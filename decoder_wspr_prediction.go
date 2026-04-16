@@ -1176,3 +1176,226 @@ func sortWSPRPredictions(predictions []WSPRPredictionEntry) {
 		}
 	}
 }
+
+// ── Nearest-grids endpoint ────────────────────────────────────────────────────
+
+// WSPRNearestGridEntry is one entry in the nearest-grids response.
+type WSPRNearestGridEntry struct {
+	Grid           string                    `json:"grid"`            // 4-char Maidenhead
+	DistanceKm     float64                   `json:"distance_km"`     // great-circle distance from caller
+	BestPrediction string                    `json:"best_prediction"` // best quality across all bands
+	BestSSBSNR     float64                   `json:"best_ssb_snr"`    // highest predicted SSB SNR
+	Bands          []WSPRGridSquareBandEntry `json:"bands"`           // all bands, best-first
+}
+
+// WSPRNearestGridsResponse is the response for GET /api/wspr/nearest-grids.
+type WSPRNearestGridsResponse struct {
+	Grids []WSPRNearestGridEntry `json:"grids"`
+}
+
+// handleWSPRNearestGrids handles GET /api/wspr/nearest-grids.
+//
+// Required query parameters:
+//
+//	lat  float64  -90 to +90    Caller's latitude
+//	lon  float64  -180 to +180  Caller's longitude
+//
+// Optional query parameters:
+//
+//	count         int  1–50                              Number of nearest grids to return (default: 3)
+//	phone_power_w int  {10,50,100,250,500,1000}          Assumed SSB TX power in watts (default: 100)
+//	minutes       int  1–1440                            Lookback window in minutes (default: 60)
+//	min_ssb_snr   int  -60–30                            Minimum predicted SSB SNR to include (default: -60)
+func handleWSPRNearestGrids(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	q := r.URL.Query()
+
+	// ── lat (required) ────────────────────────────────────────────────────────
+	latStr := q.Get("lat")
+	if latStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "lat is required"})
+		return
+	}
+	callerLat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil || callerLat < -90 || callerLat > 90 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "lat must be a number between -90 and 90"})
+		return
+	}
+
+	// ── lon (required) ────────────────────────────────────────────────────────
+	lonStr := q.Get("lon")
+	if lonStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "lon is required"})
+		return
+	}
+	callerLon, err := strconv.ParseFloat(lonStr, 64)
+	if err != nil || callerLon < -180 || callerLon > 180 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "lon must be a number between -180 and 180"})
+		return
+	}
+
+	// ── count (optional, default 3) ───────────────────────────────────────────
+	count := 3
+	if s := q.Get("count"); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil || v < 1 || v > 50 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "count must be an integer between 1 and 50"})
+			return
+		}
+		count = v
+	}
+
+	// ── phone_power_w (optional, default 100) ─────────────────────────────────
+	phonePowerW := 100
+	if s := q.Get("phone_power_w"); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil || !validPhonePowers[v] {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "phone_power_w must be one of: 10, 50, 100, 250, 500, 1000",
+			})
+			return
+		}
+		phonePowerW = v
+	}
+
+	// ── minutes (optional, default 60) ────────────────────────────────────────
+	minutes := 60
+	if s := q.Get("minutes"); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil || v < 1 || v > 1440 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "minutes must be an integer between 1 and 1440"})
+			return
+		}
+		minutes = v
+	}
+
+	// ── min_ssb_snr (optional, default -60 — show all grids) ─────────────────
+	minSSBSNR := -60.0
+	if s := q.Get("min_ssb_snr"); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil || v < -60 || v > 30 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "min_ssb_snr must be an integer between -60 and 30"})
+			return
+		}
+		minSSBSNR = float64(v)
+	}
+
+	// ── Rate limiting ─────────────────────────────────────────────────────────
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("wspr-nearest-%s-%d-%d", clientIP, minutes, phonePowerW)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait before retrying.",
+		})
+		return
+	}
+
+	// ── Fetch and process spots ───────────────────────────────────────────────
+	now := time.Now().UTC()
+	windowStart := now.Add(-time.Duration(minutes) * time.Minute)
+	phonePowerDbm := wattsTodBm(phonePowerW)
+
+	spots, err := getWSPRSpotsCached(md.spotsLogger)
+	if err != nil {
+		spots = nil
+	}
+
+	gridBandGroups := make(map[gridBandKey]*gridBandData)
+
+	for _, spot := range spots {
+		ts, err := time.Parse(time.RFC3339, spot.Timestamp)
+		if err != nil || ts.Before(windowStart) {
+			continue
+		}
+		if spot.DBm == nil || spot.Country == "" {
+			continue
+		}
+		if len(spot.Locator) < 4 {
+			continue
+		}
+		gk := gridBandKey{
+			Grid:    strings.ToUpper(spot.Locator[:4]),
+			Band:    spot.Band,
+			Country: spot.Country,
+		}
+		gg, ok := gridBandGroups[gk]
+		if !ok {
+			gg = &gridBandData{Continent: spot.Continent}
+			gridBandGroups[gk] = gg
+		}
+		gg.SNRSum += float64(spot.SNR)
+		gg.TxDbmSum += float64(*spot.DBm)
+		gg.SpotCount++
+	}
+
+	// Build grid squares (applying min_ssb_snr filter)
+	gsEntries := buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm, minSSBSNR)
+
+	if len(gsEntries) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(WSPRNearestGridsResponse{Grids: []WSPRNearestGridEntry{}})
+		return
+	}
+
+	// Compute distance from caller to each grid square centre and sort
+	type gridWithDist struct {
+		entry      WSPRGridSquareEntry
+		distanceKm float64
+	}
+	withDist := make([]gridWithDist, 0, len(gsEntries))
+	for _, gs := range gsEntries {
+		gridLat, gridLon, err := MaidenheadToLatLon(gs.Grid)
+		if err != nil {
+			continue
+		}
+		dist, _ := CalculateDistanceAndBearing(callerLat, callerLon, gridLat, gridLon)
+		withDist = append(withDist, gridWithDist{entry: gs, distanceKm: dist})
+	}
+
+	sort.Slice(withDist, func(i, j int) bool {
+		return withDist[i].distanceKm < withDist[j].distanceKm
+	})
+
+	if count < len(withDist) {
+		withDist = withDist[:count]
+	}
+
+	// Build response — bands already sorted best-first by buildWSPRGridSquaresTyped
+	result := make([]WSPRNearestGridEntry, 0, len(withDist))
+	for _, gd := range withDist {
+		result = append(result, WSPRNearestGridEntry{
+			Grid:           gd.entry.Grid,
+			DistanceKm:     math.Round(gd.distanceKm*10) / 10,
+			BestPrediction: gd.entry.BestPrediction,
+			BestSSBSNR:     gd.entry.BestSSBSNR,
+			Bands:          gd.entry.Bands,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(WSPRNearestGridsResponse{Grids: result}); err != nil {
+		log.Printf("WSPR nearest-grids: error encoding response: %v", err)
+	}
+}

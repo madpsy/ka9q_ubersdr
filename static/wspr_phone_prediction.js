@@ -797,6 +797,7 @@ const app = (() => {
             updateMap(predictions, gridSquares);
             renderTable(predictions);
             renderTop10(predictions, gridSquares);
+            fetchNearestGridsBanner();
 
         } catch (e) {
             console.error('WSPR prediction fetch error:', e);
@@ -809,6 +810,80 @@ const app = (() => {
             btn.classList.remove('loading');
             btn.disabled = false;
         }
+    }
+
+    // ── Nearest-grids banner ─────────────────────────────────────────────────
+
+    /**
+     * Fetch the top-3 nearest active grid squares from the API and render the
+     * banner above the status bar.  Silently hides the banner on any error or
+     * when userLocation is not yet available.
+     */
+    async function fetchNearestGridsBanner() {
+        const banner = document.getElementById('nearest-grids-banner');
+        if (!banner) return;
+
+        if (!userLocation) {
+            banner.classList.remove('visible');
+            return;
+        }
+
+        const minutes   = document.getElementById('minutes-select').value;
+        const power     = document.getElementById('power-select').value;
+        const minSSBSNR = document.getElementById('min-snr-select').value;
+
+        const params = new URLSearchParams({
+            lat:           userLocation.lat.toFixed(6),
+            lon:           userLocation.lon.toFixed(6),
+            count:         3,
+            minutes,
+            phone_power_w: power,
+            min_ssb_snr:   minSSBSNR,
+        });
+
+        try {
+            const resp = await fetch(`/api/wspr/nearest-grids?${params}`);
+            if (!resp.ok) { banner.classList.remove('visible'); return; }
+            const data = await resp.json();
+            renderNearestGridsBanner(data.grids || []);
+        } catch (_) {
+            banner.classList.remove('visible');
+        }
+    }
+
+    /**
+     * Render the nearest-grids banner from an array of WSPRNearestGridEntry objects.
+     * Hides the banner when the array is empty.
+     */
+    function renderNearestGridsBanner(grids) {
+        const banner = document.getElementById('nearest-grids-banner');
+        const items  = document.getElementById('ngb-items');
+        if (!banner || !items) return;
+
+        if (!grids || grids.length === 0) {
+            banner.classList.remove('visible');
+            return;
+        }
+
+        items.innerHTML = grids.map(g => {
+            const distStr = g.distance_km < 50
+                ? 'nearby'
+                : `${Math.round(g.distance_km).toLocaleString()} km`;
+
+            const bandBadges = (g.bands || []).map(b => {
+                const color = bandColor(b.band);
+                const predClass = tooltipPredClass(b.prediction);
+                return `<span class="ngb-band-badge ${predClass}" style="background:${color}20;border:1px solid ${color};color:${color}">${escHtml(b.band)}</span>`;
+            }).join('');
+
+            return `<div class="ngb-grid-item">
+                <span class="ngb-grid-name">${escHtml(g.grid)}</span>
+                <span class="ngb-dist">${distStr}</span>
+                <span class="ngb-bands">${bandBadges}</span>
+            </div>`;
+        }).join('');
+
+        banner.classList.add('visible');
     }
 
     // ── Utility ──────────────────────────────────────────────────────────────
@@ -873,12 +948,14 @@ const app = (() => {
         initTableSort();
 
         // Request browser geolocation (non-blocking — map loads regardless).
-        // If granted, draw a blue marker at the user's position.
+        // If granted, draw a blue marker at the user's position and fetch the
+        // nearest-grids banner.
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
                     userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
                     drawUserLocationMarker();
+                    fetchNearestGridsBanner();
                 },
                 () => { /* permission denied or unavailable — silently ignore */ },
                 { timeout: 10000, maximumAge: 300000 }

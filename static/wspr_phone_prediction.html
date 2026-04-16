@@ -91,6 +91,66 @@
             cursor: not-allowed;
         }
 
+        /* ── Nearest-grids banner ── */
+        #nearest-grids-banner {
+            display: none;
+            background: #0f1e38;
+            border-bottom: 1px solid #1a4a7a;
+            padding: 8px 20px;
+            font-size: 12px;
+            color: #ccc;
+            gap: 6px 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        #nearest-grids-banner.visible {
+            display: flex;
+        }
+
+        .ngb-label {
+            color: #4a9eff;
+            font-weight: bold;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .ngb-grid-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid #1a3a5a;
+            border-radius: 5px;
+            padding: 4px 10px;
+            white-space: nowrap;
+        }
+
+        .ngb-grid-name {
+            font-weight: bold;
+            color: #e0e0e0;
+            font-size: 13px;
+        }
+
+        .ngb-dist {
+            color: #888;
+            font-size: 11px;
+        }
+
+        .ngb-bands {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .ngb-band-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            color: #fff;
+        }
+
         /* ── Map ── */
         #map-container {
             position: relative;
@@ -474,6 +534,11 @@
         </div>
         <button class="refresh-btn" id="refresh-btn" onclick="app.fetch()">🔄 Refresh</button>
     </div>
+</div>
+
+<div id="nearest-grids-banner">
+    <span class="ngb-label">📍 Nearest active grids:</span>
+    <div id="ngb-items" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
 </div>
 
 <div id="status-bar">

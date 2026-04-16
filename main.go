@@ -1940,6 +1940,9 @@ func main() {
 	http.HandleFunc("/api/wspr/phone-prediction", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleWSPRPhonePrediction(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
+	http.HandleFunc("/api/wspr/nearest-grids", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleWSPRNearestGrids(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
 	http.HandleFunc("/api/decoder/spots/predictions", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleBandPredictions(w, r, multiDecoder, spaceWeatherMonitor, ipBanManager, fftRateLimiter)
 	}))

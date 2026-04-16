@@ -306,13 +306,23 @@ const app = (() => {
         // ── Grid-square heat-map layer (drawn first, below spot circles) ──────
         gridSquaresGroup = mapGroup.append('g').attr('class', 'grid-squares');
 
+        // Only draw grid squares for predictions that are worth showing on the map.
+        // Skipping not_viable (and poor) avoids flooding the map with a near-solid
+        // dark-red overlay when thousands of low-quality WSPR spots are present.
+        const GRID_DRAW_PREDICTIONS = new Set(['excellent', 'good', 'workable', 'marginal']);
+
         for (const gs of (gsData || [])) {
             if (!gs.grid || gs.grid.length < 4) continue;
+            if (!GRID_DRAW_PREDICTIONS.has(gs.best_prediction)) continue;
             let bounds;
             try { bounds = gridSquareBounds(gs.grid); } catch (e) { continue; }
             const [lonMin, latMin, lonMax, latMax] = bounds;
 
             const fill = PREDICTION_FILL[gs.best_prediction] || '#888';
+            // Stronger predictions get slightly higher opacity so the best squares
+            // stand out more clearly against the map background.
+            const opacityMap = { excellent: 0.45, good: 0.38, workable: 0.30, marginal: 0.22 };
+            const fillOpacity = opacityMap[gs.best_prediction] || 0.25;
 
             gridSquaresGroup.append('path')
                 .datum({
@@ -326,10 +336,10 @@ const app = (() => {
                 })
                 .attr('d', pathGen)
                 .style('fill', fill)
-                .style('fill-opacity', '0.28')
+                .style('fill-opacity', fillOpacity)
                 .style('stroke', fill)
-                .style('stroke-width', '0.6px')
-                .style('stroke-opacity', '0.5')
+                .style('stroke-width', '0.5px')
+                .style('stroke-opacity', '0.4')
                 .style('cursor', 'pointer')
                 .on('mousemove', (event) => onGridSquareMouseMove(event, gs))
                 .on('mouseout', () => { tooltip.style.display = 'none'; });

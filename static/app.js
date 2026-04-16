@@ -577,6 +577,7 @@ let waterfallContrast = 50; // Contrast threshold for waterfall (0-100, suppress
 let oscilloscope = null; // Oscilloscope instance
 let lowpassFilters = []; // Array of cascaded low-pass filters for steep rolloff
 let audioVisualizationEnabled = false; // Track if audio visualization is expanded
+let audioVisualizationPaused = false; // Track if audio visualization is paused (frozen)
 let noiseReductionEnabled = false; // Track if noise reduction is enabled
 let noiseReductionMode = 'off'; // 'off' | 'nr2' | 'nr'  — which engine is active
 let noiseReductionProcessor = null; // ScriptProcessor for noise reduction
@@ -4885,7 +4886,7 @@ function startVisualization() {
         updateVUMeter();
 
         // Only update other visualizations if the section is expanded (performance optimization)
-        if (audioVisualizationEnabled) {
+        if (audioVisualizationEnabled && !audioVisualizationPaused) {
 
             // Update oscilloscope (throttled to 30fps)
             if (oscilloscope) {
@@ -4989,6 +4990,18 @@ function toggleAudioVisualization() {
         if (compactVU) compactVU.style.display = 'flex';
         log('Audio visualization disabled (performance mode)');
     }
+}
+
+// Toggle pause/resume of audio visualization displays (oscilloscope, spectrum, waterfall)
+function toggleAudioVisualizationPause() {
+    audioVisualizationPaused = !audioVisualizationPaused;
+    const btn = document.getElementById('audio-viz-pause-btn');
+    if (btn) {
+        btn.textContent = audioVisualizationPaused ? '▶ Resume' : '⏸ Pause';
+        btn.title = audioVisualizationPaused ? 'Resume visualization updates' : 'Pause visualization updates (freeze display)';
+        btn.style.backgroundColor = audioVisualizationPaused ? '#28a745' : '#6c757d';
+    }
+    log(audioVisualizationPaused ? 'Audio visualization paused' : 'Audio visualization resumed');
 }
 
 // Toggle audio controls panel (filters section)
@@ -8247,6 +8260,7 @@ window.updateBandwidth = updateBandwidth;
 // Visualization controls
 window.openRecorderModal = openRecorderModal;
 window.toggleAudioVisualization = toggleAudioVisualization;
+window.toggleAudioVisualizationPause = toggleAudioVisualizationPause;
 window.toggleAudioControls = toggleAudioControls;
 window.updateFFTSize = updateFFTSize;
 window.updateScrollRate = updateScrollRate;

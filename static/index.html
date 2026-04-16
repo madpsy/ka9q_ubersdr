@@ -563,7 +563,10 @@
         <div class="audio-visualization-section">
             <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
                 <h3>Audio Visualisation</h3>
-                <span id="audio-viz-toggle" class="toggle-icon">▼</span>
+                <div style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
+                    <button id="audio-viz-pause-btn" onclick="toggleAudioVisualizationPause()" style="padding: 3px 10px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;" title="Pause visualization updates (freeze display)">⏸ Pause</button>
+                    <span id="audio-viz-toggle" class="toggle-icon">▼</span>
+                </div>
             </div>
             <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
                 <div class="visualizer-panel">

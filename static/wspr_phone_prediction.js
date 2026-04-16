@@ -711,36 +711,80 @@ const app = (() => {
             }
         }
 
-        // Deduplicate by country + band — keep best predicted_ssb_snr per country/band pair.
-        // Skip entries with no country name (unknown/unresolved locators show as '—').
-        const byCountryBand = new Map();
+        // Group by country — collect all band entries, keep best SNR per band.
+        const byCountry = new Map();
         for (const p of preds) {
-            if (!p.country) continue; // exclude entries with no country
-            const key = p.country + '\x00' + (p.band || '');
-            const existing = byCountryBand.get(key);
+            if (!p.country) continue;
+            if (!byCountry.has(p.country)) {
+                byCountry.set(p.country, { bands: new Map(), bestSNR: -Infinity, bestBand: '', bestPred: '' });
+            }
+            const acc = byCountry.get(p.country);
+            const existing = acc.bands.get(p.band);
             if (!existing || p.predicted_ssb_snr > existing.predicted_ssb_snr) {
-                byCountryBand.set(key, p);
+                acc.bands.set(p.band, p);
+            }
+            if (p.predicted_ssb_snr > acc.bestSNR) {
+                acc.bestSNR = p.predicted_ssb_snr;
+                acc.bestBand = p.band;
+                acc.bestPred = p.prediction;
             }
         }
 
-        // Sort by predicted SSB SNR descending, take top 10
-        const top10 = [...byCountryBand.values()]
-            .sort((a, b) => b.predicted_ssb_snr - a.predicted_ssb_snr)
+        // Sort by best SNR descending, take top 10
+        const top10 = [...byCountry.entries()]
+            .sort((a, b) => b[1].bestSNR - a[1].bestSNR)
             .slice(0, 10);
 
-        el.innerHTML = top10.map(p => {
-            const fill = PREDICTION_FILL[p.prediction] || '#888';
-            const snrStr = (p.predicted_ssb_snr >= 0 ? '+' : '') + p.predicted_ssb_snr.toFixed(1);
-            const country = escHtml(p.country || '—');
-            const band = escHtml(p.band || '—');
-            const gridCount = gridCountByCountry[p.country] || 0;
+        const DOT_R = 7; // px — mini marker radius
+        const CX = DOT_R + 1;
+        const CY = DOT_R + 1;
+        const SIZE = (DOT_R + 1) * 2;
+
+        el.innerHTML = top10.map(([country, acc]) => {
+            const bands = [...acc.bands.values()];
+            const ringColor = PREDICTION_FILL[acc.bestPred] || '#888';
+            const snrStr = (acc.bestSNR >= 0 ? '+' : '') + acc.bestSNR.toFixed(1);
+            const countryEsc = escHtml(country || '—');
+            const bandEsc = escHtml(acc.bestBand || '—');
+            const gridCount = gridCountByCountry[country] || 0;
             const gridBadge = gridCount > 0
                 ? `<div class="top10-grids" title="${gridCount} grid square${gridCount !== 1 ? 's' : ''} heard">${gridCount}⊞</div>`
                 : '';
+
+            // Build mini SVG pie marker (same logic as map markers)
+            let dotSVG;
+            if (bands.length === 1) {
+                const bc = bandColor(bands[0].band);
+                dotSVG = `<svg width="${SIZE}" height="${SIZE}" style="flex-shrink:0;overflow:visible">
+                    <circle cx="${CX}" cy="${CY}" r="${DOT_R}" fill="${bc}" stroke="#0f172a" stroke-width="1"/>
+                    <circle cx="${CX}" cy="${CY}" r="${DOT_R + 2}" fill="none" stroke="${ringColor}" stroke-width="1.5" opacity="0.85"/>
+                </svg>`;
+            } else {
+                // Pie segments
+                const n = bands.length;
+                const sliceAngle = (2 * Math.PI) / n;
+                let paths = '';
+                for (let i = 0; i < n; i++) {
+                    const a0 = i * sliceAngle - Math.PI / 2;
+                    const a1 = a0 + sliceAngle;
+                    const x0 = CX + DOT_R * Math.cos(a0);
+                    const y0 = CY + DOT_R * Math.sin(a0);
+                    const x1 = CX + DOT_R * Math.cos(a1);
+                    const y1 = CY + DOT_R * Math.sin(a1);
+                    const large = sliceAngle > Math.PI ? 1 : 0;
+                    const bc = bandColor(bands[i].band);
+                    paths += `<path d="M${CX},${CY} L${x0},${y0} A${DOT_R},${DOT_R} 0 ${large},1 ${x1},${y1} Z" fill="${bc}" stroke="#0f172a" stroke-width="0.8"/>`;
+                }
+                dotSVG = `<svg width="${SIZE}" height="${SIZE}" style="flex-shrink:0;overflow:visible">
+                    ${paths}
+                    <circle cx="${CX}" cy="${CY}" r="${DOT_R + 2}" fill="none" stroke="${ringColor}" stroke-width="1.5" opacity="0.85"/>
+                </svg>`;
+            }
+
             return `<div class="top10-row">
-                <div class="top10-dot" style="background:${fill}"></div>
-                <div class="top10-country" title="${country} (${band})">${country}</div>
-                <div class="top10-snr">${band}&nbsp;${snrStr} dB</div>
+                ${dotSVG}
+                <div class="top10-country" title="${countryEsc}">${countryEsc}</div>
+                <div class="top10-snr">${bandEsc}&nbsp;${snrStr} dB</div>
                 ${gridBadge}
             </div>`;
         }).join('');

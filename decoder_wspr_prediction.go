@@ -244,9 +244,11 @@ type WSPRGridSquareEntry struct {
 	Grid           string                    `json:"grid"` // 4-char Maidenhead (e.g. "IO91")
 	Country        string                    `json:"country"`
 	Continent      string                    `json:"continent"`
-	BestPrediction string                    `json:"best_prediction"` // best quality across all bands
-	BestSSBSNR     float64                   `json:"best_ssb_snr"`    // highest predicted SSB SNR across all bands
-	Bands          []WSPRGridSquareBandEntry `json:"bands"`           // all bands heard, best-first
+	BestPrediction string                    `json:"best_prediction"`       // best quality across all bands
+	BestSSBSNR     float64                   `json:"best_ssb_snr"`          // highest predicted SSB SNR across all bands
+	Bands          []WSPRGridSquareBandEntry `json:"bands"`                 // all bands heard, best-first
+	CountryLat     *float64                  `json:"country_lat,omitempty"` // CTY entity latitude for this country
+	CountryLon     *float64                  `json:"country_lon,omitempty"` // CTY entity longitude for this country
 }
 
 // ── Summary-mode types ────────────────────────────────────────────────────────
@@ -383,6 +385,11 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 			gg.SNRSum += float64(spot.SNR)
 			gg.TxDbmSum += float64(*spot.DBm)
 			gg.SpotCount++
+			if !gg.BestSNRSet || spot.SNR > gg.BestSNR {
+				gg.BestSNR = spot.SNR
+				gg.BestCallsign = spot.Callsign
+				gg.BestSNRSet = true
+			}
 		}
 	}
 
@@ -767,6 +774,11 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			gg.SNRSum += float64(spot.SNR)
 			gg.TxDbmSum += float64(*spot.DBm)
 			gg.SpotCount++
+			if !gg.BestSNRSet || spot.SNR > gg.BestSNR {
+				gg.BestSNR = spot.SNR
+				gg.BestCallsign = spot.Callsign
+				gg.BestSNRSet = true
+			}
 		}
 	}
 
@@ -1066,10 +1078,13 @@ type gridBandKey struct {
 
 // gridBandData accumulates SNR/TxDbm per grid+band+country group.
 type gridBandData struct {
-	SNRSum    float64
-	TxDbmSum  float64
-	SpotCount int
-	Continent string
+	SNRSum       float64
+	TxDbmSum     float64
+	SpotCount    int
+	Continent    string
+	BestCallsign string // callsign of the spot with the highest SNR in this group
+	BestSNR      int
+	BestSNRSet   bool
 }
 
 // buildWSPRGridSquaresTyped converts the parallel grid+band+country accumulator
@@ -1089,6 +1104,8 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 	}
 
 	// Aggregate by grid square across bands.
+	// Also track the best callsign per country (across all grids) so we can do
+	// a single CTY lookup per country for the CountryLat/CountryLon fields.
 	type gridAcc struct {
 		country        string
 		continent      string
@@ -1097,6 +1114,15 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 		bands          map[string]WSPRGridSquareBandEntry // band → best entry for that band
 	}
 	byGrid := make(map[string]*gridAcc)
+
+	// countryBest tracks the best-SNR callsign seen for each country across all
+	// grid+band groups so we can resolve a single CTY lat/lon per country.
+	type countryBestInfo struct {
+		callsign string
+		snr      int
+		set      bool
+	}
+	countryBest := make(map[string]*countryBestInfo)
 
 	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
 
@@ -1143,10 +1169,41 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 			acc.bestPrediction = pred
 			acc.bestSSBSNR = snr
 		}
+
+		// Track best callsign per country for CTY lat/lon lookup
+		if gg.BestCallsign != "" && gk.Country != "" {
+			cb, exists := countryBest[gk.Country]
+			if !exists {
+				cb = &countryBestInfo{}
+				countryBest[gk.Country] = cb
+			}
+			if !cb.set || gg.BestSNR > cb.snr {
+				cb.callsign = gg.BestCallsign
+				cb.snr = gg.BestSNR
+				cb.set = true
+			}
+		}
 	}
 
 	if len(byGrid) == 0 {
 		return nil
+	}
+
+	// Resolve CTY lat/lon once per country
+	type countryLatLon struct {
+		lat float64
+		lon float64
+	}
+	countryLatLonCache := make(map[string]*countryLatLon)
+	for country, cb := range countryBest {
+		if cb.set && cb.callsign != "" {
+			if ctyInfo := GetCallsignInfo(cb.callsign); ctyInfo != nil {
+				countryLatLonCache[country] = &countryLatLon{
+					lat: ctyInfo.Latitude,
+					lon: ctyInfo.Longitude,
+				}
+			}
+		}
 	}
 
 	result := make([]WSPRGridSquareEntry, 0, len(byGrid))
@@ -1158,14 +1215,19 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 				bands = append(bands, entry)
 			}
 		}
-		result = append(result, WSPRGridSquareEntry{
+		entry := WSPRGridSquareEntry{
 			Grid:           grid,
 			Country:        acc.country,
 			Continent:      acc.continent,
 			BestPrediction: acc.bestPrediction,
 			BestSSBSNR:     acc.bestSSBSNR,
 			Bands:          bands,
-		})
+		}
+		if ll, ok := countryLatLonCache[acc.country]; ok {
+			entry.CountryLat = &ll.lat
+			entry.CountryLon = &ll.lon
+		}
+		result = append(result, entry)
 	}
 
 	// Sort by best prediction tier, then by best SNR descending

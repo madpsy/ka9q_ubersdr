@@ -153,24 +153,31 @@ const app = (() => {
             .attr('stroke', '#2a3a4a')
             .attr('stroke-width', 0.8);
 
-        // Zoom behaviour — counter-scale circles so they stay constant screen size
+        // Zoom behaviour — counter-scale circles so they stay constant screen size.
+        // Spot markers (.spot-marker) use translate(mapX,mapY) in map-space, so when
+        // the zoom transform is applied to mapGroup they scale up with the map.
+        // We fix this by storing the original map-space coords as data-px/data-py and
+        // recomputing each group's transform to translate(screenX,screenY) scale(1/k),
+        // keeping the marker children drawn at their natural BASE_R size.
         const zoom = d3.zoom()
             .scaleExtent([1, 8])
             .on('zoom', (event) => {
                 mapGroup.attr('transform', event.transform);
-                const k = event.transform.k; // current zoom scale
-                // Counter-scale all spot circles and their glow rings so they stay
-                // a constant screen size regardless of zoom level
-                mapGroup.selectAll('.spot-marker circle')
-                    .attr('r', function() {
-                        const base = +d3.select(this).attr('data-base-r');
-                        return isNaN(base) ? null : base / k;
-                    })
-                    .style('stroke-width', function() {
-                        const base = +d3.select(this).attr('data-base-sw');
-                        return isNaN(base) ? null : (base / k) + 'px';
-                    });
-                // Counter-scale the receiver marker circles the same way as spot circles.
+                const { k } = event.transform;
+
+                // Spot markers: stay at their map-space position (translate(px,py))
+                // but counter-scale so they remain constant screen size.
+                // mapGroup already has the zoom transform, so children are in map-space.
+                mapGroup.selectAll('.spot-marker').each(function() {
+                    const g = d3.select(this);
+                    const px = +g.attr('data-px');
+                    const py = +g.attr('data-py');
+                    if (!isNaN(px) && !isNaN(py)) {
+                        g.attr('transform', `translate(${px},${py}) scale(${1 / k})`);
+                    }
+                });
+
+                // Counter-scale receiver marker circles (data-base-r pattern)
                 mapGroup.selectAll('.receiver-marker circle')
                     .attr('r', function() {
                         const base = +d3.select(this).attr('data-base-r');
@@ -463,31 +470,42 @@ const app = (() => {
             const projected = projection([cdata.lon, cdata.lat]);
             if (!projected || isNaN(projected[0]) || isNaN(projected[1])) continue;
             const [px, py] = projected;
-            const r = BASE_R / k;
 
             const best = bestPrediction(cdata.bands);
             const ringColor = PREDICTION_FILL[best] || '#888';
 
+            // Store map-space coords as data attributes so the zoom handler can
+            // update the counter-scale transform on each zoom event.
+            // Transform: translate to map-space position (mapGroup already has the
+            // zoom transform applied, so children are in map-space) then scale(1/k)
+            // to keep the marker a constant screen size.
             const markerG = spotMarkersGroup.append('g')
                 .attr('class', 'spot-marker')
-                .attr('transform', `translate(${px},${py})`);
+                .attr('data-px', px)
+                .attr('data-py', py)
+                .attr('transform', `translate(${px},${py}) scale(${1 / k})`);
+
+            const cdataFull = { country, ...cdata };
+            const onMove = (event) => onSpotMouseMove(event, cdataFull);
+            const onOut  = () => { tooltip.style.display = 'none'; };
 
             const n = cdata.bands.length;
-            // The marker group is positioned via translate() so the zoom transform
-            // scales it automatically — no manual counter-scaling needed.
-            // We deliberately omit data-base-r so the zoom handler skips these circles.
+            // Children are drawn at BASE_R (screen pixels). The group's scale(1/k)
+            // counter-scales them so they stay constant size as the map zooms.
             if (n === 1) {
                 // Single band — plain filled circle (band colour)
                 const bc = bandColor(cdata.bands[0].band);
                 markerG.append('circle')
-                    .attr('r', r)
+                    .attr('r', BASE_R)
                     .style('fill', bc)
                     .style('stroke', '#0f172a')
                     .style('stroke-width', '1.2px')
-                    .style('cursor', 'pointer');
+                    .style('cursor', 'pointer')
+                    .on('mousemove', onMove)
+                    .on('mouseout', onOut);
             } else {
                 // Multiple bands — D3 pie segments (band colours)
-                const arc  = d3.arc().innerRadius(0).outerRadius(r);
+                const arc  = d3.arc().innerRadius(0).outerRadius(BASE_R);
                 const pie  = d3.pie().sort(null).value(() => 1);
                 const arcs = pie(cdata.bands);
                 arcs.forEach((a, idx) => {
@@ -496,26 +514,28 @@ const app = (() => {
                         .style('fill', bandColor(cdata.bands[idx].band))
                         .style('stroke', '#0f172a')
                         .style('stroke-width', '0.8px')
-                        .style('cursor', 'pointer');
+                        .style('cursor', 'pointer')
+                        .on('mousemove', onMove)
+                        .on('mouseout', onOut);
                 });
             }
 
             // Quality ring (prediction colour) — drawn on top, non-interactive
             markerG.append('circle')
-                .attr('r', r + 2.5 / k)
+                .attr('r', BASE_R + 2.5)
                 .style('fill', 'none')
                 .style('stroke', ringColor)
                 .style('stroke-width', '1.5px')
                 .style('stroke-opacity', '0.85')
                 .style('pointer-events', 'none');
 
-            // Invisible hit-area circle for reliable hover
+            // Invisible hit-area circle for reliable hover (covers gaps between pie slices)
             markerG.append('circle')
-                .attr('r', r + 4 / k)
+                .attr('r', BASE_R + 4)
                 .style('fill', 'transparent')
                 .style('cursor', 'pointer')
-                .on('mousemove', (event) => onSpotMouseMove(event, { country, ...cdata }))
-                .on('mouseout', () => { tooltip.style.display = 'none'; });
+                .on('mousemove', onMove)
+                .on('mouseout', onOut);
         }
 
         // Apply current layer visibility

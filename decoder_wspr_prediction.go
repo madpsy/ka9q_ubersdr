@@ -244,11 +244,9 @@ type WSPRGridSquareEntry struct {
 	Grid           string                    `json:"grid"` // 4-char Maidenhead (e.g. "IO91")
 	Country        string                    `json:"country"`
 	Continent      string                    `json:"continent"`
-	BestPrediction string                    `json:"best_prediction"`       // best quality across all bands
-	BestSSBSNR     float64                   `json:"best_ssb_snr"`          // highest predicted SSB SNR across all bands
-	Bands          []WSPRGridSquareBandEntry `json:"bands"`                 // all bands heard, best-first
-	CountryLat     *float64                  `json:"country_lat,omitempty"` // CTY entity latitude for this country
-	CountryLon     *float64                  `json:"country_lon,omitempty"` // CTY entity longitude for this country
+	BestPrediction string                    `json:"best_prediction"` // best quality across all bands
+	BestSSBSNR     float64                   `json:"best_ssb_snr"`    // highest predicted SSB SNR across all bands
+	Bands          []WSPRGridSquareBandEntry `json:"bands"`           // all bands heard, best-first
 }
 
 // ── Summary-mode types ────────────────────────────────────────────────────────
@@ -330,22 +328,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 		return nil
 	}
 
-	type groupKey struct {
-		Country string
-		Band    string
-	}
-	type groupData struct {
-		SNRSum       float64
-		TxDbmSum     float64
-		SpotCount    int
-		Continent    string
-		BestCallsign string
-		BestSNR      int
-		BestSNRSet   bool
-	}
-
-	groups := make(map[groupKey]*groupData)
-	gridGroups := make(map[gridBandKey]*gridBandData) // parallel grid-square accumulator
+	gridGroups := make(map[gridBandKey]*gridBandData)
 
 	for _, spot := range spots {
 		ts, err := time.Parse(time.RFC3339, spot.Timestamp)
@@ -355,22 +338,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 		if spot.DBm == nil || spot.Country == "" {
 			continue
 		}
-		k := groupKey{Country: spot.Country, Band: spot.Band}
-		g, ok := groups[k]
-		if !ok {
-			g = &groupData{Continent: spot.Continent}
-			groups[k] = g
-		}
-		g.SNRSum += float64(spot.SNR)
-		g.TxDbmSum += float64(*spot.DBm)
-		g.SpotCount++
-		if !g.BestSNRSet || spot.SNR > g.BestSNR {
-			g.BestSNR = spot.SNR
-			g.BestCallsign = spot.Callsign
-			g.BestSNRSet = true
-		}
 
-		// Parallel grid-square accumulation
 		if len(spot.Locator) >= 4 {
 			gk := gridBandKey{
 				Grid:    strings.ToUpper(spot.Locator[:4]),
@@ -379,56 +347,61 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 			}
 			gg, ok := gridGroups[gk]
 			if !ok {
-				gg = &gridBandData{Continent: spot.Continent}
+				gg = &gridBandData{
+					Continent:  spot.Continent,
+					LastSeen:   spot.Timestamp,
+					Locator:    spot.Locator,
+					DistanceKm: spot.DistanceKm,
+					BearingDeg: spot.BearingDeg,
+				}
 				gridGroups[gk] = gg
 			}
 			gg.SNRSum += float64(spot.SNR)
 			gg.TxDbmSum += float64(*spot.DBm)
 			gg.SpotCount++
+			if spot.Timestamp > gg.LastSeen {
+				gg.LastSeen = spot.Timestamp
+				if spot.Locator != "" {
+					gg.Locator = spot.Locator
+					gg.DistanceKm = spot.DistanceKm
+					gg.BearingDeg = spot.BearingDeg
+				}
+			}
 			if !gg.BestSNRSet || spot.SNR > gg.BestSNR {
 				gg.BestSNR = spot.SNR
-				gg.BestCallsign = spot.Callsign
 				gg.BestSNRSet = true
+				gg.BestCallsign = spot.Callsign
+				gg.BestCallsignDBm = *spot.DBm
 			}
 		}
 	}
 
-	if len(groups) == 0 {
+	if len(gridGroups) == 0 {
 		return nil
 	}
 
-	// Build flat prediction list, applying the same SNR filter as summary mode.
-	type flatEntry struct {
-		Country         string
-		Continent       string
-		Band            string
-		PredictedSSBSNR float64
-		Prediction      string
-		BestCallsign    string
+	// For each country+band, find the best-SNR grid square.
+	type countryBandKey struct {
+		Country string
+		Band    string
 	}
-	var flat []flatEntry
-	for k, g := range groups {
-		if g.SpotCount == 0 {
+	type countryBandBest struct {
+		snr  float64
+		grid *gridBandData
+	}
+	bestByCountryBand := make(map[countryBandKey]*countryBandBest)
+	for gk, gg := range gridGroups {
+		if gg.SpotCount == 0 {
 			continue
 		}
-		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
-		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
-		predictedSSBSNR := meanWSPRSNR + (phonePowerDbm - meanTxDbm) - bwCorrectionDB
-		if predictedSSBSNR < minSSBSNR {
-			continue
+		meanWSPR := gg.SNRSum / float64(gg.SpotCount)
+		meanTx := gg.TxDbmSum / float64(gg.SpotCount)
+		snr := meanWSPR + (phonePowerDbm - meanTx) - bwCorrectionDB
+		ck := countryBandKey{Country: gk.Country, Band: gk.Band}
+		existing, ok := bestByCountryBand[ck]
+		if !ok || snr > existing.snr {
+			bestByCountryBand[ck] = &countryBandBest{snr: snr, grid: gg}
 		}
-		flat = append(flat, flatEntry{
-			Country:         k.Country,
-			Continent:       g.Continent,
-			Band:            k.Band,
-			PredictedSSBSNR: math.Round(predictedSSBSNR*10) / 10,
-			Prediction:      classifyPrediction(predictedSSBSNR),
-			BestCallsign:    g.BestCallsign,
-		})
-	}
-
-	if len(flat) == 0 {
-		return nil
 	}
 
 	predRank := map[string]int{
@@ -436,27 +409,31 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 		"marginal": 3, "poor": 4, "not_viable": 5,
 	}
 
-	// Group by band.
 	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
 	type bandAcc struct {
 		bestPrediction string
 		countries      []WSPRSummaryCountryEntry
 	}
 	byBand := make(map[string]*bandAcc)
-	for _, e := range flat {
-		acc, ok := byBand[e.Band]
+
+	for ck, best := range bestByCountryBand {
+		if best.snr < minSSBSNR {
+			continue
+		}
+		pred := classifyPrediction(best.snr)
+		acc, ok := byBand[ck.Band]
 		if !ok {
-			acc = &bandAcc{bestPrediction: e.Prediction}
-			byBand[e.Band] = acc
+			acc = &bandAcc{bestPrediction: pred}
+			byBand[ck.Band] = acc
 		}
 		entry := WSPRSummaryCountryEntry{
-			Country:         e.Country,
-			Continent:       e.Continent,
-			Prediction:      e.Prediction,
-			PredictedSSBSNR: e.PredictedSSBSNR,
+			Country:         ck.Country,
+			Continent:       best.grid.Continent,
+			Prediction:      pred,
+			PredictedSSBSNR: math.Round(best.snr*10) / 10,
 		}
-		if e.BestCallsign != "" {
-			if ctyInfo := GetCallsignInfo(e.BestCallsign); ctyInfo != nil {
+		if best.grid.BestCallsign != "" {
+			if ctyInfo := GetCallsignInfo(best.grid.BestCallsign); ctyInfo != nil {
 				lat := ctyInfo.Latitude
 				lon := ctyInfo.Longitude
 				entry.Lat = &lat
@@ -464,9 +441,13 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 			}
 		}
 		acc.countries = append(acc.countries, entry)
-		if predRank[e.Prediction] < predRank[acc.bestPrediction] {
-			acc.bestPrediction = e.Prediction
+		if predRank[pred] < predRank[acc.bestPrediction] {
+			acc.bestPrediction = pred
 		}
+	}
+
+	if len(byBand) == 0 {
+		return nil
 	}
 
 	result := make([]WSPRSummaryByBandEntry, 0, len(byBand))
@@ -664,36 +645,11 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	// GetHistoricalSpots works on whole days; we need to trim to the minute window.
 	phonePowerDbm := wattsTodBm(phonePowerW)
 
-	// key: "country|band"
-	type groupKey struct {
-		Country string
-		Band    string
-	}
-	// groupData accumulates SNR and TX power separately so we can apply the
-	// bandwidth correction and power adjustment correctly at prediction time.
-	// Using means across all spots makes the prediction robust against outliers
-	// and transmitters mis-reporting their TX power.
-	type groupData struct {
-		SNRSum          float64 // sum of WSPR SNR values (in ~6 Hz BW)
-		TxDbmSum        float64 // sum of reported TX power in dBm
-		SpotCount       int
-		LastSeen        string
-		Locator         string // locator of the most recent spot (for map placement)
-		DistanceKm      *float64
-		BearingDeg      *float64
-		Continent       string
-		BestSNR         int    // highest SNR seen in this group
-		BestCallsign    string // callsign of the spot with the highest SNR
-		BestCallsignDBm int    // TX power (dBm) of that best-SNR spot
-		BestSNRSet      bool   // whether BestSNR has been initialised
-	}
-
-	// Parallel grouping by grid4+band+country for the map grid-square layer.
-	// Each entry accumulates SNR/TxDbm independently so we can compute a
-	// per-grid-square predicted SSB SNR that is then aggregated across bands.
+	// Grouping by grid4+band+country.  Country-level predictions are derived
+	// from this by selecting the best-SNR grid per country+band, so that large
+	// countries (e.g. USA) are not penalised by averaging weak distant grids
+	// together with strong nearby ones.
 	// gridBandKey and gridBandData are defined at package level.
-
-	groups := make(map[groupKey]*groupData)
 	gridBandGroups := make(map[gridBandKey]*gridBandData)
 	bandsSeenSet := make(map[string]bool)
 	totalFiltered := 0
@@ -718,49 +674,17 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			continue
 		}
 
+		// Skip spots with no resolved country
+		if spot.Country == "" {
+			continue
+		}
+
 		totalFiltered++
 		bandsSeenSet[spot.Band] = true
 
-		k := groupKey{Country: spot.Country, Band: spot.Band}
-		existing, ok := groups[k]
-		if !ok {
-			existing = &groupData{
-				LastSeen:   spot.Timestamp,
-				Locator:    spot.Locator,
-				DistanceKm: spot.DistanceKm,
-				BearingDeg: spot.BearingDeg,
-				Continent:  spot.Continent,
-			}
-			groups[k] = existing
-		}
-
-		// Accumulate SNR and TX power separately
-		existing.SNRSum += float64(spot.SNR)
-		existing.TxDbmSum += float64(*spot.DBm)
-		existing.SpotCount++
-
-		// Track the callsign with the highest SNR (best propagation sample for this group)
-		if !existing.BestSNRSet || spot.SNR > existing.BestSNR {
-			existing.BestSNR = spot.SNR
-			existing.BestSNRSet = true
-			existing.BestCallsign = spot.Callsign
-			existing.BestCallsignDBm = *spot.DBm
-		}
-
-		// Track latest timestamp and its associated locator/distance/bearing
-		if spot.Timestamp > existing.LastSeen {
-			existing.LastSeen = spot.Timestamp
-			if spot.Locator != "" {
-				existing.Locator = spot.Locator
-				existing.DistanceKm = spot.DistanceKm
-				existing.BearingDeg = spot.BearingDeg
-			}
-		}
-
-		// ── Parallel grid-square grouping ─────────────────────────────────────
-		// Only accumulate spots that have a valid 4-char locator prefix and a
-		// resolved country (same guard as the main prediction path).
-		if len(spot.Locator) >= 4 && spot.Country != "" {
+		// ── Grid-square grouping ───────────────────────────────────────────────
+		// Only accumulate spots that have a valid 4-char locator prefix.
+		if len(spot.Locator) >= 4 {
 			gk := gridBandKey{
 				Grid:    strings.ToUpper(spot.Locator[:4]),
 				Band:    spot.Band,
@@ -768,16 +692,31 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			}
 			gg, ok := gridBandGroups[gk]
 			if !ok {
-				gg = &gridBandData{Continent: spot.Continent}
+				gg = &gridBandData{
+					Continent:  spot.Continent,
+					LastSeen:   spot.Timestamp,
+					Locator:    spot.Locator,
+					DistanceKm: spot.DistanceKm,
+					BearingDeg: spot.BearingDeg,
+				}
 				gridBandGroups[gk] = gg
 			}
 			gg.SNRSum += float64(spot.SNR)
 			gg.TxDbmSum += float64(*spot.DBm)
 			gg.SpotCount++
+			if spot.Timestamp > gg.LastSeen {
+				gg.LastSeen = spot.Timestamp
+				if spot.Locator != "" {
+					gg.Locator = spot.Locator
+					gg.DistanceKm = spot.DistanceKm
+					gg.BearingDeg = spot.BearingDeg
+				}
+			}
 			if !gg.BestSNRSet || spot.SNR > gg.BestSNR {
 				gg.BestSNR = spot.SNR
-				gg.BestCallsign = spot.Callsign
 				gg.BestSNRSet = true
+				gg.BestCallsign = spot.Callsign
+				gg.BestCallsignDBm = *spot.DBm
 			}
 		}
 	}
@@ -792,53 +731,60 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	}
 
 	// ── Calculate predictions ─────────────────────────────────────────────────
-	predictions := make([]WSPRPredictionEntry, 0, len(groups))
+	// For each country+band, find the grid square with the highest predicted
+	// SSB SNR and use it as the representative value.  This means a country
+	// like the USA — which has many grids with varying propagation — is judged
+	// by its best reachable grid, not the average of all grids including the
+	// weakest ones.
+	type countryBandKey struct {
+		Country string
+		Band    string
+	}
+	type countryBandBest struct {
+		snr  float64
+		grid *gridBandData
+	}
+	bestByCountryBand := make(map[countryBandKey]*countryBandBest)
 
-	for k, g := range groups {
-		if g.SpotCount == 0 {
+	for gk, gg := range gridBandGroups {
+		if gg.SpotCount == 0 {
+			continue
+		}
+		meanWSPR := gg.SNRSum / float64(gg.SpotCount)
+		meanTx := gg.TxDbmSum / float64(gg.SpotCount)
+		snr := meanWSPR + (phonePowerDbm - meanTx) - bwCorrectionDB
+
+		ck := countryBandKey{Country: gk.Country, Band: gk.Band}
+		existing, ok := bestByCountryBand[ck]
+		if !ok || snr > existing.snr {
+			bestByCountryBand[ck] = &countryBandBest{snr: snr, grid: gg}
+		}
+	}
+
+	predictions := make([]WSPRPredictionEntry, 0, len(bestByCountryBand))
+
+	for ck, best := range bestByCountryBand {
+		// Apply min_ssb_snr filter
+		if best.snr < minSSBSNR {
 			continue
 		}
 
-		// Skip entries with no resolved country — these are spots from transmitters
-		// whose locator could not be matched to a DXCC entity.  They would appear
-		// as blank/dash rows in the table and are not useful for propagation planning.
-		if k.Country == "" {
-			continue
-		}
-
-		// Correct formula:
-		//   predicted_ssb_snr = mean_wspr_snr + power_gain − bw_correction_db
-		//
-		// Where:
-		//   mean_wspr_snr   = actual channel SNR in 2500 Hz BW (wsprd normalises to this internally)
-		//   power_gain      = phone_power_dbm − mean_tx_dbm  (TX power difference, dB)
-		//   bw_correction   = 10·log10(2700/2500) ≈ +0.33 dB (subtracted: wider SSB BW = more noise = lower SNR)
-		//
-		// The WSPR coding advantage (≈41 dB) is NOT subtracted here.  It explains why
-		// wsprd can decode signals 28–31 dB below the noise floor, but the SNR value
-		// wsprd reports is the real channel SNR.  Subtracting the coding advantage would
-		// be double-counting — it would imply the channel is 41 dB worse than measured.
+		g := best.grid
 		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
 		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
 		powerGainDB := phonePowerDbm - meanTxDbm
-		predictedSSBSNR := meanWSPRSNR + powerGainDB - bwCorrectionDB
-
-		// Apply min_ssb_snr filter
-		if predictedSSBSNR < minSSBSNR {
-			continue
-		}
 
 		entry := WSPRPredictionEntry{
-			Country:         k.Country,
+			Country:         ck.Country,
 			Continent:       g.Continent,
-			Band:            k.Band,
+			Band:            ck.Band,
 			MeanWSPRSNR:     math.Round(meanWSPRSNR*10) / 10,
 			MeanTxDbm:       math.Round(meanTxDbm*10) / 10,
 			BWCorrectionDB:  math.Round(bwCorrectionDB*100) / 100,
 			PhonePowerDbm:   math.Round(phonePowerDbm*10) / 10,
 			PowerGainDB:     math.Round(powerGainDB*10) / 10,
-			PredictedSSBSNR: math.Round(predictedSSBSNR*10) / 10,
-			Prediction:      classifyPrediction(predictedSSBSNR),
+			PredictedSSBSNR: math.Round(best.snr*10) / 10,
+			Prediction:      classifyPrediction(best.snr),
 			SpotCount:       g.SpotCount,
 			LastSeen:        g.LastSeen,
 			Locator:         g.Locator,
@@ -1077,14 +1023,23 @@ type gridBandKey struct {
 }
 
 // gridBandData accumulates SNR/TxDbm per grid+band+country group.
+// It is also used to derive country-level predictions: for each country+band
+// the grid with the highest predicted SSB SNR is used as the representative
+// value, so that large countries (e.g. USA) are not penalised by averaging
+// weak distant grids together with strong nearby ones.
 type gridBandData struct {
-	SNRSum       float64
-	TxDbmSum     float64
-	SpotCount    int
-	Continent    string
-	BestCallsign string // callsign of the spot with the highest SNR in this group
-	BestSNR      int
-	BestSNRSet   bool
+	SNRSum          float64
+	TxDbmSum        float64
+	SpotCount       int
+	Continent       string
+	LastSeen        string
+	Locator         string
+	DistanceKm      *float64
+	BearingDeg      *float64
+	BestSNR         int
+	BestCallsign    string
+	BestCallsignDBm int
+	BestSNRSet      bool
 }
 
 // buildWSPRGridSquaresTyped converts the parallel grid+band+country accumulator
@@ -1104,8 +1059,6 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 	}
 
 	// Aggregate by grid square across bands.
-	// Also track the best callsign per country (across all grids) so we can do
-	// a single CTY lookup per country for the CountryLat/CountryLon fields.
 	type gridAcc struct {
 		country        string
 		continent      string
@@ -1114,15 +1067,6 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 		bands          map[string]WSPRGridSquareBandEntry // band → best entry for that band
 	}
 	byGrid := make(map[string]*gridAcc)
-
-	// countryBest tracks the best-SNR callsign seen for each country across all
-	// grid+band groups so we can resolve a single CTY lat/lon per country.
-	type countryBestInfo struct {
-		callsign string
-		snr      int
-		set      bool
-	}
-	countryBest := make(map[string]*countryBestInfo)
 
 	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
 
@@ -1169,41 +1113,10 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 			acc.bestPrediction = pred
 			acc.bestSSBSNR = snr
 		}
-
-		// Track best callsign per country for CTY lat/lon lookup
-		if gg.BestCallsign != "" && gk.Country != "" {
-			cb, exists := countryBest[gk.Country]
-			if !exists {
-				cb = &countryBestInfo{}
-				countryBest[gk.Country] = cb
-			}
-			if !cb.set || gg.BestSNR > cb.snr {
-				cb.callsign = gg.BestCallsign
-				cb.snr = gg.BestSNR
-				cb.set = true
-			}
-		}
 	}
 
 	if len(byGrid) == 0 {
 		return nil
-	}
-
-	// Resolve CTY lat/lon once per country
-	type countryLatLon struct {
-		lat float64
-		lon float64
-	}
-	countryLatLonCache := make(map[string]*countryLatLon)
-	for country, cb := range countryBest {
-		if cb.set && cb.callsign != "" {
-			if ctyInfo := GetCallsignInfo(cb.callsign); ctyInfo != nil {
-				countryLatLonCache[country] = &countryLatLon{
-					lat: ctyInfo.Latitude,
-					lon: ctyInfo.Longitude,
-				}
-			}
-		}
 	}
 
 	result := make([]WSPRGridSquareEntry, 0, len(byGrid))
@@ -1215,19 +1128,14 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 				bands = append(bands, entry)
 			}
 		}
-		entry := WSPRGridSquareEntry{
+		result = append(result, WSPRGridSquareEntry{
 			Grid:           grid,
 			Country:        acc.country,
 			Continent:      acc.continent,
 			BestPrediction: acc.bestPrediction,
 			BestSSBSNR:     acc.bestSSBSNR,
 			Bands:          bands,
-		}
-		if ll, ok := countryLatLonCache[acc.country]; ok {
-			entry.CountryLat = &ll.lat
-			entry.CountryLon = &ll.lon
-		}
-		result = append(result, entry)
+		})
 	}
 
 	// Sort by best prediction tier, then by best SNR descending

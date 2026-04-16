@@ -453,8 +453,7 @@ const app = (() => {
         const currentTransform = d3.zoomTransform(svg.node());
         const k = currentTransform.k;
 
-        // Group by country — collect all band entries per country.
-        // Primary source: predictions[] (country-average SNR passed the filter).
+        // Group by country — collect all band entries per country
         const byCountry = new Map();
         for (const entry of preds) {
             if (entry.lat == null || entry.lon == null) continue;
@@ -463,56 +462,6 @@ const app = (() => {
                     continent: entry.continent, bands: [] });
             }
             byCountry.get(entry.country).bands.push(entry);
-        }
-
-        // Secondary source: grid_squares[].  For countries that have visible grid
-        // squares but were filtered out of predictions[] (e.g. USA where the
-        // country-average SNR is dragged below the threshold by weak spots), we
-        // synthesise a country marker using the CTY entity lat/lon carried on each
-        // grid square entry and the best band quality seen across all that country's
-        // grid squares.
-        if (gsData && gsData.length) {
-            // Collect per-country best-band info from grid squares
-            const gsCountry = new Map(); // country → { lat, lon, continent, bands: Map<band,entry> }
-            for (const gs of gsData) {
-                if (!gs.country_lat || !gs.country_lon) continue;
-                if (byCountry.has(gs.country)) continue; // already have a marker from predictions
-                if (!gsCountry.has(gs.country)) {
-                    gsCountry.set(gs.country, {
-                        lat: gs.country_lat, lon: gs.country_lon,
-                        continent: gs.continent,
-                        bandMap: new Map() // band → best entry for that band
-                    });
-                }
-                const cAcc = gsCountry.get(gs.country);
-                for (const b of (gs.bands || [])) {
-                    const existing = cAcc.bandMap.get(b.band);
-                    if (!existing || b.predicted_ssb_snr > existing.predicted_ssb_snr) {
-                        cAcc.bandMap.set(b.band, {
-                            // Shape matches WSPRPredictionEntry fields used by onSpotMouseMove
-                            country: gs.country,
-                            continent: gs.continent,
-                            band: b.band,
-                            prediction: b.prediction,
-                            predicted_ssb_snr: b.predicted_ssb_snr,
-                            lat: gs.country_lat,
-                            lon: gs.country_lon,
-                            _fromGridSquares: true,
-                        });
-                    }
-                }
-            }
-            // Merge synthesised entries into byCountry
-            for (const [country, cAcc] of gsCountry) {
-                const bands = Array.from(cAcc.bandMap.values());
-                if (bands.length === 0) continue;
-                byCountry.set(country, {
-                    lat: cAcc.lat, lon: cAcc.lon,
-                    continent: cAcc.continent,
-                    bands,
-                    _fromGridSquares: true,
-                });
-            }
         }
 
         const BASE_R = 8; // constant screen-pixel radius

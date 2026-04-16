@@ -217,12 +217,14 @@ class Oscilloscope {
         this.ctx.stroke();
 
         // Draw time markers (on top of waveform).
-        // In auto mode, snap markers to detected pulse peaks before drawing.
+        // Capture the clean waveform snapshot BEFORE drawing any overlays (PRF label,
+        // markers) so that drawMarkersOnFrozenCanvas() can restore a clean background
+        // when the mode changes while paused.
         if (this.markersMode !== 'off') {
-            if (this.markersMode === 'auto') {
-                this._detectAndDrawPRF(dataArray, sampleRate, width, height);
-            }
             this._frozenSnapshot = this.ctx.getImageData(0, 0, width, height);
+            if (this.markersMode === 'auto') {
+                this._detectAndDrawPRF(dataArray, sampleRate, width, height, startSample, samplesToDisplay);
+            }
             this.drawMarkers(width, height);
         } else {
             this._frozenSnapshot = null;
@@ -445,7 +447,12 @@ class Oscilloscope {
         const w = this.canvas.width;
         const h = this.canvas.height;
         if (w <= 0 || h <= 0) return;
-        // Capture the current canvas as the frozen background
+        // If we already have a clean frozen snapshot (waveform without markers),
+        // restore it first so we don't bake stale markers into the new snapshot.
+        if (this._frozenSnapshot) {
+            this.ctx.putImageData(this._frozenSnapshot, 0, 0);
+        }
+        // Capture the clean canvas as the frozen background, then draw markers on top.
         this._frozenSnapshot = this.ctx.getImageData(0, 0, w, h);
         this.drawMarkers(w, h);
     }
@@ -532,7 +539,7 @@ class Oscilloscope {
 
     // Run PRF detection, optionally auto-snap markers to first two peaks (auto mode),
     // and draw the PRF readout box on the canvas.
-    _detectAndDrawPRF(dataArray, sampleRate, width, height) {
+    _detectAndDrawPRF(dataArray, sampleRate, width, height, startSample, samplesToDisplay) {
         const { prf, peaks } = this.detectPRF(dataArray, sampleRate);
 
         if (prf > 0) {
@@ -541,28 +548,22 @@ class Oscilloscope {
                 this._prfHistory.shift();
             }
 
-            // In auto mode, snap markerA and markerB to the first two detected peaks.
+            // In auto mode, snap markerA and markerB to the first two detected peaks
+            // that are actually visible in the current view window.
             // Peaks are absolute sample indices; convert to canvas fractions using the
-            // same log-scale formula as the waveform drawing.
-            if (this.markersMode === 'auto' && peaks.length >= 2 &&
-                this._cachedBufferLength && this._cachedSampleRate) {
-                const bufLen = this._cachedBufferLength;
-                const minFraction = 0.005;
-                const maxFraction = 1.0;
-                const logMin = Math.log10(minFraction);
-                const logMax = Math.log10(maxFraction);
-                const logRange = logMax - logMin;
-                const normalizedSlider = (this.zoom - 1) / 199;
-                const logValue = logMin + (normalizedSlider * logRange);
-                const fraction = Math.pow(10, logValue);
-                const samplesToDisplay = Math.floor(bufLen * fraction);
-                const startSample = Math.floor((bufLen - samplesToDisplay) / 2);
+            // exact same startSample/samplesToDisplay as the waveform drawing.
+            if (this.markersMode === 'auto' && peaks.length >= 2) {
+                // Filter to peaks that are within the visible window
+                const visiblePeaks = peaks.filter(p =>
+                    p >= startSample && p < startSample + samplesToDisplay);
 
-                const toFrac = (sampleIdx) =>
-                    Math.max(0, Math.min(1, (sampleIdx - startSample) / samplesToDisplay));
+                if (visiblePeaks.length >= 2) {
+                    const toFrac = (sampleIdx) =>
+                        Math.max(0, Math.min(1, (sampleIdx - startSample) / samplesToDisplay));
 
-                this.markerA = toFrac(peaks[0]);
-                this.markerB = toFrac(peaks[1]);
+                    this.markerA = toFrac(visiblePeaks[0]);
+                    this.markerB = toFrac(visiblePeaks[1]);
+                }
             }
         }
 
@@ -671,9 +672,14 @@ class Oscilloscope {
         }
         this.ctx.stroke();
 
-        // Update frozen snapshot and redraw markers if enabled
-        if (this.markersEnabled) {
+        // Update frozen snapshot and redraw markers if enabled.
+        // Capture clean snapshot BEFORE drawing PRF label / markers so that
+        // drawMarkersOnFrozenCanvas() can restore a clean background on mode change.
+        if (this.markersMode !== 'off') {
             this._frozenSnapshot = this.ctx.getImageData(0, 0, width, height);
+            if (this.markersMode === 'auto') {
+                this._detectAndDrawPRF(dataArray, sampleRate, width, height, startSample, samplesToDisplay);
+            }
             this.drawMarkers(width, height);
         } else {
             this._frozenSnapshot = null;
@@ -681,11 +687,6 @@ class Oscilloscope {
 
         // Draw frequency display
         this.drawFrequencyDisplay(width, avgFreq);
-
-        // Draw PRF readout if enabled (uses frozen data — no new detection, just redraw)
-        if (this.prfEnabled && this._prfHistory.length >= 3) {
-            this._detectAndDrawPRF(dataArray, sampleRate, width, height);
-        }
     }
     
     // Draw grid lines and labels

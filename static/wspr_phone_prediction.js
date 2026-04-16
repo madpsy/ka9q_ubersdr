@@ -306,31 +306,25 @@ const app = (() => {
         // ── Grid-square heat-map layer (drawn first, below spot circles) ──────
         gridSquaresGroup = mapGroup.append('g').attr('class', 'grid-squares');
 
-        // Only draw grid squares for predictions that are worth showing on the map.
-        // Skipping not_viable (and poor) avoids flooding the map with a near-solid
-        // dark-red overlay when thousands of low-quality WSPR spots are present.
-        const GRID_DRAW_PREDICTIONS = new Set(['excellent', 'good', 'workable', 'marginal']);
-
         for (const gs of (gsData || [])) {
             if (!gs.grid || gs.grid.length < 4) continue;
-            if (!GRID_DRAW_PREDICTIONS.has(gs.best_prediction)) continue;
             let bounds;
             try { bounds = gridSquareBounds(gs.grid); } catch (e) { continue; }
             const [lonMin, latMin, lonMax, latMax] = bounds;
 
-            const fill = PREDICTION_FILL[gs.best_prediction] || '#888';
-            // Stronger predictions get slightly higher opacity so the best squares
-            // stand out more clearly against the map background.
-            const opacityMap = { excellent: 0.45, good: 0.38, workable: 0.30, marginal: 0.22 };
-            const fillOpacity = opacityMap[gs.best_prediction] || 0.25;
+            const fill = PREDICTION_FILL[gs.best_prediction] || '#555';
+            const fillOpacity = 0.28;
 
+            // GeoJSON exterior rings must be counter-clockwise (right-hand rule).
+            // Clockwise winding causes D3 geoPath to fill the complement (entire world).
+            // CCW: bottom-left → top-left → top-right → bottom-right → bottom-left
             gridSquaresGroup.append('path')
                 .datum({
                     type: 'Feature',
                     geometry: {
                         type: 'Polygon',
-                        coordinates: [[[lonMin, latMin], [lonMax, latMin],
-                                       [lonMax, latMax], [lonMin, latMax],
+                        coordinates: [[[lonMin, latMin], [lonMin, latMax],
+                                       [lonMax, latMax], [lonMax, latMin],
                                        [lonMin, latMin]]]
                     }
                 })

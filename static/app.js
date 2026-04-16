@@ -566,6 +566,9 @@ let vuRmsValue = null;
 let vuPeakValue = null;
 let vuMeterBarCompact = null;
 let vuMeterPeakCompact = null;
+let vuMeterLedsCompact = null;       // LED container element
+let vuMeterLedElements = [];         // Array of 20 LED <span> elements
+let vuMeterStyle = localStorage.getItem('vuMeterStyle') || 'bar'; // 'bar' or 'led'
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visibility)
 let animationFrameId = null;
@@ -1016,6 +1019,30 @@ document.addEventListener('DOMContentLoaded', () => {
     vuPeakValue = document.getElementById('vu-peak-value');
     vuMeterBarCompact = document.getElementById('vu-meter-bar-compact');
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
+    vuMeterLedsCompact = document.getElementById('vu-meter-leds-compact');
+
+    // Build 20 LED <span> elements inside the LED container
+    if (vuMeterLedsCompact) {
+        vuMeterLedsCompact.innerHTML = '';
+        vuMeterLedElements = [];
+        for (let i = 0; i < 20; i++) {
+            const led = document.createElement('span');
+            led.className = 'vu-meter-led-compact';
+            vuMeterLedsCompact.appendChild(led);
+            vuMeterLedElements.push(led);
+        }
+    }
+
+    // Apply initial VU meter style visibility
+    applyVUMeterStyle();
+
+    // Click handler on the compact VU meter container to cycle styles
+    const compactVUContainer = document.getElementById('vu-meter-compact');
+    if (compactVUContainer) {
+        compactVUContainer.style.cursor = 'pointer';
+        compactVUContainer.addEventListener('click', toggleVUMeterStyle);
+        updateVUMeterTooltip(compactVUContainer);
+    }
 
     // Set audio visualization as disabled by default (collapsed)
     audioVisualizationEnabled = false;
@@ -5056,6 +5083,31 @@ function checkClipping() {
     }
 }
 
+// Toggle compact VU meter display style ('bar' ↔ 'led') and persist to localStorage
+function toggleVUMeterStyle() {
+    const styles = ['bar', 'led'];
+    const idx = styles.indexOf(vuMeterStyle);
+    vuMeterStyle = styles[(idx + 1) % styles.length];
+    localStorage.setItem('vuMeterStyle', vuMeterStyle);
+    applyVUMeterStyle();
+    const container = document.getElementById('vu-meter-compact');
+    if (container) updateVUMeterTooltip(container);
+}
+
+// Show/hide bar wrapper vs LED container based on current vuMeterStyle
+function applyVUMeterStyle() {
+    const barWrapper = document.getElementById('vu-meter-bar-wrapper');
+    if (barWrapper) barWrapper.style.display = vuMeterStyle === 'led' ? 'none' : '';
+    if (vuMeterLedsCompact) vuMeterLedsCompact.style.display = vuMeterStyle === 'led' ? 'flex' : 'none';
+}
+
+// Update the title tooltip on the compact VU meter container
+function updateVUMeterTooltip(container) {
+    const labels = { bar: 'Gradient bar', led: 'LED segments' };
+    const label = labels[vuMeterStyle] || vuMeterStyle;
+    container.title = `Click to cycle audio meter style (currently: ${label})`;
+}
+
 function updateVUMeter() {
     // Use dedicated VU analyser (after all processing) if available, otherwise fall back to main analyser
     const activeAnalyser = vuAnalyser || analyser;
@@ -5121,12 +5173,44 @@ function updateVUMeter() {
     }
 
     // Update compact VU meter (in audio controls) - bar and peak only, no text values
-    if (vuMeterBarCompact && vuMeterPeakCompact) {
-        vuMeterBarCompact.style.width = rmsPercentage + '%';
-        vuMeterBarCompact.style.background = gradient;
-        vuMeterBarCompact.style.backgroundSize = `${100 / (rmsPercentage / 100)}% 100%`;
-        vuMeterBarCompact.style.backgroundPosition = 'left center';
-        vuMeterPeakCompact.style.left = vuPeakHold + '%';
+    if (vuMeterStyle === 'led') {
+        // ── LED mode ─────────────────────────────────────────────────────────
+        // 20 segments: 0–13 green (0–66.67%), 14–16 yellow (66.67–83.33%),
+        //              17–18 orange (83.33–91.67%), 19 red (91.67–100%)
+        if (vuMeterLedElements.length === 20) {
+            const litCount = Math.round(rmsPercentage / 5); // 0–20
+            const peakSegment = Math.min(19, Math.round(vuPeakHold / 5) - 1);
+
+            for (let i = 0; i < 20; i++) {
+                const led = vuMeterLedElements[i];
+                // Remove all state classes
+                led.classList.remove('lit-green', 'lit-yellow', 'lit-orange', 'lit-red', 'peak-hold');
+
+                if (i === peakSegment && vuPeakHold > 0) {
+                    led.classList.add('peak-hold');
+                } else if (i < litCount) {
+                    if (i <= 13) {
+                        led.classList.add('lit-green');
+                    } else if (i <= 16) {
+                        led.classList.add('lit-yellow');
+                    } else if (i <= 18) {
+                        led.classList.add('lit-orange');
+                    } else {
+                        led.classList.add('lit-red');
+                    }
+                }
+                // else: unlit — no class, shows dark background
+            }
+        }
+    } else {
+        // ── Bar mode (default) ────────────────────────────────────────────────
+        if (vuMeterBarCompact && vuMeterPeakCompact) {
+            vuMeterBarCompact.style.width = rmsPercentage + '%';
+            vuMeterBarCompact.style.background = gradient;
+            vuMeterBarCompact.style.backgroundSize = `${100 / (rmsPercentage / 100)}% 100%`;
+            vuMeterBarCompact.style.backgroundPosition = 'left center';
+            vuMeterPeakCompact.style.left = vuPeakHold + '%';
+        }
     }
 }
 

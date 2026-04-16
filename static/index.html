@@ -499,7 +499,7 @@
                 <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 5px; padding: 8px 12px;" title="Open Recorder (R key)">⏺ Rec</button>
             </div>
             <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
-                <div class="vu-meter">
+                <div class="vu-meter" id="vu-meter-bar-wrapper">
                     <div id="vu-meter-bar-compact" class="vu-meter-bar"></div>
                     <div id="vu-meter-peak-compact" class="vu-meter-peak"></div>
                     <div class="vu-meter-scale">
@@ -510,6 +510,9 @@
                         <span>-5</span>
                         <span>0</span>
                     </div>
+                </div>
+                <div id="vu-meter-leds-compact" class="vu-meter-leds-compact" style="display:none;">
+                    <!-- LED segments built by JS -->
                 </div>
             </div>
         </div>

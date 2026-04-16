@@ -168,6 +168,51 @@
             font-size: 11px;
         }
 
+        /* ── Layer toggles ── */
+        .map-layer-toggles {
+            position: absolute;
+            bottom: 14px;
+            right: 14px;
+            background: rgba(15, 25, 50, 0.9);
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .map-layer-toggles-title {
+            font-weight: bold;
+            color: #aaa;
+            margin-bottom: 2px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .layer-toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            cursor: pointer;
+            user-select: none;
+            color: #ccc;
+        }
+
+        .layer-toggle-row:hover { color: #fff; }
+
+        .layer-toggle-row input[type="checkbox"] {
+            accent-color: #4a9eff;
+            width: 13px;
+            height: 13px;
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .layer-toggle-row.layer-off { opacity: 0.45; }
+
         /* ── Top-10 panel ── */
         .top10-panel {
             position: absolute;
@@ -456,10 +501,28 @@
             </svg>
             Receiver
         </div>
+        <div class="legend-item">
+            <svg width="14" height="14" style="flex-shrink:0">
+                <circle cx="7" cy="7" r="6" fill="#4a9eff" stroke="#ffffff" stroke-width="2"/>
+                <circle cx="7" cy="7" r="2" fill="#ffffff"/>
+            </svg>
+            Your Location
+        </div>
     </div>
     <div class="top10-panel">
         <div class="top10-title">🏆 Top 10 Strongest</div>
         <div id="top10-list"><div style="color:#666;font-size:10px;">Loading…</div></div>
+    </div>
+    <div class="map-layer-toggles">
+        <div class="map-layer-toggles-title">Layers</div>
+        <label class="layer-toggle-row" id="toggle-row-dots">
+            <input type="checkbox" id="layer-toggle-dots" checked>
+            Country Dots
+        </label>
+        <label class="layer-toggle-row" id="toggle-row-grids">
+            <input type="checkbox" id="layer-toggle-grids" checked>
+            Grid Squares
+        </label>
     </div>
 </div>
 

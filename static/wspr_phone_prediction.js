@@ -21,7 +21,13 @@ const app = (() => {
     let pathGen = null;
     let countryPaths = null;    // D3 selection of all country <path> elements
     let receiverMarkerGroup = null; // D3 group for the receiver marker (redrawn on zoom)
+    let userLocationGroup = null;   // D3 group for the browser geolocation marker
+    let userLocation = null;        // { lat, lon } from browser geolocation API
     let mapGroup = null;        // D3 group containing all map elements
+
+    // Layer visibility state (persisted across data refreshes)
+    let showDots   = true;
+    let showGrids  = true;
 
     // Table sort state
     let sortCol = 'predicted_ssb_snr';
@@ -174,6 +180,16 @@ const app = (() => {
                         const base = +d3.select(this).attr('data-base-sw');
                         return isNaN(base) ? null : (base / k) + 'px';
                     });
+                // Counter-scale the user location marker the same way.
+                mapGroup.selectAll('.user-location-marker circle')
+                    .attr('r', function() {
+                        const base = +d3.select(this).attr('data-base-r');
+                        return isNaN(base) ? null : base / k;
+                    })
+                    .style('stroke-width', function() {
+                        const base = +d3.select(this).attr('data-base-sw');
+                        return isNaN(base) ? null : (base / k) + 'px';
+                    });
             });
         svg.call(zoom);
     }
@@ -231,6 +247,59 @@ const app = (() => {
             .attr('cx', cx).attr('cy', cy)
             .attr('r', 2.5 / k).attr('data-base-r', 2.5).attr('data-base-sw', 0)
             .style('fill', '#0f3460')
+            .style('pointer-events', 'none');
+    }
+
+    // ── User location marker ─────────────────────────────────────────────────
+    // Blue pulsing dot — visually distinct from the white receiver marker.
+    // Redrawn whenever userLocation changes or the map is refreshed.
+    function drawUserLocationMarker() {
+        if (userLocationGroup) { userLocationGroup.remove(); userLocationGroup = null; }
+        if (!userLocation || !mapGroup) return;
+
+        const [cx, cy] = projection([userLocation.lon, userLocation.lat]);
+        if (isNaN(cx) || isNaN(cy)) return;
+
+        const k = d3.zoomTransform(svg.node()).k;
+
+        userLocationGroup = mapGroup.append('g').attr('class', 'user-location-marker');
+
+        // Accuracy halo (large, very faint)
+        userLocationGroup.append('circle')
+            .attr('cx', cx).attr('cy', cy)
+            .attr('r', 14 / k).attr('data-base-r', 14).attr('data-base-sw', 0)
+            .style('fill', '#4a9eff')
+            .style('fill-opacity', '0.12')
+            .style('stroke', '#4a9eff')
+            .style('stroke-width', (0.8 / k) + 'px')
+            .style('stroke-opacity', '0.35')
+            .style('pointer-events', 'none');
+
+        // Main dot — blue fill, white border
+        userLocationGroup.append('circle')
+            .attr('cx', cx).attr('cy', cy)
+            .attr('r', 7 / k).attr('data-base-r', 7).attr('data-base-sw', 2)
+            .style('fill', '#4a9eff')
+            .style('stroke', '#ffffff')
+            .style('stroke-width', (2 / k) + 'px')
+            .style('cursor', 'pointer')
+            .on('mousemove', (event) => {
+                const grid = latLonToMaidenhead(userLocation.lat, userLocation.lon, 2);
+                tooltip.innerHTML = `
+                    <div class="tooltip-title">📍 Your Location</div>
+                    <div>${userLocation.lat.toFixed(4)}°, ${userLocation.lon.toFixed(4)}°</div>
+                    ${grid ? `<div style="color:#aaa;font-size:11px;">Grid: <strong style="color:#e0e0e0">${grid}</strong></div>` : ''}
+                `;
+                tooltip.style.display = 'block';
+                positionTooltip(event);
+            })
+            .on('mouseout', () => { tooltip.style.display = 'none'; });
+
+        // Centre pip
+        userLocationGroup.append('circle')
+            .attr('cx', cx).attr('cy', cy)
+            .attr('r', 2.5 / k).attr('data-base-r', 2.5).attr('data-base-sw', 0)
+            .style('fill', '#ffffff')
             .style('pointer-events', 'none');
     }
 
@@ -339,6 +408,9 @@ const app = (() => {
                 .on('mouseout', () => { tooltip.style.display = 'none'; });
         }
 
+        // Apply current layer visibility
+        gridSquaresGroup.style('display', showGrids ? null : 'none');
+
         // Draw spot circles at locator positions
         spotMarkersGroup = mapGroup.append('g').attr('class', 'spot-markers');
 
@@ -395,8 +467,12 @@ const app = (() => {
                 .on('mouseout', () => { tooltip.style.display = 'none'; });
         }
 
-        // Draw receiver marker on top
+        // Apply current layer visibility
+        spotMarkersGroup.style('display', showDots ? null : 'none');
+
+        // Draw receiver marker and user location marker on top
         drawReceiverMarker(meta);
+        drawUserLocationMarker();
     }
 
     // ── Tooltip ──────────────────────────────────────────────────────────────
@@ -731,6 +807,19 @@ const app = (() => {
         await initMap();
         initTableSort();
 
+        // Request browser geolocation (non-blocking — map loads regardless).
+        // If granted, draw a blue marker at the user's position.
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                    drawUserLocationMarker();
+                },
+                () => { /* permission denied or unavailable — silently ignore */ },
+                { timeout: 10000, maximumAge: 300000 }
+            );
+        }
+
         // Wire up controls to re-fetch immediately on change and reset the timer
         ['band-select', 'minutes-select', 'power-select', 'min-snr-select'].forEach(id => {
             document.getElementById(id).addEventListener('change', () => {
@@ -738,6 +827,32 @@ const app = (() => {
                 startAutoRefresh(); // reset 2-min timer after manual change
             });
         });
+
+        // ── Layer toggle checkboxes ───────────────────────────────────────────
+        function applyLayerToggle(id, rowId, groupGetter, stateGetter, stateSetter) {
+            const cb  = document.getElementById(id);
+            const row = document.getElementById(rowId);
+            if (!cb) return;
+            cb.addEventListener('change', () => {
+                stateSetter(cb.checked);
+                if (row) row.classList.toggle('layer-off', !cb.checked);
+                const grp = groupGetter();
+                if (grp) grp.style('display', cb.checked ? null : 'none');
+            });
+        }
+
+        applyLayerToggle(
+            'layer-toggle-dots', 'toggle-row-dots',
+            () => spotMarkersGroup,
+            () => showDots,
+            v => { showDots = v; }
+        );
+        applyLayerToggle(
+            'layer-toggle-grids', 'toggle-row-grids',
+            () => gridSquaresGroup,
+            () => showGrids,
+            v => { showGrids = v; }
+        );
 
         window.addEventListener('resize', onResize);
 

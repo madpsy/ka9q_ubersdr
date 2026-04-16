@@ -488,7 +488,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 	}
 	return &WSPRSummaryResult{
 		Predictions: result,
-		GridSquares: buildWSPRGridSquaresTyped(gridGroups, phonePowerDbm),
+		GridSquares: buildWSPRGridSquaresTyped(gridGroups, phonePowerDbm, minSSBSNR),
 	}
 }
 
@@ -972,7 +972,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			w.WriteHeader(http.StatusOK)
 			if err := json.NewEncoder(w).Encode(WSPRSummaryByCountryResponse{
 				Predictions: result,
-				GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm),
+				GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm, minSSBSNR),
 			}); err != nil {
 				log.Printf("WSPR prediction summary by=country: error encoding response: %v", err)
 			}
@@ -1037,7 +1037,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(WSPRSummaryByBandResponse{
 			Predictions: result,
-			GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm),
+			GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm, minSSBSNR),
 		}); err != nil {
 			log.Printf("WSPR prediction summary by=band: error encoding response: %v", err)
 		}
@@ -1047,7 +1047,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	resp := WSPRPredictionResponse{
 		Meta:        meta,
 		Predictions: predictions,
-		GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm),
+		GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm, minSSBSNR),
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -1078,7 +1078,7 @@ type gridBandData struct {
 // Each WSPRGridSquareEntry represents one 4-char Maidenhead grid square.
 // BestPrediction / BestSSBSNR reflect the best quality across all bands heard
 // from that square; Bands lists every band with its individual quality.
-func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerDbm float64) []WSPRGridSquareEntry {
+func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerDbm float64, minSSBSNR float64) []WSPRGridSquareEntry {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -1107,6 +1107,11 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 		meanWSPR := gg.SNRSum / float64(gg.SpotCount)
 		meanTx := gg.TxDbmSum / float64(gg.SpotCount)
 		snr := math.Round((meanWSPR+(phonePowerDbm-meanTx)-bwCorrectionDB)*10) / 10
+		// Apply the same min_ssb_snr threshold as the predictions array so that
+		// grid squares only appear for bands/countries that pass the filter.
+		if snr < minSSBSNR {
+			continue
+		}
 		pred := classifyPrediction(snr)
 
 		acc, ok := byGrid[gk.Grid]

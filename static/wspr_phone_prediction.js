@@ -338,13 +338,14 @@ const app = (() => {
         positionTooltip(event);
     }
 
-    // ── Spot circle markers ───────────────────────────────────────────────────
-    // Instead of colouring country polygons (which include overseas territories),
-    // we draw a circle at each prediction's Maidenhead locator position.
-    // This accurately represents where the signal was heard, not a whole country.
+    // ── Country dot markers ───────────────────────────────────────────────────
+    // One marker per country, positioned at the CTY entity lat/lon.
+    // Single band → filled circle (band colour) + quality ring.
+    // Multiple bands → D3 pie segments (band colours) + quality ring (best prediction).
     let spotMarkersGroup = null;
     let gridSquaresGroup = null; // D3 group for the grid-square heat-map layer
 
+    // Prediction quality → fill colour (used for grid squares and quality rings)
     const PREDICTION_FILL = {
         excellent:  '#1abc9c',
         good:       '#27ae60',
@@ -353,6 +354,30 @@ const app = (() => {
         poor:       '#c0392b',
         not_viable: '#4a2020',
     };
+
+    // Per-band colour palette (distinct hues, readable on dark background)
+    const BAND_COLORS = {
+        '2200m': '#c084fc', // purple
+        '630m':  '#e879f9', // fuchsia
+        '160m':  '#818cf8', // indigo
+        '80m':   '#f472b6', // pink
+        '60m':   '#fb923c', // orange
+        '40m':   '#facc15', // yellow
+        '30m':   '#4ade80', // green
+        '20m':   '#22d3ee', // cyan
+        '17m':   '#a78bfa', // violet
+        '15m':   '#f87171', // red
+        '12m':   '#34d399', // emerald
+        '10m':   '#60a5fa', // blue
+    };
+    function bandColor(band) { return BAND_COLORS[band] || '#94a3b8'; }
+
+    const PRED_RANK = { excellent: 0, good: 1, workable: 2, marginal: 3, poor: 4, not_viable: 5 };
+    function bestPrediction(entries) {
+        return entries.reduce((best, e) =>
+            (PRED_RANK[e.prediction] ?? 99) < (PRED_RANK[best] ?? 99) ? e.prediction : best,
+            entries[0].prediction);
+    }
 
     function updateMap(preds, gsData) {
         if (!mapGroup) return;
@@ -411,59 +436,85 @@ const app = (() => {
         // Apply current layer visibility
         gridSquaresGroup.style('display', showGrids ? null : 'none');
 
-        // Draw spot circles at locator positions
+        // ── Country dot markers (collector-style) ────────────────────────────
+        // Group predictions by country, using CTY entity lat/lon for position.
+        // One marker per country: pie segments by band colour + quality ring.
         spotMarkersGroup = mapGroup.append('g').attr('class', 'spot-markers');
 
         // Read the current zoom scale so newly-drawn circles are immediately
-        // counter-scaled to match the existing zoom level (avoids full-size dots
-        // appearing when the user changes a dropdown while zoomed in).
+        // counter-scaled to match the existing zoom level.
         const currentTransform = d3.zoomTransform(svg.node());
         const k = currentTransform.k;
 
+        // Group by country — collect all band entries per country
+        const byCountry = new Map();
         for (const entry of preds) {
-            if (!entry.locator || entry.locator.length < 4) continue;
+            if (entry.lat == null || entry.lon == null) continue;
+            if (!byCountry.has(entry.country)) {
+                byCountry.set(entry.country, { lat: entry.lat, lon: entry.lon,
+                    continent: entry.continent, bands: [] });
+            }
+            byCountry.get(entry.country).bands.push(entry);
+        }
 
-            let coords;
-            try {
-                coords = maidenheadToLatLon(entry.locator);
-            } catch (e) {
-                continue;
+        const BASE_R = 8; // constant screen-pixel radius
+
+        for (const [country, cdata] of byCountry) {
+            const projected = projection([cdata.lon, cdata.lat]);
+            if (!projected || isNaN(projected[0]) || isNaN(projected[1])) continue;
+            const [px, py] = projected;
+            const r = BASE_R / k;
+
+            const best = bestPrediction(cdata.bands);
+            const ringColor = PREDICTION_FILL[best] || '#888';
+
+            const markerG = spotMarkersGroup.append('g')
+                .attr('class', 'spot-marker')
+                .attr('transform', `translate(${px},${py})`);
+
+            const n = cdata.bands.length;
+            // The marker group is positioned via translate() so the zoom transform
+            // scales it automatically — no manual counter-scaling needed.
+            // We deliberately omit data-base-r so the zoom handler skips these circles.
+            if (n === 1) {
+                // Single band — plain filled circle (band colour)
+                const bc = bandColor(cdata.bands[0].band);
+                markerG.append('circle')
+                    .attr('r', r)
+                    .style('fill', bc)
+                    .style('stroke', '#0f172a')
+                    .style('stroke-width', '1.2px')
+                    .style('cursor', 'pointer');
+            } else {
+                // Multiple bands — D3 pie segments (band colours)
+                const arc  = d3.arc().innerRadius(0).outerRadius(r);
+                const pie  = d3.pie().sort(null).value(() => 1);
+                const arcs = pie(cdata.bands);
+                arcs.forEach((a, idx) => {
+                    markerG.append('path')
+                        .attr('d', arc(a))
+                        .style('fill', bandColor(cdata.bands[idx].band))
+                        .style('stroke', '#0f172a')
+                        .style('stroke-width', '0.8px')
+                        .style('cursor', 'pointer');
+                });
             }
 
-            const projected = projection([coords.lon, coords.lat]);
-            if (!projected || isNaN(projected[0]) || isNaN(projected[1])) continue;
-
-            const [cx, cy] = projected;
-            const fill = PREDICTION_FILL[entry.prediction] || '#888';
-            // Radius scales slightly with spot count (min 5, max 10)
-            const baseR = Math.min(10, Math.max(5, 4 + Math.log2(entry.spot_count + 1)));
-            const r = baseR / k; // counter-scale for current zoom level
-
-            const g = spotMarkersGroup.append('g').attr('class', 'spot-marker');
-
-            // Outer ring — store base-r and base-sw for zoom counter-scaling
-            g.append('circle')
-                .attr('cx', cx).attr('cy', cy)
-                .attr('r', r + 3 / k)
-                .attr('data-base-r', baseR + 3)
-                .attr('data-base-sw', 1)
+            // Quality ring (prediction colour) — drawn on top, non-interactive
+            markerG.append('circle')
+                .attr('r', r + 2.5 / k)
                 .style('fill', 'none')
-                .style('stroke', fill)
-                .style('stroke-width', (1 / k) + 'px')
-                .style('opacity', '0.35')
+                .style('stroke', ringColor)
+                .style('stroke-width', '1.5px')
+                .style('stroke-opacity', '0.85')
                 .style('pointer-events', 'none');
 
-            // Main circle — store base-r and base-sw for zoom counter-scaling
-            g.append('circle')
-                .attr('cx', cx).attr('cy', cy)
-                .attr('r', r)
-                .attr('data-base-r', baseR)
-                .attr('data-base-sw', 1.2)
-                .style('fill', fill)
-                .style('stroke', '#fff')
-                .style('stroke-width', (1.2 / k) + 'px')
+            // Invisible hit-area circle for reliable hover
+            markerG.append('circle')
+                .attr('r', r + 4 / k)
+                .style('fill', 'transparent')
                 .style('cursor', 'pointer')
-                .on('mousemove', (event) => onSpotMouseMove(event, entry))
+                .on('mousemove', (event) => onSpotMouseMove(event, { country, ...cdata }))
                 .on('mouseout', () => { tooltip.style.display = 'none'; });
         }
 
@@ -478,42 +529,36 @@ const app = (() => {
     // ── Tooltip ──────────────────────────────────────────────────────────────
     const tooltip = document.getElementById('map-tooltip');
 
-    // Tooltip for spot circle markers
-    function onSpotMouseMove(event, entry) {
-        const cls = entry.prediction;
-        const snrStr = (entry.predicted_ssb_snr >= 0 ? '+' : '') + entry.predicted_ssb_snr.toFixed(1);
-        const wsprSnrStr = (entry.mean_wspr_snr >= 0 ? '+' : '') + entry.mean_wspr_snr.toFixed(1);
-        const pgStr = (entry.power_gain_db >= 0 ? '+' : '') + entry.power_gain_db.toFixed(1);
+    // Tooltip for country dot markers (grouped: one entry per country, bands array)
+    function onSpotMouseMove(event, cdata) {
+        const bandOrder = ['2200m','630m','160m','80m','60m','40m','30m','20m','17m','15m','12m','10m'];
+        const sorted = [...(cdata.bands || [])].sort((a, b) => {
+            const ai = bandOrder.indexOf(a.band), bi = bandOrder.indexOf(b.band);
+            return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+        });
 
-        let distStr = '—';
-        if (entry.distance_km != null) distStr = `${Math.round(entry.distance_km)} km`;
-
-        let bearingStr = '—';
-        if (entry.bearing_deg != null) bearingStr = `${Math.round(entry.bearing_deg)}°`;
-
-        const lastSeen = entry.last_seen
-            ? new Date(entry.last_seen).toUTCString().replace(' GMT', ' UTC')
-            : '—';
-
-        const predLabel = PREDICTION_LABELS[cls] || cls;
-
-        // Best-SNR callsign line (explains why a locator may be geographically
-        // distant from the country name — e.g. a Swedish SM callsign in JN60)
-        let callsignLine = '';
-        if (entry.best_callsign) {
-            const dbmStr = entry.best_callsign_dbm != null ? ` @ ${entry.best_callsign_dbm} dBm` : '';
-            callsignLine = `<div style="color:#aaa;font-size:11px;margin-top:3px;">Best spot: <strong style="color:#e0e0e0">${escHtml(entry.best_callsign)}</strong>${escHtml(dbmStr)} &nbsp; Grid: <strong style="color:#e0e0e0">${escHtml(entry.locator || '?')}</strong></div>`;
-        }
+        const bandRows = sorted.map(e => {
+            const bc   = bandColor(e.band);
+            const snr  = (e.predicted_ssb_snr >= 0 ? '+' : '') + e.predicted_ssb_snr.toFixed(1);
+            const pred = PREDICTION_LABELS[e.prediction] || e.prediction;
+            const qc   = tooltipPredClass(e.prediction);
+            let extra = '';
+            if (e.best_callsign) {
+                const dbm = e.best_callsign_dbm != null ? ` @ ${e.best_callsign_dbm} dBm` : '';
+                extra = `<span style="color:#888;font-size:10px;margin-left:4px;">${escHtml(e.best_callsign)}${escHtml(dbm)}</span>`;
+            }
+            return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
+                <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${bc};flex-shrink:0;"></span>
+                <span style="color:${bc};font-weight:600;min-width:32px;">${escHtml(e.band)}</span>
+                <span class="${qc}"><strong>${pred}</strong> (${snr} dB)</span>
+                ${extra}
+            </div>`;
+        }).join('');
 
         tooltip.innerHTML = `
-            <div class="tooltip-title">${escHtml(entry.country)} — ${escHtml(entry.locator || '?')}</div>
-            <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
-            <div class="${tooltipPredClass(cls)}">Signal quality: <strong>${predLabel}</strong> (${snrStr} dB)</div>
-            <div>Mean WSPR SNR: ${wsprSnrStr} dB &nbsp; Mean TX: ${entry.mean_tx_dbm.toFixed(1)} dBm &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
-            <div>Power gain: ${pgStr} dB &nbsp; BW correction: −${entry.bw_correction_db.toFixed(2)} dB</div>
-            <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
-            <div>Last seen: ${lastSeen}</div>
-            ${callsignLine}
+            <div class="tooltip-title">${escHtml(cdata.country)}</div>
+            <div style="color:#888;font-size:11px;margin-bottom:5px;">${escHtml(cdata.continent || '')}</div>
+            ${bandRows}
         `;
         tooltip.style.display = 'block';
         positionTooltip(event);

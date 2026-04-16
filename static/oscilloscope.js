@@ -468,7 +468,7 @@ class Oscilloscope {
     // and peaks is an array of sample indices of detected pulse peaks.
     detectPRF(dataArray, sampleRate) {
         const n = dataArray.length;
-        if (n < 2 || sampleRate <= 0) return 0;
+        if (n < 2 || sampleRate <= 0) return { prf: 0, peaks: [], avgIntervalSamples: 0 };
 
         // --- Step 1: compute rectified envelope using a sliding RMS window ---
         // Window size ~5 ms (enough to smooth carrier but preserve pulse shape)
@@ -521,7 +521,7 @@ class Oscilloscope {
             }
         }
 
-        if (peaks.length < 2) return { prf: 0, peaks };
+        if (peaks.length < 2) return { prf: 0, peaks, avgIntervalSamples: 0 };
 
         // --- Step 4: compute average inter-peak interval ---
         let totalInterval = 0;
@@ -532,15 +532,15 @@ class Oscilloscope {
         const prf = sampleRate / avgIntervalSamples;
 
         // Sanity check: PRF must be between 0.5 Hz and 100 Hz
-        if (prf < 0.5 || prf > 100) return { prf: 0, peaks };
+        if (prf < 0.5 || prf > 100) return { prf: 0, peaks, avgIntervalSamples: 0 };
 
-        return { prf, peaks };
+        return { prf, peaks, avgIntervalSamples };
     }
 
     // Run PRF detection, optionally auto-snap markers to first two peaks (auto mode),
     // and draw the PRF readout box on the canvas.
     _detectAndDrawPRF(dataArray, sampleRate, width, height, startSample, samplesToDisplay) {
-        const { prf, peaks } = this.detectPRF(dataArray, sampleRate);
+        const { prf, peaks, avgIntervalSamples } = this.detectPRF(dataArray, sampleRate);
 
         if (prf > 0) {
             this._prfHistory.push(prf);
@@ -548,21 +548,22 @@ class Oscilloscope {
                 this._prfHistory.shift();
             }
 
-            // In auto mode, snap markerA and markerB to the first two detected peaks
-            // that are actually visible in the current view window.
-            // Peaks are absolute sample indices; convert to canvas fractions using the
-            // exact same startSample/samplesToDisplay as the waveform drawing.
-            if (this.markersMode === 'auto' && peaks.length >= 2) {
-                // Filter to peaks that are within the visible window
-                const visiblePeaks = peaks.filter(p =>
+            // In auto mode, snap markerA to the first visible peak and markerB exactly
+            // one PRF period later (using avgIntervalSamples). This ensures the markers
+            // span exactly one pulse period even when multiple sub-peaks exist within
+            // a single pulse burst.
+            if (this.markersMode === 'auto' && peaks.length >= 2 && avgIntervalSamples > 0) {
+                // Find the first peak that is visible in the current window
+                const firstVisible = peaks.find(p =>
                     p >= startSample && p < startSample + samplesToDisplay);
 
-                if (visiblePeaks.length >= 2) {
+                if (firstVisible !== undefined) {
+                    const secondPeak = firstVisible + Math.round(avgIntervalSamples);
                     const toFrac = (sampleIdx) =>
                         Math.max(0, Math.min(1, (sampleIdx - startSample) / samplesToDisplay));
 
-                    this.markerA = toFrac(visiblePeaks[0]);
-                    this.markerB = toFrac(visiblePeaks[1]);
+                    this.markerA = toFrac(firstVisible);
+                    this.markerB = toFrac(secondPeak);
                 }
             }
         }

@@ -1021,11 +1021,11 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
     vuMeterLedsCompact = document.getElementById('vu-meter-leds-compact');
 
-    // Build 20 LED <span> elements inside the LED container
+    // Build 40 LED <span> elements inside the LED container
     if (vuMeterLedsCompact) {
         vuMeterLedsCompact.innerHTML = '';
         vuMeterLedElements = [];
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 40; i++) {
             const led = document.createElement('span');
             led.className = 'vu-meter-led-compact';
             vuMeterLedsCompact.appendChild(led);
@@ -5175,29 +5175,33 @@ function updateVUMeter() {
     // Update compact VU meter (in audio controls) - bar and peak only, no text values
     if (vuMeterStyle === 'led') {
         // ── LED mode ─────────────────────────────────────────────────────────
-        // 20 segments: 0–13 green (0–66.67%), 14–16 yellow (66.67–83.33%),
-        //              17–18 orange (83.33–91.67%), 19 red (91.67–100%)
-        if (vuMeterLedElements.length === 20) {
-            const litCount = Math.round(rmsPercentage / 5); // 0–20
-            const peakSegment = Math.min(19, Math.round(vuPeakHold / 5) - 1);
+        // 40 segments matching the gradient zones:
+        //   0–26  (0–66.67%)   → green
+        //   27–33 (66.67–83.33%) → yellow
+        //   34–36 (83.33–91.67%) → orange
+        //   37–39 (91.67–100%)   → red
+        const NUM_LEDS = 40;
+        if (vuMeterLedElements.length === NUM_LEDS) {
+            const litCount = Math.round(rmsPercentage / 100 * NUM_LEDS); // 0–40
+            const peakSegment = Math.min(NUM_LEDS - 1, Math.round(vuPeakHold / 100 * NUM_LEDS) - 1);
 
-            for (let i = 0; i < 20; i++) {
+            // Helper: get zone class for a segment index
+            const zoneClass = (i) => {
+                if (i <= 26) return 'lit-green';
+                if (i <= 33) return 'lit-yellow';
+                if (i <= 36) return 'lit-orange';
+                return 'lit-red';
+            };
+
+            for (let i = 0; i < NUM_LEDS; i++) {
                 const led = vuMeterLedElements[i];
-                // Remove all state classes
                 led.classList.remove('lit-green', 'lit-yellow', 'lit-orange', 'lit-red', 'peak-hold');
 
                 if (i === peakSegment && vuPeakHold > 0) {
-                    led.classList.add('peak-hold');
+                    // Peak hold: use the zone colour but with peak-hold brightness modifier
+                    led.classList.add(zoneClass(i), 'peak-hold');
                 } else if (i < litCount) {
-                    if (i <= 13) {
-                        led.classList.add('lit-green');
-                    } else if (i <= 16) {
-                        led.classList.add('lit-yellow');
-                    } else if (i <= 18) {
-                        led.classList.add('lit-orange');
-                    } else {
-                        led.classList.add('lit-red');
-                    }
+                    led.classList.add(zoneClass(i));
                 }
                 // else: unlit — no class, shows dark background
             }

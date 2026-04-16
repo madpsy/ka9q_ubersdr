@@ -797,6 +797,7 @@ const app = (() => {
             updateMap(predictions, gridSquares);
             renderTable(predictions);
             renderTop10(predictions, gridSquares);
+            scheduleNearestGridsBanner();
 
         } catch (e) {
             console.error('WSPR prediction fetch error:', e);
@@ -812,6 +813,18 @@ const app = (() => {
     }
 
     // ── Nearest-grids banner ─────────────────────────────────────────────────
+
+    // Debounce timer for nearest-grids banner — prevents double-calls when
+    // geolocation resolves at the same time as fetchData() completes.
+    let _nearestGridsTimer = null;
+
+    function scheduleNearestGridsBanner() {
+        if (_nearestGridsTimer !== null) clearTimeout(_nearestGridsTimer);
+        _nearestGridsTimer = setTimeout(() => {
+            _nearestGridsTimer = null;
+            fetchNearestGridsBanner();
+        }, 150);
+    }
 
     /**
      * Fetch the top-3 nearest active grid squares from the API and render the
@@ -954,7 +967,7 @@ const app = (() => {
                 (pos) => {
                     userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
                     drawUserLocationMarker();
-                    fetchNearestGridsBanner();
+                    scheduleNearestGridsBanner();
                 },
                 () => { /* permission denied or unavailable — silently ignore */ },
                 { timeout: 10000, maximumAge: 300000 }

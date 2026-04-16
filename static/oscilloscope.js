@@ -37,6 +37,33 @@ class Oscilloscope {
         // Throttling
         this.lastUpdate = 0;
         this.updateInterval = 33; // 30 fps
+
+        // --- Time markers ---
+        // markersEnabled: whether the marker overlay is shown
+        this.markersEnabled = false;
+        // Marker positions as fractions of canvas width (0.0 – 1.0)
+        this.markerA = 0.25;
+        this.markerB = 0.75;
+        // Which marker is being dragged: null | 'A' | 'B'
+        this._draggingMarker = null;
+        // Cache the last computed timebase so drawMarkers can use it
+        this._lastDisplayedTimeMs = 0;
+        this._lastSamplesToDisplay = 0;
+        this._lastSampleRate = 0;
+        // Snapshot of the canvas pixels taken just before markers are drawn,
+        // so we can restore it when redrawing markers while paused.
+        this._frozenSnapshot = null;
+
+        // Bind mouse handlers once so we can remove them on destroy
+        this._onMouseDown = this._markerMouseDown.bind(this);
+        this._onMouseMove = this._markerMouseMove.bind(this);
+        this._onMouseUp   = this._markerMouseUp.bind(this);
+
+        if (this.canvas) {
+            this.canvas.addEventListener('mousedown', this._onMouseDown);
+            window.addEventListener('mousemove', this._onMouseMove);
+            window.addEventListener('mouseup',   this._onMouseUp);
+        }
     }
     
     // Update oscilloscope display
@@ -111,6 +138,15 @@ class Oscilloscope {
         const logValue = logMin + (normalizedSlider * logRange);
         const fraction = Math.pow(10, logValue);
         const samplesToDisplay = Math.floor(bufferLength * fraction);
+
+        // Cache timebase for marker readout
+        const sampleRate = audioContext.sampleRate;
+        const totalTimeMs = (bufferLength / sampleRate) * 1000;
+        const invertedZoom = 201 - this.zoom;
+        const displayedTimeMs = totalTimeMs / invertedZoom;
+        this._lastDisplayedTimeMs = displayedTimeMs;
+        this._lastSamplesToDisplay = samplesToDisplay;
+        this._lastSampleRate = sampleRate;
         
         // Find trigger point if enabled
         let startSample;
@@ -166,9 +202,199 @@ class Oscilloscope {
         }
         
         this.ctx.stroke();
+
+        // Draw time markers (on top of waveform).
+        // Take a snapshot of the canvas just before drawing markers so we can
+        // restore it when the user drags a marker while the visualization is paused.
+        if (this.markersEnabled) {
+            this._frozenSnapshot = this.ctx.getImageData(0, 0, width, height);
+            this.drawMarkers(width, height);
+        } else {
+            this._frozenSnapshot = null;
+        }
         
         // Draw frequency display
         this.drawFrequencyDisplay(width, avgFreq);
+    }
+
+    // -----------------------------------------------------------------------
+    // Time marker drawing
+    // -----------------------------------------------------------------------
+
+    drawMarkers(width, height) {
+        const ctx = this.ctx;
+        const xA = Math.round(this.markerA * width);
+        const xB = Math.round(this.markerB * width);
+
+        // --- Marker A (cyan) ---
+        ctx.save();
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(xA, 0);
+        ctx.lineTo(xA, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label "A" at top
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(xA - 8, 2, 16, 14);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillText('A', xA, 3);
+        ctx.restore();
+
+        // --- Marker B (yellow) ---
+        ctx.save();
+        ctx.strokeStyle = '#ffd600';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(xB, 0);
+        ctx.lineTo(xB, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label "B" at top
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(xB - 8, 2, 16, 14);
+        ctx.fillStyle = '#ffd600';
+        ctx.fillText('B', xB, 3);
+        ctx.restore();
+
+        // --- ΔT readout ---
+        this._drawMarkerReadout(width, height);
+    }
+
+    _drawMarkerReadout(width, height) {
+        if (this._lastDisplayedTimeMs <= 0) return;
+
+        const ctx = this.ctx;
+        const deltaFrac = Math.abs(this.markerB - this.markerA);
+        const deltaMs = deltaFrac * this._lastDisplayedTimeMs;
+
+        let deltaLabel;
+        if (deltaMs >= 1) {
+            deltaLabel = deltaMs.toFixed(3) + ' ms';
+        } else {
+            deltaLabel = (deltaMs * 1000).toFixed(1) + ' µs';
+        }
+
+        let freqLabel = '';
+        if (deltaMs > 0) {
+            const impliedFreq = 1000 / deltaMs; // Hz
+            if (impliedFreq >= 1000) {
+                freqLabel = ' = ' + (impliedFreq / 1000).toFixed(2) + ' kHz';
+            } else {
+                freqLabel = ' = ' + impliedFreq.toFixed(1) + ' Hz';
+            }
+        }
+
+        const line1 = `ΔT: ${deltaLabel}${freqLabel}`;
+
+        ctx.save();
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        const padding = 5;
+        const boxW = ctx.measureText(line1).width + padding * 2;
+        const boxH = 18;
+
+        // Position: bottom-left, above the time scale labels
+        const bx = 4;
+        const by = height - boxH - 18; // 18px above bottom to clear time labels
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(bx, by, boxW, boxH);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(line1, bx + padding, by + 3);
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------------
+    // Mouse interaction for dragging markers
+    // -----------------------------------------------------------------------
+
+    _markerHitTest(fracX) {
+        // Returns 'A', 'B', or null depending on which marker is within 8px
+        if (!this.canvas) return null;
+        const width = this.canvas.width;
+        const pxA = this.markerA * width;
+        const pxB = this.markerB * width;
+        const px  = fracX * width;
+        const hitRadius = 8;
+        const dA = Math.abs(px - pxA);
+        const dB = Math.abs(px - pxB);
+        if (dA <= hitRadius && dA <= dB) return 'A';
+        if (dB <= hitRadius) return 'B';
+        return null;
+    }
+
+    _canvasFracX(e) {
+        if (!this.canvas) return 0;
+        const rect = this.canvas.getBoundingClientRect();
+        const cssX = e.clientX - rect.left;
+        return Math.max(0, Math.min(1, cssX / rect.width));
+    }
+
+    _markerMouseDown(e) {
+        if (!this.markersEnabled) return;
+        const frac = this._canvasFracX(e);
+        const hit = this._markerHitTest(frac);
+        if (hit) {
+            this._draggingMarker = hit;
+            e.preventDefault();
+        }
+    }
+
+    _markerMouseMove(e) {
+        if (!this._draggingMarker || !this.canvas) return;
+        const frac = this._canvasFracX(e);
+        if (this._draggingMarker === 'A') {
+            this.markerA = frac;
+        } else {
+            this.markerB = frac;
+        }
+        // Update cursor style
+        this.canvas.style.cursor = 'ew-resize';
+
+        // If the visualization is paused (update() is not being called), we still
+        // need to redraw the markers on top of the frozen waveform so the user
+        // can see them move in real time.
+        if (this._frozenSnapshot && this.ctx) {
+            const w = this.canvas.width;
+            const h = this.canvas.height;
+            this.ctx.putImageData(this._frozenSnapshot, 0, 0);
+            this.drawMarkers(w, h);
+        }
+
+        e.preventDefault();
+    }
+
+    _markerMouseUp(e) {
+        if (this._draggingMarker) {
+            this._draggingMarker = null;
+            if (this.canvas) this.canvas.style.cursor = '';
+        }
+    }
+
+    // Toggle markers on/off; returns new state
+    toggleMarkers() {
+        this.markersEnabled = !this.markersEnabled;
+        // Reset to sensible default positions when enabling
+        if (this.markersEnabled) {
+            this.markerA = 0.25;
+            this.markerB = 0.75;
+        }
+        return this.markersEnabled;
     }
     
     // Draw grid lines and labels
@@ -420,6 +646,15 @@ class Oscilloscope {
             this.canvas.width = Math.floor(rect.width);
             this.canvas.height = Math.floor(rect.height);
         }
+    }
+
+    // Clean up event listeners
+    destroy() {
+        if (this.canvas) {
+            this.canvas.removeEventListener('mousedown', this._onMouseDown);
+        }
+        window.removeEventListener('mousemove', this._onMouseMove);
+        window.removeEventListener('mouseup',   this._onMouseUp);
     }
 }
 

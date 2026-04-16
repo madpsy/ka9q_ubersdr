@@ -7232,6 +7232,22 @@ function autoScaleOscilloscope() {
     }
 }
 
+// Toggle time markers A/B on the oscilloscope
+function toggleOscilloscopeMarkers() {
+    if (!oscilloscope) return;
+
+    const enabled = oscilloscope.toggleMarkers();
+    const button = document.getElementById('osc-markers-btn');
+    if (button) {
+        button.style.backgroundColor = enabled ? '#fd7e14' : '#6c757d';
+        button.textContent = enabled ? 'Markers: ON' : 'Markers';
+        button.title = enabled
+            ? 'Drag cyan (A) and yellow (B) lines to measure time between two points. Click again to hide.'
+            : 'Toggle time markers A/B — drag to measure time between two points';
+    }
+    log(enabled ? 'Oscilloscope time markers enabled — drag A/B to measure' : 'Oscilloscope time markers disabled');
+}
+
 
 // Keepalive is now handled by idle-detector.js (activity-based heartbeats)
 // Fixed 30-second interval removed to allow proper idle detection
@@ -8262,6 +8278,7 @@ window.openRecorderModal = openRecorderModal;
 window.toggleAudioVisualization = toggleAudioVisualization;
 window.toggleAudioVisualizationPause = toggleAudioVisualizationPause;
 window.toggleAudioControls = toggleAudioControls;
+window.toggleOscilloscopeMarkers = toggleOscilloscopeMarkers;
 window.updateFFTSize = updateFFTSize;
 window.updateScrollRate = updateScrollRate;
 window.updateOscilloscopeZoom = updateOscilloscopeZoom;

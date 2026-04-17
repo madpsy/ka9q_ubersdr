@@ -62,6 +62,10 @@ details.api-ref summary{cursor:pointer;font-weight:600;opacity:.9;list-style:non
 details.api-ref summary::before{content:'▶ '}
 details.api-ref[open] summary::before{content:'▼ '}
 details.api-ref code{font-family:monospace;background:rgba(255,255,255,.1);border-radius:3px;padding:1px 5px;font-size:1em}
+/* Info banner */
+.sg-info{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:.8em;opacity:.8;line-height:1.65;display:flex;align-items:flex-start;gap:10px}
+.sg-info-icon{font-size:1.2em;flex-shrink:0;margin-top:1px}
+.sg-info b{opacity:1;font-weight:600}
 details.api-ref table{border-collapse:collapse;margin-top:6px;width:100%}
 details.api-ref td{padding:2px 10px 2px 0;vertical-align:top}
 details.api-ref td:first-child{white-space:nowrap;opacity:.85}
@@ -140,6 +144,16 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <span class="status" id="status">Loading&hellip;</span>
 </div>
 
+<div class="sg-info">
+  <span class="sg-info-icon">ℹ️</span>
+  <span>
+    <b>How to read this spectrogram:</b>
+    Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows).
+    The <b>X-axis</b> shows frequency (0&ndash;30&nbsp;MHz for wideband); the <b>Y-axis</b> shows UTC time, with the most recent data at the bottom.
+    Colour indicates signal strength &mdash; from noise floor (cool/dark) to signal peak (warm/bright) &mdash; as shown in the legend below.
+    Hover over the image for exact frequency, time, and signal level.
+  </span>
+</div>
 <div id="err"></div>
 <div id="loading" class="loading">Loading spectrogram&hellip;</div>
 

@@ -453,7 +453,10 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 	sr.lastRow = lastRowTime
 	sr.mu.Unlock()
 
-	// Fill gap since last row with black (sentinel) rows
+	// Fill gap since last row with black (sentinel) rows.
+	// Each gap row is also written to the JSONL so the JSONL stays in sync
+	// with the ring buffer — without this the meta handler falls back to
+	// synthetic timestamps for all rows after the gap.
 	now := time.Now().UTC()
 	gapMinutes := int(now.Sub(lastRowTime).Minutes())
 	if gapMinutes > 0 {
@@ -471,6 +474,18 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 			sr.rowCount++
 		}
 		sr.mu.Unlock()
+		// Write gap rows to JSONL outside the lock so the meta handler
+		// never sees liveRowCount > len(jsonlRows).
+		// Use noise_floor=0 (not noDataSentinel=-Inf) because json.Marshal
+		// rejects non-finite floats.
+		sr.mu.Lock()
+		gapRowCount := sr.rowCount
+		sr.mu.Unlock()
+		for i := rowCount; i < gapRowCount; i++ {
+			// Timestamp: lastRowTime + (i - rowCount + 1) minutes
+			rowTime := lastRowTime.Add(time.Duration(i-rowCount+1) * time.Minute)
+			sr.appendRowToJSONL(today, i, rowTime, 0)
+		}
 	}
 
 	log.Printf("Spectrogram: resumed %s with %d rows (last row: %s)",

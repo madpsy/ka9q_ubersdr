@@ -16,7 +16,8 @@ h1{font-size:1.9em;margin-bottom:5px;text-shadow:2px 2px 4px rgba(0,0,0,.3)}
 .controls label{font-size:.88em;opacity:.85;margin-right:4px}
 select,button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:6px;padding:5px 11px;font-size:.88em;cursor:pointer}
 select option{background:#1e3c72;color:#fff}
-button:hover{background:rgba(255,255,255,.25)}
+button:hover:not(:disabled){background:rgba(255,255,255,.25)}
+button:disabled{opacity:.3;cursor:not-allowed}
 .status{margin-left:auto;font-size:.78em;opacity:.7;white-space:nowrap}
 /* Layout: time axis left, spectrogram right */
 .sg-wrap{display:flex;gap:0;user-select:none}

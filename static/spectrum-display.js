@@ -2115,12 +2115,14 @@ class SpectrumDisplay {
 
             // Calculate y position using actual data range (inverted - higher dB at top)
             // Draw in the area below the frequency scale (from graphTopMargin to graphHeight)
-            // Apply gamma curve: contrast=15 (default) → gamma≈0.7 (decent compression),
-            // contrast=30 → gamma≈0.25 (strong), contrast=0 → gamma≈1.9 (near-linear).
+            // Apply gamma curve: gamma > 1 compresses low values (noise floor) toward the
+            // bottom and expands the mid-range (weak signals), making them more visible.
+            // contrast=0 → gamma≈0.5 (near-linear), contrast=15 → gamma≈1.4 (default,
+            // decent noise compression), contrast=30 → gamma≈4.0 (strong compression).
             // The dB axis labels are placed at the same gamma-corrected positions so they
             // remain accurate — the scale is non-linear but always correct.
             const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
-            const gamma = Math.pow(2, (10 - this.config.autoContrast) / 15);
+            const gamma = Math.pow(2, (this.config.autoContrast - 10) / 15);
             const normalized = Math.pow(linearNorm, gamma);
             const y = graphHeight - (normalized * graphDrawHeight);
 
@@ -2177,7 +2179,7 @@ class SpectrumDisplay {
         ctx.lineWidth = 2;
 
         // Use the same gamma as drawLineGraph() so labels sit at the correct pixel positions
-        const gamma = Math.pow(2, (10 - this.config.autoContrast) / 15);
+        const gamma = Math.pow(2, (this.config.autoContrast - 10) / 15);
 
         const firstDb = Math.ceil(minDb / dbStep) * dbStep;
         for (let db = firstDb; db <= maxDb; db += dbStep) {
@@ -2337,7 +2339,7 @@ class SpectrumDisplay {
             // Calculate y position - use graphTopMargin + graphDrawHeight as base, subtract normalized height
             // Apply the same gamma as drawLineGraph() so peak hold stays aligned with the filled area
             const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
-            const gamma = Math.pow(2, (10 - this.config.autoContrast) / 15);
+            const gamma = Math.pow(2, (this.config.autoContrast - 10) / 15);
             const normalized = Math.pow(linearNorm, gamma);
             const y = graphTopMargin + graphDrawHeight - (normalized * graphDrawHeight);
 

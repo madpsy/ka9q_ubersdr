@@ -765,18 +765,39 @@ function buildTimeAxis(){
   else if(visibleSpanRows<=480)interval=60;
   else if(visibleSpanRows<=960)interval=120;
 
-  /* Snap to first tick at or before visible top */
-  var firstRow=Math.floor(visTop*canvasRows/interval)*interval;
+  /* UTC minute of row 0 — used to snap ticks to clean clock boundaries.
+     Each row is exactly 1 minute, so row N has UTC minute = row0Min + N. */
+  var row0Min=0;
+  if(meta.rows&&meta.rows[0]&&meta.rows[0].unix){
+    var d0=new Date(meta.rows[0].unix*1000);
+    row0Min=d0.getUTCHours()*60+d0.getUTCMinutes();
+  }
+
+  /* Snap first tick to a multiple of interval in UTC-minute space */
+  var visTopRow=Math.floor(visTop*canvasRows);
+  var visTopUtcMin=row0Min+visTopRow;
+  var firstTickUtcMin=Math.ceil(visTopUtcMin/interval)*interval;
+  /* Convert back to row index */
+  var firstRow=firstTickUtcMin-row0Min;
 
   for(var row=firstRow;row<=canvasRows;row+=interval){
+    if(row<0)continue;
     var sc=canvasRowToScreen(row/canvasRows);
     if(sc<-0.02||sc>1.02)continue; /* small margin for edge labels */
     var lbl=document.createElement('span');
     lbl.className='t-label';
     lbl.style.top=(sc*100)+'%';
-    var hh=String(Math.floor(row/60)).padStart(2,'0');
-    var mm=String(row%60).padStart(2,'0');
-    lbl.textContent=hh+':'+mm;
+    /* Use real UTC time from meta.rows if available; fall back to synthetic */
+    var rowMeta=meta.rows&&meta.rows[row];
+    var timeStr;
+    if(rowMeta&&rowMeta.unix){
+      var d=new Date(rowMeta.unix*1000);
+      timeStr=String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');
+    } else {
+      var utcMin=row0Min+row;
+      timeStr=String(Math.floor(utcMin/60)%24).padStart(2,'0')+':'+String(utcMin%60).padStart(2,'0');
+    }
+    lbl.textContent=timeStr;
     ax.appendChild(lbl);
   }
 }
@@ -831,12 +852,19 @@ function setupHover(){
 
     /* Time — yp maps 0..1 across the image height which equals meta.row_count pixels
        (the cached PNG only contains data rows, not the full 1440-row canvas).
-       Scale by row_count to get the actual row index, then derive the UTC minute. */
-    var row=Math.floor(yp*meta.row_count);
-    var nodata=!overCanvas||row>=meta.row_count;
-    var hh=String(Math.floor(row/60)).padStart(2,'0');
-    var mm=String(row%60).padStart(2,'0');
-    var tstr=hh+':'+mm+' UTC';
+       Scale by row_count to get the actual row index, then look up the real UTC time
+       from meta.rows[row].unix — immune to service restarts and mid-day starts.
+       Clamp to meta.row_count-1 so yp=1.0 (bottom edge) maps to the last valid row. */
+    var row=Math.min(Math.floor(yp*meta.row_count),meta.row_count-1);
+    var nodata=!overCanvas||row<0||row>=meta.row_count;
+    var tstr;
+    var rowMeta=meta.rows&&meta.rows[row];
+    if(rowMeta&&rowMeta.unix){
+      var d=new Date(rowMeta.unix*1000);
+      tstr=String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+' UTC';
+    } else {
+      tstr=String(Math.floor(row/60)).padStart(2,'0')+':'+String(row%60).padStart(2,'0')+' UTC';
+    }
 
     /* Signal level from pixel — use the range that was actually used to render
        the current PNG (slider values if user changed them, else meta auto-range) */

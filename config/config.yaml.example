@@ -1094,49 +1094,28 @@ noisefloor:
 #   GET /api/spectrogram                    — today's in-progress PNG (Cache-Control: max-age=60)
 #   GET /api/spectrogram?date=YYYY-MM-DD    — archived PNG for a past date (Cache-Control: max-age=86400)
 #   GET /api/spectrogram/list               — JSON list of available dates (newest first)
+#   GET /api/spectrogram/latest             — redirects to the most recent complete day's PNG
+#   GET /api/spectrogram/meta               — JSON metadata (date, row count, auto-ranged dB min/max)
 #
-# Colour scale: viridis palette (dark purple = noise floor, bright yellow = strong signal)
-#   db_min maps to the darkest colour (noise floor)
-#   db_max maps to the brightest colour (signal peak)
-#   Signals outside this range are clamped to the nearest colour
-#   Tune db_min/db_max to match your receiver's noise floor and signal levels
+# Colour scale: auto-ranged per image using the 5th/95th percentile of signal levels.
+# The Jet palette is used by default; users can switch palette and adjust contrast
+# interactively in the browser UI without re-fetching from the server.
 #
 spectrogram:
-  # Enable daily spectrogram recording (default: false)
+  # Enable daily spectrogram recording (default: true)
   # Requires noisefloor.enabled: true
-  enabled: false
+  enabled: true
 
   # Directory to store spectrogram files (one PNG + one .bin per UTC day)
   # Relative paths are resolved relative to the config directory (/app/config in Docker)
   # Default: "spectrogram" → /app/config/spectrogram/
   data_dir: "spectrogram"
 
-  # Minimum dB value mapped to the darkest colour (noise floor)
-  # Signals at or below this level appear as the darkest colour in the palette
-  # Typical values: -130 to -120 dBFS for a quiet HF receiver
-  # Default: -130
-  db_min: -130
-
-  # Maximum dB value mapped to the brightest colour (signal peak)
-  # Signals at or above this level appear as the brightest colour in the palette
-  # Typical values: -60 to -50 dBFS for strong HF signals
-  # Default: -60
-  db_max: -60
-
   # Number of completed daily PNG files to retain on disk
   # Files older than this are automatically deleted at UTC midnight rollover
   # Set to 0 to keep all files indefinitely
   # Default: 30
   retention_days: 30
-
-  # Colour palette for the spectrogram PNG
-  # Matches the palettes available in the main waterfall display
-  # Valid values:
-  #   viridis — perceptually uniform, colour-blind friendly (default)
-  #   plasma  — high contrast, warm tones (purple → orange → yellow)
-  #   jet     — classic rainbow (blue → cyan → yellow → red)
-  # Default: viridis
-  palette: viridis
 
 # Instance Reporting settings
 # Allows this UberSDR instance to report to a central registry

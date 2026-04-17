@@ -2079,10 +2079,10 @@ class SpectrumDisplay {
             // Use the average of recent maximums as the ceiling for smoother display
             const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
 
-            // Apply the same symmetric contrast offset as the waterfall so
-            // both displays share the same dB range when in auto mode.
-            minDb = avgMinDb + this.config.autoContrast;
-            maxDb = avgMaxDb - this.config.autoContrast;
+            // Use smoothed minimum as floor, smoothed maximum as ceiling.
+            // The spectrum line graph auto-ranges independently from the waterfall.
+            minDb = avgMinDb;
+            maxDb = avgMaxDb;
         }
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
@@ -2115,7 +2115,11 @@ class SpectrumDisplay {
 
             // Calculate y position using actual data range (inverted - higher dB at top)
             // Draw in the area below the frequency scale (from graphTopMargin to graphHeight)
-            const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            // Apply gamma curve so the contrast slider compresses the noise floor visually
+            // without altering the dB scale labels. gamma < 1 pushes signals upward.
+            const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const gamma = Math.pow(2, (15 - this.config.autoContrast) / 15);
+            const normalized = Math.pow(linearNorm, gamma);
             const y = graphHeight - (normalized * graphDrawHeight);
 
             ctx.lineTo(x, y);
@@ -2324,7 +2328,10 @@ class SpectrumDisplay {
             }
 
             // Calculate y position - use graphTopMargin + graphDrawHeight as base, subtract normalized height
-            const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            // Apply the same gamma as drawLineGraph() so peak hold stays aligned with the filled area
+            const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const gamma = Math.pow(2, (15 - this.config.autoContrast) / 15);
+            const normalized = Math.pow(linearNorm, gamma);
             const y = graphTopMargin + graphDrawHeight - (normalized * graphDrawHeight);
 
             if (firstPoint) {

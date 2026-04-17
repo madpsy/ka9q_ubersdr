@@ -453,9 +453,10 @@ function render(){
 }
 
 /* Frequency axis — zoom-aware, rebuilds on every zoom/pan change.
-   Positions labels in the freq-axis coordinate space (which is inside zoom-wrap
-   and therefore already scaled). We compute which frequencies are visible and
-   choose an appropriate tick interval. */
+   All ticks are rendered across the full 0–30 MHz range at the appropriate
+   density for the current zoom level. Positions are left:X% of the full width.
+   The CSS transform on zoom-wrap handles scaling; overflow:hidden on sg-right
+   clips labels outside the viewport. No getBoundingClientRect() needed. */
 function buildFreqAxis(){
   var ax=document.getElementById('freq-axis');
   ax.innerHTML='';
@@ -463,34 +464,28 @@ function buildFreqAxis(){
 
   var totalHz=meta.end_freq_hz; /* 30 MHz */
 
-  /* Determine visible frequency range from zoom state.
-     zoom-wrap is scaled by zoom.scale and translated by zoom.tx pixels.
-     The freq-axis has the same width as the canvas (100% of zoom-wrap).
-     Visible left edge in zoom-wrap coords: -zoom.tx / zoom.scale
-     Visible right edge: (-zoom.tx + containerWidth) / zoom.scale
-     But since we're inside zoom-wrap, positions are in unscaled coords. */
-  var container=document.querySelector('.sg-right');
-  var cw=container?container.getBoundingClientRect().width:800;
+  /* Estimate visible frequency span from zoom scale.
+     At scale=1 the full 30 MHz is visible.
+     At scale=N, approximately 30/N MHz is visible. */
+  var visibleSpanHz=totalHz/zoom.scale;
 
-  /* Fraction of total width visible */
-  var visLeft = -zoom.tx / zoom.scale;          /* px in zoom-wrap space */
-  var visRight= visLeft + cw / zoom.scale;       /* px in zoom-wrap space */
-  /* zoom-wrap width = freq-axis width = 100% of sg-right at scale=1 */
-  var zoomWrapW = cw; /* at scale=1, zoom-wrap fills sg-right */
-
-  var freqLeft = Math.max(0, (visLeft / zoomWrapW) * totalHz);
-  var freqRight= Math.min(totalHz, (visRight / zoomWrapW) * totalHz);
-  var freqSpan = freqRight - freqLeft;
-
-  /* Choose tick interval based on visible span */
-  var tickIntervals=[
-    5e6,2e6,1e6,500e3,200e3,100e3,50e3,25e3,10e3
+  /* Choose tick intervals based on visible span */
+  var intervals=[
+    {span:25e6, major:5e6,  minor:1e6},
+    {span:12e6, major:2e6,  minor:500e3},
+    {span:6e6,  major:1e6,  minor:200e3},
+    {span:3e6,  major:500e3,minor:100e3},
+    {span:1.5e6,major:200e3,minor:50e3},
+    {span:600e3,major:100e3,minor:25e3},
+    {span:300e3,major:50e3, minor:10e3},
+    {span:150e3,major:25e3, minor:5e3},
+    {span:0,    major:10e3, minor:2e3}
   ];
-  var labelInterval=5e6, minorInterval=1e6;
-  for(var ti=0;ti<tickIntervals.length;ti++){
-    if(freqSpan/tickIntervals[ti]<=8){
-      labelInterval=tickIntervals[ti];
-      minorInterval=tickIntervals[ti+1]||tickIntervals[ti]/5;
+  var majorInterval=5e6, minorInterval=1e6;
+  for(var ii=0;ii<intervals.length;ii++){
+    if(visibleSpanHz>=intervals[ii].span){
+      majorInterval=intervals[ii].major;
+      minorInterval=intervals[ii].minor;
       break;
     }
   }
@@ -502,14 +497,9 @@ function buildFreqAxis(){
     return hz+' Hz';
   }
 
-  /* Snap to first tick at or before freqLeft */
-  var firstMajor=Math.floor(freqLeft/labelInterval)*labelInterval;
-  var firstMinor=Math.floor(freqLeft/minorInterval)*minorInterval;
-
-  /* Draw minor notches */
-  for(var f=firstMinor;f<=freqRight+minorInterval;f+=minorInterval){
-    if(f<0||f>totalHz)continue;
-    if(f%labelInterval===0)continue; /* major handles these */
+  /* Render all minor notches across full range */
+  for(var f=0;f<=totalHz;f+=minorInterval){
+    if(f%majorInterval===0)continue; /* major handles these */
     var pct=(f/totalHz)*100+'%';
     var notch=document.createElement('div');
     notch.className='f-notch';
@@ -519,9 +509,8 @@ function buildFreqAxis(){
     ax.appendChild(notch);
   }
 
-  /* Draw major notches + labels */
-  for(var f=firstMajor;f<=freqRight+labelInterval;f+=labelInterval){
-    if(f<0||f>totalHz)continue;
+  /* Render all major notches + labels across full range */
+  for(var f=0;f<=totalHz;f+=majorInterval){
     var pct=(f/totalHz)*100+'%';
     var notch=document.createElement('div');
     notch.className='f-notch'; notch.style.left=pct;

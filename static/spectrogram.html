@@ -70,7 +70,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <body>
 <div class="container">
 <header>
-  <h1>&#x1F4E1; Wideband Spectrogram</h1>
+  <h1 id="page-title">&#x1F4E1; Wideband Spectrogram</h1>
   <p class="subtitle" id="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; Jet palette</p>
 </header>
 
@@ -78,6 +78,12 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button id="prev-btn" onclick="navDate(-1)" title="Previous day (older)" disabled>&#x25C4;</button>
   <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
   <button id="next-btn" onclick="navDate(+1)" title="Next day (newer)" disabled>&#x25BA;</button>
+  <div>
+    <label for="bsel">Band:</label>
+    <select id="bsel" onchange="onBandChange()">
+      <option value="wideband" selected>Wideband (0&ndash;30 MHz)</option>
+    </select>
+  </div>
   <div>
     <label for="psel">Palette:</label>
     <select id="psel" onchange="onPaletteChange()">
@@ -348,6 +354,22 @@ function syncSliders(mn,mx){
   document.getElementById('ceil-val').textContent=mx;
 }
 
+/* ── Band selection ─────────────────────────────────────────────────────── */
+/* urlBand is read from ?band= on page load and drives all API calls.
+   Changing the band selector navigates to spectrogram.html?band=<name>. */
+var urlBand=(new URLSearchParams(window.location.search)).get('band')||'wideband';
+
+/* Called when the band selector changes — navigate to new URL */
+function onBandChange(){
+  var bsel=document.getElementById('bsel');
+  var newBand=bsel.value||'wideband';
+  var params=new URLSearchParams(window.location.search);
+  if(newBand==='wideband'){params.delete('band');}
+  else{params.set('band',newBand);}
+  var qs=params.toString();
+  window.location.href=window.location.pathname+(qs?'?'+qs:'');
+}
+
 /* ── State ──────────────────────────────────────────────────────────────── */
 /* readCtx: offscreen canvas used ONLY for getImageData pixel reads.
    It is never displayed and never has anything composited over it, so
@@ -434,10 +456,33 @@ function clampZoom(rect){
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
 (function init(){
+  /* Pre-select the band from the URL before the list loads */
+  var bsel=document.getElementById('bsel');
+  bsel.value=urlBand;
+
+  /* Update page title for non-wideband bands */
+  if(urlBand&&urlBand!=='wideband'){
+    document.getElementById('page-title').textContent='\uD83D\uDCE1 '+urlBand.toUpperCase()+' Spectrogram';
+  }
+
   fetch('/api/spectrogram/list')
     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
     .then(function(data){
       if(!data.enabled){showErr('Spectrogram not enabled. Set <code>spectrogram.enabled: true</code> in config.yaml.');return;}
+
+      /* Populate band selector from server response */
+      if(data.bands&&data.bands.length>0){
+        bsel.innerHTML='';
+        for(var bi=0;bi<data.bands.length;bi++){
+          var bn=data.bands[bi];
+          var bo=document.createElement('option');
+          bo.value=bn;
+          bo.textContent=bn==='wideband'?'Wideband (0\u201330 MHz)':bn;
+          if(bn===urlBand)bo.selected=true;
+          bsel.appendChild(bo);
+        }
+      }
+
       var sel=document.getElementById('dsel');
       sel.innerHTML='';
       availableDates=[];
@@ -513,7 +558,11 @@ function load(){
     setStatus('Refreshing\u2026');
   }
 
-  var murl='/api/spectrogram/meta'+(ds?'?date='+encodeURIComponent(ds):'');
+  /* Build meta URL — include ?band= for non-wideband bands */
+  var mparams=[];
+  if(ds)mparams.push('date='+encodeURIComponent(ds));
+  if(urlBand&&urlBand!=='wideband')mparams.push('band='+encodeURIComponent(urlBand));
+  var murl='/api/spectrogram/meta'+(mparams.length?'?'+mparams.join('&'):'');
 
   fetch(murl)
     .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})

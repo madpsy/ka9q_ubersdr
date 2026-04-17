@@ -904,6 +904,11 @@ class NoiseFloorMonitor {
             <div style="margin-top: 15px; height: 200px;">
                 <canvas id="${fftId}"></canvas>
             </div>
+            <div style="margin-top: 10px; text-align: right;">
+                <a href="/spectrogram.html?band=${encodeURIComponent(band)}" target="_blank"
+                   style="font-size:0.8em; opacity:0.7; text-decoration:none; color:inherit;"
+                   onclick="event.stopPropagation()" title="View ${band} spectrogram">&#x1F4CA; Spectrogram</a>
+            </div>
         `;
 
         setTimeout(() => {
@@ -971,6 +976,11 @@ class NoiseFloorMonitor {
                 <span class="metric-value">${measurement.occupancy_pct.toFixed(1)}%</span>
             </div>
             ${ft8SnrHtml}
+            <div style="margin-top: 10px; text-align: right;">
+                <a href="/spectrogram.html?band=${encodeURIComponent(band)}" target="_blank"
+                   style="font-size:0.8em; opacity:0.7; text-decoration:none; color:inherit;"
+                   title="View ${band} spectrogram">&#x1F4CA; Spectrogram</a>
+            </div>
         `;
 
         // Card 2: Sparkline (1 hour noise floor)

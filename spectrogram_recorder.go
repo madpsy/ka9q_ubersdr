@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	spectrogramBins           = 4096 // Must match wideband FFT bin count
+	spectrogramBins           = 4096 // Wideband FFT bin count (used as default for wideband recorder)
 	spectrogramMaxRows        = 1440 // One row per minute, 24 hours
 	spectrogramMagic          = "SGRM"
 	spectrogramVersion        = uint32(1)
@@ -35,15 +35,26 @@ const (
 // noDataSentinel marks bins with no data (rendered as black).
 var noDataSentinel = float32(math.Inf(-1))
 
-// SpectrogramRecorder records the 0-30 MHz wideband spectrum as a daily PNG image.
+// SpectrogramRecorder records a daily spectrum as a PNG image.
 // One row is appended per minute. At UTC midnight the completed day is archived
 // and a new image begins. The in-memory PNG is always valid and served via HTTP.
+// It records either the 0-30 MHz wideband spectrum or a single named band.
 type SpectrogramRecorder struct {
 	nfm    *NoiseFloorMonitor
 	config SpectrogramConfig
 
-	// Ring buffer — fixed size, allocated once at startup
-	rows     [spectrogramMaxRows][spectrogramBins]float32
+	// Band identity — "wideband" or a NoiseFloor band name (e.g. "80m")
+	bandName    string
+	binCount    int    // number of FFT bins for this band
+	startFreqHz uint64 // band start frequency in Hz
+	endFreqHz   uint64 // band end frequency in Hz
+
+	// getFft is called each tick to sample the FFT for this band.
+	getFft func() *BandFFT
+
+	// Ring buffer — fixed size, allocated once at startup.
+	// Each row is a []float32 of length binCount.
+	rows     [spectrogramMaxRows][]float32
 	rowCount int       // rows written so far today (0..1440)
 	lastRow  time.Time // UTC timestamp of the last written row
 
@@ -60,15 +71,42 @@ type SpectrogramRecorder struct {
 	wg       sync.WaitGroup
 }
 
-// NewSpectrogramRecorder creates a new recorder. Returns nil if disabled or nfm is nil.
+// NewSpectrogramRecorder creates a new wideband (0-30 MHz) recorder.
+// Returns nil if disabled or nfm is nil.
 func NewSpectrogramRecorder(nfm *NoiseFloorMonitor, config SpectrogramConfig) *SpectrogramRecorder {
 	if !config.IsEnabled() || nfm == nil {
 		return nil
 	}
+	return newSpectrogramRecorderForBand(nfm, config, "wideband", 0, 30_000_000, spectrogramBins,
+		func() *BandFFT { return nfm.GetWideBandFFT() })
+}
+
+// NewBandSpectrogramRecorder creates a per-band recorder for a named noise-floor band.
+// Data is stored in a subdirectory of config.DataDir named after the band.
+// Returns nil if disabled, nfm is nil, or band.BinCount is zero.
+func NewBandSpectrogramRecorder(nfm *NoiseFloorMonitor, config SpectrogramConfig, band NoiseFloorBand) *SpectrogramRecorder {
+	if !config.IsEnabled() || nfm == nil || band.BinCount == 0 {
+		return nil
+	}
+	bandConfig := config
+	bandConfig.DataDir = filepath.Join(config.DataDir, band.Name)
+	return newSpectrogramRecorderForBand(nfm, bandConfig, band.Name,
+		band.Start, band.End, band.BinCount,
+		func() *BandFFT { return nfm.GetAveragedFFT(band.Name, 10*time.Second) })
+}
+
+// newSpectrogramRecorderForBand is the internal constructor used by both public constructors.
+func newSpectrogramRecorderForBand(nfm *NoiseFloorMonitor, config SpectrogramConfig,
+	bandName string, startHz, endHz uint64, binCount int, getFft func() *BandFFT) *SpectrogramRecorder {
 	return &SpectrogramRecorder{
-		nfm:      nfm,
-		config:   config,
-		stopChan: make(chan struct{}),
+		nfm:         nfm,
+		config:      config,
+		bandName:    bandName,
+		binCount:    binCount,
+		startFreqHz: startHz,
+		endFreqHz:   endHz,
+		getFft:      getFft,
+		stopChan:    make(chan struct{}),
 	}
 }
 
@@ -78,9 +116,10 @@ func (sr *SpectrogramRecorder) Start() error {
 		return err
 	}
 
-	// Initialise all rows to sentinel (black)
+	// Allocate and initialise all rows to sentinel (black)
 	sr.mu.Lock()
 	for i := range sr.rows {
+		sr.rows[i] = make([]float32, sr.binCount)
 		for j := range sr.rows[i] {
 			sr.rows[i][j] = noDataSentinel
 		}
@@ -103,7 +142,8 @@ func (sr *SpectrogramRecorder) Start() error {
 
 	sr.wg.Add(1)
 	go sr.loop()
-	log.Printf("Spectrogram recorder started (dir: %s, rows so far today: %d)", sr.config.DataDir, sr.rowCount)
+	log.Printf("Spectrogram recorder started (band: %s, dir: %s, bins: %d, rows so far today: %d)",
+		sr.bandName, sr.config.DataDir, sr.binCount, sr.rowCount)
 	return nil
 }
 
@@ -204,14 +244,14 @@ func (sr *SpectrogramRecorder) tick(t time.Time) {
 		sr.rollover(t)
 	}
 
-	// Sample the wideband FFT (10-second average — already smoothed)
-	fft := sr.nfm.GetWideBandFFT()
+	// Sample the FFT for this band (10-second average — already smoothed)
+	fft := sr.getFft()
 
 	sr.mu.Lock()
 	var newRowIndex int = -1
 	var noiseFloor float32
 	if sr.rowCount < spectrogramMaxRows {
-		row := &sr.rows[sr.rowCount]
+		row := sr.rows[sr.rowCount]
 		if fft == nil || len(fft.Data) == 0 {
 			// No data — black row
 			for i := range row {
@@ -219,11 +259,11 @@ func (sr *SpectrogramRecorder) tick(t time.Time) {
 			}
 		} else {
 			n := len(fft.Data)
-			if n > spectrogramBins {
-				n = spectrogramBins
+			if n > sr.binCount {
+				n = sr.binCount
 			}
 			copy(row[:n], fft.Data[:n])
-			for i := n; i < spectrogramBins; i++ {
+			for i := n; i < sr.binCount; i++ {
 				row[i] = noDataSentinel
 			}
 		}
@@ -275,7 +315,7 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 	// Update the cached latest-complete date (used by /api/spectrogram/latest)
 	sr.latestComplete.Store(oldDate)
 
-	// Reset state for new day
+	// Reset state for new day (re-use existing row slices — just zero them)
 	sr.mu.Lock()
 	sr.rowCount = 0
 	sr.lastRow = time.Time{}
@@ -294,9 +334,10 @@ func (sr *SpectrogramRecorder) persistToDisk(today string) {
 	sr.mu.Lock()
 	rowCount := sr.rowCount
 	lastRow := sr.lastRow
-	rowData := make([]float32, rowCount*spectrogramBins)
+	binCount := sr.binCount
+	rowData := make([]float32, rowCount*binCount)
 	for i := 0; i < rowCount; i++ {
-		copy(rowData[i*spectrogramBins:(i+1)*spectrogramBins], sr.rows[i][:])
+		copy(rowData[i*binCount:(i+1)*binCount], sr.rows[i])
 	}
 	sr.mu.Unlock()
 
@@ -308,14 +349,14 @@ func (sr *SpectrogramRecorder) persistToDisk(today string) {
 
 	// Header: magic(4) + version(4) + rowCount(4) + lastRowUnix(8) + binCount(4) = 24 bytes
 	headerSize := 24
-	dataSize := rowCount * spectrogramBins * 4
+	dataSize := rowCount * binCount * 4
 	buf := make([]byte, headerSize+dataSize)
 
 	copy(buf[0:4], spectrogramMagic)
 	binary.LittleEndian.PutUint32(buf[4:8], spectrogramVersion)
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(rowCount))
 	binary.LittleEndian.PutUint64(buf[12:20], uint64(lastRow.Unix()))
-	binary.LittleEndian.PutUint32(buf[20:24], uint32(spectrogramBins))
+	binary.LittleEndian.PutUint32(buf[20:24], uint32(binCount))
 
 	offset := headerSize
 	for _, v := range rowData {
@@ -429,21 +470,21 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 		log.Printf("Spectrogram: invalid rowCount %d in .bin, starting fresh", rowCount)
 		return
 	}
-	if binCount != spectrogramBins {
-		log.Printf("Spectrogram: bin count mismatch (%d vs %d), starting fresh", binCount, spectrogramBins)
+	if binCount != sr.binCount {
+		log.Printf("Spectrogram: bin count mismatch (%d vs %d), starting fresh", binCount, sr.binCount)
 		return
 	}
 
-	expectedSize := 24 + rowCount*spectrogramBins*4
+	expectedSize := 24 + rowCount*sr.binCount*4
 	if len(data) < expectedSize {
-		rowCount = (len(data) - 24) / (spectrogramBins * 4)
+		rowCount = (len(data) - 24) / (sr.binCount * 4)
 		log.Printf("Spectrogram: truncated .bin, loading %d rows", rowCount)
 	}
 
 	sr.mu.Lock()
 	for i := 0; i < rowCount; i++ {
-		offset := 24 + i*spectrogramBins*4
-		for j := 0; j < spectrogramBins; j++ {
+		offset := 24 + i*sr.binCount*4
+		for j := 0; j < sr.binCount; j++ {
 			bits := binary.LittleEndian.Uint32(data[offset : offset+4])
 			sr.rows[i][j] = math.Float32frombits(bits)
 			offset += 4
@@ -499,6 +540,7 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 func (sr *SpectrogramRecorder) renderAndCache() {
 	sr.mu.Lock()
 	rowCount := sr.rowCount
+	binCount := sr.binCount
 	if rowCount == 0 {
 		sr.mu.Unlock()
 		return
@@ -506,8 +548,8 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 	// Snapshot rows under lock
 	snapshot := make([][]float32, rowCount)
 	for i := 0; i < rowCount; i++ {
-		row := make([]float32, spectrogramBins)
-		copy(row, sr.rows[i][:])
+		row := make([]float32, binCount)
+		copy(row, sr.rows[i])
 		snapshot[i] = row
 	}
 	sr.mu.Unlock()
@@ -519,7 +561,7 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 	// The frontend uses meta.max_rows (always 1440) for time-axis scaling,
 	// so a variable-height image is correct; CSS height:auto handles it.
 	// This avoids rendering ~950 black rows early in the day (saves ~80% of work).
-	img := image.NewNRGBA(image.Rect(0, 0, spectrogramBins, rowCount))
+	img := image.NewNRGBA(image.Rect(0, 0, binCount, rowCount))
 
 	black := color.NRGBA{0, 0, 0, 255}
 
@@ -969,7 +1011,11 @@ var jetLUT = [256][3]uint8{
 func autoRangeRows(rows [][]float32, configMin, configMax float32) (float32, float32) {
 	// Collect a sample of valid values — cap at 500 k to keep memory bounded
 	const maxSamples = 500_000
-	valid := make([]float32, 0, min(len(rows)*spectrogramBins, maxSamples))
+	binCount := 0
+	if len(rows) > 0 {
+		binCount = len(rows[0])
+	}
+	valid := make([]float32, 0, min(len(rows)*binCount, maxSamples))
 	for _, row := range rows {
 		for _, v := range row {
 			if math.IsInf(float64(v), -1) || math.IsNaN(float64(v)) {
@@ -1048,9 +1094,9 @@ func parseAndValidateDBRange(q url.Values) (float32, float32, bool) {
 
 // rowP5 returns the 5th-percentile dBFS value of a spectrogram row,
 // skipping sentinel (no-data) values. Used as a per-minute noise floor estimate.
-func rowP5(row *[spectrogramBins]float32) float32 {
+func rowP5(row []float32) float32 {
 	// Collect valid (non-sentinel) values
-	valid := make([]float32, 0, spectrogramBins)
+	valid := make([]float32, 0, len(row))
 	for _, v := range row {
 		if !math.IsInf(float64(v), -1) && !math.IsNaN(float64(v)) {
 			valid = append(valid, v)
@@ -1078,13 +1124,13 @@ func sortFloat32Slice(s []float32) {
 
 // renderRowsAsPNG renders a set of float32 rows as a PNG using the specified palette.
 // Used for on-the-fly palette switching.
-func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string) []byte {
-	img := image.NewNRGBA(image.Rect(0, 0, spectrogramBins, spectrogramMaxRows))
+func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, binCount int) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, binCount, spectrogramMaxRows))
 	black := color.NRGBA{0, 0, 0, 255}
 
 	rowCount := len(rows)
 	for y := rowCount; y < spectrogramMaxRows; y++ {
-		for x := 0; x < spectrogramBins; x++ {
+		for x := 0; x < binCount; x++ {
 			img.SetNRGBA(x, y, black)
 		}
 	}
@@ -1198,8 +1244,8 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			rowCount := recorder.rowCount
 			rows := make([][]float32, rowCount)
 			for i := 0; i < rowCount; i++ {
-				row := make([]float32, spectrogramBins)
-				copy(row, recorder.rows[i][:])
+				row := make([]float32, recorder.binCount)
+				copy(row, recorder.rows[i])
 				rows[i] = row
 			}
 			recorder.mu.Unlock()
@@ -1211,7 +1257,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 				// Auto-compute range from actual data
 				dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 			}
-			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign)
+			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign, recorder.binCount)
 		} else {
 			// No palette or range change — serve the pre-cached PNG directly.
 			// The cached PNG was rendered with config db_min/db_max; if the user
@@ -1267,14 +1313,18 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		if rowCount <= 0 || rowCount > spectrogramMaxRows {
 			goto serveDiskPNG
 		}
+		fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
+		if fileBinCount <= 0 {
+			fileBinCount = recorder.binCount
+		}
 		rows := make([][]float32, rowCount)
 		for i := 0; i < rowCount; i++ {
-			row := make([]float32, spectrogramBins)
-			offset := 24 + i*spectrogramBins*4
-			if offset+spectrogramBins*4 > len(binData) {
+			row := make([]float32, fileBinCount)
+			offset := 24 + i*fileBinCount*4
+			if offset+fileBinCount*4 > len(binData) {
 				break
 			}
-			for j := 0; j < spectrogramBins; j++ {
+			for j := 0; j < fileBinCount; j++ {
 				bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
 				row[j] = math.Float32frombits(bits)
 				offset += 4
@@ -1285,7 +1335,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			// Auto-compute range from actual archived data
 			dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
-		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign)
+		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign, fileBinCount)
 		if len(pngBytes) == 0 {
 			goto serveDiskPNG
 		}
@@ -1418,26 +1468,37 @@ func handleSpectrogramMetaLatest(w http.ResponseWriter, r *http.Request, recorde
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// handleSpectrogramList returns a JSON list of available spectrogram dates (newest first).
+// handleSpectrogramList returns a JSON list of available spectrogram dates (newest first)
+// and the set of available band names.
 //
 //	GET /api/spectrogram/list
-func handleSpectrogramList(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
+func handleSpectrogramList(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, bandRecorders map[string]*SpectrogramRecorder) {
 	if recorder == nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"enabled":   false,
 			"available": []string{},
+			"bands":     []string{},
 		})
 		return
 	}
 
 	dates := recorder.AvailableDates()
+
+	// Build sorted list of available band names (wideband always first)
+	bands := []string{"wideband"}
+	for name := range bandRecorders {
+		bands = append(bands, name)
+	}
+	sort.Strings(bands[1:]) // sort everything after "wideband"
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=60")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"enabled":   true,
 		"today":     time.Now().UTC().Format("2006-01-02"),
 		"available": dates,
+		"bands":     bands,
 	})
 }
 
@@ -1552,7 +1613,7 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 					Row:        i,
 					UTCTime:    t.Format("15:04"),
 					Unix:       t.Unix(),
-					NoiseFloor: rowP5(&recorder.rows[i]),
+					NoiseFloor: rowP5(recorder.rows[i]),
 				}
 			}
 		}
@@ -1565,8 +1626,8 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		recorder.mu.Lock()
 		dataRows = make([][]float32, recorder.rowCount)
 		for i := 0; i < recorder.rowCount; i++ {
-			row := make([]float32, spectrogramBins)
-			copy(row, recorder.rows[i][:])
+			row := make([]float32, recorder.binCount)
+			copy(row, recorder.rows[i])
 			dataRows[i] = row
 		}
 		recorder.mu.Unlock()
@@ -1583,15 +1644,19 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 		if binData, binErr := os.ReadFile(binPath); binErr == nil && len(binData) >= 24 && string(binData[0:4]) == spectrogramMagic {
 			binRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
+			fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
+			if fileBinCount <= 0 {
+				fileBinCount = recorder.binCount
+			}
 			if binRowCount > 0 && binRowCount <= spectrogramMaxRows {
 				dataRows = make([][]float32, binRowCount)
 				for i := 0; i < binRowCount; i++ {
-					row := make([]float32, spectrogramBins)
-					offset := 24 + i*spectrogramBins*4
-					if offset+spectrogramBins*4 > len(binData) {
+					row := make([]float32, fileBinCount)
+					offset := 24 + i*fileBinCount*4
+					if offset+fileBinCount*4 > len(binData) {
 						break
 					}
-					for j := 0; j < spectrogramBins; j++ {
+					for j := 0; j < fileBinCount; j++ {
 						bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
 						row[j] = math.Float32frombits(bits)
 						offset += 4
@@ -1623,9 +1688,26 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	// to populate the contrast sliders and only adds db_min/db_max to the image URL
 	// when the user has moved the sliders away from the auto-range defaults.
 	// This avoids a re-render on every page load.
+	// Include ?band= for non-wideband recorders so the frontend can construct correct URLs.
+	bandParam := ""
+	if recorder.bandName != "" && recorder.bandName != "wideband" {
+		bandParam = "band=" + url.QueryEscape(recorder.bandName)
+	}
 	imageURL := "/api/spectrogram"
+	listURL := "/api/spectrogram/list"
+	sep := "?"
 	if safeDateStr != today {
-		imageURL += "?date=" + safeDateStr
+		imageURL += sep + "date=" + safeDateStr
+		sep = "&"
+	}
+	if bandParam != "" {
+		imageURL += sep + bandParam
+		listURL += "?" + bandParam
+	}
+
+	binWidthHz := float64(0)
+	if recorder.binCount > 0 {
+		binWidthHz = float64(recorder.endFreqHz-recorder.startFreqHz) / float64(recorder.binCount)
 	}
 
 	cacheControl := "max-age=60"
@@ -1636,10 +1718,10 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 
 	meta := SpectrogramMeta{
 		Date:               safeDateStr,
-		StartFreqHz:        0,
-		EndFreqHz:          30000000,
-		BinWidthHz:         7324.21875,
-		BinCount:           spectrogramBins,
+		StartFreqHz:        float64(recorder.startFreqHz),
+		EndFreqHz:          float64(recorder.endFreqHz),
+		BinWidthHz:         binWidthHz,
+		BinCount:           recorder.binCount,
 		RowCount:           rowCount,
 		MaxRows:            spectrogramMaxRows,
 		RowIntervalSeconds: 60,
@@ -1647,7 +1729,7 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		DBMax:              float64(autoMax),
 		Palette:            spectrogramDefaultPalette,
 		ImageURL:           imageURL,
-		ListURL:            "/api/spectrogram/list",
+		ListURL:            listURL,
 		Complete:           complete,
 		Rows:               rows,
 	}

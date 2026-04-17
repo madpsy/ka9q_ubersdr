@@ -660,6 +660,39 @@ func main() {
 		}
 	}
 
+	// Initialize per-band spectrogram recorders — one for every configured NoiseFloor band.
+	// No extra config needed: all bands are automatically recorded when the spectrogram
+	// recorder is enabled and the noise floor monitor is running.
+	bandSpectrogramRecorders := map[string]*SpectrogramRecorder{}
+	if noiseFloorMonitor != nil && spectrogramRecorder != nil {
+		for _, band := range config.NoiseFloor.Bands {
+			r := NewBandSpectrogramRecorder(noiseFloorMonitor, config.Spectrogram, band)
+			if r == nil {
+				log.Printf("Warning: Could not create spectrogram recorder for band %s (zero bins?)", band.Name)
+				continue
+			}
+			if err := r.Start(); err != nil {
+				log.Printf("Warning: Failed to start spectrogram recorder for band %s: %v", band.Name, err)
+			} else {
+				bandSpectrogramRecorders[band.Name] = r
+				defer r.Stop()
+				log.Printf("Per-band spectrogram recorder started for %s", band.Name)
+			}
+		}
+	}
+
+	// selectSpectrogramRecorder picks the right recorder based on the ?band= query param.
+	selectSpectrogramRecorder := func(r *http.Request) *SpectrogramRecorder {
+		band := r.URL.Query().Get("band")
+		if band == "" || band == "wideband" {
+			return spectrogramRecorder
+		}
+		if rec, ok := bandSpectrogramRecorders[band]; ok {
+			return rec
+		}
+		return nil // unknown band → handlers will return 503
+	}
+
 	// Create frequency reference monitor
 	freqRefMonitor, err := NewFrequencyReferenceMonitor(config, radiod, sessions)
 	if err != nil {
@@ -1900,20 +1933,21 @@ func main() {
 	}))
 
 	// Spectrogram endpoints (rate limited: 1 req/10s per IP for PNG, no limit for list/meta)
+	// All endpoints accept an optional ?band= query param to select a per-band recorder.
 	http.HandleFunc("/api/spectrogram", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectrogram(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
+		handleSpectrogram(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
 	})
 	http.HandleFunc("/api/spectrogram/latest", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectrogramLatest(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
+		handleSpectrogramLatest(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
 	})
 	http.HandleFunc("/api/spectrogram/list", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectrogramList(w, r, spectrogramRecorder)
+		handleSpectrogramList(w, r, spectrogramRecorder, bandSpectrogramRecorders)
 	})
 	http.HandleFunc("/api/spectrogram/meta/latest", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectrogramMetaLatest(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
+		handleSpectrogramMetaLatest(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
 	})
 	http.HandleFunc("/api/spectrogram/meta", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectrogramMeta(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
+		handleSpectrogramMeta(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
 	})
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)

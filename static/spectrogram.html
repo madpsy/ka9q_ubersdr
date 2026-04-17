@@ -18,6 +18,13 @@ select,button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255
 select option{background:#1e3c72;color:#fff}
 button:hover:not(:disabled){background:rgba(255,255,255,.25)}
 button:disabled{opacity:.3;cursor:not-allowed}
+/* Contrast sliders */
+.contrast-wrap{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.contrast-wrap label{white-space:nowrap}
+input[type=range].cslider{-webkit-appearance:none;appearance:none;width:110px;height:4px;border-radius:2px;background:rgba(255,255,255,.3);outline:none;cursor:pointer;border:none;padding:0}
+input[type=range].cslider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:#7df;cursor:pointer}
+input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#7df;cursor:pointer;border:none}
+.cval{font-size:.8em;opacity:.75;min-width:38px;text-align:right}
 .status{margin-left:auto;font-size:.78em;opacity:.7;white-space:nowrap}
 /* Layout: time axis left, spectrogram right */
 .sg-wrap{display:flex;gap:0;user-select:none}
@@ -69,6 +76,16 @@ button:disabled{opacity:.3;cursor:not-allowed}
       <option value="plasma">Plasma</option>
       <option value="jet">Jet</option>
     </select>
+  </div>
+  <div class="contrast-wrap">
+    <label for="floor-sl">Floor:</label>
+    <input type="range" id="floor-sl" class="cslider" min="-200" max="-20" step="1" value="-130" oninput="onContrastChange()">
+    <span class="cval" id="floor-val">-130</span>
+  </div>
+  <div class="contrast-wrap">
+    <label for="ceil-sl">Ceiling:</label>
+    <input type="range" id="ceil-sl" class="cslider" min="-150" max="0" step="1" value="-60" oninput="onContrastChange()">
+    <span class="cval" id="ceil-val">-60</span>
   </div>
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
@@ -253,6 +270,56 @@ function bandName(hz){for(var i=0;i<BANDS.length;i++)if(hz>=BANDS[i][0]&&hz<=BAN
 
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
+/* ── Contrast state ─────────────────────────────────────────────────────── */
+/* These track the current floor/ceiling values shown in the sliders.
+   They are initialised from the meta response (auto-range) and can be
+   overridden by the user dragging the sliders. */
+var contrastMin=-130, contrastMax=-60;
+var contrastUserChanged=false; /* true once the user has moved a slider */
+
+function getSliderMin(){return parseInt(document.getElementById('floor-sl').value,10);}
+function getSliderMax(){return parseInt(document.getElementById('ceil-sl').value,10);}
+
+/* Called whenever either slider moves */
+function onContrastChange(){
+  var fl=getSliderMin(), ce=getSliderMax();
+  /* Enforce floor < ceiling - 5 */
+  if(fl>=ce-5){
+    /* Clamp whichever slider was just moved */
+    var flEl=document.getElementById('floor-sl');
+    var ceEl=document.getElementById('ceil-sl');
+    if(fl>=ce-5){
+      /* Decide which to clamp based on which is closer to the boundary */
+      if(fl>contrastMin){ceEl.value=fl+5;ce=fl+5;}
+      else{flEl.value=ce-5;fl=ce-5;}
+    }
+  }
+  contrastMin=fl; contrastMax=ce;
+  contrastUserChanged=true;
+  document.getElementById('floor-val').textContent=fl;
+  document.getElementById('ceil-val').textContent=ce;
+  /* Update legend labels immediately */
+  document.getElementById('lmin').textContent=fl+' dBFS';
+  document.getElementById('lmax').textContent=ce+' dBFS';
+  /* Re-fetch image with new range (debounced 300 ms) */
+  clearTimeout(contrastTimer);
+  contrastTimer=setTimeout(function(){bmp=null;load();},300);
+}
+var contrastTimer=null;
+
+/* Sync sliders to a given min/max (called when meta arrives) */
+function syncSliders(mn,mx){
+  var flEl=document.getElementById('floor-sl');
+  var ceEl=document.getElementById('ceil-sl');
+  /* Clamp to slider bounds */
+  mn=Math.max(-200,Math.min(-21,Math.round(mn)));
+  mx=Math.max(mn+5,Math.min(0,Math.round(mx)));
+  flEl.value=mn; ceEl.value=mx;
+  contrastMin=mn; contrastMax=mx;
+  document.getElementById('floor-val').textContent=mn;
+  document.getElementById('ceil-val').textContent=mx;
+}
+
 /* ── State ──────────────────────────────────────────────────────────────── */
 var meta=null,bmp=null,ictx=null,timer=null;
 var availableDates=[]; /* populated from /api/spectrogram/list, newest first */
@@ -350,7 +417,7 @@ function clampZoom(rect){
         o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
         sel.appendChild(o);
       }
-      sel.onchange=function(){updateNavButtons();bmp=null;load();};
+      sel.onchange=function(){updateNavButtons();bmp=null;contrastUserChanged=false;load();};
       updateNavButtons();
       load();
     })
@@ -369,6 +436,7 @@ function navDate(dir){
   sel.value=availableDates[newIdx];
   updateNavButtons();
   bmp=null; /* force loading spinner for date change */
+  contrastUserChanged=false; /* reset contrast to auto-range for new date */
   load();
 }
 
@@ -426,8 +494,24 @@ function load(){
         userPalette=psel.value;
       }
       setPalette(userPalette);
-      /* Build image URL with palette param if different from config */
+
+      /* Sync contrast sliders to the auto-range from meta, but only if the
+         user hasn't manually adjusted them (preserve user's choice on refresh) */
+      if(!contrastUserChanged){
+        syncSliders(meta.db_min, meta.db_max);
+      }
+
+      /* Build image URL — meta.image_url already contains ?db_min=&db_max= from
+         the backend auto-range. If the user has moved the sliders, override those
+         values with the slider values instead. */
       var iurl=meta.image_url;
+      if(contrastUserChanged){
+        /* Strip any existing db_min/db_max from the URL and replace with slider values */
+        iurl=iurl.replace(/[?&]db_min=[^&]*/g,'').replace(/[?&]db_max=[^&]*/g,'');
+        /* Clean up any dangling ? or & */
+        iurl=iurl.replace(/\?&/,'?').replace(/&&/g,'&').replace(/[?&]$/,'');
+        iurl+=(iurl.indexOf('?')>=0?'&':'?')+'db_min='+contrastMin+'&db_max='+contrastMax;
+      }
       if(userPalette&&userPalette!==meta.palette){
         iurl+=(iurl.indexOf('?')>=0?'&':'?')+'palette='+encodeURIComponent(userPalette);
       }
@@ -449,9 +533,15 @@ function load(){
       var palNames={viridis:'Viridis',plasma:'Plasma',jet:'Jet'};
       var palName=palNames[userPalette]||userPalette;
       document.getElementById('subtitle').textContent=startMHz+' \u2013 '+endMHz+' MHz \u00b7 one row per minute \u00b7 '+palName+' palette';
-      /* Update download button */
+      /* Update download button — always use the same URL that was fetched so
+         the saved PNG exactly matches what the user sees */
       var dlBtn=document.getElementById('dl-btn');
       var dlUrl=meta.image_url;
+      if(contrastUserChanged){
+        dlUrl=dlUrl.replace(/[?&]db_min=[^&]*/g,'').replace(/[?&]db_max=[^&]*/g,'');
+        dlUrl=dlUrl.replace(/\?&/,'?').replace(/&&/g,'&').replace(/[?&]$/,'');
+        dlUrl+=(dlUrl.indexOf('?')>=0?'&':'?')+'db_min='+contrastMin+'&db_max='+contrastMax;
+      }
       if(userPalette&&userPalette!==meta.palette){
         dlUrl+=(dlUrl.indexOf('?')>=0?'&':'?')+'palette='+encodeURIComponent(userPalette);
       }
@@ -605,7 +695,7 @@ function buildTimeAxis(){
   }
 }
 
-/* Viridis legend */
+/* Legend — uses current slider values for labels */
 function buildLegend(){
   var c=document.getElementById('legend-canvas');
   var ctx=c.getContext('2d');
@@ -616,8 +706,8 @@ function buildLegend(){
     ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
     ctx.fillRect(i,0,1,c.height);
   }
-  document.getElementById('lmin').textContent=meta.db_min.toFixed(0)+' dBFS';
-  document.getElementById('lmax').textContent=meta.db_max.toFixed(0)+' dBFS';
+  document.getElementById('lmin').textContent=contrastMin+' dBFS';
+  document.getElementById('lmax').textContent=contrastMax+' dBFS';
 }
 
 /* ── Hover crosshair + tooltip ──────────────────────────────────────────── */
@@ -659,10 +749,13 @@ function setupHover(){
     var mm=String(row%60).padStart(2,'0');
     var tstr=hh+':'+mm+' UTC';
 
-    /* Signal level from pixel */
+    /* Signal level from pixel — use the range that was actually used to render
+       the current PNG (slider values if user changed them, else meta auto-range) */
     var sig=null,nf=null,snr=null;
     if(!nodata){
-      sig=pxToDb(ictx,px,py,meta.db_min,meta.db_max);
+      var ttMin=contrastUserChanged?contrastMin:meta.db_min;
+      var ttMax=contrastUserChanged?contrastMax:meta.db_max;
+      sig=pxToDb(ictx,px,py,ttMin,ttMax);
       if(meta.rows&&meta.rows[row]){
         var nfv=meta.rows[row].noise_floor;
         if(nfv!==0){nf=nfv;if(sig!==null)snr=sig-nf;}

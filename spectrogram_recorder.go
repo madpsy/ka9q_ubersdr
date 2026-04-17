@@ -11,9 +11,11 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -933,6 +935,90 @@ var jetLUT = [256][3]uint8{
 
 // ─── Statistics helpers ───────────────────────────────────────────────────────
 
+// autoRangeRows computes the P5 (noise floor) and P95 (signal peak) dBFS values
+// across all valid bins in all rows. Used to auto-scale the colour range when
+// no explicit db_min/db_max is provided by the caller.
+// Returns (dbMin, dbMax). If no valid data is found, returns the config defaults.
+func autoRangeRows(rows [][]float32, configMin, configMax float32) (float32, float32) {
+	// Collect a sample of valid values — cap at 500 k to keep memory bounded
+	const maxSamples = 500_000
+	valid := make([]float32, 0, min(len(rows)*spectrogramBins, maxSamples))
+	for _, row := range rows {
+		for _, v := range row {
+			if math.IsInf(float64(v), -1) || math.IsNaN(float64(v)) {
+				continue
+			}
+			valid = append(valid, v)
+			if len(valid) >= maxSamples {
+				goto done
+			}
+		}
+	}
+done:
+	if len(valid) < 10 {
+		return configMin, configMax
+	}
+	sortFloat32Slice(valid)
+	p5idx := len(valid) * 5 / 100
+	p95idx := len(valid) * 95 / 100
+	if p5idx >= len(valid) {
+		p5idx = len(valid) - 1
+	}
+	if p95idx >= len(valid) {
+		p95idx = len(valid) - 1
+	}
+	dbMin := valid[p5idx]
+	dbMax := valid[p95idx]
+	// Ensure a minimum 10 dB spread to avoid degenerate images
+	if dbMax-dbMin < 10 {
+		dbMax = dbMin + 10
+	}
+	return dbMin, dbMax
+}
+
+// min returns the smaller of two ints (Go 1.20 added a builtin but keep compat).
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// parseAndValidateDBRange parses optional ?db_min= and ?db_max= query parameters.
+// Rules:
+//   - Values must be finite floats in the range [-300, 0] dBFS.
+//   - db_max must be at least 5 dB above db_min.
+//   - If either param is absent or invalid, both are returned as (0, 0, false)
+//     to signal "use auto-range".
+//
+// Returns (dbMin, dbMax, ok). ok=true means both values are valid and should be used.
+func parseAndValidateDBRange(q url.Values) (float32, float32, bool) {
+	minStr := q.Get("db_min")
+	maxStr := q.Get("db_max")
+	if minStr == "" && maxStr == "" {
+		return 0, 0, false // caller should auto-range
+	}
+	if minStr == "" || maxStr == "" {
+		return 0, 0, false // partial params — ignore both
+	}
+	minVal, err1 := strconv.ParseFloat(minStr, 32)
+	maxVal, err2 := strconv.ParseFloat(maxStr, 32)
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	// Clamp to sane dBFS range
+	if minVal < -300 || minVal > 0 || maxVal < -300 || maxVal > 0 {
+		return 0, 0, false
+	}
+	if math.IsNaN(minVal) || math.IsInf(minVal, 0) || math.IsNaN(maxVal) || math.IsInf(maxVal, 0) {
+		return 0, 0, false
+	}
+	if float32(maxVal)-float32(minVal) < 5 {
+		return 0, 0, false // spread too small
+	}
+	return float32(minVal), float32(maxVal), true
+}
+
 // rowP5 returns the 5th-percentile dBFS value of a spectrogram row,
 // skipping sentinel (no-data) values. Used as a per-minute noise floor estimate.
 func rowP5(row *[spectrogramBins]float32) float32 {
@@ -1002,10 +1088,15 @@ func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dat
 
 // handleSpectrogram serves the spectrogram PNG for a given UTC date.
 //
-//	GET /api/spectrogram                    → today's PNG (config palette, from memory)
-//	GET /api/spectrogram?palette=plasma     → today's PNG re-rendered with plasma palette
-//	GET /api/spectrogram?date=YYYY-MM-DD    → archived PNG (config palette, from disk)
-//	GET /api/spectrogram?date=...&palette=jet → archived PNG re-rendered with jet palette
+//	GET /api/spectrogram                          → today's PNG (config palette, auto range)
+//	GET /api/spectrogram?palette=plasma           → today's PNG re-rendered with plasma palette
+//	GET /api/spectrogram?db_min=-110&db_max=-65   → today's PNG with explicit dB range
+//	GET /api/spectrogram?date=YYYY-MM-DD          → archived PNG (config palette, from disk)
+//	GET /api/spectrogram?date=...&palette=jet     → archived PNG re-rendered with jet palette
+//	GET /api/spectrogram?date=...&db_min=...&db_max=... → archived PNG with explicit dB range
+//
+// When db_min/db_max are absent the range is auto-computed from the actual data
+// (P5 noise floor → P95 signal peak) so the full palette is always utilised.
 func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -1016,11 +1107,13 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		return
 	}
 
-	// Rate limit: use "spectrogram-palette" key (2s) when a palette param is present
-	// (palette re-renders are CPU-only, no disk I/O), otherwise "spectrogram" (10s).
+	q := r.URL.Query()
+
+	// Rate limit: use "spectrogram-palette" key (2s) when a re-render is needed
+	// (palette/range changes are CPU-only, no disk I/O), otherwise "spectrogram" (10s).
 	clientIP := getClientIP(r)
 	rateLimitKey := "spectrogram"
-	if r.URL.Query().Get("palette") != "" {
+	if q.Get("palette") != "" || q.Get("db_min") != "" || q.Get("db_max") != "" {
 		rateLimitKey = "spectrogram-palette"
 	}
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
@@ -1030,22 +1123,28 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	}
 
 	today := time.Now().UTC().Format("2006-01-02")
-	dateStr := r.URL.Query().Get("date")
+	dateStr := q.Get("date")
 
 	// Validate and sanitise palette param
-	requestedPalette := r.URL.Query().Get("palette")
+	requestedPalette := q.Get("palette")
 	switch requestedPalette {
 	case "viridis", "plasma", "jet":
 		// valid
 	default:
 		requestedPalette = recorder.config.Palette // fall back to config palette
 	}
-	paletteChanged := requestedPalette != recorder.config.Palette
+
+	// Parse and validate optional db_min / db_max query params.
+	// If absent or invalid, dbRangeExplicit=false → auto-compute from data.
+	dbMin, dbMax, dbRangeExplicit := parseAndValidateDBRange(q)
+
+	// needsRerender is true whenever we cannot serve the pre-cached PNG as-is.
+	needsRerender := requestedPalette != recorder.config.Palette || dbRangeExplicit
 
 	if dateStr == "" || dateStr == today {
 		var pngBytes []byte
-		if paletteChanged {
-			// Re-render today's data with the requested palette
+		if needsRerender {
+			// Snapshot today's rows under lock
 			recorder.mu.Lock()
 			rowCount := recorder.rowCount
 			rows := make([][]float32, rowCount)
@@ -1059,8 +1158,16 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 				http.Error(w, "spectrogram not yet available — waiting for first data", http.StatusServiceUnavailable)
 				return
 			}
-			pngBytes = renderRowsAsPNG(rows, requestedPalette, float32(recorder.config.DBMin), float32(recorder.config.DBMax), today, recorder.config.Callsign)
+			if !dbRangeExplicit {
+				// Auto-compute range from actual data
+				dbMin, dbMax = autoRangeRows(rows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
+			}
+			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign)
 		} else {
+			// No palette or range change — serve the pre-cached PNG directly.
+			// The cached PNG was rendered with config db_min/db_max; if the user
+			// wants auto-range they must pass db_min/db_max explicitly (the JS
+			// frontend always does this after receiving the meta response).
 			pngBytes = recorder.GetCachedPNG()
 		}
 		if len(pngBytes) == 0 {
@@ -1093,8 +1200,8 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 
 	safeDateStr := requestedDate.Format("2006-01-02")
 
-	if paletteChanged {
-		// Re-render archived day from .bin file with requested palette
+	if needsRerender {
+		// Re-render archived day from .bin file with requested palette / range
 		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 		binData, err := os.ReadFile(binPath)
 		if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
@@ -1119,12 +1226,16 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			}
 			rows[i] = row
 		}
-		pngBytes := renderRowsAsPNG(rows, requestedPalette, float32(recorder.config.DBMin), float32(recorder.config.DBMax), safeDateStr, recorder.config.Callsign)
+		if !dbRangeExplicit {
+			// Auto-compute range from actual archived data
+			dbMin, dbMax = autoRangeRows(rows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
+		}
+		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign)
 		if len(pngBytes) == 0 {
 			goto serveDiskPNG
 		}
 		w.Header().Set("Content-Type", "image/png")
-		w.Header().Set("Cache-Control", "max-age=3600") // palette-switched, not immutable
+		w.Header().Set("Cache-Control", "max-age=3600") // re-rendered, not immutable
 		w.Header().Set("Content-Disposition", `inline; filename="spectrogram_`+safeDateStr+`.png"`)
 		w.Write(pngBytes)
 		return
@@ -1204,6 +1315,10 @@ type SpectrogramMeta struct {
 //
 //	GET /api/spectrogram/meta              → today's metadata
 //	GET /api/spectrogram/meta?date=YYYY-MM-DD → metadata for a past date
+//
+// The response includes db_min/db_max reflecting the auto-computed range from
+// the actual data (P5/P95), so the frontend can display accurate legend labels
+// and pass the same values back as ?db_min=&db_max= when requesting the PNG.
 func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1236,6 +1351,9 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	var rowCount int
 	var complete bool
 
+	// Snapshot of float32 rows used for auto-range computation
+	var dataRows [][]float32
+
 	if safeDateStr == today {
 		// For today, fall back to ring buffer if JSONL is missing or has fewer rows
 		// (e.g. first minute before any row has been written)
@@ -1261,6 +1379,16 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		}
 		rowCount = len(rows)
 		complete = false
+
+		// Snapshot data rows for auto-range
+		recorder.mu.Lock()
+		dataRows = make([][]float32, recorder.rowCount)
+		for i := 0; i < recorder.rowCount; i++ {
+			row := make([]float32, spectrogramBins)
+			copy(row, recorder.rows[i][:])
+			dataRows[i] = row
+		}
+		recorder.mu.Unlock()
 	} else {
 		// Archived day — use JSONL row count; if JSONL missing, assume full day
 		if rows == nil {
@@ -1269,6 +1397,28 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 			rowCount = len(rows)
 		}
 		complete = true
+
+		// Load data rows from .bin for auto-range computation
+		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
+		if binData, binErr := os.ReadFile(binPath); binErr == nil && len(binData) >= 24 && string(binData[0:4]) == spectrogramMagic {
+			binRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
+			if binRowCount > 0 && binRowCount <= spectrogramMaxRows {
+				dataRows = make([][]float32, binRowCount)
+				for i := 0; i < binRowCount; i++ {
+					row := make([]float32, spectrogramBins)
+					offset := 24 + i*spectrogramBins*4
+					if offset+spectrogramBins*4 > len(binData) {
+						break
+					}
+					for j := 0; j < spectrogramBins; j++ {
+						bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
+						row[j] = math.Float32frombits(bits)
+						offset += 4
+					}
+					dataRows[i] = row
+				}
+			}
+		}
 	}
 
 	// If rows is still nil (no JSONL, archived day), build synthetic rows with zero noise floor
@@ -1285,10 +1435,19 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		}
 	}
 
+	// Compute auto-range from actual data; fall back to config values if no data available.
+	autoMin, autoMax := autoRangeRows(dataRows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
+
 	imageURL := "/api/spectrogram"
+	sep := "?"
 	if safeDateStr != today {
 		imageURL += "?date=" + safeDateStr
+		sep = "&"
 	}
+	// Embed the auto-computed range into the image URL so the PNG endpoint
+	// renders with the same range the meta reports, without a second auto-compute.
+	imageURL += sep + "db_min=" + strconv.FormatFloat(float64(autoMin), 'f', 1, 32) +
+		"&db_max=" + strconv.FormatFloat(float64(autoMax), 'f', 1, 32)
 
 	cacheControl := "max-age=60"
 	if complete {
@@ -1305,9 +1464,9 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		RowCount:           rowCount,
 		MaxRows:            spectrogramMaxRows,
 		RowIntervalSeconds: 60,
-		DBMin:              recorder.config.DBMin,
-		DBMax:              recorder.config.DBMax,
-		Palette:            "viridis",
+		DBMin:              float64(autoMin),
+		DBMax:              float64(autoMax),
+		Palette:            recorder.config.Palette,
 		ImageURL:           imageURL,
 		ListURL:            "/api/spectrogram/list",
 		Complete:           complete,

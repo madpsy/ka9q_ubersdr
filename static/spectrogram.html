@@ -65,6 +65,22 @@ details.api-ref code{font-family:monospace;background:rgba(255,255,255,.1);borde
 details.api-ref table{border-collapse:collapse;margin-top:6px;width:100%}
 details.api-ref td{padding:2px 10px 2px 0;vertical-align:top}
 details.api-ref td:first-child{white-space:nowrap;opacity:.85}
+/* Tab bar */
+.tab-bar{display:flex;gap:4px;margin-bottom:14px}
+.tab-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:8px 8px 0 0;padding:8px 20px;font-size:.9em;cursor:pointer;transition:background .15s}
+.tab-btn.active{background:rgba(255,255,255,.22);border-bottom-color:transparent;font-weight:600}
+.tab-btn:hover:not(.active){background:rgba(255,255,255,.18)}
+/* Gallery */
+#gallery-view{display:none}
+.gallery-controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px;background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:10px;padding:12px 20px}
+.gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.gallery-card{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.gallery-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.gallery-card img{width:100%;display:block;image-rendering:pixelated;aspect-ratio:300/168;background:#000}
+.gallery-card .gc-label{padding:7px 10px;font-size:.8em;opacity:.85;text-align:center}
+.gallery-card .gc-band{font-size:.72em;opacity:.55;margin-top:1px}
+#gallery-loading{text-align:center;padding:30px;opacity:.6}
+#gallery-empty{text-align:center;padding:30px;opacity:.5;font-style:italic;display:none}
 </style>
 </head>
 <body>
@@ -74,6 +90,12 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <p class="subtitle" id="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; Jet palette</p>
 </header>
 
+<div class="tab-bar">
+  <button class="tab-btn active" id="tab-sg" onclick="switchTab('sg')">&#x1F4CA; Spectrogram</button>
+  <button class="tab-btn" id="tab-gallery" onclick="switchTab('gallery')">&#x1F5BC;&#xFE0F; Gallery</button>
+</div>
+
+<div id="sg-panel">
 <div class="controls">
   <button id="prev-btn" onclick="navDate(-1)" title="Previous day (older)" disabled>&#x25C4;</button>
   <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
@@ -163,7 +185,44 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     </table>
   </details>
 </div>
+</div><!-- end #sg-panel -->
+
+<div id="gallery-view">
+  <div class="gallery-controls">
+    <div><label for="gbsel">Band:</label>
+      <select id="gbsel" onchange="loadGallery()">
+        <option value="wideband" selected>Wideband</option>
+      </select>
+    </div>
+    <div><label for="gdsel">Show:</label>
+      <select id="gdsel" onchange="loadGallery()">
+        <option value="30" selected>Last 30 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="7">Last 7 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="0">All time</option>
+      </select>
+    </div>
+    <div><label for="gpsel">Per page:</label>
+      <select id="gpsel" onchange="galleryPage=0;renderGalleryPage()">
+        <option value="7" selected>7</option>
+        <option value="14">14</option>
+        <option value="28">28</option>
+      </select>
+    </div>
+    <span class="status" id="gallery-status"></span>
+  </div>
+  <div id="gallery-loading" class="loading">Loading gallery&hellip;</div>
+  <div id="gallery-empty">No thumbnails available yet. Thumbnails are generated at UTC midnight after each complete day.</div>
+  <div class="gallery-grid" id="gallery-grid"></div>
+  <div id="gallery-pager" style="display:none;text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center;align-items:center">
+    <button id="gprev" onclick="galleryChangePage(-1)" disabled>&#x25C4; Prev</button>
+    <span id="gpage-info" style="font-size:.85em;opacity:.75"></span>
+    <button id="gnext" onclick="galleryChangePage(+1)" disabled>Next &#x25BA;</button>
+  </div>
 </div>
+
+</div><!-- end .container -->
 <div id="tt"></div>
 
 <script>
@@ -535,6 +594,8 @@ function clampZoom(rect){
           if(bn===urlBand)bo.selected=true;
           bsel.appendChild(bo);
         }
+        /* Mirror the same options into the gallery band selector */
+        syncGalleryBandSelector();
       }
 
       var sel=document.getElementById('dsel');
@@ -1109,6 +1170,162 @@ function downloadCanvas(){
     document.body.removeChild(a);
     setTimeout(function(){URL.revokeObjectURL(url);},10000);
   },'image/png');
+}
+
+/* ── Tab switching ───────────────────────────────────────────────────────── */
+function switchTab(tab){
+  var isSg=(tab==='sg');
+  document.getElementById('sg-panel').style.display=isSg?'':'none';
+  document.getElementById('gallery-view').style.display=isSg?'none':'block';
+  document.getElementById('tab-sg').classList.toggle('active',isSg);
+  document.getElementById('tab-gallery').classList.toggle('active',!isSg);
+  if(!isSg)loadGallery();
+}
+
+/* ── Gallery ─────────────────────────────────────────────────────────────── */
+var galleryThumbs=[];  /* full list from last fetch */
+var galleryPage=0;     /* current 0-based page index */
+
+/* Populate the gallery band selector from the same bands list used by the
+   spectrogram band selector (populated in init()). */
+function syncGalleryBandSelector(){
+  var bsel=document.getElementById('bsel');
+  var gbsel=document.getElementById('gbsel');
+  if(!bsel||!gbsel)return;
+  gbsel.innerHTML='';
+  for(var i=0;i<bsel.options.length;i++){
+    var o=document.createElement('option');
+    o.value=bsel.options[i].value;
+    o.textContent=bsel.options[i].textContent;
+    if(o.value===urlBand)o.selected=true;
+    gbsel.appendChild(o);
+  }
+}
+
+/* Build one gallery card element for a thumbnail entry */
+function makeGalleryCard(t){
+  var card=document.createElement('div');
+  card.className='gallery-card';
+  card.title='View '+t.date+(t.band&&t.band!=='wideband'?' ('+t.band+')':'');
+
+  var img=document.createElement('img');
+  img.loading='lazy';
+  img.src=t.thumb_url;
+  img.alt=t.date;
+
+  var label=document.createElement('div');
+  label.className='gc-label';
+  label.textContent=t.date;
+  if(t.band&&t.band!=='wideband'){
+    var bandSpan=document.createElement('div');
+    bandSpan.className='gc-band';
+    bandSpan.textContent=t.band;
+    label.appendChild(bandSpan);
+  }
+
+  card.appendChild(img);
+  card.appendChild(label);
+
+  card.addEventListener('click',function(){
+    var dsel=document.getElementById('dsel');
+    if(dsel){dsel.value=t.date;updateNavButtons();}
+    if(t.band&&t.band!==urlBand){
+      var p2=new URLSearchParams(window.location.search);
+      if(t.band==='wideband'){p2.delete('band');}else{p2.set('band',t.band);}
+      p2.set('date',t.date);
+      window.location.href=window.location.pathname+'?'+p2.toString();
+      return;
+    }
+    bmp=null; contrastUserChanged=false;
+    var tsel=document.getElementById('tsel');
+    if(tsel)tsel.value='0';
+    switchTab('sg');
+    load();
+  });
+  return card;
+}
+
+/* Render the current page of galleryThumbs into the grid */
+function renderGalleryPage(){
+  var gpsel=document.getElementById('gpsel');
+  var perPage=parseInt(gpsel?gpsel.value:'7',10)||7;
+  var total=galleryThumbs.length;
+  var totalPages=Math.max(1,Math.ceil(total/perPage));
+  if(galleryPage>=totalPages)galleryPage=totalPages-1;
+  if(galleryPage<0)galleryPage=0;
+
+  var start=galleryPage*perPage;
+  var end=Math.min(start+perPage,total);
+  var page=galleryThumbs.slice(start,end);
+
+  var grid=document.getElementById('gallery-grid');
+  grid.innerHTML='';
+  for(var i=0;i<page.length;i++){
+    grid.appendChild(makeGalleryCard(page[i]));
+  }
+
+  /* Update pager */
+  var pager=document.getElementById('gallery-pager');
+  var info=document.getElementById('gpage-info');
+  var prev=document.getElementById('gprev');
+  var next=document.getElementById('gnext');
+  if(totalPages>1){
+    pager.style.display='flex';
+    info.textContent='Page '+(galleryPage+1)+' of '+totalPages+' ('+total+' days)';
+    prev.disabled=(galleryPage===0);
+    next.disabled=(galleryPage>=totalPages-1);
+  } else {
+    pager.style.display='none';
+  }
+
+  var gstatus=document.getElementById('gallery-status');
+  if(gstatus)gstatus.textContent=total+' day'+(total===1?'':'s');
+}
+
+function galleryChangePage(dir){
+  galleryPage+=dir;
+  renderGalleryPage();
+  /* Scroll gallery into view */
+  var gv=document.getElementById('gallery-view');
+  if(gv)gv.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function loadGallery(){
+  var gbsel=document.getElementById('gbsel');
+  var gdsel=document.getElementById('gdsel');
+  var band=gbsel?gbsel.value:'wideband';
+  var days=gdsel?gdsel.value:'30';
+
+  var grid=document.getElementById('gallery-grid');
+  var loading=document.getElementById('gallery-loading');
+  var empty=document.getElementById('gallery-empty');
+  var pager=document.getElementById('gallery-pager');
+  var gstatus=document.getElementById('gallery-status');
+
+  grid.innerHTML='';
+  loading.style.display='block';
+  empty.style.display='none';
+  if(pager)pager.style.display='none';
+  if(gstatus)gstatus.textContent='Loading\u2026';
+  galleryPage=0;
+
+  var params='?band='+encodeURIComponent(band)+'&days='+encodeURIComponent(days);
+  fetch('/api/spectrogram/thumbnails'+params)
+    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(function(thumbs){
+      loading.style.display='none';
+      galleryThumbs=thumbs||[];
+      if(galleryThumbs.length===0){
+        empty.style.display='block';
+        if(gstatus)gstatus.textContent='No thumbnails';
+        return;
+      }
+      renderGalleryPage();
+    })
+    .catch(function(e){
+      loading.style.display='none';
+      if(gstatus)gstatus.textContent='Error: '+escHtml(e.message);
+    });
 }
 </script>
 </body>

@@ -301,6 +301,15 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 			log.Printf("Spectrogram: failed to archive PNG for %s: %v", oldDate, err)
 		} else {
 			log.Printf("Spectrogram: archived %s (%d bytes)", archivePath, len(pngBytes))
+			// Generate thumbnail for the completed day
+			if thumbBytes := generateThumbnail(pngBytes); len(thumbBytes) > 0 {
+				thumbPath := sr.ThumbPath(oldDate)
+				if err := atomicWriteFile(thumbPath, thumbBytes); err != nil {
+					log.Printf("Spectrogram: failed to write thumbnail for %s: %v", oldDate, err)
+				} else {
+					log.Printf("Spectrogram: thumbnail written %s (%d bytes)", thumbPath, len(thumbBytes))
+				}
+			}
 		}
 	}
 
@@ -325,6 +334,80 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 		}
 	}
 	sr.mu.Unlock()
+}
+
+// ThumbPath returns the filesystem path for a given date's thumbnail PNG.
+func (sr *SpectrogramRecorder) ThumbPath(dateStr string) string {
+	return filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+"_thumb.png")
+}
+
+// generateThumbnail downsamples a full-day spectrogram PNG to a 300×168 thumbnail
+// using a simple box filter. Returns nil on error.
+func generateThumbnail(pngBytes []byte) []byte {
+	src, err := png.Decode(bytes.NewReader(pngBytes))
+	if err != nil {
+		return nil
+	}
+	srcBounds := src.Bounds()
+	srcW := srcBounds.Max.X
+	srcH := srcBounds.Max.Y
+	if srcW == 0 || srcH == 0 {
+		return nil
+	}
+
+	const thumbW, thumbH = 300, 168
+
+	dst := image.NewNRGBA(image.Rect(0, 0, thumbW, thumbH))
+
+	// Box-filter downsample: for each destination pixel, average the source pixels
+	// that map to it. This avoids aliasing on the narrow per-band images.
+	scaleX := float64(srcW) / float64(thumbW)
+	scaleY := float64(srcH) / float64(thumbH)
+
+	for dy := 0; dy < thumbH; dy++ {
+		sy0 := float64(dy) * scaleY
+		sy1 := sy0 + scaleY
+		iy0 := int(sy0)
+		iy1 := int(sy1)
+		if iy1 >= srcH {
+			iy1 = srcH - 1
+		}
+		for dx := 0; dx < thumbW; dx++ {
+			sx0 := float64(dx) * scaleX
+			sx1 := sx0 + scaleX
+			ix0 := int(sx0)
+			ix1 := int(sx1)
+			if ix1 >= srcW {
+				ix1 = srcW - 1
+			}
+			// Average all source pixels in the box
+			var rSum, gSum, bSum, aSum, count float64
+			for sy := iy0; sy <= iy1; sy++ {
+				for sx := ix0; sx <= ix1; sx++ {
+					r, g, b, a := src.At(sx, sy).RGBA()
+					rSum += float64(r >> 8)
+					gSum += float64(g >> 8)
+					bSum += float64(b >> 8)
+					aSum += float64(a >> 8)
+					count++
+				}
+			}
+			if count > 0 {
+				dst.SetNRGBA(dx, dy, color.NRGBA{
+					R: uint8(rSum / count),
+					G: uint8(gSum / count),
+					B: uint8(bSum / count),
+					A: uint8(aSum / count),
+				})
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, dst); err != nil {
+		return nil
+	}
+	return buf.Bytes()
 }
 
 // ─── disk persistence ─────────────────────────────────────────────────────────
@@ -645,22 +728,39 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 // drawWatermark renders text at the bottom-right of the image using a 5×7 pixel font.
 // The text is drawn with a dark shadow for readability over any background colour,
 // including the black no-data area.
-// The pixel scale is chosen automatically so the watermark fits within the image width.
+//
+// The pixel scale is chosen so the watermark text occupies approximately 25% of the
+// image width. This keeps the watermark visually consistent regardless of bin count:
+// a narrow per-band image (200 bins) and the wideband image (4096 bins) both display
+// the watermark at the same apparent size when the browser stretches them to fill the
+// container width.
 func drawWatermark(img *image.NRGBA, text string) {
 	const (
-		charW = 6 // glyph width including 1px spacing
-		charH = 7 // glyph height
-		padX  = 4 // right padding
-		padY  = 4 // bottom padding
+		charW      = 6   // glyph width including 1px spacing
+		charH      = 7   // glyph height
+		padX       = 4   // right padding
+		padY       = 4   // bottom padding
+		targetFrac = 0.2 // watermark text should be ~20% of image width
 	)
 
 	bounds := img.Bounds()
 	imgW := bounds.Max.X
 
-	// Choose the largest scale that fits the full text within the image width.
-	// Minimum scale = 1 (always render something).
-	scale := 5
-	for scale > 1 && len(text)*charW*scale+padX*2 > imgW {
+	// Ideal scale: text width = targetFrac * imgW
+	// textW = len(text) * charW * scale  →  scale = targetFrac * imgW / (len(text) * charW)
+	nChars := len(text)
+	if nChars == 0 {
+		return
+	}
+	scale := int(float64(imgW)*targetFrac/float64(nChars*charW) + 0.5)
+	if scale < 1 {
+		scale = 1
+	}
+	if scale > 5 {
+		scale = 5
+	}
+	// Final safety: ensure it fits within the image width
+	for scale > 1 && nChars*charW*scale+padX*2 > imgW {
 		scale--
 	}
 
@@ -670,8 +770,8 @@ func drawWatermark(img *image.NRGBA, text string) {
 	startX := bounds.Max.X - textW - padX
 	startY := bounds.Max.Y - textH - padY
 
-	shadow := color.NRGBA{0, 0, 0, 180}
-	white := color.NRGBA{255, 255, 255, 210}
+	shadow := color.NRGBA{0, 0, 0, 90}
+	white := color.NRGBA{255, 255, 255, 128}
 
 	for ci, ch := range text {
 		glyph, ok := font5x7[byte(ch)]
@@ -1768,4 +1868,153 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	enc.Encode(meta)
+}
+
+// ─── Thumbnail endpoints ──────────────────────────────────────────────────────
+
+// SpectrogramThumbEntry is one item in the /api/spectrogram/thumbnails response.
+type SpectrogramThumbEntry struct {
+	Date     string `json:"date"`
+	Band     string `json:"band"`
+	ThumbURL string `json:"thumb_url"`
+	FullURL  string `json:"full_url"`
+}
+
+// handleSpectrogramThumbnail serves a single thumbnail PNG.
+//
+//	GET /api/spectrogram/thumb?date=YYYY-MM-DD[&band=80m]
+func handleSpectrogramThumbnail(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
+	if recorder == nil {
+		http.Error(w, "spectrogram not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	q := r.URL.Query()
+	dateStr := q.Get("date")
+	if dateStr == "" {
+		http.Error(w, "date parameter required", http.StatusBadRequest)
+		return
+	}
+	requestedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		http.Error(w, "invalid date format — use YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	safeDateStr := requestedDate.Format("2006-01-02")
+	thumbPath := recorder.ThumbPath(safeDateStr)
+
+	f, err := os.Open(thumbPath)
+	if err != nil {
+		http.Error(w, "thumbnail not available for "+safeDateStr, http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	if stat != nil {
+		etag := `W/"` + strconv.FormatInt(stat.ModTime().Unix(), 10) + "-" + strconv.FormatInt(stat.Size(), 10) + `"`
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	io.Copy(w, f)
+}
+
+// handleSpectrogramThumbnails returns a JSON list of available thumbnail entries.
+//
+//	GET /api/spectrogram/thumbnails[?band=80m][&days=30]
+//
+// days=0 means return all available thumbnails.
+func handleSpectrogramThumbnails(w http.ResponseWriter, r *http.Request,
+	recorder *SpectrogramRecorder, bandRecorders map[string]*SpectrogramRecorder) {
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "max-age=60")
+
+	if recorder == nil {
+		json.NewEncoder(w).Encode([]SpectrogramThumbEntry{})
+		return
+	}
+
+	q := r.URL.Query()
+	bandName := q.Get("band")
+	if bandName == "" {
+		bandName = "wideband"
+	}
+
+	daysStr := q.Get("days")
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d >= 0 {
+			days = d
+		}
+	}
+
+	// Select the right recorder
+	var rec *SpectrogramRecorder
+	if bandName == "wideband" {
+		rec = recorder
+	} else {
+		rec = bandRecorders[bandName]
+	}
+	if rec == nil {
+		json.NewEncoder(w).Encode([]SpectrogramThumbEntry{})
+		return
+	}
+
+	// Scan data directory for thumbnail files
+	entries, err := os.ReadDir(rec.config.DataDir)
+	if err != nil {
+		json.NewEncoder(w).Encode([]SpectrogramThumbEntry{})
+		return
+	}
+
+	cutoff := time.Time{}
+	if days > 0 {
+		cutoff = time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -days)
+	}
+
+	var thumbs []SpectrogramThumbEntry
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "spectrogram_") || !strings.HasSuffix(name, "_thumb.png") {
+			continue
+		}
+		// Extract date: "spectrogram_YYYY-MM-DD_thumb.png"
+		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "spectrogram_"), "_thumb.png")
+		fileDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		if days > 0 && fileDate.Before(cutoff) {
+			continue
+		}
+
+		// Build URLs — include band param for non-wideband
+		bandParam := ""
+		if bandName != "wideband" {
+			bandParam = "&band=" + url.QueryEscape(bandName)
+		}
+		thumbURL := "/api/spectrogram/thumb?date=" + dateStr + bandParam
+		fullURL := "/api/spectrogram?date=" + dateStr + bandParam
+
+		thumbs = append(thumbs, SpectrogramThumbEntry{
+			Date:     dateStr,
+			Band:     bandName,
+			ThumbURL: thumbURL,
+			FullURL:  fullURL,
+		})
+	}
+
+	// Sort newest first
+	sort.Slice(thumbs, func(i, j int) bool {
+		return thumbs[i].Date > thumbs[j].Date
+	})
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.Encode(thumbs)
 }

@@ -597,7 +597,12 @@
             <!-- Wide-band spectrum (0-30 MHz) -->
             <div class="chart-container" id="widebandContainer" style="margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h2 style="margin: 0;">📡 Full HF Spectrum (0-30 MHz)</h2>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <h2 style="margin: 0;">📡 Full HF Spectrum (0-30 MHz)</h2>
+                        <a href="/spectrogram.html" target="_blank"
+                           style="font-size:0.8em; opacity:0.7; text-decoration:none; color:inherit;"
+                           title="View wideband spectrogram">&#x1F4CA; Spectrogram</a>
+                    </div>
                     <div id="wideband-stats" style="display: flex; gap: 15px; font-size: 0.9em; opacity: 0.9;">
                         <span>Min: <strong id="wideband-min">--</strong></span>
                         <span>Max: <strong id="wideband-max">--</strong></span>

@@ -1949,6 +1949,12 @@ func main() {
 	http.HandleFunc("/api/spectrogram/meta", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramMeta(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
 	})
+	http.HandleFunc("/api/spectrogram/thumb", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramThumbnail(w, r, selectSpectrogramRecorder(r))
+	})
+	http.HandleFunc("/api/spectrogram/thumbnails", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramThumbnails(w, r, spectrogramRecorder, bandSpectrogramRecorders)
+	})
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))

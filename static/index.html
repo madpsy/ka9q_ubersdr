@@ -279,6 +279,20 @@
                             <span>Manual</span>
                         </label>
                     </div>
+                    <!-- Auto-range offset sliders: visible when Manual is OFF -->
+                    <div id="spectrum-auto-range-controls" class="spectrum-control-group" style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="min-width: 35px; font-size: 0.8em;" title="Shift auto-calculated noise floor up/down">Floor:</label>
+                            <input type="range" id="spectrum-auto-floor" min="-30" max="30" value="0" step="1" style="width: 80px;">
+                            <span id="spectrum-auto-floor-value" style="min-width: 32px; font-size: 0.8em; text-align: right;">0</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="min-width: 35px; font-size: 0.8em;" title="Shift auto-calculated ceiling up/down">Ceil:</label>
+                            <input type="range" id="spectrum-auto-ceil" min="-30" max="30" value="0" step="1" style="width: 80px;">
+                            <span id="spectrum-auto-ceil-value" style="min-width: 32px; font-size: 0.8em; text-align: right;">0</span>
+                        </div>
+                    </div>
+                    <!-- Manual range sliders: visible when Manual is ON -->
                     <div id="spectrum-manual-range-controls" class="spectrum-control-group" style="display: none; flex-direction: column; gap: 4px;">
                         <div style="display: flex; align-items: center; gap: 4px;">
                             <label style="min-width: 35px; font-size: 0.8em;">Min:</label>
@@ -293,9 +307,10 @@
                     </div>
                     <div class="spectrum-control-group">
                         <select id="spectrum-colorscheme" onchange="updateSpectrumColorScheme()">
+                            <option value="turbo" selected>Turbo</option>
                             <option value="viridis">Viridis</option>
                             <option value="plasma">Plasma</option>
-                            <option value="jet" selected>Jet</option>
+                            <option value="jet">Jet</option>
                         </select>
                     </div>
                     <div class="spectrum-control-group">

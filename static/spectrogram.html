@@ -421,18 +421,60 @@ function syncSliders(mn,mx){
   document.getElementById('ceil-val').textContent=mx;
 }
 
-/* ── Band selection ─────────────────────────────────────────────────────── */
-/* urlBand is read from ?band= on page load and drives all API calls.
-   Changing the band selector navigates to spectrogram.html?band=<name>. */
-var urlBand=(new URLSearchParams(window.location.search)).get('band')||'wideband';
+/* ── Preferences (localStorage) ─────────────────────────────────────────── */
+/* band, palette, and time-window are persisted to localStorage so they
+   survive page reloads and band changes without cluttering the URL.
+   The date is still URL-driven (bookmarkable / shareable). */
+var PREFS_KEY='ubersdr_sg_prefs';
 
-/* Called when the band selector changes — navigate to new URL */
+function savePrefs(){
+  try{
+    var prefs={
+      band:urlBand,
+      palette:(document.getElementById('psel')||{}).value||'jet',
+      window:(document.getElementById('tsel')||{}).value||'0'
+    };
+    localStorage.setItem(PREFS_KEY,JSON.stringify(prefs));
+  }catch(e){}
+}
+
+function loadPrefs(){
+  try{
+    var raw=localStorage.getItem(PREFS_KEY);
+    if(!raw)return {};
+    return JSON.parse(raw)||{};
+  }catch(e){return {};}
+}
+
+/* ── Band selection ─────────────────────────────────────────────────────── */
+/* urlBand is read from ?band= on page load (URL takes priority over localStorage
+   so that links from noisefloor.html work correctly). */
+var _urlParams=new URLSearchParams(window.location.search);
+var urlBand=_urlParams.get('band')||'wideband';
+var urlDate=_urlParams.get('date')||''; /* '' = rolling-24h (default) */
+
+/* Called when the band selector changes — navigate to new URL with band param */
 function onBandChange(){
   var bsel=document.getElementById('bsel');
   var newBand=bsel.value||'wideband';
+
+  /* Save band preference immediately */
+  urlBand=newBand;
+  savePrefs();
+
   var params=new URLSearchParams(window.location.search);
   if(newBand==='wideband'){params.delete('band');}
   else{params.set('band',newBand);}
+
+  /* Preserve the current date selection */
+  var dsel=document.getElementById('dsel');
+  var currentDate=dsel?dsel.value:'';
+  if(currentDate&&currentDate!=='rolling-24h'){
+    params.set('date',currentDate);
+  } else {
+    params.delete('date');
+  }
+
   var qs=params.toString();
   window.location.href=window.location.pathname+(qs?'?'+qs:'');
 }
@@ -494,6 +536,7 @@ function applyTimeWindow(){
 }
 
 function onTimeWindowChange(){
+  savePrefs();
   applyTimeWindow();
 }
 
@@ -567,6 +610,21 @@ function clampZoom(rect){
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
 (function init(){
+  /* Load saved preferences — URL params take priority over localStorage */
+  var prefs=loadPrefs();
+
+  /* Apply saved palette */
+  if(prefs.palette){
+    var psel=document.getElementById('psel');
+    if(psel){psel.value=prefs.palette;setPalette(prefs.palette);}
+  }
+
+  /* Apply saved time window */
+  if(prefs.window){
+    var tsel=document.getElementById('tsel');
+    if(tsel)tsel.value=prefs.window;
+  }
+
   /* Pre-select the band from the URL before the list loads */
   var bsel=document.getElementById('bsel');
   bsel.value=urlBand;
@@ -614,7 +672,11 @@ function clampZoom(rect){
         o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
         sel.appendChild(o);
       }
-      /* Default to rolling-24h (first option) — already selected by the rollingOpt element */
+      /* Restore date from URL param if present, otherwise default to rolling-24h */
+      if(urlDate&&/^\d{4}-\d{2}-\d{2}$/.test(urlDate)){
+        sel.value=urlDate;
+      }
+      /* If urlDate is empty or not found in the list, rolling-24h stays selected */
 
       sel.onchange=function(){
         updateNavButtons();
@@ -666,6 +728,7 @@ function updateNavButtons(){
 function onPaletteChange(){
   var psel=document.getElementById('psel');
   setPalette(psel.value);
+  savePrefs();
   bmp=null; /* force re-fetch with new palette */
   load();
 }

@@ -58,7 +58,9 @@ button:hover{background:rgba(255,255,255,.25)}
 </header>
 
 <div class="controls">
+  <button id="prev-btn" onclick="navDate(-1)" title="Previous day (older)" disabled>&#x25C4;</button>
   <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
+  <button id="next-btn" onclick="navDate(+1)" title="Next day (newer)" disabled>&#x25BA;</button>
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <a id="dl-btn" href="#" download style="display:none">
@@ -80,9 +82,11 @@ button:hover{background:rgba(255,255,255,.25)}
         <div id="freq-axis"></div>
         <div class="sg-canvas-wrap" id="cwrap">
           <canvas id="img-canvas"></canvas>
-          <canvas id="overlay-canvas"></canvas>
         </div>
       </div>
+      <!-- Overlay canvas is OUTSIDE zoom-wrap so it doesn't get CSS-scaled.
+           It covers the full sg-right area and draws crosshair in screen coords. -->
+      <canvas id="overlay-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10"></canvas>
     </div>
   </div>
   <div class="legend">
@@ -199,10 +203,27 @@ function setPalette(name){
 
 function pxToDb(ctx,px,py,dmin,dmax){
   var d=ctx.getImageData(px,py,1,1).data;
-  if(d[0]===0&&d[1]===0&&d[2]===0)return null;
-  var k=((d[0]>>3)<<10)|((d[1]>>3)<<5)|(d[2]>>3);
+  var r=d[0],g=d[1],b=d[2];
+  /* Pure black = no-data sentinel */
+  if(r===0&&g===0&&b===0)return null;
+
+  /* Try exact quantised lookup first */
+  var k=((r>>3)<<10)|((g>>3)<<5)|(b>>3);
   var idx=INV[k];
-  if(idx===undefined)return null;
+
+  /* If exact lookup fails (PNG compression altered the colour slightly),
+     fall back to nearest-neighbour search across the full LUT.
+     This is O(256) but only runs on cache miss — acceptable for a tooltip. */
+  if(idx===undefined){
+    var bestDist=1e9,bestIdx=0;
+    for(var i=0;i<V.length;i++){
+      var dr=r-V[i][0],dg=g-V[i][1],db2=b-V[i][2];
+      var dist=dr*dr+dg*dg+db2*db2;
+      if(dist<bestDist){bestDist=dist;bestIdx=i;}
+    }
+    idx=bestIdx;
+  }
+
   return dmin+(idx/255)*(dmax-dmin);
 }
 
@@ -221,6 +242,7 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 var meta=null,bmp=null,ictx=null,timer=null;
+var availableDates=[]; /* populated from /api/spectrogram/list, newest first */
 
 /* Zoom/pan state */
 var zoom={scale:1,tx:0,ty:0,dragging:false,dragStartX:0,dragStartY:0,dragStartTx:0,dragStartTy:0};
@@ -229,6 +251,8 @@ var MIN_SCALE=1, MAX_SCALE=20;
 function applyZoom(){
   var zw=document.getElementById('zoom-wrap');
   zw.style.transform='translate('+zoom.tx+'px,'+zoom.ty+'px) scale('+zoom.scale+')';
+  /* Rebuild freq axis so labels reflect the visible frequency range and density */
+  if(meta)buildFreqAxis();
 }
 
 function resetZoom(){
@@ -304,18 +328,45 @@ function clampZoom(rect){
       if(!data.enabled){showErr('Spectrogram not enabled. Set <code>spectrogram.enabled: true</code> in config.yaml.');return;}
       var sel=document.getElementById('dsel');
       sel.innerHTML='';
+      availableDates=[];
       for(var i=0;i<data.available.length;i++){
         var d=data.available[i];
         if(!/^\d{4}-\d{2}-\d{2}$/.test(d))continue; /* sanitise */
+        availableDates.push(d);
         var o=document.createElement('option');
         o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
         sel.appendChild(o);
       }
-      sel.onchange=load;
+      sel.onchange=function(){updateNavButtons();bmp=null;load();};
+      updateNavButtons();
       load();
     })
     .catch(function(e){showErr('Failed to load date list: '+escHtml(e.message));});
 })();
+
+/* Navigate to the previous (-1=older) or next (+1=newer) date.
+   availableDates is newest-first, so newer=lower index, older=higher index. */
+function navDate(dir){
+  var sel=document.getElementById('dsel');
+  var idx=-1;
+  for(var i=0;i<availableDates.length;i++){if(availableDates[i]===sel.value){idx=i;break;}}
+  if(idx<0)return;
+  var newIdx=idx-dir; /* dir=+1 → newer → idx-1; dir=-1 → older → idx+1 */
+  if(newIdx<0||newIdx>=availableDates.length)return;
+  sel.value=availableDates[newIdx];
+  updateNavButtons();
+  bmp=null; /* force loading spinner for date change */
+  load();
+}
+
+/* Enable/disable ◄ ► buttons based on current selection */
+function updateNavButtons(){
+  var sel=document.getElementById('dsel');
+  var idx=-1;
+  for(var i=0;i<availableDates.length;i++){if(availableDates[i]===sel.value){idx=i;break;}}
+  document.getElementById('prev-btn').disabled=(idx<0||idx>=availableDates.length-1);
+  document.getElementById('next-btn').disabled=(idx<=0);
+}
 
 function load(){
   clearTimeout(timer);
@@ -377,13 +428,15 @@ function load(){
 var zoomSetup=false;
 function render(){
   var ic=document.getElementById('img-canvas');
-  var oc=document.getElementById('overlay-canvas');
-  /* Only reset canvas dimensions if they've changed — avoids clearing the canvas
-     on auto-refresh which causes the visible flicker in the black (unfilled) area */
+  /* Only reset img-canvas dimensions if they've changed — avoids clearing on auto-refresh */
   var needsResize=(ic.width!==bmp.width||ic.height!==bmp.height);
   if(needsResize){
     ic.width=bmp.width; ic.height=bmp.height;
-    oc.width=bmp.width; oc.height=bmp.height;
+    /* Size overlay canvas to match its CSS pixel size (it's outside zoom-wrap) */
+    var oc=document.getElementById('overlay-canvas');
+    var r=oc.getBoundingClientRect();
+    oc.width=Math.round(r.width)||ic.width;
+    oc.height=Math.round(r.height)||ic.height;
   }
   if(!ictx||needsResize){
     ictx=ic.getContext('2d',{willReadFrequently:true});
@@ -399,33 +452,84 @@ function render(){
   }
 }
 
-/* Frequency axis with notches */
+/* Frequency axis — zoom-aware, rebuilds on every zoom/pan change.
+   Positions labels in the freq-axis coordinate space (which is inside zoom-wrap
+   and therefore already scaled). We compute which frequencies are visible and
+   choose an appropriate tick interval. */
 function buildFreqAxis(){
   var ax=document.getElementById('freq-axis');
   ax.innerHTML='';
-  /* Major labels every 5 MHz */
-  var majors=[0,5,10,15,20,25,30];
-  for(var i=0;i<majors.length;i++){
-    var mhz=majors[i];
-    var pct=(mhz/30)*100+'%';
-    var notch=document.createElement('div');
-    notch.className='f-notch'; notch.style.left=pct;
-    ax.appendChild(notch);
-    var lbl=document.createElement('span');
-    lbl.className='f-label'; lbl.style.left=pct;
-    lbl.textContent=mhz+' MHz';
-    ax.appendChild(lbl);
+  if(!meta)return;
+
+  var totalHz=meta.end_freq_hz; /* 30 MHz */
+
+  /* Determine visible frequency range from zoom state.
+     zoom-wrap is scaled by zoom.scale and translated by zoom.tx pixels.
+     The freq-axis has the same width as the canvas (100% of zoom-wrap).
+     Visible left edge in zoom-wrap coords: -zoom.tx / zoom.scale
+     Visible right edge: (-zoom.tx + containerWidth) / zoom.scale
+     But since we're inside zoom-wrap, positions are in unscaled coords. */
+  var container=document.querySelector('.sg-right');
+  var cw=container?container.getBoundingClientRect().width:800;
+
+  /* Fraction of total width visible */
+  var visLeft = -zoom.tx / zoom.scale;          /* px in zoom-wrap space */
+  var visRight= visLeft + cw / zoom.scale;       /* px in zoom-wrap space */
+  /* zoom-wrap width = freq-axis width = 100% of sg-right at scale=1 */
+  var zoomWrapW = cw; /* at scale=1, zoom-wrap fills sg-right */
+
+  var freqLeft = Math.max(0, (visLeft / zoomWrapW) * totalHz);
+  var freqRight= Math.min(totalHz, (visRight / zoomWrapW) * totalHz);
+  var freqSpan = freqRight - freqLeft;
+
+  /* Choose tick interval based on visible span */
+  var tickIntervals=[
+    5e6,2e6,1e6,500e3,200e3,100e3,50e3,25e3,10e3
+  ];
+  var labelInterval=5e6, minorInterval=1e6;
+  for(var ti=0;ti<tickIntervals.length;ti++){
+    if(freqSpan/tickIntervals[ti]<=8){
+      labelInterval=tickIntervals[ti];
+      minorInterval=tickIntervals[ti+1]||tickIntervals[ti]/5;
+      break;
+    }
   }
-  /* Minor notches every 1 MHz (no label) */
-  for(var mhz=1;mhz<30;mhz++){
-    if(mhz%5===0)continue;
-    var pct=(mhz/30)*100+'%';
+
+  /* Format a frequency value as a label string */
+  function fmtHz(hz){
+    if(hz>=1e6)return (hz/1e6).toFixed(hz%1e6===0?0:hz%100000===0?1:3)+' MHz';
+    if(hz>=1e3)return (hz/1e3).toFixed(hz%1e3===0?0:1)+' kHz';
+    return hz+' Hz';
+  }
+
+  /* Snap to first tick at or before freqLeft */
+  var firstMajor=Math.floor(freqLeft/labelInterval)*labelInterval;
+  var firstMinor=Math.floor(freqLeft/minorInterval)*minorInterval;
+
+  /* Draw minor notches */
+  for(var f=firstMinor;f<=freqRight+minorInterval;f+=minorInterval){
+    if(f<0||f>totalHz)continue;
+    if(f%labelInterval===0)continue; /* major handles these */
+    var pct=(f/totalHz)*100+'%';
     var notch=document.createElement('div');
     notch.className='f-notch';
     notch.style.left=pct;
     notch.style.height='4px';
     notch.style.opacity='0.3';
     ax.appendChild(notch);
+  }
+
+  /* Draw major notches + labels */
+  for(var f=firstMajor;f<=freqRight+labelInterval;f+=labelInterval){
+    if(f<0||f>totalHz)continue;
+    var pct=(f/totalHz)*100+'%';
+    var notch=document.createElement('div');
+    notch.className='f-notch'; notch.style.left=pct;
+    ax.appendChild(notch);
+    var lbl=document.createElement('span');
+    lbl.className='f-label'; lbl.style.left=pct;
+    lbl.textContent=fmtHz(f);
+    ax.appendChild(lbl);
   }
 }
 
@@ -461,21 +565,30 @@ function buildLegend(){
 
 /* ── Hover crosshair + tooltip ──────────────────────────────────────────── */
 function setupHover(){
+  /* Attach hover to the sg-right container (covers freq-axis + canvas) */
+  var sgRight=document.querySelector('.sg-right');
   var cw=document.getElementById('cwrap');
   var tt=document.getElementById('tt');
   var oc=document.getElementById('overlay-canvas');
   var octx=oc.getContext('2d');
 
-  cw.onmousemove=function(e){
+  sgRight.onmousemove=function(e){
     if(!meta||!ictx)return;
-    /* Map cursor through zoom/pan transform to get position in canvas space.
-       cwrap is inside zoom-wrap which has transform: translate(tx,ty) scale(s).
-       getBoundingClientRect() gives the scaled/translated rect, so we divide by scale. */
-    var r=cw.getBoundingClientRect();
-    var xp=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
-    var yp=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
-    var px=Math.floor(xp*oc.width);
-    var py=Math.floor(yp*oc.height);
+
+    /* Cursor position relative to cwrap (the scaled canvas element).
+       getBoundingClientRect() on cwrap gives its screen rect after CSS transform. */
+    var cr=cw.getBoundingClientRect();
+    /* Is cursor over the canvas area? */
+    var overCanvas=(e.clientX>=cr.left&&e.clientX<=cr.right&&e.clientY>=cr.top&&e.clientY<=cr.bottom);
+
+    /* Fraction across the canvas (0..1) — works correctly because getBoundingClientRect
+       returns the scaled rect, so dividing by width/height gives the correct fraction */
+    var xp=Math.max(0,Math.min(1,(e.clientX-cr.left)/cr.width));
+    var yp=Math.max(0,Math.min(1,(e.clientY-cr.top)/cr.height));
+
+    /* Canvas pixel coordinates for pixel read */
+    var px=Math.floor(xp*ictx.canvas.width);
+    var py=Math.floor(yp*ictx.canvas.height);
 
     /* Frequency */
     var hz=xp*meta.end_freq_hz;
@@ -484,7 +597,7 @@ function setupHover(){
 
     /* Time */
     var row=Math.floor(yp*meta.max_rows);
-    var nodata=row>=meta.row_count;
+    var nodata=!overCanvas||row>=meta.row_count;
     var hh=String(Math.floor(row/60)).padStart(2,'0');
     var mm=String(row%60).padStart(2,'0');
     var tstr=hh+':'+mm+' UTC';
@@ -499,7 +612,7 @@ function setupHover(){
       }
     }
 
-    /* Build tooltip — only numeric/hardcoded values injected into HTML */
+    /* Build tooltip */
     var h='<div class="tt-freq">'+mhz+' MHz'+(band?' <span style="opacity:.55;font-size:.9em">('+band+')</span>':'')+'</div>';
     h+='<div class="tt-time">'+tstr+'</div>';
     if(nodata){
@@ -523,24 +636,34 @@ function setupHover(){
     if(ty+th>window.innerHeight)ty=e.clientY-th-8;
     tt.style.left=tx+'px'; tt.style.top=ty+'px';
 
-    /* Crosshair */
-    var cx=xp*oc.width, cy=yp*oc.height;
+    /* Crosshair — draw in overlay canvas screen coordinates.
+       The overlay canvas covers the full sg-right area.
+       Sync its pixel dimensions to its CSS size on every draw to handle resize. */
+    var or=oc.getBoundingClientRect();
+    if(oc.width!==Math.round(or.width)||oc.height!==Math.round(or.height)){
+      oc.width=Math.round(or.width); oc.height=Math.round(or.height);
+    }
+    /* Cursor position in overlay canvas pixels */
+    var ocx=e.clientX-or.left;
+    var ocy=e.clientY-or.top;
     octx.clearRect(0,0,oc.width,oc.height);
-    octx.strokeStyle='rgba(255,255,255,.4)';
-    octx.lineWidth=1;
-    octx.setLineDash([4,4]);
-    octx.beginPath();
-    octx.moveTo(0,cy); octx.lineTo(oc.width,cy);
-    octx.moveTo(cx,0); octx.lineTo(cx,oc.height);
-    octx.stroke();
-    octx.setLineDash([]);
-    octx.fillStyle='rgba(255,255,255,.75)';
-    octx.beginPath();
-    octx.arc(cx,cy,3,0,Math.PI*2);
-    octx.fill();
+    if(overCanvas){
+      octx.strokeStyle='rgba(255,255,255,.45)';
+      octx.lineWidth=1;
+      octx.setLineDash([4,4]);
+      octx.beginPath();
+      octx.moveTo(0,ocy); octx.lineTo(oc.width,ocy);
+      octx.moveTo(ocx,0); octx.lineTo(ocx,oc.height);
+      octx.stroke();
+      octx.setLineDash([]);
+      octx.fillStyle='rgba(255,255,255,.75)';
+      octx.beginPath();
+      octx.arc(ocx,ocy,3,0,Math.PI*2);
+      octx.fill();
+    }
   };
 
-  cw.onmouseleave=function(){
+  sgRight.onmouseleave=function(){
     tt.style.display='none';
     octx.clearRect(0,0,oc.width,oc.height);
   };

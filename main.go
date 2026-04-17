@@ -649,6 +649,7 @@ func main() {
 	}
 
 	// Initialize and start the wideband spectrogram recorder (one PNG per UTC day)
+	config.Spectrogram.Callsign = config.Admin.Callsign
 	spectrogramRecorder := NewSpectrogramRecorder(noiseFloorMonitor, config.Spectrogram)
 	if spectrogramRecorder != nil {
 		if err := spectrogramRecorder.Start(); err != nil {

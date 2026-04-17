@@ -247,6 +247,10 @@ type SpectrogramConfig struct {
 	// Matches the palettes available in the main waterfall display.
 	// Valid values: "viridis" (default), "plasma", "jet"
 	Palette string `yaml:"palette"`
+
+	// Callsign is embedded in the watermark on the bottom-right of the PNG.
+	// Set automatically from admin.callsign — not a user-facing config option.
+	Callsign string `yaml:"-"`
 }
 
 // LoggingConfig contains logging settings

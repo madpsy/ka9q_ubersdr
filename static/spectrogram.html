@@ -89,9 +89,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
   </div>
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
-  <a id="dl-btn" href="#" download style="display:none">
-    <button type="button">&#x2B07; Download PNG</button>
-  </a>
+  <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
   <span style="font-size:.75em;opacity:.55">Scroll to zoom &middot; drag to pan &middot; double-click to reset</span>
   <span class="status" id="status">Loading&hellip;</span>
 </div>
@@ -532,19 +530,8 @@ function load(){
       var palNames={viridis:'Viridis',plasma:'Plasma',jet:'Jet'};
       var palName=palNames[userPalette]||userPalette;
       document.getElementById('subtitle').textContent=startMHz+' \u2013 '+endMHz+' MHz \u00b7 one row per minute \u00b7 '+palName+' palette';
-      /* Update download button — build the same URL as was fetched so the
-         saved PNG exactly matches what the user sees */
-      var dlBtn=document.getElementById('dl-btn');
-      var dlUrl=meta.image_url;
-      if(contrastUserChanged){
-        dlUrl+=(dlUrl.indexOf('?')>=0?'&':'?')+'db_min='+contrastMin+'&db_max='+contrastMax;
-      }
-      if(userPalette&&userPalette!==meta.palette){
-        dlUrl+=(dlUrl.indexOf('?')>=0?'&':'?')+'palette='+encodeURIComponent(userPalette);
-      }
-      dlBtn.href=dlUrl;
-      dlBtn.download='spectrogram_'+meta.date+'.png';
-      dlBtn.style.display='inline';
+      /* Show download button — downloadCanvas() captures the canvas directly */
+      document.getElementById('dl-btn').style.display='inline';
       if(isToday&&!meta.complete)timer=setTimeout(load,65000);
     })
     .catch(function(e){
@@ -860,6 +847,34 @@ function setupHover(){
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 function setStatus(s){document.getElementById('status').textContent=s;}
 function showErr(s){document.getElementById('err').innerHTML='<div class="error">'+s+'</div>';}
+
+/* Download the spectrogram as a PNG that looks identical to the on-screen display.
+   We composite img-canvas onto a new canvas with a black background fill so the
+   saved file matches the dark-background appearance on the page. */
+function downloadCanvas(){
+  if(!ictx||!meta)return;
+  var src=document.getElementById('img-canvas');
+  /* Create an off-screen canvas the same size as the source */
+  var out=document.createElement('canvas');
+  out.width=src.width; out.height=src.height;
+  var ctx=out.getContext('2d');
+  /* Fill with black (matches the page background behind the canvas) */
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,out.width,out.height);
+  /* Draw the spectrogram on top */
+  ctx.drawImage(src,0,0);
+  out.toBlob(function(blob){
+    if(!blob)return;
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;
+    a.download='spectrogram_'+meta.date+'.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(url);},10000);
+  },'image/png');
+}
 </script>
 </body>
 </html>

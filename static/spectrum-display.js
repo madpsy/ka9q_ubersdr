@@ -379,6 +379,29 @@ class SpectrumDisplay {
             this.hideTooltip();
         });
 
+        // Right-click on overlay canvas: show bandwidth colour picker if near the bar
+        this.overlayCanvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const rect = this.overlayCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Bar sits at y=45; accept clicks within ±8px vertically
+            const barY = 45;
+            const hitY = Math.abs(y - barY) <= 8;
+
+            // Accept clicks between xLow and xHigh (or within 8px of either edge)
+            const xLow = this.lastBandwidthXLow;
+            const xHigh = this.lastBandwidthXHigh;
+            const hitX = xLow !== null && xHigh !== null && x >= xLow - 8 && x <= xHigh + 8;
+
+            if (hitY && hitX) {
+                this.showBandwidthColorMenu(e.clientX, e.clientY);
+            }
+        });
+
         // Add click handler for bookmarks, DX spots, CW spots, and chat user markers on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
             // Skip if we just finished a bandwidth drag
@@ -542,6 +565,14 @@ class SpectrumDisplay {
         // User preference for edge detection (default disabled)
         // When false, edge detection is completely disabled
         this.edgeTuneEnabled = localStorage.getItem('edgeTuneEnabled') === 'true';
+
+        // Bandwidth indicator colour (bar + vertical lines). Stored as a base colour name.
+        // Default: green. Saved/loaded from localStorage.
+        this.bandwidthIndicatorColor = localStorage.getItem('bandwidthIndicatorColor') || 'green';
+
+        // Last computed xLow/xHigh for the bandwidth bar (used by right-click hit-test)
+        this.lastBandwidthXLow = null;
+        this.lastBandwidthXHigh = null;
 
         // Auto-ranging
         this.actualMinDb = this.config.minDb;
@@ -2877,8 +2908,15 @@ class SpectrumDisplay {
             const bracketY = 45; // Position for bracket (at top of frequency scale section)
             const bracketHeight = 8;
 
+            // Store bar positions for right-click hit-test
+            this.lastBandwidthXLow = xLow;
+            this.lastBandwidthXHigh = xHigh;
+
+            // Resolve colour with full opacity for bar/ticks
+            const barColor = this.getBandwidthIndicatorColor(0.9);
+
             // Draw horizontal line connecting the edges (thicker)
-            this.overlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.9)'; // Brighter red
+            this.overlayCtx.strokeStyle = barColor;
             this.overlayCtx.lineWidth = 3; // Thicker line
             this.overlayCtx.beginPath();
             this.overlayCtx.moveTo(xLow, bracketY);
@@ -2893,6 +2931,10 @@ class SpectrumDisplay {
             this.overlayCtx.moveTo(xHigh, bracketY - bracketHeight/2);
             this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight/2);
             this.overlayCtx.stroke();
+        } else {
+            // Bar not visible — clear stored positions
+            this.lastBandwidthXLow = null;
+            this.lastBandwidthXHigh = null;
         }
 
         // Draw vertical bandwidth lines extending down over waterfall/graph
@@ -3140,7 +3182,7 @@ class SpectrumDisplay {
         this.bandwidthLinesCtx.save();
 
         // Set line style for bandwidth edges
-        this.bandwidthLinesCtx.strokeStyle = 'rgba(255, 0, 0, 0.6)'; // Semi-transparent red
+        this.bandwidthLinesCtx.strokeStyle = this.getBandwidthIndicatorColor(0.6);
         this.bandwidthLinesCtx.lineWidth = 2;
         this.bandwidthLinesCtx.setLineDash([5, 5]); // Dashed line pattern
 
@@ -4690,6 +4732,105 @@ class SpectrumDisplay {
                 this.totalBandwidth
             );
         }
+    }
+
+    // Resolve the current bandwidth indicator colour as an rgba() string.
+    // `alpha` controls opacity (0–1).
+    getBandwidthIndicatorColor(alpha) {
+        const map = {
+            green:   `rgba(0, 255, 0, ${alpha})`,
+            red:     `rgba(255, 0, 0, ${alpha})`,
+            cyan:    `rgba(0, 255, 255, ${alpha})`,
+            white:   `rgba(255, 255, 255, ${alpha})`,
+            yellow:  `rgba(255, 255, 0, ${alpha})`,
+            orange:  `rgba(255, 165, 0, ${alpha})`,
+            magenta: `rgba(255, 0, 255, ${alpha})`,
+        };
+        return map[this.bandwidthIndicatorColor] || map.green;
+    }
+
+    // Show a colour-picker context menu for the bandwidth indicator bar.
+    // Called when the user right-clicks on the bar in the overlay canvas.
+    showBandwidthColorMenu(clientX, clientY) {
+        const colours = [
+            { name: 'Green (default)', key: 'green',   rgb: '#00ff00' },
+            { name: 'Red',             key: 'red',     rgb: '#ff0000' },
+            { name: 'Cyan',            key: 'cyan',    rgb: '#00ffff' },
+            { name: 'White',           key: 'white',   rgb: '#ffffff' },
+            { name: 'Yellow',          key: 'yellow',  rgb: '#ffff00' },
+            { name: 'Orange',          key: 'orange',  rgb: '#ffa500' },
+            { name: 'Magenta',         key: 'magenta', rgb: '#ff00ff' },
+        ];
+
+        this.contextMenu.innerHTML = '';
+
+        // Header label
+        const header = document.createElement('div');
+        header.style.padding = '6px 16px 4px';
+        header.style.fontFamily = 'monospace';
+        header.style.fontSize = '11px';
+        header.style.color = '#888';
+        header.style.borderBottom = '1px solid #eee';
+        header.textContent = 'Bandwidth indicator colour';
+        this.contextMenu.appendChild(header);
+
+        colours.forEach(({ name, key, rgb }) => {
+            const item = document.createElement('div');
+            item.style.padding = '7px 16px';
+            item.style.cursor = 'pointer';
+            item.style.fontFamily = 'monospace';
+            item.style.fontSize = '13px';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '10px';
+
+            // Colour swatch
+            const swatch = document.createElement('span');
+            swatch.style.display = 'inline-block';
+            swatch.style.width = '14px';
+            swatch.style.height = '14px';
+            swatch.style.borderRadius = '2px';
+            swatch.style.border = '1px solid #aaa';
+            swatch.style.backgroundColor = rgb;
+            swatch.style.flexShrink = '0';
+            item.appendChild(swatch);
+
+            // Label (bold if currently selected)
+            const label = document.createElement('span');
+            label.textContent = name;
+            if (key === this.bandwidthIndicatorColor) {
+                label.style.fontWeight = 'bold';
+            }
+            item.appendChild(label);
+
+            item.addEventListener('mouseenter', () => {
+                item.style.backgroundColor = '#007bff';
+                item.style.color = '#fff';
+                swatch.style.border = '1px solid #fff';
+            });
+            item.addEventListener('mouseleave', () => {
+                item.style.backgroundColor = '';
+                item.style.color = '';
+                swatch.style.border = '1px solid #aaa';
+            });
+
+            item.addEventListener('click', () => {
+                this.bandwidthIndicatorColor = key;
+                localStorage.setItem('bandwidthIndicatorColor', key);
+                this.contextMenu.style.display = 'none';
+                // Force redraw so the new colour is visible immediately
+                if (this.spectrumData && this.spectrumData.length > 0) {
+                    this.draw();
+                }
+            });
+
+            this.contextMenu.appendChild(item);
+        });
+
+        // Position and show
+        this.contextMenu.style.left = clientX + 'px';
+        this.contextMenu.style.top = clientY + 'px';
+        this.contextMenu.style.display = 'block';
     }
 
     // Create custom context menu element

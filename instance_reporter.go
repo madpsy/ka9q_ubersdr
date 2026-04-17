@@ -81,6 +81,7 @@ type InstanceReport struct {
 	Rotator                    map[string]interface{}   `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
 	FrequencyReference         map[string]interface{}   `json:"frequency_reference"`          // Frequency reference tracking information
 	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
+	Spectrogram                bool                     `json:"spectrogram"`                  // Whether wideband spectrogram recording is enabled
 	Addons                     []string                 `json:"addons"`                       // Names of enabled addon proxies
 	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
 	SSBGridSquares             []WSPRGridSquareEntry    `json:"ssb_grid_squares,omitempty"`   // WSPR-derived grid-square map overlay data (omitted when unavailable)
@@ -601,6 +602,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Rotator:                    rotatorInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
+		Spectrogram:                ir.config.Spectrogram.Enabled,
 		Addons:                     ir.getEnabledAddonNames(),
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
@@ -974,6 +976,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Rotator:                    rotatorInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
+		Spectrogram:                ir.config.Spectrogram.Enabled,
 		Addons:                     ir.getEnabledAddonNames(),
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
@@ -1332,6 +1335,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			SNR_1_8_30MHz:              snr_1_8_30,
 			Rotator:                    rotatorInfo,
 			FrequencyReference:         freqRefInfo,
+			Spectrogram:                config.Spectrogram.Enabled,
 			StartupReport:              true,
 			Addons:                     enabledAddons,
 			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected,

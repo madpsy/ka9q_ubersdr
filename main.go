@@ -3098,6 +3098,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"version":              Version,
 		"space_weather":        config.SpaceWeather.Enabled,
 		"noise_floor":          config.NoiseFloor.Enabled,
+		"spectrogram":          config.Spectrogram.Enabled,
 		"digital_decodes":      config.Decoder.Enabled,
 		"digital_modes":        digitalModes,
 		"cw_skimmer":           cwskimmerConfig.Enabled,

@@ -7782,10 +7782,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize spectrum display
     try {
+        const savedColorScheme = localStorage.getItem('spectrumColorScheme') || 'jet';
+        const colorSchemeEl = document.getElementById('spectrum-colorscheme');
+        if (colorSchemeEl && savedColorScheme) colorSchemeEl.value = savedColorScheme;
         spectrumDisplay = new SpectrumDisplay('spectrum-display-canvas', {
             minDb: -120,
             maxDb: -20,
-            colorScheme: 'jet',
+            colorScheme: savedColorScheme,
             intensity: 0.30,  // Default +0.30 for brighter display
             contrast: 35,     // Default 35 - lower threshold shows more signals in auto mode
             showGrid: true,
@@ -7982,6 +7985,7 @@ function updateSpectrumColorScheme() {
 
     const scheme = document.getElementById('spectrum-colorscheme').value;
     spectrumDisplay.updateConfig({ colorScheme: scheme });
+    localStorage.setItem('spectrumColorScheme', scheme);
     log(`Spectrum color scheme changed to ${scheme}`);
 }
 

@@ -114,12 +114,12 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   </div>
   <div class="contrast-wrap">
     <label for="floor-sl">Floor:</label>
-    <input type="range" id="floor-sl" class="cslider" min="-200" max="-20" step="1" value="-130" oninput="onContrastChange()">
+    <input type="range" id="floor-sl" class="cslider" min="-220" max="-10" step="1" value="-130" oninput="onContrastChange()">
     <span class="cval" id="floor-val">-130</span>
   </div>
   <div class="contrast-wrap">
     <label for="ceil-sl">Ceiling:</label>
-    <input type="range" id="ceil-sl" class="cslider" min="-150" max="0" step="1" value="-60" oninput="onContrastChange()">
+    <input type="range" id="ceil-sl" class="cslider" min="-170" max="10" step="1" value="-60" oninput="onContrastChange()">
     <span class="cval" id="ceil-val">-60</span>
   </div>
   <button onclick="resetContrast()" title="Reset contrast to auto-range">&#x2B0C; Auto</button>
@@ -413,8 +413,8 @@ function syncSliders(mn,mx){
   var flEl=document.getElementById('floor-sl');
   var ceEl=document.getElementById('ceil-sl');
   /* Clamp to slider bounds */
-  mn=Math.max(-200,Math.min(-21,Math.round(mn)));
-  mx=Math.max(mn+5,Math.min(0,Math.round(mx)));
+  mn=Math.max(-220,Math.min(-11,Math.round(mn)));
+  mx=Math.max(mn+5,Math.min(10,Math.round(mx)));
   flEl.value=mn; ceEl.value=mx;
   contrastMin=mn; contrastMax=mx;
   document.getElementById('floor-val').textContent=mn;

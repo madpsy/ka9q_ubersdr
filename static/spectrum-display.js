@@ -2878,7 +2878,7 @@ class SpectrumDisplay {
             const bracketHeight = 8;
 
             // Draw horizontal line connecting the edges (thicker)
-            this.overlayCtx.strokeStyle = 'rgba(0, 255, 0, 0.9)'; // Brighter green
+            this.overlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.9)'; // Brighter red
             this.overlayCtx.lineWidth = 3; // Thicker line
             this.overlayCtx.beginPath();
             this.overlayCtx.moveTo(xLow, bracketY);
@@ -3140,7 +3140,7 @@ class SpectrumDisplay {
         this.bandwidthLinesCtx.save();
 
         // Set line style for bandwidth edges
-        this.bandwidthLinesCtx.strokeStyle = 'rgba(0, 255, 0, 0.6)'; // Semi-transparent green
+        this.bandwidthLinesCtx.strokeStyle = 'rgba(255, 0, 0, 0.6)'; // Semi-transparent red
         this.bandwidthLinesCtx.lineWidth = 2;
         this.bandwidthLinesCtx.setLineDash([5, 5]); // Dashed line pattern
 

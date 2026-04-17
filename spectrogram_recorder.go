@@ -1233,18 +1233,19 @@ func sortFloat32Slice(s []float32) {
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
 
-// renderRowsAsPNG renders a set of float32 rows as a PNG using the specified palette.
-// Used for on-the-fly palette switching.
+// renderRowsAsPNG renders a set of float32 rows as a variable-height PNG using the specified palette.
+// The image height equals len(rows) — no black padding for future rows.
+// The frontend uses meta.max_rows (always 1440) for time-axis scaling, so a variable-height
+// image is correct; CSS height:auto handles it.
+// Used for on-the-fly palette switching and rolling 24h renders.
 func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, bandName string, binCount int) []byte {
-	img := image.NewNRGBA(image.Rect(0, 0, binCount, spectrogramMaxRows))
+	rowCount := len(rows)
+	if rowCount == 0 {
+		return nil
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, binCount, rowCount))
 	black := color.NRGBA{0, 0, 0, 255}
 
-	rowCount := len(rows)
-	for y := rowCount; y < spectrogramMaxRows; y++ {
-		for x := 0; x < binCount; x++ {
-			img.SetNRGBA(x, y, black)
-		}
-	}
 	for y, row := range rows {
 		for x, val := range row {
 			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
@@ -1277,7 +1278,7 @@ func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dat
 
 // rollingResult holds the data for a rolling 24-hour spectrogram.
 type rollingResult struct {
-	rows     [][]float32          // exactly spectrogramMaxRows rows, oldest first
+	rows     [][]float32          // data rows (trimmed to last non-sentinel row), oldest first
 	metaRows []SpectrogramRowMeta // one entry per row with real unix timestamps
 	binCount int
 }
@@ -1394,6 +1395,27 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 				Unix:    t.Unix(),
 			}
 		}
+	}
+
+	// Trim trailing all-sentinel rows so the image height matches actual data.
+	// This prevents black "future" rows appearing at the bottom of the image.
+	lastDataRow := -1
+	for i := len(result.rows) - 1; i >= 0; i-- {
+		hasData := false
+		for _, v := range result.rows[i] {
+			if !math.IsInf(float64(v), -1) && !math.IsNaN(float64(v)) {
+				hasData = true
+				break
+			}
+		}
+		if hasData {
+			lastDataRow = i
+			break
+		}
+	}
+	if lastDataRow >= 0 && lastDataRow < len(result.rows)-1 {
+		result.rows = result.rows[:lastDataRow+1]
+		result.metaRows = result.metaRows[:lastDataRow+1]
 	}
 
 	return result
@@ -1858,7 +1880,7 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 			EndFreqHz:          float64(recorder.endFreqHz),
 			BinWidthHz:         binWidthHz,
 			BinCount:           recorder.binCount,
-			RowCount:           spectrogramMaxRows,
+			RowCount:           len(rr.rows),
 			MaxRows:            spectrogramMaxRows,
 			RowIntervalSeconds: 60,
 			DBMin:              float64(autoMin),

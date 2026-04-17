@@ -614,8 +614,7 @@ function clampZoom(rect){
         o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
         sel.appendChild(o);
       }
-      /* Default to today (second option) so rolling isn't selected by default */
-      if(availableDates.length>0)sel.value=availableDates[0];
+      /* Default to rolling-24h (first option) — already selected by the rollingOpt element */
 
       sel.onchange=function(){
         updateNavButtons();
@@ -870,16 +869,22 @@ function buildFreqAxis(){
 
   /* Choose tick intervals based on visible span */
   var intervals=[
-    {span:25e6, major:5e6,  minor:1e6},
-    {span:12e6, major:2e6,  minor:500e3},
-    {span:6e6,  major:1e6,  minor:200e3},
-    {span:3e6,  major:500e3,minor:100e3},
-    {span:1.5e6,major:200e3,minor:50e3},
-    {span:600e3,major:100e3,minor:25e3},
-    {span:300e3,major:50e3, minor:10e3},
-    {span:150e3,major:25e3, minor:5e3},
-    {span:60e3, major:10e3, minor:2e3},
-    {span:0,    major:5e3,  minor:1e3}
+    {span:25e6,  major:5e6,   minor:1e6},
+    {span:12e6,  major:2e6,   minor:500e3},
+    {span:6e6,   major:1e6,   minor:200e3},
+    {span:3e6,   major:500e3, minor:100e3},
+    {span:1.5e6, major:200e3, minor:50e3},
+    {span:600e3, major:100e3, minor:25e3},
+    {span:300e3, major:50e3,  minor:10e3},
+    {span:150e3, major:25e3,  minor:5e3},
+    {span:60e3,  major:10e3,  minor:2e3},
+    {span:25e3,  major:5e3,   minor:1e3},
+    {span:10e3,  major:2e3,   minor:500},
+    {span:5e3,   major:1e3,   minor:200},
+    {span:2e3,   major:500,   minor:100},
+    {span:1e3,   major:200,   minor:50},
+    {span:500,   major:100,   minor:25},
+    {span:0,     major:50,    minor:10}
   ];
   var majorInterval=5e6, minorInterval=1e6;
   for(var ii=0;ii<intervals.length;ii++){

@@ -577,10 +577,13 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 		}
 	}
 
-	// Draw watermark at bottom-right: "UberSDR <callsign> <date>"
+	// Draw watermark at bottom-right: "UberSDR [callsign] [band] <date>"
 	watermarkText := "UberSDR"
 	if sr.config.Callsign != "" {
 		watermarkText += " " + sr.config.Callsign
+	}
+	if sr.bandName != "" && sr.bandName != "wideband" {
+		watermarkText += " " + sr.bandName
 	}
 	watermarkText += " " + time.Now().UTC().Format("2006-01-02")
 	drawWatermark(img, watermarkText)
@@ -642,19 +645,28 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 // drawWatermark renders text at the bottom-right of the image using a 5×7 pixel font.
 // The text is drawn with a dark shadow for readability over any background colour,
 // including the black no-data area.
+// The pixel scale is chosen automatically so the watermark fits within the image width.
 func drawWatermark(img *image.NRGBA, text string) {
 	const (
-		charW = 6  // glyph width including 1px spacing
-		charH = 7  // glyph height
-		padX  = 12 // right padding
-		padY  = 12 // bottom padding
-		scale = 5  // pixel scale factor — large enough to read when image is scaled to browser width
+		charW = 6 // glyph width including 1px spacing
+		charH = 7 // glyph height
+		padX  = 4 // right padding
+		padY  = 4 // bottom padding
 	)
+
+	bounds := img.Bounds()
+	imgW := bounds.Max.X
+
+	// Choose the largest scale that fits the full text within the image width.
+	// Minimum scale = 1 (always render something).
+	scale := 5
+	for scale > 1 && len(text)*charW*scale+padX*2 > imgW {
+		scale--
+	}
 
 	textW := len(text) * charW * scale
 	textH := charH * scale
 
-	bounds := img.Bounds()
 	startX := bounds.Max.X - textW - padX
 	startY := bounds.Max.Y - textH - padY
 
@@ -1032,16 +1044,20 @@ done:
 		return configMin, configMax
 	}
 	sortFloat32Slice(valid)
-	p5idx := len(valid) * 5 / 100
-	p95idx := len(valid) * 95 / 100
-	if p5idx >= len(valid) {
-		p5idx = len(valid) - 1
+	// Use P2 for floor (noise floor with headroom) and P99 for ceiling
+	// (strong signals visible without clipping to the darkest/brightest palette colour).
+	// P5/P95 caused strong signals to clip to palette index 255 (dark maroon in Jet)
+	// which appeared black on dark backgrounds.
+	p2idx := len(valid) * 2 / 100
+	p99idx := len(valid) * 99 / 100
+	if p2idx >= len(valid) {
+		p2idx = len(valid) - 1
 	}
-	if p95idx >= len(valid) {
-		p95idx = len(valid) - 1
+	if p99idx >= len(valid) {
+		p99idx = len(valid) - 1
 	}
-	dbMin := valid[p5idx]
-	dbMax := valid[p95idx]
+	dbMin := valid[p2idx]
+	dbMax := valid[p99idx]
 	// Ensure a minimum 10 dB spread to avoid degenerate images
 	if dbMax-dbMin < 10 {
 		dbMax = dbMin + 10
@@ -1124,7 +1140,7 @@ func sortFloat32Slice(s []float32) {
 
 // renderRowsAsPNG renders a set of float32 rows as a PNG using the specified palette.
 // Used for on-the-fly palette switching.
-func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, binCount int) []byte {
+func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, bandName string, binCount int) []byte {
 	img := image.NewNRGBA(image.Rect(0, 0, binCount, spectrogramMaxRows))
 	black := color.NRGBA{0, 0, 0, 255}
 
@@ -1144,10 +1160,13 @@ func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dat
 		}
 	}
 
-	// Watermark
+	// Watermark: "UberSDR [callsign] [band] <date>"
 	wm := "UberSDR"
 	if callsign != "" {
 		wm += " " + callsign
+	}
+	if bandName != "" && bandName != "wideband" {
+		wm += " " + bandName
 	}
 	wm += " " + dateStr
 	drawWatermark(img, wm)
@@ -1257,7 +1276,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 				// Auto-compute range from actual data
 				dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 			}
-			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign, recorder.binCount)
+			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign, recorder.bandName, recorder.binCount)
 		} else {
 			// No palette or range change — serve the pre-cached PNG directly.
 			// The cached PNG was rendered with config db_min/db_max; if the user
@@ -1335,7 +1354,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			// Auto-compute range from actual archived data
 			dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
-		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign, fileBinCount)
+		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign, recorder.bandName, fileBinCount)
 		if len(pngBytes) == 0 {
 			goto serveDiskPNG
 		}

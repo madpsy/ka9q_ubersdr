@@ -103,6 +103,16 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <span class="cval" id="ceil-val">-60</span>
   </div>
   <button onclick="resetContrast()" title="Reset contrast to auto-range">&#x2B0C; Auto</button>
+  <div>
+    <label for="tsel">Window:</label>
+    <select id="tsel" onchange="onTimeWindowChange()">
+      <option value="0" selected>All day</option>
+      <option value="720">Last 12h</option>
+      <option value="360">Last 6h</option>
+      <option value="180">Last 3h</option>
+      <option value="60">Last 1h</option>
+    </select>
+  </div>
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
@@ -389,7 +399,51 @@ function applyZoom(){
   if(meta){buildFreqAxis();buildTimeAxis();}
 }
 
+/* Apply the time-window selector: zoom vertically so only the last N rows
+   are visible, scrolled to the bottom of the image.
+   windowRows=0 means "all day" (reset to scale=1). */
+function applyTimeWindow(){
+  var tsel=document.getElementById('tsel');
+  var windowRows=parseInt(tsel.value,10)||0;
+  if(!meta||windowRows<=0||windowRows>=meta.row_count){
+    /* All day — reset vertical zoom/pan */
+    zoom.scale=1; zoom.tx=0; zoom.ty=0;
+    applyZoom();
+    return;
+  }
+  /* The canvas CSS height equals the sg-right container height.
+     getBoundingClientRect may return 0 if the view is not yet visible —
+     defer one animation frame in that case. */
+  var container=document.querySelector('.sg-right');
+  var ch=container?container.getBoundingClientRect().height:0;
+  if(ch===0){
+    requestAnimationFrame(applyTimeWindow);
+    return;
+  }
+
+  /* scale = total rows / window rows (so windowRows rows fill the full container height) */
+  var newScale=meta.row_count/windowRows;
+  if(newScale<1)newScale=1;
+  if(newScale>MAX_SCALE)newScale=MAX_SCALE;
+
+  /* Pan to bottom: ty = -(scale - 1) * ch so the bottom of the scaled image
+     aligns with the bottom of the container (transform-origin is top-left). */
+  var newTy=-(newScale-1)*ch;
+
+  zoom.scale=newScale;
+  zoom.tx=0;
+  zoom.ty=newTy;
+  applyZoom();
+}
+
+function onTimeWindowChange(){
+  applyTimeWindow();
+}
+
 function resetZoom(){
+  /* Also reset the time window selector to "All day" */
+  var tsel=document.getElementById('tsel');
+  if(tsel)tsel.value='0';
   zoom.scale=1; zoom.tx=0; zoom.ty=0;
   applyZoom();
 }
@@ -494,7 +548,15 @@ function clampZoom(rect){
         o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
         sel.appendChild(o);
       }
-      sel.onchange=function(){updateNavButtons();bmp=null;contrastUserChanged=false;load();};
+      sel.onchange=function(){
+        updateNavButtons();
+        bmp=null;
+        contrastUserChanged=false;
+        /* Reset time window to "All day" when navigating to a different date */
+        var tsel=document.getElementById('tsel');
+        if(tsel)tsel.value='0';
+        load();
+      };
       updateNavButtons();
       load();
     })
@@ -677,9 +739,13 @@ function render(){
   if(needsResize){
     buildFreqAxis(); buildTimeAxis(); buildLegend(); setupHover();
     if(!zoomSetup){setupZoom();zoomSetup=true;}
+    /* Apply time window after first render so zoom coords are valid */
+    applyTimeWindow();
   } else {
     /* On refresh, only update axes that depend on row count */
     buildTimeAxis(); buildLegend();
+    /* Re-apply time window in case row_count grew (today's live data) */
+    applyTimeWindow();
   }
 }
 

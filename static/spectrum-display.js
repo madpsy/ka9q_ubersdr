@@ -506,8 +506,7 @@ class SpectrumDisplay {
             manualMinDb: -120, // Manual minimum dB
             manualMaxDb: -40, // Manual maximum dB
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
-            autoFloorOffset: 15, // dB offset applied to auto-calculated noise floor (positive = compress upward)
-            autoCeilOffset: -15, // dB offset applied to auto-calculated ceiling (negative = compress downward)
+            autoContrast: 15, // Symmetric contrast: floor raised by +N, ceiling lowered by -N
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
             contrast: config.contrast !== undefined ? config.contrast : 35, // Contrast threshold (0-100), lower = more signals visible in auto mode
@@ -2080,9 +2079,10 @@ class SpectrumDisplay {
             // Use the average of recent maximums as the ceiling for smoother display
             const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
 
-            // Use smoothed minimum as floor, smoothed maximum as ceiling
-            minDb = avgMinDb;
-            maxDb = avgMaxDb;
+            // Apply the same symmetric contrast offset as the waterfall so
+            // both displays share the same dB range when in auto mode.
+            minDb = avgMinDb + this.config.autoContrast;
+            maxDb = avgMaxDb - this.config.autoContrast;
         }
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
@@ -3262,9 +3262,9 @@ class SpectrumDisplay {
             const avgMin = this.autoRangeMinHistory.reduce((sum, m) => sum + m.value, 0) / this.autoRangeMinHistory.length;
             const avgMax = this.autoRangeMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.autoRangeMaxHistory.length;
 
-            // Apply smoothed values with user-controlled offsets
-            this.actualMinDb = avgMin + this.config.autoFloorOffset;
-            this.actualMaxDb = avgMax + this.config.autoCeilOffset;
+            // Apply smoothed values with user-controlled symmetric contrast offset
+            this.actualMinDb = avgMin + this.config.autoContrast;
+            this.actualMaxDb = avgMax - this.config.autoContrast;
         }
     }
 
@@ -4152,10 +4152,8 @@ class SpectrumDisplay {
         const maxDbSlider = document.getElementById('spectrum-max-db');
         const minDbValue = document.getElementById('spectrum-min-db-value');
         const maxDbValue = document.getElementById('spectrum-max-db-value');
-        const autoFloorSlider = document.getElementById('spectrum-auto-floor');
-        const autoCeilSlider = document.getElementById('spectrum-auto-ceil');
-        const autoFloorValue = document.getElementById('spectrum-auto-floor-value');
-        const autoCeilValue = document.getElementById('spectrum-auto-ceil-value');
+        const autoContrastSlider = document.getElementById('spectrum-auto-contrast');
+        const autoContrastValue = document.getElementById('spectrum-auto-contrast-value');
 
         // Helper: sync auto/manual control visibility to current manual state
         const syncRangeControlVisibility = (manualEnabled) => {
@@ -4167,8 +4165,7 @@ class SpectrumDisplay {
         const savedManualRangeEnabled = localStorage.getItem('spectrumManualRangeEnabled');
         const savedMinDb = localStorage.getItem('spectrumManualMinDb');
         const savedMaxDb = localStorage.getItem('spectrumManualMaxDb');
-        const savedAutoFloor = localStorage.getItem('spectrumAutoFloorOffset');
-        const savedAutoCeil  = localStorage.getItem('spectrumAutoCeilOffset');
+        const savedAutoContrast = localStorage.getItem('spectrumAutoContrast');
 
         if (savedManualRangeEnabled !== null) {
             const isEnabled = savedManualRangeEnabled === 'true';
@@ -4201,18 +4198,11 @@ class SpectrumDisplay {
             }
         }
 
-        if (savedAutoFloor !== null) {
-            const val = parseFloat(savedAutoFloor);
-            this.config.autoFloorOffset = val;
-            if (autoFloorSlider) autoFloorSlider.value = val;
-            if (autoFloorValue)  autoFloorValue.textContent = (val >= 0 ? '+' : '') + val.toFixed(0);
-        }
-
-        if (savedAutoCeil !== null) {
-            const val = parseFloat(savedAutoCeil);
-            this.config.autoCeilOffset = val;
-            if (autoCeilSlider) autoCeilSlider.value = val;
-            if (autoCeilValue)  autoCeilValue.textContent = (val >= 0 ? '+' : '') + val.toFixed(0);
+        if (savedAutoContrast !== null) {
+            const val = parseFloat(savedAutoContrast);
+            this.config.autoContrast = val;
+            if (autoContrastSlider) autoContrastSlider.value = val;
+            if (autoContrastValue)  autoContrastValue.textContent = val.toFixed(0);
         }
 
         if (manualRangeCheckbox) {
@@ -4251,21 +4241,51 @@ class SpectrumDisplay {
             });
         }
 
-        if (autoFloorSlider && autoFloorValue) {
-            autoFloorSlider.addEventListener('input', (e) => {
+        if (autoContrastSlider && autoContrastValue) {
+            autoContrastSlider.addEventListener('input', (e) => {
                 const value = parseFloat(e.target.value);
-                this.config.autoFloorOffset = value;
-                autoFloorValue.textContent = (value >= 0 ? '+' : '') + value.toFixed(0);
-                localStorage.setItem('spectrumAutoFloorOffset', value.toString());
+                this.config.autoContrast = value;
+                autoContrastValue.textContent = value.toFixed(0);
+                localStorage.setItem('spectrumAutoContrast', value.toString());
             });
         }
 
-        if (autoCeilSlider && autoCeilValue) {
-            autoCeilSlider.addEventListener('input', (e) => {
-                const value = parseFloat(e.target.value);
-                this.config.autoCeilOffset = value;
-                autoCeilValue.textContent = (value >= 0 ? '+' : '') + value.toFixed(0);
-                localStorage.setItem('spectrumAutoCeilOffset', value.toString());
+        // Right-click on Contrast label → reset to default (15)
+        const autoContrastLabel = document.getElementById('spectrum-auto-contrast-label');
+        if (autoContrastLabel && autoContrastSlider && autoContrastValue) {
+            autoContrastLabel.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const def = 15;
+                this.config.autoContrast = def;
+                autoContrastSlider.value = def;
+                autoContrastValue.textContent = def;
+                localStorage.setItem('spectrumAutoContrast', def.toString());
+            });
+        }
+
+        // Right-click on Min label → reset to default (-120)
+        const minDbLabel = document.getElementById('spectrum-min-db-label');
+        if (minDbLabel && minDbSlider && minDbValue) {
+            minDbLabel.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const def = -120;
+                this.config.manualMinDb = def;
+                minDbSlider.value = def;
+                minDbValue.textContent = def;
+                localStorage.setItem('spectrumManualMinDb', def.toString());
+            });
+        }
+
+        // Right-click on Max label → reset to default (-40)
+        const maxDbLabel = document.getElementById('spectrum-max-db-label');
+        if (maxDbLabel && maxDbSlider && maxDbValue) {
+            maxDbLabel.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const def = -40;
+                this.config.manualMaxDb = def;
+                maxDbSlider.value = def;
+                maxDbValue.textContent = def;
+                localStorage.setItem('spectrumManualMaxDb', def.toString());
             });
         }
 

@@ -7782,7 +7782,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize spectrum display
     try {
-        const savedColorScheme = localStorage.getItem('spectrumColorScheme') || 'turbo';
+        const savedColorScheme = localStorage.getItem('spectrumColorScheme') || 'jet';
         const colorSchemeEl = document.getElementById('spectrum-colorscheme');
         if (colorSchemeEl && savedColorScheme) colorSchemeEl.value = savedColorScheme;
         spectrumDisplay = new SpectrumDisplay('spectrum-display-canvas', {

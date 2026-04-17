@@ -485,7 +485,7 @@ class SpectrumDisplay {
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
             autoFloorOffset: 0, // dB offset applied to auto-calculated noise floor
             autoCeilOffset: 0,  // dB offset applied to auto-calculated ceiling
-            colorScheme: config.colorScheme || 'turbo', // Default to turbo color scheme
+            colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
             contrast: config.contrast !== undefined ? config.contrast : 35, // Contrast threshold (0-100), lower = more signals visible in auto mode
             showGrid: config.showGrid !== false,
@@ -3549,7 +3549,7 @@ class SpectrumDisplay {
             ]
         };
 
-        return schemes[name] || schemes.turbo;
+        return schemes[name] || schemes.jet;
     }
 
     // Interpolate between colors

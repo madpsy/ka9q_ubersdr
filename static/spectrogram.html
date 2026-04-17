@@ -62,7 +62,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 <div class="container">
 <header>
   <h1>&#x1F4E1; Wideband Spectrogram</h1>
-  <p class="subtitle" id="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; viridis palette</p>
+  <p class="subtitle" id="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; Jet palette</p>
 </header>
 
 <div class="controls">
@@ -74,7 +74,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
     <select id="psel" onchange="onPaletteChange()">
       <option value="viridis">Viridis</option>
       <option value="plasma">Plasma</option>
-      <option value="jet">Jet</option>
+      <option value="jet" selected>Jet</option>
     </select>
   </div>
   <div class="contrast-wrap">
@@ -218,7 +218,7 @@ jet:[
 };
 
 /* Active LUT and inverse map — updated when palette changes */
-var V=PALETTES.viridis;
+var V=PALETTES.jet;
 var INV={};
 function buildInv(lut){
   INV={};
@@ -227,7 +227,7 @@ function buildInv(lut){
 buildInv(V);
 
 function setPalette(name){
-  V=PALETTES[name]||PALETTES.viridis;
+  V=PALETTES[name]||PALETTES.jet;
   buildInv(V);
 }
 
@@ -331,8 +331,8 @@ var MIN_SCALE=1, MAX_SCALE=20;
 function applyZoom(){
   var zw=document.getElementById('zoom-wrap');
   zw.style.transform='translate('+zoom.tx+'px,'+zoom.ty+'px) scale('+zoom.scale+')';
-  /* Rebuild freq axis so labels reflect the visible frequency range and density */
-  if(meta)buildFreqAxis();
+  /* Rebuild both axes so labels reflect the visible range and density */
+  if(meta){buildFreqAxis();buildTimeAxis();}
 }
 
 function resetZoom(){
@@ -679,15 +679,56 @@ function buildFreqAxis(){
   }
 }
 
-/* Time axis with labels every 3 hours */
+/* Time axis — zoom-aware, rebuilds on every zoom/pan change.
+   The time axis is OUTSIDE zoom-wrap so positions must be in screen-space.
+   A canvas row fraction f maps to screen position:
+     screenPct = (f * zoom.scale + zoom.ty / axisHeight) * 100%
+   Only labels within [0%, 100%] of the axis are shown.
+   #time-axis is a flex sibling of .sg-right and stretches to the same height,
+   so its getBoundingClientRect().height equals the unscaled canvas display height. */
 function buildTimeAxis(){
   var ax=document.getElementById('time-axis');
   ax.innerHTML='';
   if(!meta||meta.row_count===0)return;
-  for(var row=0;row<=meta.max_rows;row+=180){
-    var pct=(row/meta.max_rows)*100+'%';
+
+  /* Use #time-axis own height — this is what top:X% is relative to */
+  var ch=ax.getBoundingClientRect().height;
+  if(ch===0){
+    /* Fallback: use .sg-right height (same value, flex sibling) */
+    var sgRight=document.querySelector('.sg-right');
+    ch=sgRight?sgRight.getBoundingClientRect().height:600;
+  }
+  if(ch===0)ch=600;
+
+  /* Convert a canvas row fraction [0..1] to screen fraction [0..1] */
+  function canvasRowToScreen(frac){
+    return frac*zoom.scale + zoom.ty/ch;
+  }
+
+  /* Visible row range in canvas fractions */
+  var visTop=Math.max(0,-zoom.ty/(ch*zoom.scale));
+  var visBottom=Math.min(1,(-zoom.ty+ch)/(ch*zoom.scale));
+  var visibleSpanRows=(visBottom-visTop)*meta.max_rows;
+  if(visibleSpanRows<=0)visibleSpanRows=meta.max_rows;
+
+  /* Choose tick interval based on visible span (in minutes) */
+  var interval=180; /* default: every 3 hours */
+  if(visibleSpanRows<=30)interval=5;
+  else if(visibleSpanRows<=60)interval=10;
+  else if(visibleSpanRows<=120)interval=15;
+  else if(visibleSpanRows<=240)interval=30;
+  else if(visibleSpanRows<=480)interval=60;
+  else if(visibleSpanRows<=960)interval=120;
+
+  /* Snap to first tick at or before visible top */
+  var firstRow=Math.floor(visTop*meta.max_rows/interval)*interval;
+
+  for(var row=firstRow;row<=meta.max_rows;row+=interval){
+    var sc=canvasRowToScreen(row/meta.max_rows);
+    if(sc<-0.02||sc>1.02)continue; /* small margin for edge labels */
     var lbl=document.createElement('span');
-    lbl.className='t-label'; lbl.style.top=pct;
+    lbl.className='t-label';
+    lbl.style.top=(sc*100)+'%';
     var hh=String(Math.floor(row/60)).padStart(2,'0');
     var mm=String(row%60).padStart(2,'0');
     lbl.textContent=hh+':'+mm;

@@ -667,7 +667,7 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Spectrogram.DataDir = "spectrogram"
 	}
 	if config.Spectrogram.Palette == "" {
-		config.Spectrogram.Palette = "viridis"
+		config.Spectrogram.Palette = "jet"
 	}
 	// Validate palette
 	switch config.Spectrogram.Palette {

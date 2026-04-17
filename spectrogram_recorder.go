@@ -1016,11 +1016,16 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		return
 	}
 
-	// Rate limit: 1 request per 10 seconds per IP (PNG is 1-3 MB)
+	// Rate limit: use "spectrogram-palette" key (2s) when a palette param is present
+	// (palette re-renders are CPU-only, no disk I/O), otherwise "spectrogram" (10s).
 	clientIP := getClientIP(r)
-	if !rateLimiter.AllowRequest(clientIP, "spectrogram") {
+	rateLimitKey := "spectrogram"
+	if r.URL.Query().Get("palette") != "" {
+		rateLimitKey = "spectrogram-palette"
+	}
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		http.Error(w, "rate limit exceeded for spectrogram — please wait 10 seconds between requests", http.StatusTooManyRequests)
+		http.Error(w, "rate limit exceeded for spectrogram — please wait before requesting again", http.StatusTooManyRequests)
 		return
 	}
 

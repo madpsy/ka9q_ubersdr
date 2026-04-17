@@ -269,6 +269,9 @@ func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
 		case "spectrogram":
 			refillRate = 0.1 // 1 request per 10 seconds for spectrogram PNG (large response)
 			maxTokens = 1.0
+		case "spectrogram-palette":
+			refillRate = 0.5 // 1 request per 2 seconds for palette-switched re-renders (CPU only, no disk)
+			maxTokens = 2.0  // Allow 2 quick switches before throttling
 		default:
 			refillRate = 0.5 // 1 request per 2 seconds for FFT data
 			maxTokens = 1.0

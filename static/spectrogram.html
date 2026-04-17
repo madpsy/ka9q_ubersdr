@@ -21,7 +21,7 @@ button:hover{background:rgba(255,255,255,.25)}
 /* Layout: time axis left, spectrogram right */
 .sg-wrap{display:flex;gap:0;user-select:none}
 /* Time axis */
-#time-axis{width:46px;flex-shrink:0;position:relative;padding-top:32px}
+#time-axis{width:46px;flex-shrink:0;position:relative;padding-top:0}
 .t-label{position:absolute;font-size:.68em;opacity:.75;right:5px;transform:translateY(-50%);white-space:nowrap}
 /* Right side — clips zoomed content */
 .sg-right{flex:1;min-width:0;overflow:hidden;position:relative}
@@ -54,7 +54,7 @@ button:hover{background:rgba(255,255,255,.25)}
 <div class="container">
 <header>
   <h1>&#x1F4E1; Wideband Spectrogram</h1>
-  <p class="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; viridis palette</p>
+  <p class="subtitle" id="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; viridis palette</p>
 </header>
 
 <div class="controls">
@@ -82,12 +82,15 @@ button:hover{background:rgba(255,255,255,.25)}
 <div id="loading" class="loading">Loading spectrogram&hellip;</div>
 
 <div id="view" style="display:none">
+  <!-- freq-axis sits ABOVE the sg-wrap, offset by the time-axis width so it aligns with the canvas.
+       It is NOT inside sg-right (which has overflow:hidden) so labels are never clipped.
+       buildFreqAxis() positions labels in screen-space percentages of #freq-axis width. -->
+  <div style="padding-left:46px;position:relative">
+    <div id="freq-axis"></div>
+  </div>
   <div class="sg-wrap">
     <div id="time-axis"></div>
     <div class="sg-right">
-      <!-- freq-axis is OUTSIDE zoom-wrap so it stays fixed during zoom/pan.
-           buildFreqAxis() positions labels in screen-space percentages. -->
-      <div id="freq-axis"></div>
       <!-- zoom-wrap receives the CSS transform (canvas only) -->
       <div id="zoom-wrap" style="transform-origin:0 0">
         <div class="sg-canvas-wrap" id="cwrap">
@@ -233,7 +236,7 @@ function pxToDb(ctx,px,py,dmin,dmax){
     idx=bestIdx;
   }
 
-  return dmin+(idx/255)*(dmax-dmin);
+  return dmin+(idx/(V.length-1))*(dmax-dmin);
 }
 
 /* Amateur radio bands */
@@ -439,6 +442,12 @@ function load(){
       document.getElementById('loading').style.display='none';
       document.getElementById('view').style.display='block';
       setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 in progress'));
+      /* Update subtitle with actual metadata */
+      var startMHz=(meta.start_freq_hz/1e6).toFixed(0);
+      var endMHz=(meta.end_freq_hz/1e6).toFixed(0);
+      var palNames={viridis:'Viridis',plasma:'Plasma',jet:'Jet'};
+      var palName=palNames[userPalette]||userPalette;
+      document.getElementById('subtitle').textContent=startMHz+' \u2013 '+endMHz+' MHz \u00b7 one row per minute \u00b7 '+palName+' palette';
       /* Update download button */
       var dlBtn=document.getElementById('dl-btn');
       var dlUrl=meta.image_url;
@@ -600,8 +609,9 @@ function buildLegend(){
   var c=document.getElementById('legend-canvas');
   var ctx=c.getContext('2d');
   for(var i=0;i<c.width;i++){
-    var idx=Math.min(255,Math.round((i/c.width)*255));
+    var idx=Math.min(V.length-1,Math.round((i/c.width)*(V.length-1)));
     var rgb=V[idx];
+    if(!rgb)continue;
     ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
     ctx.fillRect(i,0,1,c.height);
   }

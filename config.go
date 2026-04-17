@@ -674,8 +674,8 @@ func LoadConfig(filename string) (*Config, error) {
 	case "viridis", "plasma", "jet":
 		// valid
 	default:
-		fmt.Printf("Warning: spectrogram.palette %q is not valid (viridis/plasma/jet), using viridis\n", config.Spectrogram.Palette)
-		config.Spectrogram.Palette = "viridis"
+		fmt.Printf("Warning: spectrogram.palette %q is not valid (viridis/plasma/jet), using jet\n", config.Spectrogram.Palette)
+		config.Spectrogram.Palette = "jet"
 	}
 
 	// Set delta threshold default and validate

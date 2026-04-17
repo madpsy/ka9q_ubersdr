@@ -452,7 +452,6 @@ function updateNavButtons(){
 /* Called when user changes the palette selector */
 function onPaletteChange(){
   var psel=document.getElementById('psel');
-  psel.dataset.userChanged='1'; /* mark as user-changed so load() doesn't reset it */
   setPalette(psel.value);
   bmp=null; /* force re-fetch with new palette */
   load();
@@ -471,7 +470,7 @@ function load(){
 
   /* Hoist userPalette to load() scope so all .then() callbacks can access it */
   var psel=document.getElementById('psel');
-  var userPalette=psel.value||'viridis';
+  var userPalette=psel.value||'jet';
 
   /* Only show loading spinner if we have no image yet (first load or date change) */
   var hasExisting=bmp!==null;
@@ -488,11 +487,10 @@ function load(){
     .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})
     .then(function(m){
       meta=m;
-      /* On first load (no user change yet), sync selector to backend palette */
-      if(!psel.dataset.userChanged){
-        psel.value=meta.palette||'viridis';
-        userPalette=psel.value;
-      }
+      /* Always use the selector's current value as the palette.
+         The HTML default is 'jet' (selected attribute). We do NOT sync from
+         meta.palette — the user's selector choice is the source of truth. */
+      userPalette=psel.value||'jet';
       setPalette(userPalette);
 
       /* Sync contrast sliders to the auto-range from meta, but only if the
@@ -501,17 +499,18 @@ function load(){
         syncSliders(meta.db_min, meta.db_max);
       }
 
-      /* Build image URL — meta.image_url already contains ?db_min=&db_max= from
-         the backend auto-range. If the user has moved the sliders, override those
-         values with the slider values instead. */
+      /* Build image URL.
+         meta.image_url is the base URL (no db_min/db_max — those are only added
+         when the user has moved the sliders away from the auto-range defaults).
+         The backend defaults to its config palette when no palette param is given,
+         so we only add palette= when the user has chosen a different one. */
       var iurl=meta.image_url;
+      /* Add contrast params only when user has moved sliders */
       if(contrastUserChanged){
-        /* Strip any existing db_min/db_max from the URL and replace with slider values */
-        iurl=iurl.replace(/[?&]db_min=[^&]*/g,'').replace(/[?&]db_max=[^&]*/g,'');
-        /* Clean up any dangling ? or & */
-        iurl=iurl.replace(/\?&/,'?').replace(/&&/g,'&').replace(/[?&]$/,'');
         iurl+=(iurl.indexOf('?')>=0?'&':'?')+'db_min='+contrastMin+'&db_max='+contrastMax;
       }
+      /* Add palette param only when user has chosen non-default palette.
+         meta.palette reflects the backend config default. */
       if(userPalette&&userPalette!==meta.palette){
         iurl+=(iurl.indexOf('?')>=0?'&':'?')+'palette='+encodeURIComponent(userPalette);
       }
@@ -533,13 +532,11 @@ function load(){
       var palNames={viridis:'Viridis',plasma:'Plasma',jet:'Jet'};
       var palName=palNames[userPalette]||userPalette;
       document.getElementById('subtitle').textContent=startMHz+' \u2013 '+endMHz+' MHz \u00b7 one row per minute \u00b7 '+palName+' palette';
-      /* Update download button — always use the same URL that was fetched so
-         the saved PNG exactly matches what the user sees */
+      /* Update download button — build the same URL as was fetched so the
+         saved PNG exactly matches what the user sees */
       var dlBtn=document.getElementById('dl-btn');
       var dlUrl=meta.image_url;
       if(contrastUserChanged){
-        dlUrl=dlUrl.replace(/[?&]db_min=[^&]*/g,'').replace(/[?&]db_max=[^&]*/g,'');
-        dlUrl=dlUrl.replace(/\?&/,'?').replace(/&&/g,'&').replace(/[?&]$/,'');
         dlUrl+=(dlUrl.indexOf('?')>=0?'&':'?')+'db_min='+contrastMin+'&db_max='+contrastMax;
       }
       if(userPalette&&userPalette!==meta.palette){

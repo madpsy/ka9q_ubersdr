@@ -1438,16 +1438,14 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	// Compute auto-range from actual data; fall back to config values if no data available.
 	autoMin, autoMax := autoRangeRows(dataRows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
 
+	// image_url does NOT include db_min/db_max — the frontend uses the meta values
+	// to populate the contrast sliders and only adds db_min/db_max to the image URL
+	// when the user has moved the sliders away from the auto-range defaults.
+	// This avoids a re-render on every page load.
 	imageURL := "/api/spectrogram"
-	sep := "?"
 	if safeDateStr != today {
 		imageURL += "?date=" + safeDateStr
-		sep = "&"
 	}
-	// Embed the auto-computed range into the image URL so the PNG endpoint
-	// renders with the same range the meta reports, without a second auto-compute.
-	imageURL += sep + "db_min=" + strconv.FormatFloat(float64(autoMin), 'f', 1, 32) +
-		"&db_max=" + strconv.FormatFloat(float64(autoMax), 'f', 1, 32)
 
 	cacheControl := "max-age=60"
 	if complete {

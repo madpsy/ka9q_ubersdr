@@ -327,7 +327,11 @@ function syncSliders(mn,mx){
 }
 
 /* ── State ──────────────────────────────────────────────────────────────── */
-var meta=null,bmp=null,ictx=null,timer=null;
+/* readCtx: offscreen canvas used ONLY for getImageData pixel reads.
+   It is never displayed and never has anything composited over it, so
+   getImageData always returns clean image pixels — not GPU-composited
+   pixels that include the overlay canvas (which caused the darkening bug). */
+var meta=null,bmp=null,ictx=null,readCtx=null,timer=null;
 var availableDates=[]; /* populated from /api/spectrogram/list, newest first */
 
 /* Zoom/pan state */
@@ -566,10 +570,20 @@ function render(){
     oc.height=Math.round(r.height)||ic.height;
   }
   if(!ictx||needsResize){
-    ictx=ic.getContext('2d',{willReadFrequently:true});
+    ictx=ic.getContext('2d');
   }
   /* Draw new image — single atomic canvas operation, no blank frame */
   ictx.drawImage(bmp,0,0);
+  /* Maintain a separate offscreen canvas for pixel reads (pxToDb / tooltip).
+     This canvas is never displayed and never has the overlay composited over it,
+     so getImageData always returns clean image pixels regardless of what the
+     browser does with the stacked on-screen canvases. */
+  if(!readCtx||needsResize){
+    var offscreen=document.createElement('canvas');
+    offscreen.width=bmp.width; offscreen.height=bmp.height;
+    readCtx=offscreen.getContext('2d',{willReadFrequently:true});
+  }
+  readCtx.drawImage(bmp,0,0);
   if(needsResize){
     buildFreqAxis(); buildTimeAxis(); buildLegend(); setupHover();
     if(!zoomSetup){setupZoom();zoomSetup=true;}
@@ -753,7 +767,7 @@ function setupHover(){
   var octx=oc.getContext('2d');
 
   sgRight.onmousemove=function(e){
-    if(!meta||!ictx)return;
+    if(!meta||!ictx||!readCtx)return;
 
     /* Cursor position relative to cwrap (the scaled canvas element).
        getBoundingClientRect() on cwrap gives its screen rect after CSS transform. */
@@ -766,9 +780,10 @@ function setupHover(){
     var xp=Math.max(0,Math.min(1,(e.clientX-cr.left)/cr.width));
     var yp=Math.max(0,Math.min(1,(e.clientY-cr.top)/cr.height));
 
-    /* Canvas pixel coordinates for pixel read */
-    var px=Math.floor(xp*ictx.canvas.width);
-    var py=Math.floor(yp*ictx.canvas.height);
+    /* Canvas pixel coordinates for pixel read — use readCtx dimensions (offscreen,
+       same size as img-canvas native pixels, never composited with overlay) */
+    var px=Math.floor(xp*readCtx.canvas.width);
+    var py=Math.floor(yp*readCtx.canvas.height);
 
     /* Frequency */
     var hz=xp*meta.end_freq_hz;
@@ -788,7 +803,9 @@ function setupHover(){
     if(!nodata){
       var ttMin=contrastUserChanged?contrastMin:meta.db_min;
       var ttMax=contrastUserChanged?contrastMax:meta.db_max;
-      sig=pxToDb(ictx,px,py,ttMin,ttMax);
+      /* Use readCtx (offscreen, clean pixels) — NOT ictx (on-screen canvas that
+         the browser may composite with the overlay canvas before readback) */
+      sig=pxToDb(readCtx,px,py,ttMin,ttMax);
       if(meta.rows&&meta.rows[row]){
         var nfv=meta.rows[row].noise_floor;
         if(nfv!==0){nf=nfv;if(sig!==null)snr=sig-nf;}
@@ -821,10 +838,14 @@ function setupHover(){
 
     /* Crosshair — draw in overlay canvas screen coordinates.
        The overlay canvas covers the full sg-right area.
-       Sync its pixel dimensions to its CSS size on every draw to handle resize. */
+       Sync its pixel dimensions to its CSS size on every draw to handle resize.
+       Re-acquire context after any resize — assigning .width/.height resets the
+       context state and can make the existing reference behave unexpectedly. */
     var or=oc.getBoundingClientRect();
-    if(oc.width!==Math.round(or.width)||oc.height!==Math.round(or.height)){
-      oc.width=Math.round(or.width); oc.height=Math.round(or.height);
+    var orW=Math.round(or.width), orH=Math.round(or.height);
+    if(oc.width!==orW||oc.height!==orH){
+      oc.width=orW; oc.height=orH;
+      octx=oc.getContext('2d'); /* re-acquire after resize */
     }
     /* Cursor position in overlay canvas pixels */
     var ocx=e.clientX-or.left;

@@ -483,8 +483,8 @@ class SpectrumDisplay {
             manualMinDb: -120, // Manual minimum dB
             manualMaxDb: -40, // Manual maximum dB
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
-            autoFloorOffset: 0, // dB offset applied to auto-calculated noise floor
-            autoCeilOffset: 0,  // dB offset applied to auto-calculated ceiling
+            autoFloorOffset: 15, // dB offset applied to auto-calculated noise floor (positive = compress upward)
+            autoCeilOffset: -15, // dB offset applied to auto-calculated ceiling (negative = compress downward)
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
             contrast: config.contrast !== undefined ? config.contrast : 35, // Contrast threshold (0-100), lower = more signals visible in auto mode

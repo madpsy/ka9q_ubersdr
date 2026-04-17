@@ -60,6 +60,9 @@ button:hover{background:rgba(255,255,255,.25)}
 <div class="controls">
   <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
   <button onclick="load()">&#x21BB; Refresh</button>
+  <a id="dl-btn" href="#" download style="display:none">
+    <button type="button">&#x2B07; Download PNG</button>
+  </a>
   <span class="status" id="status">Loading&hellip;</span>
 </div>
 
@@ -198,6 +201,11 @@ function load(){
       document.getElementById('loading').style.display='none';
       document.getElementById('view').style.display='block';
       setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 in progress'));
+      /* Update download button */
+      var dlBtn=document.getElementById('dl-btn');
+      dlBtn.href=meta.image_url;
+      dlBtn.download='spectrogram_'+meta.date+'.png';
+      dlBtn.style.display='inline';
       if(isToday&&!meta.complete)timer=setTimeout(load,65000);
     })
     .catch(function(e){

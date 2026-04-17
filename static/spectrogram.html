@@ -557,17 +557,18 @@ function load(){
       render();
       document.getElementById('loading').style.display='none';
       document.getElementById('view').style.display='block';
-      /* Compute UTC time of the last row: row N = N minutes past midnight */
-      var lastRowMin=meta.row_count>0?meta.row_count-1:0;
-      var lastHH=String(Math.floor(lastRowMin/60)).padStart(2,'0');
-      var lastMM=String(lastRowMin%60).padStart(2,'0');
-      var lastRowTime=lastHH+':'+lastMM+' UTC';
-      /* Compute staleness: how many minutes ago was the last row recorded? */
-      var nowUTC=new Date();
-      var midnightUTC=new Date(Date.UTC(nowUTC.getUTCFullYear(),nowUTC.getUTCMonth(),nowUTC.getUTCDate()));
-      var nowMinutes=Math.floor((nowUTC-midnightUTC)/60000);
-      var staleMinutes=nowMinutes-lastRowMin;
-      var staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
+      /* Compute UTC time and staleness from the last row's real unix timestamp.
+         meta.rows[last].unix is the actual time the row was recorded — immune to
+         service restarts, gaps, or the service not starting at midnight. */
+      var lastRowTime='';
+      var staleStr='';
+      if(meta.rows&&meta.rows.length>0){
+        var lastRow=meta.rows[meta.rows.length-1];
+        lastRowTime=lastRow.utc_time+' UTC';
+        var staleSeconds=Math.floor(Date.now()/1000)-lastRow.unix;
+        var staleMinutes=Math.floor(staleSeconds/60);
+        staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
+      }
       setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
       /* Update subtitle with actual metadata */
       var startMHz=(meta.start_freq_hz/1e6).toFixed(0);

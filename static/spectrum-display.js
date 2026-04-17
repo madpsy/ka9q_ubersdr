@@ -2115,10 +2115,12 @@ class SpectrumDisplay {
 
             // Calculate y position using actual data range (inverted - higher dB at top)
             // Draw in the area below the frequency scale (from graphTopMargin to graphHeight)
-            // Apply gamma curve so the contrast slider compresses the noise floor visually
-            // without altering the dB scale labels. gamma < 1 pushes signals upward.
+            // Apply gamma curve: contrast=15 (default) → gamma≈0.7 (decent compression),
+            // contrast=30 → gamma≈0.25 (strong), contrast=0 → gamma≈1.9 (near-linear).
+            // The dB axis labels are placed at the same gamma-corrected positions so they
+            // remain accurate — the scale is non-linear but always correct.
             const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
-            const gamma = Math.pow(2, (15 - this.config.autoContrast) / 15);
+            const gamma = Math.pow(2, (10 - this.config.autoContrast) / 15);
             const normalized = Math.pow(linearNorm, gamma);
             const y = graphHeight - (normalized * graphDrawHeight);
 
@@ -2174,10 +2176,14 @@ class SpectrumDisplay {
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2;
 
+        // Use the same gamma as drawLineGraph() so labels sit at the correct pixel positions
+        const gamma = Math.pow(2, (10 - this.config.autoContrast) / 15);
+
         const firstDb = Math.ceil(minDb / dbStep) * dbStep;
         for (let db = firstDb; db <= maxDb; db += dbStep) {
-            // Calculate y position in the drawing area (below frequency scale)
-            const y = graphTopMargin + graphDrawHeight - ((db - minDb) / dbRange) * graphDrawHeight;
+            // Calculate y position with gamma correction — matches where signals are drawn
+            const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const y = graphTopMargin + graphDrawHeight - Math.pow(linearNorm, gamma) * graphDrawHeight;
 
             // Draw major tick (8 pixels long)
             ctx.beginPath();
@@ -2207,8 +2213,9 @@ class SpectrumDisplay {
             // Skip major ticks
             if (Math.abs(db % dbStep) < 0.01) continue;
 
-            // Calculate y position in the drawing area (below frequency scale)
-            const y = graphTopMargin + graphDrawHeight - ((db - minDb) / dbRange) * graphDrawHeight;
+            // Calculate y position with gamma correction — matches where signals are drawn
+            const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const y = graphTopMargin + graphDrawHeight - Math.pow(linearNorm, gamma) * graphDrawHeight;
 
             // Draw minor tick (4 pixels long)
             ctx.beginPath();
@@ -2330,7 +2337,7 @@ class SpectrumDisplay {
             // Calculate y position - use graphTopMargin + graphDrawHeight as base, subtract normalized height
             // Apply the same gamma as drawLineGraph() so peak hold stays aligned with the filled area
             const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
-            const gamma = Math.pow(2, (15 - this.config.autoContrast) / 15);
+            const gamma = Math.pow(2, (10 - this.config.autoContrast) / 15);
             const normalized = Math.pow(linearNorm, gamma);
             const y = graphTopMargin + graphDrawHeight - (normalized * graphDrawHeight);
 

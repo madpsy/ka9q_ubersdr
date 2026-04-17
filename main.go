@@ -1909,6 +1909,9 @@ func main() {
 	http.HandleFunc("/api/spectrogram/list", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramList(w, r, spectrogramRecorder)
 	})
+	http.HandleFunc("/api/spectrogram/meta/latest", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramMetaLatest(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
+	})
 	http.HandleFunc("/api/spectrogram/meta", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramMeta(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
 	})

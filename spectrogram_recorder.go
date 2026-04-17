@@ -1102,17 +1102,39 @@ func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dat
 	return buf.Bytes()
 }
 
-// handleSpectrogram serves the spectrogram PNG for a given UTC date.
+// ── Spectrogram HTTP API ─────────────────────────────────────────────────────
 //
-//	GET /api/spectrogram                          → today's PNG (config palette, auto range)
-//	GET /api/spectrogram?palette=plasma           → today's PNG re-rendered with plasma palette
-//	GET /api/spectrogram?db_min=-110&db_max=-65   → today's PNG with explicit dB range
-//	GET /api/spectrogram?date=YYYY-MM-DD          → archived PNG (config palette, from disk)
-//	GET /api/spectrogram?date=...&palette=jet     → archived PNG re-rendered with jet palette
-//	GET /api/spectrogram?date=...&db_min=...&db_max=... → archived PNG with explicit dB range
+// Image endpoints (PNG):
+//
+//	GET /api/spectrogram                                    → today's PNG (Jet palette, auto-range)
+//	GET /api/spectrogram?palette=plasma                     → today's PNG re-rendered with Plasma palette
+//	GET /api/spectrogram?db_min=-110&db_max=-65             → today's PNG with explicit dB range
+//	GET /api/spectrogram?date=YYYY-MM-DD                    → archived PNG for a past date
+//	GET /api/spectrogram?date=...&palette=jet               → archived PNG re-rendered with Jet palette
+//	GET /api/spectrogram?date=...&db_min=...&db_max=...     → archived PNG with explicit dB range
+//	GET /api/spectrogram/latest                             → 302 → most recent complete day's PNG
+//
+// Metadata endpoints (JSON):
+//
+//	GET /api/spectrogram/meta                               → today's metadata (db_min/db_max, row count, per-row noise floor)
+//	GET /api/spectrogram/meta?date=YYYY-MM-DD               → metadata for a past date
+//	GET /api/spectrogram/meta/latest                        → 302 → metadata for the most recent complete day
+//	GET /api/spectrogram/list                               → JSON list of available dates (newest first)
+//
+// Caching:
+//
+//	Today's PNG:          Cache-Control: max-age=60,    ETag: W/"<lastModified-ms>"
+//	Re-rendered PNG:      Cache-Control: max-age=3600,  ETag: W/"<date>-<palette>-<dbMin>-<dbMax>"
+//	Archived disk PNG:    Cache-Control: max-age=86400, ETag: W/"<mtime>-<size>"
+//	/latest redirect:     Cache-Control: max-age=3600,  ETag: "<YYYY-MM-DD>"
+//	/meta/latest redirect:Cache-Control: max-age=3600,  ETag: "<YYYY-MM-DD>-meta"
+//	Today's meta:         Cache-Control: max-age=60
+//	Archived meta:        Cache-Control: max-age=3600
 //
 // When db_min/db_max are absent the range is auto-computed from the actual data
 // (P5 noise floor → P95 signal peak) so the full palette is always utilised.
+//
+// handleSpectrogram serves the spectrogram PNG for a given UTC date.
 func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -1336,6 +1358,46 @@ func handleSpectrogramLatest(w http.ResponseWriter, r *http.Request, recorder *S
 	// ETag is the target date string — stable until a new day completes at midnight.
 	target := "/api/spectrogram?date=" + latestComplete
 	etag := `"` + latestComplete + `"`
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// handleSpectrogramMetaLatest redirects to the metadata for the most recent *complete* day.
+// Mirrors handleSpectrogramLatest but targets /api/spectrogram/meta?date=YYYY-MM-DD instead
+// of the PNG endpoint, so clients can discover the latest date and its metadata in one step.
+//
+//	GET /api/spectrogram/meta/latest → 302 /api/spectrogram/meta?date=YYYY-MM-DD
+func handleSpectrogramMetaLatest(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "spectrogram-latest") {
+		http.Error(w, "rate limit exceeded for spectrogram/meta/latest — please wait before requesting again", http.StatusTooManyRequests)
+		return
+	}
+	if recorder == nil {
+		http.Error(w, "spectrogram recording is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Read from atomic cache — zero-cost, no I/O
+	v := recorder.latestComplete.Load()
+	latestComplete, _ := v.(string)
+	if latestComplete == "" {
+		http.Error(w, "no complete spectrogram available yet", http.StatusNotFound)
+		return
+	}
+
+	// Redirect to the date-specific meta endpoint.
+	// Same ETag and cache lifetime as the image latest redirect.
+	target := "/api/spectrogram/meta?date=" + latestComplete
+	etag := `"` + latestComplete + `-meta"`
 	w.Header().Set("Cache-Control", "max-age=3600")
 	w.Header().Set("ETag", etag)
 	if r.Header.Get("If-None-Match") == etag {

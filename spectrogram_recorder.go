@@ -579,9 +579,21 @@ var viridisLUT = [256][3]uint8{
 //
 //	GET /api/spectrogram          → today's in-progress PNG (from memory)
 //	GET /api/spectrogram?date=YYYY-MM-DD → archived PNG for that date (from disk)
-func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
+func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	if recorder == nil {
 		http.Error(w, "spectrogram recording is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Rate limit: 1 request per 10 seconds per IP (PNG is 1-3 MB)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "spectrogram") {
+		w.WriteHeader(http.StatusTooManyRequests)
+		http.Error(w, "rate limit exceeded for spectrogram — please wait 10 seconds between requests", http.StatusTooManyRequests)
 		return
 	}
 

@@ -262,10 +262,14 @@ func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
 		// Determine rate based on band/endpoint
 		var refillRate float64
 		var maxTokens float64
-		if band == "noise-analysis" {
+		switch band {
+		case "noise-analysis":
 			refillRate = 2.0 // 2 requests per second for noise analysis
 			maxTokens = 2.0
-		} else {
+		case "spectrogram":
+			refillRate = 0.1 // 1 request per 10 seconds for spectrogram PNG (large response)
+			maxTokens = 1.0
+		default:
 			refillRate = 0.5 // 1 request per 2 seconds for FFT data
 			maxTokens = 1.0
 		}

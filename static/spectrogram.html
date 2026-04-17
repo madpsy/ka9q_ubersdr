@@ -87,6 +87,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
     <input type="range" id="ceil-sl" class="cslider" min="-150" max="0" step="1" value="-60" oninput="onContrastChange()">
     <span class="cval" id="ceil-val">-60</span>
   </div>
+  <button onclick="resetContrast()" title="Reset contrast to auto-range">&#x2B0C; Auto</button>
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
@@ -304,6 +305,13 @@ function onContrastChange(){
   contrastTimer=setTimeout(function(){bmp=null;load();},300);
 }
 var contrastTimer=null;
+
+/* Reset contrast to auto-range — clears user override and re-fetches */
+function resetContrast(){
+  contrastUserChanged=false;
+  bmp=null;
+  load();
+}
 
 /* Sync sliders to a given min/max (called when meta arrives) */
 function syncSliders(mn,mx){

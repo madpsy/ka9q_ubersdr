@@ -557,7 +557,18 @@ function load(){
       render();
       document.getElementById('loading').style.display='none';
       document.getElementById('view').style.display='block';
-      setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 in progress'));
+      /* Compute UTC time of the last row: row N = N minutes past midnight */
+      var lastRowMin=meta.row_count>0?meta.row_count-1:0;
+      var lastHH=String(Math.floor(lastRowMin/60)).padStart(2,'0');
+      var lastMM=String(lastRowMin%60).padStart(2,'0');
+      var lastRowTime=lastHH+':'+lastMM+' UTC';
+      /* Compute staleness: how many minutes ago was the last row recorded? */
+      var nowUTC=new Date();
+      var midnightUTC=new Date(Date.UTC(nowUTC.getUTCFullYear(),nowUTC.getUTCMonth(),nowUTC.getUTCDate()));
+      var nowMinutes=Math.floor((nowUTC-midnightUTC)/60000);
+      var staleMinutes=nowMinutes-lastRowMin;
+      var staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
+      setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
       /* Update subtitle with actual metadata */
       var startMHz=(meta.start_freq_hz/1e6).toFixed(0);
       var endMHz=(meta.end_freq_hz/1e6).toFixed(0);
@@ -733,11 +744,16 @@ function buildTimeAxis(){
     return frac*zoom.scale + zoom.ty/ch;
   }
 
+  /* The image height in pixels equals meta.row_count (variable-height PNG).
+     Use row_count as the canvas row span for all axis calculations so that
+     labels are placed correctly relative to the actual image content. */
+  var canvasRows=meta.row_count;
+
   /* Visible row range in canvas fractions */
   var visTop=Math.max(0,-zoom.ty/(ch*zoom.scale));
   var visBottom=Math.min(1,(-zoom.ty+ch)/(ch*zoom.scale));
-  var visibleSpanRows=(visBottom-visTop)*meta.max_rows;
-  if(visibleSpanRows<=0)visibleSpanRows=meta.max_rows;
+  var visibleSpanRows=(visBottom-visTop)*canvasRows;
+  if(visibleSpanRows<=0)visibleSpanRows=canvasRows;
 
   /* Choose tick interval based on visible span (in minutes) */
   var interval=180; /* default: every 3 hours */
@@ -749,10 +765,10 @@ function buildTimeAxis(){
   else if(visibleSpanRows<=960)interval=120;
 
   /* Snap to first tick at or before visible top */
-  var firstRow=Math.floor(visTop*meta.max_rows/interval)*interval;
+  var firstRow=Math.floor(visTop*canvasRows/interval)*interval;
 
-  for(var row=firstRow;row<=meta.max_rows;row+=interval){
-    var sc=canvasRowToScreen(row/meta.max_rows);
+  for(var row=firstRow;row<=canvasRows;row+=interval){
+    var sc=canvasRowToScreen(row/canvasRows);
     if(sc<-0.02||sc>1.02)continue; /* small margin for edge labels */
     var lbl=document.createElement('span');
     lbl.className='t-label';
@@ -812,8 +828,10 @@ function setupHover(){
     var mhz=(hz/1e6).toFixed(4);
     var band=bandName(hz);
 
-    /* Time */
-    var row=Math.floor(yp*meta.max_rows);
+    /* Time — yp maps 0..1 across the image height which equals meta.row_count pixels
+       (the cached PNG only contains data rows, not the full 1440-row canvas).
+       Scale by row_count to get the actual row index, then derive the UTC minute. */
+    var row=Math.floor(yp*meta.row_count);
     var nodata=!overCanvas||row>=meta.row_count;
     var hh=String(Math.floor(row/60)).padStart(2,'0');
     var mm=String(row%60).padStart(2,'0');

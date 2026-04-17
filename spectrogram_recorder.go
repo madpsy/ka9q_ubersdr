@@ -500,17 +500,13 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 	// Auto-range from actual data; fall back to hardcoded defaults if insufficient data.
 	dbMin, dbMax := autoRangeRows(snapshot, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
-	// Fixed 4096×1440 image — unfilled rows are black
-	img := image.NewNRGBA(image.Rect(0, 0, spectrogramBins, spectrogramMaxRows))
+	// Only render rows that have data — image grows throughout the day.
+	// The frontend uses meta.max_rows (always 1440) for time-axis scaling,
+	// so a variable-height image is correct; CSS height:auto handles it.
+	// This avoids rendering ~950 black rows early in the day (saves ~80% of work).
+	img := image.NewNRGBA(image.Rect(0, 0, spectrogramBins, rowCount))
 
 	black := color.NRGBA{0, 0, 0, 255}
-
-	// Fill unfilled rows with black
-	for y := rowCount; y < spectrogramMaxRows; y++ {
-		for x := 0; x < spectrogramBins; x++ {
-			img.SetNRGBA(x, y, black)
-		}
-	}
 
 	// Render filled rows — row 0 = UTC midnight (top), newest = bottom
 	palette := spectrogramDefaultPalette

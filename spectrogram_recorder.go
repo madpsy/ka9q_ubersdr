@@ -573,11 +573,11 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 // including the black no-data area.
 func drawWatermark(img *image.NRGBA, text string) {
 	const (
-		charW = 6 // glyph width including 1px spacing
-		charH = 7 // glyph height
-		padX  = 8 // right padding
-		padY  = 8 // bottom padding
-		scale = 2 // pixel scale factor (renders at 12×14 per char)
+		charW = 6  // glyph width including 1px spacing
+		charH = 7  // glyph height
+		padX  = 12 // right padding
+		padY  = 12 // bottom padding
+		scale = 5  // pixel scale factor — large enough to read when image is scaled to browser width
 	)
 
 	textW := len(text) * charW * scale

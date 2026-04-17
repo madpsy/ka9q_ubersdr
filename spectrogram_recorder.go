@@ -1196,6 +1196,12 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		lm := recorder.LastModified()
 		if !lm.IsZero() {
 			w.Header().Set("Last-Modified", lm.UTC().Format(http.TimeFormat))
+			etag := `W/"` + strconv.FormatInt(lm.UnixMilli(), 10) + `"`
+			w.Header().Set("ETag", etag)
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 		}
 		w.Write(pngBytes)
 		return
@@ -1253,6 +1259,15 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "max-age=3600") // re-rendered, not immutable
 		w.Header().Set("Content-Disposition", `inline; filename="spectrogram_`+safeDateStr+`.png"`)
+		// Weak ETag: date + rendering params — changes if palette or range changes
+		etag := `W/"` + safeDateStr + "-" + requestedPalette + "-" +
+			strconv.FormatFloat(float64(dbMin), 'f', 1, 32) + "-" +
+			strconv.FormatFloat(float64(dbMax), 'f', 1, 32) + `"`
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		w.Write(pngBytes)
 		return
 	}
@@ -1273,6 +1288,13 @@ serveDiskPNG:
 	w.Header().Set("Content-Disposition", `inline; filename="spectrogram_`+safeDateStr+`.png"`)
 	if stat != nil {
 		w.Header().Set("Last-Modified", stat.ModTime().UTC().Format(http.TimeFormat))
+		// Weak ETag: mtime + size — stable for immutable archived files
+		etag := `W/"` + strconv.FormatInt(stat.ModTime().Unix(), 10) + "-" + strconv.FormatInt(stat.Size(), 10) + `"`
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 	}
 	io.Copy(w, f)
 }
@@ -1311,8 +1333,15 @@ func handleSpectrogramLatest(w http.ResponseWriter, r *http.Request, recorder *S
 
 	// Redirect to the date-specific PNG endpoint.
 	// Cache the redirect for 1 hour — re-check after midnight when a new day completes.
+	// ETag is the target date string — stable until a new day completes at midnight.
 	target := "/api/spectrogram?date=" + latestComplete
+	etag := `"` + latestComplete + `"`
 	w.Header().Set("Cache-Control", "max-age=3600")
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	http.Redirect(w, r, target, http.StatusFound)
 }
 

@@ -1091,11 +1091,13 @@ noisefloor:
 #   data_dir/spectrogram_YYYY-MM-DD.bin  — raw float32 data (today only, for restart recovery)
 #
 # HTTP endpoints:
-#   GET /api/spectrogram                    — today's in-progress PNG (Cache-Control: max-age=60)
-#   GET /api/spectrogram?date=YYYY-MM-DD    — archived PNG for a past date (Cache-Control: max-age=86400)
-#   GET /api/spectrogram/list               — JSON list of available dates (newest first)
-#   GET /api/spectrogram/latest             — redirects to the most recent complete day's PNG
-#   GET /api/spectrogram/meta               — JSON metadata (date, row count, auto-ranged dB min/max)
+#   GET /api/spectrogram                         — today's in-progress PNG (Cache-Control: max-age=60, ETag)
+#   GET /api/spectrogram?date=YYYY-MM-DD         — archived PNG for a past date (Cache-Control: max-age=86400, ETag)
+#   GET /api/spectrogram/latest                  — 302 → most recent complete day's PNG (ETag on redirect)
+#   GET /api/spectrogram/meta                    — today's JSON metadata (db_min/db_max, row count, per-row noise floor)
+#   GET /api/spectrogram/meta?date=YYYY-MM-DD    — JSON metadata for a past date
+#   GET /api/spectrogram/meta/latest             — 302 → metadata for the most recent complete day
+#   GET /api/spectrogram/list                    — JSON list of available dates (newest first)
 #
 # Colour scale: auto-ranged per image using the 5th/95th percentile of signal levels.
 # The Jet palette is used by default; users can switch palette and adjust contrast

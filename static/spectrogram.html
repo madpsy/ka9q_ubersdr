@@ -85,15 +85,16 @@ button:hover{background:rgba(255,255,255,.25)}
   <div class="sg-wrap">
     <div id="time-axis"></div>
     <div class="sg-right">
-      <!-- zoom-wrap receives the CSS transform so freq-axis + canvas move together -->
+      <!-- freq-axis is OUTSIDE zoom-wrap so it stays fixed during zoom/pan.
+           buildFreqAxis() positions labels in screen-space percentages. -->
+      <div id="freq-axis"></div>
+      <!-- zoom-wrap receives the CSS transform (canvas only) -->
       <div id="zoom-wrap" style="transform-origin:0 0">
-        <div id="freq-axis"></div>
         <div class="sg-canvas-wrap" id="cwrap">
           <canvas id="img-canvas"></canvas>
         </div>
       </div>
-      <!-- Overlay canvas is OUTSIDE zoom-wrap so it doesn't get CSS-scaled.
-           It covers the full sg-right area and draws crosshair in screen coords. -->
+      <!-- Overlay canvas is OUTSIDE zoom-wrap so it doesn't get CSS-scaled. -->
       <canvas id="overlay-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10"></canvas>
     </div>
   </div>
@@ -396,6 +397,10 @@ function load(){
   var today=new Date().toISOString().slice(0,10);
   var isToday=!ds||ds===today;
 
+  /* Hoist userPalette to load() scope so all .then() callbacks can access it */
+  var psel=document.getElementById('psel');
+  var userPalette=psel.value||'viridis';
+
   /* Only show loading spinner if we have no image yet (first load or date change) */
   var hasExisting=bmp!==null;
   if(!hasExisting){
@@ -411,10 +416,6 @@ function load(){
     .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})
     .then(function(m){
       meta=m;
-      /* Set palette selector to match backend config palette on first load,
-         but keep user's selection if they've already changed it */
-      var psel=document.getElementById('psel');
-      var userPalette=psel.value||'viridis';
       /* On first load (no user change yet), sync selector to backend palette */
       if(!psel.dataset.userChanged){
         psel.value=meta.palette||'viridis';
@@ -490,7 +491,10 @@ function render(){
    All ticks are rendered across the full 0–30 MHz range at the appropriate
    density for the current zoom level. Positions are left:X% of the full width.
    The CSS transform on zoom-wrap handles scaling; overflow:hidden on sg-right
-   clips labels outside the viewport. No getBoundingClientRect() needed. */
+   The freq-axis is now OUTSIDE zoom-wrap, so positions must be in screen-space.
+   A canvas frequency f maps to screen position:
+     screenPct = (f/totalHz * zoom.scale + zoom.tx/containerWidth) * 100%
+   Only ticks within [0%, 100%] of the container are visible. */
 function buildFreqAxis(){
   var ax=document.getElementById('freq-axis');
   ax.innerHTML='';
@@ -498,10 +502,21 @@ function buildFreqAxis(){
 
   var totalHz=meta.end_freq_hz; /* 30 MHz */
 
-  /* Estimate visible frequency span from zoom scale.
-     At scale=1 the full 30 MHz is visible.
-     At scale=N, approximately 30/N MHz is visible. */
-  var visibleSpanHz=totalHz/zoom.scale;
+  /* Get container width for tx conversion (px → fraction) */
+  var container=document.querySelector('.sg-right');
+  var cw=container?container.getBoundingClientRect().width:800;
+  if(cw===0)cw=800;
+
+  /* Convert a canvas frequency fraction [0..1] to screen fraction [0..1] */
+  function canvasToScreen(frac){
+    return frac*zoom.scale + zoom.tx/cw;
+  }
+
+  /* Visible frequency range in canvas fractions */
+  var visLeft=Math.max(0,-zoom.tx/(cw*zoom.scale));
+  var visRight=Math.min(1,(-zoom.tx+cw)/(cw*zoom.scale));
+  var visibleSpanHz=(visRight-visLeft)*totalHz;
+  if(visibleSpanHz<=0)visibleSpanHz=totalHz;
 
   /* Choose tick intervals based on visible span */
   var intervals=[
@@ -531,10 +546,16 @@ function buildFreqAxis(){
     return hz+' Hz';
   }
 
-  /* Render all minor notches across full range */
-  for(var f=0;f<=totalHz;f+=minorInterval){
-    if(f%majorInterval===0)continue; /* major handles these */
-    var pct=(f/totalHz)*100+'%';
+  /* Snap to first tick at or before visible left edge */
+  var firstMinor=Math.floor(visLeft*totalHz/minorInterval)*minorInterval;
+  var firstMajor=Math.floor(visLeft*totalHz/majorInterval)*majorInterval;
+
+  /* Render minor notches — only those in visible range */
+  for(var f=firstMinor;f<=totalHz;f+=minorInterval){
+    if(f%majorInterval===0)continue;
+    var sc=canvasToScreen(f/totalHz);
+    if(sc<0||sc>1)continue;
+    var pct=(sc*100)+'%';
     var notch=document.createElement('div');
     notch.className='f-notch';
     notch.style.left=pct;
@@ -543,9 +564,11 @@ function buildFreqAxis(){
     ax.appendChild(notch);
   }
 
-  /* Render all major notches + labels across full range */
-  for(var f=0;f<=totalHz;f+=majorInterval){
-    var pct=(f/totalHz)*100+'%';
+  /* Render major notches + labels — only those in visible range */
+  for(var f=firstMajor;f<=totalHz;f+=majorInterval){
+    var sc=canvasToScreen(f/totalHz);
+    if(sc<-0.05||sc>1.05)continue; /* small margin for edge labels */
+    var pct=(sc*100)+'%';
     var notch=document.createElement('div');
     notch.className='f-notch'; notch.style.left=pct;
     ax.appendChild(notch);

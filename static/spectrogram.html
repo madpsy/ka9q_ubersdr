@@ -61,6 +61,14 @@ button:hover{background:rgba(255,255,255,.25)}
   <button id="prev-btn" onclick="navDate(-1)" title="Previous day (older)" disabled>&#x25C4;</button>
   <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
   <button id="next-btn" onclick="navDate(+1)" title="Next day (newer)" disabled>&#x25BA;</button>
+  <div>
+    <label for="psel">Palette:</label>
+    <select id="psel" onchange="onPaletteChange()">
+      <option value="viridis">Viridis</option>
+      <option value="plasma">Plasma</option>
+      <option value="jet">Jet</option>
+    </select>
+  </div>
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <a id="dl-btn" href="#" download style="display:none">
@@ -368,6 +376,15 @@ function updateNavButtons(){
   document.getElementById('next-btn').disabled=(idx<=0);
 }
 
+/* Called when user changes the palette selector */
+function onPaletteChange(){
+  var psel=document.getElementById('psel');
+  psel.dataset.userChanged='1'; /* mark as user-changed so load() doesn't reset it */
+  setPalette(psel.value);
+  bmp=null; /* force re-fetch with new palette */
+  load();
+}
+
 function load(){
   clearTimeout(timer);
   document.getElementById('err').innerHTML='';
@@ -394,9 +411,22 @@ function load(){
     .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})
     .then(function(m){
       meta=m;
-      /* Switch to the palette used by the backend for this image */
-      setPalette(meta.palette||'viridis');
-      var iurl=meta.image_url+(isToday?(meta.image_url.indexOf('?')>=0?'&':'?')+'_t='+Date.now():'');
+      /* Set palette selector to match backend config palette on first load,
+         but keep user's selection if they've already changed it */
+      var psel=document.getElementById('psel');
+      var userPalette=psel.value||'viridis';
+      /* On first load (no user change yet), sync selector to backend palette */
+      if(!psel.dataset.userChanged){
+        psel.value=meta.palette||'viridis';
+        userPalette=psel.value;
+      }
+      setPalette(userPalette);
+      /* Build image URL with palette param if different from config */
+      var iurl=meta.image_url;
+      if(userPalette&&userPalette!==meta.palette){
+        iurl+=(iurl.indexOf('?')>=0?'&':'?')+'palette='+encodeURIComponent(userPalette);
+      }
+      if(isToday){iurl+=(iurl.indexOf('?')>=0?'&':'?')+'_t='+Date.now();}
       return fetch(iurl);
     })
     .then(function(r){if(!r.ok)throw new Error('image '+r.status);return r.blob();})
@@ -410,7 +440,11 @@ function load(){
       setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 in progress'));
       /* Update download button */
       var dlBtn=document.getElementById('dl-btn');
-      dlBtn.href=meta.image_url;
+      var dlUrl=meta.image_url;
+      if(userPalette&&userPalette!==meta.palette){
+        dlUrl+=(dlUrl.indexOf('?')>=0?'&':'?')+'palette='+encodeURIComponent(userPalette);
+      }
+      dlBtn.href=dlUrl;
       dlBtn.download='spectrogram_'+meta.date+'.png';
       dlBtn.style.display='inline';
       if(isToday&&!meta.complete)timer=setTimeout(load,65000);

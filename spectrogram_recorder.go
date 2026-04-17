@@ -963,10 +963,49 @@ func sortFloat32Slice(s []float32) {
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
 
+// renderRowsAsPNG renders a set of float32 rows as a PNG using the specified palette.
+// Used for on-the-fly palette switching.
+func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, spectrogramBins, spectrogramMaxRows))
+	black := color.NRGBA{0, 0, 0, 255}
+
+	rowCount := len(rows)
+	for y := rowCount; y < spectrogramMaxRows; y++ {
+		for x := 0; x < spectrogramBins; x++ {
+			img.SetNRGBA(x, y, black)
+		}
+	}
+	for y, row := range rows {
+		for x, val := range row {
+			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
+				img.SetNRGBA(x, y, black)
+			} else {
+				img.SetNRGBA(x, y, paletteColour(palette, val, dbMin, dbMax))
+			}
+		}
+	}
+
+	// Watermark
+	wm := "UberSDR"
+	if callsign != "" {
+		wm += " " + callsign
+	}
+	wm += " " + dateStr
+	drawWatermark(img, wm)
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 // handleSpectrogram serves the spectrogram PNG for a given UTC date.
 //
-//	GET /api/spectrogram          → today's in-progress PNG (from memory)
-//	GET /api/spectrogram?date=YYYY-MM-DD → archived PNG for that date (from disk)
+//	GET /api/spectrogram                    → today's PNG (config palette, from memory)
+//	GET /api/spectrogram?palette=plasma     → today's PNG re-rendered with plasma palette
+//	GET /api/spectrogram?date=YYYY-MM-DD    → archived PNG (config palette, from disk)
+//	GET /api/spectrogram?date=...&palette=jet → archived PNG re-rendered with jet palette
 func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -988,9 +1027,37 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	today := time.Now().UTC().Format("2006-01-02")
 	dateStr := r.URL.Query().Get("date")
 
+	// Validate and sanitise palette param
+	requestedPalette := r.URL.Query().Get("palette")
+	switch requestedPalette {
+	case "viridis", "plasma", "jet":
+		// valid
+	default:
+		requestedPalette = recorder.config.Palette // fall back to config palette
+	}
+	paletteChanged := requestedPalette != recorder.config.Palette
+
 	if dateStr == "" || dateStr == today {
-		// Serve today's in-progress PNG from memory
-		pngBytes := recorder.GetCachedPNG()
+		var pngBytes []byte
+		if paletteChanged {
+			// Re-render today's data with the requested palette
+			recorder.mu.Lock()
+			rowCount := recorder.rowCount
+			rows := make([][]float32, rowCount)
+			for i := 0; i < rowCount; i++ {
+				row := make([]float32, spectrogramBins)
+				copy(row, recorder.rows[i][:])
+				rows[i] = row
+			}
+			recorder.mu.Unlock()
+			if rowCount == 0 {
+				http.Error(w, "spectrogram not yet available — waiting for first data", http.StatusServiceUnavailable)
+				return
+			}
+			pngBytes = renderRowsAsPNG(rows, requestedPalette, float32(recorder.config.DBMin), float32(recorder.config.DBMax), today, recorder.config.Callsign)
+		} else {
+			pngBytes = recorder.GetCachedPNG()
+		}
 		if len(pngBytes) == 0 {
 			http.Error(w, "spectrogram not yet available — waiting for first data", http.StatusServiceUnavailable)
 			return
@@ -1019,8 +1086,47 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		return
 	}
 
-	// Serve archived PNG from disk (use re-formatted date to prevent path traversal)
 	safeDateStr := requestedDate.Format("2006-01-02")
+
+	if paletteChanged {
+		// Re-render archived day from .bin file with requested palette
+		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
+		binData, err := os.ReadFile(binPath)
+		if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+			// .bin not available — fall through to serve disk PNG
+			goto serveDiskPNG
+		}
+		rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
+		if rowCount <= 0 || rowCount > spectrogramMaxRows {
+			goto serveDiskPNG
+		}
+		rows := make([][]float32, rowCount)
+		for i := 0; i < rowCount; i++ {
+			row := make([]float32, spectrogramBins)
+			offset := 24 + i*spectrogramBins*4
+			if offset+spectrogramBins*4 > len(binData) {
+				break
+			}
+			for j := 0; j < spectrogramBins; j++ {
+				bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
+				row[j] = math.Float32frombits(bits)
+				offset += 4
+			}
+			rows[i] = row
+		}
+		pngBytes := renderRowsAsPNG(rows, requestedPalette, float32(recorder.config.DBMin), float32(recorder.config.DBMax), safeDateStr, recorder.config.Callsign)
+		if len(pngBytes) == 0 {
+			goto serveDiskPNG
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "max-age=3600") // palette-switched, not immutable
+		w.Header().Set("Content-Disposition", `inline; filename="spectrogram_`+safeDateStr+`.png"`)
+		w.Write(pngBytes)
+		return
+	}
+
+serveDiskPNG:
+	// Serve archived PNG from disk (use re-formatted date to prevent path traversal)
 	path := recorder.ArchivedPNGPath(safeDateStr)
 	f, err := os.Open(path)
 	if err != nil {

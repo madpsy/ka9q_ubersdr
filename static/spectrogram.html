@@ -619,9 +619,16 @@ function load(){
         staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
       }
       setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
-      /* Update subtitle with actual metadata */
-      var startMHz=(meta.start_freq_hz/1e6).toFixed(0);
-      var endMHz=(meta.end_freq_hz/1e6).toFixed(0);
+      /* Update subtitle with actual metadata.
+         Use enough decimal places to distinguish narrow bands (e.g. 7.000–7.200 MHz). */
+      function fmtMHz(hz){
+        var mhz=hz/1e6;
+        if(mhz===Math.round(mhz))return mhz.toFixed(0);
+        if(Math.round(mhz*10)===mhz*10)return mhz.toFixed(1);
+        return mhz.toFixed(3);
+      }
+      var startMHz=fmtMHz(meta.start_freq_hz);
+      var endMHz=fmtMHz(meta.end_freq_hz);
       var palNames={viridis:'Viridis',plasma:'Plasma',jet:'Jet'};
       var palName=palNames[userPalette]||userPalette;
       document.getElementById('subtitle').textContent=startMHz+' \u2013 '+endMHz+' MHz \u00b7 one row per minute \u00b7 '+palName+' palette';
@@ -689,14 +696,19 @@ function buildFreqAxis(){
   ax.innerHTML='';
   if(!meta)return;
 
-  var totalHz=meta.end_freq_hz; /* 30 MHz */
+  /* For wideband: startHz=0, spanHz=30 MHz.
+     For per-band (e.g. 40m): startHz=7 MHz, spanHz=200 kHz.
+     Canvas fraction xp ∈ [0,1] maps to frequency: startHz + xp * spanHz */
+  var startHz=meta.start_freq_hz||0;
+  var spanHz=(meta.end_freq_hz||30e6)-startHz;
+  if(spanHz<=0)spanHz=30e6;
 
   /* Get container width for tx conversion (px → fraction) */
   var container=document.querySelector('.sg-right');
   var cw=container?container.getBoundingClientRect().width:800;
   if(cw===0)cw=800;
 
-  /* Convert a canvas frequency fraction [0..1] to screen fraction [0..1] */
+  /* Convert a canvas fraction [0..1] to screen fraction [0..1] */
   function canvasToScreen(frac){
     return frac*zoom.scale + zoom.tx/cw;
   }
@@ -704,8 +716,8 @@ function buildFreqAxis(){
   /* Visible frequency range in canvas fractions */
   var visLeft=Math.max(0,-zoom.tx/(cw*zoom.scale));
   var visRight=Math.min(1,(-zoom.tx+cw)/(cw*zoom.scale));
-  var visibleSpanHz=(visRight-visLeft)*totalHz;
-  if(visibleSpanHz<=0)visibleSpanHz=totalHz;
+  var visibleSpanHz=(visRight-visLeft)*spanHz;
+  if(visibleSpanHz<=0)visibleSpanHz=spanHz;
 
   /* Choose tick intervals based on visible span */
   var intervals=[
@@ -717,7 +729,8 @@ function buildFreqAxis(){
     {span:600e3,major:100e3,minor:25e3},
     {span:300e3,major:50e3, minor:10e3},
     {span:150e3,major:25e3, minor:5e3},
-    {span:0,    major:10e3, minor:2e3}
+    {span:60e3, major:10e3, minor:2e3},
+    {span:0,    major:5e3,  minor:1e3}
   ];
   var majorInterval=5e6, minorInterval=1e6;
   for(var ii=0;ii<intervals.length;ii++){
@@ -735,14 +748,20 @@ function buildFreqAxis(){
     return hz+' Hz';
   }
 
-  /* Snap to first tick at or before visible left edge */
-  var firstMinor=Math.floor(visLeft*totalHz/minorInterval)*minorInterval;
-  var firstMajor=Math.floor(visLeft*totalHz/majorInterval)*majorInterval;
+  /* Frequency → canvas fraction */
+  function hzToFrac(hz){ return (hz-startHz)/spanHz; }
+
+  /* Snap to first tick at or before the visible left edge (in absolute Hz) */
+  var visLeftHz=startHz+visLeft*spanHz;
+  var firstMinor=Math.floor(visLeftHz/minorInterval)*minorInterval;
+  var firstMajor=Math.floor(visLeftHz/majorInterval)*majorInterval;
+  var endHz=startHz+spanHz;
 
   /* Render minor notches — only those in visible range */
-  for(var f=firstMinor;f<=totalHz;f+=minorInterval){
+  for(var f=firstMinor;f<=endHz;f+=minorInterval){
+    if(f<startHz)continue;
     if(f%majorInterval===0)continue;
-    var sc=canvasToScreen(f/totalHz);
+    var sc=canvasToScreen(hzToFrac(f));
     if(sc<0||sc>1)continue;
     var pct=(sc*100)+'%';
     var notch=document.createElement('div');
@@ -754,8 +773,9 @@ function buildFreqAxis(){
   }
 
   /* Render major notches + labels — only those in visible range */
-  for(var f=firstMajor;f<=totalHz;f+=majorInterval){
-    var sc=canvasToScreen(f/totalHz);
+  for(var f=firstMajor;f<=endHz;f+=majorInterval){
+    if(f<startHz)continue;
+    var sc=canvasToScreen(hzToFrac(f));
     if(sc<-0.05||sc>1.05)continue; /* small margin for edge labels */
     var pct=(sc*100)+'%';
     var notch=document.createElement('div');
@@ -894,8 +914,10 @@ function setupHover(){
     var px=Math.floor(xp*readCtx.canvas.width);
     var py=Math.floor(yp*readCtx.canvas.height);
 
-    /* Frequency */
-    var hz=xp*meta.end_freq_hz;
+    /* Frequency — canvas fraction xp maps to startHz + xp * spanHz */
+    var _startHz=meta.start_freq_hz||0;
+    var _spanHz=(meta.end_freq_hz||30e6)-_startHz;
+    var hz=_startHz+xp*_spanHz;
     var mhz=(hz/1e6).toFixed(4);
     var band=bandName(hz);
 

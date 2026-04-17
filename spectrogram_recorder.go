@@ -1485,12 +1485,24 @@ func handleSpectrogramList(w http.ResponseWriter, r *http.Request, recorder *Spe
 
 	dates := recorder.AvailableDates()
 
-	// Build sorted list of available band names (wideband always first)
-	bands := []string{"wideband"}
-	for name := range bandRecorders {
-		bands = append(bands, name)
+	// Build list of available band names sorted by start frequency ascending
+	// (lowest freq = longest wavelength first: 160m → 80m → 40m → 20m …).
+	// Wideband (0 Hz start) always comes first.
+	type bandEntry struct {
+		name    string
+		startHz uint64
 	}
-	sort.Strings(bands[1:]) // sort everything after "wideband"
+	entries := []bandEntry{{"wideband", 0}}
+	for name, rec := range bandRecorders {
+		entries = append(entries, bandEntry{name, rec.startFreqHz})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].startHz < entries[j].startHz
+	})
+	bands := make([]string, len(entries))
+	for i, e := range entries {
+		bands[i] = e.name
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=60")

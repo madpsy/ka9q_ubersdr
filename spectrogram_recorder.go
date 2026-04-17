@@ -23,10 +23,13 @@ import (
 )
 
 const (
-	spectrogramBins    = 4096 // Must match wideband FFT bin count
-	spectrogramMaxRows = 1440 // One row per minute, 24 hours
-	spectrogramMagic   = "SGRM"
-	spectrogramVersion = uint32(1)
+	spectrogramBins           = 4096 // Must match wideband FFT bin count
+	spectrogramMaxRows        = 1440 // One row per minute, 24 hours
+	spectrogramMagic          = "SGRM"
+	spectrogramVersion        = uint32(1)
+	spectrogramDefaultDBMin   = float32(-130) // fallback noise floor when insufficient data
+	spectrogramDefaultDBMax   = float32(-60)  // fallback signal peak when insufficient data
+	spectrogramDefaultPalette = "jet"         // default colour palette
 )
 
 // noDataSentinel marks bins with no data (rendered as black).
@@ -49,13 +52,17 @@ type SpectrogramRecorder struct {
 	lastModified time.Time
 	mu           sync.Mutex // protects rows, rowCount, lastRow, lastModified
 
+	// latestComplete caches the most recent archived date string ("YYYY-MM-DD").
+	// Updated at startup and after each midnight rollover. Zero value = no complete day yet.
+	latestComplete atomic.Value // stores string
+
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 }
 
 // NewSpectrogramRecorder creates a new recorder. Returns nil if disabled or nfm is nil.
 func NewSpectrogramRecorder(nfm *NoiseFloorMonitor, config SpectrogramConfig) *SpectrogramRecorder {
-	if !config.Enabled || nfm == nil {
+	if !config.IsEnabled() || nfm == nil {
 		return nil
 	}
 	return &SpectrogramRecorder{
@@ -84,6 +91,15 @@ func (sr *SpectrogramRecorder) Start() error {
 
 	// Render initial PNG so the endpoint is immediately valid
 	sr.renderAndCache()
+
+	// Populate latestComplete from disk so /api/spectrogram/latest works immediately.
+	today := time.Now().UTC().Format("2006-01-02")
+	for _, d := range sr.AvailableDates() {
+		if d != today {
+			sr.latestComplete.Store(d)
+			break
+		}
+	}
 
 	sr.wg.Add(1)
 	go sr.loop()
@@ -255,6 +271,9 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 
 	// Run retention cleanup
 	sr.runCleanup(newDayTime)
+
+	// Update the cached latest-complete date (used by /api/spectrogram/latest)
+	sr.latestComplete.Store(oldDate)
 
 	// Reset state for new day
 	sr.mu.Lock()
@@ -478,11 +497,8 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 	}
 	sr.mu.Unlock()
 
-	dbMin := float32(sr.config.DBMin)
-	dbMax := float32(sr.config.DBMax)
-	if dbMax <= dbMin {
-		dbMax = dbMin + 70
-	}
+	// Auto-range from actual data; fall back to hardcoded defaults if insufficient data.
+	dbMin, dbMax := autoRangeRows(snapshot, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
 	// Fixed 4096×1440 image — unfilled rows are black
 	img := image.NewNRGBA(image.Rect(0, 0, spectrogramBins, spectrogramMaxRows))
@@ -497,7 +513,7 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 	}
 
 	// Render filled rows — row 0 = UTC midnight (top), newest = bottom
-	palette := sr.config.Palette
+	palette := spectrogramDefaultPalette
 	for y, row := range snapshot {
 		for x, val := range row {
 			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
@@ -1131,7 +1147,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	case "viridis", "plasma", "jet":
 		// valid
 	default:
-		requestedPalette = recorder.config.Palette // fall back to config palette
+		requestedPalette = spectrogramDefaultPalette // fall back to default palette
 	}
 
 	// Parse and validate optional db_min / db_max query params.
@@ -1139,7 +1155,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	dbMin, dbMax, dbRangeExplicit := parseAndValidateDBRange(q)
 
 	// needsRerender is true whenever we cannot serve the pre-cached PNG as-is.
-	needsRerender := requestedPalette != recorder.config.Palette || dbRangeExplicit
+	needsRerender := requestedPalette != spectrogramDefaultPalette || dbRangeExplicit
 
 	if dateStr == "" || dateStr == today {
 		var pngBytes []byte
@@ -1160,7 +1176,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			}
 			if !dbRangeExplicit {
 				// Auto-compute range from actual data
-				dbMin, dbMax = autoRangeRows(rows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
+				dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 			}
 			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign)
 		} else {
@@ -1228,7 +1244,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		}
 		if !dbRangeExplicit {
 			// Auto-compute range from actual archived data
-			dbMin, dbMax = autoRangeRows(rows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
+			dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
 		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign)
 		if len(pngBytes) == 0 {
@@ -1259,6 +1275,45 @@ serveDiskPNG:
 		w.Header().Set("Last-Modified", stat.ModTime().UTC().Format(http.TimeFormat))
 	}
 	io.Copy(w, f)
+}
+
+// handleSpectrogramLatest redirects to the most recent *complete* spectrogram PNG.
+// "Complete" means any archived day (not today). The redirect target is the
+// date-specific PNG URL which carries Cache-Control: max-age=86400, so browsers
+// and CDNs cache the image for 24 hours without re-fetching.
+// The redirect itself is cached for 1 hour so clients re-check after midnight.
+//
+// The latest-complete date is cached in an atomic.Value updated at startup and
+// after each midnight rollover — no directory scan on every request.
+//
+//	GET /api/spectrogram/latest → 302 /api/spectrogram?date=YYYY-MM-DD
+func handleSpectrogramLatest(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "spectrogram-latest") {
+		http.Error(w, "rate limit exceeded for spectrogram/latest — please wait before requesting again", http.StatusTooManyRequests)
+		return
+	}
+	if recorder == nil {
+		http.Error(w, "spectrogram recording is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Read from atomic cache — zero-cost, no I/O
+	v := recorder.latestComplete.Load()
+	latestComplete, _ := v.(string)
+	if latestComplete == "" {
+		http.Error(w, "no complete spectrogram available yet", http.StatusNotFound)
+		return
+	}
+
+	// Redirect to the date-specific PNG endpoint.
+	// Cache the redirect for 1 hour — re-check after midnight when a new day completes.
+	target := "/api/spectrogram?date=" + latestComplete
+	w.Header().Set("Cache-Control", "max-age=3600")
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // handleSpectrogramList returns a JSON list of available spectrogram dates (newest first).
@@ -1319,8 +1374,17 @@ type SpectrogramMeta struct {
 // The response includes db_min/db_max reflecting the auto-computed range from
 // the actual data (P5/P95), so the frontend can display accurate legend labels
 // and pass the same values back as ?db_min=&db_max= when requesting the PNG.
-func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
+func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder, rateLimiter *FFTRateLimiter, ipBanManager *IPBanManager) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "spectrogram-meta") {
+		http.Error(w, `{"error":"rate limit exceeded for spectrogram/meta"}`, http.StatusTooManyRequests)
+		return
+	}
 
 	if recorder == nil {
 		http.Error(w, `{"error":"spectrogram recording is not enabled"}`, http.StatusServiceUnavailable)
@@ -1435,8 +1499,8 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		}
 	}
 
-	// Compute auto-range from actual data; fall back to config values if no data available.
-	autoMin, autoMax := autoRangeRows(dataRows, float32(recorder.config.DBMin), float32(recorder.config.DBMax))
+	// Compute auto-range from actual data; fall back to hardcoded defaults if no data available.
+	autoMin, autoMax := autoRangeRows(dataRows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
 	// image_url does NOT include db_min/db_max — the frontend uses the meta values
 	// to populate the contrast sliders and only adds db_min/db_max to the image URL
@@ -1464,7 +1528,7 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		RowIntervalSeconds: 60,
 		DBMin:              float64(autoMin),
 		DBMax:              float64(autoMax),
-		Palette:            recorder.config.Palette,
+		Palette:            spectrogramDefaultPalette,
 		ImageURL:           imageURL,
 		ListURL:            "/api/spectrogram/list",
 		Complete:           complete,

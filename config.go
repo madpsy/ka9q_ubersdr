@@ -220,22 +220,15 @@ type SpectrumDefaultConfig struct {
 // SpectrogramConfig contains settings for the daily wideband spectrogram recorder.
 // One PNG image is generated per UTC day covering 0-30 MHz.
 type SpectrogramConfig struct {
-	// Enabled controls whether the spectrogram recorder runs (default: false).
-	// Requires noisefloor.enabled: true.
-	Enabled bool `yaml:"enabled"`
+	// Enabled controls whether the spectrogram recorder runs.
+	// Default: true. Set to false to disable.
+	// Requires noisefloor.enabled: true to actually record data.
+	Enabled *bool `yaml:"enabled"`
 
 	// DataDir is the directory where spectrogram files are stored.
 	// Relative paths are resolved relative to the config directory.
 	// Default: "spectrogram"
 	DataDir string `yaml:"data_dir"`
-
-	// DBMin is the dB value mapped to the darkest colour (noise floor).
-	// Default: -130
-	DBMin float64 `yaml:"db_min"`
-
-	// DBMax is the dB value mapped to the brightest colour (signal peak).
-	// Default: -60
-	DBMax float64 `yaml:"db_max"`
 
 	// RetentionDays is the number of completed daily PNG files to keep on disk.
 	// Files older than this are deleted at UTC midnight rollover.
@@ -243,14 +236,14 @@ type SpectrogramConfig struct {
 	// Default: 30
 	RetentionDays int `yaml:"retention_days"`
 
-	// Palette is the colour palette used for the spectrogram PNG.
-	// Matches the palettes available in the main waterfall display.
-	// Valid values: "viridis" (default), "plasma", "jet"
-	Palette string `yaml:"palette"`
-
 	// Callsign is embedded in the watermark on the bottom-right of the PNG.
 	// Set automatically from admin.callsign — not a user-facing config option.
 	Callsign string `yaml:"-"`
+}
+
+// IsEnabled returns true if the spectrogram recorder is enabled (default: true).
+func (sc SpectrogramConfig) IsEnabled() bool {
+	return sc.Enabled == nil || *sc.Enabled
 }
 
 // LoggingConfig contains logging settings
@@ -654,28 +647,15 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Set spectrogram defaults if not specified
-	if config.Spectrogram.DBMin == 0 {
-		config.Spectrogram.DBMin = -130
-	}
-	if config.Spectrogram.DBMax == 0 {
-		config.Spectrogram.DBMax = -60
+	if config.Spectrogram.Enabled == nil {
+		t := true
+		config.Spectrogram.Enabled = &t
 	}
 	if config.Spectrogram.RetentionDays == 0 {
 		config.Spectrogram.RetentionDays = 30
 	}
 	if config.Spectrogram.DataDir == "" {
 		config.Spectrogram.DataDir = "spectrogram"
-	}
-	if config.Spectrogram.Palette == "" {
-		config.Spectrogram.Palette = "jet"
-	}
-	// Validate palette
-	switch config.Spectrogram.Palette {
-	case "viridis", "plasma", "jet":
-		// valid
-	default:
-		fmt.Printf("Warning: spectrogram.palette %q is not valid (viridis/plasma/jet), using jet\n", config.Spectrogram.Palette)
-		config.Spectrogram.Palette = "jet"
 	}
 
 	// Set delta threshold default and validate

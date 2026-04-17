@@ -627,9 +627,9 @@ func main() {
 	}
 
 	// Set spectrogram data directory relative to config directory
-	if config.Spectrogram.Enabled && config.Spectrogram.DataDir == "" {
+	if config.Spectrogram.IsEnabled() && config.Spectrogram.DataDir == "" {
 		config.Spectrogram.DataDir = *configDir + "/spectrogram"
-	} else if config.Spectrogram.Enabled && !strings.HasPrefix(config.Spectrogram.DataDir, "/") {
+	} else if config.Spectrogram.IsEnabled() && !strings.HasPrefix(config.Spectrogram.DataDir, "/") {
 		config.Spectrogram.DataDir = *configDir + "/" + config.Spectrogram.DataDir
 	}
 
@@ -1903,11 +1903,14 @@ func main() {
 	http.HandleFunc("/api/spectrogram", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogram(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
 	})
+	http.HandleFunc("/api/spectrogram/latest", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramLatest(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
+	})
 	http.HandleFunc("/api/spectrogram/list", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramList(w, r, spectrogramRecorder)
 	})
 	http.HandleFunc("/api/spectrogram/meta", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectrogramMeta(w, r, spectrogramRecorder)
+		handleSpectrogramMeta(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
 	})
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
@@ -3098,7 +3101,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"version":              Version,
 		"space_weather":        config.SpaceWeather.Enabled,
 		"noise_floor":          config.NoiseFloor.Enabled,
-		"spectrogram":          config.Spectrogram.Enabled,
+		"spectrogram":          config.Spectrogram.IsEnabled(),
 		"digital_decodes":      config.Decoder.Enabled,
 		"digital_modes":        digitalModes,
 		"cw_skimmer":           cwskimmerConfig.Enabled,

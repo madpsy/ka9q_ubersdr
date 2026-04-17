@@ -23,8 +23,8 @@ button:hover{background:rgba(255,255,255,.25)}
 /* Time axis */
 #time-axis{width:46px;flex-shrink:0;position:relative;padding-top:32px}
 .t-label{position:absolute;font-size:.68em;opacity:.75;right:5px;transform:translateY(-50%);white-space:nowrap}
-/* Right side */
-.sg-right{flex:1;min-width:0}
+/* Right side — clips zoomed content */
+.sg-right{flex:1;min-width:0;overflow:hidden;position:relative}
 /* Frequency axis */
 #freq-axis{position:relative;height:32px;overflow:visible}
 .f-label{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;top:4px}
@@ -60,9 +60,11 @@ button:hover{background:rgba(255,255,255,.25)}
 <div class="controls">
   <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
   <button onclick="load()">&#x21BB; Refresh</button>
+  <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <a id="dl-btn" href="#" download style="display:none">
     <button type="button">&#x2B07; Download PNG</button>
   </a>
+  <span style="font-size:.75em;opacity:.55">Scroll to zoom &middot; drag to pan &middot; double-click to reset</span>
   <span class="status" id="status">Loading&hellip;</span>
 </div>
 
@@ -73,10 +75,13 @@ button:hover{background:rgba(255,255,255,.25)}
   <div class="sg-wrap">
     <div id="time-axis"></div>
     <div class="sg-right">
-      <div id="freq-axis"></div>
-      <div class="sg-canvas-wrap" id="cwrap">
-        <canvas id="img-canvas"></canvas>
-        <canvas id="overlay-canvas"></canvas>
+      <!-- zoom-wrap receives the CSS transform so freq-axis + canvas move together -->
+      <div id="zoom-wrap" style="transform-origin:0 0">
+        <div id="freq-axis"></div>
+        <div class="sg-canvas-wrap" id="cwrap">
+          <canvas id="img-canvas"></canvas>
+          <canvas id="overlay-canvas"></canvas>
+        </div>
       </div>
     </div>
   </div>
@@ -91,8 +96,9 @@ button:hover{background:rgba(255,255,255,.25)}
 <div id="tt"></div>
 
 <script>
-/* ── Viridis LUT (256 entries, identical to Go backend) ─────────────────── */
-var V=[
+/* ── Colour palettes (256 entries each, identical to Go backend) ─────────── */
+var PALETTES={
+viridis:[
 [68,1,84],[68,2,86],[69,4,87],[69,5,89],[70,7,90],[70,8,92],[70,10,93],[70,11,94],[71,13,96],[71,14,97],
 [71,16,99],[71,17,100],[71,19,101],[72,20,103],[72,22,104],[72,23,105],[72,24,106],[72,26,108],[72,27,109],[72,28,110],
 [72,30,111],[72,31,112],[72,32,113],[72,34,115],[72,35,116],[72,36,117],[72,38,118],[72,39,119],[72,40,120],[72,42,121],
@@ -119,11 +125,77 @@ var V=[
 [122,255,76],[125,255,74],[128,255,72],[131,255,70],[134,255,68],[137,255,66],[140,255,64],[143,255,62],[146,255,60],[149,255,58],
 [152,255,56],[155,255,54],[158,255,52],[161,255,50],[164,255,48],[167,255,46],[170,255,44],[173,255,42],[176,255,40],[179,255,38],
 [182,255,36],[185,255,34],[188,255,32],[191,255,30],[194,255,28],[253,231,37]
-];
+],
+plasma:[
+[13,8,135],[14,9,138],[15,10,141],[16,11,144],[17,12,147],[18,13,150],[19,14,153],[20,15,156],[21,16,159],[22,17,162],
+[24,18,165],[25,19,168],[27,20,170],[29,21,172],[31,22,174],[33,23,176],[35,24,178],[37,25,180],[39,26,182],[41,27,184],
+[43,28,186],[45,29,188],[47,30,190],[49,31,192],[51,32,194],[53,33,196],[55,34,198],[57,35,200],[59,36,202],[61,37,204],
+[63,38,206],[65,39,208],[67,40,210],[69,41,212],[71,42,214],[73,43,216],[75,44,218],[77,45,220],[79,46,222],[81,47,224],
+[83,48,226],[85,49,228],[87,50,230],[89,51,232],[91,52,234],[93,53,236],[95,54,238],[97,55,240],[99,56,242],[101,57,244],
+[103,58,246],[105,59,248],[107,60,250],[109,61,252],[111,62,254],[113,63,255],[114,64,254],[115,65,252],[116,66,250],[117,67,248],
+[118,68,246],[119,69,244],[120,70,242],[121,71,240],[122,72,238],[123,73,236],[124,74,234],[125,75,232],[126,76,230],[127,77,228],
+[128,78,226],[129,79,224],[130,80,222],[131,81,220],[132,82,218],[133,83,216],[134,84,214],[135,85,212],[136,86,210],[137,87,208],
+[138,88,206],[139,89,204],[140,90,202],[141,91,200],[142,92,198],[143,93,196],[144,94,194],[145,95,192],[146,96,190],[147,97,188],
+[148,98,186],[149,99,184],[150,100,182],[151,101,180],[152,102,178],[153,103,176],[154,104,174],[155,105,172],[156,106,170],[157,107,168],
+[158,108,166],[159,109,164],[160,110,162],[161,111,160],[162,112,158],[163,113,156],[164,114,154],[165,115,152],[166,116,150],[167,117,148],
+[168,118,146],[169,119,144],[170,120,142],[171,121,140],[172,122,138],[173,123,136],[174,124,134],[175,125,132],[176,126,130],[177,127,128],
+[178,128,126],[179,129,124],[180,130,122],[181,131,120],[182,132,118],[183,133,116],[184,134,114],[185,135,112],[186,136,110],[187,137,108],
+[188,138,106],[189,139,104],[190,140,102],[191,141,100],[192,142,98],[193,143,96],[194,144,94],[195,145,92],[196,146,90],[197,147,88],
+[198,148,86],[199,149,84],[200,150,82],[201,151,80],[202,152,78],[203,153,76],[204,154,74],[205,155,72],[206,156,70],[207,157,68],
+[208,158,66],[209,159,64],[210,160,62],[211,161,60],[212,162,58],[213,163,56],[214,164,54],[215,165,52],[216,166,50],[217,167,48],
+[218,168,46],[219,169,44],[220,170,42],[221,171,40],[222,172,38],[223,173,36],[224,174,34],[225,175,32],[226,176,30],[227,177,28],
+[228,178,26],[229,179,24],[230,180,22],[231,181,20],[232,182,18],[233,183,16],[234,184,14],[235,185,12],[236,186,10],[237,187,8],
+[238,188,6],[239,189,4],[240,190,2],[241,191,1],[242,192,1],[243,193,2],[244,194,4],[245,195,6],[246,196,8],[247,197,10],
+[248,198,12],[248,199,14],[249,200,16],[249,201,18],[249,202,20],[249,203,22],[249,204,24],[249,205,26],[249,206,28],[249,207,30],
+[249,208,32],[249,209,33],[249,210,33],[249,211,33],[249,212,33],[249,213,33],[249,214,33],[249,215,33],[249,216,33],[249,217,33],
+[249,218,33],[249,219,33],[249,220,33],[249,221,33],[249,222,33],[249,223,33],[249,224,33],[249,225,33],[249,226,33],[249,227,33],
+[249,228,33],[249,229,33],[249,230,33],[249,231,33],[249,232,33],[249,233,33],[249,234,33],[249,235,33],[249,236,33],[249,237,33],
+[249,238,33],[249,239,33],[249,240,33],[249,241,33],[249,242,33],[249,243,33],[249,244,33],[249,245,33],[249,246,33],[249,247,33],
+[249,248,33],[249,249,33],[249,250,33],[249,251,33],[240,249,33]
+],
+jet:[
+[0,0,143],[0,0,147],[0,0,151],[0,0,155],[0,0,159],[0,0,163],[0,0,167],[0,0,171],[0,0,175],[0,0,179],
+[0,0,183],[0,0,187],[0,0,191],[0,0,195],[0,0,199],[0,0,203],[0,0,207],[0,0,211],[0,0,215],[0,0,219],
+[0,0,223],[0,0,227],[0,0,231],[0,0,235],[0,0,239],[0,0,243],[0,0,247],[0,0,251],[0,0,255],[0,4,255],
+[0,8,255],[0,12,255],[0,16,255],[0,20,255],[0,24,255],[0,28,255],[0,32,255],[0,36,255],[0,40,255],[0,44,255],
+[0,48,255],[0,52,255],[0,56,255],[0,60,255],[0,64,255],[0,68,255],[0,72,255],[0,76,255],[0,80,255],[0,84,255],
+[0,88,255],[0,92,255],[0,96,255],[0,100,255],[0,104,255],[0,108,255],[0,112,255],[0,116,255],[0,120,255],[0,124,255],
+[0,128,255],[0,132,255],[0,136,255],[0,140,255],[0,144,255],[0,148,255],[0,152,255],[0,156,255],[0,160,255],[0,164,255],
+[0,168,255],[0,172,255],[0,176,255],[0,180,255],[0,184,255],[0,188,255],[0,192,255],[0,196,255],[0,200,255],[0,204,255],
+[0,208,255],[0,212,255],[0,216,255],[0,220,255],[0,224,255],[0,228,255],[0,232,255],[0,236,255],[0,240,255],[0,244,255],
+[0,248,255],[0,252,255],[2,255,253],[6,255,249],[10,255,245],[14,255,241],[18,255,237],[22,255,233],[26,255,229],[30,255,225],
+[34,255,221],[38,255,217],[42,255,213],[46,255,209],[50,255,205],[54,255,201],[58,255,197],[62,255,193],[66,255,189],[70,255,185],
+[74,255,181],[78,255,177],[82,255,173],[86,255,169],[90,255,165],[94,255,161],[98,255,157],[102,255,153],[106,255,149],[110,255,145],
+[114,255,141],[118,255,137],[122,255,133],[126,255,129],[130,255,125],[134,255,121],[138,255,117],[142,255,113],[146,255,109],[150,255,105],
+[154,255,101],[158,255,97],[162,255,93],[166,255,89],[170,255,85],[174,255,81],[178,255,77],[182,255,73],[186,255,69],[190,255,65],
+[194,255,61],[198,255,57],[202,255,53],[206,255,49],[210,255,45],[214,255,41],[218,255,37],[222,255,33],[226,255,29],[230,255,25],
+[234,255,21],[238,255,17],[242,255,13],[246,255,9],[250,255,5],[254,255,1],[255,251,0],[255,247,0],[255,243,0],[255,239,0],
+[255,235,0],[255,231,0],[255,227,0],[255,223,0],[255,219,0],[255,215,0],[255,211,0],[255,207,0],[255,203,0],[255,199,0],
+[255,195,0],[255,191,0],[255,187,0],[255,183,0],[255,179,0],[255,175,0],[255,171,0],[255,167,0],[255,163,0],[255,159,0],
+[255,155,0],[255,151,0],[255,147,0],[255,143,0],[255,139,0],[255,135,0],[255,131,0],[255,127,0],[255,123,0],[255,119,0],
+[255,115,0],[255,111,0],[255,107,0],[255,103,0],[255,99,0],[255,95,0],[255,91,0],[255,87,0],[255,83,0],[255,79,0],
+[255,75,0],[255,71,0],[255,67,0],[255,63,0],[255,59,0],[255,55,0],[255,51,0],[255,47,0],[255,43,0],[255,39,0],
+[255,35,0],[255,31,0],[255,27,0],[255,23,0],[255,19,0],[255,15,0],[255,11,0],[255,7,0],[255,3,0],[252,0,0],
+[248,0,0],[244,0,0],[240,0,0],[236,0,0],[232,0,0],[228,0,0],[224,0,0],[220,0,0],[216,0,0],[212,0,0],
+[208,0,0],[204,0,0],[200,0,0],[196,0,0],[192,0,0],[188,0,0],[184,0,0],[180,0,0],[176,0,0],[172,0,0],
+[168,0,0],[164,0,0],[160,0,0],[156,0,0],[152,0,0],[148,0,0],[144,0,0],[140,0,0],[136,0,0],[132,0,0],
+[128,0,0]
+]
+};
 
-/* Build inverse map: quantised RGB key -> LUT index */
+/* Active LUT and inverse map — updated when palette changes */
+var V=PALETTES.viridis;
 var INV={};
-(function(){for(var i=0;i<V.length;i++){var c=V[i],k=((c[0]>>3)<<10)|((c[1]>>3)<<5)|(c[2]>>3);if(!(k in INV))INV[k]=i;}})();
+function buildInv(lut){
+  INV={};
+  for(var i=0;i<lut.length;i++){var c=lut[i],k=((c[0]>>3)<<10)|((c[1]>>3)<<5)|(c[2]>>3);if(!(k in INV))INV[k]=i;}
+}
+buildInv(V);
+
+function setPalette(name){
+  V=PALETTES[name]||PALETTES.viridis;
+  buildInv(V);
+}
 
 function pxToDb(ctx,px,py,dmin,dmax){
   var d=ctx.getImageData(px,py,1,1).data;
@@ -150,6 +222,80 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 /* ── State ──────────────────────────────────────────────────────────────── */
 var meta=null,bmp=null,ictx=null,timer=null;
 
+/* Zoom/pan state */
+var zoom={scale:1,tx:0,ty:0,dragging:false,dragStartX:0,dragStartY:0,dragStartTx:0,dragStartTy:0};
+var MIN_SCALE=1, MAX_SCALE=20;
+
+function applyZoom(){
+  var zw=document.getElementById('zoom-wrap');
+  zw.style.transform='translate('+zoom.tx+'px,'+zoom.ty+'px) scale('+zoom.scale+')';
+}
+
+function resetZoom(){
+  zoom.scale=1; zoom.tx=0; zoom.ty=0;
+  applyZoom();
+}
+
+function setupZoom(){
+  /* Attach wheel to the clipping container (sg-right) so scroll works over freq-axis too */
+  var container=document.querySelector('.sg-right');
+  var cwrap=document.getElementById('cwrap');
+
+  container.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var rect=container.getBoundingClientRect();
+    /* Cursor position in zoom-wrap's local coordinate space */
+    var cx=(e.clientX-rect.left-zoom.tx)/zoom.scale;
+    var cy=(e.clientY-rect.top -zoom.ty)/zoom.scale;
+
+    var factor=e.deltaY<0?1.15:1/1.15;
+    var newScale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,zoom.scale*factor));
+    if(newScale===zoom.scale)return;
+
+    zoom.tx=e.clientX-rect.left - cx*newScale;
+    zoom.ty=e.clientY-rect.top  - cy*newScale;
+    zoom.scale=newScale;
+    clampZoom(rect);
+    applyZoom();
+  },{passive:false});
+
+  /* Click+drag to pan when zoomed */
+  container.addEventListener('mousedown',function(e){
+    if(zoom.scale<=1)return;
+    zoom.dragging=true;
+    zoom.dragStartX=e.clientX; zoom.dragStartY=e.clientY;
+    zoom.dragStartTx=zoom.tx;  zoom.dragStartTy=zoom.ty;
+    cwrap.style.cursor='grabbing';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove',function(e){
+    if(!zoom.dragging)return;
+    var rect=document.querySelector('.sg-right').getBoundingClientRect();
+    zoom.tx=zoom.dragStartTx+(e.clientX-zoom.dragStartX);
+    zoom.ty=zoom.dragStartTy+(e.clientY-zoom.dragStartY);
+    clampZoom(rect);
+    applyZoom();
+  });
+  window.addEventListener('mouseup',function(){
+    if(!zoom.dragging)return;
+    zoom.dragging=false;
+    document.getElementById('cwrap').style.cursor='crosshair';
+  });
+
+  /* Double-click to reset zoom */
+  container.addEventListener('dblclick',function(e){
+    e.preventDefault();
+    resetZoom();
+  });
+}
+
+function clampZoom(rect){
+  var w=rect?rect.width:document.querySelector('.sg-right').getBoundingClientRect().width;
+  var h=rect?rect.height:document.querySelector('.sg-right').getBoundingClientRect().height;
+  zoom.tx=Math.max(w*(1-zoom.scale),Math.min(0,zoom.tx));
+  zoom.ty=Math.max(h*(1-zoom.scale),Math.min(0,zoom.ty));
+}
+
 /* ── Init ───────────────────────────────────────────────────────────────── */
 (function init(){
   fetch('/api/spectrogram/list')
@@ -173,9 +319,6 @@ var meta=null,bmp=null,ictx=null,timer=null;
 
 function load(){
   clearTimeout(timer);
-  setStatus('Loading\u2026');
-  document.getElementById('loading').style.display='block';
-  document.getElementById('view').style.display='none';
   document.getElementById('err').innerHTML='';
 
   var sel=document.getElementById('dsel');
@@ -184,18 +327,31 @@ function load(){
 
   var today=new Date().toISOString().slice(0,10);
   var isToday=!ds||ds===today;
+
+  /* Only show loading spinner if we have no image yet (first load or date change) */
+  var hasExisting=bmp!==null;
+  if(!hasExisting){
+    document.getElementById('loading').style.display='block';
+    document.getElementById('view').style.display='none';
+  } else {
+    setStatus('Refreshing\u2026');
+  }
+
   var murl='/api/spectrogram/meta'+(ds?'?date='+encodeURIComponent(ds):'');
 
   fetch(murl)
     .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})
     .then(function(m){
       meta=m;
+      /* Switch to the palette used by the backend for this image */
+      setPalette(meta.palette||'viridis');
       var iurl=meta.image_url+(isToday?(meta.image_url.indexOf('?')>=0?'&':'?')+'_t='+Date.now():'');
       return fetch(iurl);
     })
     .then(function(r){if(!r.ok)throw new Error('image '+r.status);return r.blob();})
     .then(function(b){return createImageBitmap(b);})
     .then(function(b){
+      /* Swap in new bitmap — render() draws to canvas atomically, no blank frame */
       bmp=b;
       render();
       document.getElementById('loading').style.display='none';
@@ -210,20 +366,37 @@ function load(){
     })
     .catch(function(e){
       document.getElementById('loading').style.display='none';
-      showErr('Load failed: '+escHtml(e.message));
+      if(bmp)document.getElementById('view').style.display='block'; /* keep existing image on error */
+      showErr('Refresh failed: '+escHtml(e.message));
       setStatus('Error');
+      if(isToday)timer=setTimeout(load,65000); /* retry on error */
     });
 }
 
 /* ── Render ─────────────────────────────────────────────────────────────── */
+var zoomSetup=false;
 function render(){
   var ic=document.getElementById('img-canvas');
   var oc=document.getElementById('overlay-canvas');
-  ic.width=bmp.width; ic.height=bmp.height;
-  ictx=ic.getContext('2d',{willReadFrequently:true});
+  /* Only reset canvas dimensions if they've changed — avoids clearing the canvas
+     on auto-refresh which causes the visible flicker in the black (unfilled) area */
+  var needsResize=(ic.width!==bmp.width||ic.height!==bmp.height);
+  if(needsResize){
+    ic.width=bmp.width; ic.height=bmp.height;
+    oc.width=bmp.width; oc.height=bmp.height;
+  }
+  if(!ictx||needsResize){
+    ictx=ic.getContext('2d',{willReadFrequently:true});
+  }
+  /* Draw new image — single atomic canvas operation, no blank frame */
   ictx.drawImage(bmp,0,0);
-  oc.width=bmp.width; oc.height=bmp.height;
-  buildFreqAxis(); buildTimeAxis(); buildLegend(); setupHover();
+  if(needsResize){
+    buildFreqAxis(); buildTimeAxis(); buildLegend(); setupHover();
+    if(!zoomSetup){setupZoom();zoomSetup=true;}
+  } else {
+    /* On refresh, only update axes that depend on row count */
+    buildTimeAxis(); buildLegend();
+  }
 }
 
 /* Frequency axis with notches */
@@ -295,6 +468,9 @@ function setupHover(){
 
   cw.onmousemove=function(e){
     if(!meta||!ictx)return;
+    /* Map cursor through zoom/pan transform to get position in canvas space.
+       cwrap is inside zoom-wrap which has transform: translate(tx,ty) scale(s).
+       getBoundingClientRect() gives the scaled/translated rect, so we divide by scale. */
     var r=cw.getBoundingClientRect();
     var xp=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
     var yp=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));

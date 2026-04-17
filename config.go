@@ -242,6 +242,11 @@ type SpectrogramConfig struct {
 	// Set to 0 to keep all files indefinitely.
 	// Default: 30
 	RetentionDays int `yaml:"retention_days"`
+
+	// Palette is the colour palette used for the spectrogram PNG.
+	// Matches the palettes available in the main waterfall display.
+	// Valid values: "viridis" (default), "plasma", "jet"
+	Palette string `yaml:"palette"`
 }
 
 // LoggingConfig contains logging settings
@@ -656,6 +661,17 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Spectrogram.DataDir == "" {
 		config.Spectrogram.DataDir = "spectrogram"
+	}
+	if config.Spectrogram.Palette == "" {
+		config.Spectrogram.Palette = "viridis"
+	}
+	// Validate palette
+	switch config.Spectrogram.Palette {
+	case "viridis", "plasma", "jet":
+		// valid
+	default:
+		fmt.Printf("Warning: spectrogram.palette %q is not valid (viridis/plasma/jet), using viridis\n", config.Spectrogram.Palette)
+		config.Spectrogram.Palette = "viridis"
 	}
 
 	// Set delta threshold default and validate

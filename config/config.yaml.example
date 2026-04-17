@@ -1129,6 +1129,15 @@ spectrogram:
   # Default: 30
   retention_days: 30
 
+  # Colour palette for the spectrogram PNG
+  # Matches the palettes available in the main waterfall display
+  # Valid values:
+  #   viridis — perceptually uniform, colour-blind friendly (default)
+  #   plasma  — high contrast, warm tones (purple → orange → yellow)
+  #   jet     — classic rainbow (blue → cyan → yellow → red)
+  # Default: viridis
+  palette: viridis
+
 # Instance Reporting settings
 # Allows this UberSDR instance to report to a central registry
 instance_reporting:

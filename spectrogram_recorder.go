@@ -1144,20 +1144,15 @@ done:
 		return configMin, configMax
 	}
 	sortFloat32Slice(valid)
-	// Use P2 for floor (noise floor with headroom) and P99 for ceiling
-	// (strong signals visible without clipping to the darkest/brightest palette colour).
-	// P5/P95 caused strong signals to clip to palette index 255 (dark maroon in Jet)
-	// which appeared black on dark backgrounds.
-	p2idx := len(valid) * 2 / 100
-	p99idx := len(valid) * 99 / 100
-	if p2idx >= len(valid) {
-		p2idx = len(valid) - 1
+	// Use P5 for floor (noise floor estimate) and the actual maximum + 3 dB for ceiling.
+	// Adding headroom above the true maximum ensures the strongest signals never clip to
+	// palette index 255 (dark maroon in Jet, which appears black on dark backgrounds).
+	p5idx := len(valid) * 5 / 100
+	if p5idx >= len(valid) {
+		p5idx = len(valid) - 1
 	}
-	if p99idx >= len(valid) {
-		p99idx = len(valid) - 1
-	}
-	dbMin := valid[p2idx]
-	dbMax := valid[p99idx]
+	dbMin := valid[p5idx]
+	dbMax := valid[len(valid)-1] + 3 // actual max + 3 dB headroom
 	// Ensure a minimum 10 dB spread to avoid degenerate images
 	if dbMax-dbMin < 10 {
 		dbMax = dbMin + 10
@@ -1278,6 +1273,132 @@ func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dat
 	return buf.Bytes()
 }
 
+// ── Rolling 24-hour view ─────────────────────────────────────────────────────
+
+// rollingResult holds the data for a rolling 24-hour spectrogram.
+type rollingResult struct {
+	rows     [][]float32          // exactly spectrogramMaxRows rows, oldest first
+	metaRows []SpectrogramRowMeta // one entry per row with real unix timestamps
+	binCount int
+}
+
+// getRolling24hRows assembles a 1440-row dataset spanning the past 24 hours.
+//
+// Layout (oldest → newest, top → bottom of image):
+//
+//	rows[0..tailLen-1]   = yesterday rows[cutoff..1439]  (cutoff = current minute-of-day)
+//	rows[tailLen..1439]  = today     rows[0..cutoff-1]
+//
+// Missing data (no .bin file, bin count mismatch, service was down) is filled
+// with noDataSentinel so the image renders black for those periods.
+func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// cutoff = minute-of-day right now (0..1439)
+	cutoff := now.Hour()*60 + now.Minute()
+	tailLen := spectrogramMaxRows - cutoff // rows from yesterday we need (cutoff..1439)
+
+	binCount := sr.binCount
+
+	// Allocate result — all rows start as noDataSentinel
+	result := &rollingResult{
+		rows:     make([][]float32, spectrogramMaxRows),
+		metaRows: make([]SpectrogramRowMeta, spectrogramMaxRows),
+		binCount: binCount,
+	}
+	for i := range result.rows {
+		row := make([]float32, binCount)
+		for j := range row {
+			row[j] = noDataSentinel
+		}
+		result.rows[i] = row
+	}
+
+	// ── Yesterday's tail (rows cutoff..1439 → result rows 0..tailLen-1) ──────
+	yesterdayDate, _ := time.Parse("2006-01-02", yesterday)
+	yesterdayMidnight := time.Date(yesterdayDate.Year(), yesterdayDate.Month(), yesterdayDate.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Build JSONL map for yesterday
+	yesterdayJSONL := make(map[int]SpectrogramRowMeta)
+	for _, r := range sr.readJSONL(yesterday) {
+		yesterdayJSONL[r.Row] = r
+	}
+
+	// Try to load yesterday's .bin
+	yesterdayBin := filepath.Join(sr.config.DataDir, "spectrogram_"+yesterday+".bin")
+	if binData, err := os.ReadFile(yesterdayBin); err == nil && len(binData) >= 24 && string(binData[0:4]) == spectrogramMagic {
+		fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
+		fileRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
+		if fileBinCount == binCount && fileRowCount > cutoff {
+			// Copy rows cutoff..min(fileRowCount-1, 1439) into result[0..tailLen-1]
+			for srcRow := cutoff; srcRow < fileRowCount && srcRow < spectrogramMaxRows; srcRow++ {
+				dstRow := srcRow - cutoff
+				offset := 24 + srcRow*binCount*4
+				if offset+binCount*4 > len(binData) {
+					break
+				}
+				for j := 0; j < binCount; j++ {
+					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
+					result.rows[dstRow][j] = math.Float32frombits(bits)
+					offset += 4
+				}
+			}
+		}
+	}
+	// Fill yesterday meta rows
+	for dstRow := 0; dstRow < tailLen; dstRow++ {
+		srcRow := cutoff + dstRow
+		if m, ok := yesterdayJSONL[srcRow]; ok {
+			result.metaRows[dstRow] = m
+		} else {
+			t := yesterdayMidnight.Add(time.Duration(srcRow) * time.Minute)
+			result.metaRows[dstRow] = SpectrogramRowMeta{
+				Row:     dstRow,
+				UTCTime: t.Format("15:04"),
+				Unix:    t.Unix(),
+			}
+		}
+	}
+
+	// ── Today's head (rows 0..cutoff-1 → result rows tailLen..1439) ──────────
+	todayDate, _ := time.Parse("2006-01-02", today)
+	todayMidnight := time.Date(todayDate.Year(), todayDate.Month(), todayDate.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Build JSONL map for today
+	todayJSONL := make(map[int]SpectrogramRowMeta)
+	for _, r := range sr.readJSONL(today) {
+		todayJSONL[r.Row] = r
+	}
+
+	// Copy today's ring buffer rows 0..cutoff-1 into result[tailLen..1439]
+	sr.mu.Lock()
+	todayRowCount := sr.rowCount
+	for srcRow := 0; srcRow < cutoff && srcRow < todayRowCount; srcRow++ {
+		dstRow := tailLen + srcRow
+		copy(result.rows[dstRow], sr.rows[srcRow])
+	}
+	sr.mu.Unlock()
+
+	// Fill today meta rows
+	for srcRow := 0; srcRow < cutoff; srcRow++ {
+		dstRow := tailLen + srcRow
+		if m, ok := todayJSONL[srcRow]; ok {
+			result.metaRows[dstRow] = m
+		} else {
+			t := todayMidnight.Add(time.Duration(srcRow) * time.Minute)
+			result.metaRows[dstRow] = SpectrogramRowMeta{
+				Row:     dstRow,
+				UTCTime: t.Format("15:04"),
+				Unix:    t.Unix(),
+			}
+		}
+	}
+
+	return result
+}
+
 // ── Spectrogram HTTP API ─────────────────────────────────────────────────────
 //
 // Image endpoints (PNG):
@@ -1338,6 +1459,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 
 	today := time.Now().UTC().Format("2006-01-02")
 	dateStr := q.Get("date")
+	rolling := q.Get("rolling") == "1"
 
 	// Validate and sanitise palette param
 	requestedPalette := q.Get("palette")
@@ -1351,6 +1473,24 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	// Parse and validate optional db_min / db_max query params.
 	// If absent or invalid, dbRangeExplicit=false → auto-compute from data.
 	dbMin, dbMax, dbRangeExplicit := parseAndValidateDBRange(q)
+
+	// ── Rolling 24-hour mode ──────────────────────────────────────────────────
+	if rolling {
+		rr := recorder.getRolling24hRows()
+		if !dbRangeExplicit {
+			dbMin, dbMax = autoRangeRows(rr.rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+		}
+		pngBytes := renderRowsAsPNG(rr.rows, requestedPalette, dbMin, dbMax, "rolling-24h", recorder.config.Callsign, recorder.bandName, rr.binCount)
+		if len(pngBytes) == 0 {
+			http.Error(w, "rolling 24h spectrogram not yet available", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Disposition", `inline; filename="spectrogram_rolling24h.png"`)
+		w.Write(pngBytes)
+		return
+	}
 
 	// needsRerender is true whenever we cannot serve the pre-cached PNG as-is.
 	needsRerender := requestedPalette != spectrogramDefaultPalette || dbRangeExplicit
@@ -1686,7 +1826,55 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	}
 
 	today := time.Now().UTC().Format("2006-01-02")
-	dateStr := r.URL.Query().Get("date")
+	q := r.URL.Query()
+	dateStr := q.Get("date")
+	rolling := q.Get("rolling") == "1"
+
+	// ── Rolling 24-hour meta ──────────────────────────────────────────────────
+	if rolling {
+		rr := recorder.getRolling24hRows()
+		autoMin, autoMax := autoRangeRows(rr.rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+
+		bandParam := ""
+		if recorder.bandName != "" && recorder.bandName != "wideband" {
+			bandParam = "band=" + url.QueryEscape(recorder.bandName)
+		}
+		imageURL := "/api/spectrogram?rolling=1"
+		listURL := "/api/spectrogram/list"
+		if bandParam != "" {
+			imageURL += "&" + bandParam
+			listURL += "?" + bandParam
+		}
+
+		binWidthHz := float64(0)
+		if recorder.binCount > 0 {
+			binWidthHz = float64(recorder.endFreqHz-recorder.startFreqHz) / float64(recorder.binCount)
+		}
+
+		w.Header().Set("Cache-Control", "max-age=60")
+		meta := SpectrogramMeta{
+			Date:               "rolling-24h",
+			StartFreqHz:        float64(recorder.startFreqHz),
+			EndFreqHz:          float64(recorder.endFreqHz),
+			BinWidthHz:         binWidthHz,
+			BinCount:           recorder.binCount,
+			RowCount:           spectrogramMaxRows,
+			MaxRows:            spectrogramMaxRows,
+			RowIntervalSeconds: 60,
+			DBMin:              float64(autoMin),
+			DBMax:              float64(autoMax),
+			Palette:            spectrogramDefaultPalette,
+			ImageURL:           imageURL,
+			ListURL:            listURL,
+			Complete:           false,
+			Rows:               rr.metaRows,
+		}
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		enc.Encode(meta)
+		return
+	}
+
 	if dateStr == "" {
 		dateStr = today
 	}

@@ -98,16 +98,14 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <div id="sg-panel">
 <div class="controls">
   <button id="prev-btn" onclick="navDate(-1)" title="Previous day (older)" disabled>&#x25C4;</button>
-  <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
+  <div><select id="dsel"></select></div>
   <button id="next-btn" onclick="navDate(+1)" title="Next day (newer)" disabled>&#x25BA;</button>
   <div>
-    <label for="bsel">Band:</label>
     <select id="bsel" onchange="onBandChange()">
       <option value="wideband" selected>Wideband (0&ndash;30 MHz)</option>
     </select>
   </div>
   <div>
-    <label for="psel">Palette:</label>
     <select id="psel" onchange="onPaletteChange()">
       <option value="viridis">Viridis</option>
       <option value="plasma">Plasma</option>
@@ -397,9 +395,9 @@ function onContrastChange(){
   /* Update legend labels immediately */
   document.getElementById('lmin').textContent=fl+' dBFS';
   document.getElementById('lmax').textContent=ce+' dBFS';
-  /* Re-fetch image with new range (debounced 300 ms) */
+  /* Re-fetch image with new range (debounced 800 ms — prevents rapid API calls while dragging) */
   clearTimeout(contrastTimer);
-  contrastTimer=setTimeout(function(){bmp=null;load();},300);
+  contrastTimer=setTimeout(function(){bmp=null;load();},800);
 }
 var contrastTimer=null;
 
@@ -601,6 +599,13 @@ function clampZoom(rect){
       var sel=document.getElementById('dsel');
       sel.innerHTML='';
       availableDates=[];
+
+      /* Always add "Rolling 24h" as the first option */
+      var rollingOpt=document.createElement('option');
+      rollingOpt.value='rolling-24h';
+      rollingOpt.textContent='\u27F3 Rolling 24h';
+      sel.appendChild(rollingOpt);
+
       for(var i=0;i<data.available.length;i++){
         var d=data.available[i];
         if(!/^\d{4}-\d{2}-\d{2}$/.test(d))continue; /* sanitise */
@@ -609,6 +614,9 @@ function clampZoom(rect){
         o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
         sel.appendChild(o);
       }
+      /* Default to today (second option) so rolling isn't selected by default */
+      if(availableDates.length>0)sel.value=availableDates[0];
+
       sel.onchange=function(){
         updateNavButtons();
         bmp=null;
@@ -643,6 +651,12 @@ function navDate(dir){
 /* Enable/disable ◄ ► buttons based on current selection */
 function updateNavButtons(){
   var sel=document.getElementById('dsel');
+  /* Rolling 24h has no prev/next */
+  if(sel.value==='rolling-24h'){
+    document.getElementById('prev-btn').disabled=true;
+    document.getElementById('next-btn').disabled=true;
+    return;
+  }
   var idx=-1;
   for(var i=0;i<availableDates.length;i++){if(availableDates[i]===sel.value){idx=i;break;}}
   document.getElementById('prev-btn').disabled=(idx<0||idx>=availableDates.length-1);
@@ -663,10 +677,13 @@ function load(){
 
   var sel=document.getElementById('dsel');
   var ds=sel.value||'';
-  if(ds&&!/^\d{4}-\d{2}-\d{2}$/.test(ds)){showErr('Invalid date');return;} /* sanitise */
+  var isRolling=(ds==='rolling-24h');
+
+  /* Sanitise: only allow YYYY-MM-DD or the special rolling value */
+  if(ds&&!isRolling&&!/^\d{4}-\d{2}-\d{2}$/.test(ds)){showErr('Invalid date');return;}
 
   var today=new Date().toISOString().slice(0,10);
-  var isToday=!ds||ds===today;
+  var isToday=isRolling||!ds||ds===today;
 
   /* Hoist userPalette to load() scope so all .then() callbacks can access it */
   var psel=document.getElementById('psel');
@@ -681,9 +698,13 @@ function load(){
     setStatus('Refreshing\u2026');
   }
 
-  /* Build meta URL — include ?band= for non-wideband bands */
+  /* Build meta URL — include rolling=1 or date=, plus band= */
   var mparams=[];
-  if(ds)mparams.push('date='+encodeURIComponent(ds));
+  if(isRolling){
+    mparams.push('rolling=1');
+  } else if(ds){
+    mparams.push('date='+encodeURIComponent(ds));
+  }
   if(urlBand&&urlBand!=='wideband')mparams.push('band='+encodeURIComponent(urlBand));
   var murl='/api/spectrogram/meta'+(mparams.length?'?'+mparams.join('&'):'');
 
@@ -741,7 +762,8 @@ function load(){
         var staleMinutes=Math.floor(staleSeconds/60);
         staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
       }
-      setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
+      var dateLabel=meta.date==='rolling-24h'?'\u27F3 Rolling 24h':meta.date;
+      setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
       /* Update subtitle with actual metadata.
          Use enough decimal places to distinguish narrow bands (e.g. 7.000–7.200 MHz). */
       function fmtMHz(hz){

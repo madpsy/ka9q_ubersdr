@@ -506,7 +506,7 @@ class SpectrumDisplay {
             manualMinDb: -120, // Manual minimum dB
             manualMaxDb: -40, // Manual maximum dB
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
-            autoContrast: 5, // Symmetric contrast: floor raised by +N, ceiling lowered by -N
+            autoContrast: 10, // Symmetric contrast: floor raised by +N, ceiling lowered by -N
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
             contrast: config.contrast !== undefined ? config.contrast : 35, // Contrast threshold (0-100), lower = more signals visible in auto mode
@@ -4271,7 +4271,7 @@ class SpectrumDisplay {
         if (autoContrastLabel && autoContrastSlider && autoContrastValue) {
             autoContrastLabel.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                const def = 5;
+                const def = 10;
                 this.config.autoContrast = def;
                 autoContrastSlider.value = def;
                 autoContrastValue.textContent = def;

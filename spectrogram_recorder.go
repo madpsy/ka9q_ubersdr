@@ -1521,29 +1521,44 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	var dataRows [][]float32
 
 	if safeDateStr == today {
-		// For today, fall back to ring buffer if JSONL is missing or has fewer rows
-		// (e.g. first minute before any row has been written)
+		// For today, merge JSONL rows (real timestamps) with ring buffer rows
+		// (real FFT data). The JSONL may be missing rows at the start of the day
+		// (service started mid-day) or have gaps from restarts, so we index by
+		// the row's own .Row field rather than by position in the file.
 		recorder.mu.Lock()
 		liveRowCount := recorder.rowCount
 		recorder.mu.Unlock()
 
-		if len(rows) < liveRowCount {
-			// JSONL is behind — fill missing rows from ring buffer
-			midnight := time.Date(requestedDate.Year(), requestedDate.Month(), requestedDate.Day(), 0, 0, 0, 0, time.UTC)
-			recorder.mu.Lock()
-			for i := len(rows); i < liveRowCount; i++ {
+		// Build a map from row index → JSONL metadata (real timestamps)
+		jsonlMap := make(map[int]SpectrogramRowMeta, len(rows))
+		for _, r := range rows {
+			jsonlMap[r.Row] = r
+		}
+
+		// Build the final rows slice: use JSONL data where available,
+		// synthetic timestamps only for rows genuinely missing from the JSONL
+		// (e.g. gap rows added at startup before this fix, or the very first
+		// minute before any row has been written).
+		midnight := time.Date(requestedDate.Year(), requestedDate.Month(), requestedDate.Day(), 0, 0, 0, 0, time.UTC)
+		mergedRows := make([]SpectrogramRowMeta, liveRowCount)
+		recorder.mu.Lock()
+		for i := 0; i < liveRowCount; i++ {
+			if r, ok := jsonlMap[i]; ok {
+				mergedRows[i] = r // real timestamp from JSONL
+			} else {
+				// Synthetic — row not yet in JSONL (race) or gap row pre-fix
 				t := midnight.Add(time.Duration(i) * time.Minute)
-				nf := rowP5(&recorder.rows[i])
-				rows = append(rows, SpectrogramRowMeta{
+				mergedRows[i] = SpectrogramRowMeta{
 					Row:        i,
 					UTCTime:    t.Format("15:04"),
 					Unix:       t.Unix(),
-					NoiseFloor: nf,
-				})
+					NoiseFloor: rowP5(&recorder.rows[i]),
+				}
 			}
-			recorder.mu.Unlock()
 		}
-		rowCount = len(rows)
+		recorder.mu.Unlock()
+		rows = mergedRows
+		rowCount = liveRowCount
 		complete = false
 
 		// Snapshot data rows for auto-range

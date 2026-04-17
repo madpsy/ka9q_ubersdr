@@ -1898,12 +1898,15 @@ func main() {
 		handleNoiseFloorWideBandFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 
-	// Spectrogram endpoints (rate limited: 1 req/10s per IP for PNG, no limit for list)
+	// Spectrogram endpoints (rate limited: 1 req/10s per IP for PNG, no limit for list/meta)
 	http.HandleFunc("/api/spectrogram", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogram(w, r, spectrogramRecorder, fftRateLimiter, ipBanManager)
 	})
 	http.HandleFunc("/api/spectrogram/list", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramList(w, r, spectrogramRecorder)
+	})
+	http.HandleFunc("/api/spectrogram/meta", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramMeta(w, r, spectrogramRecorder)
 	})
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)

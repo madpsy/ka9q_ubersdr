@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wideband Spectrogram 0-30 MHz</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);color:#fff;min-height:100vh;padding:20px}
+.container{max-width:1500px;margin:0 auto}
+header{text-align:center;margin-bottom:20px}
+h1{font-size:1.9em;margin-bottom:5px;text-shadow:2px 2px 4px rgba(0,0,0,.3)}
+.subtitle{font-size:.95em;opacity:.8}
+.controls{background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:10px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.controls label{font-size:.88em;opacity:.85;margin-right:4px}
+select,button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:6px;padding:5px 11px;font-size:.88em;cursor:pointer}
+select option{background:#1e3c72;color:#fff}
+button:hover{background:rgba(255,255,255,.25)}
+.status{margin-left:auto;font-size:.78em;opacity:.7;white-space:nowrap}
+/* Layout: time axis left, spectrogram right */
+.sg-wrap{display:flex;gap:0;user-select:none}
+/* Time axis */
+#time-axis{width:46px;flex-shrink:0;position:relative;padding-top:32px}
+.t-label{position:absolute;font-size:.68em;opacity:.75;right:5px;transform:translateY(-50%);white-space:nowrap}
+/* Right side */
+.sg-right{flex:1;min-width:0}
+/* Frequency axis */
+#freq-axis{position:relative;height:32px;overflow:visible}
+.f-label{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;top:4px}
+.f-notch{position:absolute;bottom:0;width:1px;height:8px;background:rgba(255,255,255,.5);transform:translateX(-50%)}
+/* Canvas area */
+.sg-canvas-wrap{position:relative;width:100%;cursor:crosshair;background:#000;border-radius:0 0 6px 6px}
+#img-canvas{display:block;width:100%;height:auto;image-rendering:pixelated}
+#overlay-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+/* Legend */
+.legend{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:.78em;opacity:.8;padding-left:46px}
+#legend-canvas{width:200px;height:13px;border-radius:3px}
+/* Tooltip */
+#tt{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:8px 12px;font-size:.8em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.85;box-shadow:0 4px 18px rgba(0,0,0,.45);min-width:175px}
+.tt-freq{font-size:1.05em;font-weight:600;color:#7df}
+.tt-time{opacity:.82}
+.tt-sep{border-top:1px solid rgba(255,255,255,.14);margin:4px 0}
+.tt-row{display:flex;justify-content:space-between;gap:14px}
+.tt-lbl{opacity:.65}
+.tt-val{font-weight:500}
+.tt-nd{opacity:.45;font-style:italic}
+/* Error / loading */
+.error{background:rgba(255,80,80,.2);border:1px solid rgba(255,80,80,.4);border-radius:8px;padding:14px;text-align:center;margin-top:16px}
+.loading{text-align:center;padding:40px;opacity:.7;font-size:1.05em}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <h1>&#x1F4E1; Wideband Spectrogram</h1>
+  <p class="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; viridis palette</p>
+</header>
+
+<div class="controls">
+  <div><label for="dsel">Date (UTC):</label><select id="dsel"></select></div>
+  <button onclick="load()">&#x21BB; Refresh</button>
+  <span class="status" id="status">Loading&hellip;</span>
+</div>
+
+<div id="err"></div>
+<div id="loading" class="loading">Loading spectrogram&hellip;</div>
+
+<div id="view" style="display:none">
+  <div class="sg-wrap">
+    <div id="time-axis"></div>
+    <div class="sg-right">
+      <div id="freq-axis"></div>
+      <div class="sg-canvas-wrap" id="cwrap">
+        <canvas id="img-canvas"></canvas>
+        <canvas id="overlay-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span id="lmin">-130 dBFS</span>
+    <canvas id="legend-canvas" width="200" height="13"></canvas>
+    <span id="lmax">-60 dBFS</span>
+    <span style="margin-left:14px;opacity:.45">noise floor &rarr; signal peak</span>
+  </div>
+</div>
+</div>
+<div id="tt"></div>
+
+<script>
+/* ── Viridis LUT (256 entries, identical to Go backend) ─────────────────── */
+var V=[
+[68,1,84],[68,2,86],[69,4,87],[69,5,89],[70,7,90],[70,8,92],[70,10,93],[70,11,94],[71,13,96],[71,14,97],
+[71,16,99],[71,17,100],[71,19,101],[72,20,103],[72,22,104],[72,23,105],[72,24,106],[72,26,108],[72,27,109],[72,28,110],
+[72,30,111],[72,31,112],[72,32,113],[72,34,115],[72,35,116],[72,36,117],[72,38,118],[72,39,119],[72,40,120],[72,42,121],
+[72,43,122],[71,44,122],[71,46,123],[71,47,124],[71,48,125],[71,50,126],[70,51,127],[70,52,128],[70,54,128],[70,55,129],
+[69,56,130],[69,58,131],[69,59,131],[68,60,132],[68,62,133],[68,63,133],[67,64,134],[67,66,135],[67,67,135],[66,68,136],
+[66,70,137],[65,71,137],[65,72,138],[65,74,138],[64,75,139],[64,76,140],[63,78,140],[63,79,141],[62,80,141],[62,82,142],
+[61,83,142],[61,84,143],[60,86,143],[60,87,144],[59,88,144],[59,90,145],[58,91,145],[58,92,146],[57,94,146],[57,95,146],
+[56,96,147],[56,98,147],[55,99,148],[55,100,148],[54,102,148],[54,103,149],[53,104,149],[53,106,149],[52,107,150],[52,108,150],
+[51,110,150],[51,111,151],[50,112,151],[50,114,151],[49,115,152],[49,116,152],[48,118,152],[48,119,152],[47,120,153],[47,122,153],
+[46,123,153],[46,124,153],[45,126,154],[45,127,154],[44,128,154],[44,130,154],[43,131,154],[43,132,155],[42,134,155],[42,135,155],
+[41,136,155],[41,138,155],[40,139,155],[40,140,156],[39,142,156],[39,143,156],[38,144,156],[38,146,156],[37,147,156],[37,148,156],
+[36,150,156],[36,151,156],[35,152,157],[35,154,157],[34,155,157],[34,156,157],[33,158,157],[33,159,157],[32,160,157],[32,162,157],
+[31,163,157],[31,164,157],[30,166,157],[30,167,157],[29,168,157],[29,170,157],[28,171,157],[28,172,157],[27,174,157],[27,175,157],
+[26,176,157],[26,178,157],[25,179,157],[25,180,157],[24,182,157],[24,183,157],[23,184,157],[23,186,157],[22,187,157],[22,188,157],
+[21,190,157],[21,191,157],[20,192,157],[20,194,157],[19,195,157],[19,196,157],[18,198,157],[18,199,157],[17,200,157],[17,202,157],
+[16,203,157],[16,204,157],[15,206,157],[15,207,157],[14,208,157],[14,210,157],[13,211,157],[13,212,157],[12,214,157],[12,215,157],
+[11,216,157],[11,218,157],[10,219,157],[10,220,157],[9,222,157],[9,223,157],[8,224,157],[8,226,157],[7,227,157],[7,228,157],
+[6,230,157],[6,231,157],[5,232,157],[5,234,157],[4,235,157],[4,236,157],[3,238,157],[3,239,157],[2,240,157],[2,242,157],
+[1,243,157],[1,244,157],[0,246,157],[0,247,157],[0,248,157],[0,250,157],[0,251,157],[0,252,157],[0,254,157],[1,255,157],
+[3,255,156],[5,255,154],[8,255,152],[11,255,150],[14,255,148],[17,255,146],[20,255,144],[23,255,142],[26,255,140],[29,255,138],
+[32,255,136],[35,255,134],[38,255,132],[41,255,130],[44,255,128],[47,255,126],[50,255,124],[53,255,122],[56,255,120],[59,255,118],
+[62,255,116],[65,255,114],[68,255,112],[71,255,110],[74,255,108],[77,255,106],[80,255,104],[83,255,102],[86,255,100],[89,255,98],
+[92,255,96],[95,255,94],[98,255,92],[101,255,90],[104,255,88],[107,255,86],[110,255,84],[113,255,82],[116,255,80],[119,255,78],
+[122,255,76],[125,255,74],[128,255,72],[131,255,70],[134,255,68],[137,255,66],[140,255,64],[143,255,62],[146,255,60],[149,255,58],
+[152,255,56],[155,255,54],[158,255,52],[161,255,50],[164,255,48],[167,255,46],[170,255,44],[173,255,42],[176,255,40],[179,255,38],
+[182,255,36],[185,255,34],[188,255,32],[191,255,30],[194,255,28],[253,231,37]
+];
+
+/* Build inverse map: quantised RGB key -> LUT index */
+var INV={};
+(function(){for(var i=0;i<V.length;i++){var c=V[i],k=((c[0]>>3)<<10)|((c[1]>>3)<<5)|(c[2]>>3);if(!(k in INV))INV[k]=i;}})();
+
+function pxToDb(ctx,px,py,dmin,dmax){
+  var d=ctx.getImageData(px,py,1,1).data;
+  if(d[0]===0&&d[1]===0&&d[2]===0)return null;
+  var k=((d[0]>>3)<<10)|((d[1]>>3)<<5)|(d[2]>>3);
+  var idx=INV[k];
+  if(idx===undefined)return null;
+  return dmin+(idx/255)*(dmax-dmin);
+}
+
+/* Amateur radio bands */
+var BANDS=[
+  [135700,137800,'2200m'],[472000,479000,'630m'],
+  [1800000,2000000,'160m'],[3500000,4000000,'80m'],
+  [5250000,5450000,'60m'],[7000000,7200000,'40m'],
+  [10100000,10150000,'30m'],[14000000,14350000,'20m'],
+  [18068000,18168000,'17m'],[21000000,21450000,'15m'],
+  [24890000,24990000,'12m'],[28000000,29700000,'10m']
+];
+function bandName(hz){for(var i=0;i<BANDS.length;i++)if(hz>=BANDS[i][0]&&hz<=BANDS[i][1])return BANDS[i][2];return null;}
+
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+/* ── State ──────────────────────────────────────────────────────────────── */
+var meta=null,bmp=null,ictx=null,timer=null;
+
+/* ── Init ───────────────────────────────────────────────────────────────── */
+(function init(){
+  fetch('/api/spectrogram/list')
+    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(function(data){
+      if(!data.enabled){showErr('Spectrogram not enabled. Set <code>spectrogram.enabled: true</code> in config.yaml.');return;}
+      var sel=document.getElementById('dsel');
+      sel.innerHTML='';
+      for(var i=0;i<data.available.length;i++){
+        var d=data.available[i];
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(d))continue; /* sanitise */
+        var o=document.createElement('option');
+        o.value=d; o.textContent=d===(data.today?data.today:'')?d+' (today)':d;
+        sel.appendChild(o);
+      }
+      sel.onchange=load;
+      load();
+    })
+    .catch(function(e){showErr('Failed to load date list: '+escHtml(e.message));});
+})();
+
+function load(){
+  clearTimeout(timer);
+  setStatus('Loading\u2026');
+  document.getElementById('loading').style.display='block';
+  document.getElementById('view').style.display='none';
+  document.getElementById('err').innerHTML='';
+
+  var sel=document.getElementById('dsel');
+  var ds=sel.value||'';
+  if(ds&&!/^\d{4}-\d{2}-\d{2}$/.test(ds)){showErr('Invalid date');return;} /* sanitise */
+
+  var today=new Date().toISOString().slice(0,10);
+  var isToday=!ds||ds===today;
+  var murl='/api/spectrogram/meta'+(ds?'?date='+encodeURIComponent(ds):'');
+
+  fetch(murl)
+    .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})
+    .then(function(m){
+      meta=m;
+      var iurl=meta.image_url+(isToday?(meta.image_url.indexOf('?')>=0?'&':'?')+'_t='+Date.now():'');
+      return fetch(iurl);
+    })
+    .then(function(r){if(!r.ok)throw new Error('image '+r.status);return r.blob();})
+    .then(function(b){return createImageBitmap(b);})
+    .then(function(b){
+      bmp=b;
+      render();
+      document.getElementById('loading').style.display='none';
+      document.getElementById('view').style.display='block';
+      setStatus(meta.date+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 in progress'));
+      if(isToday&&!meta.complete)timer=setTimeout(load,65000);
+    })
+    .catch(function(e){
+      document.getElementById('loading').style.display='none';
+      showErr('Load failed: '+escHtml(e.message));
+      setStatus('Error');
+    });
+}
+
+/* ── Render ─────────────────────────────────────────────────────────────── */
+function render(){
+  var ic=document.getElementById('img-canvas');
+  var oc=document.getElementById('overlay-canvas');
+  ic.width=bmp.width; ic.height=bmp.height;
+  ictx=ic.getContext('2d',{willReadFrequently:true});
+  ictx.drawImage(bmp,0,0);
+  oc.width=bmp.width; oc.height=bmp.height;
+  buildFreqAxis(); buildTimeAxis(); buildLegend(); setupHover();
+}
+
+/* Frequency axis with notches */
+function buildFreqAxis(){
+  var ax=document.getElementById('freq-axis');
+  ax.innerHTML='';
+  /* Major labels every 5 MHz */
+  var majors=[0,5,10,15,20,25,30];
+  for(var i=0;i<majors.length;i++){
+    var mhz=majors[i];
+    var pct=(mhz/30)*100+'%';
+    var notch=document.createElement('div');
+    notch.className='f-notch'; notch.style.left=pct;
+    ax.appendChild(notch);
+    var lbl=document.createElement('span');
+    lbl.className='f-label'; lbl.style.left=pct;
+    lbl.textContent=mhz+' MHz';
+    ax.appendChild(lbl);
+  }
+  /* Minor notches every 1 MHz (no label) */
+  for(var mhz=1;mhz<30;mhz++){
+    if(mhz%5===0)continue;
+    var pct=(mhz/30)*100+'%';
+    var notch=document.createElement('div');
+    notch.className='f-notch';
+    notch.style.left=pct;
+    notch.style.height='4px';
+    notch.style.opacity='0.3';
+    ax.appendChild(notch);
+  }
+}
+
+/* Time axis with labels every 3 hours */
+function buildTimeAxis(){
+  var ax=document.getElementById('time-axis');
+  ax.innerHTML='';
+  if(!meta||meta.row_count===0)return;
+  for(var row=0;row<=meta.max_rows;row+=180){
+    var pct=(row/meta.max_rows)*100+'%';
+    var lbl=document.createElement('span');
+    lbl.className='t-label'; lbl.style.top=pct;
+    var hh=String(Math.floor(row/60)).padStart(2,'0');
+    var mm=String(row%60).padStart(2,'0');
+    lbl.textContent=hh+':'+mm;
+    ax.appendChild(lbl);
+  }
+}
+
+/* Viridis legend */
+function buildLegend(){
+  var c=document.getElementById('legend-canvas');
+  var ctx=c.getContext('2d');
+  for(var i=0;i<c.width;i++){
+    var idx=Math.min(255,Math.round((i/c.width)*255));
+    var rgb=V[idx];
+    ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
+    ctx.fillRect(i,0,1,c.height);
+  }
+  document.getElementById('lmin').textContent=meta.db_min.toFixed(0)+' dBFS';
+  document.getElementById('lmax').textContent=meta.db_max.toFixed(0)+' dBFS';
+}
+
+/* ── Hover crosshair + tooltip ──────────────────────────────────────────── */
+function setupHover(){
+  var cw=document.getElementById('cwrap');
+  var tt=document.getElementById('tt');
+  var oc=document.getElementById('overlay-canvas');
+  var octx=oc.getContext('2d');
+
+  cw.onmousemove=function(e){
+    if(!meta||!ictx)return;
+    var r=cw.getBoundingClientRect();
+    var xp=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+    var yp=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+    var px=Math.floor(xp*oc.width);
+    var py=Math.floor(yp*oc.height);
+
+    /* Frequency */
+    var hz=xp*meta.end_freq_hz;
+    var mhz=(hz/1e6).toFixed(4);
+    var band=bandName(hz);
+
+    /* Time */
+    var row=Math.floor(yp*meta.max_rows);
+    var nodata=row>=meta.row_count;
+    var hh=String(Math.floor(row/60)).padStart(2,'0');
+    var mm=String(row%60).padStart(2,'0');
+    var tstr=hh+':'+mm+' UTC';
+
+    /* Signal level from pixel */
+    var sig=null,nf=null,snr=null;
+    if(!nodata){
+      sig=pxToDb(ictx,px,py,meta.db_min,meta.db_max);
+      if(meta.rows&&meta.rows[row]){
+        var nfv=meta.rows[row].noise_floor;
+        if(nfv!==0){nf=nfv;if(sig!==null)snr=sig-nf;}
+      }
+    }
+
+    /* Build tooltip — only numeric/hardcoded values injected into HTML */
+    var h='<div class="tt-freq">'+mhz+' MHz'+(band?' <span style="opacity:.55;font-size:.9em">('+band+')</span>':'')+'</div>';
+    h+='<div class="tt-time">'+tstr+'</div>';
+    if(nodata){
+      h+='<div class="tt-sep"></div><div class="tt-nd">no data yet</div>';
+    } else {
+      h+='<div class="tt-sep"></div>';
+      if(sig!==null)h+='<div class="tt-row"><span class="tt-lbl">Signal</span><span class="tt-val">'+sig.toFixed(1)+' dBFS</span></div>';
+      if(nf!==null)h+='<div class="tt-row"><span class="tt-lbl">Noise floor</span><span class="tt-val">'+nf.toFixed(1)+' dBFS</span></div>';
+      if(snr!==null){
+        var col=snr>20?'#7f7':snr>10?'#ff7':'#fa7';
+        h+='<div class="tt-row"><span class="tt-lbl">SNR</span><span class="tt-val" style="color:'+col+'">'+snr.toFixed(1)+' dB</span></div>';
+      }
+    }
+    tt.innerHTML=h;
+    tt.style.display='block';
+
+    /* Position tooltip on screen */
+    var tw=190,th=130;
+    var tx=e.clientX+16,ty=e.clientY-10;
+    if(tx+tw>window.innerWidth)tx=e.clientX-tw-8;
+    if(ty+th>window.innerHeight)ty=e.clientY-th-8;
+    tt.style.left=tx+'px'; tt.style.top=ty+'px';
+
+    /* Crosshair */
+    var cx=xp*oc.width, cy=yp*oc.height;
+    octx.clearRect(0,0,oc.width,oc.height);
+    octx.strokeStyle='rgba(255,255,255,.4)';
+    octx.lineWidth=1;
+    octx.setLineDash([4,4]);
+    octx.beginPath();
+    octx.moveTo(0,cy); octx.lineTo(oc.width,cy);
+    octx.moveTo(cx,0); octx.lineTo(cx,oc.height);
+    octx.stroke();
+    octx.setLineDash([]);
+    octx.fillStyle='rgba(255,255,255,.75)';
+    octx.beginPath();
+    octx.arc(cx,cy,3,0,Math.PI*2);
+    octx.fill();
+  };
+
+  cw.onmouseleave=function(){
+    tt.style.display='none';
+    octx.clearRect(0,0,oc.width,oc.height);
+  };
+}
+
+/* ── Helpers ────────────────────────────────────────────────────────────── */
+function setStatus(s){document.getElementById('status').textContent=s;}
+function showErr(s){document.getElementById('err').innerHTML='<div class="error">'+s+'</div>';}
+</script>
+</body>
+</html>

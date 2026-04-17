@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -189,6 +190,8 @@ func (sr *SpectrogramRecorder) tick(t time.Time) {
 	fft := sr.nfm.GetWideBandFFT()
 
 	sr.mu.Lock()
+	var newRowIndex int = -1
+	var noiseFloor float32
 	if sr.rowCount < spectrogramMaxRows {
 		row := &sr.rows[sr.rowCount]
 		if fft == nil || len(fft.Data) == 0 {
@@ -206,10 +209,17 @@ func (sr *SpectrogramRecorder) tick(t time.Time) {
 				row[i] = noDataSentinel
 			}
 		}
+		noiseFloor = rowP5(row)
+		newRowIndex = sr.rowCount
 		sr.rowCount++
 		sr.lastRow = t
 	}
 	sr.mu.Unlock()
+
+	// Append row metadata to JSONL (outside lock)
+	if newRowIndex >= 0 {
+		sr.appendRowToJSONL(today, newRowIndex, t, noiseFloor)
+	}
 
 	// Render PNG and persist to disk (outside lock — CPU-bound work)
 	sr.renderAndCache()
@@ -236,9 +246,10 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 		}
 	}
 
-	// Delete the working .bin for the old day (no longer needed)
+	// Delete the working .bin for the old day (no longer needed after archiving)
 	oldBin := filepath.Join(sr.config.DataDir, "spectrogram_"+oldDate+".bin")
 	os.Remove(oldBin)
+	// The .jsonl is kept as the archived metadata for the completed day
 
 	// Run retention cleanup
 	sr.runCleanup(newDayTime)
@@ -294,6 +305,77 @@ func (sr *SpectrogramRecorder) persistToDisk(today string) {
 	if err := atomicWriteFile(binPath, buf); err != nil {
 		log.Printf("Spectrogram: failed to write .bin: %v", err)
 	}
+}
+
+// jsonlPath returns the path to the JSONL metadata file for a given date.
+func (sr *SpectrogramRecorder) jsonlPath(dateStr string) string {
+	return filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".jsonl")
+}
+
+// appendRowToJSONL appends one row's metadata as a JSON line to the daily .jsonl file.
+// The file is opened in append mode so each call adds exactly one line.
+func (sr *SpectrogramRecorder) appendRowToJSONL(dateStr string, rowIndex int, t time.Time, noiseFloor float32) {
+	type rowEntry struct {
+		Row        int     `json:"row"`
+		UTCTime    string  `json:"utc_time"`
+		Unix       int64   `json:"unix"`
+		NoiseFloor float32 `json:"noise_floor"`
+	}
+	entry := rowEntry{
+		Row:        rowIndex,
+		UTCTime:    t.UTC().Format("15:04"),
+		Unix:       t.Unix(),
+		NoiseFloor: noiseFloor,
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("Spectrogram: failed to marshal JSONL entry: %v", err)
+		return
+	}
+
+	f, err := os.OpenFile(sr.jsonlPath(dateStr), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("Spectrogram: failed to open JSONL file: %v", err)
+		return
+	}
+	defer f.Close()
+	f.Write(line)
+	f.Write([]byte{'\n'})
+}
+
+// readJSONL reads all row entries from a .jsonl file for a given date.
+// Returns nil if the file does not exist.
+func (sr *SpectrogramRecorder) readJSONL(dateStr string) []SpectrogramRowMeta {
+	type rawEntry struct {
+		Row        int     `json:"row"`
+		UTCTime    string  `json:"utc_time"`
+		Unix       int64   `json:"unix"`
+		NoiseFloor float32 `json:"noise_floor"`
+	}
+
+	data, err := os.ReadFile(sr.jsonlPath(dateStr))
+	if err != nil {
+		return nil
+	}
+
+	var rows []SpectrogramRowMeta
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e rawEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+		rows = append(rows, SpectrogramRowMeta{
+			Row:        e.Row,
+			UTCTime:    e.UTCTime,
+			Unix:       e.Unix,
+			NoiseFloor: e.NoiseFloor,
+		})
+	}
+	return rows
 }
 
 // loadTodayFromDisk attempts to restore today's data from the .bin file.
@@ -466,9 +548,11 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 		if fileDate.Before(cutoff) {
 			pngPath := filepath.Join(sr.config.DataDir, name)
 			binPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".bin")
+			jsonlPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".jsonl")
 			os.Remove(pngPath)
 			os.Remove(binPath)
-			log.Printf("Spectrogram: deleted old file %s (older than %d days)", name, sr.config.RetentionDays)
+			os.Remove(jsonlPath)
+			log.Printf("Spectrogram: deleted old files for %s (older than %d days)", dateStr, sr.config.RetentionDays)
 		}
 	}
 }
@@ -573,6 +657,36 @@ var viridisLUT = [256][3]uint8{
 	{253, 231, 37},
 }
 
+// ─── Statistics helpers ───────────────────────────────────────────────────────
+
+// rowP5 returns the 5th-percentile dBFS value of a spectrogram row,
+// skipping sentinel (no-data) values. Used as a per-minute noise floor estimate.
+func rowP5(row *[spectrogramBins]float32) float32 {
+	// Collect valid (non-sentinel) values
+	valid := make([]float32, 0, spectrogramBins)
+	for _, v := range row {
+		if !math.IsInf(float64(v), -1) && !math.IsNaN(float64(v)) {
+			valid = append(valid, v)
+		}
+	}
+	if len(valid) == 0 {
+		return 0
+	}
+	// Partial sort to find P5 without full sort (use nth-element approximation via sort)
+	// For 4096 bins this is fast enough
+	sortFloat32Slice(valid)
+	idx := len(valid) * 5 / 100
+	if idx >= len(valid) {
+		idx = len(valid) - 1
+	}
+	return valid[idx]
+}
+
+// sortFloat32Slice sorts a []float32 in ascending order using stdlib sort.
+func sortFloat32Slice(s []float32) {
+	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
+}
+
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 // handleSpectrogram serves the spectrogram PNG for a given UTC date.
@@ -672,4 +786,150 @@ func handleSpectrogramList(w http.ResponseWriter, r *http.Request, recorder *Spe
 		"today":     time.Now().UTC().Format("2006-01-02"),
 		"available": dates,
 	})
+}
+
+// SpectrogramRowMeta holds the UTC timestamp and noise floor for a single spectrogram row.
+type SpectrogramRowMeta struct {
+	Row        int     `json:"row"`
+	UTCTime    string  `json:"utc_time"` // "HH:MM"
+	Unix       int64   `json:"unix"`
+	NoiseFloor float32 `json:"noise_floor"` // P5 percentile dBFS (noise floor estimate)
+}
+
+// SpectrogramMeta is the JSON response for GET /api/spectrogram/meta.
+type SpectrogramMeta struct {
+	Date               string               `json:"date"`
+	StartFreqHz        float64              `json:"start_freq_hz"`
+	EndFreqHz          float64              `json:"end_freq_hz"`
+	BinWidthHz         float64              `json:"bin_width_hz"`
+	BinCount           int                  `json:"bin_count"`
+	RowCount           int                  `json:"row_count"`
+	MaxRows            int                  `json:"max_rows"`
+	RowIntervalSeconds int                  `json:"row_interval_seconds"`
+	DBMin              float64              `json:"db_min"`
+	DBMax              float64              `json:"db_max"`
+	Palette            string               `json:"palette"`
+	ImageURL           string               `json:"image_url"`
+	ListURL            string               `json:"list_url"`
+	Complete           bool                 `json:"complete"`
+	Rows               []SpectrogramRowMeta `json:"rows"`
+}
+
+// handleSpectrogramMeta returns JSON metadata for a spectrogram image.
+//
+//	GET /api/spectrogram/meta              → today's metadata
+//	GET /api/spectrogram/meta?date=YYYY-MM-DD → metadata for a past date
+func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *SpectrogramRecorder) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if recorder == nil {
+		http.Error(w, `{"error":"spectrogram recording is not enabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	dateStr := r.URL.Query().Get("date")
+	if dateStr == "" {
+		dateStr = today
+	}
+
+	// Validate date
+	requestedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid date format — use YYYY-MM-DD"}`, http.StatusBadRequest)
+		return
+	}
+	if requestedDate.After(time.Now().UTC()) {
+		http.Error(w, `{"error":"date is in the future"}`, http.StatusBadRequest)
+		return
+	}
+	safeDateStr := requestedDate.Format("2006-01-02")
+
+	// Primary source: read per-row metadata from the .jsonl file (available for all dates)
+	rows := recorder.readJSONL(safeDateStr)
+
+	var rowCount int
+	var complete bool
+
+	if safeDateStr == today {
+		// For today, fall back to ring buffer if JSONL is missing or has fewer rows
+		// (e.g. first minute before any row has been written)
+		recorder.mu.Lock()
+		liveRowCount := recorder.rowCount
+		recorder.mu.Unlock()
+
+		if len(rows) < liveRowCount {
+			// JSONL is behind — fill missing rows from ring buffer
+			midnight := time.Date(requestedDate.Year(), requestedDate.Month(), requestedDate.Day(), 0, 0, 0, 0, time.UTC)
+			recorder.mu.Lock()
+			for i := len(rows); i < liveRowCount; i++ {
+				t := midnight.Add(time.Duration(i) * time.Minute)
+				nf := rowP5(&recorder.rows[i])
+				rows = append(rows, SpectrogramRowMeta{
+					Row:        i,
+					UTCTime:    t.Format("15:04"),
+					Unix:       t.Unix(),
+					NoiseFloor: nf,
+				})
+			}
+			recorder.mu.Unlock()
+		}
+		rowCount = len(rows)
+		complete = false
+	} else {
+		// Archived day — use JSONL row count; if JSONL missing, assume full day
+		if rows == nil {
+			rowCount = spectrogramMaxRows
+		} else {
+			rowCount = len(rows)
+		}
+		complete = true
+	}
+
+	// If rows is still nil (no JSONL, archived day), build synthetic rows with zero noise floor
+	if rows == nil {
+		midnight := time.Date(requestedDate.Year(), requestedDate.Month(), requestedDate.Day(), 0, 0, 0, 0, time.UTC)
+		rows = make([]SpectrogramRowMeta, rowCount)
+		for i := 0; i < rowCount; i++ {
+			t := midnight.Add(time.Duration(i) * time.Minute)
+			rows[i] = SpectrogramRowMeta{
+				Row:     i,
+				UTCTime: t.Format("15:04"),
+				Unix:    t.Unix(),
+			}
+		}
+	}
+
+	imageURL := "/api/spectrogram"
+	if safeDateStr != today {
+		imageURL += "?date=" + safeDateStr
+	}
+
+	cacheControl := "max-age=60"
+	if complete {
+		cacheControl = "max-age=3600"
+	}
+	w.Header().Set("Cache-Control", cacheControl)
+
+	meta := SpectrogramMeta{
+		Date:               safeDateStr,
+		StartFreqHz:        0,
+		EndFreqHz:          30000000,
+		BinWidthHz:         7324.21875,
+		BinCount:           spectrogramBins,
+		RowCount:           rowCount,
+		MaxRows:            spectrogramMaxRows,
+		RowIntervalSeconds: 60,
+		DBMin:              recorder.config.DBMin,
+		DBMax:              recorder.config.DBMax,
+		Palette:            "viridis",
+		ImageURL:           imageURL,
+		ListURL:            "/api/spectrogram/list",
+		Complete:           complete,
+		Rows:               rows,
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.Encode(meta)
 }

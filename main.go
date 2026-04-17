@@ -626,6 +626,13 @@ func main() {
 		config.NoiseFloor.DataDir = *configDir + "/" + config.NoiseFloor.DataDir
 	}
 
+	// Set spectrogram data directory relative to config directory
+	if config.Spectrogram.Enabled && config.Spectrogram.DataDir == "" {
+		config.Spectrogram.DataDir = *configDir + "/spectrogram"
+	} else if config.Spectrogram.Enabled && !strings.HasPrefix(config.Spectrogram.DataDir, "/") {
+		config.Spectrogram.DataDir = *configDir + "/" + config.Spectrogram.DataDir
+	}
+
 	noiseFloorMonitor, err := NewNoiseFloorMonitor(config, radiod, sessions)
 	if err != nil {
 		log.Fatalf("Failed to initialize noise floor monitor: %v", err)
@@ -639,6 +646,17 @@ func main() {
 		StartVoiceActivityBackgroundScanner(noiseFloorMonitor)
 
 		defer noiseFloorMonitor.Stop()
+	}
+
+	// Initialize and start the wideband spectrogram recorder (one PNG per UTC day)
+	spectrogramRecorder := NewSpectrogramRecorder(noiseFloorMonitor, config.Spectrogram)
+	if spectrogramRecorder != nil {
+		if err := spectrogramRecorder.Start(); err != nil {
+			log.Printf("Warning: Failed to start spectrogram recorder: %v", err)
+			spectrogramRecorder = nil
+		} else {
+			defer spectrogramRecorder.Stop()
+		}
 	}
 
 	// Create frequency reference monitor
@@ -1879,6 +1897,14 @@ func main() {
 	http.HandleFunc("/api/noisefloor/fft/wideband", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorWideBandFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
+
+	// Spectrogram endpoints
+	http.HandleFunc("/api/spectrogram", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogram(w, r, spectrogramRecorder)
+	})
+	http.HandleFunc("/api/spectrogram/list", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramList(w, r, spectrogramRecorder)
+	})
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))

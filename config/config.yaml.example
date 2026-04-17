@@ -1075,6 +1075,60 @@ noisefloor:
       bin_bandwidth: 1700     # 1.7 kHz resolution (wide band)
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
 
+# ==============================================================================
+# Wideband Spectrogram Recording
+# ==============================================================================
+# Records the 0-30 MHz wideband spectrum as a PNG image, one file per UTC day.
+# Each image is 4096 pixels wide (one pixel per FFT bin, ~7.3 kHz resolution)
+# and grows by one row per minute throughout the day (up to 1440 rows at midnight).
+# The image is always valid and can be served at any time during the day.
+# At UTC midnight, the completed day's image is archived and a new one begins.
+#
+# Requires: noisefloor.enabled: true
+#
+# Files are stored as:
+#   data_dir/spectrogram_YYYY-MM-DD.png  — daily PNG (served via HTTP)
+#   data_dir/spectrogram_YYYY-MM-DD.bin  — raw float32 data (today only, for restart recovery)
+#
+# HTTP endpoints:
+#   GET /api/spectrogram                    — today's in-progress PNG (Cache-Control: max-age=60)
+#   GET /api/spectrogram?date=YYYY-MM-DD    — archived PNG for a past date (Cache-Control: max-age=86400)
+#   GET /api/spectrogram/list               — JSON list of available dates (newest first)
+#
+# Colour scale: viridis palette (dark purple = noise floor, bright yellow = strong signal)
+#   db_min maps to the darkest colour (noise floor)
+#   db_max maps to the brightest colour (signal peak)
+#   Signals outside this range are clamped to the nearest colour
+#   Tune db_min/db_max to match your receiver's noise floor and signal levels
+#
+spectrogram:
+  # Enable daily spectrogram recording (default: false)
+  # Requires noisefloor.enabled: true
+  enabled: false
+
+  # Directory to store spectrogram files (one PNG + one .bin per UTC day)
+  # Relative paths are resolved relative to the config directory (/app/config in Docker)
+  # Default: "spectrogram" → /app/config/spectrogram/
+  data_dir: "spectrogram"
+
+  # Minimum dB value mapped to the darkest colour (noise floor)
+  # Signals at or below this level appear as the darkest colour in the palette
+  # Typical values: -130 to -120 dBFS for a quiet HF receiver
+  # Default: -130
+  db_min: -130
+
+  # Maximum dB value mapped to the brightest colour (signal peak)
+  # Signals at or above this level appear as the brightest colour in the palette
+  # Typical values: -60 to -50 dBFS for strong HF signals
+  # Default: -60
+  db_max: -60
+
+  # Number of completed daily PNG files to retain on disk
+  # Files older than this are automatically deleted at UTC midnight rollover
+  # Set to 0 to keep all files indefinitely
+  # Default: 30
+  retention_days: 30
+
 # Instance Reporting settings
 # Allows this UberSDR instance to report to a central registry
 instance_reporting:

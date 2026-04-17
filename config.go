@@ -21,6 +21,7 @@ type Config struct {
 	Audio              AudioConfig              `yaml:"audio"`
 	Spectrum           SpectrumConfig           `yaml:"spectrum"`
 	NoiseFloor         NoiseFloorConfig         `yaml:"noisefloor"`
+	Spectrogram        SpectrogramConfig        `yaml:"spectrogram"`
 	Decoder            DecoderConfig            `yaml:"decoder"`
 	Prometheus         PrometheusConfig         `yaml:"prometheus"`
 	MQTT               MQTTConfig               `yaml:"mqtt"`
@@ -214,6 +215,33 @@ type SpectrumDefaultConfig struct {
 	CenterFrequency uint64  `yaml:"center_frequency"`
 	BinCount        int     `yaml:"bin_count"`
 	BinBandwidth    float64 `yaml:"bin_bandwidth"`
+}
+
+// SpectrogramConfig contains settings for the daily wideband spectrogram recorder.
+// One PNG image is generated per UTC day covering 0-30 MHz.
+type SpectrogramConfig struct {
+	// Enabled controls whether the spectrogram recorder runs (default: false).
+	// Requires noisefloor.enabled: true.
+	Enabled bool `yaml:"enabled"`
+
+	// DataDir is the directory where spectrogram files are stored.
+	// Relative paths are resolved relative to the config directory.
+	// Default: "spectrogram"
+	DataDir string `yaml:"data_dir"`
+
+	// DBMin is the dB value mapped to the darkest colour (noise floor).
+	// Default: -130
+	DBMin float64 `yaml:"db_min"`
+
+	// DBMax is the dB value mapped to the brightest colour (signal peak).
+	// Default: -60
+	DBMax float64 `yaml:"db_max"`
+
+	// RetentionDays is the number of completed daily PNG files to keep on disk.
+	// Files older than this are deleted at UTC midnight rollover.
+	// Set to 0 to keep all files indefinitely.
+	// Default: 30
+	RetentionDays int `yaml:"retention_days"`
 }
 
 // LoggingConfig contains logging settings
@@ -614,6 +642,20 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Spectrum.MaxSessionsPerUser == 0 {
 		config.Spectrum.MaxSessionsPerUser = 2
+	}
+
+	// Set spectrogram defaults if not specified
+	if config.Spectrogram.DBMin == 0 {
+		config.Spectrogram.DBMin = -130
+	}
+	if config.Spectrogram.DBMax == 0 {
+		config.Spectrogram.DBMax = -60
+	}
+	if config.Spectrogram.RetentionDays == 0 {
+		config.Spectrogram.RetentionDays = 30
+	}
+	if config.Spectrogram.DataDir == "" {
+		config.Spectrogram.DataDir = "spectrogram"
 	}
 
 	// Set delta threshold default and validate

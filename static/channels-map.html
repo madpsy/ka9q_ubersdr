@@ -618,6 +618,28 @@
             }
         }
 
+        // Haversine distance between two lat/lon points, returns km (rounded to integer)
+        function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return Math.round(R * c);
+        }
+
+        // Get receiver GPS coordinates from opener window (returns null if unavailable)
+        function getReceiverGPS() {
+            if (!window.opener || !window.opener.instanceDescription) return null;
+            const receiver = window.opener.instanceDescription.receiver;
+            if (!receiver || !receiver.gps) return null;
+            const { lat, lon } = receiver.gps;
+            if (lat === 0 && lon === 0) return null;
+            return { lat, lon };
+        }
+
         // Format frequency for display
         function formatFrequency(hz) {
             if (hz >= 1000000) {
@@ -978,6 +1000,15 @@
                     </div>`;
                 }
 
+                const rxGPS_popup = getReceiverGPS();
+                if (rxGPS_popup) {
+                    const distKm = haversineDistanceKm(rxGPS_popup.lat, rxGPS_popup.lon, lat, lon);
+                    popupContent += `<div class="popup-row">
+                        <span class="popup-label">Distance:</span>
+                        <span class="popup-value">${distKm} km</span>
+                    </div>`;
+                }
+
                 if (channel.accuracy_radius_km) {
                     popupContent += `<div class="popup-row">
                         <span class="popup-label">Accuracy:</span>
@@ -1213,7 +1244,12 @@
                     // Build tooltip text
                     const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                     const freqMHz = (channel.frequency / 1000000).toFixed(3);
-                    const tooltipText = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                    let tooltipText = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                    const rxGPS_freq = getReceiverGPS();
+                    if (rxGPS_freq && channel.latitude != null && channel.longitude != null) {
+                        const distKm = haversineDistanceKm(rxGPS_freq.lat, rxGPS_freq.lon, channel.latitude, channel.longitude);
+                        tooltipText += `\n${distKm} km`;
+                    }
 
                     // Register indicator in channelElements
                     if (!channelElements[channel.index]) {
@@ -1468,7 +1504,12 @@
                         // Build tooltip text
                         const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                         const freqMHz = (channel.frequency / 1000000).toFixed(3);
-                        const dotTooltip = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                        let dotTooltip = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                        const rxGPS_band = getReceiverGPS();
+                        if (rxGPS_band && channel.latitude != null && channel.longitude != null) {
+                            const distKm = haversineDistanceKm(rxGPS_band.lat, rxGPS_band.lon, channel.latitude, channel.longitude);
+                            dotTooltip += `\n${distKm} km`;
+                        }
 
                         // Register in channelElements for cross-highlighting
                         if (!channelElements[channel.index]) {

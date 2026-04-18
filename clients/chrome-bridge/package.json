@@ -1,0 +1,15 @@
+{
+  "name": "ubersdr-bridge-chrome",
+  "version": "1.0.4",
+  "description": "Chrome extension bridging the UberSDR web interface to local applications",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "zip": "node build.mjs",
+    "clean": "rm -rf dist/"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

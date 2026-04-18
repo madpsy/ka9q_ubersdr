@@ -262,6 +262,10 @@ let snrChartCanvas = null;
 window.snrHistory = snrHistory;
 let snrChartCtx = null;
 
+// dBFS history for mini chart alongside S-meter (10 seconds)
+let dbfsHistory = [];
+window.dbfsHistory = dbfsHistory;
+
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
@@ -2595,8 +2599,17 @@ async function handleBinaryMessage(data) {
                     // Keep window reference in sync
                     window.snrHistory = snrHistory;
 
+                    // Also track dBFS history for mini chart (store both baseband power and noise density)
+                    dbfsHistory.push({ value: basebandPower, noise: noiseDensity, timestamp: timestamp });
+                    dbfsHistory = dbfsHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                    window.dbfsHistory = dbfsHistory;
+
                     // Update display if modal is open
                     updateSignalQualityDisplay();
+
+                    // Always update mini charts (they live on the main page)
+                    drawDbfsHistoryChart();
+                    drawSnrHistoryChart();
                 }
             }
         }
@@ -10115,7 +10128,179 @@ function updateCATSyncState() {
 // Expose toggle function globally
 window.toggleFrequencyUnit = toggleFrequencyUnit;
 
-// Draw SNR chart
+// Colour helpers matching the S-meter needle colours
+// dBFS: red at -115 dBFS (S1) → green at -73 dBFS (S9)
+function sMeterColourForDbfs(dbfs) {
+    const clamped = Math.max(-115, Math.min(-73, dbfs));
+    const hue = Math.round(((clamped + 115) / 42) * 120);
+    return `hsl(${hue}, 90%, 55%)`;
+}
+
+// SNR: red at ≤30 dB → green at ≥50 dB
+function snrColourForValue(snr) {
+    const clamped = Math.max(30, Math.min(50, snr));
+    const hue = Math.round(((clamped - 30) / 20) * 120);
+    return `hsl(${hue}, 90%, 55%)`;
+}
+
+// Draw the mini dBFS history chart (alongside S-meter on main page)
+// Shows two lines: noise density (grey-blue, lower) and baseband power (coloured, upper)
+// Y-axis auto-scales to the 10s data range with a minimum 10 dB span
+function drawDbfsHistoryChart() {
+    const canvas = document.getElementById('dbfs-history-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Semi-transparent background
+    ctx.fillStyle = 'rgba(15, 25, 40, 0.75)';
+    ctx.fillRect(0, 0, width, height);
+
+    const historyData = window.dbfsHistory || dbfsHistory;
+    if (historyData.length < 2) {
+        ctx.fillStyle = '#888';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('No data', width / 2, height / 2);
+        return;
+    }
+
+    const now = Date.now();
+    const timeRange = SNR_HISTORY_MAX_AGE;
+
+    // Auto-scale: Y range covers all baseband and noise values with padding
+    const allValues = historyData.flatMap(e => [e.value, e.noise != null ? e.noise : e.value]);
+    let minDb = Math.min(...allValues);
+    let maxDb = Math.max(...allValues);
+    const span = maxDb - minDb;
+    const pad = Math.max(3, span * 0.1);
+    minDb -= pad;
+    maxDb += pad;
+    // Enforce minimum 10 dB span
+    if (maxDb - minDb < 10) {
+        const mid = (maxDb + minDb) / 2;
+        minDb = mid - 5;
+        maxDb = mid + 5;
+    }
+    const dbRange = maxDb - minDb;
+
+    const toY = v => height - ((Math.max(minDb, Math.min(maxDb, v)) - minDb) / dbRange) * height;
+    const toX = ts => width - ((now - ts) / timeRange) * width;
+
+    // --- Filled area between noise floor and baseband power ---
+    const lastBbVal = historyData[historyData.length - 1].value;
+    const fillColour = sMeterColourForDbfs(lastBbVal);
+    ctx.fillStyle = fillColour.replace('hsl(', 'hsla(').replace(')', ', 0.12)');
+    ctx.beginPath();
+    // Top edge: baseband power (left to right)
+    ctx.moveTo(toX(historyData[0].timestamp), toY(historyData[0].value));
+    historyData.forEach(e => ctx.lineTo(toX(e.timestamp), toY(e.value)));
+    // Bottom edge: noise density (right to left)
+    for (let i = historyData.length - 1; i >= 0; i--) {
+        const e = historyData[i];
+        ctx.lineTo(toX(e.timestamp), toY(e.noise != null ? e.noise : e.value));
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Noise density line (grey-blue, dashed) ---
+    ctx.strokeStyle = 'rgb(100, 160, 200)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    historyData.forEach((e, i) => {
+        const x = toX(e.timestamp);
+        const y = toY(e.noise != null ? e.noise : e.value);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // --- Baseband power line (coloured per segment) ---
+    ctx.lineWidth = 2.5;
+    for (let i = 1; i < historyData.length; i++) {
+        const prev = historyData[i - 1];
+        const curr = historyData[i];
+        ctx.strokeStyle = sMeterColourForDbfs(curr.value);
+        ctx.beginPath();
+        ctx.moveTo(toX(prev.timestamp), toY(prev.value));
+        ctx.lineTo(toX(curr.timestamp), toY(curr.value));
+        ctx.stroke();
+    }
+}
+
+// Draw the mini SNR history chart (alongside S-meter on main page)
+// Y-axis auto-scales to the 10s data range with a minimum 10 dB span
+function drawSnrHistoryChart() {
+    const canvas = document.getElementById('snr-history-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Semi-transparent background
+    ctx.fillStyle = 'rgba(15, 25, 40, 0.75)';
+    ctx.fillRect(0, 0, width, height);
+
+    const historyData = window.snrHistory || snrHistory;
+    if (historyData.length < 2) {
+        ctx.fillStyle = '#888';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('No data', width / 2, height / 2);
+        return;
+    }
+
+    const now = Date.now();
+    const timeRange = SNR_HISTORY_MAX_AGE;
+
+    // Auto-scale: Y range covers all SNR values with padding
+    let minSnr = Math.min(...historyData.map(e => e.value));
+    let maxSnr = Math.max(...historyData.map(e => e.value));
+    const span = maxSnr - minSnr;
+    const pad = Math.max(2, span * 0.1);
+    minSnr = Math.max(0, minSnr - pad);
+    maxSnr = maxSnr + pad;
+    // Enforce minimum 10 dB span
+    if (maxSnr - minSnr < 10) {
+        const mid = (maxSnr + minSnr) / 2;
+        minSnr = Math.max(0, mid - 5);
+        maxSnr = mid + 5;
+    }
+    const snrRange = maxSnr - minSnr;
+
+    const toY = v => height - ((Math.max(minSnr, Math.min(maxSnr, v)) - minSnr) / snrRange) * height;
+    const toX = ts => width - ((now - ts) / timeRange) * width;
+
+    // Filled area under the line (last point's colour at low opacity)
+    const lastVal = historyData[historyData.length - 1].value;
+    const fillColour = snrColourForValue(lastVal);
+    ctx.fillStyle = fillColour.replace('hsl(', 'hsla(').replace(')', ', 0.15)');
+    ctx.beginPath();
+    ctx.moveTo(toX(historyData[0].timestamp), height);
+    ctx.lineTo(toX(historyData[0].timestamp), toY(historyData[0].value));
+    historyData.forEach(e => ctx.lineTo(toX(e.timestamp), toY(e.value)));
+    ctx.lineTo(toX(historyData[historyData.length - 1].timestamp), height);
+    ctx.closePath();
+    ctx.fill();
+
+    // Coloured line segments
+    ctx.lineWidth = 2.5;
+    for (let i = 1; i < historyData.length; i++) {
+        const prev = historyData[i - 1];
+        const curr = historyData[i];
+        ctx.strokeStyle = snrColourForValue(curr.value);
+        ctx.beginPath();
+        ctx.moveTo(toX(prev.timestamp), toY(prev.value));
+        ctx.lineTo(toX(curr.timestamp), toY(curr.value));
+        ctx.stroke();
+    }
+}
+
+// Draw SNR chart (in Audio Settings modal)
 function drawSNRChart() {
     if (!snrChartCanvas || !snrChartCtx) {
         snrChartCanvas = document.getElementById('snr-chart-canvas');
@@ -10306,8 +10491,12 @@ function updateSignalQualityDisplay() {
         }
     }
 
-    // Draw SNR chart
+    // Draw SNR chart (modal)
     drawSNRChart();
+
+    // Draw mini charts on main page
+    drawDbfsHistoryChart();
+    drawSnrHistoryChart();
 }
 
 // Expose signal quality update function globally

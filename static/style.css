@@ -2760,6 +2760,50 @@ input[type="range"]::-moz-range-thumb {
     display: block;
 }
 
+/* S-meter control group: side-by-side layout (S-meter left, mini charts right) */
+.smeter-control-group {
+    flex-direction: row !important;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.smeter-left {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.smeter-charts-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    justify-content: flex-start;
+    padding-top: 10px; /* match .s-meter-container margin-top */
+    flex: 1;
+    min-width: 0;
+}
+
+.smeter-mini-chart-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.smeter-mini-chart-title {
+    font-size: 10px;
+    color: #ecf0f1;
+    text-align: center;
+    font-weight: bold;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+}
+
+.smeter-mini-chart-wrap canvas {
+    display: block;
+    border-radius: 3px;
+    width: 100%;
+}
+
 #s-meter-canvas {
     background: var(--panel-dark);
     border-radius: 6px 6px 0 0;

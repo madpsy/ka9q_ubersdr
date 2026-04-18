@@ -458,24 +458,38 @@
                 </div>
             </div>
 
-            <div class="control-group">
-                <div class="s-meter-container">
-                    <canvas id="s-meter-canvas" width="280" height="160"></canvas>
+            <div class="control-group smeter-control-group">
+                <!-- Left: S-meter canvas + readout bar -->
+                <div class="smeter-left">
+                    <div class="s-meter-container">
+                        <canvas id="s-meter-canvas" width="280" height="160"></canvas>
+                    </div>
+                    <div style="display: flex; justify-content: center; align-items: center; padding: 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 12px 8px; background: #2c3e50; border-radius: 0 0 4px 4px; width: 280px; box-sizing: border-box;">
+                            <div style="flex: 1; text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
+                                <div id="s-meter-value-display" style="font-size: 18px; font-weight: bold; color: #ecf0f1;">S0</div>
+                                <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">Instant</div>
+                            </div>
+                            <div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                                <div id="s-meter-peak-display" style="font-size: 18px; font-weight: bold; color: rgba(0, 255, 255, 0.9);">S0</div>
+                                <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">Hold</div>
+                            </div>
+                            <div style="flex: 1; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 1px;">
+                                <div id="s-meter-snr-display" style="font-size: 18px; font-weight: bold; color: #ffc107;">--</div>
+                                <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">SNR</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div style="display: flex; justify-content: center; align-items: center; padding: 0;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 12px 8px; background: #2c3e50; border-radius: 0 0 4px 4px; width: 280px; box-sizing: border-box;">
-                        <div style="flex: 1; text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
-                            <div id="s-meter-value-display" style="font-size: 18px; font-weight: bold; color: #ecf0f1;">S0</div>
-                            <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">Instant</div>
-                        </div>
-                        <div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1px;">
-                            <div id="s-meter-peak-display" style="font-size: 18px; font-weight: bold; color: rgba(0, 255, 255, 0.9);">S0</div>
-                            <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">Hold</div>
-                        </div>
-                        <div style="flex: 1; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 1px;">
-                            <div id="s-meter-snr-display" style="font-size: 18px; font-weight: bold; color: #ffc107;">--</div>
-                            <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">SNR</div>
-                        </div>
+                <!-- Right: two mini history charts stacked -->
+                <div class="smeter-charts-panel">
+                    <div class="smeter-mini-chart-wrap">
+                        <span class="smeter-mini-chart-title">dBFS (10s)</span>
+                        <canvas id="dbfs-history-canvas" width="130" height="82"></canvas>
+                    </div>
+                    <div class="smeter-mini-chart-wrap">
+                        <span class="smeter-mini-chart-title">SNR (10s)</span>
+                        <canvas id="snr-history-canvas" width="130" height="82"></canvas>
                     </div>
                 </div>
             </div>

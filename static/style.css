@@ -2779,8 +2779,7 @@ input[type="range"]::-moz-range-thumb {
     gap: 5px;
     justify-content: flex-start;
     padding-top: 10px; /* match .s-meter-container margin-top */
-    flex: 1;
-    min-width: 0;
+    flex-shrink: 0;
 }
 
 .smeter-mini-chart-wrap {

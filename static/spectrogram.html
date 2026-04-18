@@ -1818,7 +1818,9 @@ function renderTimesliceMulti(results){
           }
         }
       },
-      scales:scales
+      scales:scales,
+      /* X axis title — set after scales object is built */
+      plugins_xTitle:'Time (UTC)'
     }
   });
 

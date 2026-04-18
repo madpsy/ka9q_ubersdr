@@ -2779,13 +2779,15 @@ input[type="range"]::-moz-range-thumb {
     gap: 5px;
     justify-content: flex-start;
     padding-top: 10px; /* match .s-meter-container margin-top */
-    flex-shrink: 0;
+    flex: none; /* fixed size — no grow, no shrink */
 }
 
 .smeter-mini-chart-wrap {
     display: flex;
     flex-direction: column;
     gap: 1px;
+    border-radius: 6px;
+    overflow: hidden;
 }
 
 .smeter-mini-chart-title {
@@ -2799,7 +2801,6 @@ input[type="range"]::-moz-range-thumb {
 
 .smeter-mini-chart-wrap canvas {
     display: block;
-    border-radius: 3px;
     background: rgba(15, 25, 40, 0.75);
 }
 

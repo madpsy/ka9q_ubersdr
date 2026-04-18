@@ -2929,17 +2929,25 @@ function updateStatus(msg) {
         }
 
         // Announce via TTS for externally-driven changes (MIDI, backend, etc.)
-        // Uses announceFrequencyAndMode when both are present to avoid the race condition
-        // where announceModeChange (immediate) fires before announceFrequencyChange (1s debounce).
-        // The lastAnnouncedFrequency/lastAnnouncedMode dedup prevents double-announcements
-        // when a UI-initiated change already called TTS directly.
+        // Only fire when frequency or mode actually changed vs the last status message,
+        // because updateStatus() is called on every periodic poll (every 2 seconds).
+        // announceFrequencyAndMode() bypasses the lastAnnouncedFrequency dedup so we
+        // must guard here ourselves.
         if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
-            if (msg.mode) {
-                window.ttsAnnouncements.announceFrequencyAndMode(msg.frequency, msg.mode);
-            } else {
-                window.ttsAnnouncements.announceFrequencyChange(msg.frequency);
+            const prevFreq = window._lastStatusFrequency;
+            const prevMode = window._lastStatusMode;
+            const freqChanged = msg.frequency !== prevFreq;
+            const modeChanged = msg.mode && msg.mode !== prevMode;
+            if (freqChanged || modeChanged) {
+                if (msg.mode) {
+                    window.ttsAnnouncements.announceFrequencyAndMode(msg.frequency, msg.mode);
+                } else {
+                    window.ttsAnnouncements.announceFrequencyChange(msg.frequency);
+                }
             }
         }
+        window._lastStatusFrequency = msg.frequency;
+        window._lastStatusMode = msg.mode;
 
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor - use window globals for latest values
@@ -2963,9 +2971,12 @@ function updateStatus(msg) {
         }
 
         // Announce mode-only change via TTS (e.g. MIDI mode change without frequency change)
-        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        // Guard against repeated announcements on every periodic poll.
+        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled() &&
+            msg.mode !== window._lastStatusMode) {
             window.ttsAnnouncements.announceModeChange(msg.mode);
         }
+        window._lastStatusMode = msg.mode;
     }
 
     // Update page title

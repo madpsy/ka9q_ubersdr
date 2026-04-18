@@ -3758,12 +3758,12 @@
             return convertObject(config);
         }
 
-        function showAlert(message, type) {
+        function showAlert(message, type, scrollToAlert = false) {
             const alertBox = document.getElementById('alertBox');
             alertBox.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
 
-            // Only scroll alert into view for errors, not for success or info messages
-            if (type === 'error') {
+            // Scroll alert into view for errors always, or when explicitly requested (e.g. save actions)
+            if (type === 'error' || scrollToAlert) {
                 alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
 
@@ -6835,7 +6835,7 @@
                     throw new Error(errText || 'Failed to save UI config');
                 }
                 const result = await response.json();
-                showAlert(result.message || 'UI defaults saved. New visitors will see these settings immediately.', 'success');
+                showAlert(result.message || 'UI defaults saved. New visitors will see these settings immediately.', 'success', true);
             } catch (error) {
                 showAlert('Error saving UI configuration: ' + error.message, 'error');
             }

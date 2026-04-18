@@ -262,7 +262,6 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <label for="ts-dsel" style="font-size:.88em;opacity:.85">Date:</label>
     <select id="ts-dsel" onchange="tsOnDateChange()"></select>
     <button onclick="tsReloadAll()">&#x21BB; Reload all</button>
-    <button onclick="tsAutoRange()">&#x2B0C; Auto Y</button>
     <span class="status" id="ts-status"></span>
   </div>
 
@@ -270,17 +269,20 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <div class="ts-add-bar">
     <div>
       <label for="ts-freq">Freq (MHz):</label>
-      <input type="number" id="ts-freq" class="ts-input" min="0" max="30" step="0.001" placeholder="e.g. 7.100">
+      <input type="number" id="ts-freq" class="ts-input" min="0" max="30" step="0.001" placeholder="e.g. 7.100"
+             onkeydown="if(event.key==='Enter')tsAddSlice()">
     </div>
     <div>
       <label for="ts-bw">BW (kHz):</label>
-      <input type="number" id="ts-bw" class="ts-input" min="0.1" max="30000" step="0.1" placeholder="e.g. 3">
+      <input type="number" id="ts-bw" class="ts-input" min="0.1" max="30000" step="0.1" value="3" placeholder="e.g. 3"
+             onkeydown="if(event.key==='Enter')tsAddSlice()">
     </div>
     <div>
       <label for="ts-label">Label:</label>
-      <input type="text" id="ts-label" class="ts-input ts-label-input" placeholder="optional">
+      <input type="text" id="ts-label" class="ts-input ts-label-input" placeholder="optional"
+             onkeydown="if(event.key==='Enter')tsAddSlice()">
     </div>
-    <button onclick="tsAddSlice()">&#x2795; Add slice</button>
+    <button onclick="tsAddSlice()" style="background:rgba(100,200,255,.25);border-color:rgba(100,200,255,.5);font-weight:600">+ Add slice</button>
   </div>
 
   <!-- Slice list -->
@@ -1722,44 +1724,74 @@ function renderTimesliceMulti(results){
   var labels=results[0].data.rows.map(function(r){return r.utc_time||'';});
 
   var datasets=[];
+  var hasAnySNR=false;
+
   for(var i=0;i<results.length;i++){
     var s=results[i].slice;
     var rows=results[i].data.rows;
     var lbl=s.label||(s.freqMHz.toFixed(3)+' MHz');
-    var sigData=rows.map(function(r){return r.db;});
+
+    /* Signal level — left axis (y), solid line */
     datasets.push({
       label:lbl+' (dBFS)',
-      data:sigData,
+      data:rows.map(function(r){return r.db;}),
       borderColor:s.color,
       backgroundColor:s.color.replace(',1)',',.07)'),
       borderWidth:1.5,
       pointRadius:0,
       pointHoverRadius:4,
       tension:0.2,
-      fill:false
+      fill:false,
+      yAxisID:'y'
     });
-    /* Noise floor as dashed line for first slice only (avoid clutter) */
-    if(i===0){
-      var hasNF=rows.some(function(r){return r.noise_floor;});
-      if(hasNF){
-        datasets.push({
-          label:'Noise floor (dBFS)',
-          data:rows.map(function(r){return r.noise_floor||null;}),
-          borderColor:'rgba(180,180,180,0.45)',
-          backgroundColor:'transparent',
-          borderWidth:1,
-          borderDash:[4,3],
-          pointRadius:0,
-          pointHoverRadius:0,
-          tension:0.2,
-          fill:false
-        });
-      }
+
+    /* SNR = signal - noise_floor — right axis (y1), dashed, same colour as signal */
+    var snrData=rows.map(function(r){
+      return (r.noise_floor&&r.db!==null)?Math.round((r.db-r.noise_floor)*10)/10:null;
+    });
+    var hasSNR=snrData.some(function(v){return v!==null;});
+    if(hasSNR){
+      hasAnySNR=true;
+      datasets.push({
+        label:lbl+' SNR (dB)',
+        data:snrData,
+        borderColor:s.color,
+        backgroundColor:'transparent',
+        borderWidth:1.5,
+        borderDash:[5,4],
+        pointRadius:0,
+        pointHoverRadius:3,
+        tension:0.2,
+        fill:false,
+        yAxisID:'y1'
+      });
     }
   }
 
   var ctx=document.getElementById('ts-canvas').getContext('2d');
   if(tsChart){tsChart.destroy();tsChart=null;}
+
+  var scales={
+    x:{
+      ticks:{color:'rgba(255,255,255,0.6)',maxRotation:0,autoSkip:true,maxTicksLimit:10},
+      grid:{color:'rgba(255,255,255,0.07)'}
+    },
+    y:{
+      position:'left',
+      ticks:{color:'rgba(255,255,255,0.6)',callback:function(v){return v.toFixed(0)+' dB';}},
+      grid:{color:'rgba(255,255,255,0.1)'},
+      title:{display:true,text:'Signal (dBFS)',color:'rgba(255,255,255,0.5)'}
+    }
+  };
+
+  if(hasAnySNR){
+    scales.y1={
+      position:'right',
+      ticks:{color:'rgba(200,220,255,0.55)',callback:function(v){return v.toFixed(0)+' dB';}},
+      grid:{drawOnChartArea:false},
+      title:{display:true,text:'SNR (dB)',color:'rgba(200,220,255,0.5)'}
+    };
+  }
 
   tsChart=new Chart(ctx,{
     type:'line',
@@ -1779,21 +1811,14 @@ function renderTimesliceMulti(results){
           borderWidth:1,
           callbacks:{
             title:function(items){return items[0].label+' UTC';},
-            label:function(item){return item.dataset.label+': '+item.parsed.y.toFixed(1)+' dBFS';}
+            label:function(item){
+              var suffix=item.dataset.yAxisID==='y1'?' dB':' dBFS';
+              return item.dataset.label+': '+item.parsed.y.toFixed(1)+suffix;
+            }
           }
         }
       },
-      scales:{
-        x:{
-          ticks:{color:'rgba(255,255,255,0.6)',maxRotation:0,autoSkip:true,maxTicksLimit:10},
-          grid:{color:'rgba(255,255,255,0.07)'}
-        },
-        y:{
-          ticks:{color:'rgba(255,255,255,0.6)',callback:function(v){return v.toFixed(0)+' dB';}},
-          grid:{color:'rgba(255,255,255,0.1)'},
-          title:{display:true,text:'dBFS',color:'rgba(255,255,255,0.5)'}
-        }
-      }
+      scales:scales
     }
   });
 
@@ -1805,6 +1830,10 @@ function tsAutoRange(){
   if(!tsChart)return;
   tsChart.options.scales.y.min=undefined;
   tsChart.options.scales.y.max=undefined;
+  if(tsChart.options.scales.y1){
+    tsChart.options.scales.y1.min=undefined;
+    tsChart.options.scales.y1.max=undefined;
+  }
   tsChart.update();
 }
 </script>

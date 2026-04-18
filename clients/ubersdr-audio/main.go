@@ -19,6 +19,15 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// ── flrig preference keys ──────────────────────────────────────────────────────
+const (
+	prefKeyFlrigEnabled   = "flrig_enabled"
+	prefKeyFlrigHost      = "flrig_host"
+	prefKeyFlrigPort      = "flrig_port"
+	prefKeyFlrigDirection = "flrig_direction"
+	prefKeyFlrigPTTMute   = "flrig_ptt_mute"
+)
+
 //go:embed ubersdr.ico
 var appIcon []byte
 
@@ -143,6 +152,9 @@ func main() {
 		prefKeyChannel = "channel_mode"
 	)
 	prefs := a.Preferences()
+
+	// ── flrig sync ────────────────────────────────────────────────────────────
+	flrigSync := NewFlrigSync()
 
 	// ── State ────────────────────────────────────────────────────────────────
 	currentMode := prefs.StringWithFallback(prefKeyMode, "usb")
@@ -272,6 +284,8 @@ func main() {
 			statusLabel.SetText("Tune error: " + err.Error())
 		}
 		updateWindowTitle()
+		// Push SDR→rig (debounced; no-op if disabled or direction is rig-to-sdr).
+		flrigSync.PushSDRState(currentFreq, currentMode)
 	}
 
 	// ── applyFreqEntry — reads the kHz entry, updates currentFreq, tunes ─────
@@ -1542,6 +1556,194 @@ func main() {
 		audioBar,
 	)
 
+	// ── flrig sync UI ─────────────────────────────────────────────────────────
+
+	// Status dot + label for flrig connection state.
+	flrigDot := NewStatusDot(dotColorGrey)
+	flrigStatusLabel := widget.NewLabel("Disabled")
+
+	// PTT indicator label.
+	flrigPTTLabel := widget.NewLabel("RX")
+
+	// Restore saved flrig preferences.
+	flrigEnabledSaved := prefs.BoolWithFallback(prefKeyFlrigEnabled, false)
+	flrigHostSaved := prefs.StringWithFallback(prefKeyFlrigHost, "127.0.0.1")
+	flrigPortSaved := prefs.IntWithFallback(prefKeyFlrigPort, 12345)
+	flrigDirSaved := prefs.StringWithFallback(prefKeyFlrigDirection, "both")
+	flrigPTTMuteSaved := prefs.BoolWithFallback(prefKeyFlrigPTTMute, true)
+
+	// volumeBeforePTT remembers the volume level to restore after TX ends.
+	volumeBeforePTT := volumeSlider.Value
+
+	// applyFlrigConfig pushes the current UI values into FlrigSync and persists them.
+	// Called whenever any flrig setting changes.
+	// flrigWidgetsReady is set true once all widgets are assigned so that the
+	// OnChanged callbacks fired during widget construction are no-ops.
+	flrigWidgetsReady := false
+	var flrigEnabledCheck *widget.Check // forward-declared so applyFlrigConfig can read it
+	var flrigHostEntry *widget.Entry
+	var flrigPortEntry *widget.Entry
+	var flrigDirSelect *widget.RadioGroup
+	var flrigPTTMuteCheck *widget.Check
+
+	applyFlrigConfig := func() {
+		if !flrigWidgetsReady {
+			return
+		}
+		enabled := flrigEnabledCheck.Checked
+		host := strings.TrimSpace(flrigHostEntry.Text)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		portStr := strings.TrimSpace(flrigPortEntry.Text)
+		port, err := strconv.Atoi(portStr)
+		if err != nil || port < 1 || port > 65535 {
+			port = 12345
+		}
+		dir := flrigDirSelect.Selected
+		if dir == "" {
+			dir = "both"
+		}
+		pttMute := flrigPTTMuteCheck.Checked
+
+		prefs.SetBool(prefKeyFlrigEnabled, enabled)
+		prefs.SetString(prefKeyFlrigHost, host)
+		prefs.SetInt(prefKeyFlrigPort, port)
+		prefs.SetString(prefKeyFlrigDirection, dir)
+		prefs.SetBool(prefKeyFlrigPTTMute, pttMute)
+
+		flrigSync.Configure(host, port, dir, enabled)
+
+		if !enabled {
+			flrigDot.SetColor(dotColorGrey)
+			flrigStatusLabel.SetText("Disabled")
+		}
+	}
+
+	// Wire flrig callbacks — these are called from the FlrigSync poll goroutine.
+	flrigSync.OnStatus = func(connected bool, msg string) {
+		if connected {
+			flrigDot.SetColor(dotColorGreen)
+		} else {
+			flrigDot.SetColor(dotColorRed)
+		}
+		flrigStatusLabel.SetText(msg)
+	}
+
+	flrigSync.OnPTT = func(active bool) {
+		if active {
+			flrigPTTLabel.SetText("TX")
+			// Mute the SDR during TX if PTT-mute is enabled.
+			if flrigPTTMuteCheck.Checked {
+				volumeBeforePTT = volumeSlider.Value
+				client.SetVolume(0)
+			}
+		} else {
+			flrigPTTLabel.SetText("RX")
+			// Restore volume when returning to RX.
+			if flrigPTTMuteCheck.Checked {
+				client.SetVolume(volumeBeforePTT / 100.0)
+			}
+		}
+	}
+
+	flrigSync.OnFreqMode = func(hz int, sdrMode string) {
+		// Guard: only apply if the mode is one we know about.
+		knownMode := false
+		for _, lbl := range modeLabels {
+			if modeKey(lbl) == sdrMode {
+				knownMode = true
+				break
+			}
+		}
+
+		currentFreq = hz
+		prefs.SetInt(prefKeyFreq, hz)
+		freqEntry.SetText(formatFreqKHz(hz))
+
+		if knownMode && sdrMode != currentMode {
+			currentMode = sdrMode
+			prefs.SetString(prefKeyMode, sdrMode)
+			for _, lbl := range modeLabels {
+				if modeKey(lbl) == sdrMode {
+					modeInitDone = false
+					modeSelect.SetSelected(lbl)
+					modeInitDone = true
+					newMax := bwSliderMax(currentMode)
+					bwSlider.Max = newMax
+					bwSlider.Value = bwDefaultSlider(currentMode)
+					bwSlider.Refresh()
+					bwValueLabel.SetText(fmt.Sprintf("%.0f Hz", bwSlider.Value))
+					break
+				}
+			}
+		}
+
+		// Tune the SDR to the new frequency/mode from flrig.
+		// sendTune calls PushSDRState, but FlrigSync's echo prevention
+		// (lastSdrFreq/lastSdrMode already stamped in poll()) will suppress
+		// the round-trip push back to flrig.
+		if client.State() == StateConnected {
+			lo, hi := bwToLoHi(currentMode, bwSlider.Value)
+			client.Frequency = currentFreq
+			client.Mode = currentMode
+			client.BandwidthLow = lo
+			client.BandwidthHigh = hi
+			_ = client.Tune(currentFreq, currentMode, lo, hi)
+			updateWindowTitle()
+		}
+	}
+
+	// Build flrig UI widgets now that the callbacks are wired.
+	flrigEnabledCheck = widget.NewCheck("Enable FLRig sync", func(checked bool) {
+		applyFlrigConfig()
+	})
+	flrigEnabledCheck.SetChecked(flrigEnabledSaved)
+
+	flrigHostEntry = widget.NewEntry()
+	flrigHostEntry.SetPlaceHolder("127.0.0.1")
+	flrigHostEntry.SetText(flrigHostSaved)
+	flrigHostEntry.OnSubmitted = func(_ string) { applyFlrigConfig() }
+
+	flrigPortEntry = widget.NewEntry()
+	flrigPortEntry.SetPlaceHolder("12345")
+	flrigPortEntry.SetText(strconv.Itoa(flrigPortSaved))
+	flrigPortEntry.OnSubmitted = func(_ string) { applyFlrigConfig() }
+
+	flrigDirSelect = widget.NewRadioGroup(
+		[]string{"rig-to-sdr", "sdr-to-rig", "both"},
+		func(_ string) { applyFlrigConfig() },
+	)
+	flrigDirSelect.Horizontal = true
+	flrigDirSelect.SetSelected(flrigDirSaved)
+
+	flrigPTTMuteCheck = widget.NewCheck("Mute during TX", func(_ bool) {
+		applyFlrigConfig()
+	})
+	flrigPTTMuteCheck.SetChecked(flrigPTTMuteSaved)
+
+	flrigApplyBtn := widget.NewButton("Apply", func() { applyFlrigConfig() })
+
+	flrigStatusRow := container.NewHBox(flrigDot, flrigStatusLabel, layout.NewSpacer(), widget.NewLabel("PTT:"), flrigPTTLabel)
+
+	flrigBox := container.NewVBox(
+		flrigEnabledCheck,
+		container.New(layout.NewFormLayout(),
+			widget.NewLabel("Host"), flrigHostEntry,
+			widget.NewLabel("Port"), flrigPortEntry,
+			widget.NewLabel("Direction"), flrigDirSelect,
+		),
+		container.NewHBox(flrigPTTMuteCheck, layout.NewSpacer(), flrigApplyBtn),
+		flrigStatusRow,
+	)
+
+	// All flrig widgets are now assigned — enable the config callback and apply.
+	flrigWidgetsReady = true
+	applyFlrigConfig()
+
+	// Start the flrig background goroutines.
+	flrigSync.Start()
+
 	// Throughput label — updated every second while connected.
 	throughputLabel := widget.NewLabel("")
 
@@ -1558,6 +1760,7 @@ func main() {
 		widget.NewCard("Instance", "", serverGrid),
 		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid)),
 		widget.NewCard("Audio", "", audioBox),
+		widget.NewCard("FLRig Sync", "", flrigBox),
 	)
 
 	// Full window: scrollable body + fixed status bar at bottom
@@ -1569,9 +1772,10 @@ func main() {
 	)
 
 	w.SetContent(content)
-	w.Resize(fyne.NewSize(580, 700))
+	w.Resize(fyne.NewSize(580, 780))
 
 	w.SetOnClosed(func() {
+		flrigSync.Stop()
 		if mdns != nil {
 			mdns.Stop()
 		}

@@ -1955,6 +1955,9 @@ func main() {
 	http.HandleFunc("/api/spectrogram/thumbnails", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramThumbnails(w, r, spectrogramRecorder, bandSpectrogramRecorders)
 	})
+	http.HandleFunc("/api/spectrogram/timeslice", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramTimeslice(w, r, spectrogramRecorder, bandSpectrogramRecorders, fftRateLimiter, ipBanManager)
+	})
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))

@@ -272,6 +272,9 @@ func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
 		case "spectrogram-meta":
 			refillRate = 5.0 // 5 requests per second for metadata (JSON only, no PNG)
 			maxTokens = 5.0
+		case "spectrogram-timeslice":
+			refillRate = 2.0 // 2 requests per second for time-slice JSON (lightweight)
+			maxTokens = 4.0
 		default:
 			refillRate = 0.5 // 1 request per 2 seconds for FFT data
 			maxTokens = 1.0

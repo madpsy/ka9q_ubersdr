@@ -1639,6 +1639,24 @@
                             </div>
                         </div>
 
+                        <!-- Bandwidth Indicator Colour -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎨 Default Bandwidth Indicator Colour</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                The colour of the bandwidth indicator bar drawn on the waterfall showing the tuned receive bandwidth.
+                                Users can right-click the bar to change the colour; their personal choice is saved in their browser and always takes priority.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-bandwidth-indicator-color" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Bandwidth Indicator Colour</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <select id="ui-bandwidth-indicator-color" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;" onchange="updateBandwidthColorSwatch()">
+                                        <!-- Options populated dynamically from /admin/ui-config -->
+                                    </select>
+                                    <span id="ui-bandwidth-indicator-swatch" style="display: inline-block; width: 24px; height: 24px; border-radius: 4px; border: 1px solid #aaa; flex-shrink: 0; background: #00ff00;"></span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Spectrum Background Image -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                             <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🖼️ Spectrum Background Image</h3>
@@ -6681,6 +6699,11 @@
                     contrastDisplay.textContent = contrast.default !== undefined ? contrast.default : 10;
                 }
 
+                // Build bandwidth indicator colour select
+                buildUISelect('ui-bandwidth-indicator-color', ui.bandwidth_indicator_color);
+                // Update swatch to match loaded default
+                updateBandwidthColorSwatch();
+
                 // Set boolean checkboxes
                 const setCheck = (id, setting, fallback) => {
                     const el = document.getElementById(id);
@@ -6730,6 +6753,26 @@
                 if (form) form.style.display = 'block';
                 showAlert('Error loading UI configuration: ' + error.message, 'error');
             }
+        }
+
+        /**
+         * Update the bandwidth indicator colour swatch next to the select.
+         * Called on change and after loading the config.
+         */
+        function updateBandwidthColorSwatch() {
+            const select = document.getElementById('ui-bandwidth-indicator-color');
+            const swatch = document.getElementById('ui-bandwidth-indicator-swatch');
+            if (!select || !swatch) return;
+            const colorMap = {
+                green:   '#00ff00',
+                red:     '#ff0000',
+                cyan:    '#00ffff',
+                white:   '#ffffff',
+                yellow:  '#ffff00',
+                orange:  '#ffa500',
+                magenta: '#ff00ff',
+            };
+            swatch.style.backgroundColor = colorMap[select.value] || '#00ff00';
         }
 
         /**
@@ -6819,7 +6862,19 @@
                     smoothing:            { default: smoothing ? smoothing.checked : false },
                     peak_hold:            { default: peakHold  ? peakHold.checked  : true  },
                     line_graph:           { default: lineGraph ? lineGraph.checked : false },
-                    spectrum_bg_opacity:  bgOpacity ? parseFloat(bgOpacity.value) : 0.30
+                    spectrum_bg_opacity:  bgOpacity ? parseFloat(bgOpacity.value) : 0.30,
+                    bandwidth_indicator_color: (() => {
+                        const sel = document.getElementById('ui-bandwidth-indicator-color');
+                        return sel ? {
+                            default: sel.value,
+                            available: Array.from(sel.options).map(o => ({ value: o.value, label: o.textContent }))
+                        } : { default: 'green', available: [
+                            {value:'green',label:'Green (default)'},{value:'red',label:'Red'},
+                            {value:'cyan',label:'Cyan'},{value:'white',label:'White'},
+                            {value:'yellow',label:'Yellow'},{value:'orange',label:'Orange'},
+                            {value:'magenta',label:'Magenta'}
+                        ]};
+                    })()
                 }
             };
 

@@ -102,3 +102,26 @@ ui:
   # localStorage key: spectrumLineGraphEnabled
   line_graph:
     default: false
+
+  # Default bandwidth indicator colour for new visitors
+  # The coloured bar drawn on the waterfall/overlay canvas showing the tuned receive bandwidth.
+  # Users can right-click the bandwidth indicator bar to change the colour; their choice is
+  # saved in browser localStorage and always takes priority over this server default.
+  # localStorage key: bandwidthIndicatorColor
+  bandwidth_indicator_color:
+    default: "green"
+    available:
+      - value: "green"
+        label: "Green (default)"
+      - value: "red"
+        label: "Red"
+      - value: "cyan"
+        label: "Cyan"
+      - value: "white"
+        label: "White"
+      - value: "yellow"
+        label: "Yellow"
+      - value: "orange"
+        label: "Orange"
+      - value: "magenta"
+        label: "Magenta"

@@ -85,19 +85,20 @@ ui:
     default: false
 
   # Default spatial smoothing for new visitors
-  # Reduces noise fuzziness in the waterfall display
+  # Reduces noise fuzziness in the spectrum display
   # localStorage key: spectrumSmoothEnabled
   smoothing:
     default: false
 
   # Default peak hold for new visitors
-  # Shows the highest signal level reached in the waterfall
+  # Shows the highest signal level reached in the spectrum display
   # localStorage key: spectrumHoldEnabled
   peak_hold:
     default: true
 
-  # Default line graph overlay for new visitors
-  # Shows a spectrum line graph overlaid on the waterfall
+  # Default spectrum split view for new visitors
+  # Shows a spectrum line graph above the waterfall in a split-screen layout
+  # Corresponds to the 'Spectrum' checkbox in the UI controls
   # localStorage key: spectrumLineGraphEnabled
   line_graph:
     default: false

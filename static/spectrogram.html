@@ -277,7 +277,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <div class="ts-add-bar">
     <div>
       <label for="ts-freq">Freq (MHz):</label>
-      <input type="number" id="ts-freq" class="ts-input" min="0" max="30" step="0.001" placeholder="e.g. 7.100"
+      <input type="number" id="ts-freq" class="ts-input" min="0" max="30" step="0.001" value="14.074" placeholder="e.g. 7.100"
              onkeydown="if(event.key==='Enter')tsAddSlice()">
     </div>
     <div>
@@ -287,7 +287,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     </div>
     <div>
       <label for="ts-label">Label:</label>
-      <input type="text" id="ts-label" class="ts-input ts-label-input" placeholder="optional"
+      <input type="text" id="ts-label" class="ts-input ts-label-input" value="20m FT8" placeholder="optional"
              onkeydown="if(event.key==='Enter')tsAddSlice()">
     </div>
     <button onclick="tsAddSlice()" style="background:rgba(100,200,255,.25);border-color:rgba(100,200,255,.5);font-weight:600">+ Add slice</button>

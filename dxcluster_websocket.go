@@ -1225,6 +1225,36 @@ func (h *DXClusterWebSocketHandler) GetChatUserCount() int {
 	return h.chatManager.GetActiveUserCount()
 }
 
+// KickConnectionsByIP closes all active DX cluster WebSocket connections from the given IP address.
+// It looks up each connection's session ID and checks the bound IP via the session manager.
+// Returns the number of connections closed.
+func (h *DXClusterWebSocketHandler) KickConnectionsByIP(ip string) int {
+	if ip == "" {
+		return 0
+	}
+
+	// Collect connections whose session is bound to this IP
+	h.connToSessionIDMu.RLock()
+	var connsToClose []*websocket.Conn
+	for conn, sessionID := range h.connToSessionID {
+		boundIP := h.sessions.GetUUIDIP(sessionID)
+		if boundIP == ip {
+			connsToClose = append(connsToClose, conn)
+		}
+	}
+	h.connToSessionIDMu.RUnlock()
+
+	// Close each matching connection — the handleClient defer will clean up maps
+	for _, conn := range connsToClose {
+		conn.Close()
+	}
+
+	if len(connsToClose) > 0 {
+		log.Printf("DX Cluster WebSocket: Kicked %d connection(s) from banned IP %s", len(connsToClose), ip)
+	}
+	return len(connsToClose)
+}
+
 // AddDXBytes tracks bytes sent to a DX cluster connection for a given UserSessionID
 func (h *DXClusterWebSocketHandler) AddDXBytes(userSessionID string, bytes uint64) {
 	if userSessionID == "" {

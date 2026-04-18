@@ -2789,15 +2789,23 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error kicking sessions for banned IP %s: %v", req.IP, err)
 	}
 
+	// Also close any active DX cluster WebSocket connections from this IP
+	// (chat runs over the DX WS, which is separate from the audio/spectrum session)
+	dxKicked := 0
+	if ah.dxClusterWsHandler != nil {
+		dxKicked = ah.dxClusterWsHandler.KickConnectionsByIP(req.IP)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
 		"status":           "success",
-		"message":          fmt.Sprintf("Banned IP %s and kicked %d session(s)", req.IP, count),
+		"message":          fmt.Sprintf("Banned IP %s and kicked %d session(s), %d DX connection(s)", req.IP, count, dxKicked),
 		"sessions_removed": count,
+		"dx_kicked":        dxKicked,
 	}
 	if messagesRemoved > 0 {
 		response["messages_removed"] = messagesRemoved
-		response["message"] = fmt.Sprintf("Banned IP %s and kicked %d session(s), removed %d message(s)", req.IP, count, messagesRemoved)
+		response["message"] = fmt.Sprintf("Banned IP %s and kicked %d session(s), %d DX connection(s), removed %d message(s)", req.IP, count, dxKicked, messagesRemoved)
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding ban response: %v", err)

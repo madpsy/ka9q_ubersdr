@@ -254,7 +254,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <!-- ── Time Slice panel ──────────────────────────────────────────────────── -->
 <div id="ts-panel">
   <div class="ts-info">
-    <b>Time Slice:</b> Track one or more frequencies over time. Add slices below — each is plotted as a separate line. The best data source (per-band or wideband) is chosen automatically. Slices and the selected date are saved to localStorage.
+    <b>Time Slice:</b> Track one or more frequencies over time. Add slices below — each is plotted as a separate line. The best data source (per-band or wideband) is chosen automatically.
   </div>
 
   <!-- Date / reload bar -->
@@ -297,7 +297,20 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 
   <div id="ts-err"></div>
   <div id="ts-chart-area" style="display:none">
-    <div class="ts-chart-wrap">
+    <div style="display:flex;align-items:center;gap:18px;margin-bottom:8px;font-size:.83em;opacity:.85;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="ts-show-dbfs" checked onchange="tsToggleLines()"> Show dBFS lines
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="ts-show-snr" checked onchange="tsToggleLines()"> Show SNR lines
+      </label>
+      <span style="opacity:.45;font-size:.9em">Drag to zoom &middot; double-click to reset</span>
+    </div>
+    <div class="ts-chart-wrap" style="position:relative">
+      <button onclick="tsResetZoom()" title="Reset zoom (or double-click chart)"
+              style="position:absolute;top:8px;right:8px;z-index:10;padding:3px 10px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer;opacity:.75">
+        &#x2B1C; Reset zoom
+      </button>
       <canvas id="ts-canvas" height="340"></canvas>
     </div>
     <details class="api-ref" style="margin-top:14px">
@@ -315,6 +328,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <div id="tt"></div>
 
 <script src="chart.umd.min.js"></script>
+<script src="chartjs-plugin-zoom.min.js"></script>
 <script>
 /* ── Colour palettes (256 entries each, identical to Go backend) ─────────── */
 var PALETTES={
@@ -1817,6 +1831,15 @@ function renderTimesliceMulti(results){
               return item.dataset.label+': '+item.parsed.y.toFixed(1)+suffix;
             }
           }
+        },
+        zoom:{
+          zoom:{
+            drag:{enabled:true,backgroundColor:'rgba(100,200,255,0.15)',borderColor:'rgba(100,200,255,0.5)',borderWidth:1},
+            mode:'x',
+            onZoomComplete:function(){
+              /* Show reset button hint in status */
+            }
+          }
         }
       },
       scales:scales
@@ -1825,6 +1848,30 @@ function renderTimesliceMulti(results){
 
   document.getElementById('ts-chart-area').style.display='block';
   document.getElementById('ts-canvas').style.height='340px';
+
+  /* Double-click on canvas resets zoom */
+  var canvas=document.getElementById('ts-canvas');
+  canvas.ondblclick=function(){tsResetZoom();};
+}
+
+function tsResetZoom(){
+  if(!tsChart)return;
+  tsChart.resetZoom();
+}
+
+function tsToggleLines(){
+  if(!tsChart)return;
+  var showDbfs=document.getElementById('ts-show-dbfs').checked;
+  var showSnr=document.getElementById('ts-show-snr').checked;
+  tsChart.data.datasets.forEach(function(ds){
+    var isSnr=(ds.yAxisID==='y1');
+    ds.hidden=isSnr?!showSnr:!showDbfs;
+  });
+  /* Hide/show the right axis label when SNR is toggled off */
+  if(tsChart.options.scales.y1){
+    tsChart.options.scales.y1.display=showSnr;
+  }
+  tsChart.update();
 }
 
 function tsAutoRange(){

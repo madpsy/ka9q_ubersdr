@@ -7765,6 +7765,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         ? getUIDefault('vuMeterStyle', 'vu_meter_style', 'bar')
         : (localStorage.getItem('vuMeterStyle') || 'bar');
 
+    // Re-apply VU meter style now that vuMeterStyle has been resolved from the server config.
+    // The synchronous DOMContentLoaded listener (line ~650) called applyVUMeterStyle() earlier
+    // while vuMeterStyle was still the placeholder 'bar', so the DOM may be in the wrong state.
+    applyVUMeterStyle();
+
     // Load signal data source setting FIRST
     loadSignalDataSource();
 

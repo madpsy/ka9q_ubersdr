@@ -231,7 +231,16 @@ window.ws = null;
 let audioQueue = [];
 let isPlaying = false;
 let isMuted = false;
-let currentVolume = 0.7;
+let currentVolume = (() => {
+    try {
+        const saved = localStorage.getItem('volume');
+        if (saved !== null) {
+            const v = parseInt(saved, 10);
+            if (!isNaN(v) && v >= 0 && v <= 200) return v / 100;
+        }
+    } catch (e) { /* localStorage unavailable */ }
+    return 1.0; // default 100%
+})();
 let lastBufferDisplayUpdate = 0;
 let nextPlayTime = 0;
 let audioStartTime = 0;
@@ -714,7 +723,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const volumeSlider = document.getElementById('volume');
             if (volumeSlider) {
                 let newVolume = parseInt(volumeSlider.value) + 5;
-                if (newVolume > 125) newVolume = 125;
+                if (newVolume > 200) newVolume = 200;
                 volumeSlider.value = newVolume;
                 // Trigger the input event to update volume
                 volumeSlider.dispatchEvent(new Event('input'));
@@ -996,7 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const savedVolume = localStorage.getItem('volume');
         if (savedVolume !== null) {
             const v = parseInt(savedVolume, 10);
-            if (!isNaN(v) && v >= 0 && v <= 125) {
+            if (!isNaN(v) && v >= 0 && v <= 200) {
                 volumeSlider.value = v;
                 document.getElementById('volume-value').textContent = v + '%';
                 currentVolume = v / 100;

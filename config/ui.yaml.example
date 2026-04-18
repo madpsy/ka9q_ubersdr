@@ -1,0 +1,103 @@
+# UberSDR Web UI Defaults
+# These settings control the default appearance for all new visitors.
+# Individual users can override any of these via the UI controls,
+# and their personal preference is saved in browser localStorage.
+# The server default only applies when a user has no saved preference for that setting.
+#
+# To add a new palette (after implementing it in spectrum-display.js):
+#   Simply add a new entry to the palette.available list below.
+#   It will automatically appear as an option in the admin UI.
+#   No Go code or HTML changes are required.
+
+ui:
+  # Default signal bar meter mode for new visitors
+  # The signal bar meter sits under the waterfall and shows signal strength
+  # Users can click the meter to cycle through modes
+  # localStorage key: signalMeterDisplayMode
+  signal_meter_mode:
+    default: "dbfs"
+    available:
+      - value: "dbfs"
+        label: "dBFS Bar"
+      - value: "snr"
+        label: "SNR Bar"
+      - value: "dbfs-led"
+        label: "dBFS LED"
+      - value: "snr-led"
+        label: "SNR LED"
+
+  # Default S-meter display mode for new visitors
+  # Controls which mode the needle S-meter (canvas) starts in
+  # Users can click the S-meter canvas to cycle through modes
+  # localStorage key: ubersdr_smeter_colour_mode
+  smeter_mode:
+    default: "smeter-classic"
+    available:
+      - value: "smeter-classic"
+        label: "S-Meter (Classic)"
+      - value: "snr-classic"
+        label: "SNR Meter (Classic)"
+      - value: "smeter-dynamic"
+        label: "S-Meter (Dynamic colour)"
+      - value: "snr-dynamic"
+        label: "SNR Meter (Dynamic colour)"
+
+  # Default waterfall colour palette for new visitors
+  # localStorage key: spectrumColorScheme
+  # To add a new palette: add an entry to 'available' below (after adding it to spectrum-display.js)
+  palette:
+    default: "jet"
+    available:
+      - value: "jet"
+        label: "Jet"
+      - value: "turbo"
+        label: "Turbo"
+      - value: "viridis"
+        label: "Viridis"
+      - value: "plasma"
+        label: "Plasma"
+
+  # Default auto-contrast value for new visitors
+  # Symmetric dB offset applied to the auto-range window:
+  #   floor is raised by +N dB, ceiling is lowered by -N dB
+  # Range: 0-20 (matches the Contrast slider in the spectrum controls)
+  # localStorage key: spectrumAutoContrast
+  contrast:
+    default: 10
+    min: 0
+    max: 20
+
+  # Default VU meter display style for new visitors
+  # localStorage key: vuMeterStyle
+  vu_meter_style:
+    default: "bar"
+    available:
+      - value: "bar"
+        label: "Bar"
+      - value: "led"
+        label: "LED"
+
+  # Default GPU sub-pixel waterfall scroll for new visitors
+  # Smoother 60fps scrolling using CSS transform compositing
+  # Disable if users report visual glitches on older hardware
+  # localStorage key: spectrumGpuScrollEnabled
+  gpu_scroll:
+    default: false
+
+  # Default spatial smoothing for new visitors
+  # Reduces noise fuzziness in the waterfall display
+  # localStorage key: spectrumSmoothEnabled
+  smoothing:
+    default: false
+
+  # Default peak hold for new visitors
+  # Shows the highest signal level reached in the waterfall
+  # localStorage key: spectrumHoldEnabled
+  peak_hold:
+    default: true
+
+  # Default line graph overlay for new visitors
+  # Shows a spectrum line graph overlaid on the waterfall
+  # localStorage key: spectrumLineGraphEnabled
+  line_graph:
+    default: false

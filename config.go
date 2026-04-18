@@ -40,6 +40,7 @@ type Config struct {
 	FreeDVExtension    FreeDVExtensionConfig    `yaml:"freedv_extension"`
 	EiBi               EiBiConfig               `yaml:"eibi"`
 	NTP                NTPConfig                `yaml:"ntp"`
+	UI                 UIConfig                 `yaml:"ui"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -434,6 +435,58 @@ type FreeDVExtensionConfig struct {
 // EiBiConfig contains settings for the EiBi shortwave broadcast schedule
 type EiBiConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable/disable EiBi schedule fetching (default: false)
+}
+
+// UIOptionItem represents a single selectable option for a UI setting
+type UIOptionItem struct {
+	Value string `yaml:"value" json:"value"`
+	Label string `yaml:"label" json:"label"`
+}
+
+// UISelectSetting represents a UI setting with a selected default and a list of available options.
+// The available list is the source of truth — adding a new entry here makes it appear in the admin UI.
+type UISelectSetting struct {
+	Default   string         `yaml:"default"   json:"default"`
+	Available []UIOptionItem `yaml:"available" json:"available"`
+}
+
+// UIRangeSetting represents a numeric slider UI setting with min/max bounds.
+type UIRangeSetting struct {
+	Default int `yaml:"default" json:"default"`
+	Min     int `yaml:"min"     json:"min"`
+	Max     int `yaml:"max"     json:"max"`
+}
+
+// UIBoolSetting represents a boolean (checkbox) UI setting.
+type UIBoolSetting struct {
+	Default bool `yaml:"default" json:"default"`
+}
+
+// UIConfig contains web UI appearance defaults for new visitors.
+// Each setting stores both the chosen default and the full list of available options.
+// The available list is read directly from ui.yaml — no Go code changes are needed
+// when new options (e.g. a new palette) are added to the YAML file.
+//
+// Settings and their corresponding localStorage keys:
+//   SignalMeterMode: signalMeterDisplayMode     — signal bar meter mode (dbfs/snr/dbfs-led/snr-led)
+//   SMeterMode:      ubersdr_smeter_colour_mode — needle S-meter display mode
+//   Palette:         spectrumColorScheme         — waterfall colour palette
+//   Contrast:        spectrumAutoContrast        — auto-range symmetric dB offset (0-20)
+//   VUMeterStyle:    vuMeterStyle                — VU meter display style (bar/led)
+//   GPUScroll:       spectrumGpuScrollEnabled    — GPU sub-pixel waterfall scroll
+//   Smoothing:       spectrumSmoothEnabled       — spatial smoothing
+//   PeakHold:        spectrumHoldEnabled         — peak hold (default true)
+//   LineGraph:       spectrumLineGraphEnabled    — line graph overlay
+type UIConfig struct {
+	SignalMeterMode UISelectSetting `yaml:"signal_meter_mode" json:"signal_meter_mode"`
+	SMeterMode      UISelectSetting `yaml:"smeter_mode"       json:"smeter_mode"`
+	Palette         UISelectSetting `yaml:"palette"           json:"palette"`
+	Contrast        UIRangeSetting  `yaml:"contrast"          json:"contrast"`
+	VUMeterStyle    UISelectSetting `yaml:"vu_meter_style"    json:"vu_meter_style"`
+	GPUScroll       UIBoolSetting   `yaml:"gpu_scroll"        json:"gpu_scroll"`
+	Smoothing       UIBoolSetting   `yaml:"smoothing"         json:"smoothing"`
+	PeakHold        UIBoolSetting   `yaml:"peak_hold"         json:"peak_hold"`
+	LineGraph       UIBoolSetting   `yaml:"line_graph"        json:"line_graph"`
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -879,6 +932,80 @@ func LoadConfig(filename string) (*Config, error) {
 
 	// Note: Decoder defaults are NOT set here because decoder.yaml is loaded separately
 	// and should be the source of truth for all decoder configuration
+
+	// Set UI defaults if not specified (only applies when ui.yaml is not loaded).
+	// These built-in defaults are used when no ui.yaml exists at all.
+	// When ui.yaml is loaded, its values replace these entirely.
+	//
+	// SignalMeterMode: localStorage key = signalMeterDisplayMode (dbfs/snr/dbfs-led/snr-led)
+	// SMeterMode:      localStorage key = ubersdr_smeter_colour_mode
+	// Palette:         localStorage key = spectrumColorScheme
+	// Contrast:        localStorage key = spectrumAutoContrast (range 0-20, symmetric dB offset)
+	if config.UI.SignalMeterMode.Default == "" {
+		config.UI.SignalMeterMode.Default = "dbfs"
+	}
+	if len(config.UI.SignalMeterMode.Available) == 0 {
+		config.UI.SignalMeterMode.Available = []UIOptionItem{
+			{Value: "dbfs", Label: "dBFS Bar"},
+			{Value: "snr", Label: "SNR Bar"},
+			{Value: "dbfs-led", Label: "dBFS LED"},
+			{Value: "snr-led", Label: "SNR LED"},
+		}
+	}
+	if config.UI.SMeterMode.Default == "" {
+		config.UI.SMeterMode.Default = "smeter-classic"
+	}
+	if len(config.UI.SMeterMode.Available) == 0 {
+		config.UI.SMeterMode.Available = []UIOptionItem{
+			{Value: "smeter-classic", Label: "S-Meter (Classic)"},
+			{Value: "snr-classic", Label: "SNR Meter (Classic)"},
+			{Value: "smeter-dynamic", Label: "S-Meter (Dynamic colour)"},
+			{Value: "snr-dynamic", Label: "SNR Meter (Dynamic colour)"},
+		}
+	}
+	if config.UI.Palette.Default == "" {
+		config.UI.Palette.Default = "jet"
+	}
+	if len(config.UI.Palette.Available) == 0 {
+		config.UI.Palette.Available = []UIOptionItem{
+			{Value: "jet", Label: "Jet"},
+			{Value: "turbo", Label: "Turbo"},
+			{Value: "viridis", Label: "Viridis"},
+			{Value: "plasma", Label: "Plasma"},
+		}
+	}
+	// Contrast: auto-range symmetric dB offset, range 0-20 (matches UI slider in index.html).
+	// Default is 10 (matches the HTML default value="10").
+	// Only set defaults if the YAML had no contrast section (all zeros).
+	if config.UI.Contrast.Max == 0 {
+		config.UI.Contrast.Max = 20
+	}
+	if config.UI.Contrast.Default == 0 && config.UI.Contrast.Min == 0 && config.UI.Contrast.Max == 20 {
+		config.UI.Contrast.Default = 10
+	}
+	// VU meter style: bar or led (matches vuMeterStyle localStorage key)
+	if len(config.UI.VUMeterStyle.Available) == 0 {
+		config.UI.VUMeterStyle.Available = []UIOptionItem{
+			{Value: "bar", Label: "Bar"},
+			{Value: "led", Label: "LED"},
+		}
+	}
+	if config.UI.VUMeterStyle.Default == "" {
+		config.UI.VUMeterStyle.Default = "bar"
+	}
+	// Boolean settings: GPU scroll, smoothing, peak hold, line graph.
+	// These use UIBoolSetting which only has a Default field.
+	// The YAML zero value for bool is false, so we only need to set peak_hold
+	// to true if it was never configured (we can't distinguish false-by-default
+	// from false-explicitly-set, so we document that peak_hold defaults to true
+	// and users who want false must explicitly set it in ui.yaml).
+	// For peak_hold: default is true (matches spectrumHoldEnabled !== 'false' logic)
+	// We detect "never configured" by checking if the YAML section was absent.
+	// Since UIBoolSetting.Default is a plain bool, we can't distinguish false-from-yaml
+	// vs false-from-zero-value. We document this: if peak_hold is absent from ui.yaml,
+	// the built-in default (true) is used. If explicitly set to false, that is respected.
+	// This is handled in ui-config.js via getUIDefault with fallback=true.
+	// No Go-side override needed — the YAML value is used as-is.
 
 	// Uppercase decoder callsigns
 	config.Decoder.ReceiverCallsign = strings.ToUpper(config.Decoder.ReceiverCallsign)

@@ -1,0 +1,250 @@
+/**
+ * ui-config.js — Server UI defaults loader
+ *
+ * Fetches /api/ui-config on page load and applies each setting as a default
+ * for new visitors. If the user has already set a preference in localStorage,
+ * their value always takes priority — the server default is only used when
+ * no localStorage value exists for that setting.
+ *
+ * Settings and their localStorage keys:
+ *   signal_meter_mode → signalMeterDisplayMode       (signal bar meter mode: dbfs/snr/dbfs-led/snr-led)
+ *   smeter_mode       → ubersdr_smeter_colour_mode   (SMeterNeedle display mode)
+ *   palette           → spectrumColorScheme           (waterfall colour palette)
+ *   contrast       → spectrumAutoContrast         (auto-range symmetric dB offset, 0-20)
+ *   vu_meter_style → vuMeterStyle                 (VU meter style: bar/led)
+ *   gpu_scroll     → spectrumGpuScrollEnabled     (GPU sub-pixel waterfall scroll)
+ *   smoothing      → spectrumSmoothEnabled        (spatial smoothing)
+ *   peak_hold      → spectrumHoldEnabled          (peak hold, default true)
+ *   line_graph     → spectrumLineGraphEnabled     (line graph overlay)
+ *
+ * Usage (called from app.js before spectrum/meter initialisation):
+ *   await loadServerUIConfig();
+ *   const palette = getUIDefault('spectrumColorScheme', 'palette', 'jet');
+ */
+
+// Holds the fetched server UI config (null until loaded)
+window.serverUIConfig = null;
+
+/**
+ * Fetch /api/ui-config and store in window.serverUIConfig.
+ * Safe to call multiple times — subsequent calls are no-ops if already loaded.
+ * Never throws; on failure serverUIConfig remains null and built-in defaults apply.
+ */
+async function loadServerUIConfig() {
+    if (window.serverUIConfig !== null) return; // already loaded
+    try {
+        const resp = await fetch('/api/ui-config');
+        if (resp.ok) {
+            window.serverUIConfig = await resp.json();
+        } else {
+            console.warn('[ui-config] /api/ui-config returned', resp.status, '— using built-in defaults');
+            window.serverUIConfig = {};
+        }
+    } catch (e) {
+        console.warn('[ui-config] Failed to fetch /api/ui-config:', e, '— using built-in defaults');
+        window.serverUIConfig = {};
+    }
+}
+
+/**
+ * Return the effective value for a UI setting using this priority order:
+ *   1. User's localStorage value (user preference always wins)
+ *   2. Server default from /api/ui-config
+ *   3. Built-in hardcoded fallback
+ *
+ * @param {string} localStorageKey  - The localStorage key for this setting
+ * @param {string} serverKey        - The key in the /api/ui-config response
+ * @param {*}      fallback         - Built-in default if neither source has a value
+ * @returns {*} The effective value (always a string from localStorage, or typed from server/fallback)
+ */
+function getUIDefault(localStorageKey, serverKey, fallback) {
+    // 1. Check localStorage first — user preference always wins
+    try {
+        const local = localStorage.getItem(localStorageKey);
+        if (local !== null && local !== undefined && local !== '') {
+            return local;
+        }
+    } catch (e) {
+        // localStorage unavailable (private browsing, etc.) — continue to server default
+    }
+
+    // 2. Use server default if available
+    if (window.serverUIConfig && window.serverUIConfig[serverKey] !== undefined) {
+        const serverVal = window.serverUIConfig[serverKey];
+        // Convert numbers to strings for settings stored as strings in localStorage
+        if (typeof fallback === 'string' && typeof serverVal === 'number') {
+            return String(serverVal);
+        }
+        return serverVal;
+    }
+
+    // 3. Built-in fallback
+    return fallback;
+}
+
+/**
+ * Return the effective numeric value for a UI setting.
+ * Same priority as getUIDefault but always returns a number.
+ *
+ * @param {string} localStorageKey  - The localStorage key for this setting
+ * @param {string} serverKey        - The key in the /api/ui-config response
+ * @param {number} fallback         - Built-in default number
+ * @returns {number}
+ */
+function getUIDefaultNumber(localStorageKey, serverKey, fallback) {
+    const val = getUIDefault(localStorageKey, serverKey, fallback);
+    const num = parseFloat(val);
+    return isNaN(num) ? fallback : num;
+}
+
+/**
+ * Return the effective boolean value for a UI setting.
+ * Same priority as getUIDefault but always returns a boolean.
+ *
+ * localStorage stores booleans as strings ('true'/'false').
+ * The server returns actual JSON booleans.
+ * The fallback is a boolean.
+ *
+ * @param {string}  localStorageKey  - The localStorage key for this setting
+ * @param {string}  serverKey        - The key in the /api/ui-config response
+ * @param {boolean} fallback         - Built-in default boolean
+ * @returns {boolean}
+ */
+function getUIDefaultBool(localStorageKey, serverKey, fallback) {
+    try {
+        const local = localStorage.getItem(localStorageKey);
+        if (local !== null && local !== undefined && local !== '') {
+            // localStorage stores booleans as strings
+            return local === 'true';
+        }
+    } catch (e) {
+        // localStorage unavailable
+    }
+
+    if (window.serverUIConfig && window.serverUIConfig[serverKey] !== undefined) {
+        return Boolean(window.serverUIConfig[serverKey]);
+    }
+
+    return fallback;
+}
+
+/**
+ * Apply the server UI defaults to the spectrum display and meters.
+ * Called after loadServerUIConfig() and after the DOM is ready,
+ * but BEFORE SpectrumDisplay and SMeterNeedle are initialised.
+ *
+ * For settings read by constructors (SMeterNeedle, SpectrumDisplay), we
+ * pre-populate localStorage with the server default if no user preference exists.
+ * For settings read from DOM elements, we set the element value directly.
+ */
+function applyServerUIDefaults() {
+    // ── Palette ──────────────────────────────────────────────────────────────
+    // Apply default palette to the <select> element so it's pre-selected
+    // before SpectrumDisplay reads it during initialisation.
+    // localStorage key: spectrumColorScheme
+    const paletteDefault = getUIDefault('spectrumColorScheme', 'palette', 'jet');
+    const colorSchemeEl = document.getElementById('spectrum-colorscheme');
+    if (colorSchemeEl) {
+        colorSchemeEl.value = paletteDefault;
+    }
+
+    // ── Auto-contrast ─────────────────────────────────────────────────────────
+    // Apply default auto-contrast to the slider element.
+    // The slider range is 0-20 (symmetric dB offset for auto-range).
+    // localStorage key: spectrumAutoContrast
+    const contrastDefault = getUIDefaultNumber('spectrumAutoContrast', 'contrast', 10);
+    const contrastSlider = document.getElementById('spectrum-auto-contrast');
+    const contrastValue = document.getElementById('spectrum-auto-contrast-value');
+    if (contrastSlider) {
+        contrastSlider.value = contrastDefault;
+    }
+    if (contrastValue) {
+        contrastValue.textContent = contrastDefault;
+    }
+
+    // ── Signal bar meter mode ─────────────────────────────────────────────────
+    // SignalMeter reads from localStorage in its constructor.
+    // localStorage key: signalMeterDisplayMode
+    // Valid values: dbfs, snr, dbfs-led, snr-led
+    const signalMeterModeDefault = getUIDefault('signalMeterDisplayMode', 'signal_meter_mode', 'dbfs');
+    try {
+        if (localStorage.getItem('signalMeterDisplayMode') === null) {
+            localStorage.setItem('signalMeterDisplayMode', signalMeterModeDefault);
+        }
+    } catch (e) {
+        // localStorage unavailable — SignalMeter will use its own built-in default
+    }
+
+    // ── S-meter mode ──────────────────────────────────────────────────────────
+    // SMeterNeedle reads from localStorage in its constructor, so pre-populate
+    // localStorage with the server default if no user preference exists.
+    // localStorage key: ubersdr_smeter_colour_mode
+    // Valid values: smeter-classic, snr-classic, smeter-dynamic, snr-dynamic
+    const smeterModeDefault = getUIDefault('ubersdr_smeter_colour_mode', 'smeter_mode', 'smeter-classic');
+    try {
+        if (localStorage.getItem('ubersdr_smeter_colour_mode') === null) {
+            localStorage.setItem('ubersdr_smeter_colour_mode', smeterModeDefault);
+        }
+    } catch (e) {
+        // localStorage unavailable — SMeterNeedle will use its own built-in default
+    }
+
+    // ── VU meter style ────────────────────────────────────────────────────────
+    // app.js reads vuMeterStyle from localStorage at module level (line ~571),
+    // so we pre-populate localStorage before app.js runs.
+    // localStorage key: vuMeterStyle
+    // Valid values: bar, led
+    const vuMeterDefault = getUIDefault('vuMeterStyle', 'vu_meter_style', 'bar');
+    try {
+        if (localStorage.getItem('vuMeterStyle') === null) {
+            localStorage.setItem('vuMeterStyle', vuMeterDefault);
+        }
+    } catch (e) {
+        // localStorage unavailable
+    }
+
+    // ── Boolean spectrum settings ─────────────────────────────────────────────
+    // SpectrumDisplay reads these from localStorage in its constructor/setupControls.
+    // Pre-populate localStorage with server defaults if no user preference exists.
+
+    // GPU scroll: spectrumGpuScrollEnabled (default: false)
+    const gpuScrollDefault = getUIDefaultBool('spectrumGpuScrollEnabled', 'gpu_scroll', false);
+    try {
+        if (localStorage.getItem('spectrumGpuScrollEnabled') === null) {
+            localStorage.setItem('spectrumGpuScrollEnabled', gpuScrollDefault.toString());
+        }
+    } catch (e) { /* ignore */ }
+
+    // Smoothing: spectrumSmoothEnabled (default: false)
+    const smoothingDefault = getUIDefaultBool('spectrumSmoothEnabled', 'smoothing', false);
+    try {
+        if (localStorage.getItem('spectrumSmoothEnabled') === null) {
+            localStorage.setItem('spectrumSmoothEnabled', smoothingDefault.toString());
+        }
+    } catch (e) { /* ignore */ }
+
+    // Peak hold: spectrumHoldEnabled (default: true)
+    // Note: SpectrumDisplay reads this as !== 'false' (true if absent), so
+    // we only need to write 'false' if the server default is false.
+    const peakHoldDefault = getUIDefaultBool('spectrumHoldEnabled', 'peak_hold', true);
+    try {
+        if (localStorage.getItem('spectrumHoldEnabled') === null) {
+            localStorage.setItem('spectrumHoldEnabled', peakHoldDefault.toString());
+        }
+    } catch (e) { /* ignore */ }
+
+    // Line graph: spectrumLineGraphEnabled (default: false)
+    const lineGraphDefault = getUIDefaultBool('spectrumLineGraphEnabled', 'line_graph', false);
+    try {
+        if (localStorage.getItem('spectrumLineGraphEnabled') === null) {
+            localStorage.setItem('spectrumLineGraphEnabled', lineGraphDefault.toString());
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// Expose globally for use from app.js
+window.loadServerUIConfig = loadServerUIConfig;
+window.getUIDefault = getUIDefault;
+window.getUIDefaultNumber = getUIDefaultNumber;
+window.getUIDefaultBool = getUIDefaultBool;
+window.applyServerUIDefaults = applyServerUIDefaults;

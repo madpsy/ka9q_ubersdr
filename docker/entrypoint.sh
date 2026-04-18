@@ -124,6 +124,18 @@ initialize_configs() {
         merge_config_keys "/app/config/rotator_schedule.yaml" "/etc/ka9q_ubersdr/rotator_schedule.yaml.example" "rotator_schedule.yaml"
     fi
 
+    # ui.yaml: merge (not just copy) so new options added to the example
+    # (e.g. a new palette or meter mode) automatically appear in the user's config.
+    # The yq * merge operator preserves user values for existing keys and appends
+    # new entries to available[] arrays, which is exactly what we need.
+    if [ ! -f "/app/config/ui.yaml" ]; then
+        echo "Initializing ui.yaml from example..."
+        cp /etc/ka9q_ubersdr/ui.yaml.example /app/config/ui.yaml
+    else
+        # Merge: example provides new options, user config preserves chosen defaults
+        merge_config_keys "/app/config/ui.yaml" "/etc/ka9q_ubersdr/ui.yaml.example" "ui.yaml"
+    fi
+
     # Initialize CTY.DAT directory if it doesn't exist
     if [ ! -d "/app/config/cty" ]; then
         echo "Initializing cty directory..."

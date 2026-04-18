@@ -3259,6 +3259,22 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// HandleUIConfig handles GET and PUT requests for UI configuration.
+// GET returns the full UIConfig (with available options) for the admin UI to render.
+// PUT saves the updated config to ui.yaml and updates in-memory config immediately.
+func (ah *AdminHandler) HandleUIConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		handleAdminGetUIConfig(w, r, ah.configDir, ah.config)
+	case http.MethodPut:
+		handleAdminPutUIConfig(w, r, ah.configDir, ah.config)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // HandleDecoderConfig handles GET, POST, PUT, DELETE requests for decoder configuration
 func (ah *AdminHandler) HandleDecoderConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

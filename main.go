@@ -493,6 +493,21 @@ func main() {
 		log.Printf("No decoder.yaml found or error loading: %v", err)
 	}
 
+	// Load UI configuration from ui.yaml if it exists
+	uiConfigPath := "ui.yaml"
+	if *configDir != "." {
+		uiConfigPath = *configDir + "/ui.yaml"
+	}
+	uiConfig, err := LoadConfig(uiConfigPath)
+	if err == nil {
+		config.UI = uiConfig.UI
+		log.Printf("Loaded UI configuration from ui.yaml (palette: %s, smeter_mode: %s, contrast: %d)",
+			config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default)
+	} else {
+		log.Printf("No ui.yaml found, using built-in UI defaults (palette: %s, smeter_mode: %s, contrast: %d)",
+			config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default)
+	}
+
 	// Initialize CTY.DAT database for country lookup
 	ctyPath := "cty/cty.dat"
 	if *configDir != "." {
@@ -1834,6 +1849,9 @@ func main() {
 	http.HandleFunc("/api/bands", func(w http.ResponseWriter, r *http.Request) {
 		handleBands(w, r, config)
 	})
+	http.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
+		handleUIConfig(w, r, config)
+	})
 	http.HandleFunc("/api/extensions", func(w http.ResponseWriter, r *http.Request) {
 		handleExtensions(w, r, config)
 	})
@@ -2105,6 +2123,7 @@ func main() {
 	http.HandleFunc("/admin/ban-country", adminHandler.AuthMiddleware(adminHandler.HandleBanCountry))
 	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
 	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))
+	http.HandleFunc("/admin/ui-config", adminHandler.AuthMiddleware(adminHandler.HandleUIConfig))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))

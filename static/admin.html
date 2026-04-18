@@ -597,6 +597,7 @@
                     <button class="tab" onclick="switchTab('chat')">Chat</button>
                     <button class="tab" onclick="switchTab('monitor')">Monitor</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
+                    <button class="tab" onclick="switchTab('ui')">UI</button>
                 </div>
 
                 <!-- Sessions Tab -->
@@ -1505,6 +1506,150 @@
                     </div>
                 </div>
 
+                <!-- UI Defaults Tab -->
+                <div id="uiTab" class="tab-content">
+                    <h2 style="color: #333; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🎨 Web UI Defaults</h2>
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        These settings control the default appearance for <strong>new visitors</strong> who have not yet set their own preferences.
+                        Individual users can override any of these via the UI controls, and their personal preference is saved in their browser.
+                        The server default only applies when a user has no saved preference for that setting.
+                        <br><br>
+                        ✅ <strong>No server restart required.</strong> Changes take effect immediately for new page loads — existing users are not affected.
+                        <br><br>
+                        <strong>To add a new palette:</strong> add it to <code>config/ui.yaml</code> under <code>palette.available</code> and reload — it will appear here automatically.
+                    </div>
+
+                    <div id="uiConfigForm" style="display: none;">
+
+                        <!-- Signal Bar Meter Mode -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📊 Default Signal Bar Meter Mode</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Controls the display mode of the signal bar meter (under the waterfall) for new visitors.
+                                Users can click the meter to cycle through modes.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-signal-meter-mode" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Signal Bar Meter Mode</label>
+                                <select id="ui-signal-meter-mode" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- S-Meter Mode -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎯 Default S-Meter Mode</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Controls which mode the needle S-meter (canvas) starts in for new visitors.
+                                Users can click the S-meter canvas to cycle through modes.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-smeter-mode" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">S-Meter Mode</label>
+                                <select id="ui-smeter-mode" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Waterfall Palette -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🌈 Default Waterfall Palette</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                The colour palette used for the waterfall display for new visitors.
+                                Add new palettes to <code>config/ui.yaml</code> under <code>palette.available</code> — they appear here automatically.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-palette" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Colour Palette</label>
+                                <select id="ui-palette" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Auto-Contrast Slider -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Default Auto-Contrast</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                The symmetric dB offset applied to the auto-range window for new visitors.
+                                The noise floor is raised by +N dB and the ceiling is lowered by -N dB, making signals pop out against the noise.
+                                Range: 0–20. Default: 10. (Matches the Contrast slider in the spectrum controls.)
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-contrast" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Auto-Contrast: <span id="ui-contrast-display" style="font-weight: bold; color: #667eea;">10</span>
+                                </label>
+                                <input type="range" id="ui-contrast" min="0" max="20" value="10"
+                                    style="width: 100%; max-width: 400px;"
+                                    oninput="document.getElementById('ui-contrast-display').textContent = this.value">
+                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0 — Wider dB window</span>
+                                    <span>20 — Tighter dB window</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- VU Meter Style -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📊 Default VU Meter Style</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Controls the audio VU meter display style for new visitors.
+                                Users can click the VU meter to toggle between styles.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-vu-meter-style" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">VU Meter Style</label>
+                                <select id="ui-vu-meter-style" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Waterfall Boolean Settings -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">⚙️ Default Waterfall Options</h3>
+                            <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">
+                                Controls which waterfall features are enabled by default for new visitors.
+                                Users can toggle these via the checkboxes in the spectrum controls.
+                            </p>
+                            <div style="display: flex; flex-direction: column; gap: 14px;">
+                                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+                                    <input type="checkbox" id="ui-gpu-scroll" style="margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0;">
+                                    <span>
+                                        <strong>GPU Sub-pixel Scroll</strong>
+                                        <span style="display: block; font-size: 12px; color: #666; margin-top: 2px;">Smoother 60fps waterfall scrolling using CSS transform compositing. Disable if users report visual glitches on older hardware.</span>
+                                    </span>
+                                </label>
+                                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+                                    <input type="checkbox" id="ui-smoothing" style="margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0;">
+                                    <span>
+                                        <strong>Spatial Smoothing</strong>
+                                        <span style="display: block; font-size: 12px; color: #666; margin-top: 2px;">Reduces noise fuzziness in the waterfall display using a Gaussian filter across adjacent frequency bins.</span>
+                                    </span>
+                                </label>
+                                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+                                    <input type="checkbox" id="ui-peak-hold" style="margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0;" checked>
+                                    <span>
+                                        <strong>Peak Hold</strong>
+                                        <span style="display: block; font-size: 12px; color: #666; margin-top: 2px;">Shows the highest signal level reached in the waterfall. Enabled by default.</span>
+                                    </span>
+                                </label>
+                                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+                                    <input type="checkbox" id="ui-line-graph" style="margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0;">
+                                    <span>
+                                        <strong>Line Graph Overlay</strong>
+                                        <span style="display: block; font-size: 12px; color: #666; margin-top: 2px;">Shows a spectrum line graph overlaid on the waterfall display.</span>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div id="uiConfigLoading" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading UI configuration...</p>
+                    </div>
+                </div>
+
                 <div class="button-group" id="sessionButtons" style="display: flex;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
@@ -1564,6 +1709,10 @@
                 </div>
                 <div class="button-group" id="systemButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
+                </div>
+                <div class="button-group" id="uiButtons" style="display: none;">
+                    <button class="btn" onclick="saveUIConfig()">Save UI Defaults</button>
+                    <button class="btn btn-secondary" onclick="loadAdminUIConfig()">Reload</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
@@ -2405,6 +2554,7 @@
             document.getElementById('chatButtons').style.display = 'none';
             document.getElementById('monitorButtons').style.display = 'none';
             document.getElementById('systemButtons').style.display = 'none';
+            document.getElementById('uiButtons').style.display = 'none';
             const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
             if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'none';
 
@@ -2522,6 +2672,11 @@
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
                 startSystemAutoRefresh();
+            } else if (tab === 'ui') {
+                document.querySelector('.tab:nth-child(17)').classList.add('active');
+                document.getElementById('uiTab').classList.add('active');
+                document.getElementById('uiButtons').style.display = 'flex';
+                loadAdminUIConfig();
             }
         }
 
@@ -6440,6 +6595,180 @@
                 phonePredBtn.style.display = wsprEnabled ? '' : 'none';
             }
         }
+
+        // ── UI Config Tab ─────────────────────────────────────────────────────────
+
+        /**
+         * Load UI configuration from /admin/ui-config.
+         * The response contains the full UIConfig structure with available options
+         * for each select setting, so we can build dropdowns dynamically.
+         */
+        async function loadAdminUIConfig() {
+            const loading = document.getElementById('uiConfigLoading');
+            const form = document.getElementById('uiConfigForm');
+            if (loading) loading.style.display = 'block';
+            if (form) form.style.display = 'none';
+
+            try {
+                const response = await authenticatedFetch('/admin/ui-config');
+                if (!response) return; // Auth failed
+                if (!response.ok) throw new Error('Failed to load UI config');
+
+                const data = await response.json();
+                const ui = data.ui || data; // handle both {ui: {...}} and flat response
+
+                // Build signal_meter_mode select (values: dbfs, snr, dbfs-led, snr-led)
+                buildUISelect('ui-signal-meter-mode', ui.signal_meter_mode);
+
+                // Build smeter_mode select (values: smeter-classic, snr-classic, smeter-dynamic, snr-dynamic)
+                buildUISelect('ui-smeter-mode', ui.smeter_mode);
+
+                // Build palette select (values: jet, turbo, viridis, plasma — extensible via ui.yaml)
+                buildUISelect('ui-palette', ui.palette);
+
+                // Build VU meter style select (values: bar, led)
+                buildUISelect('ui-vu-meter-style', ui.vu_meter_style);
+
+                // Set auto-contrast slider (range 0-20, symmetric dB offset for auto-range)
+                const contrast = ui.contrast || {};
+                const contrastSlider = document.getElementById('ui-contrast');
+                const contrastDisplay = document.getElementById('ui-contrast-display');
+                if (contrastSlider) {
+                    if (contrast.min !== undefined) contrastSlider.min = contrast.min;
+                    if (contrast.max !== undefined) contrastSlider.max = contrast.max;
+                    contrastSlider.value = contrast.default !== undefined ? contrast.default : 10;
+                }
+                if (contrastDisplay) {
+                    contrastDisplay.textContent = contrast.default !== undefined ? contrast.default : 10;
+                }
+
+                // Set boolean checkboxes
+                const setCheck = (id, setting, fallback) => {
+                    const el = document.getElementById(id);
+                    if (el) el.checked = setting ? Boolean(setting.default) : fallback;
+                };
+                setCheck('ui-gpu-scroll',  ui.gpu_scroll,  false);
+                setCheck('ui-smoothing',   ui.smoothing,   false);
+                setCheck('ui-peak-hold',   ui.peak_hold,   true);
+                setCheck('ui-line-graph',  ui.line_graph,  false);
+
+                if (loading) loading.style.display = 'none';
+                if (form) form.style.display = 'block';
+            } catch (error) {
+                if (loading) loading.style.display = 'none';
+                if (form) form.style.display = 'block';
+                showAlert('Error loading UI configuration: ' + error.message, 'error');
+            }
+        }
+
+        /**
+         * Build a <select> element from a UISelectSetting object.
+         * Clears existing options and adds new ones from setting.available[].
+         * Sets the selected value to setting.default.
+         * Options are populated dynamically — no hardcoded values in HTML.
+         */
+        function buildUISelect(elementId, setting) {
+            const select = document.getElementById(elementId);
+            if (!select || !setting) return;
+
+            // Clear existing options
+            select.innerHTML = '';
+
+            // Add options from available list
+            const available = setting.available || [];
+            available.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label || opt.value;
+                if (opt.value === setting.default) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+
+            // If no options were added (e.g. ui.yaml missing), add a placeholder
+            if (available.length === 0) {
+                const option = document.createElement('option');
+                option.value = setting.default || '';
+                option.textContent = setting.default || '(no options available)';
+                option.selected = true;
+                select.appendChild(option);
+            }
+        }
+
+        /**
+         * Save UI configuration to /admin/ui-config (PUT).
+         * Reads current values from the form and sends the full UIConfig structure.
+         * The available[] arrays are re-read from the current select options so the
+         * server writes them back to ui.yaml unchanged.
+         */
+        async function saveUIConfig() {
+            const signalMeterMode = document.getElementById('ui-signal-meter-mode');
+            const smeterMode = document.getElementById('ui-smeter-mode');
+            const palette = document.getElementById('ui-palette');
+            const contrast = document.getElementById('ui-contrast');
+            const vuMeterStyle = document.getElementById('ui-vu-meter-style');
+            const gpuScroll = document.getElementById('ui-gpu-scroll');
+            const smoothing = document.getElementById('ui-smoothing');
+            const peakHold = document.getElementById('ui-peak-hold');
+            const lineGraph = document.getElementById('ui-line-graph');
+
+            if (!smeterMode || !palette || !contrast) {
+                showAlert('UI config form not loaded yet. Please wait and try again.', 'error');
+                return;
+            }
+
+            // Build the full UIConfig structure to send back.
+            // Include available[] arrays so the server writes them back to ui.yaml.
+            const body = {
+                ui: {
+                    signal_meter_mode: signalMeterMode ? {
+                        default: signalMeterMode.value,
+                        available: Array.from(signalMeterMode.options).map(o => ({ value: o.value, label: o.textContent }))
+                    } : { default: 'dbfs', available: [{value:'dbfs',label:'dBFS Bar'},{value:'snr',label:'SNR Bar'},{value:'dbfs-led',label:'dBFS LED'},{value:'snr-led',label:'SNR LED'}] },
+                    smeter_mode: {
+                        default: smeterMode.value,
+                        available: Array.from(smeterMode.options).map(o => ({ value: o.value, label: o.textContent }))
+                    },
+                    palette: {
+                        default: palette.value,
+                        available: Array.from(palette.options).map(o => ({ value: o.value, label: o.textContent }))
+                    },
+                    contrast: {
+                        default: parseInt(contrast.value, 10),
+                        min: parseInt(contrast.min, 10),
+                        max: parseInt(contrast.max, 10)
+                    },
+                    vu_meter_style: vuMeterStyle ? {
+                        default: vuMeterStyle.value,
+                        available: Array.from(vuMeterStyle.options).map(o => ({ value: o.value, label: o.textContent }))
+                    } : { default: 'bar', available: [{value:'bar',label:'Bar'},{value:'led',label:'LED'}] },
+                    gpu_scroll:  { default: gpuScroll  ? gpuScroll.checked  : false },
+                    smoothing:   { default: smoothing  ? smoothing.checked  : false },
+                    peak_hold:   { default: peakHold   ? peakHold.checked   : true  },
+                    line_graph:  { default: lineGraph  ? lineGraph.checked  : false }
+                }
+            };
+
+            try {
+                const response = await authenticatedFetch('/admin/ui-config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!response) return; // Auth failed
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Failed to save UI config');
+                }
+                const result = await response.json();
+                showAlert(result.message || 'UI defaults saved. New visitors will see these settings immediately.', 'success');
+            } catch (error) {
+                showAlert('Error saving UI configuration: ' + error.message, 'error');
+            }
+        }
+
+        // ── End UI Config Tab ─────────────────────────────────────────────────────
 
         async function loadDecoderConfig() {
             try {

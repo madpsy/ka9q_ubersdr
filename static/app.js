@@ -7749,7 +7749,15 @@ const ZOOM_THROTTLE_MS = 25;
 // They are imported at the top of this file and exposed on window by that module
 
 // Initialize spectrum display on page load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load server UI config FIRST so getUIDefault() works for all subsequent initialisation
+    if (typeof loadServerUIConfig === 'function') {
+        await loadServerUIConfig();
+        if (typeof applyServerUIDefaults === 'function') {
+            applyServerUIDefaults();
+        }
+    }
+
     // Load signal data source setting FIRST
     loadSignalDataSource();
 
@@ -7782,15 +7790,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize spectrum display
     try {
-        const savedColorScheme = localStorage.getItem('spectrumColorScheme') || 'jet';
+        // Use server default if no user preference exists in localStorage
+        const savedColorScheme = (typeof getUIDefault === 'function')
+            ? getUIDefault('spectrumColorScheme', 'palette', 'jet')
+            : (localStorage.getItem('spectrumColorScheme') || 'jet');
         const colorSchemeEl = document.getElementById('spectrum-colorscheme');
         if (colorSchemeEl && savedColorScheme) colorSchemeEl.value = savedColorScheme;
+
+        // Use server default for contrast if no user preference exists
+        const savedContrast = (typeof getUIDefaultNumber === 'function')
+            ? getUIDefaultNumber('spectrumAutoContrast', 'contrast', 35)
+            : (parseFloat(localStorage.getItem('spectrumAutoContrast')) || 35);
+
         spectrumDisplay = new SpectrumDisplay('spectrum-display-canvas', {
             minDb: -120,
             maxDb: -20,
             colorScheme: savedColorScheme,
             intensity: 0.30,  // Default +0.30 for brighter display
-            contrast: 35,     // Default 35 - lower threshold shows more signals in auto mode
+            contrast: savedContrast,
             showGrid: true,
             showLabels: true,
             onConnect: () => {

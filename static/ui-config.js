@@ -23,6 +23,13 @@
  *   spectrum_bg_opacity       → (no localStorage key)         Opacity of the background image (0.0–1.0,
  *                                                              default 0.3). Read directly from
  *                                                              window.serverUIConfig by SpectrumDisplay.
+ *   station_id_overlay        → (no localStorage key)         Whether to show the station callsign/name/
+ *                                                              location overlay on the spectrum line graph.
+ *                                                              Server-side operator setting; default true.
+ *                                                              Read directly from window.serverUIConfig.
+ *   station_id_color          → (no localStorage key)         Hex colour (#rrggbb) for the station ID
+ *                                                              overlay text; default "#ffffff". Read
+ *                                                              directly from window.serverUIConfig.
  *   theme                     → (no localStorage key)         Map of CSS theme token overrides.
  *                                                              Applied as CSS custom properties on :root
  *                                                              via document.documentElement.style.setProperty().

@@ -1715,6 +1715,50 @@
                             </div>
                         </div>
 
+                        <!-- Station ID Overlay -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📡 Station ID Overlay</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Show the station callsign, name, and location in the top-right corner of the spectrum
+                                line graph. The first line shows <strong>&lt;callsign&gt; – &lt;name&gt;</strong> and
+                                the second line shows <strong>&lt;location&gt;</strong> in smaller text.
+                                Values come from the <strong>Station Info</strong> section of the main config.
+                                This is a server-wide setting; users cannot override it individually.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 14px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; color: #555;">
+                                    <input type="checkbox" id="ui-station-id-overlay" style="width: 16px; height: 16px;">
+                                    Show station ID overlay on spectrum
+                                </label>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Text colour</label>
+                                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                                    <input type="color"
+                                           id="ui-station-id-color"
+                                           value="#ffffff"
+                                           title="Station ID text colour"
+                                           style="width:44px; height:32px; padding:2px; border:1px solid #ddd; border-radius:4px; cursor:pointer; flex-shrink:0;"
+                                           oninput="syncStationIdHexFromPicker()">
+                                    <input type="text"
+                                           id="ui-station-id-color-hex"
+                                           value="#ffffff"
+                                           maxlength="7"
+                                           placeholder="#rrggbb"
+                                           style="width:88px; font-family:monospace; font-size:13px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; flex-shrink:0;"
+                                           oninput="syncStationIdPickerFromHex()">
+                                    <button class="btn btn-secondary"
+                                            onclick="resetStationIdColor()"
+                                            style="font-size:12px; padding:4px 10px; flex-shrink:0;"
+                                            title="Reset to default (#ffffff)">↺</button>
+                                    <div style="min-width:0;">
+                                        <div style="font-weight:500; font-size:14px; color:#333;">Overlay text colour</div>
+                                        <div style="font-size:12px; color:#666; margin-top:1px;">A 1 px black drop-shadow is always added for legibility over any background.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
 
                     <div id="uiConfigLoading" class="loading">
@@ -6742,6 +6786,16 @@
                 if (opacitySlider)  opacitySlider.value       = opacity;
                 if (opacityDisplay) opacityDisplay.textContent = opacity.toFixed(2);
 
+                // Station ID overlay
+                const stationIdOverlayEl = document.getElementById('ui-station-id-overlay');
+                const stationIdColorEl   = document.getElementById('ui-station-id-color');
+                const stationIdHexEl     = document.getElementById('ui-station-id-color-hex');
+                if (stationIdOverlayEl) stationIdOverlayEl.checked = ui.station_id_overlay !== false;
+                const stationIdCol = (typeof ui.station_id_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(ui.station_id_color))
+                    ? ui.station_id_color : '#ffffff';
+                if (stationIdColorEl) stationIdColorEl.value = stationIdCol;
+                if (stationIdHexEl)   stationIdHexEl.value   = stationIdCol;
+
                 // Spectrum background image preview
                 const previewWrap = document.getElementById('spectrumBgPreviewWrap');
                 const previewImg  = document.getElementById('spectrumBgPreview');
@@ -6910,6 +6964,31 @@
             });
             return result;
         }
+/** Sync hex text input from the station ID colour picker (oninput on picker). */
+function syncStationIdHexFromPicker() {
+    const picker = document.getElementById('ui-station-id-color');
+    const hex    = document.getElementById('ui-station-id-color-hex');
+    if (picker && hex) hex.value = picker.value;
+}
+
+/** Sync the station ID colour picker from the hex text input (oninput on text field). */
+function syncStationIdPickerFromHex() {
+    const hex    = document.getElementById('ui-station-id-color-hex');
+    const picker = document.getElementById('ui-station-id-color');
+    if (hex && picker && /^#[0-9a-fA-F]{6}$/.test(hex.value)) {
+        picker.value = hex.value;
+    }
+}
+
+/** Reset station ID colour to the built-in default (#ffffff). */
+function resetStationIdColor() {
+    const def    = '#ffffff';
+    const picker = document.getElementById('ui-station-id-color');
+    const hex    = document.getElementById('ui-station-id-color-hex');
+    if (picker) picker.value = def;
+    if (hex)    hex.value    = def;
+}
+
 
         /**
          * Build a <select> element from a UISelectSetting object.
@@ -6999,6 +7078,14 @@
                     peak_hold:            { default: peakHold  ? peakHold.checked  : true  },
                     line_graph:           { default: lineGraph ? lineGraph.checked : false },
                     spectrum_bg_opacity:  bgOpacity ? parseFloat(bgOpacity.value) : 0.30,
+                    station_id_overlay: (() => {
+                        const el = document.getElementById('ui-station-id-overlay');
+                        return el ? el.checked : true;
+                    })(),
+                    station_id_color: (() => {
+                        const el = document.getElementById('ui-station-id-color');
+                        return (el && /^#[0-9a-fA-F]{6}$/.test(el.value)) ? el.value : '#ffffff';
+                    })(),
                     bandwidth_indicator_color: (() => {
                         const sel = document.getElementById('ui-bandwidth-indicator-color');
                         return sel ? {

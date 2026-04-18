@@ -125,3 +125,16 @@ ui:
         label: "Orange"
       - value: "magenta"
         label: "Magenta"
+
+  # Station ID overlay on the spectrum line graph
+  # When enabled, shows "<callsign> - <name>" on the first line and "<location>" on the
+  # second line, right-aligned in the top-right corner of the spectrum drawing area.
+  # Values come from the admin > Station Info section (callsign, name, location fields).
+  # This is a server-side operator setting — users cannot override it individually.
+  # No localStorage key.
+  station_id_overlay: true
+
+  # Hex colour for the station ID overlay text (#rrggbb).
+  # The location line is drawn at 75% opacity of this colour.
+  # A 1 px black drop-shadow is always added for legibility over any background.
+  station_id_color: "#ffffff"

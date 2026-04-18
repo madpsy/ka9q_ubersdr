@@ -80,6 +80,11 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		bwColor = "green" // built-in fallback
 	}
 
+	stationIdColor := config.UI.StationIdColor
+	if stationIdColor == "" || !isValidHexColor(stationIdColor) {
+		stationIdColor = "#ffffff" // built-in fallback
+	}
+
 	// Build the effective theme map: start with defaults, overlay any configured values.
 	// This ensures the frontend always receives a complete set of theme tokens even when
 	// ui.yaml has no theme section — the CSS :root fallback values match these defaults.
@@ -106,6 +111,8 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"bandwidth_indicator_color": bwColor,
 		"spectrum_bg_image":         bgImageURL,
 		"spectrum_bg_opacity":       opacity,
+		"station_id_overlay":        config.UI.StationIdOverlay,
+		"station_id_color":          stationIdColor,
 		"theme":                     effectiveTheme,
 	}); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
@@ -207,6 +214,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
+	// Validate station_id_color — must be a valid 6-digit hex colour if non-empty
+	if parsed.UI.StationIdColor != "" && !isValidHexColor(parsed.UI.StationIdColor) {
+		http.Error(w, fmt.Sprintf("station_id_color: invalid hex colour '%s' (expected #rrggbb)", parsed.UI.StationIdColor), http.StatusBadRequest)
+		return
+	}
+
 	// Validate theme colours — each value must be a valid 6-digit hex colour if present
 	for key, val := range parsed.UI.Theme {
 		if val != "" && !isValidHexColor(val) {
@@ -229,11 +242,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, theme=%v",
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
 		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
 		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
-		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity, config.UI.Theme)
+		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity,
+		config.UI.StationIdOverlay, config.UI.StationIdColor, config.UI.Theme)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

@@ -701,6 +701,11 @@ class SpectrumDisplay {
         // Load background image from server UI config if available
         this.loadLineGraphBgImage();
 
+        // Station ID overlay settings (read from window.serverUIConfig, same pattern as bg image)
+        this.stationIdOverlay = true;      // default: show overlay
+        this.stationIdColor   = '#ffffff'; // default: white
+        this.loadStationIdConfig();
+
         // Setup filter latency change listener for synchronization
         this.setupFilterLatencyListener();
     }
@@ -731,6 +736,20 @@ class SpectrumDisplay {
         };
         // Cache-bust so a freshly uploaded image is always fetched
         img.src = url + '?t=' + Date.now();
+    }
+
+    /**
+     * Load station ID overlay settings from window.serverUIConfig.
+     * Called from constructor; safe to call again to hot-reload after admin saves.
+     * station_id_overlay: boolean (default true — show overlay)
+     * station_id_color:   #rrggbb hex string (default "#ffffff")
+     */
+    loadStationIdConfig() {
+        const cfg = window.serverUIConfig || {};
+        // Default to true (show) when the key is absent (e.g. old server without the field)
+        this.stationIdOverlay = cfg.station_id_overlay !== false;
+        const col = (cfg.station_id_color || '').trim();
+        this.stationIdColor = /^#[0-9a-fA-F]{6}$/.test(col) ? col : '#ffffff';
     }
 
     // Setup listener for filter latency changes
@@ -2194,6 +2213,60 @@ class SpectrumDisplay {
         ctx.moveTo(0, graphHeight - 1); // Bottom of line graph canvas (y=299)
         ctx.lineTo(graphWidth, graphHeight - 1);
         ctx.stroke();
+
+        // Station ID overlay — top-right corner of the drawing area
+        if (this.stationIdOverlay) {
+            this.drawStationIdOverlay(ctx, graphWidth, graphTopMargin);
+        }
+    }
+
+    /**
+     * Draw the station ID overlay in the top-right corner of the spectrum line graph.
+     * Line 1 (bold 13px): "<callsign> - <name>"  or just callsign or just name
+     * Line 2 (11px, 75% opacity): location
+     * Text colour comes from this.stationIdColor (set by loadStationIdConfig()).
+     * A 1 px black drop-shadow is always added for legibility over any background.
+     * Data comes from window.instanceDescription.receiver (populated by fetchSiteDescription()).
+     */
+    drawStationIdOverlay(ctx, graphWidth, graphTopMargin) {
+        const receiver = window.instanceDescription?.receiver;
+        if (!receiver) return;
+
+        const callsign = (receiver.callsign || '').trim();
+        const name     = (receiver.name     || '').trim();
+        const location = (receiver.location || '').trim();
+
+        // Nothing to show if both callsign and name are absent
+        if (!callsign && !name) return;
+
+        const line1  = (callsign && name) ? `${callsign} - ${name}` : (callsign || name);
+        const rightX = graphWidth - 6;
+        const topY   = graphTopMargin + 6;
+        const col    = this.stationIdColor;
+
+        ctx.save();
+        ctx.textAlign    = 'right';
+        ctx.textBaseline = 'top';
+
+        // Line 1: bold 13px — callsign - name
+        ctx.font      = 'bold 13px sans-serif';
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillText(line1, rightX + 1, topY + 1);   // 1 px drop-shadow
+        ctx.fillStyle = col;
+        ctx.fillText(line1, rightX, topY);
+
+        // Line 2: 11px — location at 75% opacity
+        if (location) {
+            ctx.font        = '11px sans-serif';
+            ctx.fillStyle   = 'rgba(0,0,0,0.55)';
+            ctx.fillText(location, rightX + 1, topY + 17);
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle   = col;
+            ctx.fillText(location, rightX, topY + 16);
+            ctx.globalAlpha = 1.0;
+        }
+
+        ctx.restore();
     }
 
 

@@ -468,25 +468,29 @@ type UIBoolSetting struct {
 // when new options (e.g. a new palette) are added to the YAML file.
 //
 // Settings and their corresponding localStorage keys:
-//   SignalMeterMode: signalMeterDisplayMode     — signal bar meter mode (dbfs/snr/dbfs-led/snr-led)
-//   SMeterMode:      ubersdr_smeter_colour_mode — needle S-meter display mode
-//   Palette:         spectrumColorScheme         — waterfall colour palette
-//   Contrast:        spectrumAutoContrast        — auto-range symmetric dB offset (0-20)
-//   VUMeterStyle:    vuMeterStyle                — VU meter display style (bar/led)
-//   GPUScroll:       spectrumGpuScrollEnabled    — GPU sub-pixel waterfall scroll
-//   Smoothing:       spectrumSmoothEnabled       — spatial smoothing
-//   PeakHold:        spectrumHoldEnabled         — peak hold (default true)
-//   LineGraph:       spectrumLineGraphEnabled    — line graph overlay
+//
+//	SignalMeterMode:    signalMeterDisplayMode     — signal bar meter mode (dbfs/snr/dbfs-led/snr-led)
+//	SMeterMode:         ubersdr_smeter_colour_mode — needle S-meter display mode
+//	Palette:            spectrumColorScheme         — waterfall colour palette
+//	Contrast:           spectrumAutoContrast        — auto-range symmetric dB offset (0-20)
+//	VUMeterStyle:       vuMeterStyle                — VU meter display style (bar/led)
+//	GPUScroll:          spectrumGpuScrollEnabled    — GPU sub-pixel waterfall scroll
+//	Smoothing:          spectrumSmoothEnabled       — spatial smoothing
+//	PeakHold:           spectrumHoldEnabled         — peak hold (default true)
+//	LineGraph:          spectrumLineGraphEnabled    — line graph overlay
+//	SpectrumBgEnabled:  spectrumBgEnabled           — whether a background image is set (read-only, set by upload)
+//	SpectrumBgOpacity:  spectrumBgOpacity           — background image opacity (0.0–1.0, default 0.3)
 type UIConfig struct {
-	SignalMeterMode UISelectSetting `yaml:"signal_meter_mode" json:"signal_meter_mode"`
-	SMeterMode      UISelectSetting `yaml:"smeter_mode"       json:"smeter_mode"`
-	Palette         UISelectSetting `yaml:"palette"           json:"palette"`
-	Contrast        UIRangeSetting  `yaml:"contrast"          json:"contrast"`
-	VUMeterStyle    UISelectSetting `yaml:"vu_meter_style"    json:"vu_meter_style"`
-	GPUScroll       UIBoolSetting   `yaml:"gpu_scroll"        json:"gpu_scroll"`
-	Smoothing       UIBoolSetting   `yaml:"smoothing"         json:"smoothing"`
-	PeakHold        UIBoolSetting   `yaml:"peak_hold"         json:"peak_hold"`
-	LineGraph       UIBoolSetting   `yaml:"line_graph"        json:"line_graph"`
+	SignalMeterMode   UISelectSetting `yaml:"signal_meter_mode"   json:"signal_meter_mode"`
+	SMeterMode        UISelectSetting `yaml:"smeter_mode"         json:"smeter_mode"`
+	Palette           UISelectSetting `yaml:"palette"             json:"palette"`
+	Contrast          UIRangeSetting  `yaml:"contrast"            json:"contrast"`
+	VUMeterStyle      UISelectSetting `yaml:"vu_meter_style"      json:"vu_meter_style"`
+	GPUScroll         UIBoolSetting   `yaml:"gpu_scroll"          json:"gpu_scroll"`
+	Smoothing         UIBoolSetting   `yaml:"smoothing"           json:"smoothing"`
+	PeakHold          UIBoolSetting   `yaml:"peak_hold"           json:"peak_hold"`
+	LineGraph         UIBoolSetting   `yaml:"line_graph"          json:"line_graph"`
+	SpectrumBgOpacity float64         `yaml:"spectrum_bg_opacity" json:"spectrum_bg_opacity"`
 }
 
 // LoadConfig loads configuration from a YAML file

@@ -1639,6 +1639,48 @@
                             </div>
                         </div>
 
+                        <!-- Spectrum Background Image -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🖼️ Spectrum Background Image</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Upload a custom PNG image to display behind the spectrum line graph (split view).
+                                The image is stretched to fill the 220 px spectrum drawing area below the frequency scale.
+                                PNG only · max 500 KB.
+                            </p>
+
+                            <!-- Current image preview -->
+                            <div id="spectrumBgPreviewWrap" style="display: none; margin-bottom: 12px;">
+                                <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 500; color: #555;">Current image:</p>
+                                <img id="spectrumBgPreview"
+                                     src=""
+                                     alt="Spectrum background preview"
+                                     style="max-width: 100%; max-height: 120px; border: 1px solid #dee2e6; border-radius: 4px; display: block;">
+                            </div>
+                            <p id="spectrumBgNone" style="margin: 0 0 12px 0; font-size: 13px; color: #999; font-style: italic;">No background image set.</p>
+
+                            <!-- File picker + upload -->
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
+                                <input type="file" id="spectrumBgFile" accept="image/png"
+                                       style="flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; background: white;">
+                                <button class="btn" onclick="uploadSpectrumBg()" style="white-space: nowrap;">Upload Image</button>
+                                <button class="btn btn-danger" id="spectrumBgRemoveBtn" onclick="removeSpectrumBg()" style="white-space: nowrap; display: none;">Remove Image</button>
+                            </div>
+
+                            <!-- Opacity slider -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-spectrum-bg-opacity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Background Opacity: <span id="ui-spectrum-bg-opacity-display" style="font-weight: bold; color: #667eea;">0.30</span>
+                                </label>
+                                <input type="range" id="ui-spectrum-bg-opacity" min="0" max="1" step="0.01" value="0.30"
+                                       style="width: 100%; max-width: 400px;"
+                                       oninput="document.getElementById('ui-spectrum-bg-opacity-display').textContent = parseFloat(this.value).toFixed(2)">
+                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0.00 — Invisible</span>
+                                    <span>1.00 — Fully opaque</span>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
 
                     <div id="uiConfigLoading" class="loading">
@@ -6649,6 +6691,38 @@
                 setCheck('ui-peak-hold',   ui.peak_hold,   true);
                 setCheck('ui-line-graph',  ui.line_graph,  false);
 
+                // Spectrum background opacity slider
+                const opacitySlider  = document.getElementById('ui-spectrum-bg-opacity');
+                const opacityDisplay = document.getElementById('ui-spectrum-bg-opacity-display');
+                const rawOpacity = (ui.spectrum_bg_opacity !== undefined && ui.spectrum_bg_opacity !== null)
+                    ? parseFloat(ui.spectrum_bg_opacity) : 0.30;
+                const opacity = isNaN(rawOpacity) ? 0.30 : rawOpacity;
+                if (opacitySlider)  opacitySlider.value       = opacity;
+                if (opacityDisplay) opacityDisplay.textContent = opacity.toFixed(2);
+
+                // Spectrum background image preview
+                const previewWrap = document.getElementById('spectrumBgPreviewWrap');
+                const previewImg  = document.getElementById('spectrumBgPreview');
+                const noneLabel   = document.getElementById('spectrumBgNone');
+                const removeBtn   = document.getElementById('spectrumBgRemoveBtn');
+                try {
+                    const imgCheck = await fetch('/api/spectrum-bg-image', { method: 'HEAD' });
+                    if (imgCheck.ok) {
+                        if (previewImg)  previewImg.src              = '/api/spectrum-bg-image?t=' + Date.now();
+                        if (previewWrap) previewWrap.style.display   = 'block';
+                        if (noneLabel)   noneLabel.style.display     = 'none';
+                        if (removeBtn)   removeBtn.style.display     = 'inline-block';
+                    } else {
+                        if (previewWrap) previewWrap.style.display   = 'none';
+                        if (noneLabel)   noneLabel.style.display     = 'block';
+                        if (removeBtn)   removeBtn.style.display     = 'none';
+                    }
+                } catch (_) {
+                    if (previewWrap) previewWrap.style.display = 'none';
+                    if (noneLabel)   noneLabel.style.display   = 'block';
+                    if (removeBtn)   removeBtn.style.display   = 'none';
+                }
+
                 if (loading) loading.style.display = 'none';
                 if (form) form.style.display = 'block';
             } catch (error) {
@@ -6709,6 +6783,7 @@
             const smoothing = document.getElementById('ui-smoothing');
             const peakHold = document.getElementById('ui-peak-hold');
             const lineGraph = document.getElementById('ui-line-graph');
+            const bgOpacity = document.getElementById('ui-spectrum-bg-opacity');
 
             if (!smeterMode || !palette || !contrast) {
                 showAlert('UI config form not loaded yet. Please wait and try again.', 'error');
@@ -6740,10 +6815,11 @@
                         default: vuMeterStyle.value,
                         available: Array.from(vuMeterStyle.options).map(o => ({ value: o.value, label: o.textContent }))
                     } : { default: 'bar', available: [{value:'bar',label:'Bar'},{value:'led',label:'LED'}] },
-                    gpu_scroll:  { default: gpuScroll  ? gpuScroll.checked  : false },
-                    smoothing:   { default: smoothing  ? smoothing.checked  : false },
-                    peak_hold:   { default: peakHold   ? peakHold.checked   : true  },
-                    line_graph:  { default: lineGraph  ? lineGraph.checked  : false }
+                    gpu_scroll:           { default: gpuScroll ? gpuScroll.checked : false },
+                    smoothing:            { default: smoothing ? smoothing.checked : false },
+                    peak_hold:            { default: peakHold  ? peakHold.checked  : true  },
+                    line_graph:           { default: lineGraph ? lineGraph.checked : false },
+                    spectrum_bg_opacity:  bgOpacity ? parseFloat(bgOpacity.value) : 0.30
                 }
             };
 
@@ -6762,6 +6838,83 @@
                 showAlert(result.message || 'UI defaults saved. New visitors will see these settings immediately.', 'success');
             } catch (error) {
                 showAlert('Error saving UI configuration: ' + error.message, 'error');
+            }
+        }
+
+        /**
+         * Upload a PNG file as the spectrum background image.
+         * Sends a multipart/form-data POST to /admin/spectrum-bg-image.
+         * On success, refreshes the preview in the UI card.
+         */
+        async function uploadSpectrumBg() {
+            const fileInput = document.getElementById('spectrumBgFile');
+            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                showAlert('Please select a PNG file to upload.', 'error');
+                return;
+            }
+            const file = fileInput.files[0];
+            if (file.size > 500 * 1024) {
+                showAlert('File is too large. Maximum size is 500 KB.', 'error');
+                return;
+            }
+            if (!file.name.toLowerCase().endsWith('.png') && file.type !== 'image/png') {
+                showAlert('Only PNG files are accepted.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {
+                const response = await authenticatedFetch('/admin/spectrum-bg-image', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response) return; // Auth failed
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Upload failed');
+                }
+                showAlert('Spectrum background image uploaded successfully.', 'success');
+                // Refresh preview
+                const previewImg  = document.getElementById('spectrumBgPreview');
+                const previewWrap = document.getElementById('spectrumBgPreviewWrap');
+                const noneLabel   = document.getElementById('spectrumBgNone');
+                const removeBtn   = document.getElementById('spectrumBgRemoveBtn');
+                if (previewImg)  previewImg.src            = '/api/spectrum-bg-image?t=' + Date.now();
+                if (previewWrap) previewWrap.style.display = 'block';
+                if (noneLabel)   noneLabel.style.display   = 'none';
+                if (removeBtn)   removeBtn.style.display   = 'inline-block';
+                fileInput.value = '';
+            } catch (error) {
+                showAlert('Error uploading image: ' + error.message, 'error');
+            }
+        }
+
+        /**
+         * Remove the spectrum background image via DELETE /admin/spectrum-bg-image.
+         * Hides the preview and shows the "no image" label.
+         */
+        async function removeSpectrumBg() {
+            if (!confirm('Remove the spectrum background image?')) return;
+            try {
+                const response = await authenticatedFetch('/admin/spectrum-bg-image', {
+                    method: 'DELETE'
+                });
+                if (!response) return; // Auth failed
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Delete failed');
+                }
+                showAlert('Spectrum background image removed.', 'success');
+                const previewWrap = document.getElementById('spectrumBgPreviewWrap');
+                const noneLabel   = document.getElementById('spectrumBgNone');
+                const removeBtn   = document.getElementById('spectrumBgRemoveBtn');
+                if (previewWrap) previewWrap.style.display = 'none';
+                if (noneLabel)   noneLabel.style.display   = 'block';
+                if (removeBtn)   removeBtn.style.display   = 'none';
+            } catch (error) {
+                showAlert('Error removing image: ' + error.message, 'error');
             }
         }
 

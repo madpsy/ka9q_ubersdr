@@ -694,8 +694,43 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.display = 'none';
         }
 
+        // Spectrum line-graph background image (loaded from /api/spectrum-bg-image if set)
+        this.lineGraphBgImage   = null;  // HTMLImageElement or null
+        this.lineGraphBgOpacity = 0.30;  // 0.0–1.0, default 0.3
+
+        // Load background image from server UI config if available
+        this.loadLineGraphBgImage();
+
         // Setup filter latency change listener for synchronization
         this.setupFilterLatencyListener();
+    }
+
+    /**
+     * Load the spectrum line-graph background image from the server.
+     * Reads the URL and opacity from window.serverUIConfig (populated by ui-config.js).
+     * If no image URL is set, lineGraphBgImage remains null and no background is drawn.
+     * Safe to call multiple times — re-fetches on each call so the admin can hot-reload.
+     */
+    loadLineGraphBgImage() {
+        const cfg = window.serverUIConfig || {};
+        const url = cfg.spectrum_bg_image || '';
+        const opacity = (cfg.spectrum_bg_opacity !== undefined && cfg.spectrum_bg_opacity !== null)
+            ? parseFloat(cfg.spectrum_bg_opacity) : 0.30;
+        this.lineGraphBgOpacity = isNaN(opacity) ? 0.30 : opacity;
+
+        if (!url) {
+            this.lineGraphBgImage = null;
+            return;
+        }
+
+        const img = new Image();
+        img.onload  = () => { this.lineGraphBgImage = img; };
+        img.onerror = () => {
+            console.warn('[spectrum] Failed to load spectrum background image:', url);
+            this.lineGraphBgImage = null;
+        };
+        // Cache-bust so a freshly uploaded image is always fetched
+        img.src = url + '?t=' + Date.now();
     }
 
     // Setup listener for filter latency changes
@@ -1999,6 +2034,15 @@ class SpectrumDisplay {
         // (grey bookmark background is now in overlay)
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, graphWidth, graphHeight);
+
+        // Draw custom background image stretched to fill the spectrum drawing area
+        // (below the 80 px frequency-scale margin, above the bottom separator)
+        if (this.lineGraphBgImage) {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, Math.min(1, this.lineGraphBgOpacity));
+            ctx.drawImage(this.lineGraphBgImage, 0, graphTopMargin, graphWidth, graphDrawHeight);
+            ctx.restore();
+        }
 
         // Apply temporal smoothing based on toggle
         const now = Date.now();

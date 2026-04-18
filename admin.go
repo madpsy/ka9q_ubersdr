@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -3273,6 +3275,154 @@ func (ah *AdminHandler) HandleUIConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// assetsDir returns the path to the persistent assets directory within the config dir.
+func (ah *AdminHandler) assetsDir() string {
+	if ah.configDir == "" || ah.configDir == "." {
+		return "assets"
+	}
+	return ah.configDir + "/assets"
+}
+
+// spectrumBgPath returns the full path to the spectrum background image file.
+func (ah *AdminHandler) spectrumBgPath() string {
+	return ah.assetsDir() + "/spectrum-bg.png"
+}
+
+// HandleSpectrumBgImagePublic serves the spectrum background image to any visitor (no auth).
+// GET /api/spectrum-bg-image
+func (ah *AdminHandler) HandleSpectrumBgImagePublic(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	imgPath := ah.spectrumBgPath()
+	data, err := os.ReadFile(imgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "No background image set", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to read image", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Compute ETag as hex-encoded SHA-256 of the file content.
+	// Clients can use If-None-Match to avoid re-downloading an unchanged image.
+	sum := sha256.Sum256(data)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("ETag", etag)
+
+	// Honour If-None-Match for conditional GET/HEAD
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	// For HEAD requests write headers only (no body)
+	if r.Method == http.MethodHead {
+		return
+	}
+	w.Write(data)
+}
+
+// HandleSpectrumBgImage handles upload (POST) and removal (DELETE) of the spectrum background image.
+// POST /admin/spectrum-bg-image  — multipart/form-data, field "image", PNG only, max 500 KB
+// DELETE /admin/spectrum-bg-image — removes the image and clears the config field
+func (ah *AdminHandler) HandleSpectrumBgImage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodPost:
+		ah.handleUploadSpectrumBg(w, r)
+	case http.MethodDelete:
+		ah.handleDeleteSpectrumBg(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+const spectrumBgMaxBytes = 500 * 1024 // 500 KB
+
+func (ah *AdminHandler) handleUploadSpectrumBg(w http.ResponseWriter, r *http.Request) {
+	// Limit total request body to slightly above max to give a clear error
+	r.Body = http.MaxBytesReader(w, r.Body, spectrumBgMaxBytes+1024)
+
+	if err := r.ParseMultipartForm(spectrumBgMaxBytes); err != nil {
+		http.Error(w, `{"error":"File too large or invalid form (max 500 KB)"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, `{"error":"Missing 'image' field in form"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Enforce 500 KB size limit
+	if header.Size > spectrumBgMaxBytes {
+		http.Error(w, `{"error":"Image exceeds 500 KB limit"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Read file bytes
+	imgBytes := make([]byte, header.Size)
+	if _, err := file.Read(imgBytes); err != nil {
+		http.Error(w, `{"error":"Failed to read uploaded file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Validate PNG magic bytes: \x89PNG\r\n\x1a\n
+	if len(imgBytes) < 8 ||
+		imgBytes[0] != 0x89 || imgBytes[1] != 0x50 || imgBytes[2] != 0x4E || imgBytes[3] != 0x47 ||
+		imgBytes[4] != 0x0D || imgBytes[5] != 0x0A || imgBytes[6] != 0x1A || imgBytes[7] != 0x0A {
+		http.Error(w, `{"error":"File must be a valid PNG image"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Ensure assets directory exists
+	if err := os.MkdirAll(ah.assetsDir(), 0755); err != nil {
+		http.Error(w, `{"error":"Failed to create assets directory"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Write to disk (always overwrites)
+	if err := os.WriteFile(ah.spectrumBgPath(), imgBytes, 0644); err != nil {
+		http.Error(w, `{"error":"Failed to save image"}`, http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Spectrum background image uploaded: %d bytes", len(imgBytes))
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success","message":"Background image uploaded successfully"}`))
+}
+
+func (ah *AdminHandler) handleDeleteSpectrumBg(w http.ResponseWriter, r *http.Request) {
+	imgPath := ah.spectrumBgPath()
+
+	if err := os.Remove(imgPath); err != nil {
+		if os.IsNotExist(err) {
+			// Already gone — treat as success
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"success","message":"No background image was set"}`))
+			return
+		}
+		http.Error(w, `{"error":"Failed to remove image"}`, http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Spectrum background image removed")
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success","message":"Background image removed"}`))
 }
 
 // HandleDecoderConfig handles GET, POST, PUT, DELETE requests for decoder configuration

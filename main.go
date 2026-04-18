@@ -1850,7 +1850,10 @@ func main() {
 		handleBands(w, r, config)
 	})
 	http.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
-		handleUIConfig(w, r, config)
+		handleUIConfig(w, r, config, *configDir)
+	})
+	http.HandleFunc("/api/spectrum-bg-image", func(w http.ResponseWriter, r *http.Request) {
+		adminHandler.HandleSpectrumBgImagePublic(w, r)
 	})
 	http.HandleFunc("/api/extensions", func(w http.ResponseWriter, r *http.Request) {
 		handleExtensions(w, r, config)
@@ -2124,6 +2127,7 @@ func main() {
 	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
 	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))
 	http.HandleFunc("/admin/ui-config", adminHandler.AuthMiddleware(adminHandler.HandleUIConfig))
+	http.HandleFunc("/admin/spectrum-bg-image", adminHandler.AuthMiddleware(adminHandler.HandleSpectrumBgImage))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))

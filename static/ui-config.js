@@ -7,15 +7,21 @@
  * no localStorage value exists for that setting.
  *
  * Settings and their localStorage keys:
- *   signal_meter_mode → signalMeterDisplayMode       (signal bar meter mode: dbfs/snr/dbfs-led/snr-led)
- *   smeter_mode       → ubersdr_smeter_colour_mode   (SMeterNeedle display mode)
- *   palette           → spectrumColorScheme           (waterfall colour palette)
- *   contrast       → spectrumAutoContrast         (auto-range symmetric dB offset, 0-20)
- *   vu_meter_style → vuMeterStyle                 (VU meter style: bar/led)
- *   gpu_scroll     → spectrumGpuScrollEnabled     (GPU sub-pixel waterfall scroll)
- *   smoothing      → spectrumSmoothEnabled        (spatial smoothing)
- *   peak_hold      → spectrumHoldEnabled          (peak hold, default true)
- *   line_graph     → spectrumLineGraphEnabled     (line graph overlay)
+ *   signal_meter_mode    → signalMeterDisplayMode       (signal bar meter mode: dbfs/snr/dbfs-led/snr-led)
+ *   smeter_mode          → ubersdr_smeter_colour_mode   (SMeterNeedle display mode)
+ *   palette              → spectrumColorScheme           (waterfall colour palette)
+ *   contrast             → spectrumAutoContrast          (auto-range symmetric dB offset, 0-20)
+ *   vu_meter_style       → vuMeterStyle                  (VU meter style: bar/led)
+ *   gpu_scroll           → spectrumGpuScrollEnabled      (GPU sub-pixel waterfall scroll)
+ *   smoothing            → spectrumSmoothEnabled         (spatial smoothing)
+ *   peak_hold            → spectrumHoldEnabled           (peak hold, default true)
+ *   line_graph           → spectrumLineGraphEnabled      (line graph overlay)
+ *   spectrum_bg_image    → (no localStorage key)         URL of the spectrum background image,
+ *                                                         or "" if none. Read directly from
+ *                                                         window.serverUIConfig by SpectrumDisplay.
+ *   spectrum_bg_opacity  → (no localStorage key)         Opacity of the background image (0.0–1.0,
+ *                                                         default 0.3). Read directly from
+ *                                                         window.serverUIConfig by SpectrumDisplay.
  *
  * Usage (called from app.js before spectrum/meter initialisation):
  *   await loadServerUIConfig();

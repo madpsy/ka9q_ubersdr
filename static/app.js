@@ -568,7 +568,7 @@ let vuMeterBarCompact = null;
 let vuMeterPeakCompact = null;
 let vuMeterLedsCompact = null;       // LED canvas element
 let vuMeterLedsCtx = null;           // LED canvas 2D context
-let vuMeterStyle = localStorage.getItem('vuMeterStyle') || 'bar'; // 'bar' or 'led'
+let vuMeterStyle = 'bar'; // 'bar' or 'led' — set properly in DOMContentLoaded after server UI config is fetched
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visibility)
 let animationFrameId = null;
@@ -7757,6 +7757,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             applyServerUIDefaults();
         }
     }
+
+    // Initialise vuMeterStyle here (after server UI config is fetched and localStorage pre-populated)
+    // This must happen after applyServerUIDefaults() which writes the server default to localStorage
+    // if no user preference exists. The module-level declaration is just 'bar' as a placeholder.
+    vuMeterStyle = (typeof getUIDefault === 'function')
+        ? getUIDefault('vuMeterStyle', 'vu_meter_style', 'bar')
+        : (localStorage.getItem('vuMeterStyle') || 'bar');
 
     // Load signal data source setting FIRST
     loadSignalDataSource();

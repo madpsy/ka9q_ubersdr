@@ -23,6 +23,13 @@
  *   spectrum_bg_opacity       → (no localStorage key)         Opacity of the background image (0.0–1.0,
  *                                                              default 0.3). Read directly from
  *                                                              window.serverUIConfig by SpectrumDisplay.
+ *   theme                     → (no localStorage key)         Map of CSS theme token overrides.
+ *                                                              Applied as CSS custom properties on :root
+ *                                                              via document.documentElement.style.setProperty().
+ *                                                              Keys: page_bg, panel_dark, panel_mid,
+ *                                                                    accent, accent_end, text_light.
+ *                                                              When absent/empty the :root defaults in
+ *                                                              style.css reproduce the original appearance.
  *
  * Usage (called from app.js before spectrum/meter initialisation):
  *   await loadServerUIConfig();
@@ -257,6 +264,29 @@ function applyServerUIDefaults() {
             localStorage.setItem('bandwidthIndicatorColor', bwColorDefault);
         }
     } catch (e) { /* ignore */ }
+
+    // ── Theme colours ─────────────────────────────────────────────────────────
+    // Applied as CSS custom properties on :root. No localStorage — this is a
+    // server-side operator setting, not a per-user preference.
+    // The :root defaults in style.css reproduce the original appearance when
+    // no theme is configured, so this block is a no-op for unconfigured installs.
+    //
+    // Map of server response key → CSS custom property name
+    const themeCssVars = {
+        page_bg:    '--page-bg',
+        panel_dark: '--panel-dark',
+        panel_mid:  '--panel-mid',
+        accent:     '--accent',
+        accent_end: '--accent-end',
+        text_light: '--text-light',
+    };
+    const theme = (window.serverUIConfig && window.serverUIConfig.theme) || {};
+    for (const [key, cssVar] of Object.entries(themeCssVars)) {
+        const val = theme[key];
+        if (val && /^#[0-9a-fA-F]{6}$/.test(val)) {
+            document.documentElement.style.setProperty(cssVar, val);
+        }
+    }
 }
 
 // Expose globally for use from app.js

@@ -2,12 +2,33 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
+
+// themeDefaults are the original hardcoded colours used throughout style.css.
+// When a theme key is absent or empty in ui.yaml the CSS :root fallback applies,
+// reproducing the original appearance exactly.
+var themeDefaults = map[string]string{
+	"page_bg":    "#adb5bd",
+	"panel_dark": "#2c3e50",
+	"panel_mid":  "#34495e",
+	"accent":     "#667eea",
+	"accent_end": "#764ba2",
+	"text_light": "#ecf0f1",
+}
+
+// validHexColor reports whether s is a valid 6-digit CSS hex colour (#rrggbb).
+var hexColorRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func isValidHexColor(s string) bool {
+	return hexColorRE.MatchString(s)
+}
 
 // handleUIConfig serves the UI configuration defaults to the public frontend.
 // This is a public endpoint — no authentication required.
@@ -59,6 +80,19 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		bwColor = "green" // built-in fallback
 	}
 
+	// Build the effective theme map: start with defaults, overlay any configured values.
+	// This ensures the frontend always receives a complete set of theme tokens even when
+	// ui.yaml has no theme section — the CSS :root fallback values match these defaults.
+	effectiveTheme := make(map[string]string, len(themeDefaults))
+	for k, v := range themeDefaults {
+		effectiveTheme[k] = v
+	}
+	for k, v := range config.UI.Theme {
+		if isValidHexColor(v) {
+			effectiveTheme[k] = v
+		}
+	}
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"signal_meter_mode":         config.UI.SignalMeterMode.Default,
 		"smeter_mode":               config.UI.SMeterMode.Default,
@@ -72,6 +106,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"bandwidth_indicator_color": bwColor,
 		"spectrum_bg_image":         bgImageURL,
 		"spectrum_bg_opacity":       opacity,
+		"theme":                     effectiveTheme,
 	}); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
 	}
@@ -172,6 +207,14 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
+	// Validate theme colours — each value must be a valid 6-digit hex colour if present
+	for key, val := range parsed.UI.Theme {
+		if val != "" && !isValidHexColor(val) {
+			http.Error(w, fmt.Sprintf("theme.%s: invalid hex colour '%s' (expected #rrggbb)", key, val), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Write to ui.yaml
 	uiPath := "ui.yaml"
 	if configDir != "" && configDir != "." {
@@ -186,11 +229,11 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f",
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, theme=%v",
 		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
 		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
-		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity)
+		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity, config.UI.Theme)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

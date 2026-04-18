@@ -1640,6 +1640,22 @@
                         </div>
 
                         <!-- Bandwidth Indicator Colour -->
+                        <!-- Theme Colours -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 8px 0; color: #333; font-size: 16px;">🎨 Theme Colours</h3>
+                            <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">
+                                Customise the colour palette used throughout the receiver UI.
+                                Defaults reproduce the original appearance exactly — change any colour to theme the entire interface.
+                                These are server-wide settings; users cannot override them individually.
+                            </p>
+                            <div id="ui-theme-colors">
+                                <!-- Populated dynamically by loadAdminUIConfig() -->
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <button class="btn btn-secondary" onclick="resetAllThemeColors()" style="font-size: 13px; padding: 6px 14px;">↺ Reset all to defaults</button>
+                            </div>
+                        </div>
+
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                             <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎨 Default Bandwidth Indicator Colour</h3>
                             <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
@@ -6714,6 +6730,9 @@
                 setCheck('ui-peak-hold',   ui.peak_hold,   true);
                 setCheck('ui-line-graph',  ui.line_graph,  false);
 
+                // Theme colours — build dynamic colour picker rows
+                buildThemeColorPickers(ui.theme || {});
+
                 // Spectrum background opacity slider
                 const opacitySlider  = document.getElementById('ui-spectrum-bg-opacity');
                 const opacityDisplay = document.getElementById('ui-spectrum-bg-opacity-display');
@@ -6773,6 +6792,123 @@
                 magenta: '#ff00ff',
             };
             swatch.style.backgroundColor = colorMap[select.value] || '#00ff00';
+        }
+
+        // ── Theme colour helpers ──────────────────────────────────────────────────
+
+        /**
+         * The canonical set of theme tokens with their default values and human labels.
+         * Order here determines the display order in the admin UI.
+         */
+        const THEME_TOKENS = [
+            { key: 'page_bg',    default: '#adb5bd', label: 'Page Background',    desc: 'Background of all panels below the waterfall (controls, filters, equalizer)' },
+            { key: 'panel_dark', default: '#2c3e50', label: 'Dark Panel',          desc: 'Dark widget backgrounds: S-meter, oscilloscope, canvases, modals' },
+            { key: 'panel_mid',  default: '#34495e', label: 'Mid Panel',           desc: 'Section headers, control group backgrounds, waterfall controls' },
+            { key: 'accent',     default: '#667eea', label: 'Accent',              desc: 'Hover states, primary buttons, scrollbar thumbs, gradient start' },
+            { key: 'accent_end', default: '#764ba2', label: 'Accent Gradient End', desc: 'End colour of accent gradients (header, voice button, etc.)' },
+            { key: 'text_light', default: '#ecf0f1', label: 'Light Text',          desc: 'Text colour on dark panel backgrounds' },
+        ];
+
+        /**
+         * Build the dynamic colour picker rows inside #ui-theme-colors.
+         * Called by loadAdminUIConfig() with the theme map from the server.
+         * @param {Object} themeMap  e.g. { page_bg: '#adb5bd', accent: '#667eea', ... }
+         */
+        function buildThemeColorPickers(themeMap) {
+            const container = document.getElementById('ui-theme-colors');
+            if (!container) return;
+            container.innerHTML = '';
+
+            THEME_TOKENS.forEach(({ key, default: def, label, desc }) => {
+                const val = (themeMap[key] && /^#[0-9a-fA-F]{6}$/.test(themeMap[key]))
+                    ? themeMap[key] : def;
+
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;';
+                row.innerHTML = `
+                    <input type="color"
+                           id="theme-picker-${key}"
+                           value="${val}"
+                           title="${label}"
+                           style="width:44px; height:32px; padding:2px; border:1px solid #ddd; border-radius:4px; cursor:pointer; flex-shrink:0;"
+                           oninput="syncThemeHexFromPicker('${key}')">
+                    <input type="text"
+                           id="theme-hex-${key}"
+                           value="${val}"
+                           maxlength="7"
+                           placeholder="#rrggbb"
+                           style="width:88px; font-family:monospace; font-size:13px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; flex-shrink:0;"
+                           oninput="syncThemePickerFromHex('${key}')">
+                    <button class="btn btn-secondary"
+                            onclick="resetThemeColor('${key}')"
+                            style="font-size:12px; padding:4px 10px; flex-shrink:0;"
+                            title="Reset to default (${def})">↺</button>
+                    <div style="min-width:0;">
+                        <div style="font-weight:500; font-size:14px; color:#333;">${label}</div>
+                        <div style="font-size:12px; color:#666; margin-top:1px;">${desc}</div>
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        /**
+         * Sync the hex text input from the colour picker (called on picker oninput).
+         * @param {string} key  Theme token key, e.g. 'page_bg'
+         */
+        function syncThemeHexFromPicker(key) {
+            const picker = document.getElementById('theme-picker-' + key);
+            const hex    = document.getElementById('theme-hex-' + key);
+            if (picker && hex) hex.value = picker.value;
+        }
+
+        /**
+         * Sync the colour picker from the hex text input (called on text oninput).
+         * Only syncs when the value is a valid 6-digit hex colour.
+         * @param {string} key  Theme token key, e.g. 'page_bg'
+         */
+        function syncThemePickerFromHex(key) {
+            const hex    = document.getElementById('theme-hex-' + key);
+            const picker = document.getElementById('theme-picker-' + key);
+            if (!hex || !picker) return;
+            if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) {
+                picker.value = hex.value;
+            }
+        }
+
+        /**
+         * Reset a single theme token to its built-in default value.
+         * @param {string} key  Theme token key, e.g. 'page_bg'
+         */
+        function resetThemeColor(key) {
+            const token = THEME_TOKENS.find(t => t.key === key);
+            if (!token) return;
+            const picker = document.getElementById('theme-picker-' + key);
+            const hex    = document.getElementById('theme-hex-' + key);
+            if (picker) picker.value = token.default;
+            if (hex)    hex.value    = token.default;
+        }
+
+        /**
+         * Reset all theme tokens to their built-in default values.
+         */
+        function resetAllThemeColors() {
+            THEME_TOKENS.forEach(t => resetThemeColor(t.key));
+        }
+
+        /**
+         * Collect the current theme colour values from the picker inputs.
+         * Returns a plain object suitable for inclusion in the PUT body.
+         * @returns {Object}  e.g. { page_bg: '#adb5bd', accent: '#667eea', ... }
+         */
+        function collectThemeColors() {
+            const result = {};
+            THEME_TOKENS.forEach(({ key, default: def }) => {
+                const picker = document.getElementById('theme-picker-' + key);
+                result[key] = (picker && /^#[0-9a-fA-F]{6}$/.test(picker.value))
+                    ? picker.value : def;
+            });
+            return result;
         }
 
         /**
@@ -6874,7 +7010,8 @@
                             {value:'yellow',label:'Yellow'},{value:'orange',label:'Orange'},
                             {value:'magenta',label:'Magenta'}
                         ]};
-                    })()
+                    })(),
+                    theme: collectThemeColors()
                 }
             };
 

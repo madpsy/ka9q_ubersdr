@@ -108,7 +108,6 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <header>
   <h1 id="page-title">&#x1F4E1; Wideband Spectrogram</h1>
   <p class="subtitle" id="receiver-subtitle" style="font-size:1em;opacity:.75;margin-bottom:2px"></p>
-  <p class="subtitle" id="subtitle"></p>
 </header>
 
 <div style="text-align:center;margin:12px 0 16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
@@ -953,19 +952,6 @@ function load(){
       }
       var dateLabel=meta.date==='rolling-24h'?'\u27F3 Rolling 24h':meta.date;
       setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
-      /* Update subtitle with actual metadata.
-         Use enough decimal places to distinguish narrow bands (e.g. 7.000–7.200 MHz). */
-      function fmtMHz(hz){
-        var mhz=hz/1e6;
-        if(mhz===Math.round(mhz))return mhz.toFixed(0);
-        if(Math.round(mhz*10)===mhz*10)return mhz.toFixed(1);
-        return mhz.toFixed(3);
-      }
-      var startMHz=fmtMHz(meta.start_freq_hz);
-      var endMHz=fmtMHz(meta.end_freq_hz);
-      var palNames={viridis:'Viridis',plasma:'Plasma',jet:'Jet'};
-      var palName=palNames[userPalette]||userPalette;
-      document.getElementById('subtitle').textContent=startMHz+' \u2013 '+endMHz+' MHz \u00b7 one row per minute \u00b7 '+palName+' palette';
       /* Show download button — downloadCanvas() captures the canvas directly */
       document.getElementById('dl-btn').style.display='inline';
       if(isToday&&!meta.complete)timer=setTimeout(load,65000);

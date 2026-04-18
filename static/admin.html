@@ -18554,6 +18554,7 @@ const tooltipLine2 = timeStr;
                         <th style="padding: 12px; text-align: left; width: 140px; cursor: pointer; user-select: none;" onclick="sortChatLogs('ip')" title="Click to sort">IP Address${sortIcon('ip')}</th>
                         <th style="padding: 12px; text-align: left; width: 100px; cursor: pointer; user-select: none;" onclick="sortChatLogs('country')" title="Click to sort">Country${sortIcon('country')}</th>
                         <th style="padding: 12px; text-align: left; width: 150px; cursor: pointer; user-select: none;" onclick="sortChatLogs('nickname')" title="Click to sort">Nickname${sortIcon('nickname')}</th>
+                        <th style="padding: 12px; text-align: center; width: 50px;" title="Ban user by IP">Ban</th>
                         <th style="padding: 12px; text-align: left;">Message</th>
                     </tr>
                 </thead>
@@ -18588,6 +18589,9 @@ const tooltipLine2 = timeStr;
                     <td style="padding: 12px; font-family: monospace; font-size: 12px; cursor: pointer; color: #667eea;" onclick="filterChatByIP('${escapedIP}')" title="Click to filter by this IP">${escapeHtml(log.source_ip)}</td>
                     <td style="padding: 12px; font-size: 12px;">${escapeHtml(countryDisplay)}</td>
                     <td style="padding: 12px; font-weight: bold; color: #667eea; cursor: pointer;" onclick="filterChatByNickname('${escapedNickname}')" title="Click to filter by this nickname">${escapeHtml(log.username)}</td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button onclick="banUser('${escapedIP}', 'Banned from chat log')" title="Ban IP ${escapeHtml(log.source_ip)}" style="background: none; border: none; font-size: 18px; cursor: pointer; padding: 2px 6px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">🚫</button>
+                    </td>
                     <td style="padding: 12px; word-break: break-word;">${escapeHtml(log.message)}</td>
                 `;
                 tbody.appendChild(row);

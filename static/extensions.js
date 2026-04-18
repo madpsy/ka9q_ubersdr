@@ -414,10 +414,22 @@ class RadioAPI {
     // Internal notification methods
     notifyFrequencyChange(freq) {
         this.emit('frequency_changed', { frequency: freq });
+        // Announce for accessibility (TTS) — covers browser extension and radioAPI callers.
+        // The lastAnnouncedFrequency dedup + 1s debounce in tts-announcements.js prevents
+        // double-announcements when a UI-initiated change already called TTS directly.
+        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+            window.ttsAnnouncements.announceFrequencyChange(freq);
+        }
     }
     
     notifyModeChange(mode) {
         this.emit('mode_changed', { mode: mode });
+        // Announce for accessibility (TTS) — covers browser extension and radioAPI callers.
+        // The lastAnnouncedMode dedup in tts-announcements.js prevents double-announcements
+        // when a UI-initiated change already called TTS directly.
+        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+            window.ttsAnnouncements.announceModeChange(mode);
+        }
     }
     
     notifyBandwidthChange(low, high) {

@@ -2928,6 +2928,19 @@ function updateStatus(msg) {
             bandElement.textContent = bandName || '-';
         }
 
+        // Announce via TTS for externally-driven changes (MIDI, backend, etc.)
+        // Uses announceFrequencyAndMode when both are present to avoid the race condition
+        // where announceModeChange (immediate) fires before announceFrequencyChange (1s debounce).
+        // The lastAnnouncedFrequency/lastAnnouncedMode dedup prevents double-announcements
+        // when a UI-initiated change already called TTS directly.
+        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+            if (msg.mode) {
+                window.ttsAnnouncements.announceFrequencyAndMode(msg.frequency, msg.mode);
+            } else {
+                window.ttsAnnouncements.announceFrequencyChange(msg.frequency);
+            }
+        }
+
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor - use window globals for latest values
         // Skip bandwidth update if chat is syncing to prevent flickering
@@ -2947,6 +2960,11 @@ function updateStatus(msg) {
         const currentModeElement = document.getElementById('current-mode');
         if (currentModeElement) {
             currentModeElement.textContent = msg.mode.toUpperCase();
+        }
+
+        // Announce mode-only change via TTS (e.g. MIDI mode change without frequency change)
+        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+            window.ttsAnnouncements.announceModeChange(msg.mode);
         }
     }
 

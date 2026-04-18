@@ -2763,7 +2763,7 @@ input[type="range"]::-moz-range-thumb {
 /* S-meter control group: side-by-side layout (S-meter left, mini charts right) */
 .smeter-control-group {
     flex-direction: row !important;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
 }
 
@@ -2777,8 +2777,7 @@ input[type="range"]::-moz-range-thumb {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    justify-content: flex-start;
-    padding-top: 10px; /* match .s-meter-container margin-top */
+    justify-content: center;
     flex: none; /* fixed size — no grow, no shrink */
 }
 

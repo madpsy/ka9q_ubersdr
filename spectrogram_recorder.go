@@ -313,10 +313,10 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 		}
 	}
 
-	// Delete the working .bin for the old day (no longer needed after archiving)
-	oldBin := filepath.Join(sr.config.DataDir, "spectrogram_"+oldDate+".bin")
-	os.Remove(oldBin)
-	// The .jsonl is kept as the archived metadata for the completed day
+	// Keep the .bin for the old day — getRolling24hRows() reads it for the first 24 hours
+	// after midnight to populate the "yesterday" portion of the rolling 24h view.
+	// runCleanup() will delete it once it falls outside the retention window.
+	// The .jsonl is kept as the archived metadata for the completed day.
 
 	// Run retention cleanup
 	sr.runCleanup(newDayTime)
@@ -701,21 +701,44 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 		return
 	}
 
+	// Collect all dated spectrogram files (any extension) so we can clean up
+	// .bin files that outlived their .png (e.g. orphaned after a partial cleanup).
+	datesFound := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, "spectrogram_") || !strings.HasSuffix(name, ".png") {
+		if !strings.HasPrefix(name, "spectrogram_") {
 			continue
 		}
-		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "spectrogram_"), ".png")
+		// Extract date from spectrogram_YYYY-MM-DD.{png,bin,jsonl}
+		// Skip thumbnail files (spectrogram_YYYY-MM-DD_thumb.png)
+		base := strings.TrimPrefix(name, "spectrogram_")
+		var dateStr string
+		if strings.HasSuffix(base, ".png") && !strings.HasSuffix(base, "_thumb.png") {
+			dateStr = strings.TrimSuffix(base, ".png")
+		} else if strings.HasSuffix(base, ".bin") {
+			dateStr = strings.TrimSuffix(base, ".bin")
+		} else if strings.HasSuffix(base, ".jsonl") {
+			dateStr = strings.TrimSuffix(base, ".jsonl")
+		} else {
+			continue
+		}
+		if _, err := time.Parse("2006-01-02", dateStr); err == nil {
+			datesFound[dateStr] = true
+		}
+	}
+
+	for dateStr := range datesFound {
 		fileDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			continue
 		}
 		if fileDate.Before(cutoff) {
-			pngPath := filepath.Join(sr.config.DataDir, name)
+			pngPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".png")
+			thumbPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+"_thumb.png")
 			binPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".bin")
 			jsonlPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".jsonl")
 			os.Remove(pngPath)
+			os.Remove(thumbPath)
 			os.Remove(binPath)
 			os.Remove(jsonlPath)
 			log.Printf("Spectrogram: deleted old files for %s (older than %d days)", dateStr, sr.config.RetentionDays)
@@ -1582,12 +1605,18 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 
 	safeDateStr := requestedDate.Format("2006-01-02")
 
+	// rerenderFailed tracks whether we attempted a re-render but had to fall back
+	// to the disk PNG because the .bin was unavailable. When true we use a shorter
+	// cache lifetime so the browser retries once the .bin becomes available.
+	rerenderFailed := false
+
 	if needsRerender {
 		// Re-render archived day from .bin file with requested palette / range
 		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 		binData, err := os.ReadFile(binPath)
 		if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
-			// .bin not available — fall through to serve disk PNG
+			// .bin not available — fall through to serve disk PNG (palette/range ignored)
+			rerenderFailed = true
 			goto serveDiskPNG
 		}
 		rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
@@ -1648,7 +1677,14 @@ serveDiskPNG:
 
 	stat, _ := f.Stat()
 	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "max-age=86400") // archived days are immutable
+	// If we fell back here because a re-render was requested but the .bin is missing,
+	// use a short cache lifetime so the browser retries once the .bin is available.
+	// Otherwise archived days are immutable and can be cached for a full day.
+	if rerenderFailed {
+		w.Header().Set("Cache-Control", "max-age=300, must-revalidate")
+	} else {
+		w.Header().Set("Cache-Control", "max-age=86400") // archived days are immutable
+	}
 	w.Header().Set("Content-Disposition", `inline; filename="spectrogram_`+safeDateStr+`.png"`)
 	if stat != nil {
 		w.Header().Set("Last-Modified", stat.ModTime().UTC().Format(http.TimeFormat))

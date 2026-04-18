@@ -29,12 +29,12 @@ var (
 	audioDeviceMu   sync.RWMutex
 )
 
-var modeLabels = []string{"USB", "LSB", "AM", "FM", "CWU", "CWL"}
+var modeLabels = []string{"USB", "LSB", "AM", "SAM", "FM", "CWU", "CWL"}
 
 // bwSliderMax returns the maximum slider value (Hz) for a given mode.
 func bwSliderMax(mode string) float64 {
 	switch mode {
-	case "am", "fm":
+	case "am", "sam", "fm":
 		return 6000
 	default:
 		return 5000
@@ -48,7 +48,7 @@ func bwDefaultSlider(mode string) float64 {
 		return 2700
 	case "cwu", "cwl":
 		return 600
-	case "am":
+	case "am", "sam":
 		return 4000
 	case "fm":
 		return 5000
@@ -69,7 +69,7 @@ func bwToLoHi(mode string, val float64) (lo, hi int) {
 		return 0, v
 	case "lsb", "cwl":
 		return -v, 0
-	default: // am, fm
+	default: // am, sam, fm
 		return -v, v
 	}
 }

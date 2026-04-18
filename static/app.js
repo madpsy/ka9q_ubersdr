@@ -10153,13 +10153,12 @@ function drawDbfsHistoryChart() {
     const width = canvas.width;
     const height = canvas.height;
 
-    // Semi-transparent background
-    ctx.fillStyle = 'rgba(15, 25, 40, 0.75)';
-    ctx.fillRect(0, 0, width, height);
+    // Clear canvas (background comes from CSS on the canvas element)
+    ctx.clearRect(0, 0, width, height);
 
     const historyData = window.dbfsHistory || dbfsHistory;
     if (historyData.length < 2) {
-        ctx.fillStyle = '#888';
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.7)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -10240,13 +10239,12 @@ function drawSnrHistoryChart() {
     const width = canvas.width;
     const height = canvas.height;
 
-    // Semi-transparent background
-    ctx.fillStyle = 'rgba(15, 25, 40, 0.75)';
-    ctx.fillRect(0, 0, width, height);
+    // Clear canvas (background comes from CSS on the canvas element)
+    ctx.clearRect(0, 0, width, height);
 
     const historyData = window.snrHistory || snrHistory;
     if (historyData.length < 2) {
-        ctx.fillStyle = '#888';
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.7)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';

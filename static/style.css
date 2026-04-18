@@ -2801,7 +2801,7 @@ input[type="range"]::-moz-range-thumb {
 .smeter-mini-chart-wrap canvas {
     display: block;
     border-radius: 3px;
-    width: 100%;
+    background: rgba(15, 25, 40, 0.75);
 }
 
 #s-meter-canvas {

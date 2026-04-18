@@ -18,16 +18,17 @@ import (
 // Response:
 //
 //	{
-//	  "smeter_mode":          "smeter-classic",          // ubersdr_smeter_colour_mode
-//	  "palette":              "jet",                     // spectrumColorScheme
-//	  "contrast":             10,                        // spectrumAutoContrast (0-20)
-//	  "vu_meter_style":       "bar",                     // vuMeterStyle
-//	  "gpu_scroll":           false,                     // spectrumGpuScrollEnabled
-//	  "smoothing":            false,                     // spectrumSmoothEnabled
-//	  "peak_hold":            true,                      // spectrumHoldEnabled
-//	  "line_graph":           false,                     // spectrumLineGraphEnabled
-//	  "spectrum_bg_image":    "/api/spectrum-bg-image",  // URL or "" if not set
-//	  "spectrum_bg_opacity":  0.3                        // 0.0–1.0
+//	  "smeter_mode":                "smeter-classic",          // ubersdr_smeter_colour_mode
+//	  "palette":                    "jet",                     // spectrumColorScheme
+//	  "contrast":                   10,                        // spectrumAutoContrast (0-20)
+//	  "vu_meter_style":             "bar",                     // vuMeterStyle
+//	  "gpu_scroll":                 false,                     // spectrumGpuScrollEnabled
+//	  "smoothing":                  false,                     // spectrumSmoothEnabled
+//	  "peak_hold":                  true,                      // spectrumHoldEnabled
+//	  "line_graph":                 false,                     // spectrumLineGraphEnabled
+//	  "bandwidth_indicator_color":  "green",                   // bandwidthIndicatorColor
+//	  "spectrum_bg_image":          "/api/spectrum-bg-image",  // URL or "" if not set
+//	  "spectrum_bg_opacity":        0.3                        // 0.0–1.0
 //	}
 func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, configDir string) {
 	if r.Method != http.MethodGet {
@@ -53,18 +54,24 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		opacity = 0.3 // sensible default when not explicitly set
 	}
 
+	bwColor := config.UI.BandwidthIndicatorColor.Default
+	if bwColor == "" {
+		bwColor = "green" // built-in fallback
+	}
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"signal_meter_mode":   config.UI.SignalMeterMode.Default,
-		"smeter_mode":         config.UI.SMeterMode.Default,
-		"palette":             config.UI.Palette.Default,
-		"contrast":            config.UI.Contrast.Default,
-		"vu_meter_style":      config.UI.VUMeterStyle.Default,
-		"gpu_scroll":          config.UI.GPUScroll.Default,
-		"smoothing":           config.UI.Smoothing.Default,
-		"peak_hold":           config.UI.PeakHold.Default,
-		"line_graph":          config.UI.LineGraph.Default,
-		"spectrum_bg_image":   bgImageURL,
-		"spectrum_bg_opacity": opacity,
+		"signal_meter_mode":         config.UI.SignalMeterMode.Default,
+		"smeter_mode":               config.UI.SMeterMode.Default,
+		"palette":                   config.UI.Palette.Default,
+		"contrast":                  config.UI.Contrast.Default,
+		"vu_meter_style":            config.UI.VUMeterStyle.Default,
+		"gpu_scroll":                config.UI.GPUScroll.Default,
+		"smoothing":                 config.UI.Smoothing.Default,
+		"peak_hold":                 config.UI.PeakHold.Default,
+		"line_graph":                config.UI.LineGraph.Default,
+		"bandwidth_indicator_color": bwColor,
+		"spectrum_bg_image":         bgImageURL,
+		"spectrum_bg_opacity":       opacity,
 	}); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
 	}
@@ -154,6 +161,10 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := validateUISelectSetting("bandwidth_indicator_color", parsed.UI.BandwidthIndicatorColor); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// Validate contrast range (0-20 to match the UI slider)
 	if parsed.UI.Contrast.Default < parsed.UI.Contrast.Min || parsed.UI.Contrast.Default > parsed.UI.Contrast.Max {
@@ -175,10 +186,11 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bg_opacity=%.2f",
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f",
 		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
-		config.UI.PeakHold.Default, config.UI.LineGraph.Default, config.UI.SpectrumBgOpacity)
+		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
+		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

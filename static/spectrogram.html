@@ -1774,7 +1774,8 @@ function renderTimesliceMulti(results){
   var scales={
     x:{
       ticks:{color:'rgba(255,255,255,0.6)',maxRotation:0,autoSkip:true,maxTicksLimit:10},
-      grid:{color:'rgba(255,255,255,0.07)'}
+      grid:{color:'rgba(255,255,255,0.07)'},
+      title:{display:true,text:'Time (UTC)',color:'rgba(255,255,255,0.45)'}
     },
     y:{
       position:'left',
@@ -1818,9 +1819,7 @@ function renderTimesliceMulti(results){
           }
         }
       },
-      scales:scales,
-      /* X axis title — set after scales object is built */
-      plugins_xTitle:'Time (UTC)'
+      scales:scales
     }
   });
 

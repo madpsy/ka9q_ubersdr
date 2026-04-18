@@ -714,7 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const volumeSlider = document.getElementById('volume');
             if (volumeSlider) {
                 let newVolume = parseInt(volumeSlider.value) + 5;
-                if (newVolume > 100) newVolume = 100;
+                if (newVolume > 125) newVolume = 125;
                 volumeSlider.value = newVolume;
                 // Trigger the input event to update volume
                 volumeSlider.dispatchEvent(new Event('input'));
@@ -990,9 +990,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Setup volume control
     const volumeSlider = document.getElementById('volume');
+
+    // Restore saved volume from localStorage (fallback to slider's default of 100)
+    try {
+        const savedVolume = localStorage.getItem('volume');
+        if (savedVolume !== null) {
+            const v = parseInt(savedVolume, 10);
+            if (!isNaN(v) && v >= 0 && v <= 125) {
+                volumeSlider.value = v;
+                document.getElementById('volume-value').textContent = v + '%';
+                currentVolume = v / 100;
+            }
+        }
+    } catch (e) {
+        // localStorage unavailable — use HTML default
+    }
+
     volumeSlider.addEventListener('input', (e) => {
         currentVolume = e.target.value / 100;
         document.getElementById('volume-value').textContent = e.target.value + '%';
+        try {
+            localStorage.setItem('volume', e.target.value);
+        } catch (err) {
+            // localStorage unavailable
+        }
         if (audioContext) {
             // Volume will be applied when playing audio
         }

@@ -107,6 +107,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <div class="container">
 <header>
   <h1 id="page-title">&#x1F4E1; Wideband Spectrogram</h1>
+  <p class="subtitle" id="receiver-subtitle" style="font-size:1em;opacity:.75;margin-bottom:2px"></p>
   <p class="subtitle" id="subtitle">0 &ndash; 30 MHz &middot; one row per minute &middot; Jet palette</p>
 </header>
 
@@ -304,28 +305,33 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 
   <div id="ts-err"></div>
   <div id="ts-chart-area" style="display:none">
-    <div style="display:flex;align-items:center;gap:18px;margin-bottom:8px;font-size:.83em;opacity:.85;flex-wrap:wrap">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" id="ts-show-dbfs" checked onchange="tsToggleLines()"> Show dBFS lines
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" id="ts-show-snr" checked onchange="tsToggleLines()"> Show SNR lines
-      </label>
-      <span style="opacity:.45;font-size:.9em">Drag to zoom &middot; double-click to reset</span>
+    <!-- Toolbar: checkboxes left, buttons right -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:16px;font-size:.83em;opacity:.85;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="ts-show-dbfs" checked onchange="tsToggleLines()"> Show dBFS
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="ts-show-snr" checked onchange="tsToggleLines()"> Show SNR
+        </label>
+        <span style="opacity:.45;font-size:.9em">Drag to zoom &middot; double-click to reset</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button onclick="tsDownloadCSV()" title="Download data as CSV"
+                style="padding:4px 11px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer">
+          &#x2B07; CSV
+        </button>
+        <button onclick="tsDownloadChart()" title="Download chart as PNG"
+                style="padding:4px 11px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer">
+          &#x2B07; PNG
+        </button>
+        <button onclick="tsResetZoom()" title="Reset zoom (or double-click chart)"
+                style="padding:4px 11px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer">
+          &#x2B1C; Reset zoom
+        </button>
+      </div>
     </div>
-    <div class="ts-chart-wrap" style="position:relative">
-      <button onclick="tsResetZoom()" title="Reset zoom (or double-click chart)"
-              style="position:absolute;top:8px;right:8px;z-index:10;padding:3px 10px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer;opacity:.75">
-        &#x2B1C; Reset zoom
-      </button>
-      <button onclick="tsDownloadChart()" title="Download chart as PNG"
-              style="position:absolute;top:8px;right:110px;z-index:10;padding:3px 10px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer;opacity:.75">
-        &#x2B07; PNG
-      </button>
-      <button onclick="tsDownloadCSV()" title="Download data as CSV"
-              style="position:absolute;top:8px;right:185px;z-index:10;padding:3px 10px;font-size:.78em;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;cursor:pointer;opacity:.75">
-        &#x2B07; CSV
-      </button>
+    <div class="ts-chart-wrap">
       <canvas id="ts-canvas" height="340"></canvas>
     </div>
     <details class="api-ref" style="margin-top:14px">
@@ -1876,6 +1882,48 @@ function tsResetZoom(){
   tsChart.resetZoom();
 }
 
+/* Instance callsign + receiver name — fetched once on page load from /api/description */
+var tsCallsign='';
+(function fetchDescription(){
+  fetch('/api/description')
+    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(function(d){
+      if(d&&d.callsign)tsCallsign=d.callsign.replace(/[^A-Za-z0-9]/g,'');
+      /* Populate receiver name under the page title (same as noisefloor.html) */
+      var sub=document.getElementById('receiver-subtitle');
+      if(sub){
+        if(d&&d.receiver&&d.receiver.name)sub.textContent=d.receiver.name;
+        else if(d&&d.callsign)sub.textContent=d.callsign;
+      }
+    })
+    .catch(function(){});
+})();
+
+/* Returns a filename stem: [callsign_]<date-part>_<UTC-download-time> */
+function tsFileName(){
+  var dsel=document.getElementById('ts-dsel');
+  var v=dsel?dsel.value:'today';
+  var datePart;
+  if(v==='rolling-24h')datePart='rolling24h';
+  else if(/^\d{4}-\d{2}-\d{2}$/.test(v))datePart=v;
+  else datePart='today';
+
+  /* UTC download timestamp: YYYYMMDD_HHMMSS */
+  var now=new Date();
+  var ts=now.getUTCFullYear()+
+    String(now.getUTCMonth()+1).padStart(2,'0')+
+    String(now.getUTCDate()).padStart(2,'0')+'_'+
+    String(now.getUTCHours()).padStart(2,'0')+
+    String(now.getUTCMinutes()).padStart(2,'0')+
+    String(now.getUTCSeconds()).padStart(2,'0');
+
+  var parts=['timeslice'];
+  if(tsCallsign)parts.push(tsCallsign);
+  parts.push(datePart);
+  parts.push(ts);
+  return parts.join('_');
+}
+
 function tsDownloadChart(){
   if(!tsChart)return;
   var src=document.getElementById('ts-canvas');
@@ -1892,10 +1940,7 @@ function tsDownloadChart(){
     var url=URL.createObjectURL(blob);
     var a=document.createElement('a');
     a.href=url;
-    /* Build a filename from the first slice label and date */
-    var datePart=(tsChart&&tsChart.data&&tsChart.data.labels&&tsChart.data.labels.length>0)?
-      (document.getElementById('ts-dsel')?document.getElementById('ts-dsel').value:'today'):'today';
-    a.download='timeslice_'+datePart.replace(/[^0-9\-]/g,'_')+'.png';
+    a.download=tsFileName()+'.png';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1967,8 +2012,7 @@ function tsDownloadCSV(){
   var a=document.createElement('a');
   a.href=url;
   var dsel=document.getElementById('ts-dsel');
-  var datePart=dsel?dsel.value.replace(/[^0-9\-]/g,'_'):'today';
-  a.download='timeslice_'+datePart+'.csv';
+  a.download=tsFileName()+'.csv';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

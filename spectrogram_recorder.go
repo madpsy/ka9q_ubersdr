@@ -2062,8 +2062,15 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
 		autoMin, autoMax := autoRangeRowsSlice(rr.rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
+		// Use the band name from the request, not recorder.bandName.
+		// wideband-hf is a virtual band served by the wideband recorder, so
+		// recorder.bandName is "wideband" — but the image URL must carry
+		// band=wideband-hf so the image handler applies the 1.8 MHz crop.
+		requestedBand := q.Get("band")
 		bandParam := ""
-		if recorder.bandName != "" && recorder.bandName != "wideband" {
+		if requestedBand != "" && requestedBand != "wideband" {
+			bandParam = "band=" + url.QueryEscape(requestedBand)
+		} else if recorder.bandName != "" && recorder.bandName != "wideband" {
 			bandParam = "band=" + url.QueryEscape(recorder.bandName)
 		}
 		imageURL := "/api/spectrogram?rolling=1"
@@ -2249,9 +2256,14 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	// to populate the contrast sliders and only adds db_min/db_max to the image URL
 	// when the user has moved the sliders away from the auto-range defaults.
 	// This avoids a re-render on every page load.
-	// Include ?band= for non-wideband recorders so the frontend can construct correct URLs.
+	// Include ?band= in the image URL so the frontend fetches the correct cropped image.
+	// For wideband-hf, recorder.bandName is "wideband" (it shares the wideband recorder),
+	// so we must use the band from the request query param instead.
+	requestedBand := q.Get("band")
 	bandParam := ""
-	if recorder.bandName != "" && recorder.bandName != "wideband" {
+	if requestedBand != "" && requestedBand != "wideband" {
+		bandParam = "band=" + url.QueryEscape(requestedBand)
+	} else if recorder.bandName != "" && recorder.bandName != "wideband" {
 		bandParam = "band=" + url.QueryEscape(recorder.bandName)
 	}
 	imageURL := "/api/spectrogram"

@@ -610,7 +610,7 @@ function onBandChange(){
    It is never displayed and never has anything composited over it, so
    getImageData always returns clean image pixels — not GPU-composited
    pixels that include the overlay canvas (which caused the darkening bug). */
-var meta=null,bmp=null,ictx=null,readCtx=null,timer=null;
+var meta=null,bmp=null,ictx=null,readCtx=null;
 var availableDates=[]; /* populated from /api/spectrogram/list, newest first */
 
 /* Zoom/pan state */
@@ -864,7 +864,6 @@ function onPaletteChange(){
 }
 
 function load(){
-  clearTimeout(timer);
   document.getElementById('err').innerHTML='';
 
   var sel=document.getElementById('dsel');
@@ -958,14 +957,12 @@ function load(){
       setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
       /* Show download button — downloadCanvas() captures the canvas directly */
       document.getElementById('dl-btn').style.display='inline';
-      if(isToday&&!meta.complete)timer=setTimeout(load,65000);
     })
     .catch(function(e){
       document.getElementById('loading').style.display='none';
       if(bmp)document.getElementById('view').style.display='block'; /* keep existing image on error */
       showErr('Refresh failed: '+escHtml(e.message));
       setStatus('Error');
-      if(isToday)timer=setTimeout(load,65000); /* retry on error */
     });
 }
 

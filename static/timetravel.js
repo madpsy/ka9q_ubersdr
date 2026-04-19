@@ -1624,20 +1624,40 @@ function ttToggleFullscreen() {
     return;
   }
 
-  /* Try real Fullscreen API first (works on desktop + Android Chrome).
-     Request on document.documentElement for broadest mobile support. */
-  var root = document.documentElement;
-  var reqFn = root.requestFullscreen ||
-              root.webkitRequestFullscreen ||
-              root.mozRequestFullScreen ||
-              root.msRequestFullscreen;
+  /* Try real Fullscreen API on the canvas wrap element first (desktop).
+     If that fails (some mobile browsers only allow documentElement),
+     retry on documentElement. If that also fails, use CSS fake-fullscreen. */
+  var wrap = document.getElementById('tt-canvas-wrap');
+  var reqFn = wrap && (
+    wrap.requestFullscreen ||
+    wrap.webkitRequestFullscreen ||
+    wrap.mozRequestFullScreen ||
+    wrap.msRequestFullscreen
+  );
+
+  function tryDocumentElement() {
+    var root = document.documentElement;
+    var rootReq = root.requestFullscreen ||
+                  root.webkitRequestFullscreen ||
+                  root.mozRequestFullScreen ||
+                  root.msRequestFullscreen;
+    if (rootReq) {
+      var p2 = rootReq.call(root);
+      if (p2 && typeof p2.then === 'function') {
+        p2.then(null, function() { ttEnterFakeFs(); });
+      }
+    } else {
+      ttEnterFakeFs();
+    }
+  }
 
   if (reqFn) {
-    var p = reqFn.call(root);
+    var p = reqFn.call(wrap);
     /* requestFullscreen returns a Promise in modern browsers.
-       If it rejects (e.g. iOS blocks it), fall back to CSS fake-fullscreen. */
+       If it rejects (e.g. mobile blocks element-level fullscreen),
+       fall back to documentElement, then CSS fake-fullscreen. */
     if (p && typeof p.then === 'function') {
-      p.then(null, function() { ttEnterFakeFs(); });
+      p.then(null, function() { tryDocumentElement(); });
     }
     /* If no Promise returned, assume it worked; onFsChange will fire */
   } else {

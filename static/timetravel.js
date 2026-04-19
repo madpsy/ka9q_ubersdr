@@ -301,7 +301,25 @@ function ttLoadData() {
         if (!ttIsPlaying) ttStartStarLoop();
       });
     })
-    .catch(function(e) { ttSetStatus('Error: ' + e.message); });
+    .catch(function(e) {
+      /* Rate-limited: auto-retry after 10 s with countdown in status bar */
+      if (e.message && e.message.indexOf('429') !== -1) {
+        var retryIn = 10;
+        ttSetStatus('\u23F3 Rate limited \u2014 retrying in ' + retryIn + 's\u2026');
+        var countdown = setInterval(function() {
+          retryIn--;
+          if (retryIn <= 0) {
+            clearInterval(countdown);
+            ttSetStatus('Retrying\u2026');
+            ttLoadData();
+          } else {
+            ttSetStatus('\u23F3 Rate limited \u2014 retrying in ' + retryIn + 's\u2026');
+          }
+        }, 1000);
+      } else {
+        ttSetStatus('Error: ' + e.message);
+      }
+    });
 }
 
 /* ── Pre-compute sample cache ───────────────────────────────────────────── */

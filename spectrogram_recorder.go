@@ -1470,28 +1470,42 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 		result.rows[i] = row
 	}
 
-	// ── Yesterday's tail (rows cutoff..1439 → result rows 0..tailLen-1) ──────
+	// ── Yesterday's tail (minutes cutoff..1439 → result rows 0..tailLen-1) ───
 	yesterdayDate, _ := time.Parse("2006-01-02", yesterday)
 	yesterdayMidnight := time.Date(yesterdayDate.Year(), yesterdayDate.Month(), yesterdayDate.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Build JSONL map for yesterday
-	yesterdayJSONL := make(map[int]SpectrogramRowMeta)
+	// Build JSONL map for yesterday keyed by minute-of-day (derived from unix
+	// timestamp) rather than by the sequential bin-row index stored in Row.
+	// The bin row index (Row field) is 0-based from the first row the service
+	// wrote that day — it does NOT equal the minute-of-day if the service
+	// started after midnight. Using unix timestamps gives the correct mapping.
+	yesterdayJSONL := make(map[int]SpectrogramRowMeta) // key = minute-of-day
+	yesterdayBinRow := make(map[int]int)               // minute-of-day → bin row index
 	for _, r := range sr.readJSONL(yesterday) {
-		yesterdayJSONL[r.Row] = r
+		if r.Unix > 0 {
+			mod := int((r.Unix / 60) % 1440)
+			yesterdayJSONL[mod] = r
+			yesterdayBinRow[mod] = r.Row
+		}
 	}
 
-	// Try to load yesterday's .bin
+	// Try to load yesterday's .bin and copy the needed minutes into the result.
 	yesterdayBin := filepath.Join(sr.config.DataDir, "spectrogram_"+yesterday+".bin")
 	if binData, err := os.ReadFile(yesterdayBin); err == nil && len(binData) >= 24 && string(binData[0:4]) == spectrogramMagic {
 		fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
 		fileRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-		if fileBinCount == binCount && fileRowCount > cutoff {
-			// Copy rows cutoff..min(fileRowCount-1, 1439) into result[0..tailLen-1]
-			for srcRow := cutoff; srcRow < fileRowCount && srcRow < spectrogramMaxRows; srcRow++ {
-				dstRow := srcRow - cutoff
-				offset := 24 + srcRow*binCount*4
+		if fileBinCount == binCount {
+			// For each minute-of-day we need (cutoff..1439), look up the bin
+			// row index from the JSONL map and read from the correct offset.
+			for minuteOfDay := cutoff; minuteOfDay < spectrogramMaxRows; minuteOfDay++ {
+				binRow, ok := yesterdayBinRow[minuteOfDay]
+				if !ok || binRow < 0 || binRow >= fileRowCount {
+					continue // no data for this minute — leave as sentinel
+				}
+				dstRow := minuteOfDay - cutoff
+				offset := 24 + binRow*binCount*4
 				if offset+binCount*4 > len(binData) {
-					break
+					continue
 				}
 				for j := 0; j < binCount; j++ {
 					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
@@ -1501,13 +1515,13 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 			}
 		}
 	}
-	// Fill yesterday meta rows
+	// Fill yesterday meta rows — use JSONL entry if available, else synthetic.
 	for dstRow := 0; dstRow < tailLen; dstRow++ {
-		srcRow := cutoff + dstRow
-		if m, ok := yesterdayJSONL[srcRow]; ok {
+		minuteOfDay := cutoff + dstRow
+		if m, ok := yesterdayJSONL[minuteOfDay]; ok {
 			result.metaRows[dstRow] = m
 		} else {
-			t := yesterdayMidnight.Add(time.Duration(srcRow) * time.Minute)
+			t := yesterdayMidnight.Add(time.Duration(minuteOfDay) * time.Minute)
 			result.metaRows[dstRow] = SpectrogramRowMeta{
 				Row:     dstRow,
 				UTCTime: t.Format("15:04"),
@@ -1516,32 +1530,43 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 		}
 	}
 
-	// ── Today's head (rows 0..cutoff-1 → result rows tailLen..1439) ──────────
+	// ── Today's head (minutes 0..cutoff-1 → result rows tailLen..1439) ───────
 	todayDate, _ := time.Parse("2006-01-02", today)
 	todayMidnight := time.Date(todayDate.Year(), todayDate.Month(), todayDate.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Build JSONL map for today
-	todayJSONL := make(map[int]SpectrogramRowMeta)
+	// Build JSONL map for today keyed by minute-of-day (same approach as yesterday).
+	todayJSONL := make(map[int]SpectrogramRowMeta) // key = minute-of-day
+	todayBinRow := make(map[int]int)               // minute-of-day → ring buffer row index
 	for _, r := range sr.readJSONL(today) {
-		todayJSONL[r.Row] = r
+		if r.Unix > 0 {
+			mod := int((r.Unix / 60) % 1440)
+			todayJSONL[mod] = r
+			todayBinRow[mod] = r.Row
+		}
 	}
 
-	// Copy today's ring buffer rows 0..cutoff-1 into result[tailLen..1439]
+	// Copy today's ring buffer rows into result[tailLen..1439], using the
+	// JSONL minute-of-day → ring-buffer-index map so the correct row is placed
+	// at the correct minute position regardless of when the service started.
 	sr.mu.Lock()
 	todayRowCount := sr.rowCount
-	for srcRow := 0; srcRow < cutoff && srcRow < todayRowCount; srcRow++ {
-		dstRow := tailLen + srcRow
-		copy(result.rows[dstRow], sr.rows[srcRow])
+	for minuteOfDay := 0; minuteOfDay < cutoff; minuteOfDay++ {
+		bufRow, ok := todayBinRow[minuteOfDay]
+		if !ok || bufRow < 0 || bufRow >= todayRowCount {
+			continue // no data for this minute — leave as sentinel
+		}
+		dstRow := tailLen + minuteOfDay
+		copy(result.rows[dstRow], sr.rows[bufRow])
 	}
 	sr.mu.Unlock()
 
-	// Fill today meta rows
-	for srcRow := 0; srcRow < cutoff; srcRow++ {
-		dstRow := tailLen + srcRow
-		if m, ok := todayJSONL[srcRow]; ok {
+	// Fill today meta rows — use JSONL entry if available, else synthetic.
+	for minuteOfDay := 0; minuteOfDay < cutoff; minuteOfDay++ {
+		dstRow := tailLen + minuteOfDay
+		if m, ok := todayJSONL[minuteOfDay]; ok {
 			result.metaRows[dstRow] = m
 		} else {
-			t := todayMidnight.Add(time.Duration(srcRow) * time.Minute)
+			t := todayMidnight.Add(time.Duration(minuteOfDay) * time.Minute)
 			result.metaRows[dstRow] = SpectrogramRowMeta{
 				Row:     dstRow,
 				UTCTime: t.Format("15:04"),

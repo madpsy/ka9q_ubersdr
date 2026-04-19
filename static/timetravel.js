@@ -589,8 +589,10 @@ function ttDrawOverlay() {
   var W = oc.width, H = oc.height;
   octx.clearRect(0, 0, W, H);
 
-  /* Only show when data is ready and not actively playing (countdown is ok) */
+  /* Only show when data is ready and not actively playing (countdown is ok).
+     After first play, hide the overlay entirely when paused so the spectrum is visible. */
   if (!ttSampleCache || (ttIsPlaying && !ttCountingDown)) return;
+  if (ttHasStarted && !ttCountingDown) return;
 
   var cx = W / 2, cy = H / 2;
   var now3 = Date.now();

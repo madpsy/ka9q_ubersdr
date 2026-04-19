@@ -697,9 +697,12 @@ func main() {
 	}
 
 	// selectSpectrogramRecorder picks the right recorder based on the ?band= query param.
+	// "wideband-hf" is a virtual band that uses the wideband recorder but restricts
+	// auto-ranging to 1.8–30 MHz (excluding AM broadcast). The handlers detect this
+	// by checking band=="wideband-hf" and applying freq_min=1800000 automatically.
 	selectSpectrogramRecorder := func(r *http.Request) *SpectrogramRecorder {
 		band := r.URL.Query().Get("band")
-		if band == "" || band == "wideband" {
+		if band == "" || band == "wideband" || band == "wideband-hf" {
 			return spectrogramRecorder
 		}
 		if rec, ok := bandSpectrogramRecorders[band]; ok {

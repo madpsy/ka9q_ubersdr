@@ -170,7 +170,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 
 <div class="sg-info">
   <span class="sg-info-icon">ℹ️</span>
-  <span>
+  <span id="sg-info-text">
     <b>How to read this spectrogram:</b>
     Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows).
     The <b>X-axis</b> shows frequency (0&ndash;30&nbsp;MHz for wideband); the <b>Y-axis</b> shows UTC time, with the most recent data at the bottom.
@@ -756,7 +756,9 @@ function clampZoom(rect){
   bsel.value=urlBand;
 
   /* Update page title for non-wideband bands */
-  if(urlBand&&urlBand!=='wideband'){
+  if(urlBand==='wideband-hf'){
+    document.getElementById('page-title').textContent='\uD83D\uDCE1 Wideband HF Spectrogram (1.8\u201330 MHz)';
+  } else if(urlBand&&urlBand!=='wideband'){
     document.getElementById('page-title').textContent='\uD83D\uDCE1 '+urlBand.toUpperCase()+' Spectrogram';
   }
 
@@ -772,7 +774,9 @@ function clampZoom(rect){
           var bn=data.bands[bi];
           var bo=document.createElement('option');
           bo.value=bn;
-          bo.textContent=bn==='wideband'?'Wideband (0\u201330 MHz)':bn;
+          if(bn==='wideband')bo.textContent='Wideband (0\u201330 MHz)';
+          else if(bn==='wideband-hf')bo.textContent='Wideband (1.8\u201330 MHz)';
+          else bo.textContent=bn;
           if(bn===urlBand)bo.selected=true;
           bsel.appendChild(bo);
         }
@@ -999,11 +1003,24 @@ function render(){
     if(!zoomSetup){setupZoom();zoomSetup=true;}
     /* Apply time window after first render so zoom coords are valid */
     applyTimeWindow();
+    /* Update info banner to reflect the current band/view */
+    updateInfoBanner();
   } else {
     /* On refresh, only update axes that depend on row count */
     buildTimeAxis(); buildLegend();
     /* Re-apply time window in case row_count grew (today's live data) */
     applyTimeWindow();
+  }
+}
+
+/* Update the info banner text to reflect the current band/view. */
+function updateInfoBanner(){
+  var infoEl=document.getElementById('sg-info-text');
+  if(!infoEl)return;
+  if(urlBand==='wideband-hf'){
+    infoEl.innerHTML='<b>How to read this spectrogram (1.8\u201330 MHz view):</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image covers <b>1.8\u201330 MHz</b>, excluding the AM broadcast band below 1.8 MHz which would otherwise skew the colour scale. The auto-range is computed from the 1.8\u201330 MHz data only. Hover over the image for exact frequency, time, and signal level.';
+  } else {
+    infoEl.innerHTML='<b>How to read this spectrogram:</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows). The <b>X-axis</b> shows frequency; the <b>Y-axis</b> shows UTC time, with the most recent data at the bottom. Colour indicates signal strength &mdash; from noise floor (cool/dark) to signal peak (warm/bright) &mdash; as shown in the legend below. Hover over the image for exact frequency, time, and signal level.';
   }
 }
 

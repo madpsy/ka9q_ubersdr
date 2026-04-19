@@ -302,13 +302,38 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 			log.Printf("Spectrogram: failed to archive PNG for %s: %v", oldDate, err)
 		} else {
 			log.Printf("Spectrogram: archived %s (%d bytes)", archivePath, len(pngBytes))
-			// Generate thumbnail for the completed day
+			// Generate thumbnail for the completed day (full 0–30 MHz)
 			if thumbBytes := generateThumbnail(pngBytes); len(thumbBytes) > 0 {
 				thumbPath := sr.ThumbPath(oldDate)
 				if err := atomicWriteFile(thumbPath, thumbBytes); err != nil {
 					log.Printf("Spectrogram: failed to write thumbnail for %s: %v", oldDate, err)
 				} else {
 					log.Printf("Spectrogram: thumbnail written %s (%d bytes)", thumbPath, len(thumbBytes))
+				}
+			}
+			// Also generate a wideband-hf thumbnail (1.8–30 MHz) from the same data.
+			// Re-render the cropped slice and downsample to thumbnail size.
+			if sr.bandName == "wideband" || sr.bandName == "" {
+				sr.mu.Lock()
+				hfRowCount := sr.rowCount
+				hfRows := make([][]float32, hfRowCount)
+				for i := 0; i < hfRowCount; i++ {
+					row := make([]float32, sr.binCount)
+					copy(row, sr.rows[i])
+					hfRows[i] = row
+				}
+				hfBinCount := sr.binCount
+				sr.mu.Unlock()
+				hfSb, hfEb := binSliceForFreqRange(float64(sr.startFreqHz), float64(sr.endFreqHz), hfBinCount, 1_800_000, 0)
+				hfDbMin, hfDbMax := autoRangeRowsSlice(hfRows, hfSb, hfEb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+				hfPNG := renderRowsAsPNGSlice(hfRows, spectrogramDefaultPalette, hfDbMin, hfDbMax, oldDate, sr.config.Callsign, "wideband-hf", hfBinCount, hfSb, hfEb)
+				if hfThumb := generateThumbnail(hfPNG); len(hfThumb) > 0 {
+					hfThumbPath := sr.ThumbPathForBand(oldDate, "wideband-hf")
+					if err := atomicWriteFile(hfThumbPath, hfThumb); err != nil {
+						log.Printf("Spectrogram: failed to write wideband-hf thumbnail for %s: %v", oldDate, err)
+					} else {
+						log.Printf("Spectrogram: wideband-hf thumbnail written %s (%d bytes)", hfThumbPath, len(hfThumb))
+					}
 				}
 			}
 		}
@@ -340,6 +365,16 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 // ThumbPath returns the filesystem path for a given date's thumbnail PNG.
 func (sr *SpectrogramRecorder) ThumbPath(dateStr string) string {
 	return filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+"_thumb.png")
+}
+
+// ThumbPathForBand returns the filesystem path for a virtual-band thumbnail.
+// For wideband-hf (and any future virtual bands) the thumb is stored alongside
+// the wideband data as "spectrogram_YYYY-MM-DD_wideband-hf_thumb.png".
+func (sr *SpectrogramRecorder) ThumbPathForBand(dateStr, band string) string {
+	if band == "" || band == "wideband" {
+		return sr.ThumbPath(dateStr)
+	}
+	return filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+"_"+band+"_thumb.png")
 }
 
 // generateThumbnail downsamples a full-day spectrogram PNG to a 300×168 thumbnail
@@ -736,10 +771,12 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 		if fileDate.Before(cutoff) {
 			pngPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".png")
 			thumbPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+"_thumb.png")
+			hfThumbPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+"_wideband-hf_thumb.png")
 			binPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".bin")
 			jsonlPath := filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".jsonl")
 			os.Remove(pngPath)
 			os.Remove(thumbPath)
+			os.Remove(hfThumbPath)
 			os.Remove(binPath)
 			os.Remove(jsonlPath)
 			log.Printf("Spectrogram: deleted old files for %s (older than %d days)", dateStr, sr.config.RetentionDays)
@@ -1140,20 +1177,74 @@ var jetLUT = [256][3]uint8{
 
 // ─── Statistics helpers ───────────────────────────────────────────────────────
 
+// binSliceForFreqRange converts optional freq_min / freq_max Hz values into a
+// [startBin, endBin) bin index range for a recorder whose spectrum spans
+// [startFreqHz, endFreqHz) across binCount bins.
+//
+// Either bound may be zero / negative to mean "no restriction on that side".
+// If the resulting slice would be empty or invalid the full range [0, binCount)
+// is returned so callers always get a usable range.
+func binSliceForFreqRange(startFreqHz, endFreqHz float64, binCount int, freqMinHz, freqMaxHz float64) (int, int) {
+	spanHz := endFreqHz - startFreqHz
+	if spanHz <= 0 || binCount <= 0 {
+		return 0, binCount
+	}
+	startBin := 0
+	endBin := binCount
+	if freqMinHz > startFreqHz {
+		b := int(math.Round((freqMinHz - startFreqHz) / spanHz * float64(binCount)))
+		if b > 0 && b < binCount {
+			startBin = b
+		}
+	}
+	if freqMaxHz > 0 && freqMaxHz < endFreqHz {
+		b := int(math.Round((freqMaxHz - startFreqHz) / spanHz * float64(binCount)))
+		if b > startBin && b <= binCount {
+			endBin = b
+		}
+	}
+	if endBin <= startBin {
+		return 0, binCount // invalid range — fall back to full
+	}
+	return startBin, endBin
+}
+
 // autoRangeRows computes the P5 (noise floor) and P95 (signal peak) dBFS values
 // across all valid bins in all rows. Used to auto-scale the colour range when
 // no explicit db_min/db_max is provided by the caller.
 // Returns (dbMin, dbMax). If no valid data is found, returns the config defaults.
 func autoRangeRows(rows [][]float32, configMin, configMax float32) (float32, float32) {
+	return autoRangeRowsSlice(rows, 0, 0, configMin, configMax)
+}
+
+// autoRangeRowsSlice is like autoRangeRows but restricts sampling to bins
+// [startBin, endBin). Pass startBin=0, endBin=0 to use the full row width.
+// This allows callers to exclude frequency ranges (e.g. AM broadcast below
+// 1.8 MHz) that would otherwise skew the auto-range computation.
+func autoRangeRowsSlice(rows [][]float32, startBin, endBin int, configMin, configMax float32) (float32, float32) {
 	// Collect a sample of valid values — cap at 500 k to keep memory bounded
 	const maxSamples = 500_000
 	binCount := 0
 	if len(rows) > 0 {
 		binCount = len(rows[0])
 	}
-	valid := make([]float32, 0, min(len(rows)*binCount, maxSamples))
+	// Normalise bin bounds
+	if startBin < 0 {
+		startBin = 0
+	}
+	if endBin <= 0 || endBin > binCount {
+		endBin = binCount
+	}
+	if startBin >= endBin {
+		startBin = 0
+		endBin = binCount
+	}
+	valid := make([]float32, 0, min(len(rows)*(endBin-startBin), maxSamples))
 	for _, row := range rows {
-		for _, v := range row {
+		if len(row) < endBin {
+			continue // skip malformed rows
+		}
+		for _, v := range row[startBin:endBin] {
 			if math.IsInf(float64(v), -1) || math.IsNaN(float64(v)) {
 				continue
 			}
@@ -1182,6 +1273,20 @@ done:
 		dbMax = dbMin + 10
 	}
 	return dbMin, dbMax
+}
+
+// parseOptionalFreqHz parses a frequency string (in Hz) from a query parameter.
+// Returns 0 if the string is empty, negative, or not a valid finite number.
+// Used for the optional ?freq_min= and ?freq_max= parameters.
+func parseOptionalFreqHz(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0
+	}
+	return v
 }
 
 // min returns the smaller of two ints (Go 1.20 added a builtin but keep compat).
@@ -1262,16 +1367,40 @@ func sortFloat32Slice(s []float32) {
 // The frontend uses meta.max_rows (always 1440) for time-axis scaling, so a variable-height
 // image is correct; CSS height:auto handles it.
 // Used for on-the-fly palette switching and rolling 24h renders.
+// startBin and endBin define the column slice to render (0, 0 = full width).
 func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, bandName string, binCount int) []byte {
+	return renderRowsAsPNGSlice(rows, palette, dbMin, dbMax, dateStr, callsign, bandName, binCount, 0, 0)
+}
+
+// renderRowsAsPNGSlice renders only columns [startBin, endBin) of each row.
+// Pass startBin=0, endBin=0 (or endBin>=binCount) to render the full width.
+// This is used by the wideband-hf view to produce a 1.8–30 MHz image from
+// the full 0–30 MHz raw data without storing a separate recorder.
+func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, bandName string, binCount int, startBin, endBin int) []byte {
 	rowCount := len(rows)
 	if rowCount == 0 {
 		return nil
 	}
-	img := image.NewNRGBA(image.Rect(0, 0, binCount, rowCount))
+	// Normalise bin bounds
+	if startBin < 0 {
+		startBin = 0
+	}
+	if endBin <= 0 || endBin > binCount {
+		endBin = binCount
+	}
+	if startBin >= endBin {
+		startBin = 0
+		endBin = binCount
+	}
+	width := endBin - startBin
+	img := image.NewNRGBA(image.Rect(0, 0, width, rowCount))
 	black := color.NRGBA{0, 0, 0, 255}
 
 	for y, row := range rows {
-		for x, val := range row {
+		if len(row) < endBin {
+			continue // skip malformed rows
+		}
+		for x, val := range row[startBin:endBin] {
 			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
 				img.SetNRGBA(x, y, black)
 			} else {
@@ -1285,7 +1414,7 @@ func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dat
 	if callsign != "" {
 		wm += " " + callsign
 	}
-	if bandName != "" && bandName != "wideband" {
+	if bandName != "" && bandName != "wideband" && bandName != "wideband-hf" {
 		wm += " " + bandName
 	}
 	wm += " " + dateStr
@@ -1520,13 +1649,31 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	// If absent or invalid, dbRangeExplicit=false → auto-compute from data.
 	dbMin, dbMax, dbRangeExplicit := parseAndValidateDBRange(q)
 
+	// Parse optional freq_min / freq_max Hz params for auto-range restriction.
+	// These restrict which bins are sampled when computing the auto-range, so
+	// strong out-of-band signals (e.g. AM broadcast below 1.8 MHz) do not skew
+	// the colour scale for the amateur HF bands. The rendered PNG still covers
+	// the full recorder bandwidth; only the auto-range computation is affected.
+	// When band=wideband-hf the 1.8 MHz floor is applied automatically regardless
+	// of any explicit freq_min param.
+	freqMinHz := parseOptionalFreqHz(q.Get("freq_min"))
+	freqMaxHz := parseOptionalFreqHz(q.Get("freq_max"))
+	if q.Get("band") == "wideband-hf" && freqMinHz < 1_800_000 {
+		freqMinHz = 1_800_000
+	}
+
+	// Compute bin slice for rendering (used by wideband-hf to crop the PNG to 1.8–30 MHz).
+	renderStartBin, renderEndBin := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), recorder.binCount, freqMinHz, freqMaxHz)
+
 	// ── Rolling 24-hour mode ──────────────────────────────────────────────────
 	if rolling {
 		rr := recorder.getRolling24hRows()
 		if !dbRangeExplicit {
-			dbMin, dbMax = autoRangeRows(rr.rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+			sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
+			dbMin, dbMax = autoRangeRowsSlice(rr.rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
-		pngBytes := renderRowsAsPNG(rr.rows, requestedPalette, dbMin, dbMax, "rolling-24h", recorder.config.Callsign, recorder.bandName, rr.binCount)
+		rsb, reb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
+		pngBytes := renderRowsAsPNGSlice(rr.rows, requestedPalette, dbMin, dbMax, "rolling-24h", recorder.config.Callsign, recorder.bandName, rr.binCount, rsb, reb)
 		if len(pngBytes) == 0 {
 			http.Error(w, "rolling 24h spectrogram not yet available", http.StatusServiceUnavailable)
 			return
@@ -1559,10 +1706,11 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 				return
 			}
 			if !dbRangeExplicit {
-				// Auto-compute range from actual data
-				dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+				// Auto-compute range from actual data, restricted to freq_min/freq_max bins
+				sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), recorder.binCount, freqMinHz, freqMaxHz)
+				dbMin, dbMax = autoRangeRowsSlice(rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 			}
-			pngBytes = renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign, recorder.bandName, recorder.binCount)
+			pngBytes = renderRowsAsPNGSlice(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign, recorder.bandName, recorder.binCount, renderStartBin, renderEndBin)
 		} else {
 			// No palette or range change — serve the pre-cached PNG directly.
 			// The cached PNG was rendered with config db_min/db_max; if the user
@@ -1643,10 +1791,12 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			rows[i] = row
 		}
 		if !dbRangeExplicit {
-			// Auto-compute range from actual archived data
-			dbMin, dbMax = autoRangeRows(rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+			// Auto-compute range from actual archived data, restricted to freq_min/freq_max bins
+			sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), fileBinCount, freqMinHz, freqMaxHz)
+			dbMin, dbMax = autoRangeRowsSlice(rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
-		pngBytes := renderRowsAsPNG(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign, recorder.bandName, fileBinCount)
+		archSb, archEb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), fileBinCount, freqMinHz, freqMaxHz)
+		pngBytes := renderRowsAsPNGSlice(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign, recorder.bandName, fileBinCount, archSb, archEb)
 		if len(pngBytes) == 0 {
 			goto serveDiskPNG
 		}
@@ -1810,11 +1960,18 @@ func handleSpectrogramList(w http.ResponseWriter, r *http.Request, recorder *Spe
 		name    string
 		startHz uint64
 	}
-	entries := []bandEntry{{"wideband", 0}}
+	// wideband always first, then wideband-hf (same data, AM-broadcast excluded from auto-range),
+	// then per-band recorders sorted by start frequency ascending.
+	entries := []bandEntry{{"wideband", 0}, {"wideband-hf", 0}}
 	for name, rec := range bandRecorders {
 		entries = append(entries, bandEntry{name, rec.startFreqHz})
 	}
-	sort.Slice(entries, func(i, j int) bool {
+	sort.SliceStable(entries, func(i, j int) bool {
+		// Keep wideband and wideband-hf pinned at the top (startHz==0) in insertion order,
+		// then sort remaining bands by start frequency.
+		if entries[i].startHz == 0 && entries[j].startHz == 0 {
+			return false // preserve insertion order for the two wideband entries
+		}
 		return entries[i].startHz < entries[j].startHz
 	})
 	bands := make([]string, len(entries))
@@ -1889,10 +2046,19 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 	dateStr := q.Get("date")
 	rolling := q.Get("rolling") == "1"
 
+	// Parse optional freq_min / freq_max Hz params — same semantics as handleSpectrogram.
+	// When band=wideband-hf the 1.8 MHz floor is applied automatically.
+	freqMinHz := parseOptionalFreqHz(q.Get("freq_min"))
+	freqMaxHz := parseOptionalFreqHz(q.Get("freq_max"))
+	if q.Get("band") == "wideband-hf" && freqMinHz < 1_800_000 {
+		freqMinHz = 1_800_000
+	}
+
 	// ── Rolling 24-hour meta ──────────────────────────────────────────────────
 	if rolling {
 		rr := recorder.getRolling24hRows()
-		autoMin, autoMax := autoRangeRows(rr.rows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+		sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
+		autoMin, autoMax := autoRangeRowsSlice(rr.rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
 		bandParam := ""
 		if recorder.bandName != "" && recorder.bandName != "wideband" {
@@ -1905,18 +2071,31 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 			listURL += "?" + bandParam
 		}
 
+		// For wideband-hf the rendered PNG covers only freqMinHz–endFreqHz, so
+		// report the cropped frequency range and bin count in the meta response.
+		metaStartHz := float64(recorder.startFreqHz)
+		metaEndHz := float64(recorder.endFreqHz)
+		metaBinCount := rr.binCount
+		if freqMinHz > metaStartHz {
+			metaStartHz = freqMinHz
+			sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
+			metaBinCount = eb - sb
+		}
+		if freqMaxHz > 0 && freqMaxHz < metaEndHz {
+			metaEndHz = freqMaxHz
+		}
 		binWidthHz := float64(0)
-		if recorder.binCount > 0 {
-			binWidthHz = float64(recorder.endFreqHz-recorder.startFreqHz) / float64(recorder.binCount)
+		if metaBinCount > 0 {
+			binWidthHz = (metaEndHz - metaStartHz) / float64(metaBinCount)
 		}
 
 		w.Header().Set("Cache-Control", "max-age=60")
 		meta := SpectrogramMeta{
 			Date:               "rolling-24h",
-			StartFreqHz:        float64(recorder.startFreqHz),
-			EndFreqHz:          float64(recorder.endFreqHz),
+			StartFreqHz:        metaStartHz,
+			EndFreqHz:          metaEndHz,
 			BinWidthHz:         binWidthHz,
-			BinCount:           recorder.binCount,
+			BinCount:           metaBinCount,
 			RowCount:           len(rr.rows),
 			MaxRows:            spectrogramMaxRows,
 			RowIntervalSeconds: 60,
@@ -2059,8 +2238,10 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		}
 	}
 
-	// Compute auto-range from actual data; fall back to hardcoded defaults if no data available.
-	autoMin, autoMax := autoRangeRows(dataRows, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
+	// Compute auto-range from actual data, restricted to freq_min/freq_max bins.
+	// Falls back to hardcoded defaults if no data available.
+	sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), recorder.binCount, freqMinHz, freqMaxHz)
+	autoMin, autoMax := autoRangeRowsSlice(dataRows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
 	// image_url does NOT include db_min/db_max — the frontend uses the meta values
 	// to populate the contrast sliders and only adds db_min/db_max to the image URL
@@ -2083,9 +2264,22 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		listURL += "?" + bandParam
 	}
 
+	// For wideband-hf the rendered PNG covers only freqMinHz–endFreqHz, so
+	// report the cropped frequency range and bin count in the meta response.
+	metaStartHz := float64(recorder.startFreqHz)
+	metaEndHz := float64(recorder.endFreqHz)
+	metaBinCount := recorder.binCount
+	if freqMinHz > metaStartHz {
+		metaStartHz = freqMinHz
+		sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), recorder.binCount, freqMinHz, freqMaxHz)
+		metaBinCount = eb - sb
+	}
+	if freqMaxHz > 0 && freqMaxHz < metaEndHz {
+		metaEndHz = freqMaxHz
+	}
 	binWidthHz := float64(0)
-	if recorder.binCount > 0 {
-		binWidthHz = float64(recorder.endFreqHz-recorder.startFreqHz) / float64(recorder.binCount)
+	if metaBinCount > 0 {
+		binWidthHz = (metaEndHz - metaStartHz) / float64(metaBinCount)
 	}
 
 	cacheControl := "max-age=60"
@@ -2096,10 +2290,10 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 
 	meta := SpectrogramMeta{
 		Date:               safeDateStr,
-		StartFreqHz:        float64(recorder.startFreqHz),
-		EndFreqHz:          float64(recorder.endFreqHz),
+		StartFreqHz:        metaStartHz,
+		EndFreqHz:          metaEndHz,
 		BinWidthHz:         binWidthHz,
-		BinCount:           recorder.binCount,
+		BinCount:           metaBinCount,
 		RowCount:           rowCount,
 		MaxRows:            spectrogramMaxRows,
 		RowIntervalSeconds: 60,
@@ -2147,7 +2341,13 @@ func handleSpectrogramThumbnail(w http.ResponseWriter, r *http.Request, recorder
 		return
 	}
 	safeDateStr := requestedDate.Format("2006-01-02")
-	thumbPath := recorder.ThumbPath(safeDateStr)
+	band := q.Get("band")
+	var thumbPath string
+	if band == "wideband-hf" {
+		thumbPath = recorder.ThumbPathForBand(safeDateStr, "wideband-hf")
+	} else {
+		thumbPath = recorder.ThumbPath(safeDateStr)
+	}
 
 	f, err := os.Open(thumbPath)
 	if err != nil {
@@ -2200,9 +2400,12 @@ func handleSpectrogramThumbnails(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	// Select the right recorder
+	// Select the right recorder.
+	// wideband-hf is a virtual band that uses the wideband recorder's data directory
+	// but has its own thumbnail files (spectrogram_YYYY-MM-DD_wideband-hf_thumb.png).
 	var rec *SpectrogramRecorder
-	if bandName == "wideband" {
+	isWidebandHF := bandName == "wideband-hf"
+	if bandName == "wideband" || isWidebandHF {
 		rec = recorder
 	} else {
 		rec = bandRecorders[bandName]
@@ -2224,14 +2427,33 @@ func handleSpectrogramThumbnails(w http.ResponseWriter, r *http.Request,
 		cutoff = time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -days)
 	}
 
+	// Determine the filename suffix to look for.
+	// wideband:    "spectrogram_YYYY-MM-DD_thumb.png"
+	// wideband-hf: "spectrogram_YYYY-MM-DD_wideband-hf_thumb.png"
+	// per-band:    "spectrogram_YYYY-MM-DD_thumb.png" (in band's own data dir)
+	var thumbSuffix string
+	if isWidebandHF {
+		thumbSuffix = "_wideband-hf_thumb.png"
+	} else {
+		thumbSuffix = "_thumb.png"
+	}
+
 	var thumbs []SpectrogramThumbEntry
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, "spectrogram_") || !strings.HasSuffix(name, "_thumb.png") {
+		if !strings.HasPrefix(name, "spectrogram_") || !strings.HasSuffix(name, thumbSuffix) {
 			continue
 		}
-		// Extract date: "spectrogram_YYYY-MM-DD_thumb.png"
-		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "spectrogram_"), "_thumb.png")
+		// Extract date from filename
+		inner := strings.TrimPrefix(name, "spectrogram_")
+		inner = strings.TrimSuffix(inner, thumbSuffix)
+		// For wideband-hf the inner is just "YYYY-MM-DD".
+		// For plain wideband we must reject "YYYY-MM-DD_wideband-hf" entries
+		// (they end with "_thumb.png" but contain an extra segment).
+		if !isWidebandHF && strings.Contains(inner, "_") {
+			continue // skip virtual-band thumbs when listing plain wideband
+		}
+		dateStr := inner
 		fileDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			continue

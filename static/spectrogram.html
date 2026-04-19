@@ -80,10 +80,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 #tt-panel{display:none}
 .tt-controls{background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:10px;padding:12px 20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .tt-controls label{font-size:.88em;opacity:.85;margin-right:3px}
-.tt-canvas-wrap{position:relative;background:#000;border-radius:8px 8px 0 0;overflow:hidden;cursor:crosshair}
+.tt-canvas-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;cursor:crosshair}
 #tt-canvas{display:block;width:100%;image-rendering:pixelated}
 #tt-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
-.tt-scrubber-wrap{margin-top:0;position:relative;height:44px;background:rgba(0,0,0,.4);border-radius:0 0 6px 6px;overflow:hidden;cursor:pointer}
+.tt-scrubber-wrap{position:absolute;bottom:0;left:0;right:0;height:44px;background:rgba(0,0,0,.4);overflow:hidden;cursor:pointer}
 #tt-scrubber{display:block;width:100%;height:100%}
 .tt-hud{position:absolute;top:12px;right:16px;font-size:1.6em;font-weight:700;color:#0ff;text-shadow:0 0 12px #0ff,0 0 24px rgba(0,255,255,.4);pointer-events:none;letter-spacing:.04em;font-variant-numeric:tabular-nums}
 .tt-hud-date{position:absolute;top:52px;right:16px;font-size:.82em;color:rgba(0,255,255,.6);pointer-events:none;text-shadow:0 0 8px rgba(0,255,255,.3)}
@@ -417,18 +417,17 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <span class="status" id="tt-status" style="margin-left:auto"></span>
   </div>
 
-  <!-- 3D canvas + HUD overlay -->
+  <!-- 3D canvas + HUD overlay + scrubber (all inside one wrap) -->
   <div class="tt-canvas-wrap" id="tt-canvas-wrap">
     <canvas id="tt-canvas" height="520"></canvas>
     <canvas id="tt-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
     <div class="tt-hud" id="tt-hud">--:-- UTC</div>
     <div class="tt-hud-date" id="tt-hud-date"></div>
-  </div>
-
-  <!-- Scrubber -->
-  <div class="tt-scrubber-wrap" id="tt-scrubber-wrap">
-    <canvas id="tt-scrubber"></canvas>
-    <div id="tt-scrubber-label" style="position:absolute;bottom:3px;left:8px;font-size:.7em;opacity:.5;pointer-events:none">drag to seek</div>
+    <!-- Scrubber sits at the bottom of the canvas wrap -->
+    <div class="tt-scrubber-wrap" id="tt-scrubber-wrap">
+      <canvas id="tt-scrubber"></canvas>
+      <div id="tt-scrubber-label" style="position:absolute;bottom:3px;left:8px;font-size:.7em;opacity:.5;pointer-events:none">drag to seek</div>
+    </div>
   </div>
 </div><!-- end #tt-panel -->
 

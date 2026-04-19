@@ -432,7 +432,9 @@ function ttRedraw() {
   /* ── Perspective parameters ─────────────────────────────────────────── */
   var vanishX = W * 0.5;
   var vanishY = H * 0.20;
-  var groundY = H * 0.86;
+  /* groundY leaves ~44px at the bottom for the scrubber overlay */
+  var scrubberH = 44;
+  var groundY = H - scrubberH - 10;
   var frontHalfW = W * 0.5;
   var maxPeakH = (groundY - vanishY) * TT_HEIGHT_SCALE;
 

@@ -460,56 +460,67 @@ function ttRedraw() {
 
   /* ── Draw mountain rows back-to-front ───────────────────────────────── */
   var frontRow = Math.round(ttCurrentRow);
+  var lut = (typeof V !== 'undefined') ? V : null;
 
-  /* Pre-compute geometry for all rows so we can reference the next row's baseY */
-  var rowGeom = [];
+  /* Pre-compute all row screen points so we can stitch rows together */
+  var allPtsX = [];
+  var allPtsY = [];
+  var allBaseY = [];
+  var allWFrac = [];
+  var allXL = [];
+  var allXR = [];
+  var allValid = [];
+
   for (var di2 = depthRows - 1; di2 >= 0; di2--) {
     var d2 = di2 / depthRows;
     var bY2 = groundY - (groundY - vanishY) * d2;
     var wF2 = 1 - d2 * (1 - TT_MIN_WFRAC);
     var xL2 = vanishX - frontHalfW * wF2;
     var xR2 = vanishX + frontHalfW * wF2;
-    rowGeom[di2] = { d: d2, baseY: bY2, wFrac: wF2, xL: xL2, xR: xR2 };
+    var rowW2 = xR2 - xL2;
+    var rowIdx2 = frontRow - di2;
+    var samples2 = (rowIdx2 >= 0 && rowIdx2 < totalRows) ? ttSampleCache[rowIdx2] : null;
+    var peakH2 = maxPeakH * wF2;
+
+    allBaseY[di2] = bY2;
+    allWFrac[di2] = wF2;
+    allXL[di2] = xL2;
+    allXR[di2] = xR2;
+    allValid[di2] = (samples2 && rowW2 >= 1);
+
+    if (samples2 && rowW2 >= 1) {
+      var px2 = new Float32Array(TT_SAMPLES);
+      var py2 = new Float32Array(TT_SAMPLES);
+      for (var si2 = 0; si2 < TT_SAMPLES; si2++) {
+        px2[si2] = xL2 + (si2 / (TT_SAMPLES - 1)) * rowW2;
+        py2[si2] = bY2 - samples2[si2] * peakH2;
+      }
+      allPtsX[di2] = px2;
+      allPtsY[di2] = py2;
+    } else {
+      allPtsX[di2] = null;
+      allPtsY[di2] = null;
+    }
   }
 
   for (var di = depthRows - 1; di >= 0; di--) {
-    var g = rowGeom[di];
-    var baseY = g.baseY;
-    var wFrac = g.wFrac;
-    var xL = g.xL;
-    var xR = g.xR;
+    if (!allValid[di]) continue;
+
+    var baseY = allBaseY[di];
+    var wFrac = allWFrac[di];
+    var xL = allXL[di];
+    var xR = allXR[di];
     var rowW = xR - xL;
-    if (rowW < 1) continue;
-
-    var rowIdx = frontRow - di;
-    if (rowIdx < 0 || rowIdx >= totalRows) continue;
-
-    var samples = ttSampleCache[rowIdx];
-    if (!samples) continue;
-
-    /* Scale peak height and fog with wFrac so distant rows look proportionally smaller */
+    var ptsX = allPtsX[di];
+    var ptsY = allPtsY[di];
     var peakH = maxPeakH * wFrac;
-    var fogAlpha = wFrac * 0.94 + 0.06;
 
-    /* The "floor" for this row's silhouette is the baseY of the next closer row
-       (di-1), so the fill seamlessly bridges the gap between rows.
-       For the frontmost row (di=0) use groundY. */
-    var floorY = (di > 0) ? rowGeom[di - 1].baseY : groundY;
+    /* The floor for this row's dark fill is the next closer row's baseY
+       (or groundY for the frontmost row). Using globalAlpha=1 for the fill
+       so it fully occludes sky — fog effect is only on the ridge line. */
+    var floorY = (di > 0 && allValid[di - 1]) ? allBaseY[di - 1] : groundY;
 
-    /* ── Compute screen points ──────────────────────────────────────── */
-    var ptsX = new Float32Array(TT_SAMPLES);
-    var ptsY = new Float32Array(TT_SAMPLES);
-    for (var si = 0; si < TT_SAMPLES; si++) {
-      ptsX[si] = xL + (si / (TT_SAMPLES - 1)) * rowW;
-      ptsY[si] = baseY - samples[si] * peakH;
-    }
-
-    ctx.save();
-    ctx.globalAlpha = fogAlpha;
-
-    /* ── Filled silhouette (occludes rows behind) ───────────────────── */
-    /* Fill down to floorY (the next closer row's baseY) so there are no
-       gaps between consecutive rows — the terrain is continuous. */
+    /* ── Filled silhouette (occludes rows behind) — always opaque ───── */
     ctx.beginPath();
     ctx.moveTo(xL, floorY);
     ctx.lineTo(xL, baseY);
@@ -519,13 +530,12 @@ function ttRedraw() {
     ctx.lineTo(xR, baseY);
     ctx.lineTo(xR, floorY);
     ctx.closePath();
-    /* Solid dark fill — this is what occludes distant rows */
     ctx.fillStyle = '#000810';
     ctx.fill();
 
-    /* ── Ridge line with vertical gradient ─────────────────────────── */
-    var lut = (typeof V !== 'undefined') ? V : null;
+    /* ── Ridge line with vertical gradient + fog alpha ──────────────── */
     if (lut && rowW > 1) {
+      var fogAlpha = wFrac * 0.94 + 0.06;
       var topY = baseY - peakH;
       var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
       var GSTOPS = 16;
@@ -537,7 +547,7 @@ function ttRedraw() {
         } else {
           var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
           var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
-          ridgeGrad.addColorStop(stopPos, 'rgb(' + rc + ',' + gc2 + ',' + bc + ')');
+          ridgeGrad.addColorStop(stopPos, 'rgba(' + rc + ',' + gc2 + ',' + bc + ',' + fogAlpha.toFixed(3) + ')');
         }
       }
 
@@ -550,8 +560,6 @@ function ttRedraw() {
       ctx.lineWidth = Math.max(1, 1.8 * wFrac);
       ctx.stroke();
     }
-
-    ctx.restore();
 
   }
 

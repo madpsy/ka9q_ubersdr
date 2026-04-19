@@ -109,44 +109,8 @@ function ttSetSpeed(mult) {
   });
 }
 
-/* ── Text-to-speech helper ──────────────────────────────────────────────── */
-/* Prefers a high-quality neural voice (Google/Microsoft) if available.
-   Silently no-ops if the browser doesn't support speechSynthesis. */
-function ttSpeak(text, rate, pitch) {
-  if (typeof speechSynthesis === 'undefined') return;
-  speechSynthesis.cancel(); /* stop any current utterance */
-  var utt = new SpeechSynthesisUtterance(text);
-  utt.rate  = rate  || 0.92;
-  utt.pitch = pitch || 1.0;
-  utt.volume = 0.9;
-
-  /* Pick the best available voice: prefer Google/Microsoft neural voices */
-  var voices = speechSynthesis.getVoices();
-  var preferred = null;
-  var preferredNames = [
-    'Google UK English Female', 'Google UK English Male',
-    'Microsoft Sonia Online', 'Microsoft Libby Online',
-    'Microsoft George Online', 'Google US English',
-    'Microsoft Zira', 'Microsoft David'
-  ];
-  for (var pi = 0; pi < preferredNames.length; pi++) {
-    for (var vi = 0; vi < voices.length; vi++) {
-      if (voices[vi].name === preferredNames[pi]) { preferred = voices[vi]; break; }
-    }
-    if (preferred) break;
-  }
-  /* Fallback: first English voice */
-  if (!preferred) {
-    for (var vi2 = 0; vi2 < voices.length; vi2++) {
-      if (/en/i.test(voices[vi2].lang)) { preferred = voices[vi2]; break; }
-    }
-  }
-  if (preferred) utt.voice = preferred;
-  speechSynthesis.speak(utt);
-}
-
 /* ── Countdown before playback ──────────────────────────────────────────── */
-/* Shows 3-2-1 on the overlay canvas and speaks each number, then engages. */
+/* Shows 3-2-1 on the overlay canvas, then engages. */
 function ttStartCountdown() {
   if (!ttSampleCache) { ttSetStatus('Cache not ready yet.'); return; }
   if (ttIsPlaying) { ttPause(); return; } /* already playing → pause */
@@ -157,13 +121,8 @@ function ttStartCountdown() {
   ttCountdownTs = Date.now();
   ttStartStarLoop(); /* keep overlay animating during countdown */
 
-  /* Speak the sequence with timed delays */
-  ttSpeak('3', 1.0);
-  setTimeout(function() { if (ttCountingDown) ttSpeak('2', 1.0); }, 1000);
-  setTimeout(function() { if (ttCountingDown) ttSpeak('1', 1.0); }, 2000);
   setTimeout(function() {
     if (!ttCountingDown) return;
-    ttSpeak('Engaging temporal drive', 1.05, 0.9);
     ttCountingDown = false;
     ttCountdownVal = 0;
     ttPlay();
@@ -339,7 +298,6 @@ function ttLoadData() {
       ttRedraw();
       ttSetStatus(ttMeta.row_count + ' rows (shared)');
       if (!ttIsPlaying) ttStartStarLoop();
-      ttSpeak('Temporal array initialised. Ready for time travel.', 0.9, 1.0);
     });
     return;
   }
@@ -379,7 +337,6 @@ function ttLoadData() {
         ttRedraw();
         ttSetStatus(ttMeta.row_count + ' rows \u00b7 ' + ttMeta.date);
         if (!ttIsPlaying) ttStartStarLoop();
-        ttSpeak('Temporal array initialised. Ready for time travel.', 0.9, 1.0);
       });
     })
     .catch(function(e) {
@@ -536,7 +493,6 @@ function ttTogglePlay() {
     /* Cancel countdown */
     ttCountingDown = false;
     ttCountdownVal = 0;
-    speechSynthesis && speechSynthesis.cancel();
     ttDrawOverlay();
     return;
   }

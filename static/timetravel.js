@@ -537,57 +537,41 @@ function ttRedraw() {
       continue;
     }
 
-    /* ── Coloured terrain fill + ridge line ────────────────────────────
-       Fill from the ridge all the way down to groundY with a gradient.
-       The gradient spans baseY→topY for correct signal colours; below
-       baseY the gradient clamps to the noise-floor colour, filling the
-       gap between rows solidly. Painter's algorithm (back-to-front)
-       means each closer row covers the row behind — no gaps visible. */
+    /* ── Dark silhouette fill (occludes rows behind) ────────────────── */
+    /* Fill from ridge down to groundY with solid dark colour.
+       This is always opaque so it fully covers the sky and any rows behind. */
+    ctx.beginPath();
+    ctx.moveTo(xL, groundY);
+    for (var pi = 0; pi < TT_SAMPLES; pi++) {
+      ctx.lineTo(ptsX[pi], ptsY[pi]);
+    }
+    ctx.lineTo(xR, groundY);
+    ctx.closePath();
+    ctx.fillStyle = '#000810';
+    ctx.fill();
+
+    /* ── Ridge line with palette gradient ───────────────────────────── */
+    /* The ridge line is drawn thick enough to fill the gap to the next row.
+       Gap between consecutive baseY values = (groundY-vanishY)/depthRows px.
+       lineWidth is set to cover that gap so rows appear continuous. */
     if (lut && rowW > 1) {
       var topY = baseY - peakH;
-      /* Gradient: stop positions are in canvas Y space mapped 0→1 over
-         the range groundY→topY. baseY sits at fraction:
-           baseFrac = (groundY - baseY) / (groundY - topY)
-         Below baseFrac → noise-floor colour; above → signal colours. */
-      var totalH = groundY - topY;
-      if (totalH < 1) totalH = 1;
-      var baseFrac = (groundY - baseY) / totalH;
+      /* Pixel gap between this row's baseY and the next closer row's baseY */
+      var rowGap = (groundY - vanishY) / depthRows;
+      /* Line width: enough to bridge the gap, scaled by wFrac for perspective */
+      var lineW = Math.max(2, (rowGap + 1) * wFrac);
 
-      var fillGrad = ctx.createLinearGradient(0, groundY, 0, topY);
-      /* Below baseY: noise-floor colour (lut[0] in jet = dark blue) */
-      var nfR = lut[0][0], nfG = lut[0][1], nfB = lut[0][2];
-      fillGrad.addColorStop(0,        'rgba(' + nfR + ',' + nfG + ',' + nfB + ',' + fogAlpha.toFixed(3) + ')');
-      fillGrad.addColorStop(Math.max(0, baseFrac - 0.001), 'rgba(' + nfR + ',' + nfG + ',' + nfB + ',' + fogAlpha.toFixed(3) + ')');
-
-      /* From baseY upward: map signal level to palette */
+      var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
-        var gsVal = gs / GSTOPS;  /* 0=noise floor, 1=peak signal */
-        var stopPos = baseFrac + gsVal * (1 - baseFrac); /* map into gradient space */
-        if (stopPos > 1) stopPos = 1;
-        var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
-        var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
-        fillGrad.addColorStop(stopPos, 'rgba(' + rc + ',' + gc2 + ',' + bc + ',' + fogAlpha.toFixed(3) + ')');
-      }
-
-      /* Filled area: ridge outline down to groundY (covers gap between rows) */
-      ctx.beginPath();
-      ctx.moveTo(xL, groundY);
-      for (var pi = 0; pi < TT_SAMPLES; pi++) {
-        ctx.lineTo(ptsX[pi], ptsY[pi]);
-      }
-      ctx.lineTo(xR, groundY);
-      ctx.closePath();
-      ctx.fillStyle = fillGrad;
-      ctx.fill();
-
-      /* Ridge line on top for crispness */
-      var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
-      for (var rgs = 0; rgs <= GSTOPS; rgs++) {
-        var rgsVal = rgs / GSTOPS;
-        var rLutIdx = Math.min(lut.length - 1, Math.round(rgsVal * (lut.length - 1)));
-        var rrc = lut[rLutIdx][0], rgc = lut[rLutIdx][1], rbc = lut[rLutIdx][2];
-        ridgeGrad.addColorStop(rgsVal, 'rgba(' + rrc + ',' + rgc + ',' + rbc + ',' + fogAlpha.toFixed(3) + ')');
+        var gsVal = gs / GSTOPS;
+        if (gsVal < 0.05) {
+          ridgeGrad.addColorStop(gsVal, 'rgba(0,0,0,0)');
+        } else {
+          var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
+          var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
+          ridgeGrad.addColorStop(gsVal, 'rgba(' + rc + ',' + gc2 + ',' + bc + ',' + fogAlpha.toFixed(3) + ')');
+        }
       }
       ctx.beginPath();
       ctx.moveTo(ptsX[0], ptsY[0]);
@@ -595,19 +579,9 @@ function ttRedraw() {
         ctx.lineTo(ptsX[ri], ptsY[ri]);
       }
       ctx.strokeStyle = ridgeGrad;
-      ctx.lineWidth = Math.max(1, 1.5 * wFrac);
+      ctx.lineWidth = lineW;
+      ctx.lineJoin = 'round';
       ctx.stroke();
-    } else {
-      /* Fallback: dark fill */
-      ctx.beginPath();
-      ctx.moveTo(xL, groundY);
-      for (var pi = 0; pi < TT_SAMPLES; pi++) {
-        ctx.lineTo(ptsX[pi], ptsY[pi]);
-      }
-      ctx.lineTo(xR, groundY);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(0,8,20,0.9)';
-      ctx.fill();
     }
 
   }

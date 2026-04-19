@@ -293,17 +293,27 @@ function ttBuildCache(onDone) {
         }
       }
 
-      /* Mark gap rows as null. A gap row is one where a significant fraction
-         of samples are the missing-data sentinel (-1).
-         Threshold: >30% black/missing pixels → treat entire row as a gap.
-         Sentinels are replaced with 1.0 (noise floor = zero height) rather
-         than 0 (max signal) so that any row that slips through the threshold
-         doesn't render as a spurious full-height peak. */
+      /* Mark gap rows as null.
+         Gap rows in the spectrogram image are uniformly the noise-floor colour
+         (dark blue) — NOT pure black. Pure-black sentinel detection misses them.
+         Instead: compute the variance of the 160 sample values. A real data row
+         has signal variation; a gap/missing row is nearly flat (all samples map
+         to the same noise-floor LUT index → variance ≈ 0).
+         Also handle the legacy pure-black sentinel just in case. */
       var sentinelCount = 0;
+      var sum = 0, sumSq = 0;
       for (var zi = 0; zi < TT_SAMPLES; zi++) {
         if (samples[zi] < 0) { sentinelCount++; samples[zi] = 1.0; }
+        sum += samples[zi];
+        sumSq += samples[zi] * samples[zi];
       }
-      ttSampleCache[row] = (sentinelCount > TT_SAMPLES * 0.30) ? null : samples;
+      var mean = sum / TT_SAMPLES;
+      var variance = sumSq / TT_SAMPLES - mean * mean;
+      /* Gap row criteria:
+         - More than 30% pure-black sentinels, OR
+         - Variance < 0.0004 (std-dev < 0.02) — row is essentially flat/uniform */
+      var isGap = (sentinelCount > TT_SAMPLES * 0.30) || (variance < 0.0004);
+      ttSampleCache[row] = isGap ? null : samples;
     }
 
     if (row < totalRows) {

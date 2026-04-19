@@ -313,6 +313,9 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" id="ts-show-snr" checked onchange="tsToggleLines()"> Show SNR
         </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="ts-show-fill" onchange="tsToggleLines()"> Show noise floor fill
+        </label>
         <span style="opacity:.45;font-size:.9em">Drag to zoom &middot; double-click to reset</span>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0">
@@ -1763,10 +1766,39 @@ function renderTimesliceMulti(results){
   var datasets=[];
   var hasAnySNR=false;
 
+  /* Whether the fill checkbox is currently checked (may not exist yet on first render) */
+  var showFillEl=document.getElementById('ts-show-fill');
+  var showFill=showFillEl?showFillEl.checked:false;
+
   for(var i=0;i<results.length;i++){
     var s=results[i].slice;
     var rows=results[i].data.rows;
     var lbl=s.label||(s.freqMHz.toFixed(3)+' MHz');
+
+    /* Noise-floor fill dataset — plotted FIRST so the signal line sits on top.
+       It is a borderless line at the noise_floor value; the fill between it and
+       the signal dataset above creates the shaded band.
+       We tag it with tsRole:'nf' so tsToggleLines() can find it. */
+    var nfData=rows.map(function(r){return r.noise_floor||null;});
+    var hasNF=nfData.some(function(v){return v!==null;});
+    var nfDatasetIdx=datasets.length; /* index of this NF dataset */
+    if(hasNF){
+      datasets.push({
+        label:lbl+' noise floor',
+        data:nfData,
+        borderColor:'transparent',
+        backgroundColor:s.color.replace(',1)',',.13)'),
+        borderWidth:0,
+        pointRadius:0,
+        pointHoverRadius:0,
+        tension:0.2,
+        /* fill:'stack' not needed — fill to the NEXT dataset (signal line) */
+        fill:'+1',
+        yAxisID:'y',
+        tsRole:'nf',
+        hidden:!showFill
+      });
+    }
 
     /* Signal level — left axis (y), solid line */
     datasets.push({
@@ -1779,7 +1811,8 @@ function renderTimesliceMulti(results){
       pointHoverRadius:4,
       tension:0.2,
       fill:false,
-      yAxisID:'y'
+      yAxisID:'y',
+      tsRole:'dbfs'
     });
 
     /* SNR = signal - noise_floor — right axis (y1), dashed, same colour as signal */
@@ -1800,7 +1833,8 @@ function renderTimesliceMulti(results){
         pointHoverRadius:3,
         tension:0.2,
         fill:false,
-        yAxisID:'y1'
+        yAxisID:'y1',
+        tsRole:'snr'
       });
     }
   }
@@ -1952,9 +1986,19 @@ function tsToggleLines(){
   if(!tsChart)return;
   var showDbfs=document.getElementById('ts-show-dbfs').checked;
   var showSnr=document.getElementById('ts-show-snr').checked;
-  tsChart.data.datasets.forEach(function(ds){
-    var isSnr=(ds.yAxisID==='y1');
-    ds.hidden=isSnr?!showSnr:!showDbfs;
+  var showFillEl=document.getElementById('ts-show-fill');
+  var showFill=showFillEl?showFillEl.checked:false;
+  /* Use setDatasetVisibility() — the correct Chart.js API for toggling
+     dataset visibility. Directly mutating ds.hidden is unreliable because
+     Chart.js maintains its own internal visibility state that can diverge
+     from the dataset property, especially after zoom or re-render. */
+  tsChart.data.datasets.forEach(function(ds,idx){
+    var role=ds.tsRole||'dbfs';
+    var visible;
+    if(role==='snr')visible=showSnr;
+    else if(role==='nf')visible=showFill;
+    else visible=showDbfs; /* 'dbfs' */
+    tsChart.setDatasetVisibility(idx,visible);
   });
   /* Hide/show the right axis label when SNR is toggled off */
   if(tsChart.options.scales.y1){

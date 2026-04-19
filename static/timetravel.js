@@ -6,7 +6,7 @@
 
    Performance design:
    - All row samples are pre-computed ONCE when data loads (ttBuildCache).
-     Each row is stored as a Float32Array of TT_SAMPLES normalised values.
+     Each row is stored as a Float32Array of imgW (full image width) normalised values.
    - Per-frame rendering only does canvas drawing — no getImageData calls.
    - Ridge lines are drawn as a single path with a horizontal gradient rather
      than per-segment strokeStyle changes (eliminates GPU state flushes).
@@ -514,11 +514,24 @@ function ttRedraw() {
   var frontRow = Math.round(ttCurrentRow);
   var lut = (typeof V !== 'undefined') ? V : null;
 
+  /* Pre-build LUT colour strings once per frame (avoids string concat in hot loop).
+     lutRGB[i] = 'r,g,b' — alpha and rgba() wrapper added per-row with fogAlpha. */
+  var lutRGB = null;
+  var lutLastIdx = 0;
+  if (lut) {
+    lutLastIdx = lut.length - 1;
+    lutRGB = new Array(lut.length);
+    for (var li2 = 0; li2 < lut.length; li2++) {
+      lutRGB[li2] = lut[li2][0] + ',' + lut[li2][1] + ',' + lut[li2][2];
+    }
+  }
+
   /* Pre-compute all row screen points.
      allInRange[di] = true if the row index exists in the data (even if gap/null).
      allValid[di]   = true if the row has real signal samples to draw. */
   var allPtsX = [];
   var allPtsY = [];
+  var allNPts = [];   /* actual draw-point count per slot (may be < ttSlotPX[di].length) */
   var allBaseY = [];
   var allWFrac = [];
   var allXL = [];
@@ -547,22 +560,29 @@ function ttRedraw() {
 
     if (samples2 && rowW2 >= 1) {
       var nSamples2 = samples2.length;
-      /* Reuse per-slot arrays; grow them if sample count increased */
-      if (!ttSlotPX[di2] || ttSlotPX[di2].length < nSamples2) {
-        ttSlotPX[di2] = new Float32Array(nSamples2);
-        ttSlotPY[di2] = new Float32Array(nSamples2);
+      /* Clamp path points to screen pixel width — no benefit drawing more points
+         than there are pixels in the row. Distant (narrow) rows get far fewer points. */
+      var nDraw2 = Math.min(nSamples2, Math.max(2, Math.ceil(rowW2)));
+      /* Reuse per-slot arrays; grow them if needed */
+      if (!ttSlotPX[di2] || ttSlotPX[di2].length < nDraw2) {
+        ttSlotPX[di2] = new Float32Array(nDraw2);
+        ttSlotPY[di2] = new Float32Array(nDraw2);
       }
       var px2 = ttSlotPX[di2];
       var py2 = ttSlotPY[di2];
-      for (var si2 = 0; si2 < nSamples2; si2++) {
-        px2[si2] = xL2 + (si2 / (nSamples2 - 1)) * rowW2;
-        py2[si2] = bY2 - samples2[si2] * peakH2;
+      var step2 = nDraw2 > 1 ? (nSamples2 - 1) / (nDraw2 - 1) : 0;
+      for (var si2 = 0; si2 < nDraw2; si2++) {
+        var srcIdx2 = Math.min(nSamples2 - 1, Math.round(si2 * step2));
+        px2[si2] = xL2 + (si2 / (nDraw2 - 1)) * rowW2;
+        py2[si2] = bY2 - samples2[srcIdx2] * peakH2;
       }
       allPtsX[di2] = px2;
       allPtsY[di2] = py2;
+      allNPts[di2] = nDraw2;
     } else {
       allPtsX[di2] = null;
       allPtsY[di2] = null;
+      allNPts[di2] = 0;
     }
   }
 
@@ -596,64 +616,52 @@ function ttRedraw() {
     }
 
     /* ── Filled silhouette + ridge line ─────────────────────────────── */
-    /* Step 1: Fill from ridge down to groundY.
-       Use the same vertical palette gradient as the ridge line so the fill
-       colour matches the outline — strong signals appear warm/bright all the
-       way down their slope, not just on the thin ridge stroke. */
-    var fillStyle;
-    if (lut && rowW > 1) {
+    /* Build ONE gradient per row, shared by both fill and stroke.
+       The gradient maps height → palette colour (bottom=noise floor, top=signal peak).
+       fogAlpha fades distant rows. */
+    var rowGrad = null;
+    var fogStr = fogAlpha.toFixed(3);
+    if (lut && lutRGB && rowW > 1) {
       var topY = baseY - peakH;
-      var fillGrad = ctx.createLinearGradient(0, baseY, 0, topY);
-      var FSTOPS = 16;
-      for (var fs = 0; fs <= FSTOPS; fs++) {
-        var fsVal = fs / FSTOPS;
-        if (fsVal < 0.05) {
-          fillGrad.addColorStop(fsVal, 'rgba(0,0,0,0)');
+      rowGrad = ctx.createLinearGradient(0, baseY, 0, topY);
+      var GSTOPS = 16;
+      for (var gs = 0; gs <= GSTOPS; gs++) {
+        var gsVal = gs / GSTOPS;
+        if (gsVal < 0.05) {
+          rowGrad.addColorStop(gsVal, 'rgba(0,0,0,0)');
         } else {
-          var fLutIdx = Math.min(lut.length - 1, Math.round(fsVal * (lut.length - 1)));
-          var fR = lut[fLutIdx][0], fG = lut[fLutIdx][1], fB = lut[fLutIdx][2];
-          fillGrad.addColorStop(fsVal, 'rgba(' + fR + ',' + fG + ',' + fB + ',' + fogAlpha.toFixed(3) + ')');
+          var gLutIdx = Math.min(lutLastIdx, Math.round(gsVal * lutLastIdx));
+          rowGrad.addColorStop(gsVal, 'rgba(' + lutRGB[gLutIdx] + ',' + fogStr + ')');
         }
       }
-      fillStyle = fillGrad;
-    } else if (lut) {
-      var nfR = lut[0][0], nfG = lut[0][1], nfB = lut[0][2];
-      fillStyle = 'rgba(' + nfR + ',' + nfG + ',' + nfB + ',' + fogAlpha.toFixed(3) + ')';
-    } else {
-      fillStyle = 'rgba(0,8,20,' + fogAlpha.toFixed(3) + ')';
     }
+
+    /* Step 1: Fill silhouette from ridge down to groundY */
+    var nPts = allNPts[di];
     ctx.beginPath();
     ctx.moveTo(xL, groundY);
-    var nPts = ptsX.length;
     for (var pi = 0; pi < nPts; pi++) {
       ctx.lineTo(ptsX[pi], ptsY[pi]);
     }
     ctx.lineTo(xR, groundY);
     ctx.closePath();
-    ctx.fillStyle = fillStyle;
+    if (rowGrad) {
+      ctx.fillStyle = rowGrad;
+    } else if (lut) {
+      ctx.fillStyle = 'rgba(' + lutRGB[0] + ',' + fogStr + ')';
+    } else {
+      ctx.fillStyle = 'rgba(0,8,20,' + fogStr + ')';
+    }
     ctx.fill();
 
-    /* Step 2: Ridge line with signal-level gradient on top (thin, crisp) */
-    if (lut && rowW > 1) {
-      var topY = baseY - peakH;
-      var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
-      var GSTOPS = 16;
-      for (var gs = 0; gs <= GSTOPS; gs++) {
-        var gsVal = gs / GSTOPS;
-        if (gsVal < 0.05) {
-          ridgeGrad.addColorStop(gsVal, 'rgba(0,0,0,0)');
-        } else {
-          var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
-          var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
-          ridgeGrad.addColorStop(gsVal, 'rgba(' + rc + ',' + gc2 + ',' + bc + ',' + fogAlpha.toFixed(3) + ')');
-        }
-      }
+    /* Step 2: Ridge line — reuse the same gradient object */
+    if (rowGrad) {
       ctx.beginPath();
       ctx.moveTo(ptsX[0], ptsY[0]);
       for (var ri = 1; ri < nPts; ri++) {
         ctx.lineTo(ptsX[ri], ptsY[ri]);
       }
-      ctx.strokeStyle = ridgeGrad;
+      ctx.strokeStyle = rowGrad;
       ctx.lineWidth = Math.max(1, 1.8 * wFrac);
       ctx.stroke();
     }

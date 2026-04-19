@@ -1475,7 +1475,7 @@ function downloadCanvas(){
     var dsel=document.getElementById('dsel');
     var dsVal=dsel?dsel.value:'';
     var datePart=dsVal==='rolling-24h'?'rolling24h':(dsVal||meta.date||'unknown');
-    var bandPart=(urlBand&&urlBand!=='wideband')?urlBand:'wideband';
+    var bandPart=urlBand||'wideband';
     a.download='spectrogram_'+bandPart+'_'+datePart+'.png';
     document.body.appendChild(a);
     a.click();

@@ -567,15 +567,31 @@ function ttRedraw() {
     }
 
     /* ── Filled silhouette + ridge line ─────────────────────────────── */
-    /* Step 1: Fill from ridge down to groundY with the noise-floor colour.
-       This bridges the gap between rows (painter's algorithm covers rows behind).
-       Using the actual noise-floor palette colour so it blends naturally. */
-    var fillColor;
-    if (lut) {
+    /* Step 1: Fill from ridge down to groundY.
+       Use the same vertical palette gradient as the ridge line so the fill
+       colour matches the outline — strong signals appear warm/bright all the
+       way down their slope, not just on the thin ridge stroke. */
+    var fillStyle;
+    if (lut && rowW > 1) {
+      var topY = baseY - peakH;
+      var fillGrad = ctx.createLinearGradient(0, baseY, 0, topY);
+      var FSTOPS = 16;
+      for (var fs = 0; fs <= FSTOPS; fs++) {
+        var fsVal = fs / FSTOPS;
+        if (fsVal < 0.05) {
+          fillGrad.addColorStop(fsVal, 'rgba(0,0,0,0)');
+        } else {
+          var fLutIdx = Math.min(lut.length - 1, Math.round(fsVal * (lut.length - 1)));
+          var fR = lut[fLutIdx][0], fG = lut[fLutIdx][1], fB = lut[fLutIdx][2];
+          fillGrad.addColorStop(fsVal, 'rgba(' + fR + ',' + fG + ',' + fB + ',' + fogAlpha.toFixed(3) + ')');
+        }
+      }
+      fillStyle = fillGrad;
+    } else if (lut) {
       var nfR = lut[0][0], nfG = lut[0][1], nfB = lut[0][2];
-      fillColor = 'rgba(' + nfR + ',' + nfG + ',' + nfB + ',' + fogAlpha.toFixed(3) + ')';
+      fillStyle = 'rgba(' + nfR + ',' + nfG + ',' + nfB + ',' + fogAlpha.toFixed(3) + ')';
     } else {
-      fillColor = 'rgba(0,8,20,' + fogAlpha.toFixed(3) + ')';
+      fillStyle = 'rgba(0,8,20,' + fogAlpha.toFixed(3) + ')';
     }
     ctx.beginPath();
     ctx.moveTo(xL, groundY);
@@ -584,7 +600,7 @@ function ttRedraw() {
     }
     ctx.lineTo(xR, groundY);
     ctx.closePath();
-    ctx.fillStyle = fillColor;
+    ctx.fillStyle = fillStyle;
     ctx.fill();
 
     /* Step 2: Ridge line with signal-level gradient on top (thin, crisp) */

@@ -461,12 +461,23 @@ function ttRedraw() {
   /* ── Draw mountain rows back-to-front ───────────────────────────────── */
   var frontRow = Math.round(ttCurrentRow);
 
+  /* Pre-compute geometry for all rows so we can reference the next row's baseY */
+  var rowGeom = [];
+  for (var di2 = depthRows - 1; di2 >= 0; di2--) {
+    var d2 = di2 / depthRows;
+    var bY2 = groundY - (groundY - vanishY) * d2;
+    var wF2 = 1 - d2 * (1 - TT_MIN_WFRAC);
+    var xL2 = vanishX - frontHalfW * wF2;
+    var xR2 = vanishX + frontHalfW * wF2;
+    rowGeom[di2] = { d: d2, baseY: bY2, wFrac: wF2, xL: xL2, xR: xR2 };
+  }
+
   for (var di = depthRows - 1; di >= 0; di--) {
-    var d = di / depthRows;
-    var baseY = groundY - (groundY - vanishY) * d;
-    var wFrac = 1 - d * (1 - TT_MIN_WFRAC);
-    var xL = vanishX - frontHalfW * wFrac;
-    var xR = vanishX + frontHalfW * wFrac;
+    var g = rowGeom[di];
+    var baseY = g.baseY;
+    var wFrac = g.wFrac;
+    var xL = g.xL;
+    var xR = g.xR;
     var rowW = xR - xL;
     if (rowW < 1) continue;
 
@@ -480,6 +491,11 @@ function ttRedraw() {
     var peakH = maxPeakH * wFrac;
     var fogAlpha = wFrac * 0.94 + 0.06;
 
+    /* The "floor" for this row's silhouette is the baseY of the next closer row
+       (di-1), so the fill seamlessly bridges the gap between rows.
+       For the frontmost row (di=0) use groundY. */
+    var floorY = (di > 0) ? rowGeom[di - 1].baseY : groundY;
+
     /* ── Compute screen points ──────────────────────────────────────── */
     var ptsX = new Float32Array(TT_SAMPLES);
     var ptsY = new Float32Array(TT_SAMPLES);
@@ -492,42 +508,30 @@ function ttRedraw() {
     ctx.globalAlpha = fogAlpha;
 
     /* ── Filled silhouette (occludes rows behind) ───────────────────── */
-    /* Anchor to groundY (not baseY) so the fill extends to the absolute
-       canvas bottom, eliminating gaps between consecutive perspective rows. */
+    /* Fill down to floorY (the next closer row's baseY) so there are no
+       gaps between consecutive rows — the terrain is continuous. */
     ctx.beginPath();
-    ctx.moveTo(xL, groundY);
+    ctx.moveTo(xL, floorY);
     ctx.lineTo(xL, baseY);
     for (var pi = 0; pi < TT_SAMPLES; pi++) {
       ctx.lineTo(ptsX[pi], ptsY[pi]);
     }
     ctx.lineTo(xR, baseY);
-    ctx.lineTo(xR, groundY);
+    ctx.lineTo(xR, floorY);
     ctx.closePath();
     /* Solid dark fill — this is what occludes distant rows */
     ctx.fillStyle = '#000810';
     ctx.fill();
 
     /* ── Ridge line with vertical gradient ─────────────────────────── */
-    /* A vertical gradient from baseY (signal=0) to baseY-peakH (signal=1)
-       means each point on the ridge picks up the exact palette colour for
-       its signal value — no averaging, no boost distortion.
-       lut[0] (often red) sits at the very bottom and is never reached
-       because the silhouette fill already covers that area. */
     var lut = (typeof V !== 'undefined') ? V : null;
     if (lut && rowW > 1) {
-      /* Gradient runs from baseY (bottom, stop=0) to topY (top, stop=1).
-         gsVal=0 → noise floor → stop near 0 (bottom).
-         gsVal=1 → strong signal → stop near 1 (top).
-         So stopPos = gsVal directly. */
       var topY = baseY - peakH;
       var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
-        var gsVal = gs / GSTOPS;   /* signal value 0→1 */
-        var stopPos = gsVal;       /* stop 0=bottom(baseY), stop 1=top(topY) */
-        /* Gradient: stop 0=baseY(bottom,low signal), stop 1=topY(top,high signal).
-           gsVal=1 (top/peak) → lut[255], gsVal=0 (bottom/noise) → transparent.
-           Fade out the bottom 10%. */
+        var gsVal = gs / GSTOPS;
+        var stopPos = gsVal;
         if (gsVal < 0.10) {
           ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
         } else {

@@ -568,6 +568,35 @@ function ttRedraw() {
   var lutLastIdx = ttLutLastIdx;
 
 
+  /* Build per-depth-slot gradient cache if stale (canvas resize or depthRows change).
+     Gradients are purely a function of geometry + palette — independent of ttCurrentRow,
+     so they can be reused every frame without rebuilding. */
+  if (lut && lutRGB && (ttRowGradCache.length !== depthRows || ttRowGradDepth !== depthRows)) {
+    ttRowGradCache = new Array(depthRows);
+    ttRowGradDepth = depthRows;
+    var GSTOPS_C = 16;
+    for (var gdi = 0; gdi < depthRows; gdi++) {
+      var gd = gdi / depthRows;
+      var gbY = groundY - (groundY - vanishY) * gd;
+      var gwF = 1 - gd * (1 - TT_MIN_WFRAC);
+      var gpH = maxPeakH * gwF;
+      var gtopY = gbY - gpH;
+      var gfogAlpha = gwF * 0.94 + 0.06;
+      var gfogStr = gfogAlpha.toFixed(3);
+      var grad = ctx.createLinearGradient(0, gbY, 0, gtopY);
+      for (var gsi = 0; gsi <= GSTOPS_C; gsi++) {
+        var gsv = gsi / GSTOPS_C;
+        if (gsv < 0.05) {
+          grad.addColorStop(gsv, 'rgba(0,0,0,0)');
+        } else {
+          var gcIdx = Math.min(lutLastIdx, Math.round(gsv * lutLastIdx));
+          grad.addColorStop(gsv, 'rgba(' + lutRGB[gcIdx] + ',' + gfogStr + ')');
+        }
+      }
+      ttRowGradCache[gdi] = grad;
+    }
+  }
+
   /* Pre-compute all row screen points into persistent module-level arrays
      (avoids allocating + GC-ing 9 new JS arrays on every frame). */
   var allPtsX    = ttAllPtsX;
@@ -657,32 +686,14 @@ function ttRedraw() {
       continue;
     }
 
-    /* ── Filled silhouette ───────────────────────────────────────────── */
-    /* Use a solid colour derived from the row's peak signal value.
-       Gradients cause browser GPU deferred-rasterisation accumulation
-       which leads to exponential slowdown. Solid fills are immediate. */
-    var nPts = allNPts[di];
+    /* ── Filled silhouette + ridge line ─────────────────────────────── */
+    /* Use the pre-built cached gradient for this depth slot — zero gradient
+       construction cost per frame during playback. */
+    var rowGrad = (lut && lutRGB && rowW > 1 && ttRowGradCache[di]) ? ttRowGradCache[di] : null;
     var fogStr = fogAlpha.toFixed(3);
 
-    /* Find the peak (minimum sample value = strongest signal in LUT mapping) */
-    var rowSamples = ttSampleCache[frontRow - di];
-    var peakSample = 1.0;
-    if (rowSamples) {
-      for (var psi = 0; psi < rowSamples.length; psi++) {
-        if (rowSamples[psi] < peakSample) peakSample = rowSamples[psi];
-      }
-    }
-    /* Map peak to LUT colour — blend between noise-floor (lut[last]) and peak colour */
-    var solidFill;
-    if (lut && lutRGB) {
-      /* Use a colour midway between noise floor and peak for a natural look */
-      var midSample = (peakSample + 1.0) * 0.5; /* average of peak and noise floor */
-      var midIdx = Math.min(lutLastIdx, Math.round(midSample * lutLastIdx));
-      solidFill = 'rgba(' + lutRGB[midIdx] + ',' + fogStr + ')';
-    } else {
-      solidFill = 'rgba(0,8,20,' + fogStr + ')';
-    }
-
+    /* Step 1: Fill silhouette from ridge down to groundY */
+    var nPts = allNPts[di];
     ctx.beginPath();
     ctx.moveTo(xL, groundY);
     for (var pi = 0; pi < nPts; pi++) {
@@ -690,7 +701,13 @@ function ttRedraw() {
     }
     ctx.lineTo(xR, groundY);
     ctx.closePath();
-    ctx.fillStyle = solidFill;
+    if (rowGrad) {
+      ctx.fillStyle = rowGrad;
+    } else if (lut) {
+      ctx.fillStyle = 'rgba(' + lutRGB[0] + ',' + fogStr + ')';
+    } else {
+      ctx.fillStyle = 'rgba(0,8,20,' + fogStr + ')';
+    }
     ctx.fill();
 
 

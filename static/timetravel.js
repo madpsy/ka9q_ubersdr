@@ -1,11 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   ⏳  TIME TRAVEL — 3D perspective waterfall flythrough
+   ⏳  TIME TRAVEL — 3D mountain terrain waterfall flythrough
    ═══════════════════════════════════════════════════════════════════════════
-   Renders the spectrogram as a 3D runway: 0-30 MHz left→right, time recedes
-   into the distance. Each row is a perspective-projected trapezoid drawn
-   back-to-front (painter's algorithm). Uses the same ImageBitmap (bmp) and
-   meta object already loaded by the main Spectrogram tab — no extra API calls
-   when the same date/band is selected.
+   Renders the spectrogram as a 3D mountain range: 0-30 MHz left→right, time
+   recedes into the distance, and signal strength becomes vertical HEIGHT —
+   strong signals rise as peaks, the noise floor is flat.
+
+   Each row is drawn as a filled polygon (mountain silhouette) coloured with
+   the spectrogram palette, drawn back-to-front so nearer rows occlude distant
+   ones (painter's algorithm).
 
    Speed table (1× = 24 rows/sec → 24h in 60 s):
      1×  = 24 r/s  → 60 s
@@ -29,7 +31,15 @@ var ttDepthRows = 60;        /* how many rows visible in depth */
 var ttScrubDragging = false;
 var ttKeyHandlerAttached = false;
 var ttBand = 'wideband';     /* current band for TT */
-var ttReadCtx = null;        /* offscreen canvas for pixel reads (tooltip) */
+var ttReadCtx = null;        /* offscreen canvas for pixel reads */
+
+/* Number of frequency sample points per row — higher = smoother mountains
+   but slower. 200 is a good balance for a 1500px wide canvas. */
+var TT_SAMPLES = 200;
+
+/* Height scale: how many canvas pixels a full-scale signal peak rises.
+   Expressed as a fraction of the canvas height. */
+var TT_HEIGHT_SCALE = 0.38;
 
 /* ── Speed helpers ──────────────────────────────────────────────────────── */
 function ttRowsPerSec() { return ttBaseRowsPerSec * ttSpeedMult; }
@@ -76,23 +86,16 @@ function initTimeTravelTab() {
     ttBand = bdst.value || 'wideband';
   }
 
-  /* Size the main canvas to fill its wrapper */
   ttResizeCanvas();
   window.addEventListener('resize', ttResizeCanvas);
-
-  /* Setup scrubber interaction */
   ttSetupScrubber();
 
-  /* Attach keyboard handler once */
   if (!ttKeyHandlerAttached) {
     ttKeyHandlerAttached = true;
     document.addEventListener('keydown', ttKeyHandler);
   }
 
-  /* Setup hover tooltip on the 3D canvas */
   ttSetupHover();
-
-  /* Load data */
   ttLoadData();
 }
 
@@ -103,14 +106,12 @@ function ttResizeCanvas() {
   var oc = document.getElementById('tt-overlay');
   if (!wrap || !c) return;
   var w = wrap.getBoundingClientRect().width || 800;
-  /* 16:9-ish aspect, capped at 580px tall */
-  var h = Math.min(Math.round(w * 0.52), 580);
+  var h = Math.min(Math.round(w * 0.54), 600);
   if (c.width !== Math.round(w) || c.height !== h) {
     c.width = Math.round(w);
     c.height = h;
     if (oc) { oc.width = Math.round(w); oc.height = h; }
   }
-  /* Size scrubber */
   var sc = document.getElementById('tt-scrubber');
   var sw = document.getElementById('tt-scrubber-wrap');
   if (sc && sw) {
@@ -150,25 +151,25 @@ function ttLoadData() {
   var ds = dsel ? dsel.value : '';
   var isRolling = (ds === 'rolling-24h');
 
-  /* Try to reuse the main tab's already-loaded data when date+band match */
+  /* Reuse main tab data if same date+band */
   var mainDsel = document.getElementById('dsel');
   var mainDate = mainDsel ? mainDsel.value : '';
   var mainBand = (typeof urlBand !== 'undefined') ? urlBand : 'wideband';
-  var sameDateBand = (ds === mainDate && ttBand === mainBand);
-  if (sameDateBand && typeof bmp !== 'undefined' && bmp && typeof meta !== 'undefined' && meta) {
+  if (ds === mainDate && ttBand === mainBand &&
+      typeof bmp !== 'undefined' && bmp &&
+      typeof meta !== 'undefined' && meta) {
     ttBmp = bmp;
     ttMeta = meta;
     ttCurrentRow = 0;
     ttBuildReadCtx();
     ttDrawScrubber();
     ttRedraw();
-    ttSetStatus(ttMeta.row_count + ' rows loaded (shared)');
+    ttSetStatus(ttMeta.row_count + ' rows (shared)');
     return;
   }
 
   ttSetStatus('Loading\u2026');
 
-  /* Build meta URL */
   var mparams = [];
   if (isRolling) {
     mparams.push('rolling=1');
@@ -178,7 +179,6 @@ function ttLoadData() {
   if (ttBand && ttBand !== 'wideband') mparams.push('band=' + encodeURIComponent(ttBand));
   var murl = '/api/spectrogram/meta' + (mparams.length ? '?' + mparams.join('&') : '');
 
-  /* Palette from main selector */
   var psel = document.getElementById('psel');
   var pal = psel ? psel.value : 'jet';
 
@@ -189,9 +189,7 @@ function ttLoadData() {
       var iurl = m.image_url;
       if (pal && pal !== m.palette) iurl += (iurl.indexOf('?') >= 0 ? '&' : '?') + 'palette=' + encodeURIComponent(pal);
       var today = new Date().toISOString().slice(0, 10);
-      if (isRolling || !ds || ds === today) {
-        iurl += (iurl.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
-      }
+      if (isRolling || !ds || ds === today) iurl += (iurl.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
       return fetch(iurl);
     })
     .then(function(r) { if (!r.ok) throw new Error('image ' + r.status); return r.blob(); })
@@ -216,6 +214,59 @@ function ttBuildReadCtx() {
   ttReadCtx.drawImage(ttBmp, 0, 0);
 }
 
+/* ── Sample one row from the offscreen canvas ───────────────────────────── */
+/* Returns an array of TT_SAMPLES normalised signal values [0..1].
+   0 = noise floor colour, 1 = peak colour.
+   Uses the raw RGB → palette index lookup (same as pxToDb but returns
+   normalised index directly, avoiding the dB conversion overhead). */
+function ttSampleRow(rowIdx) {
+  var result = new Float32Array(TT_SAMPLES);
+  if (!ttReadCtx || !ttMeta || rowIdx < 0 || rowIdx >= ttMeta.row_count) return result;
+
+  var imgW = ttReadCtx.canvas.width;
+  var imgH = ttReadCtx.canvas.height;
+  var srcRowH = imgH / ttMeta.row_count;
+  var srcY = Math.floor(rowIdx * srcRowH + srcRowH * 0.5); /* sample mid-row */
+  if (srcY >= imgH) srcY = imgH - 1;
+
+  /* Read the entire row in one getImageData call — much faster than N individual reads */
+  var rowData = ttReadCtx.getImageData(0, srcY, imgW, 1).data;
+
+  var lut = (typeof V !== 'undefined') ? V : null;
+
+  for (var si = 0; si < TT_SAMPLES; si++) {
+    var xFrac = si / (TT_SAMPLES - 1);
+    var px = Math.min(Math.floor(xFrac * imgW), imgW - 1);
+    var base = px * 4;
+    var r = rowData[base], g = rowData[base + 1], b = rowData[base + 2];
+
+    /* Pure black = no-data sentinel → 0 */
+    if (r === 0 && g === 0 && b === 0) { result[si] = 0; continue; }
+
+    /* Fast palette index lookup */
+    var idx = 0;
+    if (lut) {
+      var k = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      var inv = (typeof INV !== 'undefined') ? INV : {};
+      idx = inv[k];
+      if (idx === undefined) {
+        /* Nearest-neighbour fallback */
+        var bestDist = 1e9;
+        for (var li = 0; li < lut.length; li++) {
+          var dr = r - lut[li][0], dg = g - lut[li][1], db2 = b - lut[li][2];
+          var dist = dr * dr + dg * dg + db2 * db2;
+          if (dist < bestDist) { bestDist = dist; idx = li; }
+        }
+      }
+      result[si] = idx / (lut.length - 1);
+    } else {
+      /* Fallback: use green channel as proxy for brightness */
+      result[si] = g / 255;
+    }
+  }
+  return result;
+}
+
 /* ── Playback ───────────────────────────────────────────────────────────── */
 function ttTogglePlay() {
   if (ttIsPlaying) ttPause(); else ttPlay();
@@ -223,7 +274,6 @@ function ttTogglePlay() {
 
 function ttPlay() {
   if (!ttBmp || !ttMeta) { ttSetStatus('No data loaded yet.'); return; }
-  /* If at the end, restart from beginning */
   if (ttMeta && ttCurrentRow >= ttMeta.row_count - 1) ttCurrentRow = 0;
   ttIsPlaying = true;
   ttLastFrameTs = null;
@@ -252,8 +302,7 @@ function ttPause() {
 function ttFrame(ts) {
   if (!ttIsPlaying) return;
   if (ttLastFrameTs !== null) {
-    var dt = (ts - ttLastFrameTs) / 1000; /* seconds */
-    /* Cap dt to 100ms to avoid huge jumps after tab switch or background */
+    var dt = (ts - ttLastFrameTs) / 1000;
     if (dt > 0.1) dt = 0.1;
     ttCurrentRow += dt * ttRowsPerSec();
     if (ttMeta && ttCurrentRow >= ttMeta.row_count) {
@@ -266,7 +315,7 @@ function ttFrame(ts) {
   if (ttIsPlaying) ttRafId = requestAnimationFrame(ttFrame);
 }
 
-/* ── Main 3D draw ───────────────────────────────────────────────────────── */
+/* ── Main 3D mountain terrain draw ─────────────────────────────────────── */
 function ttRedraw() {
   var c = document.getElementById('tt-canvas');
   if (!c) return;
@@ -276,12 +325,16 @@ function ttRedraw() {
   var W = c.width, H = c.height;
   ctx.clearRect(0, 0, W, H);
 
-  /* Dark background gradient */
-  var bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, '#000510');
-  bg.addColorStop(1, '#000c1a');
-  ctx.fillStyle = bg;
+  /* Sky gradient background */
+  var sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#000814');
+  sky.addColorStop(0.55, '#001428');
+  sky.addColorStop(1, '#000a1a');
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H);
+
+  /* Stars in the upper portion */
+  ttDrawStars(ctx, W, H);
 
   if (!ttBmp || !ttMeta || ttMeta.row_count === 0) {
     ctx.fillStyle = 'rgba(255,255,255,.35)';
@@ -295,18 +348,15 @@ function ttRedraw() {
 
   /* ── Perspective parameters ─────────────────────────────────────────── */
   var vanishX = W * 0.5;
-  var vanishY = H * 0.16;   /* horizon line — upper 16% of canvas */
-  var frontY = H;            /* front edge at very bottom of canvas */
-  var frontHalfW = W * 0.5; /* front row spans full canvas width */
+  var vanishY = H * 0.22;   /* horizon */
+  var groundY = H * 0.88;   /* where the front row baseline sits */
+  var frontHalfW = W * 0.5;
 
   var totalRows = ttMeta.row_count;
   var depthRows = Math.min(ttDepthRows, totalRows);
 
-  /* Image source: each row in the PNG is (bmp.height / totalRows) pixels tall */
-  var srcRowH = ttBmp.height / totalRows;
-
-  /* Speed-based motion blur: blur increases with speed multiplier */
-  var blurPx = Math.max(0, (Math.log2(ttRowsPerSec() / 24)) * 1.6);
+  /* Maximum peak height in canvas pixels (at the front row) */
+  var maxPeakH = (groundY - vanishY) * TT_HEIGHT_SCALE;
 
   /* Read toggle states */
   var showBandsEl = document.getElementById('tt-show-bands');
@@ -314,97 +364,137 @@ function ttRedraw() {
   var doBands = showBandsEl ? showBandsEl.checked : true;
   var doGrid = showGridEl ? showGridEl.checked : true;
 
-  /* Frequency range from meta */
   var startHz = ttMeta.start_freq_hz || 0;
   var spanHz = (ttMeta.end_freq_hz || 30e6) - startHz;
   if (spanHz <= 0) spanHz = 30e6;
 
-  /* ── Draw rows back-to-front (painter's algorithm) ──────────────────── */
+  /* ── Draw perspective grid FIRST (behind mountains) ────────────────── */
+  if (doGrid) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,150,220,0.12)';
+    ctx.lineWidth = 1;
+    var gridFreqs = [0, 5e6, 10e6, 15e6, 20e6, 25e6, 30e6];
+    for (var gi = 0; gi < gridFreqs.length; gi++) {
+      var gf = gridFreqs[gi];
+      if (gf < startHz || gf > startHz + spanHz) continue;
+      var gfrac = (gf - startHz) / spanHz;
+      var gxFront = vanishX - frontHalfW + gfrac * frontHalfW * 2;
+      ctx.beginPath();
+      ctx.moveTo(gxFront, groundY);
+      ctx.lineTo(vanishX, vanishY);
+      ctx.stroke();
+    }
+    /* Horizontal depth lines */
+    var hStep = Math.max(1, Math.round(depthRows / 8));
+    for (var hi = 0; hi <= depthRows; hi += hStep) {
+      var hd = hi / depthRows;
+      var hy = groundY - (groundY - vanishY) * hd;
+      var hwFrac = Math.pow(1 - hd, 1.3);
+      var hxL = vanishX - frontHalfW * hwFrac;
+      var hxR = vanishX + frontHalfW * hwFrac;
+      ctx.beginPath();
+      ctx.moveTo(hxL, hy); ctx.lineTo(hxR, hy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ── Draw mountain rows back-to-front ───────────────────────────────── */
   for (var di = depthRows - 1; di >= 0; di--) {
-    /* d = 0 at front (current row), 1 at back (oldest visible row) */
-    var d = di / depthRows;
-    var dNext = (di + 1) / depthRows;
+    var d = di / depthRows;           /* 0=front, 1=back */
 
-    /* Y positions of this row's bottom and top edges */
-    var yBot = frontY - (frontY - vanishY) * d;
-    var yTop = frontY - (frontY - vanishY) * dNext;
-    if (yTop >= yBot) continue; /* degenerate — skip */
-
-    /* X extents — perspective narrowing using power curve */
-    var wFrac = Math.pow(1 - d, 1.35);
-    var wFracNext = Math.pow(1 - dNext, 1.35);
+    /* Perspective: baseline Y and width at this depth */
+    var baseY = groundY - (groundY - vanishY) * d;
+    var wFrac = Math.pow(1 - d, 1.3);
     var xL = vanishX - frontHalfW * wFrac;
     var xR = vanishX + frontHalfW * wFrac;
-    var xLN = vanishX - frontHalfW * wFracNext;
-    var xRN = vanishX + frontHalfW * wFracNext;
+    var rowW = xR - xL;
+    if (rowW < 1) continue;
 
-    /* Source row index in the image */
+    /* Source row index */
     var rowIdx = Math.round(ttCurrentRow) - di;
     if (rowIdx < 0 || rowIdx >= totalRows) continue;
 
-    var srcY = rowIdx * srcRowH;
+    /* Sample signal values for this row */
+    var samples = ttSampleRow(rowIdx);
 
-    /* Depth fog: front=full opacity, back=dim */
-    var fogAlpha = Math.pow(1 - d, 1.1) * 0.93 + 0.07;
+    /* Peak height scales with perspective (front rows are taller) */
+    var peakH = maxPeakH * Math.pow(1 - d, 0.7);
 
-    /* ── Draw the spectrogram row as a perspective-warped trapezoid ──── */
-    /* We split into N vertical strips to approximate the perspective warp.
-       Each strip is drawn using ctx.setTransform to map the source rect
-       into the destination trapezoid strip. */
-    var N = Math.max(24, Math.round(W / 14));
+    /* Depth fog: front=bright, back=dim */
+    var fogAlpha = Math.pow(1 - d, 0.9) * 0.92 + 0.08;
+
+    /* ── Build the mountain polygon ─────────────────────────────────── */
+    /* The polygon: baseline left → peaks → baseline right → close.
+       We draw it as a filled path, then stroke the ridge line on top. */
+
+    /* Compute screen X and peak Y for each sample point */
+    var pts = new Array(TT_SAMPLES);
+    for (var si = 0; si < TT_SAMPLES; si++) {
+      var xFrac = si / (TT_SAMPLES - 1);
+      var sx = xL + xFrac * rowW;
+      var sy = baseY - samples[si] * peakH;
+      pts[si] = { x: sx, y: sy };
+    }
+
+    /* ── Fill: use a vertical gradient from peak colour to dark base ── */
     ctx.save();
-    if (blurPx > 0.5) ctx.filter = 'blur(' + blurPx.toFixed(1) + 'px)';
     ctx.globalAlpha = fogAlpha;
 
-    for (var si = 0; si < N; si++) {
-      var t0 = si / N;
-      var t1 = (si + 1) / N;
+    /* Filled silhouette — dark fill so mountains occlude rows behind */
+    ctx.beginPath();
+    ctx.moveTo(xL, baseY);
+    for (var pi = 0; pi < TT_SAMPLES; pi++) {
+      ctx.lineTo(pts[pi].x, pts[pi].y);
+    }
+    ctx.lineTo(xR, baseY);
+    ctx.closePath();
 
-      /* Source rect in the image */
-      var sx = t0 * ttBmp.width;
-      var sw = (t1 - t0) * ttBmp.width;
+    /* Fill with a dark-to-slightly-lighter gradient so the base is solid black */
+    var fillGrad = ctx.createLinearGradient(0, baseY - peakH, 0, baseY);
+    fillGrad.addColorStop(0, 'rgba(0,8,20,0.0)');
+    fillGrad.addColorStop(1, 'rgba(0,4,12,0.98)');
+    ctx.fillStyle = fillGrad;
+    ctx.fill();
 
-      /* Destination trapezoid strip — interpolate between bottom and top edges */
-      var dx0 = xL + t0 * (xR - xL);
-      var dx1 = xL + t1 * (xR - xL);
-      var dx0t = xLN + t0 * (xRN - xLN);
-      /* var dx1t = xLN + t1 * (xRN - xLN); */
+    /* ── Ridge line: colour each segment individually ───────────────── */
+    /* We draw short line segments, colouring each by the palette colour
+       of the signal at that point. This gives the "coloured mountain ridge"
+       effect — the ridge glows with the spectrogram colours. */
+    ctx.lineWidth = Math.max(1, 1.5 * (1 - d * 0.6));
 
-      var destW = dx1 - dx0;
-      var destH = yBot - yTop;
-      if (destW < 0.3 || destH < 0.3) continue;
+    for (var ri = 0; ri < TT_SAMPLES - 1; ri++) {
+      var v0 = samples[ri];
+      var v1 = samples[ri + 1];
+      var vMid = (v0 + v1) * 0.5;
 
-      /* Horizontal shear per pixel of vertical travel */
-      var shearX = (dx0t - dx0) / destH;
-      var scaleX = destW / sw;
-      var scaleY = destH / srcRowH;
+      /* Get palette colour for this signal level */
+      var lut2 = (typeof V !== 'undefined') ? V : null;
+      var r2 = 100, g2 = 100, b2 = 200; /* default blue */
+      if (lut2) {
+        var lutIdx = Math.min(lut2.length - 1, Math.round(vMid * (lut2.length - 1)));
+        r2 = lut2[lutIdx][0]; g2 = lut2[lutIdx][1]; b2 = lut2[lutIdx][2];
+      }
 
-      /* ctx.setTransform(a, b, c, d, e, f) maps:
-           x' = a*x + c*y + e
-           y' = b*x + d*y + f
-         We want: source (sx,0) → dest (dx0, yTop)
-                  source (sx+sw,0) → dest (dx1, yTop)
-                  source (sx,srcRowH) → dest (dx0+shearX*destH, yBot)
-         So: a=scaleX, b=0, c=shearX*scaleX, d=scaleY, e=dx0, f=yTop */
-      ctx.setTransform(
-        scaleX, 0,
-        shearX * scaleX, scaleY,
-        dx0, yTop
-      );
-      ctx.drawImage(ttBmp,
-        sx, srcY, sw, srcRowH,
-        0, 0, sw, srcRowH
-      );
+      /* Boost brightness for the ridge line so it glows */
+      var boost = 1.0 + vMid * 0.8;
+      r2 = Math.min(255, Math.round(r2 * boost));
+      g2 = Math.min(255, Math.round(g2 * boost));
+      b2 = Math.min(255, Math.round(b2 * boost));
+
+      ctx.strokeStyle = 'rgb(' + r2 + ',' + g2 + ',' + b2 + ')';
+      ctx.beginPath();
+      ctx.moveTo(pts[ri].x, pts[ri].y);
+      ctx.lineTo(pts[ri + 1].x, pts[ri + 1].y);
+      ctx.stroke();
     }
 
     ctx.restore();
-    ctx.filter = 'none';
-    ctx.globalAlpha = 1;
 
-    /* ── Band overlays on this row ──────────────────────────────────── */
+    /* ── Band overlays ──────────────────────────────────────────────── */
     if (doBands && typeof BANDS !== 'undefined' && spanHz > 0) {
       ctx.save();
-      ctx.globalAlpha = fogAlpha * 0.16;
+      ctx.globalAlpha = fogAlpha * 0.12;
       var bandColors = [
         'rgba(255,200,0,1)', 'rgba(0,200,255,1)', 'rgba(0,255,120,1)',
         'rgba(255,80,200,1)', 'rgba(255,140,0,1)', 'rgba(100,180,255,1)',
@@ -414,103 +504,54 @@ function ttRedraw() {
         var bf0 = (BANDS[bi][0] - startHz) / spanHz;
         var bf1 = (BANDS[bi][1] - startHz) / spanHz;
         if (bf1 < 0 || bf0 > 1) continue;
-        bf0 = Math.max(0, bf0);
-        bf1 = Math.min(1, bf1);
-        var bx0 = xL + bf0 * (xR - xL);
-        var bx1 = xL + bf1 * (xR - xL);
-        var bx0t = xLN + bf0 * (xRN - xLN);
-        var bx1t = xLN + bf1 * (xRN - xLN);
+        bf0 = Math.max(0, bf0); bf1 = Math.min(1, bf1);
+        var bx0 = xL + bf0 * rowW;
+        var bx1 = xL + bf1 * rowW;
         ctx.fillStyle = bandColors[bi % bandColors.length];
-        ctx.beginPath();
-        ctx.moveTo(bx0, yBot);
-        ctx.lineTo(bx1, yBot);
-        ctx.lineTo(bx1t, yTop);
-        ctx.lineTo(bx0t, yTop);
-        ctx.closePath();
-        ctx.fill();
+        ctx.fillRect(bx0, baseY - peakH * 1.05, bx1 - bx0, peakH * 1.05);
       }
       ctx.restore();
     }
   }
 
-  /* ── Perspective grid lines ─────────────────────────────────────────── */
-  if (doGrid) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(0,180,255,0.15)';
-    ctx.lineWidth = 1;
-
-    /* Vertical lines at major frequency intervals — converge at vanishing point */
-    var gridFreqs = [0, 5e6, 10e6, 15e6, 20e6, 25e6, 30e6];
-    for (var gi = 0; gi < gridFreqs.length; gi++) {
-      var gf = gridFreqs[gi];
-      if (gf < startHz || gf > startHz + spanHz) continue;
-      var gfrac = (gf - startHz) / spanHz;
-      var gxFront = vanishX - frontHalfW + gfrac * frontHalfW * 2;
-      ctx.beginPath();
-      ctx.moveTo(gxFront, frontY);
-      ctx.lineTo(vanishX, vanishY);
-      ctx.stroke();
-    }
-
-    /* Horizontal depth lines at regular row intervals */
-    var hlineStep = Math.max(1, Math.round(depthRows / 8));
-    for (var hi = 0; hi <= depthRows; hi += hlineStep) {
-      var hd = hi / depthRows;
-      var hyBot = frontY - (frontY - vanishY) * hd;
-      var hwFrac = Math.pow(1 - hd, 1.35);
-      var hxL = vanishX - frontHalfW * hwFrac;
-      var hxR = vanishX + frontHalfW * hwFrac;
-      ctx.beginPath();
-      ctx.moveTo(hxL, hyBot);
-      ctx.lineTo(hxR, hyBot);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  /* ── NOW edge glow ──────────────────────────────────────────────────── */
+  /* ── NOW edge glow at the front baseline ────────────────────────────── */
   ctx.save();
   ctx.shadowColor = '#0ff';
-  ctx.shadowBlur = 20;
-  ctx.strokeStyle = 'rgba(0,255,255,0.88)';
-  ctx.lineWidth = 2.5;
+  ctx.shadowBlur = 16;
+  ctx.strokeStyle = 'rgba(0,255,255,0.8)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(0, frontY - 1);
-  ctx.lineTo(W, frontY - 1);
+  ctx.moveTo(0, groundY);
+  ctx.lineTo(W, groundY);
   ctx.stroke();
-  /* Pulsing centre dot */
   var pulse = 0.55 + 0.45 * Math.sin(Date.now() / 380);
-  ctx.shadowBlur = 28 * pulse;
+  ctx.shadowBlur = 24 * pulse;
   ctx.fillStyle = 'rgba(0,255,255,' + pulse.toFixed(2) + ')';
   ctx.beginPath();
-  ctx.arc(W / 2, frontY - 1, 4.5, 0, Math.PI * 2);
+  ctx.arc(W / 2, groundY, 4, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
-  /* ── Vignette overlays ──────────────────────────────────────────────── */
-  /* Top fade — past rows fade to black at the horizon */
-  var vigTop = ctx.createLinearGradient(0, 0, 0, H * 0.42);
-  vigTop.addColorStop(0, 'rgba(0,5,16,0.94)');
-  vigTop.addColorStop(1, 'rgba(0,5,16,0)');
+  /* ── Vignette ───────────────────────────────────────────────────────── */
+  var vigTop = ctx.createLinearGradient(0, 0, 0, H * 0.35);
+  vigTop.addColorStop(0, 'rgba(0,8,20,0.85)');
+  vigTop.addColorStop(1, 'rgba(0,8,20,0)');
   ctx.fillStyle = vigTop;
-  ctx.fillRect(0, 0, W, H * 0.42);
+  ctx.fillRect(0, 0, W, H * 0.35);
 
-  /* Side vignettes */
-  var vigL = ctx.createLinearGradient(0, 0, W * 0.055, 0);
-  vigL.addColorStop(0, 'rgba(0,5,16,0.72)');
-  vigL.addColorStop(1, 'rgba(0,5,16,0)');
-  ctx.fillStyle = vigL;
-  ctx.fillRect(0, 0, W * 0.055, H);
+  var vigL = ctx.createLinearGradient(0, 0, W * 0.05, 0);
+  vigL.addColorStop(0, 'rgba(0,8,20,0.7)');
+  vigL.addColorStop(1, 'rgba(0,8,20,0)');
+  ctx.fillStyle = vigL; ctx.fillRect(0, 0, W * 0.05, H);
 
-  var vigR = ctx.createLinearGradient(W, 0, W * 0.945, 0);
-  vigR.addColorStop(0, 'rgba(0,5,16,0.72)');
-  vigR.addColorStop(1, 'rgba(0,5,16,0)');
-  ctx.fillStyle = vigR;
-  ctx.fillRect(W * 0.945, 0, W * 0.055, H);
+  var vigR = ctx.createLinearGradient(W, 0, W * 0.95, 0);
+  vigR.addColorStop(0, 'rgba(0,8,20,0.7)');
+  vigR.addColorStop(1, 'rgba(0,8,20,0)');
+  ctx.fillStyle = vigR; ctx.fillRect(W * 0.95, 0, W * 0.05, H);
 
-  /* ── Frequency labels on front row ─────────────────────────────────── */
+  /* ── Frequency labels on front baseline ────────────────────────────── */
   ctx.save();
-  ctx.fillStyle = 'rgba(0,220,255,0.72)';
+  ctx.fillStyle = 'rgba(0,220,255,0.65)';
   ctx.font = 'bold 11px monospace';
   ctx.textAlign = 'center';
   var labelFreqs = [0, 5, 10, 15, 20, 25, 30];
@@ -519,13 +560,39 @@ function ttRedraw() {
     if (lf < startHz || lf > startHz + spanHz) continue;
     var lfrac = (lf - startHz) / spanHz;
     var lx = vanishX - frontHalfW + lfrac * frontHalfW * 2;
-    ctx.fillText(labelFreqs[li] + ' MHz', lx, H - 6);
+    ctx.fillText(labelFreqs[li] + ' MHz', lx, groundY + 14);
   }
   ctx.restore();
 
-  /* ── Update HUD and scrubber ────────────────────────────────────────── */
   ttUpdateHUD();
   ttDrawScrubber();
+}
+
+/* ── Starfield (static, seeded by canvas size) ──────────────────────────── */
+var ttStars = null;
+var ttStarsW = 0, ttStarsH = 0;
+
+function ttDrawStars(ctx, W, H) {
+  /* Regenerate star positions only when canvas size changes */
+  if (!ttStars || ttStarsW !== W || ttStarsH !== H) {
+    ttStarsW = W; ttStarsH = H;
+    ttStars = [];
+    var rng = 0xdeadbeef;
+    function rand() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (rng >>> 0) / 0xffffffff; }
+    for (var i = 0; i < 120; i++) {
+      ttStars.push({ x: rand() * W, y: rand() * H * 0.45, r: rand() * 1.2 + 0.3, a: rand() * 0.5 + 0.2 });
+    }
+  }
+  ctx.save();
+  for (var si = 0; si < ttStars.length; si++) {
+    var s = ttStars[si];
+    ctx.globalAlpha = s.a;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /* ── HUD update ─────────────────────────────────────────────────────────── */
@@ -562,14 +629,11 @@ function ttDrawScrubber() {
   var W = sc.width, H = sc.height;
   ctx.clearRect(0, 0, W, H);
 
-  /* Background */
   ctx.fillStyle = 'rgba(0,0,0,.65)';
   ctx.fillRect(0, 0, W, H);
 
-  /* Draw the full spectrogram as a miniature strip */
   if (ttBmp) {
     ctx.drawImage(ttBmp, 0, 0, W, H);
-    /* Darken slightly so the playhead stands out */
     ctx.fillStyle = 'rgba(0,0,0,.38)';
     ctx.fillRect(0, 0, W, H);
   }
@@ -579,9 +643,8 @@ function ttDrawScrubber() {
     ctx.fillStyle = 'rgba(255,255,255,.5)';
     ctx.font = '9px monospace';
     ctx.textAlign = 'center';
-    var labelCount = 8;
-    for (var li = 0; li <= labelCount; li++) {
-      var lf = li / labelCount;
+    for (var li = 0; li <= 8; li++) {
+      var lf = li / 8;
       var lrow = Math.round(lf * (ttMeta.row_count - 1));
       var lx = lf * W;
       var rowM = ttMeta.rows[lrow];
@@ -602,15 +665,11 @@ function ttDrawScrubber() {
     ctx.strokeStyle = 'rgba(0,255,255,0.9)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(px, 0);
-    ctx.lineTo(px, H);
+    ctx.moveTo(px, 0); ctx.lineTo(px, H);
     ctx.stroke();
-    /* Triangle handle at top */
     ctx.fillStyle = '#0ff';
     ctx.beginPath();
-    ctx.moveTo(px - 5, 0);
-    ctx.lineTo(px + 5, 0);
-    ctx.lineTo(px, 8);
+    ctx.moveTo(px - 5, 0); ctx.lineTo(px + 5, 0); ctx.lineTo(px, 8);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
@@ -625,42 +684,23 @@ function ttSetupScrubber() {
   function ttScrubSeek(e) {
     if (!ttMeta || ttMeta.row_count === 0) return;
     var rect = sc.getBoundingClientRect();
-    var x = (e.clientX !== undefined ? e.clientX : e.touches[0].clientX) - rect.left;
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var x = clientX - rect.left;
     var frac = Math.max(0, Math.min(1, x / rect.width));
     ttCurrentRow = frac * (ttMeta.row_count - 1);
-    ttLastFrameTs = null; /* reset frame timer to avoid jump */
+    ttLastFrameTs = null;
     ttRedraw();
   }
 
-  sw.addEventListener('mousedown', function(e) {
-    ttScrubDragging = true;
-    ttScrubSeek(e);
-    e.preventDefault();
-  });
-  window.addEventListener('mousemove', function(e) {
-    if (!ttScrubDragging) return;
-    ttScrubSeek(e);
-  });
-  window.addEventListener('mouseup', function() {
-    ttScrubDragging = false;
-  });
-  /* Touch support */
-  sw.addEventListener('touchstart', function(e) {
-    ttScrubDragging = true;
-    ttScrubSeek(e);
-    e.preventDefault();
-  }, { passive: false });
-  sw.addEventListener('touchmove', function(e) {
-    if (!ttScrubDragging) return;
-    ttScrubSeek(e);
-    e.preventDefault();
-  }, { passive: false });
-  sw.addEventListener('touchend', function() {
-    ttScrubDragging = false;
-  });
+  sw.addEventListener('mousedown', function(e) { ttScrubDragging = true; ttScrubSeek(e); e.preventDefault(); });
+  window.addEventListener('mousemove', function(e) { if (ttScrubDragging) ttScrubSeek(e); });
+  window.addEventListener('mouseup', function() { ttScrubDragging = false; });
+  sw.addEventListener('touchstart', function(e) { ttScrubDragging = true; ttScrubSeek(e); e.preventDefault(); }, { passive: false });
+  sw.addEventListener('touchmove', function(e) { if (ttScrubDragging) { ttScrubSeek(e); e.preventDefault(); } }, { passive: false });
+  sw.addEventListener('touchend', function() { ttScrubDragging = false; });
 }
 
-/* ── Hover tooltip on the 3D canvas ────────────────────────────────────── */
+/* ── Hover tooltip ──────────────────────────────────────────────────────── */
 function ttSetupHover() {
   var wrap = document.getElementById('tt-canvas-wrap');
   var c = document.getElementById('tt-canvas');
@@ -672,14 +712,12 @@ function ttSetupHover() {
     var rect = c.getBoundingClientRect();
     var xp = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
 
-    /* Map screen X back to frequency — front row spans full width */
     var startHz = ttMeta.start_freq_hz || 0;
     var spanHz = (ttMeta.end_freq_hz || 30e6) - startHz;
     var hz = startHz + xp * spanHz;
     var mhz = (hz / 1e6).toFixed(4);
     var band = (typeof bandName === 'function') ? bandName(hz) : null;
 
-    /* Current row */
     var row = Math.max(0, Math.min(Math.round(ttCurrentRow), ttMeta.row_count - 1));
     var rowMeta = ttMeta.rows && ttMeta.rows[row];
     var tstr;
@@ -692,7 +730,6 @@ function ttSetupHover() {
              String(row % 60).padStart(2, '0') + ' UTC';
     }
 
-    /* Signal level from pixel on the front row */
     var sig = null;
     if (typeof pxToDb === 'function' && typeof contrastMin !== 'undefined') {
       var px2 = Math.floor(xp * ttReadCtx.canvas.width);
@@ -728,7 +765,6 @@ function ttSetupHover() {
 
 /* ── Keyboard handler ───────────────────────────────────────────────────── */
 function ttKeyHandler(e) {
-  /* Only handle keys when the TT tab is active */
   var panel = document.getElementById('tt-panel');
   if (!panel || panel.style.display === 'none') return;
 
@@ -750,18 +786,18 @@ function ttKeyHandler(e) {
       ttCurrentRow = Math.max(0, ttCurrentRow - 1);
       ttRedraw();
       break;
-    case ']':
-      /* Increase speed */
+    case ']': {
       var speeds = [1, 2, 4, 8, 16];
       var ci = speeds.indexOf(ttSpeedMult);
       if (ci < speeds.length - 1) ttSetSpeed(speeds[ci + 1]);
       break;
-    case '[':
-      /* Decrease speed */
+    }
+    case '[': {
       var speeds2 = [1, 2, 4, 8, 16];
       var ci2 = speeds2.indexOf(ttSpeedMult);
       if (ci2 > 0) ttSetSpeed(speeds2[ci2 - 1]);
       break;
+    }
     case 'Home':
       e.preventDefault();
       ttPause();

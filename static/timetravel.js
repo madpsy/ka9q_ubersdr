@@ -49,6 +49,12 @@ var ttPaletteCanvas = null;
 var ttStars = null;
 var ttStarsW = 0, ttStarsH = 0;
 
+/* Shooting stars */
+var ttShootingStars = [];
+var ttLastShootingStarTime = 0;
+var ttStarLastTs = 0;
+var ttStarRafId = null;
+
 /* ── Speed helpers ──────────────────────────────────────────────────────── */
 function ttRowsPerSec() { return ttBaseRowsPerSec * ttSpeedMult; }
 
@@ -103,6 +109,7 @@ function initTimeTravelTab() {
 
   ttSetupHover();
   ttLoadData();
+  ttStartStarLoop(); /* animate stars immediately, even before data loads */
 }
 
 /* ── Canvas sizing ──────────────────────────────────────────────────────── */
@@ -172,6 +179,7 @@ function ttLoadData() {
       ttDrawScrubber();
       ttRedraw();
       ttSetStatus(ttMeta.row_count + ' rows (shared)');
+      if (!ttIsPlaying) ttStartStarLoop();
     });
     return;
   }
@@ -210,6 +218,7 @@ function ttLoadData() {
         ttDrawScrubber();
         ttRedraw();
         ttSetStatus(ttMeta.row_count + ' rows \u00b7 ' + ttMeta.date);
+        if (!ttIsPlaying) ttStartStarLoop();
       });
     })
     .catch(function(e) { ttSetStatus('Error: ' + e.message); });
@@ -334,6 +343,7 @@ function ttPlay() {
   if (ttMeta && ttCurrentRow >= ttMeta.row_count - 1) ttCurrentRow = 0;
   ttIsPlaying = true;
   ttLastFrameTs = null;
+  ttStopStarLoop(); /* playback RAF loop handles redraws */
   var btn = document.getElementById('tt-play-btn');
   if (btn) {
     btn.textContent = '\u23F8 Pause';
@@ -354,6 +364,23 @@ function ttPause() {
     btn.style.borderColor = 'rgba(0,220,255,.5)';
     btn.style.color = '#0ff';
   }
+  /* Keep star animation running while paused */
+  ttStartStarLoop();
+}
+
+/* ── Star animation loop (runs independently of playback) ───────────────── */
+function ttStartStarLoop() {
+  if (ttStarRafId) return; /* already running */
+  function starFrame(ts) {
+    if (ttIsPlaying) { ttStarRafId = null; return; } /* playback loop takes over */
+    ttStarRafId = requestAnimationFrame(starFrame);
+    ttRedraw();
+  }
+  ttStarRafId = requestAnimationFrame(starFrame);
+}
+
+function ttStopStarLoop() {
+  if (ttStarRafId) { cancelAnimationFrame(ttStarRafId); ttStarRafId = null; }
 }
 
 function ttFrame(ts) {
@@ -713,24 +740,105 @@ function ttRedraw() {
 
 /* ── Starfield ──────────────────────────────────────────────────────────── */
 function ttDrawStars(ctx, W, H) {
+  var now = Date.now();
+
+  /* Rebuild static star field if canvas size changed */
   if (!ttStars || ttStarsW !== W || ttStarsH !== H) {
     ttStarsW = W; ttStarsH = H;
     ttStars = [];
     var rng = 0xdeadbeef;
     function rand() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (rng >>> 0) / 0xffffffff; }
-    for (var i = 0; i < 120; i++) {
-      ttStars.push({ x: rand() * W, y: rand() * H * 0.42, r: rand() * 1.2 + 0.3, a: rand() * 0.5 + 0.2 });
+    /* 300 stars across the sky area (top 45% of canvas) */
+    for (var i = 0; i < 300; i++) {
+      ttStars.push({
+        x: rand() * W,
+        y: rand() * H * 0.45,
+        r: rand() * 1.4 + 0.2,
+        a: rand() * 0.6 + 0.2,
+        /* Twinkle: each star has its own phase and speed */
+        twinklePhase: rand() * Math.PI * 2,
+        twinkleSpeed: rand() * 0.002 + 0.0005,
+        twinkleAmp: rand() * 0.35
+      });
     }
   }
+
   ctx.save();
+
+  /* Draw static stars with per-star twinkle */
   for (var si = 0; si < ttStars.length; si++) {
     var s = ttStars[si];
-    ctx.globalAlpha = s.a;
-    ctx.fillStyle = '#fff';
+    var twinkle = s.a + Math.sin(now * s.twinkleSpeed + s.twinklePhase) * s.twinkleAmp;
+    twinkle = Math.max(0.05, Math.min(1, twinkle));
+    ctx.globalAlpha = twinkle;
+    /* Slightly warm/cool tint for variety */
+    var tint = (si % 5 === 0) ? '#cce8ff' : (si % 7 === 0) ? '#ffe8cc' : '#ffffff';
+    ctx.fillStyle = tint;
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  /* ── Shooting stars ─────────────────────────────────────────────────── */
+  /* Spawn a new shooting star every 2.5–6 seconds */
+  var spawnInterval = 2500 + Math.sin(now * 0.0003) * 1750; /* 2.5–6s */
+  if (now - ttLastShootingStarTime > spawnInterval) {
+    ttLastShootingStarTime = now;
+    /* Start from a random point in the upper-left portion of the sky */
+    var sx = Math.random() * W * 0.8;
+    var sy = Math.random() * H * 0.30;
+    var angle = Math.PI / 6 + Math.random() * Math.PI / 6; /* 30–60° downward */
+    var speed = 400 + Math.random() * 500; /* px/sec */
+    var length = 80 + Math.random() * 120;
+    ttShootingStars.push({
+      x: sx, y: sy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      len: length,
+      life: 1.0,   /* 1.0 = fully alive, fades to 0 */
+      decay: 0.6 + Math.random() * 0.8  /* life units per second */
+    });
+  }
+
+  /* Update and draw shooting stars using real elapsed time */
+  var dt = ttStarLastTs > 0 ? Math.min(0.1, (now - ttStarLastTs) / 1000) : 0.016;
+  ttStarLastTs = now;
+  for (var shi = ttShootingStars.length - 1; shi >= 0; shi--) {
+    var ss = ttShootingStars[shi];
+    ss.x += ss.vx * dt;
+    ss.y += ss.vy * dt;
+    ss.life -= ss.decay * dt;
+
+    if (ss.life <= 0 || ss.x > W + 50 || ss.y > H * 0.5) {
+      ttShootingStars.splice(shi, 1);
+      continue;
+    }
+
+    /* Draw as a glowing line with a bright head and fading tail */
+    var tailX = ss.x - (ss.vx / Math.sqrt(ss.vx * ss.vx + ss.vy * ss.vy)) * ss.len;
+    var tailY = ss.y - (ss.vy / Math.sqrt(ss.vx * ss.vx + ss.vy * ss.vy)) * ss.len;
+
+    var grad = ctx.createLinearGradient(tailX, tailY, ss.x, ss.y);
+    grad.addColorStop(0, 'rgba(255,255,255,0)');
+    grad.addColorStop(0.7, 'rgba(200,230,255,' + (ss.life * 0.5).toFixed(3) + ')');
+    grad.addColorStop(1, 'rgba(255,255,255,' + ss.life.toFixed(3) + ')');
+
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(tailX, tailY);
+    ctx.lineTo(ss.x, ss.y);
+    ctx.stroke();
+
+    /* Bright head glow */
+    ctx.globalAlpha = ss.life * 0.9;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(ss.x, ss.y, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.restore();
 }
 

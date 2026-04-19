@@ -1686,7 +1686,9 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 	}
 
 	// needsRerender is true whenever we cannot serve the pre-cached PNG as-is.
-	needsRerender := requestedPalette != spectrogramDefaultPalette || dbRangeExplicit
+	// wideband-hf requires a frequency crop (renderStartBin > 0), so it always
+	// needs a re-render from raw data — the cached PNG covers the full 0–30 MHz.
+	needsRerender := requestedPalette != spectrogramDefaultPalette || dbRangeExplicit || renderStartBin > 0
 
 	if dateStr == "" || dateStr == today {
 		var pngBytes []byte

@@ -278,7 +278,15 @@ function ttBuildCache(onDone) {
           samples[si] = g / 255;
         }
       }
-      ttSampleCache[row] = samples;
+
+      /* Mark entirely-zero rows (missing data / recording gaps) as null.
+         The renderer already skips null entries, so gap rows become
+         transparent — no red "missing data" line is drawn. */
+      var allZero = true;
+      for (var zi = 0; zi < TT_SAMPLES; zi++) {
+        if (samples[zi] > 0) { allZero = false; break; }
+      }
+      ttSampleCache[row] = allZero ? null : samples;
     }
 
     if (row < totalRows) {
@@ -525,27 +533,67 @@ function ttRedraw() {
 
     ctx.restore();
 
-    /* ── Band overlays ──────────────────────────────────────────────── */
-    if (doBands && typeof BANDS !== 'undefined') {
-      ctx.save();
-      ctx.globalAlpha = fogAlpha * 0.10;
-      var bandColors = [
-        'rgba(255,200,0,1)', 'rgba(0,200,255,1)', 'rgba(0,255,120,1)',
-        'rgba(255,80,200,1)', 'rgba(255,140,0,1)', 'rgba(100,180,255,1)',
-        'rgba(180,255,80,1)', 'rgba(255,80,80,1)'
-      ];
-      for (var bi = 0; bi < BANDS.length; bi++) {
-        var bf0 = (BANDS[bi][0] - startHz) / spanHz;
-        var bf1 = (BANDS[bi][1] - startHz) / spanHz;
-        if (bf1 < 0 || bf0 > 1) continue;
-        bf0 = Math.max(0, bf0); bf1 = Math.min(1, bf1);
-        var bx0 = xL + bf0 * rowW;
-        var bx1 = xL + bf1 * rowW;
-        ctx.fillStyle = bandColors[bi % bandColors.length];
-        ctx.fillRect(bx0, baseY - peakH * 1.05, bx1 - bx0, peakH * 1.05);
-      }
-      ctx.restore();
+  }
+
+  /* ── Band overlay curtains (drawn ONCE after all rows) ──────────────── */
+  /* Each band is a perspective-projected trapezoid spanning the full depth,
+     drawn as a very faint tinted "curtain" receding to the vanishing point.
+     Alpha is kept very low so it's a subtle tint, not a solid column. */
+  if (doBands && typeof BANDS !== 'undefined') {
+    var bandColors = [
+      'rgba(255,200,0,1)', 'rgba(0,200,255,1)', 'rgba(0,255,120,1)',
+      'rgba(255,80,200,1)', 'rgba(255,140,0,1)', 'rgba(100,180,255,1)',
+      'rgba(180,255,80,1)', 'rgba(255,80,80,1)'
+    ];
+    /* Front row geometry (d=0) */
+    var frontWFrac = 1.0; /* Math.pow(1-0, 1.3) = 1 */
+    var frontXL = vanishX - frontHalfW * frontWFrac;
+    var frontXR = vanishX + frontHalfW * frontWFrac;
+    var frontRowW = frontXR - frontXL;
+
+    ctx.save();
+    ctx.globalAlpha = 0.07;
+    for (var bi = 0; bi < BANDS.length; bi++) {
+      var bf0 = (BANDS[bi][0] - startHz) / spanHz;
+      var bf1 = (BANDS[bi][1] - startHz) / spanHz;
+      if (bf1 < 0 || bf0 > 1) continue;
+      bf0 = Math.max(0, bf0); bf1 = Math.min(1, bf1);
+
+      /* Front edge X positions */
+      var bFrontX0 = frontXL + bf0 * frontRowW;
+      var bFrontX1 = frontXL + bf1 * frontRowW;
+
+      /* Back edge converges toward vanishing point */
+      /* At d=1 (full depth), wFrac = Math.pow(0, 1.3) = 0, so back edge = vanishX */
+      /* We use the actual back depth fraction */
+      var backD = Math.min(1, depthRows / depthRows); /* = 1 */
+      var backWFrac = Math.pow(1 - backD, 1.3); /* ≈ 0 */
+      var backXL2 = vanishX - frontHalfW * backWFrac;
+      var backRowW2 = (vanishX + frontHalfW * backWFrac) - backXL2;
+      var bBackX0 = backXL2 + bf0 * backRowW2;
+      var bBackX1 = backXL2 + bf1 * backRowW2;
+      var backY = groundY - (groundY - vanishY) * 1.0;
+
+      ctx.fillStyle = bandColors[bi % bandColors.length];
+      ctx.beginPath();
+      ctx.moveTo(bFrontX0, groundY);
+      ctx.lineTo(bFrontX1, groundY);
+      ctx.lineTo(bBackX1, backY);
+      ctx.lineTo(bBackX0, backY);
+      ctx.closePath();
+      ctx.fill();
+
+      /* Also draw a thin vertical line at the band edges for definition */
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = bandColors[bi % bandColors.length];
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bFrontX0, groundY); ctx.lineTo(bBackX0, backY);
+      ctx.moveTo(bFrontX1, groundY); ctx.lineTo(bBackX1, backY);
+      ctx.stroke();
+      ctx.globalAlpha = 0.07;
     }
+    ctx.restore();
   }
 
   /* ── NOW edge glow ──────────────────────────────────────────────────── */
@@ -581,17 +629,31 @@ function ttRedraw() {
   ctx.fillStyle = vigR; ctx.fillRect(W * 0.95, 0, W * 0.05, H);
 
   /* ── Frequency labels ───────────────────────────────────────────────── */
+  /* Auto-pick a step size that gives ~5-8 labels across the visible span */
   ctx.save();
   ctx.fillStyle = 'rgba(0,220,255,0.65)';
   ctx.font = 'bold 11px monospace';
   ctx.textAlign = 'center';
-  var labelFreqs = [0, 5, 10, 15, 20, 25, 30];
-  for (var li = 0; li < labelFreqs.length; li++) {
-    var lf = labelFreqs[li] * 1e6;
-    if (lf < startHz || lf > startHz + spanHz) continue;
+
+  var endHz = startHz + spanHz;
+  /* Choose a nice round step: aim for ~6 divisions */
+  var rawStep = spanHz / 6;
+  var niceSteps = [100e3, 200e3, 250e3, 500e3, 1e6, 2e6, 2.5e6, 5e6, 10e6];
+  var labelStep = niceSteps[niceSteps.length - 1];
+  for (var ni = 0; ni < niceSteps.length; ni++) {
+    if (niceSteps[ni] >= rawStep) { labelStep = niceSteps[ni]; break; }
+  }
+  /* Format: kHz when span < 2 MHz, MHz otherwise */
+  var useKHz = spanHz < 2e6;
+  var firstTick = Math.ceil(startHz / labelStep) * labelStep;
+  for (var lf = firstTick; lf <= endHz + 1; lf += labelStep) {
     var lfrac = (lf - startHz) / spanHz;
+    if (lfrac < 0 || lfrac > 1) continue;
     var lx = vanishX - frontHalfW + lfrac * frontHalfW * 2;
-    ctx.fillText(labelFreqs[li] + ' MHz', lx, groundY + 14);
+    var labelStr = useKHz
+      ? (Math.round(lf / 1e3)) + ' kHz'
+      : (Math.round(lf / 1e6 * 10) / 10) + ' MHz';
+    ctx.fillText(labelStr, lx, groundY + 14);
   }
   ctx.restore();
 

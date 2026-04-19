@@ -110,6 +110,11 @@ function initTimeTravelTab() {
   if (ttInited) return;
   ttInited = true;
 
+  /* Read TT-specific URL params: ?ttdate=YYYY-MM-DD and ?ttband=<band> */
+  var _ttParams = new URLSearchParams(window.location.search);
+  var urlTtDate = _ttParams.get('ttdate') || '';
+  var urlTtBand = _ttParams.get('ttband') || '';
+
   var src = document.getElementById('dsel');
   var dst = document.getElementById('tt-dsel');
   if (src && dst) {
@@ -120,7 +125,12 @@ function initTimeTravelTab() {
       o.textContent = src.options[i].textContent;
       dst.appendChild(o);
     }
-    dst.value = src.value;
+    /* URL param takes priority, then fall back to main selector value */
+    if (urlTtDate && dst.querySelector('option[value="' + urlTtDate + '"]')) {
+      dst.value = urlTtDate;
+    } else {
+      dst.value = src.value;
+    }
   }
 
   var bsrc = document.getElementById('bsel');
@@ -131,7 +141,9 @@ function initTimeTravelTab() {
       var bo = document.createElement('option');
       bo.value = bsrc.options[j].value;
       bo.textContent = bsrc.options[j].textContent;
-      if (bsrc.options[j].value === (typeof urlBand !== 'undefined' ? urlBand : 'wideband')) bo.selected = true;
+      /* URL param takes priority, then fall back to urlBand */
+      var defaultBand = urlTtBand || (typeof urlBand !== 'undefined' ? urlBand : 'wideband');
+      if (bsrc.options[j].value === defaultBand) bo.selected = true;
       bdst.appendChild(bo);
     }
     ttBand = bdst.value || 'wideband';
@@ -147,6 +159,7 @@ function initTimeTravelTab() {
   }
 
   ttSetupHover();
+  ttUpdateUrlParams(); /* stamp current date+band into URL on first open */
   ttLoadData();
   ttStartStarLoop(); /* animate stars immediately, even before data loads */
 }
@@ -182,6 +195,7 @@ function ttResizeCanvas() {
 /* ── Data loading ───────────────────────────────────────────────────────── */
 function ttOnDateChange() {
   ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null;
+  ttUpdateUrlParams();
   ttLoadData();
 }
 
@@ -189,7 +203,30 @@ function ttOnBandChange() {
   var bdst = document.getElementById('tt-bsel');
   ttBand = bdst ? bdst.value : 'wideband';
   ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null;
+  ttUpdateUrlParams();
   ttLoadData();
+}
+
+/* Push current TT date + band into the URL without reloading the page */
+function ttUpdateUrlParams() {
+  if (typeof history === 'undefined' || !history.replaceState) return;
+  var p = new URLSearchParams(window.location.search);
+  var dsel = document.getElementById('tt-dsel');
+  var ds = dsel ? dsel.value : '';
+  if (ds && ds !== 'rolling-24h') {
+    p.set('ttdate', ds);
+  } else {
+    p.delete('ttdate');
+  }
+  if (ttBand && ttBand !== 'wideband') {
+    p.set('ttband', ttBand);
+  } else {
+    p.delete('ttband');
+  }
+  /* Always keep tab=tt while we're on this tab */
+  p.set('tab', 'tt');
+  var qs = p.toString();
+  history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
 }
 
 function ttOnDepthChange() {

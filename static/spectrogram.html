@@ -665,6 +665,7 @@ function loadPrefs(){
 var _urlParams=new URLSearchParams(window.location.search);
 var urlBand=_urlParams.get('band')||'wideband';
 var urlDate=_urlParams.get('date')||''; /* '' = rolling-24h (default) */
+var urlTab=_urlParams.get('tab')||''; /* 'tt' opens Time Travel directly */
 
 /* Called when the band selector changes — navigate to new URL with band param */
 function onBandChange(){
@@ -909,6 +910,9 @@ function clampZoom(rect){
     })
     .catch(function(e){showErr('Failed to load date list: '+escHtml(e.message));});
 })();
+
+/* If ?tab=tt was in the URL, open the Time Travel tab immediately */
+if(urlTab==='tt'){switchTab('tt');}
 
 /* Navigate to the previous (-1=older) or next (+1=newer) date.
    availableDates is newest-first, so newer=lower index, older=higher index. */
@@ -1495,6 +1499,13 @@ function switchTab(tab){
   if(isTt)initTimeTravelTab();
   /* Pause Time Travel playback when switching away */
   if(!isTt&&ttIsPlaying)ttPause();
+  /* Keep ?tab= in URL so the link is shareable */
+  if(typeof history!=='undefined'&&history.replaceState){
+    var p=new URLSearchParams(window.location.search);
+    if(isTt){p.set('tab','tt');}else{p.delete('tab');}
+    var qs=p.toString();
+    history.replaceState(null,'',window.location.pathname+(qs?'?'+qs:''));
+  }
 }
 
 /* ── Gallery ─────────────────────────────────────────────────────────────── */

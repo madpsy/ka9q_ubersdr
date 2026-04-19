@@ -20,7 +20,7 @@
    ─────────────────────────────────────────────────────────────────────── */
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
-var TT_SAMPLES = 160;        /* frequency sample points per row */
+var TT_SAMPLES = 160;        /* fallback sample count — overridden by actual imgW at cache build time */
 var TT_HEIGHT_SCALE = 0.40;  /* peak height as fraction of (groundY - vanishY) */
 var TT_MIN_WFRAC = 0.30;     /* width fraction at maximum depth (front=1.0, back=TT_MIN_WFRAC, linear) */
 
@@ -39,8 +39,10 @@ var ttScrubDragging = false;
 var ttKeyHandlerAttached = false;
 var ttBand = 'wideband';
 
-/* Pre-computed sample cache: ttSampleCache[rowIdx] = Float32Array(TT_SAMPLES) */
+/* Pre-computed sample cache: ttSampleCache[rowIdx] = Float32Array(ttSampleCount) */
 var ttSampleCache = null;
+/* Actual number of samples per row — set to imgW when cache is built */
+var ttSampleCount = TT_SAMPLES;
 
 /* Pre-built gradient canvas for ridge colouring (palette strip) */
 var ttPaletteCanvas = null;
@@ -256,14 +258,17 @@ function ttBuildCache(onDone) {
     var end = Math.min(row + CHUNK, totalRows);
     var srcRowH = imgH / totalRows;
 
+    /* Use the full image width as sample resolution — set once before the loop */
+    ttSampleCount = imgW;
+
     for (; row < end; row++) {
-      var samples = new Float32Array(TT_SAMPLES);
+      var samples = new Float32Array(ttSampleCount);
       var srcY = Math.floor(row * srcRowH + srcRowH * 0.5);
       if (srcY >= imgH) srcY = imgH - 1;
       var rowBase = srcY * imgW * 4;
 
-      for (var si = 0; si < TT_SAMPLES; si++) {
-        var xFrac = si / (TT_SAMPLES - 1);
+      for (var si = 0; si < ttSampleCount; si++) {
+        var xFrac = si / (ttSampleCount - 1);
         var px = Math.min(Math.floor(xFrac * imgW), imgW - 1);
         var base = rowBase + px * 4;
         var r = allPixels[base], g = allPixels[base + 1], b = allPixels[base + 2];
@@ -296,23 +301,23 @@ function ttBuildCache(onDone) {
       /* Mark gap rows as null.
          Gap rows in the spectrogram image are uniformly the noise-floor colour
          (dark blue) — NOT pure black. Pure-black sentinel detection misses them.
-         Instead: compute the variance of the 160 sample values. A real data row
+         Instead: compute the variance of the sample values. A real data row
          has signal variation; a gap/missing row is nearly flat (all samples map
          to the same noise-floor LUT index → variance ≈ 0).
          Also handle the legacy pure-black sentinel just in case. */
       var sentinelCount = 0;
       var sum = 0, sumSq = 0;
-      for (var zi = 0; zi < TT_SAMPLES; zi++) {
+      for (var zi = 0; zi < ttSampleCount; zi++) {
         if (samples[zi] < 0) { sentinelCount++; samples[zi] = 1.0; }
         sum += samples[zi];
         sumSq += samples[zi] * samples[zi];
       }
-      var mean = sum / TT_SAMPLES;
-      var variance = sumSq / TT_SAMPLES - mean * mean;
+      var mean = sum / ttSampleCount;
+      var variance = sumSq / ttSampleCount - mean * mean;
       /* Gap row criteria:
          - More than 30% pure-black sentinels, OR
          - Variance < 0.0004 (std-dev < 0.02) — row is essentially flat/uniform */
-      var isGap = (sentinelCount > TT_SAMPLES * 0.30) || (variance < 0.0004);
+      var isGap = (sentinelCount > ttSampleCount * 0.30) || (variance < 0.0004);
       ttSampleCache[row] = isGap ? null : samples;
     }
 
@@ -537,10 +542,11 @@ function ttRedraw() {
     allValid[di2] = !!(samples2 && rowW2 >= 1);
 
     if (samples2 && rowW2 >= 1) {
-      var px2 = new Float32Array(TT_SAMPLES);
-      var py2 = new Float32Array(TT_SAMPLES);
-      for (var si2 = 0; si2 < TT_SAMPLES; si2++) {
-        px2[si2] = xL2 + (si2 / (TT_SAMPLES - 1)) * rowW2;
+      var nSamples2 = samples2.length;
+      var px2 = new Float32Array(nSamples2);
+      var py2 = new Float32Array(nSamples2);
+      for (var si2 = 0; si2 < nSamples2; si2++) {
+        px2[si2] = xL2 + (si2 / (nSamples2 - 1)) * rowW2;
         py2[si2] = bY2 - samples2[si2] * peakH2;
       }
       allPtsX[di2] = px2;
@@ -609,7 +615,8 @@ function ttRedraw() {
     }
     ctx.beginPath();
     ctx.moveTo(xL, groundY);
-    for (var pi = 0; pi < TT_SAMPLES; pi++) {
+    var nPts = ptsX.length;
+    for (var pi = 0; pi < nPts; pi++) {
       ctx.lineTo(ptsX[pi], ptsY[pi]);
     }
     ctx.lineTo(xR, groundY);
@@ -634,7 +641,7 @@ function ttRedraw() {
       }
       ctx.beginPath();
       ctx.moveTo(ptsX[0], ptsY[0]);
-      for (var ri = 1; ri < TT_SAMPLES; ri++) {
+      for (var ri = 1; ri < nPts; ri++) {
         ctx.lineTo(ptsX[ri], ptsY[ri]);
       }
       ctx.strokeStyle = ridgeGrad;
@@ -1010,7 +1017,7 @@ function ttSetupHover() {
     var sig = null;
     var samples = ttSampleCache[row];
     if (samples) {
-      var si2 = Math.min(TT_SAMPLES - 1, Math.round(xp * (TT_SAMPLES - 1)));
+      var si2 = Math.min(samples.length - 1, Math.round(xp * (samples.length - 1)));
       var normVal = samples[si2];
       var dbMin = ttMeta.db_min, dbMax = ttMeta.db_max;
       if (typeof contrastUserChanged !== 'undefined' && contrastUserChanged) {

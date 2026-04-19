@@ -73,6 +73,11 @@ var ttGradVigTop = null;
 var ttGradVigL   = null;
 var ttGradVigR   = null;
 
+/* OffscreenCanvas for mountain rendering — avoids Firefox display-list accumulation.
+   All drawing goes here; a single drawImage blits it to the visible canvas. */
+var ttOffscreen = null;
+var ttOffCtx    = null;
+
 /* Cached LUT colour strings — rebuilt only when palette/LUT changes.
    ttLutRGB[i] = 'r,g,b' string; avoids per-frame string allocation. */
 var ttLutRGB = null;
@@ -162,6 +167,7 @@ function ttResizeCanvas() {
     ttRowGradCache = [];
     ttLutRGB = null;
     ttGradSky = null; ttGradVigTop = null; ttGradVigL = null; ttGradVigR = null;
+    ttOffscreen = null; ttOffCtx = null; /* resize offscreen on next draw */
   }
   var sc = document.getElementById('tt-scrubber');
   var sw = document.getElementById('tt-scrubber-wrap');
@@ -461,12 +467,29 @@ var _ttDbgT = [0, 0, 0, 0, 0]; /* sky, stars, precompute, draw, vignette */
 function ttRedraw() {
   var c = document.getElementById('tt-canvas');
   if (!c) return;
-  var ctx = c.getContext('2d');
-  if (!ctx) return;
+  var mainCtx = c.getContext('2d');
+  if (!mainCtx) return;
 
   var _t0 = performance.now();
 
   var W = c.width, H = c.height;
+
+  /* ── OffscreenCanvas setup ──────────────────────────────────────────── */
+  /* All drawing goes to an offscreen canvas; a single drawImage blits it
+     to the visible canvas. This avoids Firefox's canvas display-list
+     accumulation bug that causes exponential slowdown with gradient fills. */
+  var useOffscreen = (typeof OffscreenCanvas !== 'undefined');
+  if (useOffscreen) {
+    if (!ttOffscreen || ttOffscreen.width !== W || ttOffscreen.height !== H) {
+      ttOffscreen = new OffscreenCanvas(W, H);
+      ttOffCtx = ttOffscreen.getContext('2d');
+      /* Gradient objects are context-bound — must rebuild when context changes */
+      ttRowGradCache = [];
+      ttGradSky = null; ttGradVigTop = null; ttGradVigL = null; ttGradVigR = null;
+    }
+  }
+  var ctx = useOffscreen ? ttOffCtx : mainCtx;
+
   ctx.clearRect(0, 0, W, H);
 
   /* Sky gradient — cached; only rebuilt on canvas resize */
@@ -843,6 +866,13 @@ function ttRedraw() {
   ctx.restore();
 
   var _t6 = performance.now();
+
+  /* ── Blit offscreen canvas to visible canvas ────────────────────────── */
+  if (useOffscreen && ttOffscreen) {
+    mainCtx.clearRect(0, 0, W, H);
+    mainCtx.drawImage(ttOffscreen, 0, 0);
+  }
+
   ttUpdateHUD();
   ttDrawScrubber();
 

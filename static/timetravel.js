@@ -556,10 +556,10 @@ function ttRedraw() {
        lineWidth is set to cover that gap so rows appear continuous. */
     if (lut && rowW > 1) {
       var topY = baseY - peakH;
-      /* Pixel gap between this row's baseY and the next closer row's baseY */
-      var rowGap = (groundY - vanishY) / depthRows;
-      /* Line width: enough to bridge the gap, scaled by wFrac for perspective */
-      var lineW = Math.max(2, (rowGap + 1) * wFrac);
+      /* Line width = pixel gap between consecutive row baseY values + 1px overlap.
+         This exactly bridges the dark gap between rows without being visually thick. */
+      var rowGapPx = (groundY - vanishY) / depthRows;
+      var lineW = Math.max(1.5, rowGapPx + 1);
 
       var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
       var GSTOPS = 16;

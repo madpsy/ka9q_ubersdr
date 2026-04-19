@@ -93,6 +93,31 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 .tt-play-btn{background:rgba(0,220,255,.2);border:1px solid rgba(0,220,255,.5);color:#0ff;border-radius:6px;padding:6px 18px;font-size:1em;cursor:pointer;font-weight:700;transition:background .12s;min-width:80px}
 .tt-play-btn:hover{background:rgba(0,220,255,.35)}
 .tt-info{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:.8em;opacity:.8;line-height:1.65}
+/* ── Time Travel mobile overrides ───────────────────────────────────────── */
+@media(max-width:600px){
+  body{padding:10px}
+  h1{font-size:1.3em}
+  .tab-btn{padding:7px 10px;font-size:.78em}
+  .tt-controls{padding:10px 12px;gap:8px}
+  .tt-controls>div,.tt-controls>label{flex:0 0 auto}
+  /* Stack play + speed on one row, selectors on another */
+  .tt-play-btn{padding:9px 20px;font-size:1em;min-width:90px;min-height:44px}
+  .tt-speed-btn{padding:6px 8px;font-size:.78em;min-height:36px;min-width:36px}
+  /* HUD: smaller font, move to top-left so it doesn't clash with speed buttons */
+  .tt-hud{font-size:1.1em;top:8px;right:10px}
+  .tt-hud-date{font-size:.72em;top:36px;right:10px}
+  /* Scrubber: taller touch target */
+  .tt-scrubber-wrap{height:52px}
+  /* Info banner: hide on mobile to save space */
+  .tt-info{display:none}
+  /* Nav links: smaller */
+  .container>div[style*="text-align:center"] a{padding:6px 10px;font-size:.78em}
+}
+@media(max-width:400px){
+  .tt-hud{font-size:.95em;top:6px;right:8px}
+  .tt-hud-date{top:30px;right:8px;font-size:.65em}
+  .tt-speed-btn{padding:5px 6px;font-size:.72em;min-width:30px}
+}
 /* Time Slice */
 #ts-panel{display:none}
 .ts-add-bar{background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:10px;padding:12px 18px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}

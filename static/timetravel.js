@@ -209,7 +209,31 @@ function ttResizeCanvas() {
   var oc = document.getElementById('tt-overlay');
   if (!wrap || !c) return;
   var w = wrap.getBoundingClientRect().width || 800;
-  var h = Math.min(Math.round(w * 0.54), 600);
+
+  /* On narrow (portrait phone) screens use a taller aspect ratio so the 3D
+     scene fills more of the viewport height.  Breakpoints match the CSS media
+     queries in spectrogram.html:
+       ≤ 400 px  → 0.75 (4:3-ish portrait)
+       ≤ 600 px  → 0.65 (slightly taller than widescreen)
+       > 600 px  → 0.54 (original 16:9-ish desktop ratio)
+     Cap at 600 px on desktop, 480 px on tablet, 360 px on phone so the canvas
+     never pushes the controls off-screen. */
+  var aspectRatio, maxH;
+  if (w <= 400) {
+    aspectRatio = 0.75;
+    maxH = 320;
+  } else if (w <= 600) {
+    aspectRatio = 0.65;
+    maxH = 420;
+  } else {
+    aspectRatio = 0.54;
+    maxH = 600;
+  }
+  var h = Math.min(Math.round(w * aspectRatio), maxH);
+
+  /* Scrubber height matches the CSS (52 px on mobile, 44 px otherwise) */
+  var scrubH = w <= 600 ? 52 : 44;
+
   if (c.width !== Math.round(w) || c.height !== h) {
     c.width = Math.round(w);
     c.height = h;
@@ -225,7 +249,7 @@ function ttResizeCanvas() {
   if (sc && sw) {
     var sw2 = sw.getBoundingClientRect().width || 800;
     sc.width = Math.round(sw2);
-    sc.height = 44;
+    sc.height = scrubH;
   }
   if (ttBmp && ttMeta) ttRedraw();
 }
@@ -574,7 +598,8 @@ function ttDrawOverlay() {
     octx.shadowBlur = 40 * pulse;
     octx.fillText(String(digit), cx, cy);
 
-    octx.font = 'bold ' + Math.round(r * 0.28) + 'px monospace';
+    var cdSubFontSz = Math.max(10, Math.round(r * 0.28));
+    octx.font = 'bold ' + cdSubFontSz + 'px monospace';
     octx.textBaseline = 'top';
     octx.shadowBlur = 6;
     octx.fillStyle = 'rgba(0,255,200,0.6)';
@@ -626,8 +651,9 @@ function ttDrawOverlay() {
   octx.textBaseline = 'middle';
   octx.fillText('\uD83D\uDE80', cx, cy - r * 0.05);
 
-  /* "ENGAGE TEMPORAL DRIVE" label below */
-  octx.font = 'bold ' + Math.round(r * 0.28) + 'px monospace';
+  /* "ENGAGE TEMPORAL DRIVE" label below — clamp font so it's readable on mobile */
+  var engageFontSz = Math.max(10, Math.round(r * 0.28));
+  octx.font = 'bold ' + engageFontSz + 'px monospace';
   octx.textBaseline = 'top';
   octx.fillStyle = 'rgba(0,255,200,' + (0.5 + 0.5 * pulse).toFixed(2) + ')';
   octx.shadowColor = '#0fc';
@@ -776,14 +802,15 @@ function ttRedraw() {
       ctx.save();
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(0,255,180,0.9)';
-      ctx.font = 'bold 15px monospace';
+      var loadFontSz = W <= 400 ? 11 : W <= 600 ? 13 : 15;
+      ctx.font = 'bold ' + loadFontSz + 'px monospace';
       ctx.shadowColor = '#0fb';
       ctx.shadowBlur = 10;
       ctx.fillText('INITIALISING TEMPORAL ARRAY  ' + dots, cx, textY);
       ctx.shadowBlur = 0;
       ctx.fillStyle = 'rgba(0,200,150,0.55)';
-      ctx.font = '11px monospace';
-      ctx.fillText(msgs[msgIdx], cx, textY + 22);
+      ctx.font = (loadFontSz - 4) + 'px monospace';
+      ctx.fillText(msgs[msgIdx], cx, textY + loadFontSz + 6);
       ctx.restore();
     } else {
       /* No data state */
@@ -807,9 +834,12 @@ function ttRedraw() {
   /* ── Perspective parameters ─────────────────────────────────────────── */
   var vanishX = W * 0.5;
   var vanishY = H * 0.20;
-  /* groundY leaves ~44px at the bottom for the scrubber overlay + 20px for freq labels */
-  var scrubberH = 44;
-  var groundY = H - scrubberH - 20;
+  /* groundY leaves room at the bottom for the scrubber overlay + freq labels.
+     On narrow screens the scrubber is 52 px tall (matches CSS media query). */
+  var scrubberH = W <= 600 ? 52 : 44;
+  /* Freq label row: scale with canvas width so it's readable on mobile */
+  var freqLabelH = W <= 400 ? 14 : 20;
+  var groundY = H - scrubberH - freqLabelH;
   var frontHalfW = W * 0.5;
   var maxPeakH = (groundY - vanishY) * TT_HEIGHT_SCALE;
 
@@ -1111,7 +1141,9 @@ function ttRedraw() {
   /* ── Time axis labels (left + right sides) ─────────────────────────── */
   if (ttMeta && ttMeta.rows && ttMeta.rows.length > 0) {
     ctx.save();
-    ctx.font = 'bold 13px monospace';
+    /* Scale font with canvas width: smaller on narrow (mobile) canvases */
+    var tlFontSz = W <= 400 ? 10 : W <= 600 ? 11 : 13;
+    ctx.font = 'bold ' + tlFontSz + 'px monospace';
     ctx.textBaseline = 'middle';
 
     /* Pick interval: aim for ~6-8 labels across the visible depth */
@@ -1174,7 +1206,8 @@ function ttRedraw() {
   /* Auto-pick a step size that gives ~5-8 labels across the visible span */
   ctx.save();
   ctx.fillStyle = 'rgba(0,220,255,0.65)';
-  ctx.font = 'bold 11px monospace';
+  var freqFontSz = W <= 400 ? 8 : W <= 600 ? 9 : 11;
+  ctx.font = 'bold ' + freqFontSz + 'px monospace';
   ctx.textAlign = 'center';
 
   var endHz = startHz + spanHz;
@@ -1198,7 +1231,7 @@ function ttRedraw() {
     var labelStr = useKHz
       ? (Math.round(lf / 1e3)) + ' kHz'
       : (Math.round(lf / 1e6 * 10) / 10) + ' MHz';
-    ctx.fillText(labelStr, lx, groundY + 14);
+    ctx.fillText(labelStr, lx, groundY + Math.round(freqLabelH * 0.7));
   }
   ctx.restore();
 
@@ -1374,7 +1407,9 @@ function ttDrawScrubber() {
 
   if (ttMeta && ttMeta.rows && ttMeta.rows.length > 0) {
     ctx.fillStyle = 'rgba(255,255,255,.5)';
-    ctx.font = '9px monospace';
+    /* Scale scrubber time labels with scrubber width */
+    var scrubFontSz = W <= 400 ? 7 : W <= 600 ? 8 : 9;
+    ctx.font = scrubFontSz + 'px monospace';
     ctx.textAlign = 'center';
     for (var li = 0; li <= 8; li++) {
       var lf = li / 8;

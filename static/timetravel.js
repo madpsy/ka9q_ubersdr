@@ -273,7 +273,7 @@ function ttResizeCanvas() {
 
 /* ── Data loading ───────────────────────────────────────────────────────── */
 function ttOnDateChange() {
-  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null;
+  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null; ttHasStarted = false;
   ttUpdateUrlParams();
   ttLoadData();
 }
@@ -281,7 +281,7 @@ function ttOnDateChange() {
 function ttOnBandChange() {
   var bdst = document.getElementById('tt-bsel');
   ttBand = bdst ? bdst.value : 'wideband';
-  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null;
+  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null; ttHasStarted = false;
   ttUpdateUrlParams();
   ttLoadData();
 }
@@ -540,6 +540,8 @@ function ttTogglePlay() {
     ttDrawOverlay();
     return;
   }
+  /* Skip countdown when resuming from pause — only do it on first play */
+  if (ttHasStarted) { ttPlay(); return; }
   ttStartCountdown();
 }
 
@@ -547,6 +549,7 @@ function ttPlay() {
   if (!ttSampleCache) { ttSetStatus('Cache not ready yet.'); return; }
   if (ttMeta && ttCurrentRow >= ttMeta.row_count - 1) ttCurrentRow = 0;
   ttIsPlaying = true;
+  ttHasStarted = true;
   ttLastFrameTs = null;
   ttStopStarLoop(); /* playback RAF loop handles redraws */
   var btn = document.getElementById('tt-play-btn');

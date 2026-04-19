@@ -1471,7 +1471,12 @@ function downloadCanvas(){
     var url=URL.createObjectURL(blob);
     var a=document.createElement('a');
     a.href=url;
-    a.download='spectrogram_'+meta.date+'.png';
+    /* Build a descriptive filename: spectrogram_<band>_<date>.png */
+    var dsel=document.getElementById('dsel');
+    var dsVal=dsel?dsel.value:'';
+    var datePart=dsVal==='rolling-24h'?'rolling24h':(dsVal||meta.date||'unknown');
+    var bandPart=(urlBand&&urlBand!=='wideband')?urlBand:'wideband';
+    a.download='spectrogram_'+bandPart+'_'+datePart+'.png';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

@@ -520,33 +520,17 @@ function ttRedraw() {
     var peakH = maxPeakH * wFrac;
     var fogAlpha = wFrac * 0.94 + 0.06;
 
-    /* Get the next closer row's ridge points (di-1), or use groundY baseline */
-    var hasFront = (di > 0 && allValid[di - 1]);
-    var frontPtsX = hasFront ? allPtsX[di - 1] : null;
-    var frontPtsY = hasFront ? allPtsY[di - 1] : null;
-    var frontXL = hasFront ? allXL[di - 1] : allXL[0];
-    var frontXR = hasFront ? allXR[di - 1] : allXR[0];
-    var frontBaseY = hasFront ? allBaseY[di - 1] : groundY;
-
-    /* ── Dark terrain fill: this row's ridge → next row's ridge → close ─
-       Drawn opaque so it fully occludes sky. No gaps between rows. */
+    /* ── Dark terrain fill: ridge down to groundY ──────────────────────
+       Every row fills all the way to the canvas bottom. Painter's algorithm
+       (back-to-front) means each closer row's fill covers the row behind it.
+       This eliminates all gaps — only the ridge line of each row is visible
+       above the fill of the row drawn in front of it. */
     ctx.beginPath();
-    /* Start at front-left corner (next closer row left edge at its baseY or ridge) */
-    if (hasFront) {
-      /* Go along the front row's ridge in reverse (right to left) as the bottom */
-      ctx.moveTo(frontPtsX[TT_SAMPLES - 1], frontPtsY[TT_SAMPLES - 1]);
-      for (var fi = TT_SAMPLES - 2; fi >= 0; fi--) {
-        ctx.lineTo(frontPtsX[fi], frontPtsY[fi]);
-      }
-    } else {
-      ctx.moveTo(frontXR, groundY);
-      ctx.lineTo(frontXL, groundY);
-    }
-    /* Then up and along this row's ridge (left to right) */
-    ctx.lineTo(ptsX[0], ptsY[0]);
-    for (var pi = 1; pi < TT_SAMPLES; pi++) {
+    ctx.moveTo(xL, groundY);
+    for (var pi = 0; pi < TT_SAMPLES; pi++) {
       ctx.lineTo(ptsX[pi], ptsY[pi]);
     }
+    ctx.lineTo(xR, groundY);
     ctx.closePath();
     ctx.fillStyle = '#000810';
     ctx.fill();

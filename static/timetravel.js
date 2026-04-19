@@ -822,6 +822,64 @@ function ttRedraw() {
   }
   ctx.fillStyle = ttGradVigR; ctx.fillRect(W * 0.95, 0, W * 0.05, H);
 
+  /* ── Time axis labels (left + right sides) ─────────────────────────── */
+  if (ttMeta && ttMeta.rows && ttMeta.rows.length > 0) {
+    ctx.save();
+    ctx.font = 'bold 13px monospace';
+    ctx.textBaseline = 'middle';
+
+    /* Pick interval: aim for ~6-8 labels across the visible depth */
+    var tlCandidates = [1, 2, 5, 10, 15, 20, 30, 60];
+    var tlInterval = 60;
+    for (var tli = 0; tli < tlCandidates.length; tli++) {
+      if (depthRows / tlCandidates[tli] <= 8) { tlInterval = tlCandidates[tli]; break; }
+    }
+
+    for (var tldi = 0; tldi < depthRows; tldi++) {
+      var tlRowIdx = frontRow - tldi;
+      if (tlRowIdx < 0 || tlRowIdx >= totalRows) continue;
+      if (tlRowIdx % tlInterval !== 0) continue;
+
+      var tld = tldi / depthRows;
+      var tlbY = groundY - (groundY - vanishY) * tld;
+      var tlwF = 1 - tld * (1 - TT_MIN_WFRAC);
+      var tlxL = vanishX - frontHalfW * tlwF;
+      var tlxR = vanishX + frontHalfW * tlwF;
+
+      /* Fade as rows approach vanishing point */
+      var tlAlpha = Math.min(1, tlwF * 1.5 - 0.15);
+      if (tlAlpha <= 0.05) continue;
+
+      /* Build HH:MM string */
+      var tlRowM = ttMeta.rows[tlRowIdx];
+      var tlStr;
+      if (tlRowM && tlRowM.unix) {
+        var tlDate = new Date(tlRowM.unix * 1000);
+        tlStr = String(tlDate.getUTCHours()).padStart(2, '0') + ':' +
+                String(tlDate.getUTCMinutes()).padStart(2, '0');
+      } else {
+        tlStr = String(Math.floor(tlRowIdx / 60) % 24).padStart(2, '0') + ':' +
+                String(tlRowIdx % 60).padStart(2, '0');
+      }
+
+      ctx.globalAlpha = tlAlpha;
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'right';
+      ctx.fillText(tlStr, tlxL - 5, tlbY);
+      ctx.textAlign = 'left';
+      ctx.fillText(tlStr, tlxR + 5, tlbY);
+
+      /* Small tick at row edge */
+      ctx.strokeStyle = 'rgba(255,255,255,' + (tlAlpha * 0.4).toFixed(2) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(tlxL - 4, tlbY); ctx.lineTo(tlxL, tlbY);
+      ctx.moveTo(tlxR, tlbY);     ctx.lineTo(tlxR + 4, tlbY);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   /* ── Frequency labels ───────────────────────────────────────────────── */
   /* Auto-pick a step size that gives ~5-8 labels across the visible span */
   ctx.save();

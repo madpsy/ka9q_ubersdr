@@ -76,6 +76,23 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 .tab-btn:hover:not(.active){background:rgba(255,255,255,.18)}
 /* Gallery */
 #gallery-view{display:none}
+/* Time Travel */
+#tt-panel{display:none}
+.tt-controls{background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:10px;padding:12px 20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.tt-controls label{font-size:.88em;opacity:.85;margin-right:3px}
+.tt-canvas-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;cursor:crosshair}
+#tt-canvas{display:block;width:100%;image-rendering:pixelated}
+#tt-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.tt-scrubber-wrap{margin-top:10px;position:relative;height:44px;background:rgba(0,0,0,.4);border-radius:6px;overflow:hidden;cursor:pointer}
+#tt-scrubber{display:block;width:100%;height:100%}
+.tt-hud{position:absolute;top:12px;right:16px;font-size:1.6em;font-weight:700;color:#0ff;text-shadow:0 0 12px #0ff,0 0 24px rgba(0,255,255,.4);pointer-events:none;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.tt-hud-date{position:absolute;top:52px;right:16px;font-size:.82em;color:rgba(0,255,255,.6);pointer-events:none;text-shadow:0 0 8px rgba(0,255,255,.3)}
+.tt-speed-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:5px;padding:4px 11px;font-size:.85em;cursor:pointer;transition:background .12s}
+.tt-speed-btn.active{background:rgba(0,220,255,.3);border-color:rgba(0,220,255,.6);color:#0ff;font-weight:700}
+.tt-speed-btn:hover:not(.active){background:rgba(255,255,255,.22)}
+.tt-play-btn{background:rgba(0,220,255,.2);border:1px solid rgba(0,220,255,.5);color:#0ff;border-radius:6px;padding:6px 18px;font-size:1em;cursor:pointer;font-weight:700;transition:background .12s;min-width:80px}
+.tt-play-btn:hover{background:rgba(0,220,255,.35)}
+.tt-info{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:.8em;opacity:.8;line-height:1.65}
 /* Time Slice */
 #ts-panel{display:none}
 .ts-add-bar{background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:10px;padding:12px 18px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -121,6 +138,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button class="tab-btn active" id="tab-sg" onclick="switchTab('sg')">&#x1F4CA; Spectrogram</button>
   <button class="tab-btn" id="tab-gallery" onclick="switchTab('gallery')">&#x1F5BC;&#xFE0F; Gallery</button>
   <button class="tab-btn" id="tab-ts" onclick="switchTab('ts')">&#x1F4C8; Time Slice</button>
+  <button class="tab-btn" id="tab-tt" onclick="switchTab('tt')">&#x23F3; Time Travel</button>
 </div>
 
 <div id="sg-panel">
@@ -346,6 +364,73 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     </details>
   </div>
 </div>
+
+<!-- ── Time Travel panel ─────────────────────────────────────────────────── -->
+<div id="tt-panel">
+  <div class="tt-info">
+    <b>&#x23F3; Time Travel:</b> Fly through 24 hours of spectrum data in a 3D perspective waterfall.
+    0&ndash;30&nbsp;MHz runs left&ndash;right; time recedes into the distance. Use the playback controls or drag the scrubber to navigate.
+    Keyboard: <b>Space</b> play/pause &middot; <b>&#x2190;/&#x2192;</b> step &middot; <b>[/]</b> speed &middot; <b>Home/End</b> jump.
+  </div>
+
+  <!-- Controls bar -->
+  <div class="tt-controls">
+    <!-- Date selector -->
+    <div>
+      <label for="tt-dsel">Date:</label>
+      <select id="tt-dsel" onchange="ttOnDateChange()"></select>
+    </div>
+    <!-- Band selector -->
+    <div>
+      <label for="tt-bsel">Band:</label>
+      <select id="tt-bsel" onchange="ttOnBandChange()"></select>
+    </div>
+    <!-- Play/Pause -->
+    <button class="tt-play-btn" id="tt-play-btn" onclick="ttTogglePlay()">&#x25B6; Play</button>
+    <!-- Speed buttons -->
+    <div style="display:flex;align-items:center;gap:6px">
+      <label style="font-size:.82em;opacity:.7;margin-right:2px">Speed:</label>
+      <button class="tt-speed-btn active" id="tt-spd-1"  onclick="ttSetSpeed(1)">1&times;</button>
+      <button class="tt-speed-btn"        id="tt-spd-2"  onclick="ttSetSpeed(2)">2&times;</button>
+      <button class="tt-speed-btn"        id="tt-spd-4"  onclick="ttSetSpeed(4)">4&times;</button>
+      <button class="tt-speed-btn"        id="tt-spd-8"  onclick="ttSetSpeed(8)">8&times;</button>
+      <button class="tt-speed-btn"        id="tt-spd-16" onclick="ttSetSpeed(16)">16&times;</button>
+    </div>
+    <!-- Depth (visible rows) -->
+    <div style="display:flex;align-items:center;gap:8px">
+      <label style="font-size:.82em;opacity:.7">Depth:</label>
+      <select id="tt-depth" onchange="ttOnDepthChange()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:6px;padding:4px 8px;font-size:.85em">
+        <option value="30">30 min</option>
+        <option value="60" selected>60 min</option>
+        <option value="120">2 hours</option>
+        <option value="180">3 hours</option>
+      </select>
+    </div>
+    <!-- Band overlays toggle -->
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em">
+      <input type="checkbox" id="tt-show-bands" checked onchange="ttRedraw()"> Band overlays
+    </label>
+    <!-- Grid lines toggle -->
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em">
+      <input type="checkbox" id="tt-show-grid" checked onchange="ttRedraw()"> Grid lines
+    </label>
+    <span class="status" id="tt-status" style="margin-left:auto"></span>
+  </div>
+
+  <!-- 3D canvas + HUD overlay -->
+  <div class="tt-canvas-wrap" id="tt-canvas-wrap">
+    <canvas id="tt-canvas" height="520"></canvas>
+    <canvas id="tt-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
+    <div class="tt-hud" id="tt-hud">--:-- UTC</div>
+    <div class="tt-hud-date" id="tt-hud-date"></div>
+  </div>
+
+  <!-- Scrubber -->
+  <div class="tt-scrubber-wrap" id="tt-scrubber-wrap">
+    <canvas id="tt-scrubber"></canvas>
+    <div id="tt-scrubber-label" style="position:absolute;bottom:3px;left:8px;font-size:.7em;opacity:.5;pointer-events:none">drag to seek</div>
+  </div>
+</div><!-- end #tt-panel -->
 
 </div><!-- end .container -->
 <div id="tt"></div>
@@ -1397,14 +1482,20 @@ function switchTab(tab){
   var isSg=(tab==='sg');
   var isGallery=(tab==='gallery');
   var isTs=(tab==='ts');
+  var isTt=(tab==='tt');
   document.getElementById('sg-panel').style.display=isSg?'':'none';
   document.getElementById('gallery-view').style.display=isGallery?'block':'none';
   document.getElementById('ts-panel').style.display=isTs?'block':'none';
+  document.getElementById('tt-panel').style.display=isTt?'block':'none';
   document.getElementById('tab-sg').classList.toggle('active',isSg);
   document.getElementById('tab-gallery').classList.toggle('active',isGallery);
   document.getElementById('tab-ts').classList.toggle('active',isTs);
+  document.getElementById('tab-tt').classList.toggle('active',isTt);
   if(isGallery)loadGallery();
   if(isTs)initTimesliceTab();
+  if(isTt)initTimeTravelTab();
+  /* Pause Time Travel playback when switching away */
+  if(!isTt&&ttIsPlaying)ttPause();
 }
 
 /* ── Gallery ─────────────────────────────────────────────────────────────── */
@@ -2126,5 +2217,6 @@ function tsAutoRange(){
   tsChart.update();
 }
 </script>
+<script src="timetravel.js"></script>
 </body>
 </html>

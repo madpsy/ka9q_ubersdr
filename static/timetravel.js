@@ -485,9 +485,7 @@ function ttRedraw() {
     var ptsY = new Float32Array(TT_SAMPLES);
     for (var si = 0; si < TT_SAMPLES; si++) {
       ptsX[si] = xL + (si / (TT_SAMPLES - 1)) * rowW;
-      /* samples[si]=0 → strong signal (lut[0] colour), 1 → noise floor.
-         Invert for height so strong signal = tall peak. */
-      ptsY[si] = baseY - (1 - samples[si]) * peakH;
+      ptsY[si] = baseY - samples[si] * peakH;
     }
 
     ctx.save();
@@ -523,15 +521,13 @@ function ttRedraw() {
       for (var gs = 0; gs <= GSTOPS; gs++) {
         var gsVal = gs / GSTOPS;   /* signal value 0→1 */
         var stopPos = gsVal;       /* stop 0=bottom(baseY), stop 1=top(topY) */
-        /* Gradient: stop 0=baseY(bottom), stop 1=topY(top=strong signal peak).
-           samples[si]=0 → strong signal → ptsY=topY → gradient stop≈1.
-           Backend: lut[0]=strong signal colour, lut[255]=noise floor colour.
-           So: stopPos=1(strong) → lutIdx=0 → lutIdx = (1-gsVal)*255.
-           Fade out the bottom 10% (noise floor region, gsVal<0.10). */
+        /* Gradient: stop 0=baseY(bottom,low signal), stop 1=topY(top,high signal).
+           gsVal=1 (top/peak) → lut[255], gsVal=0 (bottom/noise) → transparent.
+           Fade out the bottom 10%. */
         if (gsVal < 0.10) {
           ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
         } else {
-          var lutIdx = Math.min(lut.length - 1, Math.round((1 - gsVal) * (lut.length - 1)));
+          var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
           var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
           ridgeGrad.addColorStop(stopPos, 'rgb(' + rc + ',' + gc2 + ',' + bc + ')');
         }

@@ -454,8 +454,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <div class="tt-canvas-wrap" id="tt-canvas-wrap">
     <canvas id="tt-canvas" height="520"></canvas>
     <canvas id="tt-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
-    <!-- Fullscreen toggle — top-left corner -->
-    <button class="tt-fs-btn" id="tt-fs-btn" title="Toggle fullscreen" onclick="ttToggleFullscreen()">&#x26F6;</button>
+    <!-- Fullscreen toggle — top-left corner; stopPropagation prevents the
+         canvas-wrap click handler from also toggling play/pause -->
+    <button class="tt-fs-btn" id="tt-fs-btn" title="Toggle fullscreen"
+            onclick="ttToggleFullscreen();event.stopPropagation()">&#x26F6;</button>
     <div class="tt-hud" id="tt-hud">--:-- UTC</div>
     <div class="tt-hud-date" id="tt-hud-date"></div>
     <!-- Scrubber sits at the bottom of the canvas wrap -->

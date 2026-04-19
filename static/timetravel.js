@@ -194,9 +194,11 @@ function initTimeTravelTab() {
   var ttWrap = document.getElementById('tt-canvas-wrap');
   if (ttWrap) {
     ttWrap.addEventListener('click', function(e) {
-      /* Ignore clicks on the scrubber area */
+      /* Ignore clicks on the scrubber area or the fullscreen button */
       var sw = document.getElementById('tt-scrubber-wrap');
       if (sw && sw.contains(e.target)) return;
+      var fsBtn = document.getElementById('tt-fs-btn');
+      if (fsBtn && fsBtn.contains(e.target)) return;
       if (ttSampleCache) ttTogglePlay();
     });
   }

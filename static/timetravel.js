@@ -1000,9 +1000,24 @@ function ttRedraw() {
     }
 
     /* ── Filled silhouette + ridge line ─────────────────────────────── */
-    /* Use the pre-built cached gradient for this depth slot — zero gradient
-       construction cost per frame during playback. */
-    var rowGrad = (lut && lutRGB && rowW > 1 && ttRowGradCache[di]) ? ttRowGradCache[di] : null;
+    /* Build gradient from actual row geometry (base Y and peak height) so it
+       stays correctly anchored during smooth sub-row scrolling. */
+    var rowGrad = null;
+    if (lut && lutRGB && rowW > 1) {
+      var gtopY2 = baseY - peakH;
+      var grad2 = ctx.createLinearGradient(0, baseY, 0, gtopY2);
+      var GSTOPS2 = 16;
+      for (var gsi2 = 0; gsi2 <= GSTOPS2; gsi2++) {
+        var gsv2 = gsi2 / GSTOPS2;
+        if (gsv2 < 0.05) {
+          grad2.addColorStop(gsv2, 'rgba(0,0,0,0)');
+        } else {
+          var gcIdx2 = Math.min(lutLastIdx, Math.round(gsv2 * lutLastIdx));
+          grad2.addColorStop(gsv2, 'rgba(' + lutRGB[gcIdx2] + ',' + fogAlpha.toFixed(3) + ')');
+        }
+      }
+      rowGrad = grad2;
+    }
     var fogStr = fogAlpha.toFixed(3);
 
     /* Step 1: Fill silhouette from ridge down to groundY */

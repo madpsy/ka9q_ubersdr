@@ -520,46 +520,58 @@ function ttRedraw() {
     var peakH = maxPeakH * wFrac;
     var fogAlpha = wFrac * 0.94 + 0.06;
 
-    /* ── Dark terrain fill: ridge down to groundY ──────────────────────
-       Every row fills all the way to the canvas bottom. Painter's algorithm
-       (back-to-front) means each closer row's fill covers the row behind it.
-       This eliminates all gaps — only the ridge line of each row is visible
-       above the fill of the row drawn in front of it. */
-    ctx.beginPath();
-    ctx.moveTo(xL, groundY);
-    for (var pi = 0; pi < TT_SAMPLES; pi++) {
-      ctx.lineTo(ptsX[pi], ptsY[pi]);
-    }
-    ctx.lineTo(xR, groundY);
-    ctx.closePath();
-    ctx.fillStyle = '#000810';
-    ctx.fill();
-
-    /* ── Ridge line with gradient colour ────────────────────────────── */
+    /* ── Coloured terrain fill + ridge line ────────────────────────────
+       Fill the entire area from the ridge down to groundY using the same
+       vertical palette gradient as the ridge line. Painter's algorithm
+       (back-to-front) means each closer row covers the row behind it,
+       giving a continuous coloured waterfall with no gaps. */
     if (lut && rowW > 1) {
       var topY = baseY - peakH;
-      var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
+      /* Vertical gradient: bottom (groundY) = darkest palette colour,
+         top (topY = peak) = brightest palette colour */
+      var fillGrad = ctx.createLinearGradient(0, groundY, 0, topY);
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
         var gsVal = gs / GSTOPS;
-        var stopPos = gsVal;
-        if (gsVal < 0.05) {
-          ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
-        } else {
-          var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
-          var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
-          ridgeGrad.addColorStop(stopPos, 'rgba(' + rc + ',' + gc2 + ',' + bc + ',' + fogAlpha.toFixed(3) + ')');
-        }
+        /* Map gradient position to palette: gsVal=0 → bottom/noise, gsVal=1 → peak/signal */
+        var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
+        var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
+        /* Fade to near-black at the very bottom so rows blend into the ground */
+        var stopAlpha = gsVal < 0.08 ? gsVal / 0.08 * fogAlpha : fogAlpha;
+        fillGrad.addColorStop(gsVal, 'rgba(' + rc + ',' + gc2 + ',' + bc + ',' + stopAlpha.toFixed(3) + ')');
       }
 
+      /* Filled area: ridge outline down to groundY */
+      ctx.beginPath();
+      ctx.moveTo(xL, groundY);
+      for (var pi = 0; pi < TT_SAMPLES; pi++) {
+        ctx.lineTo(ptsX[pi], ptsY[pi]);
+      }
+      ctx.lineTo(xR, groundY);
+      ctx.closePath();
+      ctx.fillStyle = fillGrad;
+      ctx.fill();
+
+      /* Ridge line on top for crispness */
       ctx.beginPath();
       ctx.moveTo(ptsX[0], ptsY[0]);
       for (var ri = 1; ri < TT_SAMPLES; ri++) {
         ctx.lineTo(ptsX[ri], ptsY[ri]);
       }
-      ctx.strokeStyle = ridgeGrad;
-      ctx.lineWidth = Math.max(1, 1.8 * wFrac);
+      ctx.strokeStyle = fillGrad;
+      ctx.lineWidth = Math.max(1, 1.5 * wFrac);
       ctx.stroke();
+    } else {
+      /* Fallback: dark fill when no LUT */
+      ctx.beginPath();
+      ctx.moveTo(xL, groundY);
+      for (var pi = 0; pi < TT_SAMPLES; pi++) {
+        ctx.lineTo(ptsX[pi], ptsY[pi]);
+      }
+      ctx.lineTo(xR, groundY);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0,8,20,0.9)';
+      ctx.fill();
     }
 
   }

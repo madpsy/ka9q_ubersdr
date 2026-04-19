@@ -296,7 +296,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <div class="ts-slice-list" id="ts-slice-list" style="display:none">
     <table>
       <thead><tr>
-        <th></th><th>Label</th><th>Freq (MHz)</th><th>BW (kHz)</th><th>Source</th><th>Bins</th><th></th>
+        <th style="opacity:.55;font-weight:500">Show</th><th>Label</th><th>Freq (MHz)</th><th>BW (kHz)</th><th>Source</th><th>Bins</th><th></th>
       </tr></thead>
       <tbody id="ts-slice-tbody"></tbody>
     </table>
@@ -1668,7 +1668,7 @@ function tsAddSlice(){
 function tsAddSliceData(freqMHz,bwKHz,label){
   var id=tsNextId++;
   var color=tsColorForIndex(tsSlices.length);
-  tsSlices.push({id:id,freqMHz:freqMHz,bwKHz:bwKHz,label:label,color:color});
+  tsSlices.push({id:id,freqMHz:freqMHz,bwKHz:bwKHz,label:label,color:color,visible:true});
   tsRenderSliceList();
 }
 
@@ -1698,16 +1698,51 @@ function tsRenderSliceList(){
     var s=tsSlices[i];
     var tr=document.createElement('tr');
     var lbl=s.label||(s.freqMHz.toFixed(3)+' MHz');
+    /* Swatch: solid fill when visible, outline-only when hidden */
+    var swatchStyle=s.visible!==false
+      ? 'background:'+s.color+';border:2px solid '+s.color+';cursor:pointer;'
+      : 'background:transparent;border:2px solid '+s.color+';cursor:pointer;opacity:.5;';
     tr.innerHTML=
-      '<td><span class="ts-swatch" style="background:'+s.color+'"></span></td>'+
-      '<td>'+escHtml(lbl)+'</td>'+
-      '<td>'+s.freqMHz.toFixed(3)+'</td>'+
+      '<td><span class="ts-swatch" title="Toggle visibility" style="'+swatchStyle+'" onclick="tsToggleSliceVisible('+s.id+')"></span></td>'+
+      '<td style="'+(s.visible===false?'opacity:.4':'')+'">'+escHtml(lbl)+'</td>'+
+      '<td style="'+(s.visible===false?'opacity:.4':'')+'">'+s.freqMHz.toFixed(3)+'</td>'+
       '<td>'+s.bwKHz+'</td>'+
       '<td id="ts-src-'+s.id+'" style="opacity:.6;font-size:.85em">\u2026</td>'+
       '<td id="ts-bins-'+s.id+'" style="opacity:.6;font-size:.85em"></td>'+
       '<td><button onclick="tsRemoveSlice('+s.id+')" style="padding:2px 8px;font-size:.8em;background:rgba(255,80,80,.3)">&#x2715;</button></td>';
     tbody.appendChild(tr);
   }
+}
+
+/* Toggle a single slice's visibility in the chart without reloading data */
+function tsToggleSliceVisible(id){
+  var s=null;
+  for(var i=0;i<tsSlices.length;i++){if(tsSlices[i].id===id){s=tsSlices[i];break;}}
+  if(!s)return;
+  s.visible=!(s.visible!==false); /* flip, treating undefined as true */
+  tsRenderSliceList();
+  if(!tsChart)return;
+
+  /* Read current global checkbox states so we only show datasets that pass both filters */
+  var showDbfs=document.getElementById('ts-show-dbfs').checked;
+  var showSnr=document.getElementById('ts-show-snr').checked;
+  var showFillEl=document.getElementById('ts-show-fill');
+  var showFill=showFillEl?showFillEl.checked:true;
+
+  var sliceLbl=s.label||(s.freqMHz.toFixed(3)+' MHz');
+  tsChart.data.datasets.forEach(function(ds,idx){
+    /* Match datasets belonging to this slice by label prefix */
+    var belongsToSlice=(
+      ds.label===sliceLbl+' (dBFS)'||
+      ds.label===sliceLbl+' SNR (dB)'||
+      ds.label===sliceLbl+' noise floor'
+    );
+    if(!belongsToSlice)return;
+    var role=ds.tsRole||'dbfs';
+    var globallyVisible=(role==='snr'?showSnr:role==='nf'?showFill:showDbfs);
+    tsChart.setDatasetVisibility(idx,s.visible&&globallyVisible);
+  });
+  tsChart.update();
 }
 
 /* ── Load / render ───────────────────────────────────────────────────────── */
@@ -1784,6 +1819,8 @@ function renderTimesliceMulti(results){
     var nfData=rows.map(function(r){return r.noise_floor||null;});
     var hasNF=nfData.some(function(v){return v!==null;});
     var nfDatasetIdx=datasets.length; /* index of this NF dataset */
+    var sliceVisible=(s.visible!==false); /* per-slice toggle */
+
     if(hasNF){
       datasets.push({
         label:lbl+' noise floor',
@@ -1794,11 +1831,11 @@ function renderTimesliceMulti(results){
         pointRadius:0,
         pointHoverRadius:0,
         tension:0.2,
-        /* fill:'stack' not needed — fill to the NEXT dataset (signal line) */
+        /* fill to the NEXT dataset (signal line) */
         fill:'+1',
         yAxisID:'y',
         tsRole:'nf',
-        hidden:!showFill  /* respects checkbox state on re-render */
+        hidden:!(sliceVisible&&showFill)
       });
     }
 
@@ -1814,7 +1851,8 @@ function renderTimesliceMulti(results){
       tension:0.2,
       fill:false,
       yAxisID:'y',
-      tsRole:'dbfs'
+      tsRole:'dbfs',
+      hidden:!sliceVisible
     });
 
     /* SNR = signal - noise_floor — right axis (y1), dashed, same colour as signal */
@@ -1837,7 +1875,7 @@ function renderTimesliceMulti(results){
         fill:false,
         yAxisID:'y1',
         tsRole:'snr',
-        hidden:!showSnrInit  /* respects checkbox state on re-render */
+        hidden:!(sliceVisible&&showSnrInit)
       });
     }
   }
@@ -1992,18 +2030,26 @@ function tsToggleLines(){
   var showDbfs=document.getElementById('ts-show-dbfs').checked;
   var showSnr=document.getElementById('ts-show-snr').checked;
   var showFillEl=document.getElementById('ts-show-fill');
-  var showFill=showFillEl?showFillEl.checked:false;
+  var showFill=showFillEl?showFillEl.checked:true;
   /* Use setDatasetVisibility() — the correct Chart.js API for toggling
      dataset visibility. Directly mutating ds.hidden is unreliable because
      Chart.js maintains its own internal visibility state that can diverge
-     from the dataset property, especially after zoom or re-render. */
+     from the dataset property, especially after zoom or re-render.
+     Also respect per-slice visibility (s.visible) by looking up the slice. */
   tsChart.data.datasets.forEach(function(ds,idx){
     var role=ds.tsRole||'dbfs';
-    var visible;
-    if(role==='snr')visible=showSnr;
-    else if(role==='nf')visible=showFill;
-    else visible=showDbfs; /* 'dbfs' */
-    tsChart.setDatasetVisibility(idx,visible);
+    /* Determine which slice this dataset belongs to by label prefix */
+    var sliceVisible=true;
+    for(var si=0;si<tsSlices.length;si++){
+      var sl=tsSlices[si];
+      var slLbl=sl.label||(sl.freqMHz.toFixed(3)+' MHz');
+      if(ds.label===slLbl+' (dBFS)'||ds.label===slLbl+' SNR (dB)'||ds.label===slLbl+' noise floor'){
+        sliceVisible=(sl.visible!==false);
+        break;
+      }
+    }
+    var globallyVisible=(role==='snr'?showSnr:role==='nf'?showFill:showDbfs);
+    tsChart.setDatasetVisibility(idx,sliceVisible&&globallyVisible);
   });
   /* Hide/show the right axis label when SNR is toggled off */
   if(tsChart.options.scales.y1){

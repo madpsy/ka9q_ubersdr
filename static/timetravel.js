@@ -22,6 +22,7 @@
 /* ── Constants ──────────────────────────────────────────────────────────── */
 var TT_SAMPLES = 160;        /* frequency sample points per row */
 var TT_HEIGHT_SCALE = 0.40;  /* peak height as fraction of (groundY - vanishY) */
+var TT_MIN_WFRAC = 0.30;     /* minimum width fraction at max depth (prevents vanishing to a point) */
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 var ttInited = false;
@@ -440,7 +441,7 @@ function ttRedraw() {
     for (var hi = 0; hi <= depthRows; hi += hStep) {
       var hd = hi / depthRows;
       var hy = groundY - (groundY - vanishY) * hd;
-      var hwFrac = Math.pow(1 - hd, 1.3);
+      var hwFrac = Math.max(TT_MIN_WFRAC, Math.pow(1 - hd, 1.3));
       var hxL = vanishX - frontHalfW * hwFrac;
       var hxR = vanishX + frontHalfW * hwFrac;
       ctx.beginPath();
@@ -456,7 +457,7 @@ function ttRedraw() {
   for (var di = depthRows - 1; di >= 0; di--) {
     var d = di / depthRows;
     var baseY = groundY - (groundY - vanishY) * d;
-    var wFrac = Math.pow(1 - d, 1.3);
+    var wFrac = Math.max(TT_MIN_WFRAC, Math.pow(1 - d, 1.3));
     var xL = vanishX - frontHalfW * wFrac;
     var xR = vanishX + frontHalfW * wFrac;
     var rowW = xR - xL;
@@ -563,11 +564,9 @@ function ttRedraw() {
       var bFrontX0 = frontXL + bf0 * frontRowW;
       var bFrontX1 = frontXL + bf1 * frontRowW;
 
-      /* Back edge converges toward vanishing point */
-      /* At d=1 (full depth), wFrac = Math.pow(0, 1.3) = 0, so back edge = vanishX */
-      /* We use the actual back depth fraction */
+      /* Back edge converges toward vanishing point, but clamped to TT_MIN_WFRAC */
       var backD = Math.min(1, depthRows / depthRows); /* = 1 */
-      var backWFrac = Math.pow(1 - backD, 1.3); /* ≈ 0 */
+      var backWFrac = Math.max(TT_MIN_WFRAC, Math.pow(1 - backD, 1.3));
       var backXL2 = vanishX - frontHalfW * backWFrac;
       var backRowW2 = (vanishX + frontHalfW * backWFrac) - backXL2;
       var bBackX0 = backXL2 + bf0 * backRowW2;
@@ -636,9 +635,12 @@ function ttRedraw() {
   ctx.textAlign = 'center';
 
   var endHz = startHz + spanHz;
-  /* Choose a nice round step: aim for ~6 divisions */
-  var rawStep = spanHz / 6;
-  var niceSteps = [100e3, 200e3, 250e3, 500e3, 1e6, 2e6, 2.5e6, 5e6, 10e6];
+  /* Choose a nice round step that gives ~20 tick marks across the span.
+     The candidate list covers 1 kHz (very narrow) up to 10 MHz (full HF). */
+  var rawStep = spanHz / 20;
+  var niceSteps = [1e3, 2e3, 5e3, 10e3, 20e3, 25e3, 50e3,
+                   100e3, 200e3, 250e3, 500e3,
+                   1e6, 2e6, 2.5e6, 5e6, 10e6];
   var labelStep = niceSteps[niceSteps.length - 1];
   for (var ni = 0; ni < niceSteps.length; ni++) {
     if (niceSteps[ni] >= rawStep) { labelStep = niceSteps[ni]; break; }

@@ -832,13 +832,29 @@ function ttRedraw() {
     var tlCandidates = [1, 2, 5, 10, 15, 20, 30, 60];
     var tlInterval = 60;
     for (var tli = 0; tli < tlCandidates.length; tli++) {
-      if (depthRows / tlCandidates[tli] <= 8) { tlInterval = tlCandidates[tli]; break; }
+      if (depthRows / tlCandidates[tli] <= 4) { tlInterval = tlCandidates[tli]; break; }
     }
 
     for (var tldi = 0; tldi < depthRows; tldi++) {
       var tlRowIdx = frontRow - tldi;
       if (tlRowIdx < 0 || tlRowIdx >= totalRows) continue;
-      if (tlRowIdx % tlInterval !== 0) continue;
+
+      /* Determine the UTC minute of this row and check it falls on a round boundary */
+      var tlRowM = ttMeta.rows[tlRowIdx];
+      var tlUtcMin; /* total minutes since midnight UTC */
+      var tlStr;
+      if (tlRowM && tlRowM.unix) {
+        var tlDate = new Date(tlRowM.unix * 1000);
+        tlUtcMin = tlDate.getUTCHours() * 60 + tlDate.getUTCMinutes();
+        tlStr = String(tlDate.getUTCHours()).padStart(2, '0') + ':' +
+                String(tlDate.getUTCMinutes()).padStart(2, '0');
+      } else {
+        tlUtcMin = tlRowIdx % 1440; /* fallback: treat row index as minutes */
+        tlStr = String(Math.floor(tlUtcMin / 60) % 24).padStart(2, '0') + ':' +
+                String(tlUtcMin % 60).padStart(2, '0');
+      }
+      /* Only label rows whose UTC minute is exactly divisible by the interval */
+      if (tlUtcMin % tlInterval !== 0) continue;
 
       var tld = tldi / depthRows;
       var tlbY = groundY - (groundY - vanishY) * tld;
@@ -849,18 +865,6 @@ function ttRedraw() {
       /* Fade as rows approach vanishing point */
       var tlAlpha = Math.min(1, tlwF * 1.5 - 0.15);
       if (tlAlpha <= 0.05) continue;
-
-      /* Build HH:MM string */
-      var tlRowM = ttMeta.rows[tlRowIdx];
-      var tlStr;
-      if (tlRowM && tlRowM.unix) {
-        var tlDate = new Date(tlRowM.unix * 1000);
-        tlStr = String(tlDate.getUTCHours()).padStart(2, '0') + ':' +
-                String(tlDate.getUTCMinutes()).padStart(2, '0');
-      } else {
-        tlStr = String(Math.floor(tlRowIdx / 60) % 24).padStart(2, '0') + ':' +
-                String(tlRowIdx % 60).padStart(2, '0');
-      }
 
       ctx.globalAlpha = tlAlpha;
       ctx.fillStyle = '#ffffff';

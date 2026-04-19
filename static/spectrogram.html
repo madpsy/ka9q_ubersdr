@@ -311,10 +311,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
           <input type="checkbox" id="ts-show-dbfs" checked onchange="tsToggleLines()"> Show dBFS
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="ts-show-snr" checked onchange="tsToggleLines()"> Show SNR
+          <input type="checkbox" id="ts-show-snr" onchange="tsToggleLines()"> Show SNR
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="ts-show-fill" onchange="tsToggleLines()"> Show noise floor fill
+          <input type="checkbox" id="ts-show-fill" checked onchange="tsToggleLines()"> Show noise floor fill
         </label>
         <span style="opacity:.45;font-size:.9em">Drag to zoom &middot; double-click to reset</span>
       </div>
@@ -1766,9 +1766,11 @@ function renderTimesliceMulti(results){
   var datasets=[];
   var hasAnySNR=false;
 
-  /* Whether the fill checkbox is currently checked (may not exist yet on first render) */
+  /* Whether the fill/SNR checkboxes are currently checked (may not exist yet on first render) */
   var showFillEl=document.getElementById('ts-show-fill');
-  var showFill=showFillEl?showFillEl.checked:false;
+  var showFill=showFillEl?showFillEl.checked:true; /* default: enabled */
+  var showSnrEl=document.getElementById('ts-show-snr');
+  var showSnrInit=showSnrEl?showSnrEl.checked:false; /* default: disabled */
 
   for(var i=0;i<results.length;i++){
     var s=results[i].slice;
@@ -1796,7 +1798,7 @@ function renderTimesliceMulti(results){
         fill:'+1',
         yAxisID:'y',
         tsRole:'nf',
-        hidden:!showFill
+        hidden:!showFill  /* respects checkbox state on re-render */
       });
     }
 
@@ -1834,7 +1836,8 @@ function renderTimesliceMulti(results){
         tension:0.2,
         fill:false,
         yAxisID:'y1',
-        tsRole:'snr'
+        tsRole:'snr',
+        hidden:!showSnrInit  /* respects checkbox state on re-render */
       });
     }
   }
@@ -1859,6 +1862,8 @@ function renderTimesliceMulti(results){
   if(hasAnySNR){
     scales.y1={
       position:'right',
+      /* Start hidden — SNR checkbox is off by default */
+      display:showSnrInit,
       ticks:{color:'rgba(200,220,255,0.55)',callback:function(v){return v.toFixed(0)+' dB';}},
       grid:{drawOnChartArea:false},
       title:{display:true,text:'SNR (dB)',color:'rgba(200,220,255,0.5)'}

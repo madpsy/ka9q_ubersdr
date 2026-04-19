@@ -1707,8 +1707,8 @@ function tsRenderSliceList(){
       '<td style="'+(s.visible===false?'opacity:.4':'')+'">'+escHtml(lbl)+'</td>'+
       '<td style="'+(s.visible===false?'opacity:.4':'')+'">'+s.freqMHz.toFixed(3)+'</td>'+
       '<td>'+s.bwKHz+'</td>'+
-      '<td id="ts-src-'+s.id+'" style="opacity:.6;font-size:.85em">\u2026</td>'+
-      '<td id="ts-bins-'+s.id+'" style="opacity:.6;font-size:.85em"></td>'+
+      '<td style="opacity:.6;font-size:.85em">'+(s.sourceBand||'\u2026')+'</td>'+
+      '<td style="opacity:.6;font-size:.85em">'+(s.binsText||'')+'</td>'+
       '<td><button onclick="tsRemoveSlice('+s.id+')" style="padding:2px 8px;font-size:.8em;background:rgba(255,80,80,.3)">&#x2715;</button></td>';
     tbody.appendChild(tr);
   }
@@ -1776,18 +1776,19 @@ function tsReloadAll(){
     if(errors.length)tsShowErr(errors.map(escHtml).join('<br>'));
     if(good.length===0){tsSetStatus('No data');return;}
 
-    /* Update source info in slice list */
+    /* Store source info on the slice object so tsRenderSliceList() can always
+       display it — even after the tbody is rebuilt by tsToggleSliceVisible(). */
     for(var j=0;j<good.length;j++){
       var d=good[j].data;
-      var sid=good[j].slice.id;
-      var srcEl=document.getElementById('ts-src-'+sid);
-      var binsEl=document.getElementById('ts-bins-'+sid);
-      if(srcEl)srcEl.textContent=d.source_band==='wideband'?'wideband':d.source_band;
-      if(binsEl)binsEl.textContent=d.bin_width_hz.toFixed(0)+' Hz/bin \u00d7 '+d.bins_averaged;
+      var sl=good[j].slice;
+      sl.sourceBand=d.source_band==='wideband'?'wideband':d.source_band;
+      sl.binsText=d.bin_width_hz.toFixed(0)+' Hz/bin \u00d7 '+d.bins_averaged;
     }
 
     tsLastResults=good;
     renderTimesliceMulti(good);
+    /* Re-render slice list now that sourceBand/binsText are populated on each slice */
+    tsRenderSliceList();
     var totalRows=good[0].data.rows.length;
     var dateLabel=good[0].data.date;
     tsSetStatus(totalRows+' rows \u00b7 '+dateLabel+(errors.length?' \u00b7 '+errors.length+' error(s)':''));

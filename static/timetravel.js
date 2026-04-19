@@ -536,11 +536,98 @@ function ttRedraw() {
   ttDrawStars(ctx, W, H);
 
   if (!ttSampleCache || !ttMeta || ttMeta.row_count === 0) {
-    ctx.fillStyle = 'rgba(255,255,255,.35)';
-    ctx.font = '15px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(ttSampleCache === null ? 'Loading\u2026' : 'No data \u2014 select a date and band above', W / 2, H / 2);
-    ctx.textAlign = 'left';
+    var isLoading = (ttSampleCache === null);
+    var cx = W / 2, cy = H / 2;
+    var now2 = Date.now();
+
+    if (isLoading) {
+      /* ── Animated radar sweep ─────────────────────────────────────────── */
+      var sweepAngle = ((now2 / 1200) % 1) * Math.PI * 2 - Math.PI / 2;
+      var radarR = Math.min(W, H) * 0.13;
+
+      /* Radar rings */
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,255,180,0.18)';
+      ctx.lineWidth = 1;
+      for (var ri = 1; ri <= 3; ri++) {
+        ctx.beginPath();
+        ctx.arc(cx, cy - 28, radarR * ri / 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      /* Sweep wedge */
+      var sweepGrad = ctx.createConicalGradient
+        ? ctx.createConicalGradient(cx, cy - 28, sweepAngle)
+        : null;
+      ctx.save();
+      ctx.translate(cx, cy - 28);
+      ctx.rotate(sweepAngle);
+      var wedge = ctx.createLinearGradient(0, 0, radarR, 0);
+      wedge.addColorStop(0, 'rgba(0,255,180,0.55)');
+      wedge.addColorStop(1, 'rgba(0,255,180,0)');
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, radarR, -0.55, 0);
+      ctx.closePath();
+      ctx.fillStyle = wedge;
+      ctx.fill();
+      /* Sweep line */
+      ctx.strokeStyle = 'rgba(0,255,180,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = '#0fb';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(radarR, 0);
+      ctx.stroke();
+      ctx.restore();
+
+      /* Centre dot */
+      ctx.save();
+      ctx.fillStyle = '#0fb';
+      ctx.shadowColor = '#0fb';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(cx, cy - 28, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      /* Animated dots suffix */
+      var dotCount = Math.floor(now2 / 400) % 4;
+      var dots = '\u25cf'.repeat(dotCount) + '\u25cb'.repeat(3 - dotCount);
+
+      /* Main loading text */
+      ctx.fillStyle = 'rgba(0,255,180,0.9)';
+      ctx.font = 'bold 15px monospace';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#0fb';
+      ctx.shadowBlur = 10;
+      ctx.fillText('INITIALISING TEMPORAL ARRAY  ' + dots, cx, cy + radarR * 0.55);
+
+      /* Sub-text — cycles through flavour messages */
+      var msgs = [
+        'Calibrating flux capacitors\u2026',
+        'Aligning frequency matrices\u2026',
+        'Decoding spectral timeline\u2026',
+        'Synchronising warp drive\u2026',
+        'Scanning the ionosphere\u2026'
+      ];
+      var msgIdx = Math.floor(now2 / 1800) % msgs.length;
+      ctx.fillStyle = 'rgba(0,200,150,0.55)';
+      ctx.font = '11px monospace';
+      ctx.shadowBlur = 0;
+      ctx.fillText(msgs[msgIdx], cx, cy + radarR * 0.55 + 22);
+      ctx.restore();
+    } else {
+      /* No data state */
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,200,255,0.45)';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('\u26a0  No data \u2014 select a date and band above', cx, cy);
+      ctx.restore();
+    }
+
     ttUpdateHUD();
     return;
   }

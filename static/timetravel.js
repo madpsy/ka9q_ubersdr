@@ -863,7 +863,11 @@ function ttRedraw() {
   }
 
   /* ── Draw mountain rows back-to-front ───────────────────────────────── */
-  var frontRow = Math.round(ttCurrentRow);
+  /* Use floor + fractional offset for smooth sub-row scrolling.
+     frac shifts all depth slots continuously so the terrain glides rather
+     than stepping one whole row at a time. */
+  var frontRow = Math.floor(ttCurrentRow);
+  var frac = ttCurrentRow - frontRow; /* 0.0–1.0 sub-row offset */
   var lut = (typeof V !== 'undefined') ? V : null;
 
   /* Use cached LUT colour strings — only rebuild if LUT changed */
@@ -920,7 +924,7 @@ function ttRedraw() {
   var allInRange = ttAllInRange;
 
   for (var di2 = depthRows - 1; di2 >= 0; di2--) {
-    var d2 = di2 / depthRows;
+    var d2 = (di2 + frac) / depthRows;
     var bY2 = groundY - (groundY - vanishY) * d2;
     var wF2 = 1 - d2 * (1 - TT_MIN_WFRAC);
     var xL2 = vanishX - frontHalfW * wF2;

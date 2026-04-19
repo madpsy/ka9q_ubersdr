@@ -1411,12 +1411,16 @@ function ttDrawScrubber() {
   if (ttBmp) {
     /* The spectrogram PNG has frequency on X (left=low, right=high) and time on Y
        (top=oldest, bottom=newest). The scrubber is a horizontal strip where X = time.
-       Rotate 90° clockwise so PNG rows (time) map to scrubber X, and PNG X=0 (low freq)
-       maps to scrubber top. */
+       We need: PNG Y (time) → scrubber X (left=old, right=new)
+                PNG X=0 (low freq) → scrubber Y=0 (top)
+                PNG X=max (high freq) → scrubber Y=H (bottom)
+       ctx.transform(a,b,c,d,e,f) maps canvas (x,y) → screen (ax+cy+e, bx+dy+f).
+       We want PNG px→screenY and PNG py→screenX:
+         screen_x = py * W/imgH  → a=0, c=W/imgH
+         screen_y = px * H/imgW  → b=H/imgW, d=0  */
     ctx.save();
-    ctx.translate(W, 0);
-    ctx.rotate(Math.PI / 2);
-    ctx.drawImage(ttBmp, 0, 0, H, W);  /* PNG height→scrubberW, PNG width→scrubberH */
+    ctx.transform(0, H / ttBmp.width, W / ttBmp.height, 0, 0, 0);
+    ctx.drawImage(ttBmp, 0, 0);
     ctx.restore();
     ctx.fillStyle = 'rgba(0,0,0,.38)';
     ctx.fillRect(0, 0, W, H);

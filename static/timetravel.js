@@ -709,17 +709,6 @@ function ttRedraw() {
     }
     ctx.fill();
 
-    /* Step 2: Ridge line — reuse the same gradient object */
-    if (rowGrad) {
-      ctx.beginPath();
-      ctx.moveTo(ptsX[0], ptsY[0]);
-      for (var ri = 1; ri < nPts; ri++) {
-        ctx.lineTo(ptsX[ri], ptsY[ri]);
-      }
-      ctx.strokeStyle = rowGrad;
-      ctx.lineWidth = Math.max(1, 1.8 * wFrac);
-      ctx.stroke();
-    }
 
   }
 

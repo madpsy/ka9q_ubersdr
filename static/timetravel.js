@@ -1475,6 +1475,16 @@ function ttSetupHover() {
   if (!wrap || !c || !tt) return;
 
   wrap.addEventListener('mousemove', function(e) {
+    /* When the "Engage" overlay is showing (paused or counting down),
+       use a pointer cursor and suppress the frequency/signal tooltip */
+    var overlayActive = ttSampleCache && (!ttIsPlaying || ttCountingDown);
+    wrap.style.cursor = overlayActive ? 'pointer' : 'crosshair';
+    if (overlayActive) {
+      var tt2 = document.getElementById('tt');
+      if (tt2) tt2.style.display = 'none';
+      return;
+    }
+
     if (!ttMeta || !ttSampleCache) return;
     var rect = c.getBoundingClientRect();
     var xp = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));

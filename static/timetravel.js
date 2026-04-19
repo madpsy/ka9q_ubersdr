@@ -259,7 +259,8 @@ function ttBuildCache(onDone) {
         var base = rowBase + px * 4;
         var r = allPixels[base], g = allPixels[base + 1], b = allPixels[base + 2];
 
-        if (r === 0 && g === 0 && b === 0) { samples[si] = 0; continue; }
+        /* Pure black = missing data sentinel (not in palette). Mark as -1. */
+        if (r === 0 && g === 0 && b === 0) { samples[si] = -1; continue; }
 
         var idx;
         if (lut) {
@@ -274,20 +275,22 @@ function ttBuildCache(onDone) {
               if (dist < bestDist) { bestDist = dist; idx = li; }
             }
           }
-          samples[si] = idx / (lutLen - 1);
+          /* The backend maps strong signal → lut[0] (blue end of jet) and
+             noise floor → lut[255] (red end). So invert so that
+             samples[si]=1.0 means strong signal, 0.0 means noise floor. */
+          samples[si] = 1 - idx / (lutLen - 1);
         } else {
-          samples[si] = g / 255;
+          samples[si] = 1 - g / 255;
         }
       }
 
-      /* Mark gap/missing-data rows as null so the renderer skips them.
-         We use an average-signal threshold rather than strict zero because:
-         - JPEG compression can introduce small non-zero values in black rows
-         - lut[0] (the lowest palette entry) is often red, giving idx=0 → 0.004
-         A row is considered a gap if its mean signal is below 2% of full scale. */
-      var rowSum = 0;
-      for (var zi = 0; zi < TT_SAMPLES; zi++) rowSum += samples[zi];
-      ttSampleCache[row] = (rowSum / TT_SAMPLES < 0.02) ? null : samples;
+      /* Mark gap rows as null. A gap row is one where most samples are the
+         missing-data sentinel (-1). Replace sentinels with 0 for rendering. */
+      var sentinelCount = 0;
+      for (var zi = 0; zi < TT_SAMPLES; zi++) {
+        if (samples[zi] < 0) { sentinelCount++; samples[zi] = 0; }
+      }
+      ttSampleCache[row] = (sentinelCount > TT_SAMPLES * 0.8) ? null : samples;
     }
 
     if (row < totalRows) {
@@ -508,18 +511,24 @@ function ttRedraw() {
        because the silhouette fill already covers that area. */
     var lut = (typeof V !== 'undefined') ? V : null;
     if (lut && rowW > 1) {
+      /* Gradient runs from baseY (bottom, stop=0) to topY (top, stop=1).
+         gsVal=0 → noise floor → stop near 0 (bottom).
+         gsVal=1 → strong signal → stop near 1 (top).
+         So stopPos = gsVal directly. */
       var topY = baseY - peakH;
       var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
-      /* 16 colour stops evenly spaced from signal=0 (bottom) to signal=1 (top) */
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
-        var gsVal = gs / GSTOPS;          /* signal value 0→1 */
-        var stopPos = 1 - gsVal;          /* gradient position: 0=top(baseY→topY start), 1=bottom */
-        /* Fade out the bottom 10% so lut[0] colours never show */
+        var gsVal = gs / GSTOPS;   /* signal value 0→1 */
+        var stopPos = gsVal;       /* stop 0=bottom(baseY), stop 1=top(topY) */
+        /* Fade out the bottom 10% (noise floor) */
         if (gsVal < 0.10) {
           ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
         } else {
-          var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
+          /* gsVal=1.0 → strong signal → lut[0] (blue/cyan in jet).
+             gsVal=0.0 → noise floor → lut[255] (dark red in jet).
+             Map: lutIdx = (1 - gsVal) * 255 so peaks get lut[0] colour. */
+          var lutIdx = Math.min(lut.length - 1, Math.round((1 - gsVal) * (lut.length - 1)));
           var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
           ridgeGrad.addColorStop(stopPos, 'rgb(' + rc + ',' + gc2 + ',' + bc + ')');
         }

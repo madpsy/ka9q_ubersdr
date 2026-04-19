@@ -462,7 +462,7 @@ function ttRedraw() {
   var frontRow = Math.round(ttCurrentRow);
   var lut = (typeof V !== 'undefined') ? V : null;
 
-  /* Pre-compute all row screen points so we can stitch rows together */
+  /* Pre-compute all row screen points */
   var allPtsX = [];
   var allPtsY = [];
   var allBaseY = [];
@@ -486,7 +486,7 @@ function ttRedraw() {
     allWFrac[di2] = wF2;
     allXL[di2] = xL2;
     allXR[di2] = xR2;
-    allValid[di2] = (samples2 && rowW2 >= 1);
+    allValid[di2] = !!(samples2 && rowW2 >= 1);
 
     if (samples2 && rowW2 >= 1) {
       var px2 = new Float32Array(TT_SAMPLES);
@@ -503,6 +503,10 @@ function ttRedraw() {
     }
   }
 
+  /* Draw back-to-front. For each row, fill a polygon that goes:
+       - along this row's ridge (the signal peaks)
+       - down to the NEXT CLOSER row's ridge (or groundY for the front row)
+     This creates a continuous terrain surface with no gaps. */
   for (var di = depthRows - 1; di >= 0; di--) {
     if (!allValid[di]) continue;
 
@@ -514,35 +518,48 @@ function ttRedraw() {
     var ptsX = allPtsX[di];
     var ptsY = allPtsY[di];
     var peakH = maxPeakH * wFrac;
+    var fogAlpha = wFrac * 0.94 + 0.06;
 
-    /* The floor for this row's dark fill is the next closer row's baseY
-       (or groundY for the frontmost row). Using globalAlpha=1 for the fill
-       so it fully occludes sky — fog effect is only on the ridge line. */
-    var floorY = (di > 0 && allValid[di - 1]) ? allBaseY[di - 1] : groundY;
+    /* Get the next closer row's ridge points (di-1), or use groundY baseline */
+    var hasFront = (di > 0 && allValid[di - 1]);
+    var frontPtsX = hasFront ? allPtsX[di - 1] : null;
+    var frontPtsY = hasFront ? allPtsY[di - 1] : null;
+    var frontXL = hasFront ? allXL[di - 1] : allXL[0];
+    var frontXR = hasFront ? allXR[di - 1] : allXR[0];
+    var frontBaseY = hasFront ? allBaseY[di - 1] : groundY;
 
-    /* ── Filled silhouette (occludes rows behind) — always opaque ───── */
+    /* ── Dark terrain fill: this row's ridge → next row's ridge → close ─
+       Drawn opaque so it fully occludes sky. No gaps between rows. */
     ctx.beginPath();
-    ctx.moveTo(xL, floorY);
-    ctx.lineTo(xL, baseY);
-    for (var pi = 0; pi < TT_SAMPLES; pi++) {
+    /* Start at front-left corner (next closer row left edge at its baseY or ridge) */
+    if (hasFront) {
+      /* Go along the front row's ridge in reverse (right to left) as the bottom */
+      ctx.moveTo(frontPtsX[TT_SAMPLES - 1], frontPtsY[TT_SAMPLES - 1]);
+      for (var fi = TT_SAMPLES - 2; fi >= 0; fi--) {
+        ctx.lineTo(frontPtsX[fi], frontPtsY[fi]);
+      }
+    } else {
+      ctx.moveTo(frontXR, groundY);
+      ctx.lineTo(frontXL, groundY);
+    }
+    /* Then up and along this row's ridge (left to right) */
+    ctx.lineTo(ptsX[0], ptsY[0]);
+    for (var pi = 1; pi < TT_SAMPLES; pi++) {
       ctx.lineTo(ptsX[pi], ptsY[pi]);
     }
-    ctx.lineTo(xR, baseY);
-    ctx.lineTo(xR, floorY);
     ctx.closePath();
     ctx.fillStyle = '#000810';
     ctx.fill();
 
-    /* ── Ridge line with vertical gradient + fog alpha ──────────────── */
+    /* ── Ridge line with gradient colour ────────────────────────────── */
     if (lut && rowW > 1) {
-      var fogAlpha = wFrac * 0.94 + 0.06;
       var topY = baseY - peakH;
       var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
         var gsVal = gs / GSTOPS;
         var stopPos = gsVal;
-        if (gsVal < 0.10) {
+        if (gsVal < 0.05) {
           ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
         } else {
           var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));

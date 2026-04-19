@@ -492,12 +492,16 @@ function ttRedraw() {
     ctx.globalAlpha = fogAlpha;
 
     /* ── Filled silhouette (occludes rows behind) ───────────────────── */
+    /* Anchor to groundY (not baseY) so the fill extends to the absolute
+       canvas bottom, eliminating gaps between consecutive perspective rows. */
     ctx.beginPath();
-    ctx.moveTo(xL, baseY);
+    ctx.moveTo(xL, groundY);
+    ctx.lineTo(xL, baseY);
     for (var pi = 0; pi < TT_SAMPLES; pi++) {
       ctx.lineTo(ptsX[pi], ptsY[pi]);
     }
     ctx.lineTo(xR, baseY);
+    ctx.lineTo(xR, groundY);
     ctx.closePath();
     /* Solid dark fill — this is what occludes distant rows */
     ctx.fillStyle = '#000810';

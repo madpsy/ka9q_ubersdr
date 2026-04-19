@@ -293,13 +293,17 @@ function ttBuildCache(onDone) {
         }
       }
 
-      /* Mark gap rows as null. A gap row is one where most samples are the
-         missing-data sentinel (-1). Replace sentinels with 0 for rendering. */
+      /* Mark gap rows as null. A gap row is one where a significant fraction
+         of samples are the missing-data sentinel (-1).
+         Threshold: >30% black/missing pixels → treat entire row as a gap.
+         Sentinels are replaced with 1.0 (noise floor = zero height) rather
+         than 0 (max signal) so that any row that slips through the threshold
+         doesn't render as a spurious full-height peak. */
       var sentinelCount = 0;
       for (var zi = 0; zi < TT_SAMPLES; zi++) {
-        if (samples[zi] < 0) { sentinelCount++; samples[zi] = 0; }
+        if (samples[zi] < 0) { sentinelCount++; samples[zi] = 1.0; }
       }
-      ttSampleCache[row] = (sentinelCount > TT_SAMPLES * 0.8) ? null : samples;
+      ttSampleCache[row] = (sentinelCount > TT_SAMPLES * 0.30) ? null : samples;
     }
 
     if (row < totalRows) {

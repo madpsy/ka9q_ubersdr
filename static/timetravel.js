@@ -537,9 +537,17 @@ function ttRedraw() {
       continue;
     }
 
-    /* ── Dark silhouette fill (occludes rows behind) ────────────────── */
-    /* Fill from ridge down to groundY with solid dark colour.
-       This is always opaque so it fully covers the sky and any rows behind. */
+    /* ── Filled silhouette + ridge line ─────────────────────────────── */
+    /* Step 1: Fill from ridge down to groundY with the noise-floor colour.
+       This bridges the gap between rows (painter's algorithm covers rows behind).
+       Using the actual noise-floor palette colour so it blends naturally. */
+    var fillColor;
+    if (lut) {
+      var nfR = lut[0][0], nfG = lut[0][1], nfB = lut[0][2];
+      fillColor = 'rgba(' + nfR + ',' + nfG + ',' + nfB + ',' + fogAlpha.toFixed(3) + ')';
+    } else {
+      fillColor = 'rgba(0,8,20,' + fogAlpha.toFixed(3) + ')';
+    }
     ctx.beginPath();
     ctx.moveTo(xL, groundY);
     for (var pi = 0; pi < TT_SAMPLES; pi++) {
@@ -547,20 +555,12 @@ function ttRedraw() {
     }
     ctx.lineTo(xR, groundY);
     ctx.closePath();
-    ctx.fillStyle = '#000810';
+    ctx.fillStyle = fillColor;
     ctx.fill();
 
-    /* ── Ridge line with palette gradient ───────────────────────────── */
-    /* The ridge line is drawn thick enough to fill the gap to the next row.
-       Gap between consecutive baseY values = (groundY-vanishY)/depthRows px.
-       lineWidth is set to cover that gap so rows appear continuous. */
+    /* Step 2: Ridge line with signal-level gradient on top (thin, crisp) */
     if (lut && rowW > 1) {
       var topY = baseY - peakH;
-      /* Line width = pixel gap between consecutive row baseY values + 1px overlap.
-         This exactly bridges the dark gap between rows without being visually thick. */
-      var rowGapPx = (groundY - vanishY) / depthRows;
-      var lineW = Math.max(1.5, rowGapPx + 1);
-
       var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
@@ -579,8 +579,7 @@ function ttRedraw() {
         ctx.lineTo(ptsX[ri], ptsY[ri]);
       }
       ctx.strokeStyle = ridgeGrad;
-      ctx.lineWidth = lineW;
-      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(1, 1.8 * wFrac);
       ctx.stroke();
     }
 

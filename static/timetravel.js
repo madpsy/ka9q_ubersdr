@@ -275,12 +275,12 @@ function ttBuildCache(onDone) {
               if (dist < bestDist) { bestDist = dist; idx = li; }
             }
           }
-          /* The backend maps strong signal → lut[0] (blue end of jet) and
-             noise floor → lut[255] (red end). So invert so that
-             samples[si]=1.0 means strong signal, 0.0 means noise floor. */
-          samples[si] = 1 - idx / (lutLen - 1);
+          /* idx=0 → lut[0] colour (strong signal in jet), idx=255 → noise floor.
+             Keep as-is: samples[si]=0 means strong signal, 1.0 means noise floor.
+             Height uses (1-samples[si]) so strong signal = tall peak. */
+          samples[si] = idx / (lutLen - 1);
         } else {
-          samples[si] = 1 - g / 255;
+          samples[si] = g / 255;
         }
       }
 
@@ -485,7 +485,9 @@ function ttRedraw() {
     var ptsY = new Float32Array(TT_SAMPLES);
     for (var si = 0; si < TT_SAMPLES; si++) {
       ptsX[si] = xL + (si / (TT_SAMPLES - 1)) * rowW;
-      ptsY[si] = baseY - samples[si] * peakH;
+      /* samples[si]=0 → strong signal (lut[0]), samples[si]=1 → noise floor.
+         Invert for height: strong signal → tall peak. */
+      ptsY[si] = baseY - (1 - samples[si]) * peakH;
     }
 
     ctx.save();
@@ -521,13 +523,17 @@ function ttRedraw() {
       for (var gs = 0; gs <= GSTOPS; gs++) {
         var gsVal = gs / GSTOPS;   /* signal value 0→1 */
         var stopPos = gsVal;       /* stop 0=bottom(baseY), stop 1=top(topY) */
-        /* Fade out the bottom 10% (noise floor) */
+        /* Gradient geometry:
+             stop 0 → baseY (bottom) = noise floor position (samples≈1.0)
+             stop 1 → topY  (top)   = strong signal position (samples≈0.0)
+           Colour mapping (backend: lut[0]=strong, lut[255]=noise):
+             stopPos=0 (noise floor) → lut[255]  → lutIdx = (1-0)*255 = 255
+             stopPos=1 (strong sig)  → lut[0]    → lutIdx = (1-1)*255 = 0
+           So: lutIdx = round((1 - stopPos) * 255) = round((1 - gsVal) * 255)
+           Fade out the bottom 10% (noise floor, gsVal<0.10, stopPos<0.10). */
         if (gsVal < 0.10) {
           ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
         } else {
-          /* gsVal=1.0 → strong signal → lut[0] (blue/cyan in jet).
-             gsVal=0.0 → noise floor → lut[255] (dark red in jet).
-             Map: lutIdx = (1 - gsVal) * 255 so peaks get lut[0] colour. */
           var lutIdx = Math.min(lut.length - 1, Math.round((1 - gsVal) * (lut.length - 1)));
           var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
           ridgeGrad.addColorStop(stopPos, 'rgb(' + rc + ',' + gc2 + ',' + bc + ')');

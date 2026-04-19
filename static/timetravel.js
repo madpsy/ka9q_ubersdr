@@ -208,31 +208,47 @@ function ttResizeCanvas() {
   var c = document.getElementById('tt-canvas');
   var oc = document.getElementById('tt-overlay');
   if (!wrap || !c) return;
-  var w = wrap.getBoundingClientRect().width || 800;
 
-  /* On narrow (portrait phone) screens use a taller aspect ratio so the 3D
-     scene fills more of the viewport height.  Breakpoints match the CSS media
-     queries in spectrogram.html:
-       ≤ 400 px  → 0.75 (4:3-ish portrait)
-       ≤ 600 px  → 0.65 (slightly taller than widescreen)
-       > 600 px  → 0.54 (original 16:9-ish desktop ratio)
-     Cap at 600 px on desktop, 480 px on tablet, 360 px on phone so the canvas
-     never pushes the controls off-screen. */
-  var aspectRatio, maxH;
-  if (w <= 400) {
-    aspectRatio = 0.75;
-    maxH = 320;
-  } else if (w <= 600) {
-    aspectRatio = 0.65;
-    maxH = 420;
+  /* Detect fullscreen — when active, fill the entire screen */
+  var isFs = !!(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement
+  );
+
+  var w, h, scrubH;
+  if (isFs) {
+    w = window.innerWidth  || screen.width  || 800;
+    h = window.innerHeight || screen.height || 600;
+    scrubH = 52; /* generous touch target in fullscreen */
   } else {
-    aspectRatio = 0.54;
-    maxH = 600;
-  }
-  var h = Math.min(Math.round(w * aspectRatio), maxH);
+    w = wrap.getBoundingClientRect().width || 800;
 
-  /* Scrubber height matches the CSS (52 px on mobile, 44 px otherwise) */
-  var scrubH = w <= 600 ? 52 : 44;
+    /* On narrow (portrait phone) screens use a taller aspect ratio so the 3D
+       scene fills more of the viewport height.  Breakpoints match the CSS media
+       queries in spectrogram.html:
+         ≤ 400 px  → 0.75 (4:3-ish portrait)
+         ≤ 600 px  → 0.65 (slightly taller than widescreen)
+         > 600 px  → 0.54 (original 16:9-ish desktop ratio)
+       Cap at 600 px on desktop, 480 px on tablet, 360 px on phone so the canvas
+       never pushes the controls off-screen. */
+    var aspectRatio, maxH;
+    if (w <= 400) {
+      aspectRatio = 0.75;
+      maxH = 320;
+    } else if (w <= 600) {
+      aspectRatio = 0.65;
+      maxH = 420;
+    } else {
+      aspectRatio = 0.54;
+      maxH = 600;
+    }
+    h = Math.min(Math.round(w * aspectRatio), maxH);
+
+    /* Scrubber height matches the CSS (52 px on mobile, 44 px otherwise) */
+    scrubH = w <= 600 ? 52 : 44;
+  }
 
   if (c.width !== Math.round(w) || c.height !== h) {
     c.width = Math.round(w);
@@ -247,8 +263,9 @@ function ttResizeCanvas() {
   var sc = document.getElementById('tt-scrubber');
   var sw = document.getElementById('tt-scrubber-wrap');
   if (sc && sw) {
-    var sw2 = sw.getBoundingClientRect().width || 800;
-    sc.width = Math.round(sw2);
+    /* In fullscreen the wrap fills the screen, so use w directly */
+    var sw2 = isFs ? Math.round(w) : (sw.getBoundingClientRect().width || Math.round(w));
+    sc.width = sw2;
     sc.height = scrubH;
   }
   if (ttBmp && ttMeta) ttRedraw();
@@ -1544,6 +1561,59 @@ function ttSetupHover() {
     if (tt2) tt2.style.display = 'none';
   });
 }
+
+/* ── Fullscreen ─────────────────────────────────────────────────────────── */
+function ttToggleFullscreen() {
+  var wrap = document.getElementById('tt-canvas-wrap');
+  if (!wrap) return;
+
+  var isFs = !!(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement
+  );
+
+  if (isFs) {
+    /* Exit fullscreen */
+    var exitFn = document.exitFullscreen ||
+                 document.webkitExitFullscreen ||
+                 document.mozCancelFullScreen ||
+                 document.msExitFullscreen;
+    if (exitFn) exitFn.call(document);
+  } else {
+    /* Enter fullscreen on the canvas wrap element */
+    var reqFn = wrap.requestFullscreen ||
+                wrap.webkitRequestFullscreen ||
+                wrap.mozRequestFullScreen ||
+                wrap.msRequestFullscreen;
+    if (reqFn) reqFn.call(wrap);
+  }
+}
+
+/* Update button icon and resize canvas whenever fullscreen state changes */
+(function ttSetupFullscreen() {
+  function onFsChange() {
+    var isFs = !!(
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.mozFullScreenElement ||
+      document.msFullscreenElement
+    );
+    var btn = document.getElementById('tt-fs-btn');
+    if (btn) {
+      /* ⛶ = enter fullscreen, ✕-like exit icon */
+      btn.textContent = isFs ? '\u2715' : '\u26F6';
+      btn.title = isFs ? 'Exit fullscreen' : 'Toggle fullscreen';
+    }
+    /* Let the browser finish resizing before we measure the wrap */
+    setTimeout(ttResizeCanvas, 50);
+  }
+  document.addEventListener('fullscreenchange',       onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  document.addEventListener('mozfullscreenchange',    onFsChange);
+  document.addEventListener('MSFullscreenChange',     onFsChange);
+})();
 
 /* ── Keyboard handler ───────────────────────────────────────────────────── */
 function ttKeyHandler(e) {

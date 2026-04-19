@@ -22,7 +22,7 @@
 /* ── Constants ──────────────────────────────────────────────────────────── */
 var TT_SAMPLES = 160;        /* frequency sample points per row */
 var TT_HEIGHT_SCALE = 0.40;  /* peak height as fraction of (groundY - vanishY) */
-var TT_MIN_WFRAC = 0.30;     /* minimum width fraction at max depth (prevents vanishing to a point) */
+var TT_MIN_WFRAC = 0.30;     /* width fraction at maximum depth (front=1.0, back=TT_MIN_WFRAC, linear) */
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 var ttInited = false;
@@ -426,22 +426,26 @@ function ttRedraw() {
     ctx.save();
     ctx.strokeStyle = 'rgba(0,150,220,0.10)';
     ctx.lineWidth = 1;
+    /* Vertical grid lines: front edge at groundY, back edge at vanishY row width */
+    var backHalfW = frontHalfW * TT_MIN_WFRAC;
+    var backY2 = groundY - (groundY - vanishY) * 1.0; /* = vanishY */
     var gridFreqs = [0, 5e6, 10e6, 15e6, 20e6, 25e6, 30e6];
     for (var gi = 0; gi < gridFreqs.length; gi++) {
       var gf = gridFreqs[gi];
       if (gf < startHz || gf > startHz + spanHz) continue;
       var gfrac = (gf - startHz) / spanHz;
       var gxFront = vanishX - frontHalfW + gfrac * frontHalfW * 2;
+      var gxBack  = vanishX - backHalfW  + gfrac * backHalfW  * 2;
       ctx.beginPath();
       ctx.moveTo(gxFront, groundY);
-      ctx.lineTo(vanishX, vanishY);
+      ctx.lineTo(gxBack, backY2);
       ctx.stroke();
     }
     var hStep = Math.max(1, Math.round(depthRows / 8));
     for (var hi = 0; hi <= depthRows; hi += hStep) {
       var hd = hi / depthRows;
       var hy = groundY - (groundY - vanishY) * hd;
-      var hwFrac = Math.max(TT_MIN_WFRAC, Math.pow(1 - hd, 1.3));
+      var hwFrac = 1 - hd * (1 - TT_MIN_WFRAC);
       var hxL = vanishX - frontHalfW * hwFrac;
       var hxR = vanishX + frontHalfW * hwFrac;
       ctx.beginPath();
@@ -457,7 +461,7 @@ function ttRedraw() {
   for (var di = depthRows - 1; di >= 0; di--) {
     var d = di / depthRows;
     var baseY = groundY - (groundY - vanishY) * d;
-    var wFrac = Math.max(TT_MIN_WFRAC, Math.pow(1 - d, 1.3));
+    var wFrac = 1 - d * (1 - TT_MIN_WFRAC);
     var xL = vanishX - frontHalfW * wFrac;
     var xR = vanishX + frontHalfW * wFrac;
     var rowW = xR - xL;
@@ -469,8 +473,9 @@ function ttRedraw() {
     var samples = ttSampleCache[rowIdx];
     if (!samples) continue;
 
-    var peakH = maxPeakH * Math.pow(1 - d, 0.65);
-    var fogAlpha = Math.pow(1 - d, 0.85) * 0.94 + 0.06;
+    /* Scale peak height and fog with wFrac so distant rows look proportionally smaller */
+    var peakH = maxPeakH * wFrac;
+    var fogAlpha = wFrac * 0.94 + 0.06;
 
     /* ── Compute screen points ──────────────────────────────────────── */
     var ptsX = new Float32Array(TT_SAMPLES);
@@ -564,9 +569,8 @@ function ttRedraw() {
       var bFrontX0 = frontXL + bf0 * frontRowW;
       var bFrontX1 = frontXL + bf1 * frontRowW;
 
-      /* Back edge converges toward vanishing point, but clamped to TT_MIN_WFRAC */
-      var backD = Math.min(1, depthRows / depthRows); /* = 1 */
-      var backWFrac = Math.max(TT_MIN_WFRAC, Math.pow(1 - backD, 1.3));
+      /* Back edge at full depth: wFrac = TT_MIN_WFRAC (linear formula) */
+      var backWFrac = TT_MIN_WFRAC; /* 1 - 1*(1-TT_MIN_WFRAC) = TT_MIN_WFRAC */
       var backXL2 = vanishX - frontHalfW * backWFrac;
       var backRowW2 = (vanishX + frontHalfW * backWFrac) - backXL2;
       var bBackX0 = backXL2 + bf0 * backRowW2;

@@ -1409,7 +1409,14 @@ function ttDrawScrubber() {
   ctx.fillRect(0, 0, W, H);
 
   if (ttBmp) {
-    ctx.drawImage(ttBmp, 0, 0, W, H);
+    /* The spectrogram PNG has frequency on X and time on Y (top=oldest, bottom=newest).
+       The scrubber is a horizontal strip where X = time and Y = frequency (collapsed).
+       Rotate the PNG 90° counter-clockwise so PNG rows (time) map to scrubber X. */
+    ctx.save();
+    ctx.translate(0, H);
+    ctx.rotate(-Math.PI / 2);
+    ctx.drawImage(ttBmp, 0, 0, H, W);  /* PNG height→scrubberW, PNG width→scrubberH */
+    ctx.restore();
     ctx.fillStyle = 'rgba(0,0,0,.38)';
     ctx.fillRect(0, 0, W, H);
   }
@@ -1432,8 +1439,18 @@ function ttDrawScrubber() {
   }
 
   if (ttMeta && ttMeta.row_count > 0) {
-    var px = (ttCurrentRow / ttMeta.row_count) * W;
+    var rc = ttMeta.row_count;
+    var depthRows = Math.min(ttDepthRows, rc);
+    /* Centre of the visible window — this is what's most prominent in the 3D scene */
+    var centreRow = ttCurrentRow - depthRows / 2;
+    var px = (centreRow / rc) * W;
+    /* Shaded band showing the full visible window extent */
+    var pxStart = ((ttCurrentRow - depthRows) / rc) * W;
+    var pxEnd   = (ttCurrentRow / rc) * W;
     ctx.save();
+    ctx.fillStyle = 'rgba(0,255,255,0.12)';
+    ctx.fillRect(pxStart, 0, pxEnd - pxStart, H);
+    /* Playhead line at centre of window */
     ctx.shadowColor = '#0ff';
     ctx.shadowBlur = 8;
     ctx.strokeStyle = 'rgba(0,255,255,0.9)';
@@ -1460,7 +1477,11 @@ function ttSetupScrubber() {
     var rect = sc.getBoundingClientRect();
     var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
     var frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    ttCurrentRow = frac * (ttMeta.row_count - 1);
+    /* The playhead sits at the centre of the visible window, so offset ttCurrentRow
+       (the front/newest row) by half the depth so the clicked position becomes the centre */
+    var depthRows = Math.min(ttDepthRows, ttMeta.row_count);
+    ttCurrentRow = Math.max(0, Math.min(ttMeta.row_count - 1,
+      frac * (ttMeta.row_count - 1) + depthRows / 2));
     ttLastFrameTs = null;
     ttRedraw();
   }

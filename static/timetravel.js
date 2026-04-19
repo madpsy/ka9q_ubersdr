@@ -541,11 +541,10 @@ function ttRedraw() {
     var now2 = Date.now();
 
     if (isLoading) {
-      /* ── Animated radar sweep ─────────────────────────────────────────── */
-      var sweepAngle = ((now2 / 1200) % 1) * Math.PI * 2 - Math.PI / 2;
       var radarR = Math.min(W, H) * 0.13;
+      var sweepAngle = ((now2 / 1200) % 1) * Math.PI * 2 - Math.PI / 2;
 
-      /* Radar rings */
+      /* ── Radar rings ──────────────────────────────────────────────────── */
       ctx.save();
       ctx.strokeStyle = 'rgba(0,255,180,0.18)';
       ctx.lineWidth = 1;
@@ -554,11 +553,9 @@ function ttRedraw() {
         ctx.arc(cx, cy - 28, radarR * ri / 3, 0, Math.PI * 2);
         ctx.stroke();
       }
+      ctx.restore();
 
-      /* Sweep wedge */
-      var sweepGrad = ctx.createConicalGradient
-        ? ctx.createConicalGradient(cx, cy - 28, sweepAngle)
-        : null;
+      /* ── Sweep wedge + line (translated/rotated context) ──────────────── */
       ctx.save();
       ctx.translate(cx, cy - 28);
       ctx.rotate(sweepAngle);
@@ -571,7 +568,6 @@ function ttRedraw() {
       ctx.closePath();
       ctx.fillStyle = wedge;
       ctx.fill();
-      /* Sweep line */
       ctx.strokeStyle = 'rgba(0,255,180,0.9)';
       ctx.lineWidth = 1.5;
       ctx.shadowColor = '#0fb';
@@ -582,7 +578,7 @@ function ttRedraw() {
       ctx.stroke();
       ctx.restore();
 
-      /* Centre dot */
+      /* ── Centre dot ───────────────────────────────────────────────────── */
       ctx.save();
       ctx.fillStyle = '#0fb';
       ctx.shadowColor = '#0fb';
@@ -592,19 +588,9 @@ function ttRedraw() {
       ctx.fill();
       ctx.restore();
 
-      /* Animated dots suffix */
+      /* ── Text ─────────────────────────────────────────────────────────── */
       var dotCount = Math.floor(now2 / 400) % 4;
       var dots = '\u25cf'.repeat(dotCount) + '\u25cb'.repeat(3 - dotCount);
-
-      /* Main loading text */
-      ctx.fillStyle = 'rgba(0,255,180,0.9)';
-      ctx.font = 'bold 15px monospace';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = '#0fb';
-      ctx.shadowBlur = 10;
-      ctx.fillText('INITIALISING TEMPORAL ARRAY  ' + dots, cx, cy + radarR * 0.55);
-
-      /* Sub-text — cycles through flavour messages */
       var msgs = [
         'Calibrating flux capacitors\u2026',
         'Aligning frequency matrices\u2026',
@@ -613,10 +599,19 @@ function ttRedraw() {
         'Scanning the ionosphere\u2026'
       ];
       var msgIdx = Math.floor(now2 / 1800) % msgs.length;
+      var textY = cy + radarR * 0.7;
+
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,255,180,0.9)';
+      ctx.font = 'bold 15px monospace';
+      ctx.shadowColor = '#0fb';
+      ctx.shadowBlur = 10;
+      ctx.fillText('INITIALISING TEMPORAL ARRAY  ' + dots, cx, textY);
+      ctx.shadowBlur = 0;
       ctx.fillStyle = 'rgba(0,200,150,0.55)';
       ctx.font = '11px monospace';
-      ctx.shadowBlur = 0;
-      ctx.fillText(msgs[msgIdx], cx, cy + radarR * 0.55 + 22);
+      ctx.fillText(msgs[msgIdx], cx, textY + 22);
       ctx.restore();
     } else {
       /* No data state */
@@ -628,6 +623,11 @@ function ttRedraw() {
       ctx.restore();
     }
 
+    /* Blit offscreen canvas to visible canvas before returning */
+    if (useOffscreen && ttOffscreen) {
+      mainCtx.clearRect(0, 0, W, H);
+      mainCtx.drawImage(ttOffscreen, 0, 0);
+    }
     ttUpdateHUD();
     return;
   }

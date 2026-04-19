@@ -906,13 +906,12 @@ function clampZoom(rect){
         load();
       };
       updateNavButtons();
+      /* If ?tab=tt was in the URL, switch now — selectors are fully populated */
+      if(urlTab==='tt'){switchTab('tt');}
       load();
     })
     .catch(function(e){showErr('Failed to load date list: '+escHtml(e.message));});
 })();
-
-/* If ?tab=tt was in the URL, open the Time Travel tab immediately */
-if(urlTab==='tt'){switchTab('tt');}
 
 /* Navigate to the previous (-1=older) or next (+1=newer) date.
    availableDates is newest-first, so newer=lower index, older=higher index. */

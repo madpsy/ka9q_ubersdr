@@ -38,6 +38,9 @@ var ttDepthRows = 60;
 var ttScrubDragging = false;
 var ttKeyHandlerAttached = false;
 var ttBand = 'wideband';
+var ttCountingDown = false;
+var ttCountdownVal = 0;
+var ttCountdownTs = 0;
 
 /* Pre-computed sample cache: ttSampleCache[rowIdx] = Float32Array(ttSampleCount) */
 var ttSampleCache = null;
@@ -105,6 +108,70 @@ function ttSetSpeed(mult) {
   });
 }
 
+/* ── Text-to-speech helper ──────────────────────────────────────────────── */
+/* Prefers a high-quality neural voice (Google/Microsoft) if available.
+   Silently no-ops if the browser doesn't support speechSynthesis. */
+function ttSpeak(text, rate, pitch) {
+  if (typeof speechSynthesis === 'undefined') return;
+  speechSynthesis.cancel(); /* stop any current utterance */
+  var utt = new SpeechSynthesisUtterance(text);
+  utt.rate  = rate  || 0.92;
+  utt.pitch = pitch || 1.0;
+  utt.volume = 0.9;
+
+  /* Pick the best available voice: prefer Google/Microsoft neural voices */
+  var voices = speechSynthesis.getVoices();
+  var preferred = null;
+  var preferredNames = [
+    'Google UK English Female', 'Google UK English Male',
+    'Microsoft Sonia Online', 'Microsoft Libby Online',
+    'Microsoft George Online', 'Google US English',
+    'Microsoft Zira', 'Microsoft David'
+  ];
+  for (var pi = 0; pi < preferredNames.length; pi++) {
+    for (var vi = 0; vi < voices.length; vi++) {
+      if (voices[vi].name === preferredNames[pi]) { preferred = voices[vi]; break; }
+    }
+    if (preferred) break;
+  }
+  /* Fallback: first English voice */
+  if (!preferred) {
+    for (var vi2 = 0; vi2 < voices.length; vi2++) {
+      if (/en/i.test(voices[vi2].lang)) { preferred = voices[vi2]; break; }
+    }
+  }
+  if (preferred) utt.voice = preferred;
+  speechSynthesis.speak(utt);
+}
+
+/* ── Countdown before playback ──────────────────────────────────────────── */
+/* Shows 3-2-1 on the overlay canvas and speaks each number, then engages. */
+function ttStartCountdown() {
+  if (!ttSampleCache) { ttSetStatus('Cache not ready yet.'); return; }
+  if (ttIsPlaying) { ttPause(); return; } /* already playing → pause */
+  if (ttCountingDown) return; /* already counting down */
+
+  ttCountingDown = true;
+  ttCountdownVal = 3;
+  ttCountdownTs = Date.now();
+  ttStartStarLoop(); /* keep overlay animating during countdown */
+
+  /* Speak the sequence with timed delays */
+  ttSpeak('3', 1.0);
+  setTimeout(function() { if (ttCountingDown) ttSpeak('2', 1.0); }, 1000);
+  setTimeout(function() { if (ttCountingDown) ttSpeak('1', 1.0); }, 2000);
+  setTimeout(function() {
+    if (!ttCountingDown) return;
+    ttSpeak('Engaging temporal drive', 1.05, 0.9);
+    ttCountingDown = false;
+    ttCountdownVal = 0;
+    ttPlay();
+  }, 3000);
+
+  /* Redraw loop will pick up ttCountingDown and show the number */
+  ttDrawOverlay();
+}
+
 /* ── Init ───────────────────────────────────────────────────────────────── */
 function initTimeTravelTab() {
   if (ttInited) return;
@@ -162,6 +229,17 @@ function initTimeTravelTab() {
   ttUpdateUrlParams(); /* stamp current date+band into URL on first open */
   ttLoadData();
   ttStartStarLoop(); /* animate stars immediately, even before data loads */
+
+  /* Click anywhere on the canvas to engage/pause */
+  var ttWrap = document.getElementById('tt-canvas-wrap');
+  if (ttWrap) {
+    ttWrap.addEventListener('click', function(e) {
+      /* Ignore clicks on the scrubber area */
+      var sw = document.getElementById('tt-scrubber-wrap');
+      if (sw && sw.contains(e.target)) return;
+      if (ttSampleCache) ttTogglePlay();
+    });
+  }
 }
 
 /* ── Canvas sizing ──────────────────────────────────────────────────────── */
@@ -260,6 +338,7 @@ function ttLoadData() {
       ttRedraw();
       ttSetStatus(ttMeta.row_count + ' rows (shared)');
       if (!ttIsPlaying) ttStartStarLoop();
+      ttSpeak('Temporal array initialised. Ready for time travel.', 0.9, 1.0);
     });
     return;
   }
@@ -299,6 +378,7 @@ function ttLoadData() {
         ttRedraw();
         ttSetStatus(ttMeta.row_count + ' rows \u00b7 ' + ttMeta.date);
         if (!ttIsPlaying) ttStartStarLoop();
+        ttSpeak('Temporal array initialised. Ready for time travel.', 0.9, 1.0);
       });
     })
     .catch(function(e) {
@@ -450,7 +530,16 @@ function ttBuildPaletteCanvas() {
 
 /* ── Playback ───────────────────────────────────────────────────────────── */
 function ttTogglePlay() {
-  if (ttIsPlaying) ttPause(); else ttPlay();
+  if (ttIsPlaying) { ttPause(); return; }
+  if (ttCountingDown) {
+    /* Cancel countdown */
+    ttCountingDown = false;
+    ttCountdownVal = 0;
+    speechSynthesis && speechSynthesis.cancel();
+    ttDrawOverlay();
+    return;
+  }
+  ttStartCountdown();
 }
 
 function ttPlay() {
@@ -466,6 +555,7 @@ function ttPlay() {
     btn.style.borderColor = 'rgba(255,150,0,.6)';
     btn.style.color = '#fa0';
   }
+  ttDrawOverlay(); /* clear the big play button */
   ttRafId = requestAnimationFrame(ttFrame);
 }
 
@@ -481,6 +571,108 @@ function ttPause() {
   }
   /* Keep star animation running while paused */
   ttStartStarLoop();
+  ttDrawOverlay(); /* show the big play button again */
+}
+
+/* ── Centre "Engage" overlay ────────────────────────────────────────────── */
+/* Drawn on the tt-overlay canvas so it sits above the 3D scene.
+   Shown when data is loaded but playback is paused; cleared when playing.
+   Animates via the star loop — ttDrawOverlay() is called each frame. */
+function ttDrawOverlay() {
+  var oc = document.getElementById('tt-overlay');
+  if (!oc) return;
+  var octx = oc.getContext('2d');
+  var W = oc.width, H = oc.height;
+  octx.clearRect(0, 0, W, H);
+
+  /* Only show when data is ready and not actively playing (countdown is ok) */
+  if (!ttSampleCache || (ttIsPlaying && !ttCountingDown)) return;
+
+  var cx = W / 2, cy = H / 2;
+  var now3 = Date.now();
+  var pulse = 0.6 + 0.4 * Math.sin(now3 / 600);   /* 0.6–1.0 */
+  var r = Math.min(W, H) * 0.11;
+
+  /* ── Countdown mode ───────────────────────────────────────────────────── */
+  if (ttCountingDown) {
+    /* Compute which digit to show based on elapsed time */
+    var elapsed = (now3 - ttCountdownTs) / 1000;
+    var digit = Math.max(1, 3 - Math.floor(elapsed));
+    /* Scale: digit pulses from large to small over each 1-second window */
+    var frac = elapsed % 1; /* 0→1 within each second */
+    var scale = 1.4 - frac * 0.5; /* 1.4 → 0.9 */
+    var alpha = 1 - frac * 0.3;
+
+    octx.save();
+    octx.textAlign = 'center';
+    octx.textBaseline = 'middle';
+    octx.font = 'bold ' + Math.round(r * 2.2 * scale) + 'px monospace';
+    octx.fillStyle = 'rgba(0,255,200,' + alpha.toFixed(2) + ')';
+    octx.shadowColor = '#0fc';
+    octx.shadowBlur = 40 * pulse;
+    octx.fillText(String(digit), cx, cy);
+
+    octx.font = 'bold ' + Math.round(r * 0.28) + 'px monospace';
+    octx.textBaseline = 'top';
+    octx.shadowBlur = 6;
+    octx.fillStyle = 'rgba(0,255,200,0.6)';
+    octx.fillText('INITIATING TEMPORAL DRIVE\u2026', cx, cy + r * 1.3);
+    octx.restore();
+    return;
+  }
+
+  octx.save();
+
+  /* Dark backdrop disc */
+  octx.beginPath();
+  octx.arc(cx, cy, r * 1.15, 0, Math.PI * 2);
+  octx.fillStyle = 'rgba(0,4,16,0.72)';
+  octx.fill();
+
+  /* Spinning orbital ring */
+  var orbitAngle = (now3 / 2200) * Math.PI * 2;
+  octx.save();
+  octx.translate(cx, cy);
+  octx.rotate(orbitAngle);
+  octx.beginPath();
+  octx.ellipse(0, 0, r * 1.25, r * 0.38, 0, 0, Math.PI * 2);
+  octx.strokeStyle = 'rgba(0,200,255,' + (pulse * 0.45).toFixed(2) + ')';
+  octx.lineWidth = 1.5;
+  octx.stroke();
+  /* Small "satellite" dot on the ring */
+  octx.beginPath();
+  octx.arc(r * 1.25, 0, 3, 0, Math.PI * 2);
+  octx.fillStyle = 'rgba(0,255,255,' + pulse.toFixed(2) + ')';
+  octx.shadowColor = '#0ff';
+  octx.shadowBlur = 8;
+  octx.fill();
+  octx.restore();
+
+  /* Pulsing outer glow ring */
+  octx.beginPath();
+  octx.arc(cx, cy, r, 0, Math.PI * 2);
+  octx.strokeStyle = 'rgba(0,255,200,' + (pulse * 0.85).toFixed(2) + ')';
+  octx.lineWidth = 2;
+  octx.shadowColor = '#0fc';
+  octx.shadowBlur = 20 * pulse;
+  octx.stroke();
+
+  /* Rocket emoji centred */
+  octx.shadowBlur = 0;
+  octx.font = Math.round(r * 0.9) + 'px serif';
+  octx.textAlign = 'center';
+  octx.textBaseline = 'middle';
+  octx.fillText('\uD83D\uDE80', cx, cy - r * 0.05);
+
+  /* "ENGAGE TEMPORAL DRIVE" label below */
+  octx.font = 'bold ' + Math.round(r * 0.28) + 'px monospace';
+  octx.textBaseline = 'top';
+  octx.fillStyle = 'rgba(0,255,200,' + (0.5 + 0.5 * pulse).toFixed(2) + ')';
+  octx.shadowColor = '#0fc';
+  octx.shadowBlur = 8 * pulse;
+  octx.fillText('ENGAGE TEMPORAL DRIVE', cx, cy + r * 1.05);
+
+  octx.restore();
 }
 
 /* ── Star animation loop (runs independently of playback) ───────────────── */
@@ -1066,6 +1258,7 @@ function ttRedraw() {
 
   ttUpdateHUD();
   ttDrawScrubber();
+  ttDrawOverlay();
 }
 
 /* ── Starfield ──────────────────────────────────────────────────────────── */

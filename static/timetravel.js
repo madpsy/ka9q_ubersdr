@@ -280,14 +280,14 @@ function ttBuildCache(onDone) {
         }
       }
 
-      /* Mark entirely-zero rows (missing data / recording gaps) as null.
-         The renderer already skips null entries, so gap rows become
-         transparent — no red "missing data" line is drawn. */
-      var allZero = true;
-      for (var zi = 0; zi < TT_SAMPLES; zi++) {
-        if (samples[zi] > 0) { allZero = false; break; }
-      }
-      ttSampleCache[row] = allZero ? null : samples;
+      /* Mark gap/missing-data rows as null so the renderer skips them.
+         We use an average-signal threshold rather than strict zero because:
+         - JPEG compression can introduce small non-zero values in black rows
+         - lut[0] (the lowest palette entry) is often red, giving idx=0 → 0.004
+         A row is considered a gap if its mean signal is below 2% of full scale. */
+      var rowSum = 0;
+      for (var zi = 0; zi < TT_SAMPLES; zi++) rowSum += samples[zi];
+      ttSampleCache[row] = (rowSum / TT_SAMPLES < 0.02) ? null : samples;
     }
 
     if (row < totalRows) {
@@ -500,31 +500,29 @@ function ttRedraw() {
     ctx.fillStyle = '#000810';
     ctx.fill();
 
-    /* ── Ridge line with horizontal gradient ────────────────────────── */
-    /* Build a gradient that maps the palette colours across the row width.
-       We use the palette canvas as a colour source by creating a gradient
-       with colour stops sampled from the LUT at regular intervals. */
+    /* ── Ridge line with vertical gradient ─────────────────────────── */
+    /* A vertical gradient from baseY (signal=0) to baseY-peakH (signal=1)
+       means each point on the ridge picks up the exact palette colour for
+       its signal value — no averaging, no boost distortion.
+       lut[0] (often red) sits at the very bottom and is never reached
+       because the silhouette fill already covers that area. */
     var lut = (typeof V !== 'undefined') ? V : null;
     if (lut && rowW > 1) {
-      var ridgeGrad = ctx.createLinearGradient(xL, 0, xR, 0);
-      /* Sample the palette at ~16 points for the gradient stops */
+      var topY = baseY - peakH;
+      var ridgeGrad = ctx.createLinearGradient(0, baseY, 0, topY);
+      /* 16 colour stops evenly spaced from signal=0 (bottom) to signal=1 (top) */
       var GSTOPS = 16;
       for (var gs = 0; gs <= GSTOPS; gs++) {
-        var gsFrac = gs / GSTOPS;
-        /* Find the average signal value in this horizontal band */
-        var gsStart = Math.floor(gsFrac * (TT_SAMPLES - 1));
-        var gsEnd = Math.min(TT_SAMPLES - 1, gsStart + Math.ceil(TT_SAMPLES / GSTOPS));
-        var gsSum = 0, gsCnt = 0;
-        for (var gsi = gsStart; gsi <= gsEnd; gsi++) {
-          gsSum += samples[gsi]; gsCnt++;
+        var gsVal = gs / GSTOPS;          /* signal value 0→1 */
+        var stopPos = 1 - gsVal;          /* gradient position: 0=top(baseY→topY start), 1=bottom */
+        /* Fade out the bottom 10% so lut[0] colours never show */
+        if (gsVal < 0.10) {
+          ridgeGrad.addColorStop(stopPos, 'rgba(0,0,0,0)');
+        } else {
+          var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
+          var rc = lut[lutIdx][0], gc2 = lut[lutIdx][1], bc = lut[lutIdx][2];
+          ridgeGrad.addColorStop(stopPos, 'rgb(' + rc + ',' + gc2 + ',' + bc + ')');
         }
-        var gsVal = gsCnt > 0 ? gsSum / gsCnt : 0;
-        var lutIdx = Math.min(lut.length - 1, Math.round(gsVal * (lut.length - 1)));
-        var boost = 1.0 + gsVal * 1.0;
-        var cr = Math.min(255, Math.round(lut[lutIdx][0] * boost));
-        var cg = Math.min(255, Math.round(lut[lutIdx][1] * boost));
-        var cb = Math.min(255, Math.round(lut[lutIdx][2] * boost));
-        ridgeGrad.addColorStop(gsFrac, 'rgb(' + cr + ',' + cg + ',' + cb + ')');
       }
 
       ctx.beginPath();
@@ -533,7 +531,7 @@ function ttRedraw() {
         ctx.lineTo(ptsX[ri], ptsY[ri]);
       }
       ctx.strokeStyle = ridgeGrad;
-      ctx.lineWidth = Math.max(1, 1.8 * (1 - d * 0.55));
+      ctx.lineWidth = Math.max(1, 1.8 * wFrac);
       ctx.stroke();
     }
 

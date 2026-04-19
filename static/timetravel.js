@@ -48,12 +48,36 @@ var ttSampleCount = TT_SAMPLES;
 var ttSlotPX = [];   /* ttSlotPX[di] = Float32Array(ttSampleCount) */
 var ttSlotPY = [];   /* ttSlotPY[di] = Float32Array(ttSampleCount) */
 
+/* Persistent per-frame working arrays — allocated once, overwritten each frame.
+   Avoids creating 9 new JS arrays (+ GC of old ones) on every ttRedraw() call. */
+var ttAllPtsX    = [];
+var ttAllPtsY    = [];
+var ttAllNPts    = [];
+var ttAllBaseY   = [];
+var ttAllWFrac   = [];
+var ttAllXL      = [];
+var ttAllXR      = [];
+var ttAllValid   = [];
+var ttAllInRange = [];
+
 /* Pre-built gradient canvas for ridge colouring (palette strip) */
 var ttPaletteCanvas = null;
 /* Cached per-depth-slot gradients — rebuilt when canvas resizes or palette changes.
    ttRowGradCache[di] = CanvasGradient for that depth slot. */
 var ttRowGradCache = [];
 var ttRowGradDepth = 0;   /* depthRows value the cache was built for */
+
+/* Cached static gradients (sky, vignette) — rebuilt only on canvas resize */
+var ttGradSky  = null;
+var ttGradVigTop = null;
+var ttGradVigL   = null;
+var ttGradVigR   = null;
+
+/* Cached LUT colour strings — rebuilt only when palette/LUT changes.
+   ttLutRGB[i] = 'r,g,b' string; avoids per-frame string allocation. */
+var ttLutRGB = null;
+var ttLutLastIdx = 0;
+var ttLutVersion = 0;   /* bumped when LUT changes to trigger rebuild */
 
 /* Stars */
 var ttStars = null;
@@ -136,6 +160,8 @@ function ttResizeCanvas() {
     if (oc) { oc.width = Math.round(w); oc.height = h; }
     ttPaletteCanvas = null; /* rebuild palette + row gradients on next draw */
     ttRowGradCache = [];
+    ttLutRGB = null;
+    ttGradSky = null; ttGradVigTop = null; ttGradVigL = null; ttGradVigR = null;
   }
   var sc = document.getElementById('tt-scrubber');
   var sw = document.getElementById('tt-scrubber-wrap');
@@ -149,14 +175,14 @@ function ttResizeCanvas() {
 
 /* ── Data loading ───────────────────────────────────────────────────────── */
 function ttOnDateChange() {
-  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = [];
+  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null;
   ttLoadData();
 }
 
 function ttOnBandChange() {
   var bdst = document.getElementById('tt-bsel');
   ttBand = bdst ? bdst.value : 'wideband';
-  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = [];
+  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null;
   ttLoadData();
 }
 
@@ -437,12 +463,14 @@ function ttRedraw() {
   var W = c.width, H = c.height;
   ctx.clearRect(0, 0, W, H);
 
-  /* Sky gradient */
-  var sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, '#000814');
-  sky.addColorStop(0.6, '#001428');
-  sky.addColorStop(1, '#000a1a');
-  ctx.fillStyle = sky;
+  /* Sky gradient — cached; only rebuilt on canvas resize */
+  if (!ttGradSky) {
+    ttGradSky = ctx.createLinearGradient(0, 0, 0, H);
+    ttGradSky.addColorStop(0, '#000814');
+    ttGradSky.addColorStop(0.6, '#001428');
+    ttGradSky.addColorStop(1, '#000a1a');
+  }
+  ctx.fillStyle = ttGradSky;
   ctx.fillRect(0, 0, W, H);
 
   ttDrawStars(ctx, W, H);
@@ -519,17 +547,16 @@ function ttRedraw() {
   var frontRow = Math.round(ttCurrentRow);
   var lut = (typeof V !== 'undefined') ? V : null;
 
-  /* Pre-build LUT colour strings once per frame (avoids string concat in hot loop).
-     lutRGB[i] = 'r,g,b' — alpha and rgba() wrapper added per-row with fogAlpha. */
-  var lutRGB = null;
-  var lutLastIdx = 0;
-  if (lut) {
-    lutLastIdx = lut.length - 1;
-    lutRGB = new Array(lut.length);
+  /* Use cached LUT colour strings — only rebuild if LUT changed */
+  if (lut && ttLutRGB === null) {
+    ttLutLastIdx = lut.length - 1;
+    ttLutRGB = new Array(lut.length);
     for (var li2 = 0; li2 < lut.length; li2++) {
-      lutRGB[li2] = lut[li2][0] + ',' + lut[li2][1] + ',' + lut[li2][2];
+      ttLutRGB[li2] = lut[li2][0] + ',' + lut[li2][1] + ',' + lut[li2][2];
     }
   }
+  var lutRGB = ttLutRGB;
+  var lutLastIdx = ttLutLastIdx;
 
   /* Build per-depth-slot gradient cache if stale (canvas resize or depthRows change).
      Gradients are purely a function of geometry + palette — independent of ttCurrentRow,
@@ -560,18 +587,17 @@ function ttRedraw() {
     }
   }
 
-  /* Pre-compute all row screen points.
-     allInRange[di] = true if the row index exists in the data (even if gap/null).
-     allValid[di]   = true if the row has real signal samples to draw. */
-  var allPtsX = [];
-  var allPtsY = [];
-  var allNPts = [];   /* actual draw-point count per slot (may be < ttSlotPX[di].length) */
-  var allBaseY = [];
-  var allWFrac = [];
-  var allXL = [];
-  var allXR = [];
-  var allValid = [];
-  var allInRange = [];
+  /* Pre-compute all row screen points into persistent module-level arrays
+     (avoids allocating + GC-ing 9 new JS arrays on every frame). */
+  var allPtsX    = ttAllPtsX;
+  var allPtsY    = ttAllPtsY;
+  var allNPts    = ttAllNPts;
+  var allBaseY   = ttAllBaseY;
+  var allWFrac   = ttAllWFrac;
+  var allXL      = ttAllXL;
+  var allXR      = ttAllXR;
+  var allValid   = ttAllValid;
+  var allInRange = ttAllInRange;
 
   for (var di2 = depthRows - 1; di2 >= 0; di2--) {
     var d2 = di2 / depthRows;
@@ -762,20 +788,26 @@ function ttRedraw() {
   ctx.fill();
   ctx.restore();
 
-  /* ── Vignette ───────────────────────────────────────────────────────── */
-  var vigTop = ctx.createLinearGradient(0, 0, 0, H * 0.35);
-  vigTop.addColorStop(0, 'rgba(0,8,20,0.88)');
-  vigTop.addColorStop(1, 'rgba(0,8,20,0)');
-  ctx.fillStyle = vigTop;
+  /* ── Vignette — cached; only rebuilt on canvas resize ───────────────── */
+  if (!ttGradVigTop) {
+    ttGradVigTop = ctx.createLinearGradient(0, 0, 0, H * 0.35);
+    ttGradVigTop.addColorStop(0, 'rgba(0,8,20,0.88)');
+    ttGradVigTop.addColorStop(1, 'rgba(0,8,20,0)');
+  }
+  ctx.fillStyle = ttGradVigTop;
   ctx.fillRect(0, 0, W, H * 0.35);
 
-  var vigL = ctx.createLinearGradient(0, 0, W * 0.05, 0);
-  vigL.addColorStop(0, 'rgba(0,8,20,0.7)'); vigL.addColorStop(1, 'rgba(0,8,20,0)');
-  ctx.fillStyle = vigL; ctx.fillRect(0, 0, W * 0.05, H);
+  if (!ttGradVigL) {
+    ttGradVigL = ctx.createLinearGradient(0, 0, W * 0.05, 0);
+    ttGradVigL.addColorStop(0, 'rgba(0,8,20,0.7)'); ttGradVigL.addColorStop(1, 'rgba(0,8,20,0)');
+  }
+  ctx.fillStyle = ttGradVigL; ctx.fillRect(0, 0, W * 0.05, H);
 
-  var vigR = ctx.createLinearGradient(W, 0, W * 0.95, 0);
-  vigR.addColorStop(0, 'rgba(0,8,20,0.7)'); vigR.addColorStop(1, 'rgba(0,8,20,0)');
-  ctx.fillStyle = vigR; ctx.fillRect(W * 0.95, 0, W * 0.05, H);
+  if (!ttGradVigR) {
+    ttGradVigR = ctx.createLinearGradient(W, 0, W * 0.95, 0);
+    ttGradVigR.addColorStop(0, 'rgba(0,8,20,0.7)'); ttGradVigR.addColorStop(1, 'rgba(0,8,20,0)');
+  }
+  ctx.fillStyle = ttGradVigR; ctx.fillRect(W * 0.95, 0, W * 0.05, H);
 
   /* ── Frequency labels ───────────────────────────────────────────────── */
   /* Auto-pick a step size that gives ~5-8 labels across the visible span */

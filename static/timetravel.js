@@ -43,6 +43,10 @@ var ttBand = 'wideband';
 var ttSampleCache = null;
 /* Actual number of samples per row — set to imgW when cache is built */
 var ttSampleCount = TT_SAMPLES;
+/* Per-depth-slot reusable screen-point arrays — one pair per depth slot.
+   Allocated once (or grown) when ttSampleCount changes; avoids per-frame GC churn. */
+var ttSlotPX = [];   /* ttSlotPX[di] = Float32Array(ttSampleCount) */
+var ttSlotPY = [];   /* ttSlotPY[di] = Float32Array(ttSampleCount) */
 
 /* Pre-built gradient canvas for ridge colouring (palette strip) */
 var ttPaletteCanvas = null;
@@ -543,8 +547,13 @@ function ttRedraw() {
 
     if (samples2 && rowW2 >= 1) {
       var nSamples2 = samples2.length;
-      var px2 = new Float32Array(nSamples2);
-      var py2 = new Float32Array(nSamples2);
+      /* Reuse per-slot arrays; grow them if sample count increased */
+      if (!ttSlotPX[di2] || ttSlotPX[di2].length < nSamples2) {
+        ttSlotPX[di2] = new Float32Array(nSamples2);
+        ttSlotPY[di2] = new Float32Array(nSamples2);
+      }
+      var px2 = ttSlotPX[di2];
+      var py2 = ttSlotPY[di2];
       for (var si2 = 0; si2 < nSamples2; si2++) {
         px2[si2] = xL2 + (si2 / (nSamples2 - 1)) * rowW2;
         py2[si2] = bY2 - samples2[si2] * peakH2;

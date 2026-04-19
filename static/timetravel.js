@@ -462,7 +462,9 @@ function ttRedraw() {
   var frontRow = Math.round(ttCurrentRow);
   var lut = (typeof V !== 'undefined') ? V : null;
 
-  /* Pre-compute all row screen points */
+  /* Pre-compute all row screen points.
+     allInRange[di] = true if the row index exists in the data (even if gap/null).
+     allValid[di]   = true if the row has real signal samples to draw. */
   var allPtsX = [];
   var allPtsY = [];
   var allBaseY = [];
@@ -470,6 +472,7 @@ function ttRedraw() {
   var allXL = [];
   var allXR = [];
   var allValid = [];
+  var allInRange = [];
 
   for (var di2 = depthRows - 1; di2 >= 0; di2--) {
     var d2 = di2 / depthRows;
@@ -479,13 +482,15 @@ function ttRedraw() {
     var xR2 = vanishX + frontHalfW * wF2;
     var rowW2 = xR2 - xL2;
     var rowIdx2 = frontRow - di2;
-    var samples2 = (rowIdx2 >= 0 && rowIdx2 < totalRows) ? ttSampleCache[rowIdx2] : null;
+    var inRange2 = (rowIdx2 >= 0 && rowIdx2 < totalRows);
+    var samples2 = inRange2 ? ttSampleCache[rowIdx2] : null;
     var peakH2 = maxPeakH * wF2;
 
     allBaseY[di2] = bY2;
     allWFrac[di2] = wF2;
     allXL[di2] = xL2;
     allXR[di2] = xR2;
+    allInRange[di2] = inRange2 && rowW2 >= 1;
     allValid[di2] = !!(samples2 && rowW2 >= 1);
 
     if (samples2 && rowW2 >= 1) {
@@ -503,12 +508,10 @@ function ttRedraw() {
     }
   }
 
-  /* Draw back-to-front. For each row, fill a polygon that goes:
-       - along this row's ridge (the signal peaks)
-       - down to the NEXT CLOSER row's ridge (or groundY for the front row)
-     This creates a continuous terrain surface with no gaps. */
+  /* Draw back-to-front. */
   for (var di = depthRows - 1; di >= 0; di--) {
-    if (!allValid[di]) continue;
+    /* Skip rows that are completely out of the data range */
+    if (!allInRange[di]) continue;
 
     var baseY = allBaseY[di];
     var wFrac = allWFrac[di];
@@ -519,6 +522,20 @@ function ttRedraw() {
     var ptsY = allPtsY[di];
     var peakH = maxPeakH * wFrac;
     var fogAlpha = wFrac * 0.94 + 0.06;
+
+    /* Gap/missing-data row: draw a dark trapezoid to bridge the gap,
+       but no coloured signal fill. */
+    if (!allValid[di]) {
+      ctx.beginPath();
+      ctx.moveTo(xL, groundY);
+      ctx.lineTo(xL, baseY);
+      ctx.lineTo(xR, baseY);
+      ctx.lineTo(xR, groundY);
+      ctx.closePath();
+      ctx.fillStyle = '#000810';
+      ctx.fill();
+      continue;
+    }
 
     /* ── Coloured terrain fill + ridge line ────────────────────────────
        Fill from the ridge all the way down to groundY with a gradient.

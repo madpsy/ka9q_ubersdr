@@ -41,6 +41,7 @@ var ttBand = 'wideband';
 var ttCountingDown = false;
 var ttCountdownVal = 0;
 var ttCountdownTs = 0;
+var ttHasStarted = false;  /* true after first playback — resume skips countdown */
 
 /* Pre-computed sample cache: ttSampleCache[rowIdx] = Float32Array(ttSampleCount) */
 var ttSampleCache = null;

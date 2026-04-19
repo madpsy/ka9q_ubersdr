@@ -209,13 +209,8 @@ function ttResizeCanvas() {
   var oc = document.getElementById('tt-overlay');
   if (!wrap || !c) return;
 
-  /* Detect fullscreen — when active, fill the entire screen */
-  var isFs = !!(
-    document.fullscreenElement ||
-    document.webkitFullscreenElement ||
-    document.mozFullScreenElement ||
-    document.msFullscreenElement
-  );
+  /* Detect fullscreen — real API or CSS fake-fullscreen */
+  var isFs = ttIsTrueFs() || ttFakeFs;
 
   var w, h, scrubH;
   if (isFs) {
@@ -1563,49 +1558,97 @@ function ttSetupHover() {
 }
 
 /* ── Fullscreen ─────────────────────────────────────────────────────────── */
-function ttToggleFullscreen() {
-  var wrap = document.getElementById('tt-canvas-wrap');
-  if (!wrap) return;
+/* Tracks whether we are in CSS-fake-fullscreen mode (used as fallback when
+   the real Fullscreen API is unavailable, e.g. iOS Safari). */
+var ttFakeFs = false;
 
-  var isFs = !!(
+function ttIsTrueFs() {
+  return !!(
     document.fullscreenElement ||
     document.webkitFullscreenElement ||
     document.mozFullScreenElement ||
     document.msFullscreenElement
   );
+}
 
-  if (isFs) {
-    /* Exit fullscreen */
+function ttFsUpdateBtn(isFs) {
+  var btn = document.getElementById('tt-fs-btn');
+  if (!btn) return;
+  btn.textContent = isFs ? '\u2715' : '\u26F6';
+  btn.title = isFs ? 'Exit fullscreen' : 'Toggle fullscreen';
+}
+
+/* CSS fake-fullscreen: overlay the canvas wrap over the entire viewport.
+   Works on iOS Safari and any browser that blocks the Fullscreen API. */
+function ttEnterFakeFs() {
+  var wrap = document.getElementById('tt-canvas-wrap');
+  if (!wrap) return;
+  ttFakeFs = true;
+  wrap.style.cssText = [
+    'position:fixed',
+    'top:0', 'left:0',
+    'width:100vw', 'height:100vh',
+    'z-index:9999',
+    'border-radius:0',
+    'background:#000'
+  ].join(';');
+  /* Prevent body scroll while fake-fullscreen is active */
+  document.body.style.overflow = 'hidden';
+  ttFsUpdateBtn(true);
+  setTimeout(ttResizeCanvas, 30);
+}
+
+function ttExitFakeFs() {
+  var wrap = document.getElementById('tt-canvas-wrap');
+  if (!wrap) return;
+  ttFakeFs = false;
+  wrap.style.cssText = '';
+  document.body.style.overflow = '';
+  ttFsUpdateBtn(false);
+  setTimeout(ttResizeCanvas, 30);
+}
+
+function ttToggleFullscreen() {
+  /* If already in CSS fake-fullscreen, exit it */
+  if (ttFakeFs) { ttExitFakeFs(); return; }
+
+  /* If already in real fullscreen, exit it */
+  if (ttIsTrueFs()) {
     var exitFn = document.exitFullscreen ||
                  document.webkitExitFullscreen ||
                  document.mozCancelFullScreen ||
                  document.msExitFullscreen;
     if (exitFn) exitFn.call(document);
+    return;
+  }
+
+  /* Try real Fullscreen API first (works on desktop + Android Chrome).
+     Request on document.documentElement for broadest mobile support. */
+  var root = document.documentElement;
+  var reqFn = root.requestFullscreen ||
+              root.webkitRequestFullscreen ||
+              root.mozRequestFullScreen ||
+              root.msRequestFullscreen;
+
+  if (reqFn) {
+    var p = reqFn.call(root);
+    /* requestFullscreen returns a Promise in modern browsers.
+       If it rejects (e.g. iOS blocks it), fall back to CSS fake-fullscreen. */
+    if (p && typeof p.then === 'function') {
+      p.then(null, function() { ttEnterFakeFs(); });
+    }
+    /* If no Promise returned, assume it worked; onFsChange will fire */
   } else {
-    /* Enter fullscreen on the canvas wrap element */
-    var reqFn = wrap.requestFullscreen ||
-                wrap.webkitRequestFullscreen ||
-                wrap.mozRequestFullScreen ||
-                wrap.msRequestFullscreen;
-    if (reqFn) reqFn.call(wrap);
+    /* No Fullscreen API at all (iOS Safari) — use CSS fake-fullscreen */
+    ttEnterFakeFs();
   }
 }
 
-/* Update button icon and resize canvas whenever fullscreen state changes */
+/* Update button icon and resize canvas whenever real fullscreen state changes */
 (function ttSetupFullscreen() {
   function onFsChange() {
-    var isFs = !!(
-      document.fullscreenElement ||
-      document.webkitFullscreenElement ||
-      document.mozFullScreenElement ||
-      document.msFullscreenElement
-    );
-    var btn = document.getElementById('tt-fs-btn');
-    if (btn) {
-      /* ⛶ = enter fullscreen, ✕-like exit icon */
-      btn.textContent = isFs ? '\u2715' : '\u26F6';
-      btn.title = isFs ? 'Exit fullscreen' : 'Toggle fullscreen';
-    }
+    var isFs = ttIsTrueFs();
+    ttFsUpdateBtn(isFs || ttFakeFs);
     /* Let the browser finish resizing before we measure the wrap */
     setTimeout(ttResizeCanvas, 50);
   }
@@ -1613,6 +1656,13 @@ function ttToggleFullscreen() {
   document.addEventListener('webkitfullscreenchange', onFsChange);
   document.addEventListener('mozfullscreenchange',    onFsChange);
   document.addEventListener('MSFullscreenChange',     onFsChange);
+
+  /* Escape key exits fake-fullscreen (real fullscreen handles its own Escape) */
+  document.addEventListener('keydown', function(e) {
+    if ((e.key === 'Escape' || e.key === 'Esc') && ttFakeFs) {
+      ttExitFakeFs();
+    }
+  });
 })();
 
 /* ── Keyboard handler ───────────────────────────────────────────────────── */

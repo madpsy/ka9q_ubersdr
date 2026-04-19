@@ -459,18 +459,12 @@ function ttFrame(ts) {
   if (ttIsPlaying) ttRafId = requestAnimationFrame(ttFrame);
 }
 
-/* ── Debug frame timing ─────────────────────────────────────────────────── */
-var _ttDbgFrame = 0;
-var _ttDbgT = [0, 0, 0, 0, 0]; /* sky, stars, precompute, draw, vignette */
-
 /* ── Main 3D mountain terrain draw ─────────────────────────────────────── */
 function ttRedraw() {
   var c = document.getElementById('tt-canvas');
   if (!c) return;
   var mainCtx = c.getContext('2d');
   if (!mainCtx) return;
-
-  var _t0 = performance.now();
 
   var W = c.width, H = c.height;
 
@@ -502,9 +496,7 @@ function ttRedraw() {
   ctx.fillStyle = ttGradSky;
   ctx.fillRect(0, 0, W, H);
 
-  var _t1 = performance.now();
   ttDrawStars(ctx, W, H);
-  var _t2 = performance.now();
 
   if (!ttSampleCache || !ttMeta || ttMeta.row_count === 0) {
     ctx.fillStyle = 'rgba(255,255,255,.35)';
@@ -574,7 +566,6 @@ function ttRedraw() {
     ctx.restore();
   }
 
-  var _t3 = performance.now();
   /* ── Draw mountain rows back-to-front ───────────────────────────────── */
   var frontRow = Math.round(ttCurrentRow);
   var lut = (typeof V !== 'undefined') ? V : null;
@@ -679,7 +670,6 @@ function ttRedraw() {
     }
   }
 
-  var _t4 = performance.now();
   /* Draw back-to-front. */
   for (var di = depthRows - 1; di >= 0; di--) {
     /* Skip rows that are completely out of the data range */
@@ -736,7 +726,6 @@ function ttRedraw() {
 
   }
 
-  var _t5 = performance.now();
   /* ── Band overlay curtains (drawn ONCE after all rows) ──────────────── */
   /* Each band is a perspective-projected trapezoid spanning the full depth,
      drawn as a very faint tinted "curtain" receding to the vanishing point.
@@ -865,8 +854,6 @@ function ttRedraw() {
   }
   ctx.restore();
 
-  var _t6 = performance.now();
-
   /* ── Blit offscreen canvas to visible canvas ────────────────────────── */
   if (useOffscreen && ttOffscreen) {
     mainCtx.clearRect(0, 0, W, H);
@@ -875,25 +862,6 @@ function ttRedraw() {
 
   ttUpdateHUD();
   ttDrawScrubber();
-
-  /* ── Frame timing debug (logs every 60 frames) ──────────────────────── */
-  _ttDbgT[0] += _t1 - _t0;   /* sky/clear */
-  _ttDbgT[1] += _t2 - _t1;   /* stars */
-  _ttDbgT[2] += _t4 - _t3;   /* precompute points */
-  _ttDbgT[3] += _t5 - _t4;   /* draw rows */
-  _ttDbgT[4] += _t6 - _t5;   /* bands+glow+vignette */
-  _ttDbgFrame++;
-  if (_ttDbgFrame % 60 === 0) {
-    var heap = (performance.memory ? (performance.memory.usedJSHeapSize / 1048576).toFixed(1) + 'MB' : 'n/a');
-    console.log('[TT frame ' + _ttDbgFrame + '] heap=' + heap +
-      ' sky=' + _ttDbgT[0].toFixed(0) + 'ms' +
-      ' stars=' + _ttDbgT[1].toFixed(0) + 'ms' +
-      ' precompute=' + _ttDbgT[2].toFixed(0) + 'ms' +
-      ' drawRows=' + _ttDbgT[3].toFixed(0) + 'ms' +
-      ' rest=' + _ttDbgT[4].toFixed(0) + 'ms' +
-      ' (totals over 60 frames)');
-    _ttDbgT = [0, 0, 0, 0, 0];
-  }
 }
 
 /* ── Starfield ──────────────────────────────────────────────────────────── */

@@ -850,7 +850,7 @@ function ttRedraw() {
     }
     var hStep = Math.max(1, Math.round(depthRows / 8));
     for (var hi = 0; hi <= depthRows; hi += hStep) {
-      var hd = hi / depthRows;
+      var hd = (hi + frac) / depthRows;
       var hy = groundY - (groundY - vanishY) * hd;
       var hwFrac = 1 - hd * (1 - TT_MIN_WFRAC);
       var hxL = vanishX - frontHalfW * hwFrac;
@@ -881,35 +881,6 @@ function ttRedraw() {
   var lutRGB = ttLutRGB;
   var lutLastIdx = ttLutLastIdx;
 
-
-  /* Build per-depth-slot gradient cache if stale (canvas resize or depthRows change).
-     Gradients are purely a function of geometry + palette — independent of ttCurrentRow,
-     so they can be reused every frame without rebuilding. */
-  if (lut && lutRGB && (ttRowGradCache.length !== depthRows || ttRowGradDepth !== depthRows)) {
-    ttRowGradCache = new Array(depthRows);
-    ttRowGradDepth = depthRows;
-    var GSTOPS_C = 16;
-    for (var gdi = 0; gdi < depthRows; gdi++) {
-      var gd = gdi / depthRows;
-      var gbY = groundY - (groundY - vanishY) * gd;
-      var gwF = 1 - gd * (1 - TT_MIN_WFRAC);
-      var gpH = maxPeakH * gwF;
-      var gtopY = gbY - gpH;
-      var gfogAlpha = gwF * 0.94 + 0.06;
-      var gfogStr = gfogAlpha.toFixed(3);
-      var grad = ctx.createLinearGradient(0, gbY, 0, gtopY);
-      for (var gsi = 0; gsi <= GSTOPS_C; gsi++) {
-        var gsv = gsi / GSTOPS_C;
-        if (gsv < 0.05) {
-          grad.addColorStop(gsv, 'rgba(0,0,0,0)');
-        } else {
-          var gcIdx = Math.min(lutLastIdx, Math.round(gsv * lutLastIdx));
-          grad.addColorStop(gsv, 'rgba(' + lutRGB[gcIdx] + ',' + gfogStr + ')');
-        }
-      }
-      ttRowGradCache[gdi] = grad;
-    }
-  }
 
   /* Pre-compute all row screen points into persistent module-level arrays
      (avoids allocating + GC-ing 9 new JS arrays on every frame). */
@@ -1171,7 +1142,7 @@ function ttRedraw() {
       /* Only label rows whose UTC minute is exactly divisible by the interval */
       if (tlUtcMin % tlInterval !== 0) continue;
 
-      var tld = tldi / depthRows;
+      var tld = (tldi + frac) / depthRows;
       var tlbY = groundY - (groundY - vanishY) * tld;
       var tlwF = 1 - tld * (1 - TT_MIN_WFRAC);
       var tlxL = vanishX - frontHalfW * tlwF;

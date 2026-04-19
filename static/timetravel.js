@@ -50,6 +50,10 @@ var ttSlotPY = [];   /* ttSlotPY[di] = Float32Array(ttSampleCount) */
 
 /* Pre-built gradient canvas for ridge colouring (palette strip) */
 var ttPaletteCanvas = null;
+/* Cached per-depth-slot gradients — rebuilt when canvas resizes or palette changes.
+   ttRowGradCache[di] = CanvasGradient for that depth slot. */
+var ttRowGradCache = [];
+var ttRowGradDepth = 0;   /* depthRows value the cache was built for */
 
 /* Stars */
 var ttStars = null;
@@ -130,7 +134,8 @@ function ttResizeCanvas() {
     c.width = Math.round(w);
     c.height = h;
     if (oc) { oc.width = Math.round(w); oc.height = h; }
-    ttPaletteCanvas = null; /* rebuild gradient on next draw */
+    ttPaletteCanvas = null; /* rebuild palette + row gradients on next draw */
+    ttRowGradCache = [];
   }
   var sc = document.getElementById('tt-scrubber');
   var sw = document.getElementById('tt-scrubber-wrap');
@@ -144,14 +149,14 @@ function ttResizeCanvas() {
 
 /* ── Data loading ───────────────────────────────────────────────────────── */
 function ttOnDateChange() {
-  ttBmp = null; ttMeta = null; ttSampleCache = null;
+  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = [];
   ttLoadData();
 }
 
 function ttOnBandChange() {
   var bdst = document.getElementById('tt-bsel');
   ttBand = bdst ? bdst.value : 'wideband';
-  ttBmp = null; ttMeta = null; ttSampleCache = null;
+  ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = [];
   ttLoadData();
 }
 
@@ -526,6 +531,35 @@ function ttRedraw() {
     }
   }
 
+  /* Build per-depth-slot gradient cache if stale (canvas resize or depthRows change).
+     Gradients are purely a function of geometry + palette — independent of ttCurrentRow,
+     so they can be reused every frame without rebuilding. */
+  if (lut && lutRGB && (ttRowGradCache.length !== depthRows || ttRowGradDepth !== depthRows)) {
+    ttRowGradCache = new Array(depthRows);
+    ttRowGradDepth = depthRows;
+    var GSTOPS_C = 16;
+    for (var gdi = 0; gdi < depthRows; gdi++) {
+      var gd = gdi / depthRows;
+      var gbY = groundY - (groundY - vanishY) * gd;
+      var gwF = 1 - gd * (1 - TT_MIN_WFRAC);
+      var gpH = maxPeakH * gwF;
+      var gtopY = gbY - gpH;
+      var gfogAlpha = gwF * 0.94 + 0.06;
+      var gfogStr = gfogAlpha.toFixed(3);
+      var grad = ctx.createLinearGradient(0, gbY, 0, gtopY);
+      for (var gsi = 0; gsi <= GSTOPS_C; gsi++) {
+        var gsv = gsi / GSTOPS_C;
+        if (gsv < 0.05) {
+          grad.addColorStop(gsv, 'rgba(0,0,0,0)');
+        } else {
+          var gcIdx = Math.min(lutLastIdx, Math.round(gsv * lutLastIdx));
+          grad.addColorStop(gsv, 'rgba(' + lutRGB[gcIdx] + ',' + gfogStr + ')');
+        }
+      }
+      ttRowGradCache[gdi] = grad;
+    }
+  }
+
   /* Pre-compute all row screen points.
      allInRange[di] = true if the row index exists in the data (even if gap/null).
      allValid[di]   = true if the row has real signal samples to draw. */
@@ -616,25 +650,10 @@ function ttRedraw() {
     }
 
     /* ── Filled silhouette + ridge line ─────────────────────────────── */
-    /* Build ONE gradient per row, shared by both fill and stroke.
-       The gradient maps height → palette colour (bottom=noise floor, top=signal peak).
-       fogAlpha fades distant rows. */
-    var rowGrad = null;
+    /* Use the pre-built cached gradient for this depth slot — zero gradient
+       construction cost per frame during playback. */
+    var rowGrad = (lut && lutRGB && rowW > 1 && ttRowGradCache[di]) ? ttRowGradCache[di] : null;
     var fogStr = fogAlpha.toFixed(3);
-    if (lut && lutRGB && rowW > 1) {
-      var topY = baseY - peakH;
-      rowGrad = ctx.createLinearGradient(0, baseY, 0, topY);
-      var GSTOPS = 16;
-      for (var gs = 0; gs <= GSTOPS; gs++) {
-        var gsVal = gs / GSTOPS;
-        if (gsVal < 0.05) {
-          rowGrad.addColorStop(gsVal, 'rgba(0,0,0,0)');
-        } else {
-          var gLutIdx = Math.min(lutLastIdx, Math.round(gsVal * lutLastIdx));
-          rowGrad.addColorStop(gsVal, 'rgba(' + lutRGB[gLutIdx] + ',' + fogStr + ')');
-        }
-      }
-    }
 
     /* Step 1: Fill silhouette from ridge down to groundY */
     var nPts = allNPts[di];

@@ -472,16 +472,6 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <button class="tt-speed-btn"        id="tt-spd-8"  onclick="ttSetSpeed(8)">8&times;</button>
       <button class="tt-speed-btn"        id="tt-spd-16" onclick="ttSetSpeed(16)">16&times;</button>
     </div>
-    <!-- Depth (visible rows) -->
-    <div style="display:flex;align-items:center;gap:8px">
-      <label style="font-size:.82em;opacity:.7">Depth:</label>
-      <select id="tt-depth" onchange="ttOnDepthChange()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:6px;padding:4px 8px;font-size:.85em">
-        <option value="30">30 min</option>
-        <option value="60" selected>60 min</option>
-        <option value="120">2 hours</option>
-        <option value="180">3 hours</option>
-      </select>
-    </div>
     <!-- Band overlays toggle -->
     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em">
       <input type="checkbox" id="tt-show-bands" checked onchange="ttRedraw()"> Band overlays
@@ -489,6 +479,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <!-- Grid lines toggle -->
     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em">
       <input type="checkbox" id="tt-show-grid" checked onchange="ttRedraw()"> Grid lines
+    </label>
+    <!-- Stars toggle -->
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em">
+      <input type="checkbox" id="tt-show-stars" checked onchange="ttRedraw()"> Show Stars
     </label>
     <span class="status" id="tt-status" style="margin-left:auto"></span>
   </div>

@@ -862,8 +862,10 @@ function ttRedraw() {
 
   var showBandsEl = document.getElementById('tt-show-bands');
   var showGridEl = document.getElementById('tt-show-grid');
+  var showStarsEl = document.getElementById('tt-show-stars');
   var doBands = showBandsEl ? showBandsEl.checked : true;
   var doGrid = showGridEl ? showGridEl.checked : true;
+  var doStars = showStarsEl ? showStarsEl.checked : true;
 
   var startHz = ttMeta.start_freq_hz || 0;
   var spanHz = (ttMeta.end_freq_hz || 30e6) - startHz;
@@ -1285,6 +1287,7 @@ function ttDrawStars(ctx, W, H) {
     }
   }
 
+  if (doStars) {
   ctx.save();
 
   /* Draw static stars with per-star twinkle */
@@ -1362,6 +1365,7 @@ function ttDrawStars(ctx, W, H) {
   }
 
   ctx.restore();
+  } /* end doStars */
 }
 
 /* ── HUD update ─────────────────────────────────────────────────────────── */
@@ -1490,72 +1494,15 @@ function ttSetupHover() {
   if (!wrap || !c || !tt) return;
 
   wrap.addEventListener('mousemove', function(e) {
-    /* When the "Engage" overlay is showing (paused or counting down),
-       use a pointer cursor and suppress the frequency/signal tooltip */
+    /* Use pointer cursor when the "Engage" overlay is showing, crosshair otherwise */
     var overlayActive = ttSampleCache && (!ttIsPlaying || ttCountingDown);
     wrap.style.cursor = overlayActive ? 'pointer' : 'crosshair';
-    if (overlayActive) {
-      var tt2 = document.getElementById('tt');
-      if (tt2) tt2.style.display = 'none';
-      return;
-    }
-
-    if (!ttMeta || !ttSampleCache) return;
-    var rect = c.getBoundingClientRect();
-    var xp = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-
-    var startHz = ttMeta.start_freq_hz || 0;
-    var spanHz = (ttMeta.end_freq_hz || 30e6) - startHz;
-    var hz = startHz + xp * spanHz;
-    var mhz = (hz / 1e6).toFixed(4);
-    var band = (typeof bandName === 'function') ? bandName(hz) : null;
-
-    var row = Math.max(0, Math.min(Math.round(ttCurrentRow), ttMeta.row_count - 1));
-    var rowMeta = ttMeta.rows && ttMeta.rows[row];
-    var tstr;
-    if (rowMeta && rowMeta.unix) {
-      var d = new Date(rowMeta.unix * 1000);
-      tstr = String(d.getUTCHours()).padStart(2, '0') + ':' +
-             String(d.getUTCMinutes()).padStart(2, '0') + ' UTC';
-    } else {
-      tstr = String(Math.floor(row / 60)).padStart(2, '0') + ':' +
-             String(row % 60).padStart(2, '0') + ' UTC';
-    }
-
-    /* Get signal from cache */
-    var sig = null;
-    var samples = ttSampleCache[row];
-    if (samples) {
-      var si2 = Math.min(samples.length - 1, Math.round(xp * (samples.length - 1)));
-      var normVal = samples[si2];
-      var dbMin = ttMeta.db_min, dbMax = ttMeta.db_max;
-      if (typeof contrastUserChanged !== 'undefined' && contrastUserChanged) {
-        dbMin = contrastMin; dbMax = contrastMax;
-      }
-      sig = dbMin + normVal * (dbMax - dbMin);
-    }
-
-    var h = '<div class="tt-freq">' + mhz + ' MHz' +
-            (band ? ' <span style="opacity:.55;font-size:.9em">(' + band + ')</span>' : '') + '</div>';
-    h += '<div class="tt-time">' + tstr + '</div>';
-    if (sig !== null) {
-      h += '<div class="tt-sep"></div>';
-      h += '<div class="tt-row"><span class="tt-lbl">Signal</span><span class="tt-val">' + sig.toFixed(1) + ' dBFS</span></div>';
-    }
-    tt.innerHTML = h;
-    tt.style.display = 'block';
-
-    var tw = 180, th = 90;
-    var tx = e.clientX + 16, ty = e.clientY - 10;
-    if (tx + tw > window.innerWidth) tx = e.clientX - tw - 8;
-    if (ty + th > window.innerHeight) ty = e.clientY - th - 8;
-    tt.style.left = tx + 'px';
-    tt.style.top = ty + 'px';
+    /* Always hide the tooltip */
+    if (tt) tt.style.display = 'none';
   });
 
   wrap.addEventListener('mouseleave', function() {
-    var tt2 = document.getElementById('tt');
-    if (tt2) tt2.style.display = 'none';
+    if (tt) tt.style.display = 'none';
   });
 }
 

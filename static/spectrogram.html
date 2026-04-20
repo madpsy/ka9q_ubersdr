@@ -2615,50 +2615,14 @@ function sgDrawRowSpectrumCanvas(data){
   }
 
   /* ── Signal fill + line — palette-coloured ───────────────────────────── */
-  /* Map a dBFS value to a palette colour string using the same LUT (V) and
-     contrast range (contrastMin/contrastMax) as the spectrogram image. */
-  function dbToRgb(db){
-    var t=(db-contrastMin)/(contrastMax-contrastMin);
-    if(t<0)t=0; if(t>1)t=1;
-    var idx=Math.round(t*(V.length-1));
-    var c=V[idx];
-    return c?[c[0],c[1],c[2]]:[100,200,255];
-  }
-
-  /* Build a list of visible bins with their x, y, and colour.
-     Downsample to at most W points (one per canvas pixel column) so the fill
-     loop never creates more gradients than there are pixels — keeps it fast
-     even for a fully zoomed-out wideband view with 30 000+ bins. */
-  var visBinsRaw=[];
+  /* Build a list of visible bins with their x and y positions. */
+  var visBins=[];
   for(var bi=0;bi<bins.length;bi++){
     var bHz=dataStartHz+(bi+0.5)*binW;
     if(bHz<visStartHz-binW||bHz>visEndHz+binW)continue;
     var bVal=bins[bi];
     if(bVal===null||bVal===undefined)continue;
-    visBinsRaw.push({hz:bHz,db:bVal});
-  }
-
-  var visBins=[];
-  if(visBinsRaw.length<=W){
-    /* Fewer bins than pixels — use all directly */
-    for(var ri=0;ri<visBinsRaw.length;ri++){
-      var rb=visBinsRaw[ri];
-      visBins.push({x:hzToX(rb.hz),y:dbToY(rb.db),rgb:dbToRgb(rb.db)});
-    }
-  } else {
-    /* More bins than pixels — average groups into W buckets */
-    var step=visBinsRaw.length/W;
-    for(var pi=0;pi<W;pi++){
-      var p0=Math.floor(pi*step);
-      var p1=Math.floor((pi+1)*step);
-      if(p1>visBinsRaw.length)p1=visBinsRaw.length;
-      var sum=0,cnt=0,midHz=0;
-      for(var pj=p0;pj<p1;pj++){sum+=visBinsRaw[pj].db;midHz+=visBinsRaw[pj].hz;cnt++;}
-      if(cnt===0)continue;
-      var avgDb=sum/cnt;
-      var avgHz=midHz/cnt;
-      visBins.push({x:hzToX(avgHz),y:dbToY(avgDb),rgb:dbToRgb(avgDb)});
-    }
+    visBins.push({x:hzToX(bHz),y:dbToY(bVal)});
   }
 
   if(visBins.length>0){
@@ -2693,19 +2657,17 @@ function sgDrawRowSpectrumCanvas(data){
     ctx.fillStyle=palGrad;
     ctx.fill();
 
-    /* Line: draw coloured segments, each coloured by the palette value at
-       the starting bin's dB level (matches the fill colour at that height). */
+    /* Line: stroke the full signal path with the same palette gradient so
+       the line colour at each point matches the fill colour at that height. */
+    ctx.beginPath();
+    ctx.moveTo(visBins[0].x,visBins[0].y);
+    for(var vi2=1;vi2<visBins.length;vi2++){
+      ctx.lineTo(visBins[vi2].x,visBins[vi2].y);
+    }
+    ctx.strokeStyle=palGrad;
     ctx.lineWidth=1.5;
     ctx.setLineDash([]);
-    for(var vi2=0;vi2<visBins.length-1;vi2++){
-      var va=visBins[vi2], vb2=visBins[vi2+1];
-      var rc=va.rgb[0],gc=va.rgb[1],bc=va.rgb[2];
-      ctx.strokeStyle='rgb('+rc+','+gc+','+bc+')';
-      ctx.beginPath();
-      ctx.moveTo(va.x,va.y);
-      ctx.lineTo(vb2.x,vb2.y);
-      ctx.stroke();
-    }
+    ctx.stroke();
   }
 
   ctx.restore(); /* remove clip */

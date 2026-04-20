@@ -25,6 +25,7 @@ Example with --users 100 --threads 10:
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
 import signal
 import sys
@@ -124,21 +125,21 @@ class BenchmarkRunner:
                     break
                 time.sleep(0.1)
         finally:
-            # Signal all workers to stop
+            # Signal all workers to stop (idempotent)
             self._stop_event.set()
 
-        print(f"\n  Stopping all users (waiting up to 10s)...")
+            print(f"\n  Stopping all users (waiting up to 10s)...")
 
-        # Wait for all threads to finish
-        for t in threads:
-            t.join(timeout=10.0)
+            # Wait for all threads to finish
+            for t in threads:
+                t.join(timeout=10.0)
 
-        # Stop reporter and print final summary
-        self._reporter.stop()
-        self._reporter.print_final_summary()
+            # Stop reporter and print final summary
+            self._reporter.stop()
+            self._reporter.print_final_summary()
 
-        # Restore original SIGINT handler
-        signal.signal(signal.SIGINT, original_sigint)
+            # Restore original SIGINT handler
+            signal.signal(signal.SIGINT, original_sigint)
 
     # ------------------------------------------------------------------
     # Thread worker
@@ -221,6 +222,13 @@ class BenchmarkRunner:
     # ------------------------------------------------------------------
 
     def _handle_sigint(self, signum, frame) -> None:
-        """Handle Ctrl-C: set stop_event and let the run() loop exit cleanly."""
-        print("\n\n  Interrupted — stopping benchmark...", file=sys.stderr)
+        """Handle Ctrl-C: set stop_event and let the run() loop exit cleanly.
+
+        Uses os.write() (async-signal-safe) instead of print() to avoid
+        reentrant I/O crashes.  Restores SIG_DFL immediately so a second
+        Ctrl-C performs a hard kill rather than re-entering this handler.
+        """
+        # Restore default handler immediately — second Ctrl-C will hard-kill
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        os.write(sys.stderr.fileno(), b"\n\n  Interrupted \xe2\x80\x94 stopping benchmark...\n")
         self._stop_event.set()

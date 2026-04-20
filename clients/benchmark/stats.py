@@ -203,7 +203,12 @@ class StatsReporter:
             self._thread.join(timeout=5.0)
 
     def print_final_summary(self) -> None:
-        """Print a final summary after the benchmark ends."""
+        """Print a final summary after the benchmark ends.
+
+        Rates are shown as averages over the entire run (total / elapsed),
+        not as a delta vs the last periodic snapshot (which would be zero
+        because no new data arrives after workers stop).
+        """
         elapsed = time.monotonic() - self._start_time
         with self._snapshots_lock:
             snapshots = list(self._latest_snapshots)
@@ -212,7 +217,9 @@ class StatsReporter:
         print("=" * 60)
         print("  FINAL BENCHMARK SUMMARY")
         print("=" * 60)
-        self._print_table(agg, prev=self._prev_agg, interval=elapsed)
+        # Pass prev=None so deltas equal the cumulative totals, and use
+        # elapsed as the interval → rates become overall averages.
+        self._print_table(agg, prev=None, interval=elapsed)
         print("=" * 60)
 
     # ------------------------------------------------------------------

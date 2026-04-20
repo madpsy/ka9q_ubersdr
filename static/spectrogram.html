@@ -2375,6 +2375,11 @@ function sgFetchRowSpectrum(rowIdx){
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(data){
       if(data.error){console.warn('rowspectrum:',data.error);return;}
+      /* Update the indicator label with the authoritative time from the API */
+      if(data.utc_time){
+        var label=document.getElementById('row-indicator-label');
+        if(label)label.textContent=data.utc_time;
+      }
       sgRenderRowSpectrum(data);
     })
     .catch(function(e){console.warn('rowspectrum fetch failed:',e.message);});

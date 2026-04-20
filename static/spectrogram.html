@@ -2662,31 +2662,45 @@ function sgDrawRowSpectrumCanvas(data){
   }
 
   if(visBins.length>0){
-    /* Fill: draw thin vertical rectangles from the signal y down to the
-       baseline, each coloured with the palette colour at that bin's dB value
-       and semi-transparent so the grid lines show through. */
     var baseline=PAD_TOP+plotH;
-    for(var vi=0;vi<visBins.length;vi++){
-      var vb=visBins[vi];
-      var vx0=vi>0?(visBins[vi-1].x+vb.x)/2:vb.x-(visBins.length>1?(visBins[1].x-visBins[0].x)/2:1);
-      var vx1=vi<visBins.length-1?(vb.x+visBins[vi+1].x)/2:vb.x+(visBins.length>1?(visBins[visBins.length-1].x-visBins[visBins.length-2].x)/2:1);
-      var vw=Math.max(1,vx1-vx0);
-      var r=vb.rgb[0],g=vb.rgb[1],b=vb.rgb[2];
-      /* Vertical gradient: opaque palette colour at signal level → transparent at baseline */
-      var grad=ctx.createLinearGradient(0,vb.y,0,baseline);
-      grad.addColorStop(0,'rgba('+r+','+g+','+b+',0.55)');
-      grad.addColorStop(1,'rgba('+r+','+g+','+b+',0.0)');
-      ctx.fillStyle=grad;
-      ctx.fillRect(vx0,vb.y,vw,baseline-vb.y);
+
+    /* Build a vertical gradient that maps y-position → palette colour.
+       The gradient spans from y=PAD_TOP (dbMax) to y=baseline (dbMin).
+       Each palette entry i maps to a stop at position i/(V.length-1),
+       which corresponds to the y-position for that dB value.
+       Opacity is 0.45 so the grid lines show through. */
+    var palGrad=ctx.createLinearGradient(0,PAD_TOP,0,baseline);
+    for(var pi=0;pi<V.length;pi++){
+      var pc=V[pi];
+      /* palette index 0 = contrastMin (bottom), V.length-1 = contrastMax (top)
+         but the gradient goes top→bottom (PAD_TOP=dbMax, baseline=dbMin),
+         so we reverse: stop position = 1 - pi/(V.length-1) */
+      var stopPos=1-(pi/(V.length-1));
+      palGrad.addColorStop(stopPos,'rgba('+pc[0]+','+pc[1]+','+pc[2]+',0.45)');
     }
 
-    /* Line: draw coloured segments between consecutive bins */
+    /* Fill: trace the signal line shape and fill with the palette gradient.
+       Because the gradient is vertical and covers the full plot height,
+       each pixel in the fill gets the palette colour for its y (dB) value. */
+    ctx.beginPath();
+    ctx.moveTo(visBins[0].x,baseline);
+    ctx.lineTo(visBins[0].x,visBins[0].y);
+    for(var vi=1;vi<visBins.length;vi++){
+      ctx.lineTo(visBins[vi].x,visBins[vi].y);
+    }
+    ctx.lineTo(visBins[visBins.length-1].x,baseline);
+    ctx.closePath();
+    ctx.fillStyle=palGrad;
+    ctx.fill();
+
+    /* Line: draw coloured segments, each coloured by the palette value at
+       the starting bin's dB level (matches the fill colour at that height). */
+    ctx.lineWidth=1.5;
+    ctx.setLineDash([]);
     for(var vi2=0;vi2<visBins.length-1;vi2++){
       var va=visBins[vi2], vb2=visBins[vi2+1];
-      var ra=va.rgb[0],ga=va.rgb[1],ba=va.rgb[2];
-      ctx.strokeStyle='rgb('+ra+','+ga+','+ba+')';
-      ctx.lineWidth=1.5;
-      ctx.setLineDash([]);
+      var rc=va.rgb[0],gc=va.rgb[1],bc=va.rgb[2];
+      ctx.strokeStyle='rgb('+rc+','+gc+','+bc+')';
       ctx.beginPath();
       ctx.moveTo(va.x,va.y);
       ctx.lineTo(vb2.x,vb2.y);

@@ -745,7 +745,7 @@ function ttRedraw() {
   ctx.fillStyle = ttGradSky;
   ctx.fillRect(0, 0, W, H);
 
-  if (doStars) ttDrawStars(ctx, W, H);
+  ttDrawStars(ctx, W, H);
 
   if (!ttSampleCache || !ttMeta || ttMeta.row_count === 0) {
     var isLoading = (ttSampleCache === null);
@@ -862,10 +862,8 @@ function ttRedraw() {
 
   var showBandsEl = document.getElementById('tt-show-bands');
   var showGridEl = document.getElementById('tt-show-grid');
-  var showStarsEl = document.getElementById('tt-show-stars');
   var doBands = showBandsEl ? showBandsEl.checked : true;
   var doGrid = showGridEl ? showGridEl.checked : true;
-  var doStars = showStarsEl ? showStarsEl.checked : true;
 
   var startHz = ttMeta.start_freq_hz || 0;
   var spanHz = (ttMeta.end_freq_hz || 30e6) - startHz;
@@ -1264,6 +1262,8 @@ function ttRedraw() {
 
 /* ── Starfield ──────────────────────────────────────────────────────────── */
 function ttDrawStars(ctx, W, H) {
+  var showStarsEl = document.getElementById('tt-show-stars');
+  if (showStarsEl && !showStarsEl.checked) return;
   var now = Date.now();
 
   /* Rebuild static star field if canvas size changed */

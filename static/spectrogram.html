@@ -2496,18 +2496,24 @@ function sgDrawRowSpectrumCanvas(data){
   }
 
   /* ── dB range for y-axis ──────────────────────────────────────────────── */
-  var dbMin=Infinity,dbMax=-Infinity;
+  /* Find the peak signal value across all bins */
+  var dbMax=-Infinity;
   for(var i=0;i<bins.length;i++){
-    if(bins[i]!==null&&bins[i]!==undefined){
-      if(bins[i]<dbMin)dbMin=bins[i];
-      if(bins[i]>dbMax)dbMax=bins[i];
-    }
+    if(bins[i]!==null&&bins[i]!==undefined&&bins[i]>dbMax)dbMax=bins[i];
   }
-  if(!isFinite(dbMin)||!isFinite(dbMax)){dbMin=-130;dbMax=-60;}
-  /* Add 5 dB headroom top and bottom, snap to 10 dB grid */
-  dbMin=Math.floor((dbMin-5)/10)*10;
-  dbMax=Math.ceil ((dbMax+5)/10)*10;
-  if(dbMax-dbMin<20){dbMax=dbMin+20;}
+  if(!isFinite(dbMax))dbMax=-60;
+  /* Add 5 dB headroom above the peak, snap to 10 dB grid */
+  dbMax=Math.ceil((dbMax+5)/10)*10;
+
+  /* Anchor the bottom of the chart to the noise floor minus a small margin.
+     This pushes the noise floor down to near the bottom of the chart so
+     signal spikes fill most of the vertical space.
+     If no noise floor is available, fall back to dbMax - 40 dB. */
+  var nfRef=data.noise_floor||null;
+  var dbMin=nfRef!==null
+    ? Math.floor((nfRef-10)/10)*10   /* 10 dB below noise floor, snapped */
+    : Math.floor((dbMax-40)/10)*10;  /* fallback: 40 dB range */
+  if(dbMax-dbMin<10){dbMin=dbMax-10;}
 
   function dbToY(db){
     return PAD_TOP+plotH-(db-dbMin)/(dbMax-dbMin)*plotH;

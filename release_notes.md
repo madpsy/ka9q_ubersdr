@@ -1,6 +1,32 @@
-# 07 April 2026
+# 20 April 2026
 
-## Version 0.1.45 - Latest Release
+## Version 0.1.46 - Latest Release
+
+### New Features
+- Added **Spectrogram** which stores one minute samples of wideband and per-band spectral data. Added as a button at the top of the Noise Floor page
+- Added **Web UI Config** for changing various defaults which new users see (signal bar/s-meter/contrast etc) as well as a background image behind the spectrum split view chart
+- Added **Firefox Extension** which can be used to control multiple instances and sync with FLRig. Works with a physical radio and/or to control other software such as FLDigi or WSJT-X etc. Chrome extension waiting for approval. ['Add to Firefox here'](https://addons.mozilla.org/en-US/firefox/addon/ubersdr-bridge/)
+- Added **Signal History Graphs** next to the S-Meter which display 10 second signal history (Peak vs Noise Floor and SNR)
+- Added **Pause and Markers** for Audio Visualisation in order to pause and calculate timings of signals
+- Added **WSPR Concurrency** to limit the the number of wsprd processes which run at once (default unlimited)
+- Added **Chat Ban Button** for banning a user directly from the 'Chat' tab in Admin
+- Added **Contrast Slider** on main web UI 'Auto' mode to adjust the waterfall & spectrum chart contrast (makes signals easier to see)
+- Added **GPU Waterfall Checkbox** on main web UI which uses sub-pixel rendering for a smoother waterfall
+- Added **CPU Govenor Control** in Admin -> System tab to set the CPU mode (performance/powersave etc)
+- Added **NTP Sync Monitor** in Admin -> Monitor which compares your system clock with another NTP server (default uses ntp.ubuntu.com) to detect issues with time syncing
+- Added **Real Time Feeds** for Digital and CW spots (admin only) which is a direct raw feed from the decoder's outputs. Available in Admin -> Decoders / CW Skimmer
+
+### Improvements
+- Improved **User Bookmark Import** to support larger import files and validate them
+
+### Bug Fixes
+- Some user preferences on the web UI were not being saved/restored on page re-load
+
+### Other Announcements
+- Public instances with WSPR decoding (and logging enabled) can be used with ['Who Can Hear Me?'](https://instances.ubersdr.org/can-hear-me.html) which is an attempt to determine what instances are likely to hear a location on Phone (SSB)
+- New recording add-on is in progress which can be used to record and playback multiple audio streams 24/7 or on a schedule for archive purposes
+
+## Version 0.1.45
 
 ### Improvements
 - Fixed **Regular user session logic** - the bug was only partially fixed in 0.1.44 so this a hot fix release with only this change

@@ -15,26 +15,30 @@ window.amateurBands = amateurBands;
 
 // Generate the band colour palette from an intensity value (0.0–1.0).
 // At intensity=0.5 (the default) the output matches the original hardcoded pastel palette exactly:
-//   alpha = 0.5 × 0.40 = 0.20,  floor = 200 - 0.5×200 = 100
+//   alpha = 0.10 + 0.5×0.20 = 0.20,  floor = round(100×(1.5−0.5)) = 100
+// The full range stays visible: at i=0 alpha=0.10/floor=150 (soft), at i=1 alpha=0.30/floor=50 (vivid).
 // Falls back to 0.5 if the value is missing or invalid.
 function generateBandColors(intensity) {
     const i = (typeof intensity === 'number' && isFinite(intensity))
         ? Math.max(0, Math.min(1, intensity))
         : 0.5;
-    const alpha = +(i * 0.40).toFixed(3);
-    const f     = Math.round(200 - i * 200); // RGB floor: 100 at default, 0 at vivid
+    const alpha = +(0.10 + i * 0.20).toFixed(3);   // 0.10 → 0.20 → 0.30
+    const f     = Math.round(100 * (1.5 - i));      // 150 → 100 → 50
+
+    // Clamp each channel to [0, 255]
+    const c = (v) => Math.min(255, Math.max(0, v));
 
     return [
-        `rgba(255, ${f+100}, ${f+100}, ${alpha})`,   // Red
-        `rgba(255, ${f+150}, ${f+100}, ${alpha})`,   // Orange-red
-        `rgba(255, ${f+200}, ${f+100}, ${alpha})`,   // Orange
-        `rgba(255, 255,      ${f+100}, ${alpha})`,   // Yellow
-        `rgba(${f+200}, 255, ${f+100}, ${alpha})`,   // Yellow-green
-        `rgba(${f+100}, 255, ${f+100}, ${alpha})`,   // Green
-        `rgba(${f+100}, 255, ${f+200}, ${alpha})`,   // Cyan-green
-        `rgba(${f+100}, ${f+200}, 255, ${alpha})`,   // Cyan
-        `rgba(${f+100}, ${f+100}, 255, ${alpha})`,   // Blue
-        `rgba(${f+150}, ${f+100}, 255, ${alpha})`,   // Purple
+        `rgba(255, ${c(f+100)}, ${c(f+100)}, ${alpha})`,   // Red
+        `rgba(255, ${c(f+150)}, ${c(f+100)}, ${alpha})`,   // Orange-red
+        `rgba(255, ${c(f+200)}, ${c(f+100)}, ${alpha})`,   // Orange
+        `rgba(255, 255,         ${c(f+100)}, ${alpha})`,   // Yellow
+        `rgba(${c(f+200)}, 255, ${c(f+100)}, ${alpha})`,   // Yellow-green
+        `rgba(${c(f+100)}, 255, ${c(f+100)}, ${alpha})`,   // Green
+        `rgba(${c(f+100)}, 255, ${c(f+200)}, ${alpha})`,   // Cyan-green
+        `rgba(${c(f+100)}, ${c(f+200)}, 255, ${alpha})`,   // Cyan
+        `rgba(${c(f+100)}, ${c(f+100)}, 255, ${alpha})`,   // Blue
+        `rgba(${c(f+150)}, ${c(f+100)}, 255, ${alpha})`,   // Purple
     ];
 }
 

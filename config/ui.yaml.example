@@ -126,6 +126,13 @@ ui:
       - value: "magenta"
         label: "Magenta"
 
+  # Band colour intensity for the amateur band overlays in the bookmark area.
+  # Controls how vivid the coloured band backgrounds appear on the spectrum.
+  # At 0.5 (default) the appearance matches the original hardcoded pastel palette exactly.
+  # 0.0 = very faint tints, 0.5 = default pastel, 1.0 = bold saturated colours.
+  # No localStorage key — this is an operator setting; users cannot override it individually.
+  band_color_intensity: 0.5
+
   # Station ID overlay on the spectrum line graph
   # When enabled, shows "<callsign> - <name>" on the first line and "<location>" on the
   # second line, right-aligned in the top-right corner of the spectrum drawing area.

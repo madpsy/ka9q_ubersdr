@@ -76,6 +76,11 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		opacity = 0.3 // sensible default when not explicitly set
 	}
 
+	bandColorIntensity := config.UI.BandColorIntensity
+	if bandColorIntensity == 0 {
+		bandColorIntensity = 0.5 // default: current pastel appearance
+	}
+
 	bwColor := config.UI.BandwidthIndicatorColor.Default
 	if bwColor == "" {
 		bwColor = "green" // built-in fallback
@@ -112,6 +117,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"bandwidth_indicator_color": bwColor,
 		"spectrum_bg_image":         bgImageURL,
 		"spectrum_bg_opacity":       opacity,
+		"band_color_intensity":      bandColorIntensity,
 		"station_id_overlay":        config.UI.StationIdOverlay,
 		"station_id_color":          stationIdColor,
 		"theme":                     effectiveTheme,
@@ -215,6 +221,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
+	// Validate band_color_intensity range (0.0–1.0)
+	if parsed.UI.BandColorIntensity < 0 || parsed.UI.BandColorIntensity > 1 {
+		http.Error(w, "band_color_intensity must be between 0.0 and 1.0", http.StatusBadRequest)
+		return
+	}
+
 	// Validate station_id_color — must be a valid 6-digit hex colour if non-empty
 	if parsed.UI.StationIdColor != "" && !isValidHexColor(parsed.UI.StationIdColor) {
 		http.Error(w, fmt.Sprintf("station_id_color: invalid hex colour '%s' (expected #rrggbb)", parsed.UI.StationIdColor), http.StatusBadRequest)
@@ -243,11 +255,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
 		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
 		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
 		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity,
+		config.UI.BandColorIntensity,
 		config.UI.StationIdOverlay, config.UI.StationIdColor, config.UI.Theme)
 
 	w.Header().Set("Content-Type", "application/json")

@@ -13,19 +13,37 @@ window.bookmarkPositions = bookmarkPositions;
 let amateurBands = [];
 window.amateurBands = amateurBands;
 
-// Color palette for bands (rainbow gradient)
-const bandColors = [
-    'rgba(255, 100, 100, 0.2)',   // Red
-    'rgba(255, 150, 100, 0.2)',   // Orange-red
-    'rgba(255, 200, 100, 0.2)',   // Orange
-    'rgba(255, 255, 100, 0.2)',   // Yellow
-    'rgba(200, 255, 100, 0.2)',   // Yellow-green
-    'rgba(100, 255, 100, 0.2)',   // Green
-    'rgba(100, 255, 200, 0.2)',   // Cyan-green
-    'rgba(100, 200, 255, 0.2)',   // Cyan
-    'rgba(100, 100, 255, 0.2)',   // Blue
-    'rgba(150, 100, 255, 0.2)'    // Purple
-];
+// Generate the band colour palette from an intensity value (0.0–1.0).
+// At intensity=0.5 (the default) the output matches the original hardcoded pastel palette exactly:
+//   alpha = 0.5 × 0.40 = 0.20,  floor = 200 - 0.5×200 = 100
+// Falls back to 0.5 if the value is missing or invalid.
+function generateBandColors(intensity) {
+    const i = (typeof intensity === 'number' && isFinite(intensity))
+        ? Math.max(0, Math.min(1, intensity))
+        : 0.5;
+    const alpha = +(i * 0.40).toFixed(3);
+    const f     = Math.round(200 - i * 200); // RGB floor: 100 at default, 0 at vivid
+
+    return [
+        `rgba(255, ${f+100}, ${f+100}, ${alpha})`,   // Red
+        `rgba(255, ${f+150}, ${f+100}, ${alpha})`,   // Orange-red
+        `rgba(255, ${f+200}, ${f+100}, ${alpha})`,   // Orange
+        `rgba(255, 255,      ${f+100}, ${alpha})`,   // Yellow
+        `rgba(${f+200}, 255, ${f+100}, ${alpha})`,   // Yellow-green
+        `rgba(${f+100}, 255, ${f+100}, ${alpha})`,   // Green
+        `rgba(${f+100}, 255, ${f+200}, ${alpha})`,   // Cyan-green
+        `rgba(${f+100}, ${f+200}, 255, ${alpha})`,   // Cyan
+        `rgba(${f+100}, ${f+100}, 255, ${alpha})`,   // Blue
+        `rgba(${f+150}, ${f+100}, 255, ${alpha})`,   // Purple
+    ];
+}
+
+// Resolved once at load time from the server UI config.
+// Falls back to intensity=0.5 (original pastel appearance) if the endpoint is
+// unavailable or the key is absent — no localStorage, owner-only setting.
+const bandColors = generateBandColors(
+    window.serverUIConfig?.band_color_intensity ?? 0.5
+);
 
 // Draw amateur radio band backgrounds on the spectrum overlay
 function drawAmateurBandBackgrounds(spectrumDisplay) {

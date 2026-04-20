@@ -497,6 +497,7 @@ type UIConfig struct {
 	LineGraph               UIBoolSetting     `yaml:"line_graph"                 json:"line_graph"`
 	BandwidthIndicatorColor UISelectSetting   `yaml:"bandwidth_indicator_color"  json:"bandwidth_indicator_color"`
 	SpectrumBgOpacity       float64           `yaml:"spectrum_bg_opacity"        json:"spectrum_bg_opacity"`
+	BandColorIntensity      float64           `yaml:"band_color_intensity"       json:"band_color_intensity"`
 	StationIdOverlay        bool              `yaml:"station_id_overlay"         json:"station_id_overlay"`
 	StationIdColor          string            `yaml:"station_id_color"           json:"station_id_color"`
 	Theme                   map[string]string `yaml:"theme"                      json:"theme"`

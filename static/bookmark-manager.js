@@ -14,14 +14,14 @@ let amateurBands = [];
 window.amateurBands = amateurBands;
 
 // Generate the band colour palette from an intensity value (0.0–1.0).
-// Uses piecewise linear curves so i=0.5 reproduces the original hardcoded pastel palette exactly
-// while the upper half of the range reaches genuinely vivid colours.
+// Uses piecewise curves so i=0.5 reproduces the original hardcoded pastel palette exactly.
 //
-//   i=0.0: alpha=0.10, floor=150  — soft, barely-there tints
+//   i=0.0: alpha=0.08, floor=100  — same hues as default, just very transparent (clearly softer)
 //   i=0.5: alpha=0.20, floor=100  — original pastel appearance (default)
 //   i=1.0: alpha=0.80, floor=0    — vivid, fully saturated
 //
-// The floor value is used directly as the non-dominant RGB channel base.
+// Below 0.5: only alpha changes (floor stays at 100) so the hue difference is clear.
+// Above 0.5: both alpha and floor change to push towards vivid saturated colours.
 // At i=0.5, floor=100, so Red = rgba(255, 100, 100, 0.20) — exactly the original hardcoded value.
 // Falls back to 0.5 if the value is missing or invalid.
 function generateBandColors(intensity) {
@@ -29,15 +29,15 @@ function generateBandColors(intensity) {
         ? Math.max(0, Math.min(1, intensity))
         : 0.5;
 
-    // Piecewise alpha: gentle slope below 0.5, steep slope above
+    // Piecewise alpha: linear below 0.5, steeper above
     const alpha = i <= 0.5
-        ? +(0.10 + i * 0.20).toFixed(3)          // 0.10 → 0.20
+        ? +(0.08 + i * 0.24).toFixed(3)          // 0.08 → 0.20
         : +(0.20 + (i - 0.5) * 1.20).toFixed(3); // 0.20 → 0.80
 
-    // Piecewise floor (= non-dominant channel base): gentle drop below 0.5, steep drop above
+    // Floor stays at 100 below 0.5 (only alpha varies), drops to 0 above 0.5
     const f = i <= 0.5
-        ? Math.round(150 - i * 100)               // 150 → 100
-        : Math.round(100 - (i - 0.5) * 200);      // 100 → 0
+        ? 100
+        : Math.round(100 - (i - 0.5) * 200);     // 100 → 0
 
     // Clamp each channel to [0, 255]
     const c = (v) => Math.min(255, Math.max(0, v));

@@ -745,7 +745,7 @@ function ttRedraw() {
   ctx.fillStyle = ttGradSky;
   ctx.fillRect(0, 0, W, H);
 
-  ttDrawStars(ctx, W, H);
+  if (doStars) ttDrawStars(ctx, W, H);
 
   if (!ttSampleCache || !ttMeta || ttMeta.row_count === 0) {
     var isLoading = (ttSampleCache === null);
@@ -1287,7 +1287,6 @@ function ttDrawStars(ctx, W, H) {
     }
   }
 
-  if (doStars) {
   ctx.save();
 
   /* Draw static stars with per-star twinkle */
@@ -1365,7 +1364,6 @@ function ttDrawStars(ctx, W, H) {
   }
 
   ctx.restore();
-  } /* end doStars */
 }
 
 /* ── HUD update ─────────────────────────────────────────────────────────── */

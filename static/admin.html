@@ -11652,11 +11652,11 @@ function resetStationIdColor() {
             ctx.textAlign = 'right';
             ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
 
-            // Draw timezone label centered below the axis
+            // Draw timezone label centered below the axis (below the hour labels)
             ctx.fillStyle = '#888';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(timelineIsUTC() ? '(UTC)' : '(Local)', marginLeft + timelineWidth / 2, timelineY + 12);
+            ctx.fillText(timelineIsUTC() ? '(UTC)' : '(Local)', marginLeft + timelineWidth / 2, timelineY + 26);
 
             // Draw available solar event triggers if checkbox is checked
             showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');

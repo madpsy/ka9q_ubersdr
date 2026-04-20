@@ -1574,6 +1574,8 @@ function switchTab(tab){
   document.getElementById('tab-gallery').classList.toggle('active',isGallery);
   document.getElementById('tab-ts').classList.toggle('active',isTs);
   document.getElementById('tab-tt').classList.toggle('active',isTt);
+  /* Re-fetch if the spectrogram tab has an error displayed (e.g. stale 429) */
+  if(isSg&&document.getElementById('err').innerHTML!=='')load();
   if(isGallery)loadGallery();
   if(isTs)initTimesliceTab();
   if(isTt)initTimeTravelTab();

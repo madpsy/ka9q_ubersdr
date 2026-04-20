@@ -4346,6 +4346,16 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Spectrogram directory
+	if ah.config.Spectrogram.IsEnabled() && ah.config.Spectrogram.DataDir != "" {
+		if _, err := os.Stat(ah.config.Spectrogram.DataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.Spectrogram.DataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["spectrogram"] = string(duOutput)
+			}
+		}
+	}
+
 	// Add data directories to stats if any were found
 	if len(dataDirs) > 0 {
 		stats["data_directories"] = dataDirs

@@ -14,16 +14,28 @@ let amateurBands = [];
 window.amateurBands = amateurBands;
 
 // Generate the band colour palette from an intensity value (0.0–1.0).
-// At intensity=0.5 (the default) the output matches the original hardcoded pastel palette exactly:
-//   alpha = 0.10 + 0.5×0.20 = 0.20,  floor = round(100×(1.5−0.5)) = 100
-// The full range stays visible: at i=0 alpha=0.10/floor=150 (soft), at i=1 alpha=0.30/floor=50 (vivid).
+// Uses piecewise linear curves so i=0.5 reproduces the original hardcoded pastel palette exactly
+// while the upper half of the range reaches genuinely vivid colours.
+//
+//   i=0.0: alpha=0.10, floor=150  — soft, barely-there tints
+//   i=0.5: alpha=0.20, floor=100  — original pastel appearance (default)
+//   i=1.0: alpha=0.80, floor=0    — vivid, fully saturated
+//
 // Falls back to 0.5 if the value is missing or invalid.
 function generateBandColors(intensity) {
     const i = (typeof intensity === 'number' && isFinite(intensity))
         ? Math.max(0, Math.min(1, intensity))
         : 0.5;
-    const alpha = +(0.10 + i * 0.20).toFixed(3);   // 0.10 → 0.20 → 0.30
-    const f     = Math.round(100 * (1.5 - i));      // 150 → 100 → 50
+
+    // Piecewise alpha: gentle slope below 0.5, steep slope above
+    const alpha = i <= 0.5
+        ? +(0.10 + i * 0.20).toFixed(3)          // 0.10 → 0.20
+        : +(0.20 + (i - 0.5) * 1.20).toFixed(3); // 0.20 → 0.80
+
+    // Piecewise floor: gentle drop below 0.5, steep drop above
+    const f = i <= 0.5
+        ? Math.round(150 - i * 100)               // 150 → 100
+        : Math.round(100 - (i - 0.5) * 200);      // 100 → 0
 
     // Clamp each channel to [0, 255]
     const c = (v) => Math.min(255, Math.max(0, v));

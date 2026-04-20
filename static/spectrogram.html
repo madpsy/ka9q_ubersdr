@@ -274,11 +274,19 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <span class="sg-rowspec-title">&#x1F4CA; Spectrum at <span id="sg-rowspec-time">--:-- UTC</span></span>
       <span class="sg-rowspec-meta" id="sg-rowspec-meta"></span>
     </div>
-    <!-- padding-left:46px / padding-right:48px mirrors the freq-axis wrapper above
-         the spectrogram so the plot area aligns pixel-perfectly with the image. -->
-    <div style="padding-left:46px;padding-right:48px;position:relative">
-      <div class="sg-rowspec-canvas-wrap">
-        <canvas id="sg-rowspec-canvas"></canvas>
+    <!-- The outer wrapper mirrors the freq-axis wrapper (padding-left:46px,
+         padding-right:48px) so the canvas left/right edges align with the
+         spectrogram image.  The y-axis labels are drawn in the 46px left
+         padding area via an absolutely-positioned overlay div. -->
+    <div style="position:relative">
+      <!-- y-axis label column — sits in the 46px left gutter -->
+      <div id="sg-rowspec-yaxis" style="position:absolute;left:0;top:0;width:46px;height:180px;pointer-events:none"></div>
+      <!-- x-axis label row — sits below the canvas in the 48px right gutter area -->
+      <div style="padding-left:46px;padding-right:48px">
+        <div class="sg-rowspec-canvas-wrap">
+          <canvas id="sg-rowspec-canvas"></canvas>
+        </div>
+        <div id="sg-rowspec-xaxis" style="position:relative;height:22px;overflow:visible"></div>
       </div>
     </div>
   </div>
@@ -2446,12 +2454,13 @@ function sgDrawRowSpectrumCanvas(data){
   var ctx=canvas.getContext('2d');
   ctx.clearRect(0,0,W,H);
 
-  /* ── Layout constants ─────────────────────────────────────────────────── */
-  var PAD_LEFT=42;   /* y-axis label area */
-  var PAD_RIGHT=8;
-  var PAD_TOP=10;
-  var PAD_BOTTOM=28; /* x-axis tick area */
-  var plotW=W-PAD_LEFT-PAD_RIGHT;
+  /* ── Layout constants — plot spans the FULL canvas width ─────────────── */
+  /* Y-axis labels go in #sg-rowspec-yaxis (the 46px DOM gutter to the left).
+     X-axis labels go in #sg-rowspec-xaxis (the DOM div below the canvas).
+     This means the canvas left/right edges align exactly with the image. */
+  var PAD_TOP=6;
+  var PAD_BOTTOM=4;
+  var plotW=W;
   var plotH=H-PAD_TOP-PAD_BOTTOM;
   if(plotW<=0||plotH<=0)return;
 
@@ -2461,11 +2470,11 @@ function sgDrawRowSpectrumCanvas(data){
   var dataSpanHz=dataEndHz-dataStartHz;
   if(dataSpanHz<=0)dataSpanHz=30e6;
 
-  /* The canvas wrapper has padding-left:46px / padding-right:48px, so the
-     canvas width equals the sg-right container width minus those paddings.
-     We need the sg-right width to compute the zoom fractions. */
+  /* sg-right container width is needed to compute zoom fractions.
+     The canvas wrapper has padding-left:46px / padding-right:48px so
+     containerW ≈ canvasW + 94; read it directly for accuracy. */
   var sgRight=document.querySelector('.sg-right');
-  var containerW=sgRight?sgRight.getBoundingClientRect().width:W+46+48;
+  var containerW=sgRight?sgRight.getBoundingClientRect().width:(W+94);
 
   /* Visible frequency fractions — same formula as buildFreqAxis() */
   var visLeft =Math.max(0,(-zoom.tx)/(containerW*zoom.scale));
@@ -2479,9 +2488,9 @@ function sgDrawRowSpectrumCanvas(data){
   var bins=data.bins||[];
   var binW=data.bin_width_hz||((dataEndHz-dataStartHz)/Math.max(bins.length,1));
 
-  /* Convert Hz to plot-area x pixel */
+  /* Convert Hz to canvas x pixel (0 = left edge = visStartHz) */
   function hzToX(hz){
-    return PAD_LEFT+(hz-visStartHz)/visSpanHz*plotW;
+    return (hz-visStartHz)/visSpanHz*plotW;
   }
 
   /* ── dB range for y-axis ──────────────────────────────────────────────── */
@@ -2502,34 +2511,34 @@ function sgDrawRowSpectrumCanvas(data){
     return PAD_TOP+plotH-(db-dbMin)/(dbMax-dbMin)*plotH;
   }
 
-  /* ── Background ───────────────────────────────────────────────────────── */
-  ctx.fillStyle='rgba(0,0,0,0.0)'; /* transparent — wrap has its own bg */
-  ctx.fillRect(0,0,W,H);
-
-  /* ── Y-axis grid lines + labels ───────────────────────────────────────── */
+  /* ── Y-axis grid lines (canvas) + labels (DOM gutter div) ────────────── */
   var dbStep=10;
-  /* Choose a step that gives ~4–8 grid lines */
   var dbRange=dbMax-dbMin;
   if(dbRange>80)dbStep=20;
   else if(dbRange<=30)dbStep=5;
 
-  ctx.font='10px -apple-system,BlinkMacSystemFont,sans-serif';
-  ctx.textAlign='right';
-  ctx.textBaseline='middle';
+  /* Clear and repopulate the y-axis label div */
+  var yAxisDiv=document.getElementById('sg-rowspec-yaxis');
+  if(yAxisDiv){yAxisDiv.innerHTML='';yAxisDiv.style.height=H+'px';}
 
   for(var db=dbMin;db<=dbMax;db+=dbStep){
     var gy=Math.round(dbToY(db))+0.5;
-    /* Grid line */
+    /* Grid line across full canvas width */
     ctx.strokeStyle='rgba(255,255,255,0.07)';
     ctx.lineWidth=1;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(PAD_LEFT,gy);
-    ctx.lineTo(PAD_LEFT+plotW,gy);
+    ctx.moveTo(0,gy);
+    ctx.lineTo(W,gy);
     ctx.stroke();
-    /* Label */
-    ctx.fillStyle='rgba(255,255,255,0.55)';
-    ctx.fillText(db+' dB',PAD_LEFT-4,gy);
+    /* Label in DOM gutter */
+    if(yAxisDiv){
+      var lbl=document.createElement('span');
+      lbl.style.cssText='position:absolute;right:4px;font-size:10px;color:rgba(255,255,255,0.55);transform:translateY(-50%);white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,sans-serif';
+      lbl.style.top=gy+'px';
+      lbl.textContent=db+' dB';
+      yAxisDiv.appendChild(lbl);
+    }
   }
 
   /* ── X-axis tick labels ───────────────────────────────────────────────── */
@@ -2552,37 +2561,42 @@ function sgDrawRowSpectrumCanvas(data){
     return hz+' Hz';
   }
 
-  ctx.textAlign='center';
-  ctx.textBaseline='top';
-  ctx.fillStyle='rgba(255,255,255,0.5)';
-  ctx.font='10px -apple-system,BlinkMacSystemFont,sans-serif';
+  /* X-axis tick marks (canvas) + labels (DOM div below canvas) */
+  var xAxisDiv=document.getElementById('sg-rowspec-xaxis');
+  if(xAxisDiv)xAxisDiv.innerHTML='';
 
   var firstXTick=Math.ceil(visStartHz/xStep)*xStep;
   for(var fhz=firstXTick;fhz<=visEndHz;fhz+=xStep){
-    var tx=Math.round(hzToX(fhz))+0.5;
-    if(tx<PAD_LEFT||tx>PAD_LEFT+plotW)continue;
-    /* Tick mark */
+    var tx=Math.round(hzToX(fhz));
+    if(tx<0||tx>W)continue;
+    /* Tick mark at bottom of canvas */
     ctx.strokeStyle='rgba(255,255,255,0.25)';
     ctx.lineWidth=1;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(tx,PAD_TOP+plotH);
-    ctx.lineTo(tx,PAD_TOP+plotH+4);
+    ctx.moveTo(tx+0.5,PAD_TOP+plotH);
+    ctx.lineTo(tx+0.5,H);
     ctx.stroke();
-    /* Label */
-    ctx.fillText(fmtHz(fhz),tx,PAD_TOP+plotH+6);
+    /* Label in DOM div */
+    if(xAxisDiv){
+      var xlbl=document.createElement('span');
+      xlbl.style.cssText='position:absolute;font-size:10px;color:rgba(255,255,255,0.5);transform:translateX(-50%);white-space:nowrap;top:2px;font-family:-apple-system,BlinkMacSystemFont,sans-serif';
+      xlbl.style.left=tx+'px';
+      xlbl.textContent=fmtHz(fhz);
+      xAxisDiv.appendChild(xlbl);
+    }
   }
 
   /* ── Plot border ──────────────────────────────────────────────────────── */
   ctx.strokeStyle='rgba(255,255,255,0.12)';
   ctx.lineWidth=1;
   ctx.setLineDash([]);
-  ctx.strokeRect(PAD_LEFT+0.5,PAD_TOP+0.5,plotW,plotH);
+  ctx.strokeRect(0.5,PAD_TOP+0.5,W-1,plotH);
 
   /* ── Clip to plot area for signal line ────────────────────────────────── */
   ctx.save();
   ctx.beginPath();
-  ctx.rect(PAD_LEFT,PAD_TOP,plotW,plotH);
+  ctx.rect(0,PAD_TOP,W,plotH);
   ctx.clip();
 
   /* ── Noise floor dashed reference line ────────────────────────────────── */
@@ -2592,41 +2606,38 @@ function sgDrawRowSpectrumCanvas(data){
     ctx.lineWidth=1;
     ctx.setLineDash([4,4]);
     ctx.beginPath();
-    ctx.moveTo(PAD_LEFT,nfy);
-    ctx.lineTo(PAD_LEFT+plotW,nfy);
+    ctx.moveTo(0,nfy);
+    ctx.lineTo(W,nfy);
     ctx.stroke();
     ctx.setLineDash([]);
   }
 
   /* ── Signal fill + line ───────────────────────────────────────────────── */
-  /* Build path across all bins that fall within the visible range */
   ctx.beginPath();
   var firstPoint=true;
-  var lastX=PAD_LEFT, lastY=PAD_TOP+plotH;
+  var lastX=0;
 
   for(var bi=0;bi<bins.length;bi++){
     var bHz=dataStartHz+(bi+0.5)*binW;
-    if(bHz<visStartHz-binW||bHz>visEndHz+binW)continue; /* skip invisible bins */
+    if(bHz<visStartHz-binW||bHz>visEndHz+binW)continue;
     var bx=hzToX(bHz);
     var by=(bins[bi]!==null&&bins[bi]!==undefined)?dbToY(bins[bi]):(PAD_TOP+plotH);
     if(firstPoint){
-      ctx.moveTo(bx,PAD_TOP+plotH); /* start at baseline */
+      ctx.moveTo(bx,PAD_TOP+plotH);
       ctx.lineTo(bx,by);
       firstPoint=false;
     } else {
       ctx.lineTo(bx,by);
     }
-    lastX=bx; lastY=by;
+    lastX=bx;
   }
 
   if(!firstPoint){
-    /* Close fill path back to baseline */
     ctx.lineTo(lastX,PAD_TOP+plotH);
     ctx.closePath();
     ctx.fillStyle='rgba(100,200,255,0.08)';
     ctx.fill();
 
-    /* Redraw just the signal line on top (no fill) */
     ctx.beginPath();
     firstPoint=true;
     for(var bi2=0;bi2<bins.length;bi2++){
@@ -2655,17 +2666,21 @@ function sgDrawRowSpectrumCanvas(data){
       var r=canvas.getBoundingClientRect();
       var mx=e.clientX-r.left;
       var my=e.clientY-r.top;
-      /* Only show tooltip inside the plot area */
-      if(mx<PAD_LEFT||mx>PAD_LEFT+plotW||my<PAD_TOP||my>PAD_TOP+plotH){
+      /* Only show tooltip inside the plot area (full canvas width, PAD_TOP..PAD_TOP+plotH) */
+      if(my<PAD_TOP||my>PAD_TOP+plotH||mx<0||mx>r.width){
         ttEl.style.display='none';
         return;
       }
       if(!sgRowData)return;
-      /* Frequency at cursor */
-      var _visStart=dataStartHz+(Math.max(0,(-zoom.tx)/(containerW*zoom.scale)))*dataSpanHz;
-      var _visEnd  =dataStartHz+(Math.min(1,(-zoom.tx+containerW)/(containerW*zoom.scale)))*dataSpanHz;
-      var _visSpan =_visEnd-_visStart;
-      var hoverHz=_visStart+(_visSpan*(mx-PAD_LEFT)/plotW);
+      /* Recompute visible range at event time (zoom may have changed since last draw) */
+      var _sgR=document.querySelector('.sg-right');
+      var _cW=_sgR?_sgR.getBoundingClientRect().width:(r.width+94);
+      var _vL=Math.max(0,(-zoom.tx)/(_cW*zoom.scale));
+      var _vR=Math.min(1,(-zoom.tx+_cW)/(_cW*zoom.scale));
+      var _sHz=dataStartHz+_vL*dataSpanHz;
+      var _eHz=dataStartHz+_vR*dataSpanHz;
+      var _span=_eHz-_sHz;
+      var hoverHz=_sHz+(_span*mx/r.width);
       var hoverMHz=(hoverHz/1e6).toFixed(4);
       /* Nearest bin value */
       var _binW=sgRowData.bin_width_hz||1;

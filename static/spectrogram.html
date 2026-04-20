@@ -42,8 +42,8 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 .sg-rowspec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px}
 .sg-rowspec-title{font-size:.85em;font-weight:600;color:rgba(0,220,255,.9)}
 .sg-rowspec-meta{font-size:.78em;opacity:.65}
-.sg-rowspec-canvas-wrap{position:relative;min-height:180px}
-#sg-rowspec-canvas{display:block;width:100%!important}
+.sg-rowspec-canvas-wrap{position:relative}
+#sg-rowspec-canvas{display:block;width:100%;height:180px;cursor:crosshair}
 /* Frequency axis */
 #freq-axis{position:relative;height:32px;overflow:visible}
 .f-label{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;top:4px}
@@ -274,8 +274,12 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <span class="sg-rowspec-title">&#x1F4CA; Spectrum at <span id="sg-rowspec-time">--:-- UTC</span></span>
       <span class="sg-rowspec-meta" id="sg-rowspec-meta"></span>
     </div>
-    <div class="sg-rowspec-canvas-wrap">
-      <canvas id="sg-rowspec-canvas" height="180"></canvas>
+    <!-- padding-left:46px / padding-right:48px mirrors the freq-axis wrapper above
+         the spectrogram so the plot area aligns pixel-perfectly with the image. -->
+    <div style="padding-left:46px;padding-right:48px;position:relative">
+      <div class="sg-rowspec-canvas-wrap">
+        <canvas id="sg-rowspec-canvas"></canvas>
+      </div>
     </div>
   </div>
   <div class="legend">
@@ -2305,8 +2309,12 @@ function tsAutoRange(){
 }
 
 /* ── Row Spectrum (click-on-spectrogram spectrum view) ───────────────────── */
-var sgRowChart=null;
-var sgSelectedRow=0; /* currently selected row index (0 = oldest = top) */
+/* Raw-canvas implementation — no Chart.js dependency.
+   The canvas sits inside a wrapper with padding-left:46px / padding-right:48px
+   that mirrors the #freq-axis wrapper, so the plot area aligns pixel-perfectly
+   with the spectrogram image above. */
+var sgRowData=null;   /* last fetched rowspectrum API response */
+var sgSelectedRow=0;  /* currently selected row index (0 = oldest = top) */
 var sgRowFetchTimer=null;
 
 /* Position the arrow indicator and time label on the right-hand strip.
@@ -2380,12 +2388,25 @@ function sgFetchRowSpectrum(rowIdx){
         var label=document.getElementById('row-indicator-label');
         if(label)label.textContent=data.utc_time;
       }
+      sgRowData=data;
       sgRenderRowSpectrum(data);
     })
     .catch(function(e){console.warn('rowspectrum fetch failed:',e.message);});
 }
 
-/* Render the row spectrum chart using Chart.js */
+/* ── Raw-canvas row spectrum renderer ───────────────────────────────────────
+   Draws the spectrum for one row directly onto #sg-rowspec-canvas using the
+   Canvas 2D API.  The canvas sits inside a wrapper with padding-left:46px /
+   padding-right:48px that mirrors the #freq-axis wrapper, so the plot area
+   aligns pixel-perfectly with the spectrogram image above.
+
+   The visible frequency range is read from the current zoom state (zoom.scale,
+   zoom.tx) using the same math as buildFreqAxis(), so the chart always shows
+   exactly the same frequency window as the image — including when zoomed.
+
+   sgRenderRowSpectrum(data)  — called when new data arrives; stores data and draws.
+   sgRedrawRowSpectrum()      — called by applyZoom to redraw with updated zoom. */
+
 function sgRenderRowSpectrum(data){
   var wrap=document.getElementById('sg-rowspec-wrap');
   var timeEl=document.getElementById('sg-rowspec-time');
@@ -2396,143 +2417,290 @@ function sgRenderRowSpectrum(data){
   if(timeEl)timeEl.textContent=(data.utc_time||'--:--')+' UTC';
   if(metaEl){
     var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
-    var nfStr=data.noise_floor?(' · NF: '+data.noise_floor.toFixed(1)+' dBFS'):'';
-    metaEl.textContent=data.bin_count+' bins · '+bwStr+nfStr;
-  }
-
-  /* Build frequency labels and dBFS values.
-     Downsample to at most 1024 points for chart performance — average bins in each bucket. */
-  var bins=data.bins||[];
-  var startHz=data.start_freq_hz||0;
-  var endHz=data.end_freq_hz||30e6;
-  var binW=data.bin_width_hz||((endHz-startHz)/Math.max(bins.length,1));
-
-  var MAX_POINTS=1024;
-  var labels=[];
-  var values=[];
-
-  if(bins.length<=MAX_POINTS){
-    /* Use all bins directly */
-    for(var i=0;i<bins.length;i++){
-      var hz=startHz+(i+0.5)*binW;
-      labels.push(hz>=1e6?(hz/1e6).toFixed(3)+' MHz':(hz/1e3).toFixed(1)+' kHz');
-      values.push(bins[i]); /* may be null */
-    }
-  } else {
-    /* Downsample: average groups of bins */
-    var step=bins.length/MAX_POINTS;
-    for(var p=0;p<MAX_POINTS;p++){
-      var b0=Math.floor(p*step);
-      var b1=Math.floor((p+1)*step);
-      if(b1>bins.length)b1=bins.length;
-      var sum=0,cnt=0;
-      for(var b=b0;b<b1;b++){
-        if(bins[b]!==null&&bins[b]!==undefined){sum+=bins[b];cnt++;}
-      }
-      var midHz=startHz+(b0+(b1-b0)/2)*binW;
-      labels.push(midHz>=1e6?(midHz/1e6).toFixed(3)+' MHz':(midHz/1e3).toFixed(1)+' kHz');
-      values.push(cnt>0?Math.round(sum/cnt*10)/10:null);
-    }
-  }
-
-  /* Noise floor reference line */
-  var nfLine=null;
-  if(data.noise_floor){
-    nfLine=values.map(function(){return data.noise_floor;});
+    var nfStr=data.noise_floor?(' \u00b7 NF: '+data.noise_floor.toFixed(1)+' dBFS'):'';
+    metaEl.textContent=data.bin_count+' bins \u00b7 '+bwStr+nfStr;
   }
 
   wrap.style.display='block';
+  sgDrawRowSpectrumCanvas(data);
+}
+
+/* Redraw the spectrum canvas using the current zoom state.
+   Called from applyZoom() so the chart tracks the image zoom. */
+function sgRedrawRowSpectrum(){
+  if(sgRowData)sgDrawRowSpectrumCanvas(sgRowData);
+}
+
+/* Core canvas drawing routine. */
+function sgDrawRowSpectrumCanvas(data){
   var canvas=document.getElementById('sg-rowspec-canvas');
   if(!canvas)return;
+
+  /* Size the canvas to its CSS pixel dimensions */
+  var rect=canvas.getBoundingClientRect();
+  var W=Math.round(rect.width)||canvas.offsetWidth||800;
+  var H=180;
+  if(canvas.width!==W)canvas.width=W;
+  if(canvas.height!==H)canvas.height=H;
+
   var ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
 
-  if(sgRowChart){sgRowChart.destroy();sgRowChart=null;}
+  /* ── Layout constants ─────────────────────────────────────────────────── */
+  var PAD_LEFT=42;   /* y-axis label area */
+  var PAD_RIGHT=8;
+  var PAD_TOP=10;
+  var PAD_BOTTOM=28; /* x-axis tick area */
+  var plotW=W-PAD_LEFT-PAD_RIGHT;
+  var plotH=H-PAD_TOP-PAD_BOTTOM;
+  if(plotW<=0||plotH<=0)return;
 
-  var datasets=[{
-    label:'Signal (dBFS)',
-    data:values,
-    borderColor:'rgba(100,200,255,1)',
-    backgroundColor:'rgba(100,200,255,0.08)',
-    borderWidth:1,
-    pointRadius:0,
-    pointHoverRadius:3,
-    tension:0,
-    fill:true,
-    spanGaps:true
-  }];
+  /* ── Frequency range — mirrors buildFreqAxis() zoom math ─────────────── */
+  var dataStartHz=data.start_freq_hz||0;
+  var dataEndHz=data.end_freq_hz||30e6;
+  var dataSpanHz=dataEndHz-dataStartHz;
+  if(dataSpanHz<=0)dataSpanHz=30e6;
 
-  if(nfLine){
-    datasets.push({
-      label:'Noise floor',
-      data:nfLine,
-      borderColor:'rgba(255,160,60,0.55)',
-      backgroundColor:'transparent',
-      borderWidth:1,
-      borderDash:[4,4],
-      pointRadius:0,
-      pointHoverRadius:0,
-      tension:0,
-      fill:false,
-      spanGaps:true
-    });
+  /* The canvas wrapper has padding-left:46px / padding-right:48px, so the
+     canvas width equals the sg-right container width minus those paddings.
+     We need the sg-right width to compute the zoom fractions. */
+  var sgRight=document.querySelector('.sg-right');
+  var containerW=sgRight?sgRight.getBoundingClientRect().width:W+46+48;
+
+  /* Visible frequency fractions — same formula as buildFreqAxis() */
+  var visLeft =Math.max(0,(-zoom.tx)/(containerW*zoom.scale));
+  var visRight=Math.min(1,(-zoom.tx+containerW)/(containerW*zoom.scale));
+  var visStartHz=dataStartHz+visLeft *dataSpanHz;
+  var visEndHz  =dataStartHz+visRight*dataSpanHz;
+  var visSpanHz =visEndHz-visStartHz;
+  if(visSpanHz<=0)visSpanHz=dataSpanHz;
+
+  /* ── Bin data ─────────────────────────────────────────────────────────── */
+  var bins=data.bins||[];
+  var binW=data.bin_width_hz||((dataEndHz-dataStartHz)/Math.max(bins.length,1));
+
+  /* Convert Hz to plot-area x pixel */
+  function hzToX(hz){
+    return PAD_LEFT+(hz-visStartHz)/visSpanHz*plotW;
   }
 
-  sgRowChart=new Chart(ctx,{
-    type:'line',
-    data:{labels:labels,datasets:datasets},
-    options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      animation:{duration:150},
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{labels:{color:'rgba(255,255,255,0.75)',font:{size:11},boxWidth:12}},
-        tooltip:{
-          backgroundColor:'rgba(8,18,38,0.93)',
-          titleColor:'#7df',
-          bodyColor:'#fff',
-          borderColor:'rgba(255,255,255,0.2)',
-          borderWidth:1,
-          callbacks:{
-            title:function(items){return items[0].label;},
-            label:function(item){
-              if(item.parsed.y===null)return item.dataset.label+': no data';
-              return item.dataset.label+': '+item.parsed.y.toFixed(1)+' dBFS';
-            }
-          }
-        },
-        zoom:{
-          zoom:{
-            drag:{
-              enabled:true,
-              backgroundColor:'rgba(100,200,255,0.15)',
-              borderColor:'rgba(100,200,255,0.5)',
-              borderWidth:1
-            },
-            mode:'x'
-          },
-          pan:{enabled:false}
-        }
-      },
-      scales:{
-        x:{
-          ticks:{color:'rgba(255,255,255,0.5)',maxRotation:0,autoSkip:true,maxTicksLimit:12,font:{size:10}},
-          grid:{color:'rgba(255,255,255,0.06)'},
-          title:{display:true,text:'Frequency (drag to zoom · double-click to reset)',color:'rgba(255,255,255,0.4)',font:{size:11}}
-        },
-        y:{
-          ticks:{color:'rgba(255,255,255,0.6)',callback:function(v){return v.toFixed(0)+' dB';}},
-          grid:{color:'rgba(255,255,255,0.08)'},
-          title:{display:true,text:'Signal (dBFS)',color:'rgba(255,255,255,0.5)',font:{size:11}}
+  /* ── dB range for y-axis ──────────────────────────────────────────────── */
+  var dbMin=Infinity,dbMax=-Infinity;
+  for(var i=0;i<bins.length;i++){
+    if(bins[i]!==null&&bins[i]!==undefined){
+      if(bins[i]<dbMin)dbMin=bins[i];
+      if(bins[i]>dbMax)dbMax=bins[i];
+    }
+  }
+  if(!isFinite(dbMin)||!isFinite(dbMax)){dbMin=-130;dbMax=-60;}
+  /* Add 5 dB headroom top and bottom, snap to 10 dB grid */
+  dbMin=Math.floor((dbMin-5)/10)*10;
+  dbMax=Math.ceil ((dbMax+5)/10)*10;
+  if(dbMax-dbMin<20){dbMax=dbMin+20;}
+
+  function dbToY(db){
+    return PAD_TOP+plotH-(db-dbMin)/(dbMax-dbMin)*plotH;
+  }
+
+  /* ── Background ───────────────────────────────────────────────────────── */
+  ctx.fillStyle='rgba(0,0,0,0.0)'; /* transparent — wrap has its own bg */
+  ctx.fillRect(0,0,W,H);
+
+  /* ── Y-axis grid lines + labels ───────────────────────────────────────── */
+  var dbStep=10;
+  /* Choose a step that gives ~4–8 grid lines */
+  var dbRange=dbMax-dbMin;
+  if(dbRange>80)dbStep=20;
+  else if(dbRange<=30)dbStep=5;
+
+  ctx.font='10px -apple-system,BlinkMacSystemFont,sans-serif';
+  ctx.textAlign='right';
+  ctx.textBaseline='middle';
+
+  for(var db=dbMin;db<=dbMax;db+=dbStep){
+    var gy=Math.round(dbToY(db))+0.5;
+    /* Grid line */
+    ctx.strokeStyle='rgba(255,255,255,0.07)';
+    ctx.lineWidth=1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(PAD_LEFT,gy);
+    ctx.lineTo(PAD_LEFT+plotW,gy);
+    ctx.stroke();
+    /* Label */
+    ctx.fillStyle='rgba(255,255,255,0.55)';
+    ctx.fillText(db+' dB',PAD_LEFT-4,gy);
+  }
+
+  /* ── X-axis tick labels ───────────────────────────────────────────────── */
+  /* Choose a tick interval that gives ~6–10 ticks across the visible span */
+  var xIntervals=[
+    {span:25e6,step:5e6},{span:12e6,step:2e6},{span:6e6,step:1e6},
+    {span:3e6,step:500e3},{span:1.5e6,step:200e3},{span:600e3,step:100e3},
+    {span:300e3,step:50e3},{span:150e3,step:25e3},{span:60e3,step:10e3},
+    {span:25e3,step:5e3},{span:10e3,step:2e3},{span:5e3,step:1e3},
+    {span:0,step:500}
+  ];
+  var xStep=5e6;
+  for(var xi=0;xi<xIntervals.length;xi++){
+    if(visSpanHz>=xIntervals[xi].span){xStep=xIntervals[xi].step;break;}
+  }
+
+  function fmtHz(hz){
+    if(hz>=1e6)return (hz/1e6).toFixed(hz%1e6===0?0:hz%100000===0?1:3)+' MHz';
+    if(hz>=1e3)return (hz/1e3).toFixed(hz%1e3===0?0:1)+' kHz';
+    return hz+' Hz';
+  }
+
+  ctx.textAlign='center';
+  ctx.textBaseline='top';
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.font='10px -apple-system,BlinkMacSystemFont,sans-serif';
+
+  var firstXTick=Math.ceil(visStartHz/xStep)*xStep;
+  for(var fhz=firstXTick;fhz<=visEndHz;fhz+=xStep){
+    var tx=Math.round(hzToX(fhz))+0.5;
+    if(tx<PAD_LEFT||tx>PAD_LEFT+plotW)continue;
+    /* Tick mark */
+    ctx.strokeStyle='rgba(255,255,255,0.25)';
+    ctx.lineWidth=1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(tx,PAD_TOP+plotH);
+    ctx.lineTo(tx,PAD_TOP+plotH+4);
+    ctx.stroke();
+    /* Label */
+    ctx.fillText(fmtHz(fhz),tx,PAD_TOP+plotH+6);
+  }
+
+  /* ── Plot border ──────────────────────────────────────────────────────── */
+  ctx.strokeStyle='rgba(255,255,255,0.12)';
+  ctx.lineWidth=1;
+  ctx.setLineDash([]);
+  ctx.strokeRect(PAD_LEFT+0.5,PAD_TOP+0.5,plotW,plotH);
+
+  /* ── Clip to plot area for signal line ────────────────────────────────── */
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(PAD_LEFT,PAD_TOP,plotW,plotH);
+  ctx.clip();
+
+  /* ── Noise floor dashed reference line ────────────────────────────────── */
+  if(data.noise_floor){
+    var nfy=dbToY(data.noise_floor);
+    ctx.strokeStyle='rgba(255,160,60,0.55)';
+    ctx.lineWidth=1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(PAD_LEFT,nfy);
+    ctx.lineTo(PAD_LEFT+plotW,nfy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  /* ── Signal fill + line ───────────────────────────────────────────────── */
+  /* Build path across all bins that fall within the visible range */
+  ctx.beginPath();
+  var firstPoint=true;
+  var lastX=PAD_LEFT, lastY=PAD_TOP+plotH;
+
+  for(var bi=0;bi<bins.length;bi++){
+    var bHz=dataStartHz+(bi+0.5)*binW;
+    if(bHz<visStartHz-binW||bHz>visEndHz+binW)continue; /* skip invisible bins */
+    var bx=hzToX(bHz);
+    var by=(bins[bi]!==null&&bins[bi]!==undefined)?dbToY(bins[bi]):(PAD_TOP+plotH);
+    if(firstPoint){
+      ctx.moveTo(bx,PAD_TOP+plotH); /* start at baseline */
+      ctx.lineTo(bx,by);
+      firstPoint=false;
+    } else {
+      ctx.lineTo(bx,by);
+    }
+    lastX=bx; lastY=by;
+  }
+
+  if(!firstPoint){
+    /* Close fill path back to baseline */
+    ctx.lineTo(lastX,PAD_TOP+plotH);
+    ctx.closePath();
+    ctx.fillStyle='rgba(100,200,255,0.08)';
+    ctx.fill();
+
+    /* Redraw just the signal line on top (no fill) */
+    ctx.beginPath();
+    firstPoint=true;
+    for(var bi2=0;bi2<bins.length;bi2++){
+      var bHz2=dataStartHz+(bi2+0.5)*binW;
+      if(bHz2<visStartHz-binW||bHz2>visEndHz+binW)continue;
+      var bx2=hzToX(bHz2);
+      var by2=(bins[bi2]!==null&&bins[bi2]!==undefined)?dbToY(bins[bi2]):(PAD_TOP+plotH);
+      if(firstPoint){ctx.moveTo(bx2,by2);firstPoint=false;}
+      else{ctx.lineTo(bx2,by2);}
+    }
+    ctx.strokeStyle='rgba(100,200,255,1)';
+    ctx.lineWidth=1;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  }
+
+  ctx.restore(); /* remove clip */
+
+  /* ── Hover tooltip ────────────────────────────────────────────────────── */
+  /* Attach once; re-attaching on every draw would stack listeners */
+  if(!canvas._sgHoverAttached){
+    canvas._sgHoverAttached=true;
+    var ttEl=document.getElementById('tt');
+
+    canvas.addEventListener('mousemove',function(e){
+      var r=canvas.getBoundingClientRect();
+      var mx=e.clientX-r.left;
+      var my=e.clientY-r.top;
+      /* Only show tooltip inside the plot area */
+      if(mx<PAD_LEFT||mx>PAD_LEFT+plotW||my<PAD_TOP||my>PAD_TOP+plotH){
+        ttEl.style.display='none';
+        return;
+      }
+      if(!sgRowData)return;
+      /* Frequency at cursor */
+      var _visStart=dataStartHz+(Math.max(0,(-zoom.tx)/(containerW*zoom.scale)))*dataSpanHz;
+      var _visEnd  =dataStartHz+(Math.min(1,(-zoom.tx+containerW)/(containerW*zoom.scale)))*dataSpanHz;
+      var _visSpan =_visEnd-_visStart;
+      var hoverHz=_visStart+(_visSpan*(mx-PAD_LEFT)/plotW);
+      var hoverMHz=(hoverHz/1e6).toFixed(4);
+      /* Nearest bin value */
+      var _binW=sgRowData.bin_width_hz||1;
+      var _startHz=sgRowData.start_freq_hz||0;
+      var binIdx=Math.round((hoverHz-_startHz)/_binW-0.5);
+      var _bins=sgRowData.bins||[];
+      var sigVal=(binIdx>=0&&binIdx<_bins.length&&_bins[binIdx]!==null)?_bins[binIdx]:null;
+      var nfVal=sgRowData.noise_floor||null;
+      var snrVal=(sigVal!==null&&nfVal!==null)?(sigVal-nfVal):null;
+      var band=bandName(hoverHz);
+
+      var h='<div class="tt-freq">'+hoverMHz+' MHz'+(band?' <span style="opacity:.55;font-size:.9em">('+band+')</span>':'')+'</div>';
+      if(sigVal!==null){
+        h+='<div class="tt-sep"></div>';
+        h+='<div class="tt-row"><span class="tt-lbl">Signal</span><span class="tt-val">'+sigVal.toFixed(1)+' dBFS</span></div>';
+        if(nfVal!==null)h+='<div class="tt-row"><span class="tt-lbl">Noise floor</span><span class="tt-val">'+nfVal.toFixed(1)+' dBFS</span></div>';
+        if(snrVal!==null){
+          var col=snrVal>20?'#7f7':snrVal>10?'#ff7':'#fa7';
+          h+='<div class="tt-row"><span class="tt-lbl">SNR</span><span class="tt-val" style="color:'+col+'">'+snrVal.toFixed(1)+' dB</span></div>';
         }
       }
-    }
-  });
+      ttEl.innerHTML=h;
+      ttEl.style.display='block';
+      var tw=175,th=110;
+      var ttx=e.clientX+16,tty=e.clientY-10;
+      if(ttx+tw>window.innerWidth)ttx=e.clientX-tw-8;
+      if(tty+th>window.innerHeight)tty=e.clientY-th-8;
+      ttEl.style.left=ttx+'px';
+      ttEl.style.top=tty+'px';
+    });
 
-  canvas.style.height='180px';
-
-  /* Double-click resets zoom */
-  canvas.ondblclick=function(){if(sgRowChart)sgRowChart.resetZoom();};
+    canvas.addEventListener('mouseleave',function(){
+      document.getElementById('tt').style.display='none';
+    });
+  }
 }
 
 /* Get the UTC time string for a row index from meta.rows */
@@ -2637,7 +2805,8 @@ function initRowIndicator(){
   sgSelectRow(0);
 }
 
-/* Keep the indicator arrow position in sync when zoom/pan changes */
+/* Keep the indicator arrow position in sync when zoom/pan changes.
+   Also redraw the row spectrum canvas so it tracks the image zoom. */
 var _origApplyZoom=applyZoom;
 applyZoom=function(){
   _origApplyZoom();
@@ -2645,6 +2814,8 @@ applyZoom=function(){
     var screenFrac=sgRowToScreenFrac(sgSelectedRow+0.5);
     sgRowIndicatorSetFrac(screenFrac,sgRowTimeStr(sgSelectedRow));
   }
+  /* Redraw spectrum canvas with updated zoom — only if data is loaded */
+  sgRedrawRowSpectrum();
 };
 </script>
 <script src="timetravel.js"></script>

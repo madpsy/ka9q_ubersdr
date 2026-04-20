@@ -326,7 +326,7 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 				sr.mu.Unlock()
 				hfSb, hfEb := binSliceForFreqRange(float64(sr.startFreqHz), float64(sr.endFreqHz), hfBinCount, 1_800_000, 0)
 				hfDbMin, hfDbMax := autoRangeRowsSlice(hfRows, hfSb, hfEb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
-				hfPNG := renderRowsAsPNGSlice(hfRows, spectrogramDefaultPalette, hfDbMin, hfDbMax, oldDate, sr.config.Callsign, "wideband-hf", hfBinCount, hfSb, hfEb)
+				hfPNG := renderRowsAsPNGSlice(hfRows, spectrogramDefaultPalette, hfDbMin, hfDbMax, hfBinCount, hfSb, hfEb)
 				if hfThumb := generateThumbnail(hfPNG); len(hfThumb) > 0 {
 					hfThumbPath := sr.ThumbPathForBand(oldDate, "wideband-hf")
 					if err := atomicWriteFile(hfThumbPath, hfThumb); err != nil {
@@ -696,17 +696,6 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 		}
 	}
 
-	// Draw watermark at bottom-right: "UberSDR [callsign] [band] <date>"
-	watermarkText := "UberSDR"
-	if sr.config.Callsign != "" {
-		watermarkText += " " + sr.config.Callsign
-	}
-	if sr.bandName != "" && sr.bandName != "wideband" {
-		watermarkText += " " + sr.bandName
-	}
-	watermarkText += " " + time.Now().UTC().Format("2006-01-02")
-	drawWatermark(img, watermarkText)
-
 	// Encode to PNG using a bytes.Buffer (no goroutine needed)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -782,157 +771,6 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 			log.Printf("Spectrogram: deleted old files for %s (older than %d days)", dateStr, sr.config.RetentionDays)
 		}
 	}
-}
-
-// ─── Watermark ────────────────────────────────────────────────────────────────
-
-// drawWatermark renders text at the bottom-right of the image using a 5×7 pixel font.
-// The text is drawn with a dark shadow for readability over any background colour,
-// including the black no-data area.
-//
-// The pixel scale is chosen so the watermark text occupies approximately 25% of the
-// image width. This keeps the watermark visually consistent regardless of bin count:
-// a narrow per-band image (200 bins) and the wideband image (4096 bins) both display
-// the watermark at the same apparent size when the browser stretches them to fill the
-// container width.
-func drawWatermark(img *image.NRGBA, text string) {
-	const (
-		charW      = 6   // glyph width including 1px spacing
-		charH      = 7   // glyph height
-		padX       = 4   // right padding
-		padY       = 4   // bottom padding
-		targetFrac = 0.2 // watermark text should be ~20% of image width
-	)
-
-	bounds := img.Bounds()
-	imgW := bounds.Max.X
-
-	// Ideal scale: text width = targetFrac * imgW
-	// textW = len(text) * charW * scale  →  scale = targetFrac * imgW / (len(text) * charW)
-	nChars := len(text)
-	if nChars == 0 {
-		return
-	}
-	scale := int(float64(imgW)*targetFrac/float64(nChars*charW) + 0.5)
-	if scale < 1 {
-		scale = 1
-	}
-	if scale > 5 {
-		scale = 5
-	}
-	// Final safety: ensure it fits within the image width
-	for scale > 1 && nChars*charW*scale+padX*2 > imgW {
-		scale--
-	}
-
-	textW := len(text) * charW * scale
-	textH := charH * scale
-
-	startX := bounds.Max.X - textW - padX
-	startY := bounds.Max.Y - textH - padY
-
-	shadow := color.NRGBA{0, 0, 0, 90}
-	white := color.NRGBA{255, 255, 255, 128}
-
-	for ci, ch := range text {
-		glyph, ok := font5x7[byte(ch)]
-		if !ok {
-			glyph = font5x7[' ']
-		}
-		bx := startX + ci*charW*scale
-		for row := 0; row < charH; row++ {
-			for col := 0; col < 5; col++ {
-				if glyph[row]&(1<<uint(4-col)) != 0 {
-					for sy := 0; sy < scale; sy++ {
-						for sx := 0; sx < scale; sx++ {
-							px := bx + col*scale + sx
-							py := startY + row*scale + sy
-							// Shadow (offset by 1 scaled pixel)
-							spx, spy := px+scale, py+scale
-							if spx >= 0 && spy >= 0 && spx < bounds.Max.X && spy < bounds.Max.Y {
-								img.SetNRGBA(spx, spy, shadow)
-							}
-							// Foreground
-							if px >= 0 && py >= 0 && px < bounds.Max.X && py < bounds.Max.Y {
-								img.SetNRGBA(px, py, white)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
-// font5x7 is a minimal 5×7 pixel bitmap font for printable ASCII.
-// Each entry is 7 bytes; each byte is a 5-bit row (MSB = leftmost pixel).
-var font5x7 = map[byte][7]byte{
-	' ': {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-	'A': {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
-	'B': {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E},
-	'C': {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E},
-	'D': {0x1E, 0x09, 0x09, 0x09, 0x09, 0x09, 0x1E},
-	'E': {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F},
-	'F': {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},
-	'G': {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F},
-	'H': {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
-	'I': {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},
-	'J': {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C},
-	'K': {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11},
-	'L': {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F},
-	'M': {0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11},
-	'N': {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11},
-	'O': {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
-	'P': {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},
-	'Q': {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D},
-	'R': {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},
-	'S': {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},
-	'T': {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04},
-	'U': {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
-	'V': {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04},
-	'W': {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11},
-	'X': {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11},
-	'Y': {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04},
-	'Z': {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
-	'a': {0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F},
-	'b': {0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x1E},
-	'c': {0x00, 0x00, 0x0E, 0x10, 0x10, 0x11, 0x0E},
-	'd': {0x01, 0x01, 0x0F, 0x11, 0x11, 0x11, 0x0F},
-	'e': {0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E},
-	'f': {0x06, 0x09, 0x08, 0x1C, 0x08, 0x08, 0x08},
-	'g': {0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x0E},
-	'h': {0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x11},
-	'i': {0x04, 0x00, 0x0C, 0x04, 0x04, 0x04, 0x0E},
-	'j': {0x02, 0x00, 0x06, 0x02, 0x02, 0x12, 0x0C},
-	'k': {0x10, 0x10, 0x11, 0x12, 0x1C, 0x12, 0x11},
-	'l': {0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},
-	'm': {0x00, 0x00, 0x1A, 0x15, 0x15, 0x11, 0x11},
-	'n': {0x00, 0x00, 0x1E, 0x11, 0x11, 0x11, 0x11},
-	'o': {0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E},
-	'p': {0x00, 0x00, 0x1E, 0x11, 0x1E, 0x10, 0x10},
-	'q': {0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x01},
-	'r': {0x00, 0x00, 0x16, 0x19, 0x10, 0x10, 0x10},
-	's': {0x00, 0x00, 0x0E, 0x10, 0x0E, 0x01, 0x1E},
-	't': {0x08, 0x08, 0x1C, 0x08, 0x08, 0x09, 0x06},
-	'u': {0x00, 0x00, 0x11, 0x11, 0x11, 0x13, 0x0D},
-	'v': {0x00, 0x00, 0x11, 0x11, 0x11, 0x0A, 0x04},
-	'w': {0x00, 0x00, 0x11, 0x11, 0x15, 0x15, 0x0A},
-	'x': {0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11},
-	'y': {0x00, 0x00, 0x11, 0x11, 0x0F, 0x01, 0x0E},
-	'z': {0x00, 0x00, 0x1F, 0x02, 0x04, 0x08, 0x1F},
-	'0': {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},
-	'1': {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},
-	'2': {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F},
-	'3': {0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E},
-	'4': {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},
-	'5': {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},
-	'6': {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},
-	'7': {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},
-	'8': {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},
-	'9': {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},
-	'-': {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00},
-	'.': {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},
-	'/': {0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10},
 }
 
 // ─── atomic file write ────────────────────────────────────────────────────────
@@ -1368,15 +1206,15 @@ func sortFloat32Slice(s []float32) {
 // image is correct; CSS height:auto handles it.
 // Used for on-the-fly palette switching and rolling 24h renders.
 // startBin and endBin define the column slice to render (0, 0 = full width).
-func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, bandName string, binCount int) []byte {
-	return renderRowsAsPNGSlice(rows, palette, dbMin, dbMax, dateStr, callsign, bandName, binCount, 0, 0)
+func renderRowsAsPNG(rows [][]float32, palette string, dbMin, dbMax float32, binCount int) []byte {
+	return renderRowsAsPNGSlice(rows, palette, dbMin, dbMax, binCount, 0, 0)
 }
 
 // renderRowsAsPNGSlice renders only columns [startBin, endBin) of each row.
 // Pass startBin=0, endBin=0 (or endBin>=binCount) to render the full width.
 // This is used by the wideband-hf view to produce a 1.8–30 MHz image from
 // the full 0–30 MHz raw data without storing a separate recorder.
-func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32, dateStr string, callsign string, bandName string, binCount int, startBin, endBin int) []byte {
+func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32, binCount int, startBin, endBin int) []byte {
 	rowCount := len(rows)
 	if rowCount == 0 {
 		return nil
@@ -1408,17 +1246,6 @@ func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32
 			}
 		}
 	}
-
-	// Watermark: "UberSDR [callsign] [band] <date>"
-	wm := "UberSDR"
-	if callsign != "" {
-		wm += " " + callsign
-	}
-	if bandName != "" && bandName != "wideband" && bandName != "wideband-hf" {
-		wm += " " + bandName
-	}
-	wm += " " + dateStr
-	drawWatermark(img, wm)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -1698,7 +1525,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			dbMin, dbMax = autoRangeRowsSlice(rr.rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
 		rsb, reb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), rr.binCount, freqMinHz, freqMaxHz)
-		pngBytes := renderRowsAsPNGSlice(rr.rows, requestedPalette, dbMin, dbMax, "rolling-24h", recorder.config.Callsign, recorder.bandName, rr.binCount, rsb, reb)
+		pngBytes := renderRowsAsPNGSlice(rr.rows, requestedPalette, dbMin, dbMax, rr.binCount, rsb, reb)
 		if len(pngBytes) == 0 {
 			http.Error(w, "rolling 24h spectrogram not yet available", http.StatusServiceUnavailable)
 			return
@@ -1737,7 +1564,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 				sb, eb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), recorder.binCount, freqMinHz, freqMaxHz)
 				dbMin, dbMax = autoRangeRowsSlice(rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 			}
-			pngBytes = renderRowsAsPNGSlice(rows, requestedPalette, dbMin, dbMax, today, recorder.config.Callsign, recorder.bandName, recorder.binCount, renderStartBin, renderEndBin)
+			pngBytes = renderRowsAsPNGSlice(rows, requestedPalette, dbMin, dbMax, recorder.binCount, renderStartBin, renderEndBin)
 		} else {
 			// No palette or range change — serve the pre-cached PNG directly.
 			// The cached PNG was rendered with config db_min/db_max; if the user
@@ -1823,7 +1650,7 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 			dbMin, dbMax = autoRangeRowsSlice(rows, sb, eb, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		}
 		archSb, archEb := binSliceForFreqRange(float64(recorder.startFreqHz), float64(recorder.endFreqHz), fileBinCount, freqMinHz, freqMaxHz)
-		pngBytes := renderRowsAsPNGSlice(rows, requestedPalette, dbMin, dbMax, safeDateStr, recorder.config.Callsign, recorder.bandName, fileBinCount, archSb, archEb)
+		pngBytes := renderRowsAsPNGSlice(rows, requestedPalette, dbMin, dbMax, fileBinCount, archSb, archEb)
 		if len(pngBytes) == 0 {
 			goto serveDiskPNG
 		}

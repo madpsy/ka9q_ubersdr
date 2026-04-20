@@ -138,3 +138,14 @@ ui:
   # The location line is drawn at 75% opacity of this colour.
   # A 1 px black drop-shadow is always added for legibility over any background.
   station_id_color: "#ffffff"
+
+  # Theme colour overrides — all values are 6-digit hex colours (#rrggbb).
+  # When absent the built-in defaults reproduce the original appearance exactly.
+  # theme:
+  #   page_bg:      "#adb5bd"  # Background of panels below the waterfall
+  #   panel_dark:   "#2c3e50"  # Dark widget backgrounds (S-meter, canvases, modals)
+  #   panel_mid:    "#34495e"  # Section headers, control group backgrounds
+  #   accent:       "#667eea"  # Hover states, primary buttons, gradient start
+  #   accent_end:   "#764ba2"  # End colour of accent gradients
+  #   text_light:   "#ecf0f1"  # Text on dark panel backgrounds
+  #   control_text: "#495057"  # Labels on light backgrounds (Volume, Left, Right, Low, High, Scroll…)

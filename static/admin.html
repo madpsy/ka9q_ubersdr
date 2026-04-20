@@ -1657,6 +1657,35 @@
                             </div>
                         </div>
 
+                        <!-- Control Text Colour -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 8px 0; color: #333; font-size: 16px;">🔤 Control Text Colour</h3>
+                            <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">
+                                Colour of control labels on light backgrounds — Volume, Left, Right, Low, High, Scroll, Contrast, etc.
+                                Defaults to dark grey (#495057) which matches the original appearance.
+                                Server-wide setting; users cannot override individually.
+                            </p>
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <input type="color"
+                                       id="theme-picker-control_text"
+                                       value="#495057"
+                                       title="Control Text colour"
+                                       style="width:44px; height:32px; padding:2px; border:1px solid #ddd; border-radius:4px; cursor:pointer; flex-shrink:0;"
+                                       oninput="syncThemeHexFromPicker('control_text')">
+                                <input type="text"
+                                       id="theme-hex-control_text"
+                                       value="#495057"
+                                       maxlength="7"
+                                       placeholder="#rrggbb"
+                                       style="width:88px; font-family:monospace; font-size:13px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; flex-shrink:0;"
+                                       oninput="syncThemePickerFromHex('control_text')">
+                                <button class="btn btn-secondary"
+                                        onclick="resetThemeColor('control_text')"
+                                        style="font-size:12px; padding:4px 10px; flex-shrink:0;"
+                                        title="Reset to default (#495057)">↺ Reset</button>
+                            </div>
+                        </div>
+
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                             <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎨 Default Bandwidth Indicator Colour</h3>
                             <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
@@ -6778,6 +6807,14 @@
                 // Theme colours — build dynamic colour picker rows
                 buildThemeColorPickers(ui.theme || {});
 
+                // Initialise standalone control_text pickers (hand-written card, not built by buildThemeColorPickers)
+                const ctVal    = (ui.theme && /^#[0-9a-fA-F]{6}$/.test(ui.theme.control_text))
+                    ? ui.theme.control_text : '#495057';
+                const ctPicker = document.getElementById('theme-picker-control_text');
+                const ctHex    = document.getElementById('theme-hex-control_text');
+                if (ctPicker) ctPicker.value = ctVal;
+                if (ctHex)    ctHex.value    = ctVal;
+
                 // Spectrum background opacity slider
                 const opacitySlider  = document.getElementById('ui-spectrum-bg-opacity');
                 const opacityDisplay = document.getElementById('ui-spectrum-bg-opacity-display');
@@ -6856,12 +6893,13 @@
          * Order here determines the display order in the admin UI.
          */
         const THEME_TOKENS = [
-            { key: 'page_bg',    default: '#adb5bd', label: 'Page Background',    desc: 'Background of all panels below the waterfall (controls, filters, equalizer)' },
-            { key: 'panel_dark', default: '#2c3e50', label: 'Dark Panel',          desc: 'Dark widget backgrounds: S-meter, oscilloscope, canvases, modals' },
-            { key: 'panel_mid',  default: '#34495e', label: 'Mid Panel',           desc: 'Section headers, control group backgrounds, waterfall controls' },
-            { key: 'accent',     default: '#667eea', label: 'Accent',              desc: 'Hover states, primary buttons, scrollbar thumbs, gradient start' },
-            { key: 'accent_end', default: '#764ba2', label: 'Accent Gradient End', desc: 'End colour of accent gradients (header, voice button, etc.)' },
-            { key: 'text_light', default: '#ecf0f1', label: 'Light Text',          desc: 'Text colour on dark panel backgrounds' },
+            { key: 'page_bg',      default: '#adb5bd', label: 'Page Background',    desc: 'Background of all panels below the waterfall (controls, filters, equalizer)' },
+            { key: 'panel_dark',   default: '#2c3e50', label: 'Dark Panel',          desc: 'Dark widget backgrounds: S-meter, oscilloscope, canvases, modals' },
+            { key: 'panel_mid',    default: '#34495e', label: 'Mid Panel',           desc: 'Section headers, control group backgrounds, waterfall controls' },
+            { key: 'accent',       default: '#667eea', label: 'Accent',              desc: 'Hover states, primary buttons, scrollbar thumbs, gradient start' },
+            { key: 'accent_end',   default: '#764ba2', label: 'Accent Gradient End', desc: 'End colour of accent gradients (header, voice button, etc.)' },
+            { key: 'text_light',   default: '#ecf0f1', label: 'Light Text',          desc: 'Text colour on dark panel backgrounds' },
+            { key: 'control_text', default: '#495057', label: 'Control Text',        desc: 'Labels on light backgrounds: Volume, Left, Right, Low, High, Scroll, Contrast, etc.' },
         ];
 
         /**

@@ -7,12 +7,13 @@
    identical to the original hardcoded version.
    ============================================================================= */
 :root {
-    --page-bg:    #adb5bd; /* panel/page background (Bootstrap gray-400)      */
-    --panel-dark: #2c3e50; /* dark widget backgrounds (meter, canvases, modal) */
-    --panel-mid:  #34495e; /* mid-tone headers, section backgrounds            */
-    --accent:     #667eea; /* interactive highlights, hover, scrollbar thumbs  */
-    --accent-end: #764ba2; /* gradient end (always paired with --accent)       */
-    --text-light: #ecf0f1; /* text on dark backgrounds                         */
+    --page-bg:      #adb5bd; /* panel/page background (Bootstrap gray-400)      */
+    --panel-dark:   #2c3e50; /* dark widget backgrounds (meter, canvases, modal) */
+    --panel-mid:    #34495e; /* mid-tone headers, section backgrounds            */
+    --accent:       #667eea; /* interactive highlights, hover, scrollbar thumbs  */
+    --accent-end:   #764ba2; /* gradient end (always paired with --accent)       */
+    --text-light:   #ecf0f1; /* text on dark backgrounds                         */
+    --control-text: #495057; /* labels on light backgrounds (Volume, Left, etc.) */
 }
 
 /* Digital Spots Country Badges on Main Page */
@@ -901,7 +902,7 @@ body {
 .control-group label {
     font-weight: bold;
     margin-bottom: 8px;
-    color: #495057;
+    color: var(--control-text);
 }
 
 .frequency-input-wrapper {

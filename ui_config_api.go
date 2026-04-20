@@ -15,12 +15,13 @@ import (
 // When a theme key is absent or empty in ui.yaml the CSS :root fallback applies,
 // reproducing the original appearance exactly.
 var themeDefaults = map[string]string{
-	"page_bg":    "#adb5bd",
-	"panel_dark": "#2c3e50",
-	"panel_mid":  "#34495e",
-	"accent":     "#667eea",
-	"accent_end": "#764ba2",
-	"text_light": "#ecf0f1",
+	"page_bg":      "#adb5bd",
+	"panel_dark":   "#2c3e50",
+	"panel_mid":    "#34495e",
+	"accent":       "#667eea",
+	"accent_end":   "#764ba2",
+	"text_light":   "#ecf0f1",
+	"control_text": "#495057",
 }
 
 // validHexColor reports whether s is a valid 6-digit CSS hex colour (#rrggbb).

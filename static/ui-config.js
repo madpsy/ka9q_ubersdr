@@ -280,12 +280,13 @@ function applyServerUIDefaults() {
     //
     // Map of server response key → CSS custom property name
     const themeCssVars = {
-        page_bg:    '--page-bg',
-        panel_dark: '--panel-dark',
-        panel_mid:  '--panel-mid',
-        accent:     '--accent',
-        accent_end: '--accent-end',
-        text_light: '--text-light',
+        page_bg:      '--page-bg',
+        panel_dark:   '--panel-dark',
+        panel_mid:    '--panel-mid',
+        accent:       '--accent',
+        accent_end:   '--accent-end',
+        text_light:   '--text-light',
+        control_text: '--control-text',
     };
     const theme = (window.serverUIConfig && window.serverUIConfig.theme) || {};
     for (const [key, cssVar] of Object.entries(themeCssVars)) {

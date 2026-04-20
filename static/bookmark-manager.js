@@ -38,12 +38,10 @@ function generateBandColors(intensity) {
     ];
 }
 
-// Resolved once at load time from the server UI config.
+// Resolved lazily in loadBands() once window.serverUIConfig is populated.
 // Falls back to intensity=0.5 (original pastel appearance) if the endpoint is
 // unavailable or the key is absent — no localStorage, owner-only setting.
-const bandColors = generateBandColors(
-    window.serverUIConfig?.band_color_intensity ?? 0.5
-);
+let bandColors = generateBandColors(0.5);
 
 // Draw amateur radio band backgrounds on the spectrum overlay
 function drawAmateurBandBackgrounds(spectrumDisplay) {
@@ -156,6 +154,10 @@ async function loadBands() {
         if (response.ok) {
             const bandsData = await response.json();
             console.log('[bookmark-manager.js] Bands data received:', bandsData.length, 'bands');
+            // Re-resolve the colour palette now that window.serverUIConfig is populated
+            bandColors = generateBandColors(
+                window.serverUIConfig?.band_color_intensity ?? 0.5
+            );
             // Add colors to bands
             amateurBands = bandsData.map((band, index) => ({
                 ...band,

@@ -34,7 +34,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 /* Right side — clips zoomed content */
 .sg-right{flex:1;min-width:0;overflow:hidden;position:relative}
 /* Row indicator strip — right of the spectrogram */
-#row-indicator{width:62px;flex-shrink:0;position:relative;cursor:pointer;background:rgba(0,0,0,.25)}
+#row-indicator{width:48px;flex-shrink:0;position:relative;cursor:pointer;background:rgba(0,0,0,.25)}
 #row-indicator-arrow{position:absolute;left:2px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:10px solid rgba(0,220,255,.85);transform:translateY(-50%);pointer-events:none;filter:drop-shadow(0 0 3px rgba(0,220,255,.6));transition:top .1s}
 #row-indicator-label{position:absolute;left:15px;transform:translateY(-50%);font-size:.62em;color:rgba(0,220,255,.9);white-space:nowrap;pointer-events:none;text-shadow:0 0 6px rgba(0,220,255,.5);font-variant-numeric:tabular-nums;transition:top .1s}
 /* Row spectrum chart below the spectrogram */
@@ -247,7 +247,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <!-- freq-axis sits ABOVE the sg-wrap, offset by the time-axis width so it aligns with the canvas.
        It is NOT inside sg-right (which has overflow:hidden) so labels are never clipped.
        buildFreqAxis() positions labels in screen-space percentages of #freq-axis width. -->
-  <div style="padding-left:46px;padding-right:62px;position:relative">
+  <div style="padding-left:46px;padding-right:48px;position:relative">
     <div id="freq-axis"></div>
   </div>
   <div class="sg-wrap">

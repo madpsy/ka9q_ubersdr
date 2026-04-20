@@ -2735,17 +2735,27 @@ function sgDrawRowSpectrumCanvas(data){
       var sgRightEl=document.querySelector('.sg-right');
       var rect=sgRightEl?sgRightEl.getBoundingClientRect():{width:800,height:600};
 
-      /* Focal point in zoom-wrap local coordinates (x only — no vertical zoom from chart) */
+      /* Horizontal focal point in zoom-wrap local coordinates */
       var cx=(sgRightX-zoom.tx)/zoom.scale;
 
       var factor=e.deltaY<0?1.15:1/1.15;
       var newScale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,zoom.scale*factor));
       if(newScale===zoom.scale)return;
 
-      /* Only update horizontal zoom — leave zoom.ty (vertical pan) unchanged
-         so the spectrogram image doesn't jump vertically when zooming from the chart */
       zoom.tx=sgRightX-cx*newScale;
       zoom.scale=newScale;
+
+      /* Vertical pan: keep the selected row centred in the visible image area.
+         sgRowToScreenFrac() returns the row's current screen fraction [0..1].
+         We want it to stay at 0.5 (centre) after the scale change.
+         screenFrac = rowFrac * newScale + zoom.ty / ch
+         → zoom.ty = (0.5 - rowFrac * newScale) * ch */
+      if(meta&&meta.row_count>0){
+        var ch=rect.height||600;
+        var rowFrac=(sgSelectedRow+0.5)/meta.row_count;
+        zoom.ty=(0.5-rowFrac*newScale)*ch;
+      }
+
       clampZoom(rect);
       applyZoom(); /* redraws image axes + spectrum canvas */
     },{passive:false});

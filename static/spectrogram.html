@@ -169,7 +169,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <body>
 <div class="container">
 <header>
-  <h1 id="page-title">&#x1F4E1; Wideband Spectrogram</h1>
+  <h1 id="page-title">Wideband Spectrogram</h1>
   <p class="subtitle" id="receiver-subtitle" style="font-size:1em;opacity:.75;margin-bottom:2px"></p>
 </header>
 
@@ -924,11 +924,6 @@ function clampZoom(rect){
   bsel.value=urlBand;
 
   /* Update page title for non-wideband bands */
-  if(urlBand==='wideband-hf'){
-    document.getElementById('page-title').textContent='\uD83D\uDCE1 Wideband HF Spectrogram (1.8\u201330 MHz)';
-  } else if(urlBand&&urlBand!=='wideband'){
-    document.getElementById('page-title').textContent='\uD83D\uDCE1 '+urlBand.toUpperCase()+' Spectrogram';
-  }
 
   fetch('/api/spectrogram/list')
     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})

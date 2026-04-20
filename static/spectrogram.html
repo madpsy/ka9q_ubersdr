@@ -26,13 +26,23 @@ input[type=range].cslider::-webkit-slider-thumb{-webkit-appearance:none;appearan
 input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#7df;cursor:pointer;border:none}
 .cval{font-size:.8em;opacity:.75;min-width:38px;text-align:right}
 .status{margin-left:auto;font-size:.78em;opacity:.7;white-space:nowrap}
-/* Layout: time axis left, spectrogram right */
+/* Layout: time axis left, spectrogram right, row-indicator right */
 .sg-wrap{display:flex;gap:0;user-select:none}
 /* Time axis */
 #time-axis{width:46px;flex-shrink:0;position:relative;padding-top:0}
 .t-label{position:absolute;font-size:.68em;opacity:.75;right:5px;transform:translateY(-50%);white-space:nowrap}
 /* Right side — clips zoomed content */
 .sg-right{flex:1;min-width:0;overflow:hidden;position:relative}
+/* Row indicator strip — right of the spectrogram */
+#row-indicator{width:18px;flex-shrink:0;position:relative;cursor:pointer;background:rgba(0,0,0,.25)}
+#row-indicator-arrow{position:absolute;right:2px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:10px solid rgba(0,220,255,.85);transform:translateY(-50%);pointer-events:none;filter:drop-shadow(0 0 3px rgba(0,220,255,.6));transition:top .1s}
+/* Row spectrum chart below the spectrogram */
+.sg-rowspec-wrap{background:rgba(0,0,0,.35);border-radius:8px;padding:14px 16px 10px;margin-top:10px;position:relative}
+.sg-rowspec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px}
+.sg-rowspec-title{font-size:.85em;font-weight:600;color:rgba(0,220,255,.9)}
+.sg-rowspec-meta{font-size:.78em;opacity:.65}
+.sg-rowspec-canvas-wrap{position:relative;min-height:180px}
+#sg-rowspec-canvas{display:block;width:100%!important}
 /* Frequency axis */
 #freq-axis{position:relative;height:32px;overflow:visible}
 .f-label{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;top:4px}
@@ -251,6 +261,20 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <!-- Overlay canvas is OUTSIDE zoom-wrap so it doesn't get CSS-scaled. -->
       <canvas id="overlay-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10"></canvas>
     </div>
+    <!-- Row indicator strip — click or hover to select a time row -->
+    <div id="row-indicator" title="Click to select a time row for spectrum view">
+      <div id="row-indicator-arrow"></div>
+    </div>
+  </div>
+  <!-- Row spectrum chart — shown below the spectrogram after a row is selected -->
+  <div id="sg-rowspec-wrap" class="sg-rowspec-wrap" style="display:none">
+    <div class="sg-rowspec-header">
+      <span class="sg-rowspec-title">&#x1F4CA; Spectrum at <span id="sg-rowspec-time">--:-- UTC</span></span>
+      <span class="sg-rowspec-meta" id="sg-rowspec-meta"></span>
+    </div>
+    <div class="sg-rowspec-canvas-wrap">
+      <canvas id="sg-rowspec-canvas" height="180"></canvas>
+    </div>
   </div>
   <div class="legend">
     <span id="lmin">-130 dBFS</span>
@@ -269,6 +293,9 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <tr><td><code>GET /api/spectrogram/meta?date=YYYY-MM-DD</code></td><td>Metadata for a past date</td></tr>
       <tr><td><code>GET /api/spectrogram/meta/latest</code></td><td>302 &rarr; metadata for the most recent complete day</td></tr>
       <tr><td><code>GET /api/spectrogram/list</code></td><td>JSON list of available dates (newest first)</td></tr>
+      <tr><td><code>GET /api/spectrogram/rowspectrum?row=N</code></td><td>Full spectrum (all bins, dBFS) for row N of today's data</td></tr>
+      <tr><td><code>&amp;date=YYYY-MM-DD</code></td><td>Row spectrum for a past date</td></tr>
+      <tr><td><code>&amp;rolling=1</code></td><td>Row spectrum from the rolling 24-hour window</td></tr>
     </table>
   </details>
 </div>
@@ -1129,11 +1156,18 @@ function render(){
     applyTimeWindow();
     /* Update info banner to reflect the current band/view */
     updateInfoBanner();
+    /* Initialise row indicator (first render only) and default to row 0 */
+    initRowIndicator();
   } else {
     /* On refresh, only update axes that depend on row count */
     buildTimeAxis(); buildLegend();
     /* Re-apply time window in case row_count grew (today's live data) */
     applyTimeWindow();
+    /* Keep indicator arrow in sync after row count may have changed */
+    if(meta&&meta.row_count>0){
+      var _sf=sgRowToScreenFrac(sgSelectedRow+0.5);
+      sgRowIndicatorSetFrac(_sf);
+    }
   }
 }
 
@@ -2267,6 +2301,323 @@ function tsAutoRange(){
   }
   tsChart.update();
 }
+
+/* ── Row Spectrum (click-on-spectrogram spectrum view) ───────────────────── */
+var sgRowChart=null;
+var sgSelectedRow=0; /* currently selected row index (0 = oldest = top) */
+var sgRowFetchTimer=null;
+
+/* Position the arrow indicator on the right-hand strip.
+   rowFrac is 0..1 (0=top, 1=bottom) in screen space of the sg-right container. */
+function sgRowIndicatorSetFrac(rowFrac){
+  var strip=document.getElementById('row-indicator');
+  var arrow=document.getElementById('row-indicator-arrow');
+  if(!strip||!arrow)return;
+  var h=strip.getBoundingClientRect().height;
+  if(h===0)return;
+  /* Clamp */
+  if(rowFrac<0)rowFrac=0;
+  if(rowFrac>1)rowFrac=1;
+  arrow.style.top=Math.round(rowFrac*h)+'px';
+}
+
+/* Convert a row index (0..rowCount-1) to a screen fraction in sg-right.
+   Mirrors the zoom/pan transform used by buildTimeAxis(). */
+function sgRowToScreenFrac(rowIdx){
+  if(!meta||meta.row_count===0)return 0;
+  var container=document.querySelector('.sg-right');
+  var ch=container?container.getBoundingClientRect().height:600;
+  if(ch===0)ch=600;
+  var frac=rowIdx/meta.row_count;
+  return frac*zoom.scale + zoom.ty/ch;
+}
+
+/* Convert a screen Y fraction (0..1 within sg-right) to a row index. */
+function sgScreenFracToRow(frac){
+  if(!meta||meta.row_count===0)return 0;
+  var container=document.querySelector('.sg-right');
+  var ch=container?container.getBoundingClientRect().height:600;
+  if(ch===0)ch=600;
+  /* Invert: frac = rowFrac*zoom.scale + zoom.ty/ch
+     rowFrac = (frac - zoom.ty/ch) / zoom.scale */
+  var rowFrac=(frac - zoom.ty/ch)/zoom.scale;
+  if(rowFrac<0)rowFrac=0;
+  if(rowFrac>1)rowFrac=1;
+  var row=Math.floor(rowFrac*meta.row_count);
+  if(row>=meta.row_count)row=meta.row_count-1;
+  return row;
+}
+
+/* Fetch and render the spectrum for the currently selected row. */
+function sgFetchRowSpectrum(rowIdx){
+  if(!meta)return;
+  var sel=document.getElementById('dsel');
+  var ds=sel?sel.value:'';
+  var params='?row='+rowIdx;
+  if(ds==='rolling-24h'){
+    params+='&rolling=1';
+  } else if(ds&&/^\d{4}-\d{2}-\d{2}$/.test(ds)){
+    params+='&date='+encodeURIComponent(ds);
+  }
+  if(urlBand&&urlBand!=='wideband'){
+    params+='&band='+encodeURIComponent(urlBand);
+  }
+
+  fetch('/api/spectrogram/rowspectrum'+params)
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(data){
+      if(data.error){console.warn('rowspectrum:',data.error);return;}
+      sgRenderRowSpectrum(data);
+    })
+    .catch(function(e){console.warn('rowspectrum fetch failed:',e.message);});
+}
+
+/* Render the row spectrum chart using Chart.js */
+function sgRenderRowSpectrum(data){
+  var wrap=document.getElementById('sg-rowspec-wrap');
+  var timeEl=document.getElementById('sg-rowspec-time');
+  var metaEl=document.getElementById('sg-rowspec-meta');
+  if(!wrap)return;
+
+  /* Update header */
+  if(timeEl)timeEl.textContent=(data.utc_time||'--:--')+' UTC';
+  if(metaEl){
+    var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
+    var nfStr=data.noise_floor?(' · NF: '+data.noise_floor.toFixed(1)+' dBFS'):'';
+    metaEl.textContent=data.bin_count+' bins · '+bwStr+nfStr;
+  }
+
+  /* Build frequency labels and dBFS values.
+     Downsample to at most 1024 points for chart performance — average bins in each bucket. */
+  var bins=data.bins||[];
+  var startHz=data.start_freq_hz||0;
+  var endHz=data.end_freq_hz||30e6;
+  var binW=data.bin_width_hz||((endHz-startHz)/Math.max(bins.length,1));
+
+  var MAX_POINTS=1024;
+  var labels=[];
+  var values=[];
+
+  if(bins.length<=MAX_POINTS){
+    /* Use all bins directly */
+    for(var i=0;i<bins.length;i++){
+      var hz=startHz+(i+0.5)*binW;
+      labels.push(hz>=1e6?(hz/1e6).toFixed(3)+' MHz':(hz/1e3).toFixed(1)+' kHz');
+      values.push(bins[i]); /* may be null */
+    }
+  } else {
+    /* Downsample: average groups of bins */
+    var step=bins.length/MAX_POINTS;
+    for(var p=0;p<MAX_POINTS;p++){
+      var b0=Math.floor(p*step);
+      var b1=Math.floor((p+1)*step);
+      if(b1>bins.length)b1=bins.length;
+      var sum=0,cnt=0;
+      for(var b=b0;b<b1;b++){
+        if(bins[b]!==null&&bins[b]!==undefined){sum+=bins[b];cnt++;}
+      }
+      var midHz=startHz+(b0+(b1-b0)/2)*binW;
+      labels.push(midHz>=1e6?(midHz/1e6).toFixed(3)+' MHz':(midHz/1e3).toFixed(1)+' kHz');
+      values.push(cnt>0?Math.round(sum/cnt*10)/10:null);
+    }
+  }
+
+  /* Noise floor reference line */
+  var nfLine=null;
+  if(data.noise_floor){
+    nfLine=values.map(function(){return data.noise_floor;});
+  }
+
+  wrap.style.display='block';
+  var canvas=document.getElementById('sg-rowspec-canvas');
+  if(!canvas)return;
+  var ctx=canvas.getContext('2d');
+
+  if(sgRowChart){sgRowChart.destroy();sgRowChart=null;}
+
+  var datasets=[{
+    label:'Signal (dBFS)',
+    data:values,
+    borderColor:'rgba(100,200,255,1)',
+    backgroundColor:'rgba(100,200,255,0.08)',
+    borderWidth:1,
+    pointRadius:0,
+    pointHoverRadius:3,
+    tension:0,
+    fill:true,
+    spanGaps:true
+  }];
+
+  if(nfLine){
+    datasets.push({
+      label:'Noise floor',
+      data:nfLine,
+      borderColor:'rgba(255,160,60,0.55)',
+      backgroundColor:'transparent',
+      borderWidth:1,
+      borderDash:[4,4],
+      pointRadius:0,
+      pointHoverRadius:0,
+      tension:0,
+      fill:false,
+      spanGaps:true
+    });
+  }
+
+  sgRowChart=new Chart(ctx,{
+    type:'line',
+    data:{labels:labels,datasets:datasets},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:{duration:150},
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{color:'rgba(255,255,255,0.75)',font:{size:11},boxWidth:12}},
+        tooltip:{
+          backgroundColor:'rgba(8,18,38,0.93)',
+          titleColor:'#7df',
+          bodyColor:'#fff',
+          borderColor:'rgba(255,255,255,0.2)',
+          borderWidth:1,
+          callbacks:{
+            title:function(items){return items[0].label;},
+            label:function(item){
+              if(item.parsed.y===null)return item.dataset.label+': no data';
+              return item.dataset.label+': '+item.parsed.y.toFixed(1)+' dBFS';
+            }
+          }
+        },
+        zoom:{
+          zoom:{
+            drag:{
+              enabled:true,
+              backgroundColor:'rgba(100,200,255,0.15)',
+              borderColor:'rgba(100,200,255,0.5)',
+              borderWidth:1
+            },
+            mode:'x'
+          },
+          pan:{enabled:false}
+        }
+      },
+      scales:{
+        x:{
+          ticks:{color:'rgba(255,255,255,0.5)',maxRotation:0,autoSkip:true,maxTicksLimit:12,font:{size:10}},
+          grid:{color:'rgba(255,255,255,0.06)'},
+          title:{display:true,text:'Frequency (drag to zoom · double-click to reset)',color:'rgba(255,255,255,0.4)',font:{size:11}}
+        },
+        y:{
+          ticks:{color:'rgba(255,255,255,0.6)',callback:function(v){return v.toFixed(0)+' dB';}},
+          grid:{color:'rgba(255,255,255,0.08)'},
+          title:{display:true,text:'Signal (dBFS)',color:'rgba(255,255,255,0.5)',font:{size:11}}
+        }
+      }
+    }
+  });
+
+  canvas.style.height='180px';
+
+  /* Double-click resets zoom */
+  canvas.ondblclick=function(){if(sgRowChart)sgRowChart.resetZoom();};
+}
+
+/* Set the selected row, update the indicator, and fetch the spectrum.
+   rowIdx is the row index in the spectrogram data (0 = oldest = top). */
+function sgSelectRow(rowIdx){
+  if(!meta)return;
+  if(rowIdx<0)rowIdx=0;
+  if(rowIdx>=meta.row_count)rowIdx=meta.row_count-1;
+  sgSelectedRow=rowIdx;
+
+  /* Position the arrow indicator */
+  var screenFrac=sgRowToScreenFrac(rowIdx+0.5); /* centre of the row */
+  sgRowIndicatorSetFrac(screenFrac);
+
+  /* Debounce fetch by 80 ms so dragging doesn't hammer the API */
+  clearTimeout(sgRowFetchTimer);
+  sgRowFetchTimer=setTimeout(function(){sgFetchRowSpectrum(rowIdx);},80);
+}
+
+/* Set up click and drag handlers on the row-indicator strip and the canvas area. */
+function setupRowIndicator(){
+  var strip=document.getElementById('row-indicator');
+  var sgRight=document.querySelector('.sg-right');
+  if(!strip||!sgRight)return;
+
+  /* Helper: convert a clientY to a row index via the sg-right rect */
+  function clientYToRow(clientY){
+    var rect=sgRight.getBoundingClientRect();
+    var frac=(clientY-rect.top)/rect.height;
+    return sgScreenFracToRow(frac);
+  }
+
+  /* Click on the indicator strip */
+  strip.addEventListener('click',function(e){
+    if(!meta)return;
+    var rect=strip.getBoundingClientRect();
+    var frac=(e.clientY-rect.top)/rect.height;
+    var row=Math.floor(frac*meta.row_count);
+    if(row<0)row=0;
+    if(row>=meta.row_count)row=meta.row_count-1;
+    sgSelectRow(row);
+  });
+
+  /* Click on the spectrogram canvas area also selects the row */
+  sgRight.addEventListener('click',function(e){
+    if(!meta)return;
+    /* Only handle clicks directly on the canvas area (not during drag) */
+    if(zoom.dragging)return;
+    var cw=document.getElementById('cwrap');
+    var cr=cw.getBoundingClientRect();
+    /* Only if click is within the canvas bounds */
+    if(e.clientX<cr.left||e.clientX>cr.right||e.clientY<cr.top||e.clientY>cr.bottom)return;
+    var yp=(e.clientY-cr.top)/cr.height;
+    var row=Math.min(Math.floor(yp*meta.row_count),meta.row_count-1);
+    sgSelectRow(row);
+  });
+
+  /* Drag on the indicator strip */
+  var draggingStrip=false;
+  strip.addEventListener('mousedown',function(e){draggingStrip=true;e.preventDefault();});
+  window.addEventListener('mousemove',function(e){
+    if(!draggingStrip||!meta)return;
+    var row=clientYToRow(e.clientY);
+    sgSelectRow(row);
+  });
+  window.addEventListener('mouseup',function(){draggingStrip=false;});
+
+  /* Touch support for the strip */
+  strip.addEventListener('touchstart',function(e){draggingStrip=true;e.preventDefault();},{passive:false});
+  window.addEventListener('touchmove',function(e){
+    if(!draggingStrip||!meta)return;
+    var row=clientYToRow(e.touches[0].clientY);
+    sgSelectRow(row);
+  },{passive:true});
+  window.addEventListener('touchend',function(){draggingStrip=false;});
+}
+
+/* Called after the spectrogram renders (from render()) to initialise the row
+   indicator and default to row 0 (oldest = top of spectrogram). */
+var sgRowIndicatorSetup=false;
+function initRowIndicator(){
+  if(!sgRowIndicatorSetup){
+    setupRowIndicator();
+    sgRowIndicatorSetup=true;
+  }
+  /* Default to row 0 (oldest available time) */
+  sgSelectRow(0);
+}
+
+/* Keep the indicator arrow position in sync when zoom/pan changes */
+var _origApplyZoom=applyZoom;
+applyZoom=function(){
+  _origApplyZoom();
+  if(meta&&meta.row_count>0){
+    var screenFrac=sgRowToScreenFrac(sgSelectedRow+0.5);
+    sgRowIndicatorSetFrac(screenFrac);
+  }
+};
 </script>
 <script src="timetravel.js"></script>
 </body>

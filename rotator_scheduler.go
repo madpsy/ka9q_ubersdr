@@ -143,7 +143,7 @@ func (rs *RotatorScheduler) getAvailableSolarEventsWithTimesNoLock(sunTimes *Sun
 			"name":         event.Name,
 			"display_name": event.DisplayName,
 			"description":  event.Description,
-			"time":         eventTime.Format("15:04"), // HH:MM format for today
+			"time":         eventTime.UTC().Format("15:04"), // HH:MM format for today (UTC)
 		}
 	}
 
@@ -386,7 +386,7 @@ func (rs *RotatorScheduler) resolvePositionTimeNoLock(pos *ScheduledPosition, su
 		eventTime = eventTime.Add(time.Duration(pos.Offset) * time.Minute)
 	}
 
-	return eventTime.Format("15:04"), nil
+	return eventTime.UTC().Format("15:04"), nil
 }
 
 // getSolarEventTime returns the time for a given solar event name
@@ -521,8 +521,8 @@ func (rs *RotatorScheduler) checkScheduledPositions() {
 		return
 	}
 
-	// Get current time in HH:MM format
-	now := time.Now()
+	// Get current time in HH:MM format (UTC, matching resolvePositionTimeNoLock output)
+	now := time.Now().UTC()
 	currentTime := now.Format("15:04")
 
 	// Check each scheduled position
@@ -896,7 +896,7 @@ func (rs *RotatorScheduler) getNextScheduledPositionNoLock(positions []Scheduled
 		return nil
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	currentMinutes := now.Hour()*60 + now.Minute()
 
 	// Convert all ENABLED positions to minutes since midnight and sort

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   ⏳  TIME TRAVEL — 3D mountain terrain waterfall flythrough
+   TIME TRAVEL — 3D mountain terrain waterfall flythrough
    ═══════════════════════════════════════════════════════════════════════════
    Renders the spectrogram as a 3D mountain range: 0-30 MHz left→right, time
    recedes into the distance, signal strength = vertical height.

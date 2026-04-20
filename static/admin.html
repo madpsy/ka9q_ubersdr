@@ -1190,8 +1190,9 @@
                             <small>Choose between fixed time or solar event trigger</small>
                         </div>
                         <div class="config-field" id="fixedTimeField">
-                            <label>Time (24-hour format)</label>
+                            <label>Time (UTC, 24-hour format)</label>
                             <input type="time" id="newScheduledPositionTime" oninput="validateScheduledPositionForm()">
+                            <small>Enter the time in UTC. The scheduler compares this against UTC clock time.</small>
                             <small id="scheduledPositionTimeError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field" id="solarEventField" style="display: none;">
@@ -9332,15 +9333,26 @@ function resetStationIdColor() {
             timelineContainer.style.borderRadius = '5px';
             timelineContainer.style.border = '1px solid #dee2e6';
 
-            // Add checkbox to show available triggers
+            // Add checkbox to show available triggers + UTC/local radio buttons
             const checkboxContainer = document.createElement('div');
             checkboxContainer.style.marginBottom = '10px';
             checkboxContainer.style.display = 'flex';
             checkboxContainer.style.alignItems = 'center';
             checkboxContainer.style.gap = '8px';
+            checkboxContainer.style.flexWrap = 'wrap';
             checkboxContainer.innerHTML = `
                 <input type="checkbox" id="showAvailableTriggersCheckbox" onchange="redrawTimelineWithTriggers()" checked style="width: 18px; height: 18px; cursor: pointer;">
                 <label for="showAvailableTriggersCheckbox" style="cursor: pointer; font-weight: 500; color: #555;">Show Available Solar Event Triggers</label>
+                <span style="flex: 1;"></span>
+                <span style="font-size: 12px; color: #666; font-weight: 500;">Timeline timezone:</span>
+                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #555; margin: 0;">
+                    <input type="radio" name="timelineTimezone" id="timelineTimezoneUTC" value="utc" checked onchange="redrawTimelineWithTriggers()" style="cursor: pointer; margin: 0;">
+                    UTC
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #555; margin: 0;">
+                    <input type="radio" name="timelineTimezone" id="timelineTimezoneLocal" value="local" onchange="redrawTimelineWithTriggers()" style="cursor: pointer; margin: 0;">
+                    Local
+                </label>
             `;
             timelineContainer.appendChild(checkboxContainer);
 
@@ -9881,9 +9893,11 @@ function resetStationIdColor() {
             const nextMovementEl = document.getElementById('rotator-next-movement-stat');
             if (!nextMovementEl) return;
 
-            // Use the cached sun path and scheduled positions from the timeline
+            // Use the cached sun path and scheduled positions from the timeline.
+            // resolved_time strings from the backend are always UTC HH:MM, so compare
+            // against UTC "now" to find the next event correctly.
             const now = new Date();
-            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
 
             // Build combined list of all events (same logic as timeline)
             const allEvents = [];
@@ -9891,6 +9905,7 @@ function resetStationIdColor() {
             // Add scheduled positions
             const positions = currentRotatorSchedulerConfig.positions || [];
             positions.filter(pos => pos.enabled !== false && pos.resolved_time).forEach(pos => {
+                // resolved_time is always UTC HH:MM from the backend
                 const timeParts = pos.resolved_time.split(':');
                 const hours = parseInt(timeParts[0]);
                 const minutes = parseInt(timeParts[1]);
@@ -10257,11 +10272,25 @@ function resetStationIdColor() {
             // Clamp time to 0-24 range
             if (timeInHours < 0 || timeInHours > 24) return;
 
-            // Calculate the time for today at the specified hour
+            // Calculate the absolute Date for today at the specified hour.
+            // timeInHours is in the display timezone (UTC or local), so build the
+            // Date accordingly so SunCalc receives the correct absolute moment.
             const now = new Date();
-            const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            targetTime.setHours(Math.floor(timeInHours));
-            targetTime.setMinutes(Math.round((timeInHours - Math.floor(timeInHours)) * 60));
+            let targetTime;
+            if (timelineIsUTC()) {
+                // Build a UTC-based Date for today at the given UTC hour
+                targetTime = new Date(Date.UTC(
+                    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+                    Math.floor(timeInHours),
+                    Math.round((timeInHours - Math.floor(timeInHours)) * 60),
+                    0
+                ));
+            } else {
+                // Build a local-time-based Date for today at the given local hour
+                targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                targetTime.setHours(Math.floor(timeInHours));
+                targetTime.setMinutes(Math.round((timeInHours - Math.floor(timeInHours)) * 60));
+            }
 
             // Use SunCalc library if available (already loaded in admin.html)
             if (typeof SunCalc !== 'undefined' && window.suncalcData && window.suncalcData.location) {
@@ -10299,14 +10328,12 @@ function resetStationIdColor() {
             const allEvents = [];
 
             // Add scheduled positions
+            // resolved_time is always UTC HH:MM from the backend; convert to display timezone
             if (positions && positions.length > 0) {
                 positions
                     .filter(pos => pos.enabled !== false && pos.resolved_time)
                     .forEach(pos => {
-                        const timeParts = pos.resolved_time.split(':');
-                        const hours = parseInt(timeParts[0]);
-                        const minutes = parseInt(timeParts[1]);
-                        const totalMinutes = hours * 60 + minutes;
+                        const totalMinutes = Math.floor(hhmmToTimelineHours(pos.resolved_time) * 60);
                         allEvents.push({
                             totalMinutes: totalMinutes,
                             bearing: pos.bearing,
@@ -10317,10 +10344,11 @@ function resetStationIdColor() {
             }
 
             // Add sun tracking points if enabled
+            // sunPoint.timeUTC is always UTC HH:MM; convert to display timezone
             const followSun = currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun;
             if (followSun && window.cachedSunPath && window.cachedSunPath.length > 0) {
                 window.cachedSunPath.forEach(sunPoint => {
-                    const totalMinutes = Math.floor(sunPoint.timeInHours * 60);
+                    const totalMinutes = Math.floor(hhmmToTimelineHours(sunPoint.timeUTC) * 60);
                     allEvents.push({
                         totalMinutes: totalMinutes,
                         bearing: sunPoint.bearing,
@@ -11347,7 +11375,45 @@ function resetStationIdColor() {
             event.target.value = '';
         }
 
-        // Redraw timeline when checkbox changes
+        // Returns true if the timeline should display in UTC (vs browser local time)
+        function timelineIsUTC() {
+            const utcRadio = document.getElementById('timelineTimezoneUTC');
+            return !utcRadio || utcRadio.checked; // default to UTC if not found
+        }
+
+        // Convert a Date to fractional hours (0-24) using the selected timezone
+        function dateToTimelineHours(date) {
+            if (timelineIsUTC()) {
+                return date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+            }
+            return date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
+        }
+
+        // Format a Date as HH:MM using the selected timezone
+        function dateToTimelineStr(date) {
+            if (timelineIsUTC()) {
+                return String(date.getUTCHours()).padStart(2, '0') + ':' + String(date.getUTCMinutes()).padStart(2, '0');
+            }
+            return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        }
+
+        // Parse an HH:MM string (which is always UTC from the backend) to fractional hours
+        // for the selected timezone display
+        function hhmmToTimelineHours(hhmmStr) {
+            // hhmmStr is always UTC from the backend
+            const parts = hhmmStr.split(':');
+            const utcHours = parseInt(parts[0]);
+            const utcMinutes = parseInt(parts[1]);
+            if (timelineIsUTC()) {
+                return utcHours + utcMinutes / 60;
+            }
+            // Convert UTC HH:MM to local by building a Date for today at that UTC time
+            const now = new Date();
+            const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), utcHours, utcMinutes, 0));
+            return d.getHours() + d.getMinutes() / 60;
+        }
+
+        // Redraw timeline when checkbox or timezone radio changes
         function redrawTimelineWithTriggers() {
             const positions = currentRotatorSchedulerConfig.positions || [];
             drawRotatorTimeline(positions);
@@ -11384,9 +11450,9 @@ function resetStationIdColor() {
                 const sunrise = new Date(times.sunrise);
                 const sunset = new Date(times.sunset);
 
-                // Convert sunrise/sunset to hours (0-24)
-                const sunriseHours = sunrise.getHours() + sunrise.getMinutes() / 60;
-                const sunsetHours = sunset.getHours() + sunset.getMinutes() / 60;
+                // Convert sunrise/sunset to hours (0-24) using selected timezone
+                const sunriseHours = dateToTimelineHours(sunrise);
+                const sunsetHours = dateToTimelineHours(sunset);
 
                 // Draw night period before sunrise (00:00 to sunrise)
                 if (sunriseHours > 0) {
@@ -11434,8 +11500,8 @@ function resetStationIdColor() {
                     ctx.font = '10px sans-serif';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'top';
-                    const sunriseTime = sunrise.getHours().toString().padStart(2, '0') + ':' + sunrise.getMinutes().toString().padStart(2, '0');
-                    const sunsetTime = sunset.getHours().toString().padStart(2, '0') + ':' + sunset.getMinutes().toString().padStart(2, '0');
+                    const sunriseTime = dateToTimelineStr(sunrise);
+                    const sunsetTime = dateToTimelineStr(sunset);
                     ctx.fillText('☀️ ' + sunriseTime, sunriseX, marginTop - 15);
                     ctx.fillText('🌙 ' + sunsetTime, sunsetX, marginTop - 15);
                 }
@@ -11475,15 +11541,14 @@ function resetStationIdColor() {
             }
 
             // Filter enabled positions only and sort by time
+            // resolved_time and time strings are always UTC from the backend;
+            // hhmmToTimelineHours() converts to the selected display timezone.
             const enabledPositions = positions
                 .filter(pos => pos.enabled !== false)
                 .map(pos => {
                     // Use resolved_time if available (for solar events), otherwise use time
                     const timeStr = pos.resolved_time || pos.time;
-                    const timeParts = timeStr.split(':');
-                    const hours = parseInt(timeParts[0]);
-                    const minutes = parseInt(timeParts[1]);
-                    const timeInHours = hours + (minutes / 60);
+                    const timeInHours = hhmmToTimelineHours(timeStr);
                     return { ...pos, timeInHours };
                 })
                 .sort((a, b) => a.timeInHours - b.timeInHours);
@@ -11554,7 +11619,7 @@ function resetStationIdColor() {
 
             // Draw current time marker (semi-transparent black dashed line)
             const now = new Date();
-            const currentHours = now.getHours() + now.getMinutes() / 60;
+            const currentHours = dateToTimelineHours(now);
             const currentX = marginLeft + (currentHours / 24) * timelineWidth;
 
             // Add "NOW" label at the very top
@@ -11562,7 +11627,7 @@ function resetStationIdColor() {
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            const currentTimeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            const currentTimeStr = dateToTimelineStr(now);
             ctx.fillText('NOW', currentX, 2);
             ctx.font = '9px sans-serif';
             ctx.fillText(currentTimeStr, currentX, 14);
@@ -11587,17 +11652,21 @@ function resetStationIdColor() {
             ctx.textAlign = 'right';
             ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
 
+            // Draw timezone label centered below the axis
+            ctx.fillStyle = '#888';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(timelineIsUTC() ? '(UTC)' : '(Local)', marginLeft + timelineWidth / 2, timelineY + 12);
+
             // Draw available solar event triggers if checkbox is checked
             showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
             if (showTriggersCheckbox && showTriggersCheckbox.checked && availableSolarEvents && availableSolarEvents.length > 0) {
                 // Parse and sort solar events by time
+                // event.time is always UTC HH:MM from the backend
                 const solarEventMarkers = availableSolarEvents
                     .filter(event => event.time)
                     .map(event => {
-                        const timeParts = event.time.split(':');
-                        const hours = parseInt(timeParts[0]);
-                        const minutes = parseInt(timeParts[1]);
-                        const timeInHours = hours + (minutes / 60);
+                        const timeInHours = hhmmToTimelineHours(event.time);
                         const x = marginLeft + (timeInHours / 24) * timelineWidth;
                         return { ...event, x, timeInHours };
                     })
@@ -11738,17 +11807,21 @@ function resetStationIdColor() {
                         bearing = (bearing + 180) % 360;
                     }
                     
-                    const timeParts = point.time_local.split(':');
+                    // time_local is formatted from a UTC time.Time, so it is UTC HH:MM.
+                    // Store it as timeUTC for use with hhmmToTimelineHours().
+                    const timeUTC = point.time_local;
+                    const timeParts = timeUTC.split(':');
                     const hours = parseInt(timeParts[0]);
                     const minutes = parseInt(timeParts[1]);
-                    const timeInHours = hours + (minutes / 60);
+                    const timeInHours = hours + (minutes / 60); // UTC fractional hours
 
                     // Only add if we haven't seen this bearing yet
                     if (!seenBearings.has(bearing)) {
                         seenBearings.add(bearing);
                         uniquePoints.push({
                             bearing: bearing,
-                            timeInHours: timeInHours
+                            timeInHours: timeInHours, // UTC fractional hours (kept for backward compat)
+                            timeUTC: timeUTC           // UTC HH:MM string for hhmmToTimelineHours()
                         });
                     }
                 });
@@ -11776,7 +11849,9 @@ function resetStationIdColor() {
             ctx.lineWidth = 1;
 
             window.cachedSunPath.forEach(point => {
-                const x = marginLeft + (point.timeInHours / 24) * timelineWidth;
+                // Convert UTC time to display timezone for correct x position
+                const displayHours = hhmmToTimelineHours(point.timeUTC);
+                const x = marginLeft + (displayHours / 24) * timelineWidth;
 
                 // Draw small circle on timeline
                 ctx.beginPath();
@@ -11863,7 +11938,9 @@ function resetStationIdColor() {
                     const timelineWidth = canvas.width - marginLeft - marginRight;
                     
                     for (const sunPoint of window.cachedSunPath) {
-                        const sunX = marginLeft + (sunPoint.timeInHours / 24) * timelineWidth;
+                        // Convert UTC time to display timezone for correct x position
+                        const sunDisplayHours = hhmmToTimelineHours(sunPoint.timeUTC);
+                        const sunX = marginLeft + (sunDisplayHours / 24) * timelineWidth;
                         const distance = Math.sqrt(Math.pow(mouseX - sunX, 2) + Math.pow(mouseY - timelineY, 2));
                         if (distance <= sunHoverRadius) {
                             hoveredSunPos = sunPoint;

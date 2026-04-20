@@ -2717,6 +2717,38 @@ function sgDrawRowSpectrumCanvas(data){
     canvas.addEventListener('mouseleave',function(){
       document.getElementById('tt').style.display='none';
     });
+
+    /* Scroll-to-zoom on the spectrum canvas drives the same zoom state as the
+       spectrogram image.  The focal point is the frequency under the cursor,
+       mapped back to the sg-right container coordinate space so clampZoom()
+       works correctly (it operates in sg-right pixels). */
+    canvas.addEventListener('wheel',function(e){
+      e.preventDefault();
+      var r=canvas.getBoundingClientRect();
+      var mx=e.clientX-r.left; /* cursor x within canvas */
+
+      /* Map canvas x → sg-right x.
+         canvas left edge = sg-right left edge + 46px (time-axis).
+         So sg-right x = mx + 46. */
+      var sgRightX=mx+46;
+
+      var sgRightEl=document.querySelector('.sg-right');
+      var rect=sgRightEl?sgRightEl.getBoundingClientRect():{width:800,height:600};
+
+      /* Focal point in zoom-wrap local coordinates (x only — no vertical zoom from chart) */
+      var cx=(sgRightX-zoom.tx)/zoom.scale;
+
+      var factor=e.deltaY<0?1.15:1/1.15;
+      var newScale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,zoom.scale*factor));
+      if(newScale===zoom.scale)return;
+
+      /* Only update horizontal zoom — leave zoom.ty (vertical pan) unchanged
+         so the spectrogram image doesn't jump vertically when zooming from the chart */
+      zoom.tx=sgRightX-cx*newScale;
+      zoom.scale=newScale;
+      clampZoom(rect);
+      applyZoom(); /* redraws image axes + spectrum canvas */
+    },{passive:false});
   }
 }
 

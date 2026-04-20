@@ -34,8 +34,9 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 /* Right side — clips zoomed content */
 .sg-right{flex:1;min-width:0;overflow:hidden;position:relative}
 /* Row indicator strip — right of the spectrogram */
-#row-indicator{width:18px;flex-shrink:0;position:relative;cursor:pointer;background:rgba(0,0,0,.25)}
-#row-indicator-arrow{position:absolute;right:2px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:10px solid rgba(0,220,255,.85);transform:translateY(-50%);pointer-events:none;filter:drop-shadow(0 0 3px rgba(0,220,255,.6));transition:top .1s}
+#row-indicator{width:62px;flex-shrink:0;position:relative;cursor:pointer;background:rgba(0,0,0,.25)}
+#row-indicator-arrow{position:absolute;left:2px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:10px solid rgba(0,220,255,.85);transform:translateY(-50%);pointer-events:none;filter:drop-shadow(0 0 3px rgba(0,220,255,.6));transition:top .1s}
+#row-indicator-label{position:absolute;left:15px;transform:translateY(-50%);font-size:.62em;color:rgba(0,220,255,.9);white-space:nowrap;pointer-events:none;text-shadow:0 0 6px rgba(0,220,255,.5);font-variant-numeric:tabular-nums;transition:top .1s}
 /* Row spectrum chart below the spectrogram */
 .sg-rowspec-wrap{background:rgba(0,0,0,.35);border-radius:8px;padding:14px 16px 10px;margin-top:10px;position:relative}
 .sg-rowspec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px}
@@ -246,7 +247,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <!-- freq-axis sits ABOVE the sg-wrap, offset by the time-axis width so it aligns with the canvas.
        It is NOT inside sg-right (which has overflow:hidden) so labels are never clipped.
        buildFreqAxis() positions labels in screen-space percentages of #freq-axis width. -->
-  <div style="padding-left:46px;position:relative">
+  <div style="padding-left:46px;padding-right:62px;position:relative">
     <div id="freq-axis"></div>
   </div>
   <div class="sg-wrap">
@@ -261,9 +262,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <!-- Overlay canvas is OUTSIDE zoom-wrap so it doesn't get CSS-scaled. -->
       <canvas id="overlay-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10"></canvas>
     </div>
-    <!-- Row indicator strip — click or hover to select a time row -->
+    <!-- Row indicator strip — click or drag to select a time row -->
     <div id="row-indicator" title="Click to select a time row for spectrum view">
       <div id="row-indicator-arrow"></div>
+      <div id="row-indicator-label"></div>
     </div>
   </div>
   <!-- Row spectrum chart — shown below the spectrogram after a row is selected -->
@@ -1166,7 +1168,7 @@ function render(){
     /* Keep indicator arrow in sync after row count may have changed */
     if(meta&&meta.row_count>0){
       var _sf=sgRowToScreenFrac(sgSelectedRow+0.5);
-      sgRowIndicatorSetFrac(_sf);
+      sgRowIndicatorSetFrac(_sf,sgRowTimeStr(sgSelectedRow));
     }
   }
 }
@@ -2307,18 +2309,24 @@ var sgRowChart=null;
 var sgSelectedRow=0; /* currently selected row index (0 = oldest = top) */
 var sgRowFetchTimer=null;
 
-/* Position the arrow indicator on the right-hand strip.
+/* Position the arrow indicator and time label on the right-hand strip.
    rowFrac is 0..1 (0=top, 1=bottom) in screen space of the sg-right container. */
-function sgRowIndicatorSetFrac(rowFrac){
+function sgRowIndicatorSetFrac(rowFrac,timeStr){
   var strip=document.getElementById('row-indicator');
   var arrow=document.getElementById('row-indicator-arrow');
+  var label=document.getElementById('row-indicator-label');
   if(!strip||!arrow)return;
   var h=strip.getBoundingClientRect().height;
   if(h===0)return;
   /* Clamp */
   if(rowFrac<0)rowFrac=0;
   if(rowFrac>1)rowFrac=1;
-  arrow.style.top=Math.round(rowFrac*h)+'px';
+  var topPx=Math.round(rowFrac*h);
+  arrow.style.top=topPx+'px';
+  if(label){
+    label.style.top=topPx+'px';
+    if(timeStr)label.textContent=timeStr;
+  }
 }
 
 /* Convert a row index (0..rowCount-1) to a screen fraction in sg-right.
@@ -2522,6 +2530,21 @@ function sgRenderRowSpectrum(data){
   canvas.ondblclick=function(){if(sgRowChart)sgRowChart.resetZoom();};
 }
 
+/* Get the UTC time string for a row index from meta.rows */
+function sgRowTimeStr(rowIdx){
+  if(!meta)return '';
+  var rm=meta.rows&&meta.rows[rowIdx];
+  if(rm&&rm.utc_time)return rm.utc_time;
+  /* Fallback: synthetic from row0 */
+  var row0Min=0;
+  if(meta.rows&&meta.rows[0]&&meta.rows[0].unix){
+    var d0=new Date(meta.rows[0].unix*1000);
+    row0Min=d0.getUTCHours()*60+d0.getUTCMinutes();
+  }
+  var utcMin=row0Min+rowIdx;
+  return String(Math.floor(utcMin/60)%24).padStart(2,'0')+':'+String(utcMin%60).padStart(2,'0');
+}
+
 /* Set the selected row, update the indicator, and fetch the spectrum.
    rowIdx is the row index in the spectrogram data (0 = oldest = top). */
 function sgSelectRow(rowIdx){
@@ -2530,9 +2553,9 @@ function sgSelectRow(rowIdx){
   if(rowIdx>=meta.row_count)rowIdx=meta.row_count-1;
   sgSelectedRow=rowIdx;
 
-  /* Position the arrow indicator */
+  /* Position the arrow indicator with time label */
   var screenFrac=sgRowToScreenFrac(rowIdx+0.5); /* centre of the row */
-  sgRowIndicatorSetFrac(screenFrac);
+  sgRowIndicatorSetFrac(screenFrac,sgRowTimeStr(rowIdx));
 
   /* Debounce fetch by 80 ms so dragging doesn't hammer the API */
   clearTimeout(sgRowFetchTimer);
@@ -2615,7 +2638,7 @@ applyZoom=function(){
   _origApplyZoom();
   if(meta&&meta.row_count>0){
     var screenFrac=sgRowToScreenFrac(sgSelectedRow+0.5);
-    sgRowIndicatorSetFrac(screenFrac);
+    sgRowIndicatorSetFrac(screenFrac,sgRowTimeStr(sgSelectedRow));
   }
 };
 </script>

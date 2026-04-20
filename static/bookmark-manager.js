@@ -13,31 +13,25 @@ window.bookmarkPositions = bookmarkPositions;
 let amateurBands = [];
 window.amateurBands = amateurBands;
 
-// Generate the band colour palette from an intensity value (0.0–1.0).
-// Uses piecewise curves so i=0.5 reproduces the original hardcoded pastel palette exactly.
+// Generate the band colour palette from an intensity value (0.5–1.0).
+// Range starts at 0.5 (the minimum/default) and goes to 1.0 (vivid).
 //
-//   i=0.0: alpha=0.08, floor=100  — same hues as default, just very transparent (clearly softer)
 //   i=0.5: alpha=0.20, floor=100  — original pastel appearance (default)
 //   i=1.0: alpha=0.80, floor=0    — vivid, fully saturated
 //
-// Below 0.5: only alpha changes (floor stays at 100) so the hue difference is clear.
-// Above 0.5: both alpha and floor change to push towards vivid saturated colours.
+// Linear interpolation across the usable range [0.5, 1.0].
 // At i=0.5, floor=100, so Red = rgba(255, 100, 100, 0.20) — exactly the original hardcoded value.
-// Falls back to 0.5 if the value is missing or invalid.
+// Falls back to 0.5 if the value is missing, invalid, or below 0.5.
 function generateBandColors(intensity) {
     const i = (typeof intensity === 'number' && isFinite(intensity))
-        ? Math.max(0, Math.min(1, intensity))
+        ? Math.max(0.5, Math.min(1, intensity))
         : 0.5;
 
-    // Piecewise alpha: linear below 0.5, steeper above
-    const alpha = i <= 0.5
-        ? +(0.08 + i * 0.24).toFixed(3)          // 0.08 → 0.20
-        : +(0.20 + (i - 0.5) * 1.20).toFixed(3); // 0.20 → 0.80
+    // Linear: 0.20 at i=0.5, 0.80 at i=1.0
+    const alpha = +(0.20 + (i - 0.5) * 1.20).toFixed(3);
 
-    // Floor stays at 100 below 0.5 (only alpha varies), drops to 0 above 0.5
-    const f = i <= 0.5
-        ? 100
-        : Math.round(100 - (i - 0.5) * 200);     // 100 → 0
+    // Linear floor: 100 at i=0.5, 0 at i=1.0
+    const f = Math.round(100 - (i - 0.5) * 200);
 
     // Clamp each channel to [0, 255]
     const c = (v) => Math.min(255, Math.max(0, v));

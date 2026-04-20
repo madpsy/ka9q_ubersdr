@@ -1749,8 +1749,8 @@
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                             <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎨 Band Colour Intensity</h3>
                             <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Controls how vivid the band overlays appear in the bookmark area of the spectrum.
-                                Lower values give soft pastel tints; higher values give bolder, more saturated colours.
+                                Controls how vivid the amateur band overlays appear in the bookmark area of the spectrum.
+                                0.50 is the default pastel appearance; 1.00 gives bold, fully saturated colours.
                                 This is a server-wide setting; users cannot override it individually.
                             </p>
                             <div class="form-group" style="margin-bottom: 0;">
@@ -1758,16 +1758,15 @@
                                     Intensity: <span id="ui-band-color-intensity-display" style="font-weight: bold; color: #667eea;">0.50</span>
                                 </label>
                                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                                    <input type="range" id="ui-band-color-intensity" min="0" max="1" step="0.05" value="0.5"
+                                    <input type="range" id="ui-band-color-intensity" min="0.5" max="1" step="0.025" value="0.5"
                                            style="width: 100%; max-width: 360px;"
-                                           oninput="document.getElementById('ui-band-color-intensity-display').textContent = parseFloat(this.value).toFixed(2)">
+                                           oninput="document.getElementById('ui-band-color-intensity-display').textContent = parseFloat(this.value).toFixed(3)">
                                     <button class="btn btn-secondary" onclick="resetBandColorIntensity()"
                                             style="font-size: 12px; padding: 4px 10px; flex-shrink: 0;"
                                             title="Reset to default (0.50)">↺ Reset</button>
                                 </div>
                                 <div style="display: flex; justify-content: space-between; max-width: 360px; font-size: 11px; color: #999; margin-top: 4px;">
-                                    <span>0.00 — Softest</span>
-                                    <span>0.50 — Default</span>
+                                    <span>0.50 — Default pastel</span>
                                     <span>1.00 — Vivid</span>
                                 </div>
                             </div>
@@ -6852,14 +6851,14 @@
                 if (opacitySlider)  opacitySlider.value       = opacity;
                 if (opacityDisplay) opacityDisplay.textContent = opacity.toFixed(2);
 
-                // Band colour intensity slider
+                // Band colour intensity slider (range 0.5–1.0)
                 const bandIntensitySlider  = document.getElementById('ui-band-color-intensity');
                 const bandIntensityDisplay = document.getElementById('ui-band-color-intensity-display');
                 const rawBandIntensity = (ui.band_color_intensity !== undefined && ui.band_color_intensity !== null)
                     ? parseFloat(ui.band_color_intensity) : 0.50;
-                const bandIntensity = isNaN(rawBandIntensity) ? 0.50 : rawBandIntensity;
+                const bandIntensity = isNaN(rawBandIntensity) ? 0.50 : Math.max(0.5, Math.min(1, rawBandIntensity));
                 if (bandIntensitySlider)  bandIntensitySlider.value       = bandIntensity;
-                if (bandIntensityDisplay) bandIntensityDisplay.textContent = bandIntensity.toFixed(2);
+                if (bandIntensityDisplay) bandIntensityDisplay.textContent = bandIntensity.toFixed(3);
 
                 // Station ID overlay
                 const stationIdOverlayEl = document.getElementById('ui-station-id-overlay');

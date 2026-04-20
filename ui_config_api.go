@@ -77,8 +77,8 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 	}
 
 	bandColorIntensity := config.UI.BandColorIntensity
-	if bandColorIntensity == 0 {
-		bandColorIntensity = 0.5 // default: current pastel appearance
+	if bandColorIntensity < 0.5 {
+		bandColorIntensity = 0.5 // default: current pastel appearance (also clamps old out-of-range values)
 	}
 
 	bwColor := config.UI.BandwidthIndicatorColor.Default
@@ -221,9 +221,9 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
-	// Validate band_color_intensity range (0.0–1.0)
-	if parsed.UI.BandColorIntensity < 0 || parsed.UI.BandColorIntensity > 1 {
-		http.Error(w, "band_color_intensity must be between 0.0 and 1.0", http.StatusBadRequest)
+	// Validate band_color_intensity range (0.5–1.0)
+	if parsed.UI.BandColorIntensity < 0.5 || parsed.UI.BandColorIntensity > 1 {
+		http.Error(w, "band_color_intensity must be between 0.5 and 1.0", http.StatusBadRequest)
 		return
 	}
 

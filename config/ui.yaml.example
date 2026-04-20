@@ -128,8 +128,7 @@ ui:
 
   # Band colour intensity for the amateur band overlays in the bookmark area.
   # Controls how vivid the coloured band backgrounds appear on the spectrum.
-  # At 0.5 (default) the appearance matches the original hardcoded pastel palette exactly.
-  # 0.0 = softest (same hues as default, alpha 0.08 — barely-there transparent tints)
+  # Valid range: 0.5–1.0.
   # 0.5 = default pastel (alpha 0.20, floor 100 — original appearance)
   # 1.0 = vivid (alpha 0.80, floor 0 — bold, fully saturated colours)
   # No localStorage key — this is an operator setting; users cannot override it individually.

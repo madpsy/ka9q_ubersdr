@@ -2614,46 +2614,84 @@ function sgDrawRowSpectrumCanvas(data){
     ctx.setLineDash([]);
   }
 
-  /* ── Signal fill + line ───────────────────────────────────────────────── */
-  ctx.beginPath();
-  var firstPoint=true;
-  var lastX=0;
+  /* ── Signal fill + line — palette-coloured ───────────────────────────── */
+  /* Map a dBFS value to a palette colour string using the same LUT (V) and
+     contrast range (contrastMin/contrastMax) as the spectrogram image. */
+  function dbToRgb(db){
+    var t=(db-contrastMin)/(contrastMax-contrastMin);
+    if(t<0)t=0; if(t>1)t=1;
+    var idx=Math.round(t*(V.length-1));
+    var c=V[idx];
+    return c?[c[0],c[1],c[2]]:[100,200,255];
+  }
 
+  /* Build a list of visible bins with their x, y, and colour.
+     Downsample to at most W points (one per canvas pixel column) so the fill
+     loop never creates more gradients than there are pixels — keeps it fast
+     even for a fully zoomed-out wideband view with 30 000+ bins. */
+  var visBinsRaw=[];
   for(var bi=0;bi<bins.length;bi++){
     var bHz=dataStartHz+(bi+0.5)*binW;
     if(bHz<visStartHz-binW||bHz>visEndHz+binW)continue;
-    var bx=hzToX(bHz);
-    var by=(bins[bi]!==null&&bins[bi]!==undefined)?dbToY(bins[bi]):(PAD_TOP+plotH);
-    if(firstPoint){
-      ctx.moveTo(bx,PAD_TOP+plotH);
-      ctx.lineTo(bx,by);
-      firstPoint=false;
-    } else {
-      ctx.lineTo(bx,by);
-    }
-    lastX=bx;
+    var bVal=bins[bi];
+    if(bVal===null||bVal===undefined)continue;
+    visBinsRaw.push({hz:bHz,db:bVal});
   }
 
-  if(!firstPoint){
-    ctx.lineTo(lastX,PAD_TOP+plotH);
-    ctx.closePath();
-    ctx.fillStyle='rgba(100,200,255,0.08)';
-    ctx.fill();
-
-    ctx.beginPath();
-    firstPoint=true;
-    for(var bi2=0;bi2<bins.length;bi2++){
-      var bHz2=dataStartHz+(bi2+0.5)*binW;
-      if(bHz2<visStartHz-binW||bHz2>visEndHz+binW)continue;
-      var bx2=hzToX(bHz2);
-      var by2=(bins[bi2]!==null&&bins[bi2]!==undefined)?dbToY(bins[bi2]):(PAD_TOP+plotH);
-      if(firstPoint){ctx.moveTo(bx2,by2);firstPoint=false;}
-      else{ctx.lineTo(bx2,by2);}
+  var visBins=[];
+  if(visBinsRaw.length<=W){
+    /* Fewer bins than pixels — use all directly */
+    for(var ri=0;ri<visBinsRaw.length;ri++){
+      var rb=visBinsRaw[ri];
+      visBins.push({x:hzToX(rb.hz),y:dbToY(rb.db),rgb:dbToRgb(rb.db)});
     }
-    ctx.strokeStyle='rgba(100,200,255,1)';
-    ctx.lineWidth=1;
-    ctx.setLineDash([]);
-    ctx.stroke();
+  } else {
+    /* More bins than pixels — average groups into W buckets */
+    var step=visBinsRaw.length/W;
+    for(var pi=0;pi<W;pi++){
+      var p0=Math.floor(pi*step);
+      var p1=Math.floor((pi+1)*step);
+      if(p1>visBinsRaw.length)p1=visBinsRaw.length;
+      var sum=0,cnt=0,midHz=0;
+      for(var pj=p0;pj<p1;pj++){sum+=visBinsRaw[pj].db;midHz+=visBinsRaw[pj].hz;cnt++;}
+      if(cnt===0)continue;
+      var avgDb=sum/cnt;
+      var avgHz=midHz/cnt;
+      visBins.push({x:hzToX(avgHz),y:dbToY(avgDb),rgb:dbToRgb(avgDb)});
+    }
+  }
+
+  if(visBins.length>0){
+    /* Fill: draw thin vertical rectangles from the signal y down to the
+       baseline, each coloured with the palette colour at that bin's dB value
+       and semi-transparent so the grid lines show through. */
+    var baseline=PAD_TOP+plotH;
+    for(var vi=0;vi<visBins.length;vi++){
+      var vb=visBins[vi];
+      var vx0=vi>0?(visBins[vi-1].x+vb.x)/2:vb.x-(visBins.length>1?(visBins[1].x-visBins[0].x)/2:1);
+      var vx1=vi<visBins.length-1?(vb.x+visBins[vi+1].x)/2:vb.x+(visBins.length>1?(visBins[visBins.length-1].x-visBins[visBins.length-2].x)/2:1);
+      var vw=Math.max(1,vx1-vx0);
+      var r=vb.rgb[0],g=vb.rgb[1],b=vb.rgb[2];
+      /* Vertical gradient: opaque palette colour at signal level → transparent at baseline */
+      var grad=ctx.createLinearGradient(0,vb.y,0,baseline);
+      grad.addColorStop(0,'rgba('+r+','+g+','+b+',0.55)');
+      grad.addColorStop(1,'rgba('+r+','+g+','+b+',0.0)');
+      ctx.fillStyle=grad;
+      ctx.fillRect(vx0,vb.y,vw,baseline-vb.y);
+    }
+
+    /* Line: draw coloured segments between consecutive bins */
+    for(var vi2=0;vi2<visBins.length-1;vi2++){
+      var va=visBins[vi2], vb2=visBins[vi2+1];
+      var ra=va.rgb[0],ga=va.rgb[1],ba=va.rgb[2];
+      ctx.strokeStyle='rgb('+ra+','+ga+','+ba+')';
+      ctx.lineWidth=1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(va.x,va.y);
+      ctx.lineTo(vb2.x,vb2.y);
+      ctx.stroke();
+    }
   }
 
   ctx.restore(); /* remove clip */

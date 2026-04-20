@@ -6893,14 +6893,19 @@
          * Order here determines the display order in the admin UI.
          */
         const THEME_TOKENS = [
-            { key: 'page_bg',      default: '#adb5bd', label: 'Page Background',    desc: 'Background of all panels below the waterfall (controls, filters, equalizer)' },
-            { key: 'panel_dark',   default: '#2c3e50', label: 'Dark Panel',          desc: 'Dark widget backgrounds: S-meter, oscilloscope, canvases, modals' },
-            { key: 'panel_mid',    default: '#34495e', label: 'Mid Panel',           desc: 'Section headers, control group backgrounds, waterfall controls' },
-            { key: 'accent',       default: '#667eea', label: 'Accent',              desc: 'Hover states, primary buttons, scrollbar thumbs, gradient start' },
-            { key: 'accent_end',   default: '#764ba2', label: 'Accent Gradient End', desc: 'End colour of accent gradients (header, voice button, etc.)' },
-            { key: 'text_light',   default: '#ecf0f1', label: 'Light Text',          desc: 'Text colour on dark panel backgrounds' },
-            { key: 'control_text', default: '#495057', label: 'Control Text',        desc: 'Labels on light backgrounds: Volume, Left, Right, Low, High, Scroll, Contrast, etc.' },
+            { key: 'page_bg',    default: '#adb5bd', label: 'Page Background',    desc: 'Background of all panels below the waterfall (controls, filters, equalizer)' },
+            { key: 'panel_dark', default: '#2c3e50', label: 'Dark Panel',          desc: 'Dark widget backgrounds: S-meter, oscilloscope, canvases, modals' },
+            { key: 'panel_mid',  default: '#34495e', label: 'Mid Panel',           desc: 'Section headers, control group backgrounds, waterfall controls' },
+            { key: 'accent',     default: '#667eea', label: 'Accent',              desc: 'Hover states, primary buttons, scrollbar thumbs, gradient start' },
+            { key: 'accent_end', default: '#764ba2', label: 'Accent Gradient End', desc: 'End colour of accent gradients (header, voice button, etc.)' },
+            { key: 'text_light', default: '#ecf0f1', label: 'Light Text',          desc: 'Text colour on dark panel backgrounds' },
+            // NOTE: control_text is intentionally excluded here — it has its own standalone card
+            // with hand-written HTML (id="theme-picker-control_text"). Including it here would
+            // cause buildThemeColorPickers() to create a duplicate element ID, breaking collection.
         ];
+
+        // Default value for the standalone control_text token (used by resetThemeColor and collectThemeColors)
+        const CONTROL_TEXT_DEFAULT = '#495057';
 
         /**
          * Build the dynamic colour picker rows inside #ui-theme-colors.
@@ -6971,9 +6976,18 @@
 
         /**
          * Reset a single theme token to its built-in default value.
+         * Handles both THEME_TOKENS entries and the standalone control_text token.
          * @param {string} key  Theme token key, e.g. 'page_bg'
          */
         function resetThemeColor(key) {
+            // Handle standalone control_text token (not in THEME_TOKENS to avoid duplicate IDs)
+            if (key === 'control_text') {
+                const picker = document.getElementById('theme-picker-control_text');
+                const hex    = document.getElementById('theme-hex-control_text');
+                if (picker) picker.value = CONTROL_TEXT_DEFAULT;
+                if (hex)    hex.value    = CONTROL_TEXT_DEFAULT;
+                return;
+            }
             const token = THEME_TOKENS.find(t => t.key === key);
             if (!token) return;
             const picker = document.getElementById('theme-picker-' + key);
@@ -6984,15 +6998,18 @@
 
         /**
          * Reset all theme tokens to their built-in default values.
+         * Includes the standalone control_text token.
          */
         function resetAllThemeColors() {
             THEME_TOKENS.forEach(t => resetThemeColor(t.key));
+            resetThemeColor('control_text');
         }
 
         /**
          * Collect the current theme colour values from the picker inputs.
          * Returns a plain object suitable for inclusion in the PUT body.
-         * @returns {Object}  e.g. { page_bg: '#adb5bd', accent: '#667eea', ... }
+         * Includes the standalone control_text token (not in THEME_TOKENS).
+         * @returns {Object}  e.g. { page_bg: '#adb5bd', accent: '#667eea', control_text: '#495057', ... }
          */
         function collectThemeColors() {
             const result = {};
@@ -7001,6 +7018,10 @@
                 result[key] = (picker && /^#[0-9a-fA-F]{6}$/.test(picker.value))
                     ? picker.value : def;
             });
+            // Collect standalone control_text token
+            const ctPicker = document.getElementById('theme-picker-control_text');
+            result.control_text = (ctPicker && /^#[0-9a-fA-F]{6}$/.test(ctPicker.value))
+                ? ctPicker.value : CONTROL_TEXT_DEFAULT;
             return result;
         }
 /** Sync hex text input from the station ID colour picker (oninput on picker). */

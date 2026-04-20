@@ -919,7 +919,7 @@ body {
 .frequency-input-wrapper input[type="text"] {
     width: 100%;
     padding: 12px;
-    padding-right: 45px; /* Make room for Hz text */
+    padding-right: 56px; /* Make room for kHz/MHz label + gap */
     -moz-appearance: textfield; /* Firefox */
     border: 2px solid #dee2e6;
     border-radius: 6px;

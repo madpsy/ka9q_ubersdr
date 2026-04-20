@@ -129,6 +129,10 @@ func (sr *SpectrogramRecorder) Start() error {
 
 	sr.loadTodayFromDisk()
 
+	// Run retention cleanup at startup so old files are purged even if the program
+	// is restarted before midnight (and therefore never triggers a rollover).
+	sr.runCleanup(time.Now().UTC())
+
 	// Render initial PNG so the endpoint is immediately valid
 	sr.renderAndCache()
 
@@ -734,11 +738,16 @@ func (sr *SpectrogramRecorder) runCleanup(today time.Time) {
 		if !strings.HasPrefix(name, "spectrogram_") {
 			continue
 		}
-		// Extract date from spectrogram_YYYY-MM-DD.{png,bin,jsonl}
-		// Skip thumbnail files (spectrogram_YYYY-MM-DD_thumb.png)
+		// Extract date from spectrogram_YYYY-MM-DD.{png,bin,jsonl} and thumbnail variants.
+		// Thumbnail files are also indexed so that orphaned thumbs (where the .png/.bin/.jsonl
+		// have already been removed) are still discovered and cleaned up.
 		base := strings.TrimPrefix(name, "spectrogram_")
 		var dateStr string
-		if strings.HasSuffix(base, ".png") && !strings.HasSuffix(base, "_thumb.png") {
+		if strings.HasSuffix(base, "_wideband-hf_thumb.png") {
+			dateStr = strings.TrimSuffix(base, "_wideband-hf_thumb.png")
+		} else if strings.HasSuffix(base, "_thumb.png") {
+			dateStr = strings.TrimSuffix(base, "_thumb.png")
+		} else if strings.HasSuffix(base, ".png") {
 			dateStr = strings.TrimSuffix(base, ".png")
 		} else if strings.HasSuffix(base, ".bin") {
 			dateStr = strings.TrimSuffix(base, ".bin")

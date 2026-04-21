@@ -1,29 +1,31 @@
 #!/usr/bin/env bash
 # suggest-radiod-cpuset.sh
 #
-# Reads CPU topology from /sys and suggests the best HT sibling pair
+# Reads CPU topology from /sys and suggests the best physical core(s)
 # to assign to radiod via cpuset in docker-compose.yml.
 #
 # Selection criteria:
-#   1. Find all physical core HT sibling pairs by reading the kernel's
+#   1. Find all physical cores and their HT siblings by reading the kernel's
 #      thread_siblings_list (the authoritative source of HT pairs)
-#   2. Pick the pair whose physical core has the lowest recent CPU load
-#      (measured via /proc/stat idle time delta over a short sample)
+#   2. Rank physical cores by average idle% (measured via /proc/stat delta)
+#   3. Select the N idlest physical cores (default: 1) and build a cpuset
+#      from all their logical CPUs (including HT siblings)
 #
 # Usage:
-#   ./suggest-radiod-cpuset.sh
-#   ./suggest-radiod-cpuset.sh --quiet
-#       Output only the cpuset string, e.g. "0,12"
+#   ./suggest-radiod-cpuset.sh [--cores N] [--quiet] [--apply [--compose-file <path>]]
 #
-#   ./suggest-radiod-cpuset.sh --apply [--compose-file <path>]
-#       Write the recommended cpuset into the ka9q-radio service in
-#       the specified docker-compose file (default: docker-compose.yml
-#       in the same directory as this script).
+# Options:
+#   --cores N           Number of physical cores to assign (default: 1)
+#   --quiet             Output only the cpuset string, e.g. "0,4"
+#   --apply             Write the recommended cpuset into the docker-compose file
+#   --compose-file PATH Path to docker-compose file (default: docker-compose.yml
+#                       in the same directory as this script)
 #
 # Examples:
-#   ./suggest-radiod-cpuset.sh --apply
-#   ./suggest-radiod-cpuset.sh --apply --compose-file /opt/sdr/docker-compose.yml
-#   ./suggest-radiod-cpuset.sh --quiet --apply --compose-file ../docker-compose.yml
+#   ./suggest-radiod-cpuset.sh
+#   ./suggest-radiod-cpuset.sh --cores 2
+#   ./suggest-radiod-cpuset.sh --cores 2 --apply --compose-file ~/ubersdr/docker-compose.yml
+#   ./suggest-radiod-cpuset.sh --quiet --cores 1
 
 set -euo pipefail
 
@@ -31,6 +33,7 @@ set -euo pipefail
 
 QUIET=false
 APPLY=false
+NUM_CORES=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 
@@ -38,22 +41,29 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --quiet)    QUIET=true;  shift ;;
         --apply)    APPLY=true;  shift ;;
+        --cores)
+            [[ -n "${2:-}" ]] || { echo "ERROR: --cores requires a number argument" >&2; exit 1; }
+            [[ "$2" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --cores must be a positive integer" >&2; exit 1; }
+            NUM_CORES="$2"; shift 2 ;;
         --compose-file)
             [[ -n "${2:-}" ]] || { echo "ERROR: --compose-file requires a path argument" >&2; exit 1; }
             COMPOSE_FILE="$2"; shift 2 ;;
+        --help|-h)
+            sed -n '2,/^set -/p' "$0" | grep '^#' | sed 's/^# \?//'
+            exit 0 ;;
         *)
-            echo "Usage: $0 [--quiet] [--apply [--compose-file <path>]]" >&2
+            echo "Usage: $0 [--cores N] [--quiet] [--apply [--compose-file <path>]]" >&2
             exit 1 ;;
     esac
 done
 
-# ── 1. Collect HT sibling pairs from thread_siblings_list ─────────────────────
+# ── 1. Collect physical cores and their logical CPU siblings ──────────────────
 # /sys/devices/system/cpu/cpuN/topology/thread_siblings_list contains the
 # canonical comma/range list of ALL logical CPUs sharing the same physical core.
-# e.g. for a 2-way HT system: "0,12" or "6,18"
+# We group by this list to identify each unique physical core.
 
-declare -A seen_pairs   # key: canonical sorted pair string → 1 (dedup)
-declare -a pair_list    # ordered list of "first,sibling" strings
+declare -A seen_cores       # key: canonical siblings string → 1 (dedup)
+declare -a core_list        # ordered list of canonical sibling strings, e.g. "0,4"
 
 for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
     siblings_file="${cpu_dir}topology/thread_siblings_list"
@@ -74,33 +84,30 @@ for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
         fi
     done
 
-    # Only handle pairs (2-way HT); skip if solo or >2 siblings
-    (( ${#expanded[@]} == 2 )) || continue
+    # Sort the logical CPU numbers and build a canonical key
+    IFS=$'\n' sorted=($(printf '%s\n' "${expanded[@]}" | sort -n)); unset IFS
+    key=$(IFS=','; echo "${sorted[*]}")
 
-    a="${expanded[0]}"
-    b="${expanded[1]}"
-
-    # Canonical key: lower number first
-    if (( a < b )); then
-        key="${a},${b}"
-    else
-        key="${b},${a}"
-    fi
-
-    if [[ -v seen_pairs["$key"] ]]; then
+    if [[ -v seen_cores["$key"] ]]; then
         continue
     fi
-    seen_pairs["$key"]=1
-    pair_list+=("$key")
+    seen_cores["$key"]=1
+    core_list+=("$key")
 done
 
-if (( ${#pair_list[@]} == 0 )); then
-    echo "ERROR: No HT sibling pairs found. Is Hyperthreading enabled?" >&2
+TOTAL_PHYSICAL=${#core_list[@]}
+
+if (( TOTAL_PHYSICAL == 0 )); then
+    echo "ERROR: No CPU topology information found." >&2
+    exit 1
+fi
+
+if (( NUM_CORES > TOTAL_PHYSICAL )); then
+    echo "ERROR: --cores ${NUM_CORES} requested but only ${TOTAL_PHYSICAL} physical core(s) detected." >&2
     exit 1
 fi
 
 # ── 2. Sample CPU idle time from /proc/stat ───────────────────────────────────
-# Format: cpu<N> user nice system idle iowait irq softirq steal guest guest_nice
 
 declare -A idle1 idle2 total1 total2
 
@@ -114,7 +121,7 @@ sample_stat() {
         idle_val="${fields[3]}"
         total_val=0
         for f in "${fields[@]}"; do
-            (( total_val += f ))
+            (( total_val += f )) || true
         done
         _idle["$cpu_n"]="$idle_val"
         _total["$cpu_n"]="$total_val"
@@ -125,16 +132,15 @@ sample_stat idle1 total1
 sleep 0.5
 sample_stat idle2 total2
 
-# ── 3. Score each HT pair by average idle% of its two logical CPUs ────────────
+# ── 3. Score each physical core by average idle% across all its logical CPUs ──
 
-best_pair=""
-best_idle=-1
+declare -A core_idle_pct    # key: canonical siblings string → avg idle%
 
-for pair in "${pair_list[@]}"; do
-    IFS=',' read -r first sibling <<< "$pair"
-
-    idle_pct=0
-    for cpu_n in "$first" "$sibling"; do
+for core_key in "${core_list[@]}"; do
+    IFS=',' read -ra cpus <<< "$core_key"
+    total_idle=0
+    count=0
+    for cpu_n in "${cpus[@]}"; do
         d_idle=$(( idle2["$cpu_n"] - idle1["$cpu_n"] ))
         d_total=$(( total2["$cpu_n"] - total1["$cpu_n"] ))
         if (( d_total > 0 )); then
@@ -142,51 +148,81 @@ for pair in "${pair_list[@]}"; do
         else
             pct=100
         fi
-        (( idle_pct += pct ))
+        (( total_idle += pct )) || true
+        (( count += 1 ))
     done
-    avg_idle=$(( idle_pct / 2 ))
-
-    if (( avg_idle > best_idle )); then
-        best_idle=$avg_idle
-        best_pair="$pair"
-    fi
+    core_idle_pct["$core_key"]=$(( total_idle / count ))
 done
 
-# ── 4. Output ─────────────────────────────────────────────────────────────────
+# ── 4. Select the N idlest physical cores ─────────────────────────────────────
+
+# Sort core_list by descending idle% and pick the top NUM_CORES
+declare -a ranked_cores
+for core_key in "${core_list[@]}"; do
+    ranked_cores+=("${core_idle_pct[$core_key]} $core_key")
+done
+
+# Sort descending by idle%
+IFS=$'\n' sorted_cores=($(printf '%s\n' "${ranked_cores[@]}" | sort -rn)); unset IFS
+
+# Build the final cpuset from the top NUM_CORES physical cores
+selected_cores=()
+selected_cpus=()
+for (( i=0; i<NUM_CORES; i++ )); do
+    entry="${sorted_cores[$i]}"
+    core_key="${entry#* }"   # strip the leading idle% score
+    selected_cores+=("$core_key")
+    IFS=',' read -ra cpus <<< "$core_key"
+    selected_cpus+=("${cpus[@]}")
+done
+
+# Sort all selected logical CPUs numerically and join with commas
+IFS=$'\n' sorted_cpus=($(printf '%s\n' "${selected_cpus[@]}" | sort -n)); unset IFS
+best_cpuset=$(IFS=','; echo "${sorted_cpus[*]}")
+
+# ── 5. Output ─────────────────────────────────────────────────────────────────
 
 if $QUIET; then
-    echo "$best_pair"
+    echo "$best_cpuset"
 else
-    IFS=',' read -r bp_first bp_sibling <<< "$best_pair"
     echo ""
-    echo "  Suggested cpuset for radiod: ${best_pair}"
+    if (( NUM_CORES == 1 )); then
+        core_desc="1 physical core"
+    else
+        core_desc="${NUM_CORES} physical cores"
+    fi
+    echo "  Suggested cpuset for radiod (${core_desc}): ${best_cpuset}"
     echo ""
-    echo "  CPUs ${bp_first} and ${bp_sibling} are confirmed HT siblings on the same physical core"
-    echo "  (shared L1/L2 cache) and had the highest average idle% (~${best_idle}%) at sample time."
+
+    # Show which physical cores were selected and their logical CPUs
+    for core_key in "${selected_cores[@]}"; do
+        idle="${core_idle_pct[$core_key]}"
+        echo "  Physical core [${core_key}]  (avg idle: ${idle}%)  ← selected"
+    done
     echo ""
+
     echo "  Add to docker-compose.yml under the ka9q-radio service:"
     echo ""
     echo "    ka9q-radio:"
-    echo "      cpuset: \"${best_pair}\""
+    echo "      cpuset: \"${best_cpuset}\""
     echo ""
-    echo "  All detected HT pairs on this system:"
-    for pair in "${pair_list[@]}"; do
-        IFS=',' read -r a b <<< "$pair"
-        d_idle_a=$(( idle2["$a"] - idle1["$a"] ))
-        d_total_a=$(( total2["$a"] - total1["$a"] ))
-        d_idle_b=$(( idle2["$b"] - idle1["$b"] ))
-        d_total_b=$(( total2["$b"] - total1["$b"] ))
-        pct_a=$(( d_total_a > 0 ? d_idle_a * 100 / d_total_a : 100 ))
-        pct_b=$(( d_total_b > 0 ? d_idle_b * 100 / d_total_b : 100 ))
-        avg=$(( (pct_a + pct_b) / 2 ))
-        marker=""
-        [[ "$pair" == "$best_pair" ]] && marker=" ← recommended"
-        printf "    CPU %-2s + CPU %-2s  (avg idle: %3d%%)%s\n" "$a" "$b" "$avg" "$marker"
+
+    echo "  All detected physical cores on this system:"
+    for entry in "${sorted_cores[@]}"; do
+        idle="${entry%% *}"
+        core_key="${entry#* }"
+        selected_marker=""
+        for sel in "${selected_cores[@]}"; do
+            [[ "$sel" == "$core_key" ]] && selected_marker=" ← selected" && break
+        done
+        IFS=',' read -ra cpus <<< "$core_key"
+        cpu_display=$(IFS='+'; echo "CPU ${cpus[*]}" | sed 's/+/ + CPU /g')
+        printf "    %-30s  (avg idle: %3d%%)%s\n" "$cpu_display" "$idle" "$selected_marker"
     done
     echo ""
 fi
 
-# ── 5. Apply to docker-compose file ──────────────────────────────────────────
+# ── 6. Apply to docker-compose file ──────────────────────────────────────────
 
 if $APPLY; then
     if [[ ! -f "$COMPOSE_FILE" ]]; then
@@ -194,29 +230,19 @@ if $APPLY; then
         exit 1
     fi
 
-    # Check if ka9q-radio service exists in the file
     if ! grep -q 'ka9q-radio:' "$COMPOSE_FILE"; then
         echo "ERROR: No 'ka9q-radio:' service found in ${COMPOSE_FILE}" >&2
         exit 1
     fi
 
-    # Back up the original file
     BACKUP="${COMPOSE_FILE}.bak"
     cp "$COMPOSE_FILE" "$BACKUP"
 
     # Single awk pass: handles both insert and replace correctly.
-    #
-    # Service blocks in docker-compose use exactly 2-space indentation for the
-    # service name key (e.g. "  ka9q-radio:") and 4-space for their properties.
-    # We enter the ka9q-radio block on that header line and exit as soon as we
-    # see another 2-space non-blank, non-comment line (the next sibling service).
-    #
-    # Within the block:
-    #   - If a cpuset: line exists, replace it and set replaced=1
-    #   - After the block ends (or at EOF), if no cpuset was replaced, insert one
-    #     after the ka9q-radio header line (tracked via insert_after)
-    awk -v new_cpuset="$best_pair" '
-        # Entering the ka9q-radio service block
+    # Service blocks in docker-compose use 2-space indent for service name,
+    # 4-space for properties. We enter the ka9q-radio block on its header
+    # and exit when we see the next 2-space non-blank, non-comment line.
+    awk -v new_cpuset="$best_cpuset" '
         /^  ka9q-radio:[[:space:]]*(#.*)?$/ {
             in_service = 1
             replaced = 0
@@ -225,15 +251,10 @@ if $APPLY; then
             next
         }
 
-        # Exiting the block: next sibling service (2-space indent, not blank/comment)
         in_service && /^  [^[:space:]#]/ {
             in_service = 0
-            # If we never found a cpuset line to replace or insert, something is wrong
-            # (should not happen since we insert on first real key below)
         }
 
-        # Within the block: replace an existing cpuset: line
-        # Match "    cpuset:" with anything after the colon (value, comment, or nothing)
         in_service && /^[[:space:]]+cpuset:/ {
             match($0, /^[[:space:]]+/)
             indent = substr($0, 1, RLENGTH)
@@ -244,19 +265,15 @@ if $APPLY; then
             next
         }
 
-        # Within the block: before printing the first real 4-space key, insert cpuset
-        # immediately before it if we have not yet inserted or replaced
         in_service && !inserted && /^    [^[:space:]#]/ {
             print "    cpuset: \"" new_cpuset "\""
             inserted = 1
             action = "added"
-            # fall through to print the current line normally
         }
 
         { print }
 
         END {
-            # Edge case: ka9q-radio is the last service block and had no keys at all
             if (in_service && !inserted) {
                 print "    cpuset: \"" new_cpuset "\""
                 action = "added"
@@ -266,7 +283,7 @@ if $APPLY; then
     ACTION="${action:-added}"
 
     if ! $QUIET; then
-        echo "  ✓ ${ACTION^} cpuset: \"${best_pair}\" in ${COMPOSE_FILE}"
+        echo "  ✓ ${ACTION^} cpuset: \"${best_cpuset}\" in ${COMPOSE_FILE}"
         echo "  Backup saved to: ${BACKUP}"
         echo ""
     fi

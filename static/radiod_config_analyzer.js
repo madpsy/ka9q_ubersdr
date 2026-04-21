@@ -170,11 +170,17 @@ function analyzeRadiodConfig(configText) {
             });
         } else if (config['global']['fft-threads']) {
             const fftThreads = parseInt(config['global']['fft-threads']);
-            if (isNaN(fftThreads) || fftThreads < 2) {
+            if (isNaN(fftThreads) || fftThreads < 1) {
                 warnings.push({
                     type: 'fft_threads',
                     message: `FFT threads is set to ${config['global']['fft-threads']}. This may result in poor performance.`,
-                    suggestion: 'Set fft-threads to at least 2 in the [global] section for optimal performance'
+                    suggestion: 'Set fft-threads to at least 1 in the [global] section for optimal performance'
+                });
+            } else if (fftThreads > 4) {
+                warnings.push({
+                    type: 'fft_threads',
+                    message: `FFT threads is set to ${config['global']['fft-threads']}. This is unusually high and may waste resources.`,
+                    suggestion: 'Set fft-threads to 4 or fewer in the [global] section for optimal performance'
                 });
             }
         }

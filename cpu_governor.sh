@@ -26,11 +26,20 @@ header() {
 
 # ─── Dependency checks ──────────────────────────────────────────────────────
 check_deps() {
-    if ! command -v cpupower &>/dev/null; then
-        die "'cpupower' not found. Install with: sudo apt install linux-cpupower"
-    fi
     if [[ $EUID -ne 0 ]]; then
         die "This script must be run as root (use: sudo $0)"
+    fi
+
+    if ! command -v cpupower &>/dev/null; then
+        warn "'cpupower' not found — attempting to install linux-cpupower..."
+        if apt-get install -y linux-cpupower &>/dev/null; then
+            ok "linux-cpupower installed successfully."
+        else
+            die "Failed to install linux-cpupower. Please install it manually: sudo apt install linux-cpupower"
+        fi
+        if ! command -v cpupower &>/dev/null; then
+            die "'cpupower' still not found after installation. Please check your system."
+        fi
     fi
 }
 

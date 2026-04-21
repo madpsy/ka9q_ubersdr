@@ -1482,42 +1482,54 @@
                 <div id="systemTab" class="tab-content">
 
                     <!-- CPU Governor Card -->
-                    <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                            <div style="flex: 1; color: #1b5e20;">
-                                <strong>⚡ CPU Governor</strong>
+                    <div style="margin-bottom: 20px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
+                        <div onclick="toggleCollapsible('cpuGovernorBody', 'cpuGovernorArrow')" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 15px; cursor: pointer; user-select: none;">
+                            <span style="color: #1b5e20; font-weight: bold;">
+                                ⚡ CPU Governor
                                 <span id="cpuGovernorBadge" style="display: none; margin-left: 10px; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; vertical-align: middle;"></span>
-                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #2e7d32;">
-                                    The CPU governor controls how the processor scales its clock speed.
-                                    Linux defaults to <strong>powersave</strong> or <strong>ondemand</strong>, which throttle the CPU and ramp up slowly under load —
-                                    on some systems this <em>may</em> contribute to audio stuttering or missed decoder cycles.
-                                    The <strong>performance</strong> governor requests maximum clock speed at all times, which
-                                    <em>may</em> improve real-time streaming stability on affected systems, but will typically
-                                    increase power consumption and heat output.
-                                </p>
+                            </span>
+                            <span id="cpuGovernorArrow" style="color: #4caf50; font-size: 14px; transition: transform 0.2s;">▶</span>
+                        </div>
+                        <div id="cpuGovernorBody" style="display: none; padding: 0 15px 15px 15px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                                <div style="flex: 1; color: #1b5e20;">
+                                    <p style="margin: 0 0 0 0; font-size: 13px; color: #2e7d32;">
+                                        The CPU governor controls how the processor scales its clock speed.
+                                        Linux defaults to <strong>powersave</strong> or <strong>ondemand</strong>, which throttle the CPU and ramp up slowly under load —
+                                        on some systems this <em>may</em> contribute to audio stuttering or missed decoder cycles.
+                                        The <strong>performance</strong> governor requests maximum clock speed at all times, which
+                                        <em>may</em> improve real-time streaming stability on affected systems, but will typically
+                                        increase power consumption and heat output.
+                                    </p>
+                                </div>
+                                <button class="btn" onclick="openCPUGovernor()" style="background: #4caf50; color: white; font-weight: bold; white-space: nowrap;">
+                                    ⚡ Manage CPU Governor
+                                </button>
                             </div>
-                            <button class="btn" onclick="openCPUGovernor()" style="background: #4caf50; color: white; font-weight: bold; white-space: nowrap;">
-                                ⚡ Manage CPU Governor
-                            </button>
                         </div>
                     </div>
 
                     <!-- CPU Pinning Card -->
-                    <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border: 1px solid #1976d2;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                            <div style="flex: 1; color: #0d47a1;">
-                                <strong>⚙️ radiod CPU Pinning</strong>
-                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #1565c0;">
-                                    Dedicating one or more physical CPU cores exclusively to <strong>radiod</strong> can reduce
-                                    scheduling jitter and improve real-time IQ processing stability.
-                                    This tool analyses your CPU topology, measures idle time, and suggests the best
-                                    core(s) to pin — then optionally writes the <code>cpuset</code> into your
-                                    <strong>docker-compose.yml</strong> and restarts UberSDR.
-                                </p>
+                    <div style="margin-bottom: 20px; background: #e3f2fd; border-radius: 5px; border: 1px solid #1976d2;">
+                        <div onclick="toggleCollapsible('cpuPinningBody', 'cpuPinningArrow')" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 15px; cursor: pointer; user-select: none;">
+                            <span style="color: #0d47a1; font-weight: bold;">⚙️ radiod CPU Pinning</span>
+                            <span id="cpuPinningArrow" style="color: #1976d2; font-size: 14px; transition: transform 0.2s;">▶</span>
+                        </div>
+                        <div id="cpuPinningBody" style="display: none; padding: 0 15px 15px 15px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                                <div style="flex: 1; color: #0d47a1;">
+                                    <p style="margin: 0 0 0 0; font-size: 13px; color: #1565c0;">
+                                        Dedicating one or more physical CPU cores exclusively to <strong>radiod</strong> can reduce
+                                        scheduling jitter and improve real-time IQ processing stability.
+                                        This tool analyses your CPU topology, measures idle time, and suggests the best
+                                        core(s) to pin — then optionally writes the <code>cpuset</code> into your
+                                        <strong>docker-compose.yml</strong> and restarts UberSDR.
+                                    </p>
+                                </div>
+                                <button class="btn" onclick="openCPUPinning()" style="background: #1976d2; color: white; font-weight: bold; white-space: nowrap;">
+                                    ⚙️ Manage CPU Pinning
+                                </button>
                             </div>
-                            <button class="btn" onclick="openCPUPinning()" style="background: #1976d2; color: white; font-weight: bold; white-space: nowrap;">
-                                ⚙️ Manage CPU Pinning
-                            </button>
                         </div>
                     </div>
 
@@ -3188,6 +3200,19 @@
             const top = (screen.height - height) / 2;
             window.open(url, 'rotctld_setup_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Toggle collapsible card body
+        function toggleCollapsible(bodyId, arrowId) {
+            const body = document.getElementById(bodyId);
+            const arrow = document.getElementById(arrowId);
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                arrow.style.transform = 'rotate(90deg)';
+            } else {
+                body.style.display = 'none';
+                arrow.style.transform = 'rotate(0deg)';
+            }
         }
 
         // Open CPU Governor management script in popup terminal window

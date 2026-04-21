@@ -387,27 +387,11 @@ if $APPLY; then
     fi
 fi
 
-# ── 8. Interactive: ask whether to restart UberSDR ───────────────────────────
+# ── 8. Interactive: remind user to restart UberSDR ───────────────────────────
 
 if $INTERACTIVE && $APPLY; then
-    read -rp "Do you want to restart UberSDR now to apply the changes? [y/N]: " _restart_ans
-    if [[ "${_restart_ans,,}" =~ ^y ]]; then
-        # Look for restart-ubersdr.sh next to this script, then in ~/ubersdr/
-        _restart_script=""
-        if [[ -x "${SCRIPT_DIR}/restart-ubersdr.sh" ]]; then
-            _restart_script="${SCRIPT_DIR}/restart-ubersdr.sh"
-        elif [[ -x "$HOME/ubersdr/restart-ubersdr.sh" ]]; then
-            _restart_script="$HOME/ubersdr/restart-ubersdr.sh"
-        fi
-
-        if [[ -n "$_restart_script" ]]; then
-            echo "Running ${_restart_script}..."
-            bash "$_restart_script"
-        else
-            echo "ERROR: restart-ubersdr.sh not found. Please restart UberSDR manually." >&2
-        fi
-    else
-        echo "Skipping restart. Remember to restart UberSDR for the cpuset change to take effect."
-    fi
+    echo "  ✓ cpuset applied. To activate the change, restart UberSDR:"
+    echo ""
+    echo "    ~/ubersdr/restart-ubersdr.sh"
     echo ""
 fi

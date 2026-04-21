@@ -113,6 +113,7 @@ if $INTERACTIVE; then
         _input="${_input:-${_default_cores}}"
         if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= _phys_count )); then
             NUM_CORES="$_input"
+            NUM_CORES_SET=true
             break
         else
             echo "  Please enter a number between 1 and ${_phys_count}."

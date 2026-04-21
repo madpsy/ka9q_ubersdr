@@ -554,11 +554,15 @@ if [ -f "$INSTALLED_MARKER" ]; then
     cd "$ACTUAL_HOME/ubersdr"
 
     # Apply recommended cpuset for ka9q-radio (2 physical cores) before starting containers
-    echo "Detecting best CPU core pair for radiod..."
-    if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 2 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
-        echo "CPU pinning applied to docker-compose.yml."
+    if grep -q 'cpuset:' "$ACTUAL_HOME/ubersdr/docker-compose.yml" 2>/dev/null; then
+        echo "CPU pinning already configured in docker-compose.yml, skipping detection."
     else
-        echo "Warning: CPU pinning detection failed. Continuing without cpuset."
+        echo "Detecting best CPU core pair for radiod..."
+        if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 2 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+            echo "CPU pinning applied to docker-compose.yml."
+        else
+            echo "Warning: CPU pinning detection failed. Continuing without cpuset."
+        fi
     fi
 
     if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull; then
@@ -587,11 +591,15 @@ else
     cd "$ACTUAL_HOME/ubersdr"
 
     # Apply recommended cpuset for ka9q-radio (2 physical cores) before starting containers
-    echo "Detecting best CPU core pair for radiod..."
-    if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 2 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
-        echo "CPU pinning applied to docker-compose.yml."
+    if grep -q 'cpuset:' "$ACTUAL_HOME/ubersdr/docker-compose.yml" 2>/dev/null; then
+        echo "CPU pinning already configured in docker-compose.yml, skipping detection."
     else
-        echo "Warning: CPU pinning detection failed. Continuing without cpuset."
+        echo "Detecting best CPU core pair for radiod..."
+        if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 2 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+            echo "CPU pinning applied to docker-compose.yml."
+        else
+            echo "Warning: CPU pinning detection failed. Continuing without cpuset."
+        fi
     fi
 
     sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull

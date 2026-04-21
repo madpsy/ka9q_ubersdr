@@ -34,6 +34,7 @@ set -euo pipefail
 QUIET=false
 APPLY=false
 NUM_CORES=1
+NUM_CORES_SET=false   # true when --cores was explicitly passed
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 INTERACTIVE=false
@@ -50,7 +51,7 @@ while [[ $# -gt 0 ]]; do
         --cores)
             [[ -n "${2:-}" ]] || { echo "ERROR: --cores requires a number argument" >&2; exit 1; }
             [[ "$2" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --cores must be a positive integer" >&2; exit 1; }
-            NUM_CORES="$2"; shift 2 ;;
+            NUM_CORES="$2"; NUM_CORES_SET=true; shift 2 ;;
         --compose-file)
             [[ -n "${2:-}" ]] || { echo "ERROR: --compose-file requires a path argument" >&2; exit 1; }
             COMPOSE_FILE="$2"; shift 2 ;;
@@ -102,9 +103,14 @@ if $INTERACTIVE; then
 
     echo "Detected ${_phys_count} physical core(s) on this system."
     echo ""
+    # Compute the same smart default for the prompt (topology scan hasn't run yet here,
+    # but _phys_count gives us the same value)
+    _default_cores=$(( _phys_count / 2 ))
+    (( _default_cores < 1 )) && _default_cores=1
+    (( _default_cores > 4 )) && _default_cores=4
     while true; do
-        read -rp "How many physical cores do you want to assign to radiod? [1-${_phys_count}] (default: 1): " _input
-        _input="${_input:-1}"
+        read -rp "How many physical cores do you want to assign to radiod? [1-${_phys_count}] (default: ${_default_cores}): " _input
+        _input="${_input:-${_default_cores}}"
         if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= _phys_count )); then
             NUM_CORES="$_input"
             break
@@ -158,6 +164,14 @@ TOTAL_PHYSICAL=${#core_list[@]}
 if (( TOTAL_PHYSICAL == 0 )); then
     echo "ERROR: No CPU topology information found." >&2
     exit 1
+fi
+
+# ── Compute smart default if --cores was not explicitly set ──────────────────
+if ! $NUM_CORES_SET; then
+    _half=$(( TOTAL_PHYSICAL / 2 ))
+    (( _half < 1 )) && _half=1
+    (( _half > 4 )) && _half=4
+    NUM_CORES=$_half
 fi
 
 if (( NUM_CORES > TOTAL_PHYSICAL )); then

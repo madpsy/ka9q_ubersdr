@@ -1502,6 +1502,25 @@
                         </div>
                     </div>
 
+                    <!-- CPU Pinning Card -->
+                    <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border: 1px solid #1976d2;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                            <div style="flex: 1; color: #0d47a1;">
+                                <strong>⚙️ radiod CPU Pinning</strong>
+                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #1565c0;">
+                                    Dedicating one or more physical CPU cores exclusively to <strong>radiod</strong> can reduce
+                                    scheduling jitter and improve real-time IQ processing stability.
+                                    This tool analyses your CPU topology, measures idle time, and suggests the best
+                                    core(s) to pin — then optionally writes the <code>cpuset</code> into your
+                                    <strong>docker-compose.yml</strong> and restarts UberSDR.
+                                </p>
+                            </div>
+                            <button class="btn" onclick="openCPUPinning()" style="background: #1976d2; color: white; font-weight: bold; white-space: nowrap;">
+                                ⚙️ Manage CPU Pinning
+                            </button>
+                        </div>
+                    </div>
+
                     <div id="systemStats" class="loading">
                         <div class="spinner"></div>
                         <p>Loading system statistics...</p>
@@ -3182,6 +3201,20 @@
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'cpu_governor_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open CPU Pinning helper script in popup terminal window
+        function openCPUPinning() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/suggest-radiod-cpuset.sh';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'cpu_pinning_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 

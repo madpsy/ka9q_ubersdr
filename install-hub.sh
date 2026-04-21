@@ -521,7 +521,7 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 chmod +x "$ACTUAL_HOME/ubersdr/cpu_governor.sh"
 
 echo "Fetching suggest-radiod-cpuset.sh script..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/suggest-radiod-cpuset.sh -o "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/suggest-radiod-cpuset.sh -o "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
 
 echo "Fetching check_time.sh script..."

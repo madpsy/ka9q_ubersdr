@@ -36,6 +36,12 @@ APPLY=false
 NUM_CORES=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+INTERACTIVE=false
+
+# Detect interactive mode: no arguments passed and stdin is a terminal
+if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
+    INTERACTIVE=true
+fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -56,6 +62,58 @@ while [[ $# -gt 0 ]]; do
             exit 1 ;;
     esac
 done
+
+# ── Interactive mode: ask for core count before topology scan ─────────────────
+
+if $INTERACTIVE; then
+    echo ""
+    echo "=== radiod CPU Pinning Helper ==="
+    echo ""
+    echo "This tool analyses your CPU topology and suggests which physical core(s)"
+    echo "to dedicate to radiod for best performance."
+    echo ""
+
+    # Quick peek at physical core count so we can show it in the prompt
+    _phys_count=0
+    for _cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
+        _sib="${_cpu_dir}topology/thread_siblings_list"
+        [[ -f "$_sib" ]] || continue
+        _key=$(cat "$_sib")
+        # Expand ranges and sort to get canonical key
+        _expanded=()
+        IFS=',' read -ra _parts <<< "$_key"
+        for _p in "${_parts[@]}"; do
+            if [[ "$_p" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                for (( _n=${BASH_REMATCH[1]}; _n<=${BASH_REMATCH[2]}; _n++ )); do
+                    _expanded+=("$_n")
+                done
+            else
+                _expanded+=("$_p")
+            fi
+        done
+        IFS=$'\n' _sorted=($(printf '%s\n' "${_expanded[@]}" | sort -n)); unset IFS
+        _canon=$(IFS=','; echo "${_sorted[*]}")
+        _seen_key="_seen_${_canon//,/_}"
+        if [[ -z "${!_seen_key:-}" ]]; then
+            printf -v "$_seen_key" 1
+            (( _phys_count++ )) || true
+        fi
+    done
+
+    echo "Detected ${_phys_count} physical core(s) on this system."
+    echo ""
+    while true; do
+        read -rp "How many physical cores do you want to assign to radiod? [1-${_phys_count}] (default: 1): " _input
+        _input="${_input:-1}"
+        if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= _phys_count )); then
+            NUM_CORES="$_input"
+            break
+        else
+            echo "  Please enter a number between 1 and ${_phys_count}."
+        fi
+    done
+    echo ""
+fi
 
 # ── 1. Collect physical cores and their logical CPU siblings ──────────────────
 # /sys/devices/system/cpu/cpuN/topology/thread_siblings_list contains the
@@ -222,7 +280,32 @@ else
     echo ""
 fi
 
-# ── 6. Apply to docker-compose file ──────────────────────────────────────────
+# ── 6. Interactive: ask whether to apply ─────────────────────────────────────
+
+if $INTERACTIVE; then
+    echo ""
+    read -rp "Do you want to apply this cpuset to your docker-compose.yml? [y/N]: " _apply_ans
+    if [[ "${_apply_ans,,}" =~ ^y ]]; then
+        APPLY=true
+
+        # Suggest the default compose file location
+        _default_compose="$HOME/ubersdr/docker-compose.yml"
+        if [[ ! -f "$_default_compose" ]]; then
+            _default_compose="${SCRIPT_DIR}/docker-compose.yml"
+        fi
+
+        read -rp "Path to docker-compose.yml [${_default_compose}]: " _compose_input
+        _compose_input="${_compose_input:-${_default_compose}}"
+        # Expand ~ manually since read doesn't expand it
+        _compose_input="${_compose_input/#\~/$HOME}"
+        COMPOSE_FILE="$_compose_input"
+    else
+        echo "Skipping apply."
+    fi
+    echo ""
+fi
+
+# ── 7. Apply to docker-compose file ──────────────────────────────────────────
 
 if $APPLY; then
     if [[ ! -f "$COMPOSE_FILE" ]]; then
@@ -287,4 +370,29 @@ if $APPLY; then
         echo "  Backup saved to: ${BACKUP}"
         echo ""
     fi
+fi
+
+# ── 8. Interactive: ask whether to restart UberSDR ───────────────────────────
+
+if $INTERACTIVE && $APPLY; then
+    read -rp "Do you want to restart UberSDR now to apply the changes? [y/N]: " _restart_ans
+    if [[ "${_restart_ans,,}" =~ ^y ]]; then
+        # Look for restart-ubersdr.sh next to this script, then in ~/ubersdr/
+        _restart_script=""
+        if [[ -x "${SCRIPT_DIR}/restart-ubersdr.sh" ]]; then
+            _restart_script="${SCRIPT_DIR}/restart-ubersdr.sh"
+        elif [[ -x "$HOME/ubersdr/restart-ubersdr.sh" ]]; then
+            _restart_script="$HOME/ubersdr/restart-ubersdr.sh"
+        fi
+
+        if [[ -n "$_restart_script" ]]; then
+            echo "Running ${_restart_script}..."
+            bash "$_restart_script"
+        else
+            echo "ERROR: restart-ubersdr.sh not found. Please restart UberSDR manually." >&2
+        fi
+    else
+        echo "Skipping restart. Remember to restart UberSDR for the cpuset change to take effect."
+    fi
+    echo ""
 fi

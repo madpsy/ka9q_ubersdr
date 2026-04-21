@@ -5143,9 +5143,27 @@
                             }
                             return band;
                         });
+                    } else if (data.bands && Array.isArray(data.bands)) {
+                        const first = data.bands[0];
+                        if (first && first.name !== undefined && first.label === undefined) {
+                            // SDRangel/country allocation format: { bands: [{name, type, start, end}] }
+                            importedBands = data.bands.map(b => {
+                                const band = {
+                                    label: b.name,
+                                    start: b.start,
+                                    end:   b.end,
+                                };
+                                if (b.type) {
+                                    band.group = b.type;
+                                }
+                                return band;
+                            });
+                        } else {
+                            // Native export format: { bands: [{label, start, end, ...}] }
+                            importedBands = data.bands;
+                        }
                     } else {
-                        // Native export format: { bands: [...] }
-                        importedBands = data.bands || [];
+                        importedBands = [];
                     }
                 } else {
                     // Simple YAML parsing for bands

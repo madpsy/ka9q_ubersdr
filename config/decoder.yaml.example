@@ -112,16 +112,15 @@ decoder:
   # Band configurations
   # Each band creates a dedicated audio channel for decoding
   bands:
-    # Example enabled bands (for testing)
     - name: "20m-ft8"
       mode: "FT8"
       frequency: 14074000  # 14.074 MHz
-      enabled: true
+      enabled: false
 
     - name: "40m-ft8"
       mode: "FT8"
       frequency: 7074000   # 7.074 MHz
-      enabled: true
+      enabled: false
 
     # ========================================
     # FT8 bands (160m - 10m)

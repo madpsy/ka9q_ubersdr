@@ -553,12 +553,12 @@ if [ -f "$INSTALLED_MARKER" ]; then
     echo "Pulling latest Docker images..."
     cd "$ACTUAL_HOME/ubersdr"
 
-    # Apply recommended cpuset for ka9q-radio (2 physical cores) before starting containers
+    # Apply recommended cpuset for ka9q-radio (3 physical cores) before starting containers
     if grep -q 'cpuset:' "$ACTUAL_HOME/ubersdr/docker-compose.yml" 2>/dev/null; then
         echo "CPU pinning already configured in docker-compose.yml, skipping detection."
     else
         echo "Detecting best CPU core pair for radiod..."
-        if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 2 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+        if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 3 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
             echo "CPU pinning applied to docker-compose.yml."
         else
             echo "Warning: CPU pinning detection failed. Continuing without cpuset."
@@ -590,12 +590,12 @@ else
     echo "Pulling latest Docker images..."
     cd "$ACTUAL_HOME/ubersdr"
 
-    # Apply recommended cpuset for ka9q-radio (2 physical cores) before starting containers
+    # Apply recommended cpuset for ka9q-radio (3 physical cores) before starting containers
     if grep -q 'cpuset:' "$ACTUAL_HOME/ubersdr/docker-compose.yml" 2>/dev/null; then
         echo "CPU pinning already configured in docker-compose.yml, skipping detection."
     else
         echo "Detecting best CPU core pair for radiod..."
-        if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 2 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+        if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --cores 3 --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
             echo "CPU pinning applied to docker-compose.yml."
         else
             echo "Warning: CPU pinning detection failed. Continuing without cpuset."

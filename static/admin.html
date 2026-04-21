@@ -5130,7 +5130,23 @@
 
                 if (file.name.endsWith('.json')) {
                     const data = JSON.parse(text);
-                    importedBands = data.bands || [];
+                    if (Array.isArray(data)) {
+                        // OpenWebRX/KiwiSDR format: top-level array with name/lower_bound/upper_bound/tags
+                        importedBands = data.map(b => {
+                            const band = {
+                                label: b.name,
+                                start: b.lower_bound,
+                                end:   b.upper_bound,
+                            };
+                            if (b.tags && b.tags.length > 0) {
+                                band.group = b.tags[0];
+                            }
+                            return band;
+                        });
+                    } else {
+                        // Native export format: { bands: [...] }
+                        importedBands = data.bands || [];
+                    }
                 } else {
                     // Simple YAML parsing for bands
                     const lines = text.split('\n');

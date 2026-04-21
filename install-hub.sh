@@ -520,6 +520,10 @@ echo "Fetching cpu_governor.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/cpu_governor.sh -o "$ACTUAL_HOME/ubersdr/cpu_governor.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/cpu_governor.sh"
 
+echo "Fetching suggest-radiod-cpuset.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/suggest-radiod-cpuset.sh -o "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
+
 echo "Fetching check_time.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/check_time.sh -o "$ACTUAL_HOME/ubersdr/check_time.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/check_time.sh"
@@ -548,6 +552,15 @@ if [ -f "$INSTALLED_MARKER" ]; then
     echo
     echo "Pulling latest Docker images..."
     cd "$ACTUAL_HOME/ubersdr"
+
+    # Apply recommended cpuset for ka9q-radio before starting containers
+    echo "Detecting best CPU core pair for radiod..."
+    if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+        echo "CPU pinning applied to docker-compose.yml."
+    else
+        echo "Warning: CPU pinning detection failed. Continuing without cpuset."
+    fi
+
     if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull; then
         # Pull succeeded - proceed with restart
         echo "Pull successful. Restarting containers with new images..."
@@ -572,6 +585,15 @@ else
     echo
     echo "Pulling latest Docker images..."
     cd "$ACTUAL_HOME/ubersdr"
+
+    # Apply recommended cpuset for ka9q-radio before starting containers
+    echo "Detecting best CPU core pair for radiod..."
+    if bash "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh" --apply --compose-file "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+        echo "CPU pinning applied to docker-compose.yml."
+    else
+        echo "Warning: CPU pinning detection failed. Continuing without cpuset."
+    fi
+
     sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull
 
     # Clean up any existing containers and network (allow failures)

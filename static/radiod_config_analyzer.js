@@ -176,11 +176,11 @@ function analyzeRadiodConfig(configText) {
                     message: `FFT threads is set to ${config['global']['fft-threads']}. This may result in poor performance.`,
                     suggestion: 'Set fft-threads to at least 1 in the [global] section for optimal performance'
                 });
-            } else if (fftThreads > 4) {
+            } else if (fftThreads > 2) {
                 warnings.push({
                     type: 'fft_threads',
-                    message: `FFT threads is set to ${config['global']['fft-threads']}. This is unusually high and may waste resources.`,
-                    suggestion: 'Set fft-threads to 4 or fewer in the [global] section for optimal performance'
+                    message: `FFT threads is set to ${config['global']['fft-threads']}. This is probably unnecessary and may waste resources.`,
+                    suggestion: 'Consider lowering fft-threads to 2 or even 1 in the [global] section. Assuming you have generated FFTW wisdom via the ✨ Generate Wisdom button, 1 thread is sufficient.'
                 });
             }
         }

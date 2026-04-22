@@ -1491,24 +1491,44 @@ func getSystemLoad() map[string]interface{} {
 		"status":     "unknown",
 	}
 
-	// Read /proc/loadavg
-	data, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		log.Printf("Failed to read /proc/loadavg: %v", err)
-		return loadData
-	}
+	var load1, load5, load15 float64
 
-	// Parse the load averages
-	// Format: "0.52 0.58 0.59 1/1234 12345"
-	fields := strings.Split(strings.TrimSpace(string(data)), " ")
-	if len(fields) < 3 {
-		log.Printf("Invalid /proc/loadavg format")
-		return loadData
-	}
+	// Prefer corrected load averages from real-load-daemon.sh (host daemon,
+	// bind-mounted read-only at /run/real-load-avg).  Fall back to /proc/loadavg
+	// when the file is absent, stale, or unparseable — same logic as load_history.go.
+	if l1, l5, l15, ok := readCorrectedLoadAvg(); ok {
+		load1, load5, load15 = l1, l5, l15
+		loadData["load_1min"] = strconv.FormatFloat(load1, 'f', 2, 64)
+		loadData["load_5min"] = strconv.FormatFloat(load5, 'f', 2, 64)
+		loadData["load_15min"] = strconv.FormatFloat(load15, 'f', 2, 64)
+	} else {
+		// Fall back to /proc/loadavg
+		data, err := os.ReadFile("/proc/loadavg")
+		if err != nil {
+			log.Printf("Failed to read /proc/loadavg: %v", err)
+			return loadData
+		}
 
-	loadData["load_1min"] = fields[0]
-	loadData["load_5min"] = fields[1]
-	loadData["load_15min"] = fields[2]
+		// Parse the load averages
+		// Format: "0.52 0.58 0.59 1/1234 12345"
+		fields := strings.Split(strings.TrimSpace(string(data)), " ")
+		if len(fields) < 3 {
+			log.Printf("Invalid /proc/loadavg format")
+			return loadData
+		}
+
+		loadData["load_1min"] = fields[0]
+		loadData["load_5min"] = fields[1]
+		loadData["load_15min"] = fields[2]
+
+		var err1, err5, err15 error
+		load1, err1 = strconv.ParseFloat(fields[0], 64)
+		load5, err5 = strconv.ParseFloat(fields[1], 64)
+		load15, err15 = strconv.ParseFloat(fields[2], 64)
+		if err1 != nil || err5 != nil || err15 != nil {
+			return loadData
+		}
+	}
 
 	// Get CPU core count
 	cpuCores := 0
@@ -1520,23 +1540,17 @@ func getSystemLoad() map[string]interface{} {
 	}
 	loadData["cpu_cores"] = cpuCores
 
-	// Parse load values for status calculation
+	// Determine status based on 15-minute load average vs CPU cores
 	// Only use 15-minute average for status (most stable, ignores temporary spikes)
-	load15, err := strconv.ParseFloat(fields[2], 64)
-
-	if err == nil {
-		// Determine status based on 15-minute load average vs CPU cores
-		// This provides the most stable indicator of sustained system load
-		status := "ok"
-		if cpuCores > 0 {
-			if load15 >= float64(cpuCores)*2.0 {
-				status = "critical"
-			} else if load15 >= float64(cpuCores) {
-				status = "warning"
-			}
+	status := "ok"
+	if cpuCores > 0 {
+		if load15 >= float64(cpuCores)*2.0 {
+			status = "critical"
+		} else if load15 >= float64(cpuCores) {
+			status = "warning"
 		}
-		loadData["status"] = status
 	}
+	loadData["status"] = status
 
 	return loadData
 }

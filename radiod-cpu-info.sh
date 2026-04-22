@@ -417,7 +417,7 @@ section_numa() {
 section_governor() {
     header "CPU Frequency Governor & Turbo"
 
-    declare -A gov_cpus
+    declare -A gov_cpus=()
     for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
         [[ -f "$gov_file" ]] || continue
         local cpu_n gov

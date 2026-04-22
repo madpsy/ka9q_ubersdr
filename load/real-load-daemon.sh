@@ -140,9 +140,8 @@ while true; do
     prev_idle="$curr_idle"
     prev_total="$curr_total"
 
-    # Write atomically
-    tmp="${STATE_FILE}.tmp.$$"
+    # Write in-place so Docker bind mounts stay live.
+    # Atomic mv would replace the inode and the container would lose the file.
     printf '%s %s %s %s %d\n' \
-        "$ema1" "$ema5" "$ema15" "$cpu_pct" "$(date +%s)" > "$tmp"
-    mv "$tmp" "$STATE_FILE"
+        "$ema1" "$ema5" "$ema15" "$cpu_pct" "$(date +%s)" > "$STATE_FILE"
 done

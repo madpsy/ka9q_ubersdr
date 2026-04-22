@@ -37,10 +37,11 @@ type UserSpectrumManager struct {
 	packetQueue chan spectrumPacket
 
 	// Control
-	running      bool
-	stopChan     chan struct{}
-	wg           sync.WaitGroup
-	pollInterval time.Duration
+	running                bool
+	stopChan               chan struct{}
+	wg                     sync.WaitGroup
+	pollInterval           time.Duration
+	backgroundPollInterval time.Duration
 }
 
 // NewUserSpectrumManager creates a new per-user spectrum manager
@@ -58,14 +59,15 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 	}
 
 	usm := &UserSpectrumManager{
-		radiod:       radiod,
-		config:       config,
-		sessions:     sessions,
-		statusAddr:   statusAddr,
-		stopChan:     make(chan struct{}),
-		pollInterval: time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
-		workerCount:  workerCount,
-		packetQueue:  make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
+		radiod:                 radiod,
+		config:                 config,
+		sessions:               sessions,
+		statusAddr:             statusAddr,
+		stopChan:               make(chan struct{}),
+		pollInterval:           time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
+		backgroundPollInterval: time.Duration(config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond,
+		workerCount:            workerCount,
+		packetQueue:            make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
 	}
 
 	return usm, nil
@@ -91,7 +93,8 @@ func (usm *UserSpectrumManager) Start() error {
 		usm.wg.Add(1)
 		go usm.pollLoop()
 
-		log.Printf("User spectrum manager started (poll interval: %v, workers: %d)", usm.pollInterval, usm.workerCount)
+		log.Printf("User spectrum manager started (poll interval: %v, background poll interval: %v, workers: %d)",
+			usm.pollInterval, usm.backgroundPollInterval, usm.workerCount)
 	} else {
 		log.Printf("User spectrum manager disabled in config")
 	}
@@ -180,6 +183,9 @@ func (usm *UserSpectrumManager) pollLoop() {
 	ticker := time.NewTicker(usm.pollInterval)
 	defer ticker.Stop()
 
+	bgTicker := time.NewTicker(usm.backgroundPollInterval)
+	defer bgTicker.Stop()
+
 	// Start receiver goroutine
 	usm.wg.Add(1)
 	go usm.receiveLoop()
@@ -189,27 +195,29 @@ func (usm *UserSpectrumManager) pollLoop() {
 		case <-usm.stopChan:
 			return
 		case <-ticker.C:
-			// Poll all active spectrum sessions
-			usm.pollAllSpectrumSessions()
+			// Poll user-facing spectrum sessions only (excludes background/internal sessions)
+			usm.pollUserSpectrumSessions()
+		case <-bgTicker.C:
+			// Poll background/internal spectrum sessions (noisefloor, frequency-reference) at a slower rate
+			usm.pollBackgroundSpectrumSessions()
 		}
 	}
 }
 
-// pollAllSpectrumSessions sends poll commands for all active spectrum sessions
-// Polls are sent in parallel for better performance with many users
-func (usm *UserSpectrumManager) pollAllSpectrumSessions() {
-	// Get all sessions (need to iterate safely)
+// pollUserSpectrumSessions sends poll commands for user-facing spectrum sessions only.
+// Background sessions (noisefloor, frequency-reference) are excluded and polled separately
+// at a lower rate to avoid saturating the radio stat thread with expensive wide-bin spectrum_poll() calls.
+func (usm *UserSpectrumManager) pollUserSpectrumSessions() {
 	usm.sessions.mu.RLock()
 	spectrumSSRCs := make([]uint32, 0)
 	for _, session := range usm.sessions.sessions {
-		if session.IsSpectrum {
+		if session.IsSpectrum && !session.IsBackground {
 			spectrumSSRCs = append(spectrumSSRCs, session.SSRC)
 		}
 	}
 	usm.sessions.mu.RUnlock()
 
 	// Send polls in parallel (non-blocking)
-	// This dramatically improves performance with many users (e.g., 50 users)
 	// sendCommand() is thread-safe (protected by mutex in RadiodController)
 	for _, ssrc := range spectrumSSRCs {
 		go func(s uint32) {
@@ -218,8 +226,29 @@ func (usm *UserSpectrumManager) pollAllSpectrumSessions() {
 			}
 		}(ssrc)
 	}
-	// Don't wait for polls to complete - they send asynchronously
-	// radiod will respond via multicast when ready
+}
+
+// pollBackgroundSpectrumSessions sends poll commands for internal background spectrum sessions
+// (noisefloor, frequency-reference). These are polled at a much lower rate than user sessions
+// because they use wide-bin mode in radiod, where spectrum_poll() runs synchronously in the
+// radio stat thread and iterates over thousands of master FFT bins per call.
+func (usm *UserSpectrumManager) pollBackgroundSpectrumSessions() {
+	usm.sessions.mu.RLock()
+	spectrumSSRCs := make([]uint32, 0)
+	for _, session := range usm.sessions.sessions {
+		if session.IsSpectrum && session.IsBackground {
+			spectrumSSRCs = append(spectrumSSRCs, session.SSRC)
+		}
+	}
+	usm.sessions.mu.RUnlock()
+
+	for _, ssrc := range spectrumSSRCs {
+		go func(s uint32) {
+			if err := usm.sendPoll(s); err != nil {
+				log.Printf("ERROR: Failed to send background spectrum poll for SSRC 0x%08x: %v", s, err)
+			}
+		}(ssrc)
+	}
 }
 
 // sendPoll sends a poll command to request spectrum data for a specific SSRC

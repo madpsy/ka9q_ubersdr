@@ -53,6 +53,7 @@ type Session struct {
 
 	// Spectrum-specific fields (only used when Mode == "spectrum")
 	IsSpectrum   bool
+	IsBackground bool          // True for internal/background spectrum sessions (noisefloor, frequency-reference) that should be polled at a slower rate
 	BinCount     int
 	BinBandwidth float64
 	SpectrumChan chan []float32 // Channel for spectrum data

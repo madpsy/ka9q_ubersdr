@@ -144,6 +144,7 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 		ChannelName:  "frequency-reference", // Used to identify channel type in radiod channels list
 		SSRC:         ssrc,
 		IsSpectrum:   true,
+		IsBackground: true,
 		Frequency:    frm.centerFreq,
 		BinCount:     frm.binCount,
 		BinBandwidth: frm.binBandwidth,

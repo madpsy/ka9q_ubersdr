@@ -193,15 +193,16 @@ type FrequencyGainRange struct {
 
 // SpectrumConfig contains spectrum analyzer settings
 type SpectrumConfig struct {
-	Enabled               bool                          `yaml:"enabled"`
-	Default               SpectrumDefaultConfig         `yaml:"default"`
-	PollPeriodMs          int                           `yaml:"poll_period_ms"`
-	MaxSessionsPerUser    int                           `yaml:"max_sessions_per_user"`
-	WorkerCount           int                           `yaml:"worker_count"`             // Number of parallel workers for spectrum packet distribution
-	GainDB                float64                       `yaml:"gain_db"`                  // Master gain adjustment in dB applied to all spectrum data
-	GainDBFrequencyRanges map[string]FrequencyGainRange `yaml:"gain_db_frequency_ranges"` // Per-frequency gain adjustments (added to master gain_db), keyed by name
-	DeltaThresholdDB      float64                       `yaml:"delta_threshold_db"`       // Delta encoding threshold in dB for binary mode
-	Smoothing             SmoothingConfig               `yaml:"smoothing"`                // Smoothing settings for waterfall display
+	Enabled                  bool                          `yaml:"enabled"`
+	Default                  SpectrumDefaultConfig         `yaml:"default"`
+	PollPeriodMs             int                           `yaml:"poll_period_ms"`
+	BackgroundPollPeriodMs   int                           `yaml:"background_poll_period_ms"` // Poll interval for internal background sessions (noisefloor, frequency-reference); default 1000ms
+	MaxSessionsPerUser       int                           `yaml:"max_sessions_per_user"`
+	WorkerCount              int                           `yaml:"worker_count"`             // Number of parallel workers for spectrum packet distribution
+	GainDB                   float64                       `yaml:"gain_db"`                  // Master gain adjustment in dB applied to all spectrum data
+	GainDBFrequencyRanges    map[string]FrequencyGainRange `yaml:"gain_db_frequency_ranges"` // Per-frequency gain adjustments (added to master gain_db), keyed by name
+	DeltaThresholdDB         float64                       `yaml:"delta_threshold_db"`       // Delta encoding threshold in dB for binary mode
+	Smoothing                SmoothingConfig               `yaml:"smoothing"`                // Smoothing settings for waterfall display
 }
 
 // SmoothingConfig contains smoothing parameters for spectrum data
@@ -708,6 +709,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Spectrum.PollPeriodMs == 0 {
 		config.Spectrum.PollPeriodMs = 100 // 100ms default (10 Hz update rate)
+	}
+	if config.Spectrum.BackgroundPollPeriodMs == 0 {
+		config.Spectrum.BackgroundPollPeriodMs = 1000 // 1s default for internal background sessions (noisefloor, frequency-reference)
 	}
 	if config.Spectrum.MaxSessionsPerUser == 0 {
 		config.Spectrum.MaxSessionsPerUser = 2

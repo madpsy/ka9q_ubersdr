@@ -368,7 +368,7 @@ section_cache() {
     if (( l3_count > 1 )); then
         echo ""
         kv "L3 instances" "${l3_count} × (${l3_total_kb} KB total)"
-        info_line "Multiple L3 caches — pin radiod to cores sharing one L3 for best memory locality"
+        info_line "Multiple L3 caches detected — see CPU Affinity section for pinning analysis"
     fi
 }
 
@@ -842,6 +842,30 @@ section_affinity() {
             warn_line "Cross-NUMA pinning adds memory latency — pin to a single node if possible"
         elif (( numa_count == 1 )); then
             ok_line "Pinned CPUs are all on NUMA node ${!pinned_numa_nodes[*]}"
+        fi
+
+        # Check whether pinned CPUs span multiple L3 cache domains
+        declare -A _pinned_l3_domains
+        for cpu_n in "${expanded_pinned[@]}"; do
+            local _cache_base="/sys/devices/system/cpu/cpu${cpu_n}/cache"
+            [[ -d "$_cache_base" ]] || continue
+            for _idx_dir in "${_cache_base}"/index*/; do
+                [[ -d "$_idx_dir" ]] || continue
+                local _lvl _typ _scl
+                _lvl=$(sysread "${_idx_dir}level")
+                _typ=$(sysread "${_idx_dir}type")
+                [[ "$_lvl" == "3" && "$_typ" == "Unified" ]] || continue
+                _scl=$(sysread "${_idx_dir}shared_cpu_list")
+                _pinned_l3_domains["$_scl"]=1
+                break
+            done
+        done
+        local _l3_domain_count="${#_pinned_l3_domains[@]}"
+        if (( _l3_domain_count > 1 )); then
+            warn_line "Pinned CPUs span ${_l3_domain_count} L3 cache domains — cross-L3 buffer handoffs add latency"
+            warn_line "Run suggest-radiod-cpuset.sh to get a cpuset confined to one L3 domain"
+        elif (( _l3_domain_count == 1 )); then
+            ok_line "Pinned CPUs share a single L3 cache domain — optimal for buffer locality"
         fi
 
         # Check if pinned CPUs include HT siblings (warn)

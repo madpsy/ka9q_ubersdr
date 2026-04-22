@@ -7,9 +7,12 @@
 # Selection criteria:
 #   1. Find all physical cores and their HT siblings by reading the kernel's
 #      thread_siblings_list (the authoritative source of HT pairs)
-#   2. Rank physical cores by average idle% (measured via /proc/stat delta)
-#   3. Select the N idlest physical cores (default: 1) and build a cpuset
-#      from all their logical CPUs (including HT siblings)
+#   2. Map each core to its L3 cache domain via the cache sysfs hierarchy
+#      (falls back to NUMA node when L3 sysfs is unavailable)
+#   3. Select N cores from the largest L3 domain first (lowest CPU number
+#      order), spilling into other domains only if more cores are needed.
+#      Current idle% is not used — the system will be rebooted after applying
+#      isolcpus, making runtime load irrelevant.
 #
 # Usage:
 #   ./suggest-radiod-cpuset.sh [--cores N] [--quiet] [--apply [--compose-file <path>]]
@@ -180,70 +183,106 @@ if (( NUM_CORES > TOTAL_PHYSICAL )); then
     exit 1
 fi
 
-# ── 2. Sample CPU idle time from /proc/stat ───────────────────────────────────
+# ── 2. Map each physical core to its L3 cache domain ─────────────────────────
+# Read /sys/devices/system/cpu/cpuN/cache/index*/shared_cpu_list for the L3
+# (level=3, type=Unified).  Cores sharing the same shared_cpu_list belong to
+# the same L3 domain.  We use the first logical CPU of each physical core as
+# the representative for the sysfs lookup.
 
-declare -A idle1 idle2 total1 total2
+declare -A core_l3_domain   # key: core_key → L3 shared_cpu_list string
 
-sample_stat() {
-    local -n _idle=$1
-    local -n _total=$2
-    while read -r line; do
-        [[ "$line" =~ ^cpu([0-9]+)[[:space:]]+(.*) ]] || continue
-        cpu_n="${BASH_REMATCH[1]}"
-        fields=(${BASH_REMATCH[2]})
-        idle_val="${fields[3]}"
-        total_val=0
-        for f in "${fields[@]}"; do
-            (( total_val += f )) || true
+for core_key in "${core_list[@]}"; do
+    # Use the first logical CPU in the core group
+    first_cpu="${core_key%%,*}"
+    cache_base="/sys/devices/system/cpu/cpu${first_cpu}/cache"
+    l3_domain=""
+    if [[ -d "$cache_base" ]]; then
+        for idx_dir in "${cache_base}"/index*/; do
+            [[ -d "$idx_dir" ]] || continue
+            lvl=$(cat "${idx_dir}level" 2>/dev/null || echo "")
+            typ=$(cat "${idx_dir}type"  2>/dev/null || echo "")
+            if [[ "$lvl" == "3" && "$typ" == "Unified" ]]; then
+                l3_domain=$(cat "${idx_dir}shared_cpu_list" 2>/dev/null || echo "")
+                break
+            fi
         done
-        _idle["$cpu_n"]="$idle_val"
-        _total["$cpu_n"]="$total_val"
-    done < /proc/stat
-}
-
-sample_stat idle1 total1
-sleep 0.5
-sample_stat idle2 total2
-
-# ── 3. Score each physical core by average idle% across all its logical CPUs ──
-
-declare -A core_idle_pct    # key: canonical siblings string → avg idle%
-
-for core_key in "${core_list[@]}"; do
-    IFS=',' read -ra cpus <<< "$core_key"
-    total_idle=0
-    count=0
-    for cpu_n in "${cpus[@]}"; do
-        d_idle=$(( idle2["$cpu_n"] - idle1["$cpu_n"] ))
-        d_total=$(( total2["$cpu_n"] - total1["$cpu_n"] ))
-        if (( d_total > 0 )); then
-            pct=$(( d_idle * 100 / d_total ))
-        else
-            pct=100
-        fi
-        (( total_idle += pct )) || true
-        (( count += 1 ))
-    done
-    core_idle_pct["$core_key"]=$(( total_idle / count ))
+    fi
+    # Fall back to NUMA node as proxy when L3 sysfs is unavailable
+    if [[ -z "$l3_domain" ]]; then
+        for node_dir in /sys/devices/system/cpu/cpu${first_cpu}/node[0-9]*/; do
+            [[ -d "$node_dir" ]] && l3_domain="numa:$(basename "$node_dir")" && break
+        done
+    fi
+    [[ -z "$l3_domain" ]] && l3_domain="unknown"
+    core_l3_domain["$core_key"]="$l3_domain"
 done
 
-# ── 4. Select the N idlest physical cores ─────────────────────────────────────
+# ── 3. Select N physical cores, preferring a single L3 domain ────────────────
+#
+# Strategy (topology-only — idle% is not used because the system will be
+# rebooted after applying isolcpus, making current load irrelevant):
+#   1. Count how many cores each L3 domain contains.
+#   2. Pick the domain with the most cores (ties broken by lowest first-CPU
+#      number, i.e. the "first" domain in physical order).
+#   3. Fill the selection from that domain (lowest CPU number first),
+#      then spill into other domains only if more cores are needed.
 
-# Sort core_list by descending idle% and pick the top NUM_CORES
-declare -a ranked_cores
+# Tally cores per L3 domain
+declare -A _domain_count _domain_first_cpu
 for core_key in "${core_list[@]}"; do
-    ranked_cores+=("${core_idle_pct[$core_key]} $core_key")
+    dom="${core_l3_domain[$core_key]}"
+    _domain_count["$dom"]=$(( ${_domain_count[$dom]:-0} + 1 ))
+    first_cpu="${core_key%%,*}"
+    # Track the lowest first-CPU number seen in this domain (for tiebreaking)
+    if [[ -z "${_domain_first_cpu[$dom]:-}" ]] || (( first_cpu < _domain_first_cpu[$dom] )); then
+        _domain_first_cpu["$dom"]="$first_cpu"
+    fi
 done
 
-# Sort descending by idle%
-IFS=$'\n' sorted_cores=($(printf '%s\n' "${ranked_cores[@]}" | sort -rn)); unset IFS
+# Pick the preferred L3 domain: most cores; tiebreak by lowest first-CPU number
+preferred_domain=""
+best_cnt=0
+best_first_cpu=999999
+for dom in "${!_domain_count[@]}"; do
+    cnt="${_domain_count[$dom]}"
+    fc="${_domain_first_cpu[$dom]}"
+    if (( cnt > best_cnt )) || { (( cnt == best_cnt )) && (( fc < best_first_cpu )); }; then
+        preferred_domain="$dom"
+        best_cnt="$cnt"
+        best_first_cpu="$fc"
+    fi
+done
 
-# Build the final cpuset from the top NUM_CORES physical cores
+# Sort core_list by lowest first-CPU number (stable, deterministic order)
+declare -a sorted_cores
+for core_key in "${core_list[@]}"; do
+    first_cpu="${core_key%%,*}"
+    sorted_cores+=("${first_cpu} ${core_key}")
+done
+IFS=$'\n' sorted_cores=($(printf '%s\n' "${sorted_cores[@]}" | sort -n)); unset IFS
+
+# Build the final cpuset: preferred domain first, then others
 selected_cores=()
 selected_cpus=()
-for (( i=0; i<NUM_CORES; i++ )); do
-    entry="${sorted_cores[$i]}"
-    core_key="${entry#* }"   # strip the leading idle% score
+declare -a _deferred_cores   # cores from non-preferred domains
+
+for entry in "${sorted_cores[@]}"; do
+    core_key="${entry#* }"
+    dom="${core_l3_domain[$core_key]}"
+    if [[ "$dom" == "$preferred_domain" ]]; then
+        if (( ${#selected_cores[@]} < NUM_CORES )); then
+            selected_cores+=("$core_key")
+            IFS=',' read -ra cpus <<< "$core_key"
+            selected_cpus+=("${cpus[@]}")
+        fi
+    else
+        _deferred_cores+=("$core_key")
+    fi
+done
+
+# Fill remaining slots from deferred (non-preferred-domain) cores if needed
+for core_key in "${_deferred_cores[@]}"; do
+    (( ${#selected_cores[@]} >= NUM_CORES )) && break
     selected_cores+=("$core_key")
     IFS=',' read -ra cpus <<< "$core_key"
     selected_cpus+=("${cpus[@]}")
@@ -253,7 +292,14 @@ done
 IFS=$'\n' sorted_cpus=($(printf '%s\n' "${selected_cpus[@]}" | sort -n)); unset IFS
 best_cpuset=$(IFS=','; echo "${sorted_cpus[*]}")
 
-# ── 5. Output ─────────────────────────────────────────────────────────────────
+# ── 4. Output ─────────────────────────────────────────────────────────────────
+
+# Count how many distinct L3 domains the selection spans
+declare -A _sel_domains
+for core_key in "${selected_cores[@]}"; do
+    _sel_domains["${core_l3_domain[$core_key]}"]=1
+done
+_sel_domain_count="${#_sel_domains[@]}"
 
 if $QUIET; then
     echo "$best_cpuset"
@@ -267,11 +313,20 @@ else
     echo "  Suggested cpuset for radiod (${core_desc}): ${best_cpuset}"
     echo ""
 
-    # Show which physical cores were selected and their logical CPUs
+    # Show which physical cores were selected and their logical CPUs + L3 domain
     for core_key in "${selected_cores[@]}"; do
-        idle="${core_idle_pct[$core_key]}"
-        echo "  Physical core [${core_key}]  (avg idle: ${idle}%)  ← selected"
+        dom="${core_l3_domain[$core_key]}"
+        echo "  Physical core [${core_key}]  L3=[${dom}]  ← selected"
     done
+    echo ""
+
+    # Warn if the selection crosses L3 domains
+    if (( _sel_domain_count > 1 )); then
+        echo "  ⚠  Selection spans ${_sel_domain_count} L3 cache domains — not enough cores in one domain."
+        echo "     Cross-domain buffer handoffs add latency. Consider reducing --cores or accepting the trade-off."
+    else
+        echo "  ✓  All selected cores share one L3 cache domain — optimal for buffer locality."
+    fi
     echo ""
 
     echo "  Add to docker-compose.yml under the ka9q-radio service:"
@@ -282,7 +337,6 @@ else
 
     echo "  All detected physical cores on this system:"
     for entry in "${sorted_cores[@]}"; do
-        idle="${entry%% *}"
         core_key="${entry#* }"
         selected_marker=""
         for sel in "${selected_cores[@]}"; do
@@ -290,12 +344,13 @@ else
         done
         IFS=',' read -ra cpus <<< "$core_key"
         cpu_display=$(IFS='+'; echo "CPU ${cpus[*]}" | sed 's/+/ + CPU /g')
-        printf "    %-30s  (avg idle: %3d%%)%s\n" "$cpu_display" "$idle" "$selected_marker"
+        dom="${core_l3_domain[$core_key]}"
+        printf "    %-30s  L3=[%s]%s\n" "$cpu_display" "$dom" "$selected_marker"
     done
     echo ""
 fi
 
-# ── 6. Interactive: ask whether to apply ─────────────────────────────────────
+# ── 5. Interactive: ask whether to apply ─────────────────────────────────────
 
 if $INTERACTIVE; then
     echo ""
@@ -320,7 +375,7 @@ if $INTERACTIVE; then
     echo ""
 fi
 
-# ── 7. Apply to docker-compose file ──────────────────────────────────────────
+# ── 6. Apply to docker-compose file ──────────────────────────────────────────
 
 if $APPLY; then
     if [[ ! -f "$COMPOSE_FILE" ]]; then
@@ -387,7 +442,7 @@ if $APPLY; then
     fi
 fi
 
-# ── 8. isolcpus suggestion ────────────────────────────────────────────────────
+# ── 7. isolcpus suggestion ────────────────────────────────────────────────────
 # cpuset keeps radiod ON the chosen cores; isolcpus keeps everything else OFF.
 # Together they give near-exclusive access to those cores.
 
@@ -569,7 +624,7 @@ if $INTERACTIVE; then
     fi
 fi
 
-# ── 9. Interactive: remind user to restart UberSDR ───────────────────────────
+# ── 8. Interactive: remind user to restart UberSDR ───────────────────────────
 
 if $INTERACTIVE && $APPLY; then
     echo "  ✓ cpuset applied. To activate the change, restart UberSDR:"

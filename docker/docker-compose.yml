@@ -83,6 +83,15 @@ services:
       - caddy-shared:/etc/caddy-shared
       # Version updater directory (accessible from host)
       - ./updater:/var/run/updater
+      # Optional: corrected load averages from real-load-daemon.sh running on the host.
+      # When present, UberSDR uses these instead of /proc/loadavg to avoid the
+      # cpuset run-queue inflation artefact that inflates load average on pinned systems.
+      # Install real-load-daemon.sh as a systemd service on the host first:
+      #   sudo cp load/real-load-daemon.sh /usr/local/bin/
+      #   sudo cp load/real-load-daemon.service /etc/systemd/system/
+      #   sudo systemctl enable --now real-load-daemon
+      # Then uncomment the line below and restart the container:
+      # - /run/real-load-avg:/run/real-load-avg:ro
 
     # Healthcheck
     healthcheck:

@@ -326,6 +326,12 @@ else
     echo "    ka9q-radio:"
     echo "      cpuset: \"${best_cpuset}\""
     echo ""
+    echo "  ⚠  Note: applying a cpuset will inflate /proc/loadavg significantly."
+    echo "     This is a Linux kernel artefact — the load average counts all threads"
+    echo "     in the cpuset run-queue, not actual CPU usage. Your system is not"
+    echo "     overloaded. Use 'mpstat 2 1' or 'docker stats' for real CPU usage."
+    echo "     Run real-load.sh (with real-load-daemon.sh) for a corrected load average."
+    echo ""
 
     echo "  All detected physical cores on this system:"
     for entry in "${sorted_cores[@]}"; do

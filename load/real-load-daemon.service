@@ -1,0 +1,15 @@
+[Unit]
+Description=Real CPU load average daemon (cpuset-corrected)
+Documentation=https://github.com/ka9q/ubersdr
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/real-load-daemon.sh
+Restart=on-failure
+RestartSec=5
+# State file is written to /run/real-load-avg (symlinked from /var/run)
+# real-load.sh reads from the same path
+
+[Install]
+WantedBy=multi-user.target

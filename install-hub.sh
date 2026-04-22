@@ -402,6 +402,47 @@ else
     echo "Warning: Failed to download RTL-TCP bridge binary. Skipping RTL-TCP bridge installation."
 fi
 
+# Install real-load daemon (cpuset-corrected load averages)
+echo "Installing real-load daemon..."
+REAL_LOAD_FAILED=0
+
+if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/load/real-load-daemon.sh -o /tmp/real-load-daemon.sh 2>/dev/null; then
+    sudo mv /tmp/real-load-daemon.sh /usr/local/bin/real-load-daemon.sh
+    sudo chmod +x /usr/local/bin/real-load-daemon.sh
+    echo "real-load-daemon.sh installed to /usr/local/bin/."
+else
+    echo "Warning: Failed to download real-load-daemon.sh. Skipping real-load daemon installation."
+    REAL_LOAD_FAILED=1
+fi
+
+if [ $REAL_LOAD_FAILED -eq 0 ]; then
+    if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/load/real-load.sh -o /tmp/real-load.sh 2>/dev/null; then
+        sudo mv /tmp/real-load.sh /usr/local/bin/real-load.sh
+        sudo chmod +x /usr/local/bin/real-load.sh
+        echo "real-load.sh installed to /usr/local/bin/."
+    else
+        echo "Warning: Failed to download real-load.sh. Skipping real-load reader installation."
+        REAL_LOAD_FAILED=1
+    fi
+fi
+
+if [ $REAL_LOAD_FAILED -eq 0 ]; then
+    if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/load/real-load-daemon.service -o /tmp/real-load-daemon.service 2>/dev/null; then
+        sudo mv /tmp/real-load-daemon.service /etc/systemd/system/real-load-daemon.service
+        sudo systemctl daemon-reload
+        sudo systemctl enable real-load-daemon.service
+        if systemctl is-active --quiet real-load-daemon.service; then
+            sudo systemctl restart real-load-daemon.service
+            echo "real-load-daemon service updated and restarted."
+        else
+            sudo systemctl start real-load-daemon.service
+            echo "real-load-daemon service installed, enabled, and started."
+        fi
+    else
+        echo "Warning: Failed to download real-load-daemon.service. Skipping service installation."
+    fi
+fi
+
 # Create ubersdr directory in user's home
 echo "Creating ~/ubersdr directory..."
 sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_HOME/ubersdr"

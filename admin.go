@@ -2641,20 +2641,37 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Read /proc/loadavg
-	data, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read /proc/loadavg: %v", err), http.StatusInternalServerError)
-		return
-	}
+	// Prefer corrected load averages from real-load-daemon.sh (host daemon,
+	// bind-mounted read-only at /run/real-load-avg).  Fall back to /proc/loadavg
+	// when the file is absent, stale, or unparseable.
+	var load1Str, load5Str, load15Str string
+	var load15 float64
 
-	// Parse the load averages
-	// Format: "0.52 0.58 0.59 1/1234 12345"
-	// We want the first three numbers (1, 5, 15 minute averages)
-	fields := strings.Fields(string(data))
-	if len(fields) < 3 {
-		http.Error(w, "Invalid /proc/loadavg format", http.StatusInternalServerError)
-		return
+	if l1, l5, l15, ok := readCorrectedLoadAvg(); ok {
+		load1Str = fmt.Sprintf("%.2f", l1)
+		load5Str = fmt.Sprintf("%.2f", l5)
+		load15Str = fmt.Sprintf("%.2f", l15)
+		load15 = l15
+	} else {
+		// Fall back to /proc/loadavg
+		data, err := os.ReadFile("/proc/loadavg")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to read /proc/loadavg: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Parse the load averages
+		// Format: "0.52 0.58 0.59 1/1234 12345"
+		// We want the first three numbers (1, 5, 15 minute averages)
+		fields := strings.Fields(string(data))
+		if len(fields) < 3 {
+			http.Error(w, "Invalid /proc/loadavg format", http.StatusInternalServerError)
+			return
+		}
+		load1Str = fields[0]
+		load5Str = fields[1]
+		load15Str = fields[2]
+		load15, _ = strconv.ParseFloat(fields[2], 64)
 	}
 
 	// Get CPU core count using gopsutil
@@ -2666,10 +2683,6 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 			cpuCores += int(cpuInfo.Cores)
 		}
 	}
-
-	// Parse load values as floats for status calculation
-	// Only use 15-minute average for status (most stable, ignores temporary spikes)
-	load15, _ := strconv.ParseFloat(fields[2], 64)
 
 	// Determine status based on 15-minute load average vs CPU cores
 	// This provides the most stable indicator of sustained system load
@@ -2683,9 +2696,9 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 	}
 
 	response := map[string]interface{}{
-		"load_1min":  fields[0],
-		"load_5min":  fields[1],
-		"load_15min": fields[2],
+		"load_1min":  load1Str,
+		"load_5min":  load5Str,
+		"load_15min": load15Str,
 		"cpu_cores":  cpuCores,
 		"status":     status,
 	}

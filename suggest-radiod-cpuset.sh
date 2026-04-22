@@ -16,12 +16,13 @@
 #      isolcpus, making runtime load irrelevant.
 #
 # Usage:
-#   ./suggest-radiod-cpuset.sh [--cores N] [--quiet] [--apply [--compose-file <path>]]
+#   ./suggest-radiod-cpuset.sh [--cores N] [--quiet] [--apply [--compose-file <path>]] [--remove]
 #
 # Options:
 #   --cores N           Number of physical cores to assign (default: 1)
 #   --quiet             Output only the cpuset string, e.g. "0,4"
 #   --apply             Write the recommended cpuset into the docker-compose file
+#   --remove            Remove cpuset from docker-compose and isolcpus from grub
 #   --compose-file PATH Path to docker-compose file (default: docker-compose.yml
 #                       in the same directory as this script)
 #
@@ -30,6 +31,8 @@
 #   ./suggest-radiod-cpuset.sh --cores 2
 #   ./suggest-radiod-cpuset.sh --cores 2 --apply --compose-file ~/ubersdr/docker-compose.yml
 #   ./suggest-radiod-cpuset.sh --quiet --cores 1
+#   ./suggest-radiod-cpuset.sh --remove
+#   ./suggest-radiod-cpuset.sh --remove --compose-file ~/ubersdr/docker-compose.yml
 
 set -euo pipefail
 
@@ -76,6 +79,7 @@ fi
 
 QUIET=false
 APPLY=false
+REMOVE=false
 SKIP_ISOLCPUS=false   # true when user explicitly declines docker-compose apply
 NUM_CORES=1
 NUM_CORES_SET=false   # true when --cores was explicitly passed
@@ -91,8 +95,9 @@ fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --quiet)    QUIET=true;  shift ;;
-        --apply)    APPLY=true;  shift ;;
+        --quiet)    QUIET=true;   shift ;;
+        --apply)    APPLY=true;   shift ;;
+        --remove)   REMOVE=true;  shift ;;
         --cores)
             [[ -n "${2:-}" ]] || { echo "ERROR: --cores requires a number argument" >&2; exit 1; }
             [[ "$2" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --cores must be a positive integer" >&2; exit 1; }
@@ -104,7 +109,7 @@ while [[ $# -gt 0 ]]; do
             sed -n '2,/^set -/p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *)
-            echo "Usage: $0 [--cores N] [--quiet] [--apply [--compose-file <path>]]" >&2
+            echo "Usage: $0 [--cores N] [--quiet] [--apply [--compose-file <path>]] [--remove]" >&2
             exit 1 ;;
     esac
 done
@@ -132,9 +137,195 @@ fi
 
 if $INTERACTIVE; then
     echo ""
+    echo "This tool can either apply CPU pinning to radiod or remove it."
+    echo ""
+    read -rp "What would you like to do? [apply/remove] (default: apply): " _mode_input
+    _mode_input="${_mode_input:-apply}"
+    case "${_mode_input,,}" in
+        remove|r)
+            REMOVE=true ;;
+        apply|a|"")
+            REMOVE=false ;;
+        *)
+            echo "  Please enter 'apply' or 'remove'."
+            REMOVE=false ;;
+    esac
+    echo ""
+fi
+
+if ! $REMOVE && $INTERACTIVE; then
     echo "This tool analyses your CPU topology and suggests which physical core(s)"
     echo "to dedicate to radiod for best performance."
     echo ""
+fi
+
+# ── Remove mode ───────────────────────────────────────────────────────────────
+# Removes cpuset from docker-compose and isolcpus/nohz_full/rcu_nocbs from grub.
+# Runs early and exits — no CPU topology analysis needed.
+
+_do_remove() {
+    local compose_file="$1"
+    local interactive="$2"   # "true" or "false"
+    local _do_reboot=false
+    local _compose_modified=false
+
+    echo ""
+    echo "  ── Removing CPU pinning ─────────────────────────────────────────────"
+    echo ""
+
+    # ── docker-compose: remove cpuset line ───────────────────────────────────
+    if [[ -n "$compose_file" ]]; then
+        if [[ ! -f "$compose_file" ]]; then
+            echo "  ERROR: docker-compose file not found: ${compose_file}" >&2
+        elif ! grep -q 'ka9q-radio:' "$compose_file"; then
+            echo "  ERROR: No 'ka9q-radio:' service found in ${compose_file}" >&2
+        else
+            if grep -qE '^[[:space:]]+cpuset:' "$compose_file"; then
+                local _bak="${compose_file}.bak.$(date +%Y%m%d%H%M%S)"
+                cp "$compose_file" "$_bak"
+                # Remove the cpuset line inside the ka9q-radio service block
+                awk '
+                    /^  ka9q-radio:[[:space:]]*(#.*)?$/ { in_service=1; print; next }
+                    in_service && /^  [^[:space:]#]/ { in_service=0 }
+                    in_service && /^[[:space:]]+cpuset:/ { next }
+                    { print }
+                ' "$compose_file" > "${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
+                _compose_modified=true
+                echo "  ✓ Removed cpuset from ${compose_file}"
+                echo "  Backup saved to: ${_bak}"
+            else
+                echo "  ✓ No cpuset line found in ${compose_file} — nothing to remove."
+            fi
+            echo ""
+        fi
+    fi
+
+    # ── grub: remove isolcpus / nohz_full / rcu_nocbs ────────────────────────
+    local _grub_file="/etc/default/grub"
+    if [[ ! -f "$_grub_file" ]]; then
+        echo "  ⚠  ${_grub_file} not found — skipping kernel parameter removal."
+        echo ""
+    elif ! grep -qE 'isolcpus=|nohz_full=|rcu_nocbs=' "$_grub_file" 2>/dev/null; then
+        echo "  ✓ No isolcpus/nohz_full/rcu_nocbs found in ${_grub_file} — nothing to remove."
+        echo ""
+    else
+        echo "  Found kernel isolation parameters in ${_grub_file}:"
+        grep 'GRUB_CMDLINE_LINUX' "$_grub_file"
+        echo ""
+
+        local _proceed=true
+        if [[ "$interactive" == "true" ]]; then
+            read -rp "  Remove isolcpus/nohz_full/rcu_nocbs from ${_grub_file}? [y/N]: " _grub_rm_ans
+            [[ "${_grub_rm_ans,,}" =~ ^y ]] || _proceed=false
+        fi
+
+        if $_proceed; then
+            local _grub_backup="${_grub_file}.bak.$(date +%Y%m%d%H%M%S)"
+            if ! sudo cp "$_grub_file" "$_grub_backup" 2>/dev/null; then
+                echo "  ERROR: could not back up ${_grub_file} (sudo cp failed)" >&2
+            else
+                echo "  Backup saved to: ${_grub_backup}"
+                # Strip the three params (and any leading space left behind)
+                sudo sed -i \
+                    -e 's/ isolcpus=[^ "]*//g' \
+                    -e 's/ nohz_full=[^ "]*//g' \
+                    -e 's/ rcu_nocbs=[^ "]*//g' \
+                    -e 's/isolcpus=[^ "]*//g' \
+                    -e 's/nohz_full=[^ "]*//g' \
+                    -e 's/rcu_nocbs=[^ "]*//g' \
+                    "$_grub_file"
+                echo "  ✓ Removed isolation parameters from ${_grub_file}"
+                echo ""
+
+                # Regenerate grub
+                local _grub_cmd=""
+                for _candidate in \
+                    /usr/sbin/update-grub \
+                    /sbin/update-grub \
+                    /usr/sbin/grub2-mkconfig \
+                    /usr/sbin/grub-mkconfig; do
+                    [[ -x "$_candidate" ]] && _grub_cmd="$_candidate" && break
+                done
+
+                if [[ -n "$_grub_cmd" ]]; then
+                    echo "  Running sudo ${_grub_cmd}..."
+                    case "$_grub_cmd" in
+                        *update-grub)
+                            sudo "$_grub_cmd" 2>&1 | tail -3 ;;
+                        *grub2-mkconfig)
+                            sudo "$_grub_cmd" -o /boot/grub2/grub.cfg 2>&1 | tail -3 ;;
+                        *grub-mkconfig)
+                            sudo "$_grub_cmd" -o /boot/grub/grub.cfg 2>&1 | tail -3 ;;
+                    esac
+                    echo ""
+                    echo "  ✓ Grub updated."
+                else
+                    echo "  ⚠  No grub update command found. Run manually: sudo update-grub"
+                fi
+                echo ""
+
+                echo "  A reboot is required to deactivate isolcpus."
+                echo ""
+                if [[ "$interactive" == "true" ]]; then
+                    read -rp "  Reboot now? [y/N]: " _reboot_ans
+                    [[ "${_reboot_ans,,}" =~ ^y ]] && _do_reboot=true || echo "  Skipping reboot. Run 'sudo reboot' when ready."
+                    echo ""
+                fi
+            fi
+        else
+            echo "  Skipping grub changes."
+            echo ""
+        fi
+    fi
+
+    # ── Restart UberSDR to drop the old cpuset ────────────────────────────────
+    # Only needed when docker-compose was actually modified.
+    if $_compose_modified; then
+        local _restart_script="$HOME/ubersdr/restart-ubersdr.sh"
+        echo ""
+        echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+        echo -e "\033[1;33m║  ⚠  YOU WILL LOSE CONNECTION BRIEFLY — THIS IS EXPECTED              ║\033[0m"
+        echo -e "\033[1;33m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
+        echo -e "\033[1;33m║  UberSDR is about to restart to remove the cpuset.                   ║\033[0m"
+        echo -e "\033[1;33m║  Your browser connection to the SDR will drop for ~30 seconds        ║\033[0m"
+        echo -e "\033[1;33m║  while Docker restarts the container.                                ║\033[0m"
+        echo -e "\033[1;33m║                                                                      ║\033[0m"
+        echo -e "\033[1;33m║  Simply refresh the page once UberSDR is back online.                ║\033[0m"
+        echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+        echo ""
+        echo "  Restarting UberSDR to remove the cpuset..."
+        echo ""
+        if [[ -x "$_restart_script" ]]; then
+            "$_restart_script"
+            echo ""
+            echo "  ✓ UberSDR restarted without cpuset."
+        else
+            echo "  ⚠  restart-ubersdr.sh not found at ${_restart_script}"
+            echo "     Run manually: cd ~/ubersdr && docker compose down && docker compose up -d"
+        fi
+        echo ""
+    fi
+
+    # ── Deferred reboot ───────────────────────────────────────────────────────
+    if $_do_reboot; then
+        echo "  Rebooting in 5 seconds — press Ctrl+C to cancel..."
+        sleep 5
+        sudo reboot
+    fi
+}
+
+if $REMOVE; then
+    # In interactive mode, ask for the compose file path
+    if $INTERACTIVE; then
+        _default_compose="$HOME/ubersdr/docker-compose.yml"
+        [[ ! -f "$_default_compose" ]] && _default_compose="${SCRIPT_DIR}/docker-compose.yml"
+        read -rp "Path to docker-compose.yml [${_default_compose}]: " _compose_input
+        _compose_input="${_compose_input:-${_default_compose}}"
+        _compose_input="${_compose_input/#\~/$HOME}"
+        COMPOSE_FILE="$_compose_input"
+    fi
+    _do_remove "$COMPOSE_FILE" "$INTERACTIVE"
+    exit 0
 fi
 
 # ── 1. Collect physical cores and their logical CPU siblings ──────────────────

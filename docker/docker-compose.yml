@@ -1,4 +1,4 @@
-services:
+ aservices:
   # ka9q-radio backend (radiod) - SDR receiver daemon
   ka9q-radio:
     build:
@@ -91,7 +91,7 @@ services:
       #   sudo cp load/real-load-daemon.service /etc/systemd/system/
       #   sudo systemctl enable --now real-load-daemon
       # Then uncomment the line below and restart the container:
-      # - /run/real-load-avg:/run/real-load-avg:ro
+      - /run/real-load-avg:/run/real-load-avg:ro
 
     # Healthcheck
     healthcheck:

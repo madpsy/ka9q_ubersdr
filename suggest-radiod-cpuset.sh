@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/bash
+
 # suggest-radiod-cpuset.sh
 #
 # Reads CPU topology from /sys and suggests the best physical core(s)
@@ -32,6 +33,50 @@
 
 set -euo pipefail
 
+# ── tmux session launcher (no-args / interactive mode) ───────────────────────
+# When launched via GoTTY (?arg=) with no arguments the script runs
+# interactively.  Matching generate_wisdom.sh: check tmux, create a named
+# session that runs the actual work, then attach so the GoTTY window shows the
+# tmux session.  The session persists if the browser window is closed and
+# appears in the Terminal → sessions dropdown for re-attachment.
+
+if [[ $# -eq 0 ]]; then
+    echo "=== radiod CPU Pinning Helper ==="
+    echo
+
+    # Check if tmux is installed
+    if ! command -v tmux &> /dev/null; then
+        echo "Error: tmux is not installed. Please install it first:"
+        echo "  sudo apt install -y tmux"
+        exit 1
+    fi
+
+    SESSION_NAME="radiod-cpuset"
+
+    # Check if session already exists
+    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        echo "Error: tmux session '$SESSION_NAME' already exists."
+        echo "Attach to it with: tmux attach -t $SESSION_NAME"
+        echo "Or kill it first with: tmux kill-session -t $SESSION_NAME"
+        exit 1
+    fi
+
+    echo "Creating tmux session '$SESSION_NAME' and starting CPU pinning helper..."
+    echo
+    echo "To detach from the session (without stopping it):"
+    echo "  Press Ctrl+B, then D"
+    echo
+
+    tmux new-session -d -s "$SESSION_NAME" -n 'CPU Pinning' "bash $0 --_interactive; echo; echo; echo 'Press Enter to close...'; read"
+
+    echo "Tmux session '$SESSION_NAME' created and CPU pinning helper started!"
+    echo
+    echo "Attaching to session now..."
+    sleep 1
+    tmux attach -t "$SESSION_NAME"
+    exit 0
+fi
+
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
 QUIET=false
@@ -43,9 +88,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 INTERACTIVE=false
 
-# Detect interactive mode: no arguments passed and stdin is a terminal
-if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
+# Detect interactive mode: launched via the tmux session wrapper above
+if [[ "${1:-}" == "--_interactive" ]]; then
     INTERACTIVE=true
+    shift
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -90,8 +136,6 @@ if ! $QUIET; then
 fi
 
 if $INTERACTIVE; then
-    echo ""
-    echo "=== radiod CPU Pinning Helper ==="
     echo ""
     echo "This tool analyses your CPU topology and suggests which physical core(s)"
     echo "to dedicate to radiod for best performance."
@@ -182,11 +226,13 @@ for core_key in "${core_list[@]}"; do
     core_l3_domain["$core_key"]="$l3_domain"
 done
 
-# ── Compute L3-aware smart default and run interactive prompt ─────────────────
-# The default is the size of the largest single L3 domain, capped at half the
-# total physical cores and at 4.  This ensures the default never crosses an L3
-# domain boundary.  We do this here (after the L3 mapping) so we know domain
-# sizes; the interactive prompt is also deferred to here for the same reason.
+# ── Compute default core count and run interactive prompt ─────────────────────
+# Default is always 1 physical core.  On a Hyper-Threaded system that means
+# 1 physical core + its HT sibling (both logical CPUs), which is the minimum
+# useful unit for radiod.  The interactive prompt still allows the user to
+# choose more cores if needed.
+# We tally L3 domain sizes here so the interactive prompt can show the
+# "stay within one L3 domain" recommendation.
 
 # Find the largest L3 domain (by physical core count)
 declare -A _pre_domain_count
@@ -201,21 +247,74 @@ for dom in "${!_pre_domain_count[@]}"; do
 done
 
 if ! $NUM_CORES_SET; then
-    _half=$(( TOTAL_PHYSICAL / 2 ))
-    (( _half < 1 )) && _half=1
-    (( _half > 4 )) && _half=4
-    # Cap at the largest single L3 domain so the default stays within one domain
-    _default_cores=$(( _half < _largest_l3 ? _half : _largest_l3 ))
-    (( _default_cores < 1 )) && _default_cores=1
-    NUM_CORES=$_default_cores
+    # Default to 1 physical core.
+    # On a Hyper-Threaded system this means 1 physical core + its HT sibling
+    # (both logical CPUs of that core), which is the minimum useful unit.
+    NUM_CORES=1
 fi
 
 if $INTERACTIVE; then
+    # Detect whether Hyper-Threading is present: any core_key with a comma means
+    # that physical core has more than one logical CPU (i.e. HT siblings).
+    _ht_present=false
+    _ht_example=""
+    for _ck in "${core_list[@]}"; do
+        if [[ "$_ck" == *","* ]]; then
+            _ht_present=true
+            _ht_example="$_ck"   # e.g. "0,4"
+            break
+        fi
+    done
+
     echo "Detected ${TOTAL_PHYSICAL} physical core(s) across ${#_pre_domain_count[@]} L3 cache domain(s)."
-    echo "Largest single L3 domain: ${_largest_l3} physical core(s)."
     echo ""
-    echo "  Recommendation: use at most ${_largest_l3} core(s) to stay within one L3 domain."
-    echo "  Using more cores will span multiple L3 domains, adding memory latency."
+
+    # Explain what "1 core" means on this specific system
+    if $_ht_present; then
+        echo "  Note: this system has Hyper-Threading enabled."
+        echo "  Each physical core has 2 logical CPUs (e.g. core [${_ht_example}] = 2 logical CPUs)."
+        echo "  Choosing 1 core will assign both logical CPUs of that core to radiod."
+    else
+        echo "  Note: Hyper-Threading is not detected — each physical core = 1 logical CPU."
+    fi
+    echo ""
+
+    # Ask about expected concurrent users to inform the recommendation
+    _expected_users=1
+    while true; do
+        read -rp "How many concurrent users do you expect at peak? (default: 1): " _users_input
+        _users_input="${_users_input:-1}"
+        if [[ "$_users_input" =~ ^[1-9][0-9]*$ ]]; then
+            _expected_users="$_users_input"
+            break
+        else
+            echo "  Please enter a positive number."
+        fi
+    done
+    echo ""
+
+    # Adjust recommended core count based on expected users
+    if (( _expected_users > 100 )); then
+        _recommended_cores=2
+        echo "  With ${_expected_users} concurrent users, we recommend 2 physical cores."
+        if $_ht_present; then
+            echo "  (2 physical cores = 4 logical CPUs on this HT system)"
+        fi
+    else
+        _recommended_cores=1
+        echo "  With ${_expected_users} concurrent user(s), 1 physical core is sufficient."
+        if $_ht_present; then
+            echo "  (1 physical core = 2 logical CPUs on this HT system)"
+        fi
+    fi
+    # Cap recommendation at the largest single L3 domain
+    (( _recommended_cores > _largest_l3 )) && _recommended_cores=$_largest_l3
+    # Update default if not already set by --cores
+    NUM_CORES=$_recommended_cores
+
+    echo ""
+    echo "  You can assign up to ${_largest_l3} core(s) and stay within one L3 cache domain."
+    echo "  Using more than ${_largest_l3} core(s) will span multiple L3 domains, adding memory latency."
     echo ""
     while true; do
         read -rp "How many physical cores do you want to assign to radiod? [1-${TOTAL_PHYSICAL}] (default: ${NUM_CORES}): " _input
@@ -652,12 +751,10 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
                 echo ""
                 echo "  A reboot is required to activate isolcpus=${best_cpuset}"
                 echo ""
+
                 read -rp "  Reboot now? [y/N]: " _reboot_ans
                 if [[ "${_reboot_ans,,}" =~ ^y ]]; then
-                    echo ""
-                    echo "  Rebooting in 5 seconds — press Ctrl+C to cancel..."
-                    sleep 5
-                    sudo reboot
+                    _do_reboot=true
                 else
                     echo "  Skipping reboot. Run 'sudo reboot' when ready."
                 fi
@@ -670,11 +767,31 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
     fi
 fi
 
-# ── 8. Interactive: remind user to restart UberSDR ───────────────────────────
+# ── 8. Interactive: restart UberSDR to activate the new cpuset ───────────────
+# Always runs when APPLY=true so Docker picks up the new cpuset.
+# Runs before the deferred reboot (section 9) so the container is already
+# using the new cpuset when the system comes back up.
 
 if $INTERACTIVE && $APPLY; then
-    echo "  ✓ cpuset applied. To activate the change, restart UberSDR:"
+    _restart_script="$HOME/ubersdr/restart-ubersdr.sh"
+    echo "  ✓ cpuset applied. Restarting UberSDR to activate the change..."
     echo ""
-    echo "    ~/ubersdr/restart-ubersdr.sh"
+    if [[ -x "$_restart_script" ]]; then
+        "$_restart_script"
+        echo ""
+        echo "  ✓ UberSDR restarted with cpuset: ${best_cpuset}"
+    else
+        echo "  ⚠  restart-ubersdr.sh not found at ${_restart_script}"
+        echo "     Run manually: cd ~/ubersdr && docker compose down && docker compose up -d"
+    fi
     echo ""
+fi
+
+# ── 9. Deferred reboot ───────────────────────────────────────────────────────
+# Executed last so UberSDR is always restarted (picking up the new cpuset)
+# before the system reboots to activate isolcpus.
+if [[ "${_do_reboot:-false}" == "true" ]]; then
+    echo "  Rebooting in 5 seconds — press Ctrl+C to cancel..."
+    sleep 5
+    sudo reboot
 fi

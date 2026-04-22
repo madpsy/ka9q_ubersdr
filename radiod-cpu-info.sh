@@ -1576,19 +1576,57 @@ section_summary() {
         fi
     fi
 
-    # CPU pinning
-    if $RADIOD_RUNNING && command -v taskset &>/dev/null; then
-        local aff
-        aff=$(taskset -cp "$RADIOD_PID" 2>/dev/null | grep -oP '(?<=affinity list: ).*' || echo "")
+    # CPU pinning — prefer the real compose cpuset over the cgroup-shifted taskset view
+    if $RADIOD_RUNNING; then
         local total_logical
         total_logical=$(nproc --all 2>/dev/null || echo "1")
-        if [[ "$aff" == "0-$(( total_logical - 1 ))" || -z "$aff" ]]; then
-            warn_line "radiod is not pinned to specific CPUs"
-            echo "    Fix: use cpuset in docker-compose.yml or taskset"
-            echo "    See: ./suggest-radiod-cpuset.sh"
-            (( issues++ )) || true
-        else
-            ok_line "radiod pinned to CPUs: ${aff}"
+        if [[ -n "$RADIOD_PINNED_CPUS" && "$RADIOD_PINNED_CPUS" != "0-$(( total_logical - 1 ))" ]]; then
+            ok_line "radiod pinned to CPUs: ${RADIOD_PINNED_CPUS}"
+
+            # L3 domain check on the real pinned set
+            declare -A _sum_l3_domains
+            IFS=',' read -ra _sum_parts <<< "$RADIOD_PINNED_CPUS"
+            for _sp in "${_sum_parts[@]}"; do
+                local _sum_cpus=()
+                if [[ "$_sp" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                    for (( _sn=${BASH_REMATCH[1]}; _sn<=${BASH_REMATCH[2]}; _sn++ )); do
+                        _sum_cpus+=("$_sn")
+                    done
+                else
+                    _sum_cpus+=("$_sp")
+                fi
+                for _sc in "${_sum_cpus[@]}"; do
+                    local _sum_cache_base="/sys/devices/system/cpu/cpu${_sc}/cache"
+                    [[ -d "$_sum_cache_base" ]] || continue
+                    for _sum_idx in "${_sum_cache_base}"/index*/; do
+                        [[ -d "$_sum_idx" ]] || continue
+                        local _sl _st _ss
+                        _sl=$(cat "${_sum_idx}level" 2>/dev/null || echo "")
+                        _st=$(cat "${_sum_idx}type"  2>/dev/null || echo "")
+                        [[ "$_sl" == "3" && "$_st" == "Unified" ]] || continue
+                        _ss=$(cat "${_sum_idx}shared_cpu_list" 2>/dev/null || echo "")
+                        _sum_l3_domains["$_ss"]=1
+                        break
+                    done
+                done
+            done
+            local _sum_l3_count="${#_sum_l3_domains[@]}"
+            if (( _sum_l3_count > 1 )); then
+                warn_line "Pinned CPUs span ${_sum_l3_count} L3 cache domains — cross-L3 buffer handoffs add latency"
+                echo "    Fix: ./suggest-radiod-cpuset.sh  (picks cores within one L3 domain)"
+                (( issues++ )) || true
+            fi
+        elif command -v taskset &>/dev/null; then
+            local aff
+            aff=$(taskset -cp "$RADIOD_PID" 2>/dev/null | grep -oP '(?<=affinity list: ).*' || echo "")
+            if [[ "$aff" == "0-$(( total_logical - 1 ))" || -z "$aff" ]]; then
+                warn_line "radiod is not pinned to specific CPUs"
+                echo "    Fix: use cpuset in docker-compose.yml or taskset"
+                echo "    See: ./suggest-radiod-cpuset.sh"
+                (( issues++ )) || true
+            else
+                ok_line "radiod pinned to CPUs: ${aff}"
+            fi
         fi
     fi
 

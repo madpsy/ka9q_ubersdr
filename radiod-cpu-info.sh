@@ -803,28 +803,30 @@ section_affinity() {
         # Prefer the Docker compose cpuset (real CPU numbers) over the host-visible
         # taskset affinity, which may be cgroup-namespace-shifted (e.g. 1-3,5-7
         # instead of the real 0,2,4,6).
+        # _real_pinned is the authoritative expanded list used for all topology checks.
+        local _real_pinned=()
         if [[ -n "${effective:-}" ]]; then
             RADIOD_PINNED_CPUS="$effective"
-            local _eff_expanded=()
             IFS=',' read -ra _eff_parts <<< "$effective"
             for _ep in "${_eff_parts[@]}"; do
                 if [[ "$_ep" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                     for (( _en=${BASH_REMATCH[1]}; _en<=${BASH_REMATCH[2]}; _en++ )); do
-                        _eff_expanded+=("$_en")
+                        _real_pinned+=("$_en")
                     done
                 else
-                    _eff_expanded+=("$_ep")
+                    _real_pinned+=("$_ep")
                 fi
             done
-            RADIOD_PINNED_CPU_COUNT="${#_eff_expanded[@]}"
+            RADIOD_PINNED_CPU_COUNT="${#_real_pinned[@]}"
         else
             RADIOD_PINNED_CPUS="${pinned_cpus}"
+            _real_pinned=("${expanded_pinned[@]}")
             RADIOD_PINNED_CPU_COUNT="${#expanded_pinned[@]}"
         fi
 
         # Check which NUMA nodes these CPUs belong to
         declare -A pinned_numa_nodes
-        for cpu_n in "${expanded_pinned[@]}"; do
+        for cpu_n in "${_real_pinned[@]}"; do
             local node_file="/sys/devices/system/cpu/cpu${cpu_n}/node"
             # node symlink or node0..nodeN dirs
             for node_dir in /sys/devices/system/cpu/cpu${cpu_n}/node[0-9]*/; do
@@ -846,7 +848,7 @@ section_affinity() {
 
         # Check whether pinned CPUs span multiple L3 cache domains
         declare -A _pinned_l3_domains
-        for cpu_n in "${expanded_pinned[@]}"; do
+        for cpu_n in "${_real_pinned[@]}"; do
             local _cache_base="/sys/devices/system/cpu/cpu${cpu_n}/cache"
             [[ -d "$_cache_base" ]] || continue
             for _idx_dir in "${_cache_base}"/index*/; do
@@ -871,7 +873,7 @@ section_affinity() {
         # Check if pinned CPUs include HT siblings (warn)
         declare -A _ht_check
         local ht_mixed=false
-        for cpu_n in "${expanded_pinned[@]}"; do
+        for cpu_n in "${_real_pinned[@]}"; do
             local sib_file="/sys/devices/system/cpu/cpu${cpu_n}/topology/thread_siblings_list"
             [[ -f "$sib_file" ]] || continue
             local sibs
@@ -883,7 +885,7 @@ section_affinity() {
                 IFS=',' read -ra sib_parts <<< "$sibs"
                 for sp in "${sib_parts[@]}"; do
                     local found_sib=false
-                    for ep in "${expanded_pinned[@]}"; do
+                    for ep in "${_real_pinned[@]}"; do
                         [[ "$ep" == "$sp" ]] && found_sib=true && break
                     done
                     $found_sib || all_sibs_pinned=false

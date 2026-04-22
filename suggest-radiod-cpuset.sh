@@ -67,61 +67,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Interactive mode: ask for core count before topology scan ─────────────────
-
 if $INTERACTIVE; then
     echo ""
     echo "=== radiod CPU Pinning Helper ==="
     echo ""
     echo "This tool analyses your CPU topology and suggests which physical core(s)"
     echo "to dedicate to radiod for best performance."
-    echo ""
-
-    # Quick peek at physical core count so we can show it in the prompt
-    _phys_count=0
-    for _cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
-        _sib="${_cpu_dir}topology/thread_siblings_list"
-        [[ -f "$_sib" ]] || continue
-        _key=$(cat "$_sib")
-        # Expand ranges and sort to get canonical key
-        _expanded=()
-        IFS=',' read -ra _parts <<< "$_key"
-        for _p in "${_parts[@]}"; do
-            if [[ "$_p" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                for (( _n=${BASH_REMATCH[1]}; _n<=${BASH_REMATCH[2]}; _n++ )); do
-                    _expanded+=("$_n")
-                done
-            else
-                _expanded+=("$_p")
-            fi
-        done
-        IFS=$'\n' _sorted=($(printf '%s\n' "${_expanded[@]}" | sort -n)); unset IFS
-        _canon=$(IFS=','; echo "${_sorted[*]}")
-        _seen_key="_seen_${_canon//,/_}"
-        if [[ -z "${!_seen_key:-}" ]]; then
-            printf -v "$_seen_key" 1
-            (( _phys_count++ )) || true
-        fi
-    done
-
-    echo "Detected ${_phys_count} physical core(s) on this system."
-    echo ""
-    # Compute the same smart default for the prompt (topology scan hasn't run yet here,
-    # but _phys_count gives us the same value)
-    _default_cores=$(( _phys_count / 2 ))
-    (( _default_cores < 1 )) && _default_cores=1
-    (( _default_cores > 4 )) && _default_cores=4
-    while true; do
-        read -rp "How many physical cores do you want to assign to radiod? [1-${_phys_count}] (default: ${_default_cores}): " _input
-        _input="${_input:-${_default_cores}}"
-        if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= _phys_count )); then
-            NUM_CORES="$_input"
-            NUM_CORES_SET=true
-            break
-        else
-            echo "  Please enter a number between 1 and ${_phys_count}."
-        fi
-    done
     echo ""
 fi
 
@@ -170,14 +121,6 @@ if (( TOTAL_PHYSICAL == 0 )); then
     exit 1
 fi
 
-# ── Compute smart default if --cores was not explicitly set ──────────────────
-if ! $NUM_CORES_SET; then
-    _half=$(( TOTAL_PHYSICAL / 2 ))
-    (( _half < 1 )) && _half=1
-    (( _half > 4 )) && _half=4
-    NUM_CORES=$_half
-fi
-
 if (( NUM_CORES > TOTAL_PHYSICAL )); then
     echo "ERROR: --cores ${NUM_CORES} requested but only ${TOTAL_PHYSICAL} physical core(s) detected." >&2
     exit 1
@@ -216,6 +159,55 @@ for core_key in "${core_list[@]}"; do
     [[ -z "$l3_domain" ]] && l3_domain="unknown"
     core_l3_domain["$core_key"]="$l3_domain"
 done
+
+# ── Compute L3-aware smart default and run interactive prompt ─────────────────
+# The default is the size of the largest single L3 domain, capped at half the
+# total physical cores and at 4.  This ensures the default never crosses an L3
+# domain boundary.  We do this here (after the L3 mapping) so we know domain
+# sizes; the interactive prompt is also deferred to here for the same reason.
+
+# Find the largest L3 domain (by physical core count)
+declare -A _pre_domain_count
+for core_key in "${core_list[@]}"; do
+    dom="${core_l3_domain[$core_key]}"
+    _pre_domain_count["$dom"]=$(( ${_pre_domain_count[$dom]:-0} + 1 ))
+done
+_largest_l3=0
+for dom in "${!_pre_domain_count[@]}"; do
+    cnt="${_pre_domain_count[$dom]}"
+    (( cnt > _largest_l3 )) && _largest_l3=$cnt
+done
+
+if ! $NUM_CORES_SET; then
+    _half=$(( TOTAL_PHYSICAL / 2 ))
+    (( _half < 1 )) && _half=1
+    (( _half > 4 )) && _half=4
+    # Cap at the largest single L3 domain so the default stays within one domain
+    _default_cores=$(( _half < _largest_l3 ? _half : _largest_l3 ))
+    (( _default_cores < 1 )) && _default_cores=1
+    NUM_CORES=$_default_cores
+fi
+
+if $INTERACTIVE; then
+    echo "Detected ${TOTAL_PHYSICAL} physical core(s) across ${#_pre_domain_count[@]} L3 cache domain(s)."
+    echo "Largest single L3 domain: ${_largest_l3} physical core(s)."
+    echo ""
+    echo "  Recommendation: use at most ${_largest_l3} core(s) to stay within one L3 domain."
+    echo "  Using more cores will span multiple L3 domains, adding memory latency."
+    echo ""
+    while true; do
+        read -rp "How many physical cores do you want to assign to radiod? [1-${TOTAL_PHYSICAL}] (default: ${NUM_CORES}): " _input
+        _input="${_input:-${NUM_CORES}}"
+        if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= TOTAL_PHYSICAL )); then
+            NUM_CORES="$_input"
+            NUM_CORES_SET=true
+            break
+        else
+            echo "  Please enter a number between 1 and ${TOTAL_PHYSICAL}."
+        fi
+    done
+    echo ""
+fi
 
 # ── 3. Select N physical cores, preferring a single L3 domain ────────────────
 #

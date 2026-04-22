@@ -94,14 +94,14 @@ func setupDataSocket(addr *net.UDPAddr, iface *net.Interface) (*net.UDPConn, err
 	// With many IQ192 channels (~47 pkt/s × 16 KB each), the inbound rate can
 	// exceed 40 MB/s. A GC pause of even 5-20 ms at that rate fills the old
 	// 1 MB buffer and causes kernel-level drops that stutter ALL channels.
-	// 16 MB gives ~1 second of headroom at 130 Mbps.
+	// 32 MB gives ~2 seconds of headroom at 130 Mbps.
 	//
 	// IMPORTANT: The kernel silently caps SetReadBuffer at net.core.rmem_max.
 	// The default rmem_max is only 208 KB — at 130 Mbps that fills in ~12 ms,
 	// causing periodic drops that stutter ALL sessions simultaneously.
-	// Run: sudo sysctl -w net.core.rmem_max=67108864
+	// Run: sudo sysctl -w net.core.rmem_max=134217728
 	// (install-hub.sh sets this automatically)
-	const wantedBufSize = 16 * 1024 * 1024
+	const wantedBufSize = 32 * 1024 * 1024
 	if err := udpConn.SetReadBuffer(wantedBufSize); err != nil {
 		log.Printf("Warning: failed to set UDP read buffer size: %v", err)
 	}
@@ -121,7 +121,7 @@ func setupDataSocket(addr *net.UDPAddr, iface *net.Interface) (*net.UDPConn, err
 			log.Printf("WARNING: UDP receive buffer is only %d KB (requested %d KB). "+
 				"Kernel net.core.rmem_max is too low — high-throughput IQ streaming will "+
 				"cause packet drops and audio stuttering. "+
-				"Fix: sudo sysctl -w net.core.rmem_max=67108864",
+				"Fix: sudo sysctl -w net.core.rmem_max=134217728",
 				actualBufSize/1024, wantedBufSize/1024)
 		} else {
 			log.Printf("UDP receive buffer set to %d KB (requested %d KB)",

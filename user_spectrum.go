@@ -151,7 +151,7 @@ func (usm *UserSpectrumManager) setupStatusListener() error {
 	// Increase UDP receive buffer to handle bursts from many users
 	// Default is typically 208KB, increase to 8MB to prevent packet loss
 	// With 40+ users, radiod may send all responses in a tight burst
-	const recvBufferSize = 8 * 1024 * 1024 // 8MB
+	const recvBufferSize = 16 * 1024 * 1024 // 16MB
 	if err := udpConn.SetReadBuffer(recvBufferSize); err != nil {
 		log.Printf("Warning: failed to set UDP receive buffer size to %d bytes: %v", recvBufferSize, err)
 	} else {

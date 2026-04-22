@@ -292,20 +292,22 @@ fi
 
 # Increase UDP receive buffer maximum to prevent packet loss at high IQ throughput.
 # The default rmem_max (208 KB) is silently used as a cap even when applications
-# request larger buffers (ubersdr requests 16 MB via SetReadBuffer). At ~130 Mbps
+# request larger buffers (ubersdr requests 32 MB via SetReadBuffer). At ~130 Mbps
 # of IQ multicast traffic the 208 KB buffer fills in ~12 ms, causing kernel-level
-# UDP drops that stutter ALL audio sessions simultaneously. 64 MB gives ~4 seconds
+# UDP drops that stutter ALL audio sessions simultaneously. 128 MB gives ~8 seconds
 # of headroom and eliminates the drops.
 echo "Configuring UDP receive buffer size..."
 if ! grep -q "^net.core.rmem_max" /etc/sysctl.conf; then
-    echo "Setting net.core.rmem_max=67108864 (64 MB) for high-throughput IQ streaming..."
-    echo "net.core.rmem_max = 67108864" | sudo tee -a /etc/sysctl.conf > /dev/null
-    sudo sysctl -w net.core.rmem_max=67108864 > /dev/null 2>&1
-    echo "UDP receive buffer maximum set to 64 MB."
+    echo "Setting net.core.rmem_max=134217728 (128 MB) for high-throughput IQ streaming..."
+    echo "net.core.rmem_max = 134217728" | sudo tee -a /etc/sysctl.conf > /dev/null
+    sudo sysctl -w net.core.rmem_max=134217728 > /dev/null 2>&1
+    echo "UDP receive buffer maximum set to 128 MB."
 else
-    echo "net.core.rmem_max already configured in sysctl.conf."
-    # Ensure the live value is also applied (in case it was set lower previously)
-    sudo sysctl -w net.core.rmem_max=67108864 > /dev/null 2>&1
+    # Update the value in sysctl.conf in case it was set to a lower value previously.
+    sudo sed -i 's/^net\.core\.rmem_max\s*=.*/net.core.rmem_max = 134217728/' /etc/sysctl.conf
+    echo "net.core.rmem_max updated to 128 MB in sysctl.conf."
+    # Also apply the new value immediately without requiring a reboot.
+    sudo sysctl -w net.core.rmem_max=134217728 > /dev/null 2>&1
 fi
 
 # Install Docker if not already installed

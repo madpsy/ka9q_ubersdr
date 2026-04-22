@@ -1530,6 +1530,17 @@
                                     ⚙️ Manage CPU Pinning
                                 </button>
                             </div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #bbdefb;">
+                                <div style="flex: 1; color: #0d47a1;">
+                                    <p style="margin: 0; font-size: 13px; color: #1565c0;">
+                                        Detailed report of CPU topology, thread scheduling, IRQ affinity, kernel isolation parameters,
+                                        and radiod CPU usage — useful for diagnosing real-time performance issues.
+                                    </p>
+                                </div>
+                                <button class="btn" onclick="openCPUInfo()" style="background: #1565c0; color: white; font-weight: bold; white-space: nowrap;">
+                                    📊 CPU Info
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -3240,6 +3251,20 @@
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'cpu_pinning_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open CPU Info report script in popup terminal window
+        function openCPUInfo() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/radiod-cpu-info.sh';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1100;
+            const height = 800;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'cpu_info_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 

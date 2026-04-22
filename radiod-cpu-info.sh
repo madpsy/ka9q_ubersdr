@@ -368,7 +368,7 @@ section_cache() {
     if (( l3_count > 1 )); then
         echo ""
         kv "L3 instances" "${l3_count} × (${l3_total_kb} KB total)"
-        warn_line "Multiple L3 caches — cross-socket memory traffic will be expensive"
+        info_line "Multiple L3 caches — pin radiod to cores sharing one L3 for best memory locality"
     fi
 }
 

@@ -524,6 +524,10 @@ echo "Fetching suggest-radiod-cpuset.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/suggest-radiod-cpuset.sh -o "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/suggest-radiod-cpuset.sh"
 
+echo "Fetching radiod-cpu-info.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/radiod-cpu-info.sh -o "$ACTUAL_HOME/ubersdr/radiod-cpu-info.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/radiod-cpu-info.sh"
+
 echo "Fetching check_time.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/check_time.sh -o "$ACTUAL_HOME/ubersdr/check_time.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/check_time.sh"

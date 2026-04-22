@@ -290,10 +290,13 @@ if [ "$1" = "ka9q_ubersdr" ]; then
     ) &
 fi
 
-# If the command is ka9q_ubersdr, add the -config-dir flag
+# If the command is ka9q_ubersdr, add the -config-dir flag.
+# Run at nice -5 so ubersdr and its decoder children (jt9, wsprd, js8 etc.)
+# are prioritised above background system processes (nice 0) while remaining
+# well below radiod's SCHED_FIFO real-time threads.
 if [ "$1" = "ka9q_ubersdr" ]; then
     shift
-    exec ka9q_ubersdr -config-dir /app/config "$@"
+    exec nice -n -5 ka9q_ubersdr -config-dir /app/config "$@"
 else
     # Execute the command as-is
     exec "$@"

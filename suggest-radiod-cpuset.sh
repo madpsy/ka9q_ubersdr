@@ -387,7 +387,189 @@ if $APPLY; then
     fi
 fi
 
-# ── 8. Interactive: remind user to restart UberSDR ───────────────────────────
+# ── 8. isolcpus suggestion ────────────────────────────────────────────────────
+# cpuset keeps radiod ON the chosen cores; isolcpus keeps everything else OFF.
+# Together they give near-exclusive access to those cores.
+
+_suggest_isolcpus() {
+    local cpuset="$1"
+
+    # Check current kernel cmdline
+    local cmdline
+    cmdline=$(cat /proc/cmdline 2>/dev/null || echo "")
+
+    local current_isolcpus=""
+    current_isolcpus=$(echo "$cmdline" | grep -oP 'isolcpus=\S+' | cut -d= -f2 || echo "")
+    local current_nohz=""
+    current_nohz=$(echo "$cmdline" | grep -oP 'nohz_full=\S+' | cut -d= -f2 || echo "")
+    local current_rcu=""
+    current_rcu=$(echo "$cmdline" | grep -oP 'rcu_nocbs=\S+' | cut -d= -f2 || echo "")
+
+    echo ""
+    echo "  ── Kernel CPU Isolation (isolcpus) ──────────────────────────────"
+    echo ""
+    echo "  cpuset keeps radiod ON cores ${cpuset}."
+    echo "  isolcpus keeps all other tasks OFF those cores."
+    echo "  Together they give radiod near-exclusive access."
+    echo ""
+
+    if [[ -n "$current_isolcpus" ]]; then
+        if [[ "$current_isolcpus" == "$cpuset" ]]; then
+            echo "  ✓ isolcpus=${current_isolcpus} already matches — no change needed."
+            [[ -n "$current_nohz" ]] && echo "  ✓ nohz_full=${current_nohz}" || true
+            [[ -n "$current_rcu"  ]] && echo "  ✓ rcu_nocbs=${current_rcu}"  || true
+            echo ""
+            return
+        else
+            echo "  ⚠  Current isolcpus=${current_isolcpus} does NOT match cpuset=${cpuset}"
+            echo "     Consider updating it to match."
+            echo ""
+        fi
+    else
+        echo "  isolcpus is not currently set."
+        echo ""
+    fi
+
+    echo "  Recommended kernel parameters to add:"
+    echo ""
+    echo "    isolcpus=${cpuset} nohz_full=${cpuset} rcu_nocbs=${cpuset}"
+    echo ""
+    echo "  These reduce timer interrupts and RCU callbacks on the SDR cores,"
+    echo "  minimising latency jitter for real-time sample processing."
+    echo ""
+}
+
+if ! $QUIET; then
+    _suggest_isolcpus "$best_cpuset"
+fi
+
+# Interactive: offer to apply isolcpus to grub
+if $INTERACTIVE; then
+    # Only offer if isolcpus isn't already correctly set
+    _current_iso=$(cat /proc/cmdline 2>/dev/null | grep -oP 'isolcpus=\S+' | cut -d= -f2 || echo "")
+    if [[ "$_current_iso" != "$best_cpuset" ]]; then
+        read -rp "Do you want to add isolcpus=${best_cpuset} to your kernel boot parameters? [y/N]: " _iso_ans
+        if [[ "${_iso_ans,,}" =~ ^y ]]; then
+            _grub_file="/etc/default/grub"
+
+            if [[ ! -f "$_grub_file" ]]; then
+                echo "  ERROR: ${_grub_file} not found — cannot apply automatically." >&2
+
+            # Check if any of these params already exist in grub (read is fine without sudo)
+            elif grep -qE 'isolcpus=|nohz_full=|rcu_nocbs=' "$_grub_file" 2>/dev/null; then
+                echo ""
+                # Check if the existing values already match what we want
+                _grub_iso=$(grep -oP 'isolcpus=\S+' "$_grub_file" | cut -d= -f2 | tr -d '"' || echo "")
+                _grub_nohz=$(grep -oP 'nohz_full=\S+' "$_grub_file" | cut -d= -f2 | tr -d '"' || echo "")
+                _grub_rcu=$(grep -oP 'rcu_nocbs=\S+' "$_grub_file" | cut -d= -f2 | tr -d '"' || echo "")
+
+                if [[ "$_grub_iso" == "$best_cpuset" && "$_grub_nohz" == "$best_cpuset" && "$_grub_rcu" == "$best_cpuset" ]]; then
+                    echo "  ✓ ${_grub_file} already has the correct values:"
+                    echo "      isolcpus=${_grub_iso} nohz_full=${_grub_nohz} rcu_nocbs=${_grub_rcu}"
+                    echo ""
+                    echo "  Grub just needs to be regenerated and the system rebooted."
+                    echo ""
+                    # Fall through to update-grub + reboot prompt by jumping to shared block
+                    _do_grub_update=true
+                else
+                    echo "  ⚠  Existing isolcpus/nohz_full/rcu_nocbs found in ${_grub_file} with different values."
+                    echo "  Current:"
+                    grep 'GRUB_CMDLINE_LINUX' "$_grub_file"
+                    echo ""
+                    echo "  Desired: isolcpus=${best_cpuset} nohz_full=${best_cpuset} rcu_nocbs=${best_cpuset}"
+                    echo ""
+                    read -rp "  Update these values automatically? [y/N]: " _update_ans
+                    if [[ "${_update_ans,,}" =~ ^y ]]; then
+                        _grub_backup="${_grub_file}.bak.$(date +%Y%m%d%H%M%S)"
+                        sudo cp "$_grub_file" "$_grub_backup" && echo "  Backup: ${_grub_backup}"
+                        # Replace existing isolcpus/nohz_full/rcu_nocbs values in-place
+                        sudo sed -i \
+                            -e "s/isolcpus=[^ \"]*/isolcpus=${best_cpuset}/g" \
+                            -e "s/nohz_full=[^ \"]*/nohz_full=${best_cpuset}/g" \
+                            -e "s/rcu_nocbs=[^ \"]*/rcu_nocbs=${best_cpuset}/g" \
+                            "$_grub_file"
+                        echo "  ✓ Values updated in ${_grub_file}"
+                        echo ""
+                        _do_grub_update=true
+                    else
+                        echo "  Skipping — edit ${_grub_file} manually."
+                        echo ""
+                        _do_grub_update=false
+                    fi
+                fi
+
+            else
+                # No existing isolcpus params — append them fresh
+                _grub_backup="${_grub_file}.bak.$(date +%Y%m%d%H%M%S)"
+                echo ""
+                if ! sudo cp "$_grub_file" "$_grub_backup" 2>/dev/null; then
+                    echo "  ERROR: could not back up ${_grub_file} (sudo cp failed)" >&2
+                    _do_grub_update=false
+                else
+                    echo "  Backup saved to: ${_grub_backup}"
+                    if sudo sed -i "s/\(GRUB_CMDLINE_LINUX=\"[^\"]*\)\"/\1 isolcpus=${best_cpuset} nohz_full=${best_cpuset} rcu_nocbs=${best_cpuset}\"/" "$_grub_file"; then
+                        echo "  ✓ Updated ${_grub_file}"
+                        echo ""
+                        _do_grub_update=true
+                    else
+                        echo "  ERROR: sudo sed failed — check sudo permissions." >&2
+                        _do_grub_update=false
+                    fi
+                fi
+            fi
+
+            # ── Shared: run update-grub and offer reboot ──────────────────────
+            if [[ "${_do_grub_update:-false}" == "true" ]]; then
+                # Find grub regeneration command — use full paths as /usr/sbin
+                # may not be in PATH in all sudo environments.
+                _grub_cmd=""
+                for _candidate in \
+                    /usr/sbin/update-grub \
+                    /sbin/update-grub \
+                    /usr/sbin/grub2-mkconfig \
+                    /usr/sbin/grub-mkconfig; do
+                    [[ -x "$_candidate" ]] && _grub_cmd="$_candidate" && break
+                done
+
+                if [[ -n "$_grub_cmd" ]]; then
+                    echo "  Running sudo ${_grub_cmd}..."
+                    case "$_grub_cmd" in
+                        *update-grub)
+                            sudo "$_grub_cmd" 2>&1 | tail -3 ;;
+                        *grub2-mkconfig)
+                            sudo "$_grub_cmd" -o /boot/grub2/grub.cfg 2>&1 | tail -3 ;;
+                        *grub-mkconfig)
+                            sudo "$_grub_cmd" -o /boot/grub/grub.cfg 2>&1 | tail -3 ;;
+                    esac
+                    echo ""
+                    echo "  ✓ Grub updated."
+                else
+                    echo "  ⚠  No grub update command found in /usr/sbin or /sbin."
+                    echo "  Run manually before rebooting: sudo update-grub"
+                fi
+
+                echo ""
+                echo "  A reboot is required to activate isolcpus=${best_cpuset}"
+                echo ""
+                read -rp "  Reboot now? [y/N]: " _reboot_ans
+                if [[ "${_reboot_ans,,}" =~ ^y ]]; then
+                    echo ""
+                    echo "  Rebooting in 5 seconds — press Ctrl+C to cancel..."
+                    sleep 5
+                    sudo reboot
+                else
+                    echo "  Skipping reboot. Run 'sudo reboot' when ready."
+                fi
+                echo ""
+            fi
+        else
+            echo "  Skipping isolcpus configuration."
+            echo ""
+        fi
+    fi
+fi
+
+# ── 9. Interactive: remind user to restart UberSDR ───────────────────────────
 
 if $INTERACTIVE && $APPLY; then
     echo "  ✓ cpuset applied. To activate the change, restart UberSDR:"

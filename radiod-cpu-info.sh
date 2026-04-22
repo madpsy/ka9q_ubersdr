@@ -103,6 +103,8 @@ RADIOD_PROC_CPU=""         # CPU% of proc_* threads (combined)
 RADIOD_SPECT_CPU=""        # CPU% of spect* threads (combined)
 RADIOD_LIN_CPU=""          # CPU% of lin* threads (combined)
 RADIOD_RADIOSTAT_CPU=""    # CPU% of "radio stat" threads (combined)
+# Global: set by section_numa; pinning advice is suppressed on single-NUMA systems
+NUMA_NODE_COUNT=1
 
 # ── 1. CPU Model & Basic Topology ─────────────────────────────────────────────
 
@@ -208,10 +210,14 @@ section_cpu_model() {
                 ok_line "Hyper-Threading is ON — pinned CPUs form complete physical core(s), no split pairs"
             fi
         else
-            # radiod not running or not pinned — just note HT is on
-            ht_colour="$YELLOW"
-            echo ""
-            warn_line "Hyper-Threading is ON. Pin radiod to dedicated physical core(s) for best RT performance."
+            # radiod not running or not pinned — only advise pinning on multi-NUMA systems
+            if (( NUMA_NODE_COUNT > 1 )); then
+                ht_colour="$YELLOW"
+                echo ""
+                warn_line "Hyper-Threading is ON. Pin radiod to dedicated physical core(s) for best RT performance."
+            else
+                ht_colour="$YELLOW"
+            fi
         fi
     else
         ht_status="disabled (${logical_cpus} logical = ${total_phys} physical)"
@@ -402,6 +408,8 @@ section_numa() {
         (( node_count++ )) || true
     done
 
+    NUMA_NODE_COUNT="$node_count"
+
     echo ""
     if (( node_count > 1 )); then
         warn_line "Multi-NUMA system (${node_count} nodes). Cross-NUMA memory access adds ~100 ns latency."
@@ -552,7 +560,7 @@ section_kernel_params() {
         fi
     fi
 
-    if ! $found_any; then
+    if ! $found_any && (( NUMA_NODE_COUNT > 1 )); then
         echo ""
         warn_line "No CPU isolation parameters detected. For best real-time SDR performance:"
         echo "    Add to /etc/default/grub GRUB_CMDLINE_LINUX:"
@@ -903,7 +911,9 @@ section_affinity() {
         fi
     else
         info_line "No CPU pinning detected — radiod can run on any CPU"
-        warn_line "Consider pinning radiod to dedicated cores for deterministic latency"
+        if (( NUMA_NODE_COUNT > 1 )); then
+            warn_line "Consider pinning radiod to dedicated cores for deterministic latency"
+        fi
     fi
 }
 
@@ -1620,10 +1630,12 @@ section_summary() {
             local aff
             aff=$(taskset -cp "$RADIOD_PID" 2>/dev/null | grep -oP '(?<=affinity list: ).*' || echo "")
             if [[ "$aff" == "0-$(( total_logical - 1 ))" || -z "$aff" ]]; then
-                warn_line "radiod is not pinned to specific CPUs"
-                echo "    Fix: use cpuset in docker-compose.yml or taskset"
-                echo "    See: ./suggest-radiod-cpuset.sh"
-                (( issues++ )) || true
+                if (( NUMA_NODE_COUNT > 1 )); then
+                    warn_line "radiod is not pinned to specific CPUs"
+                    echo "    Fix: use cpuset in docker-compose.yml or taskset"
+                    echo "    See: ./suggest-radiod-cpuset.sh"
+                    (( issues++ )) || true
+                fi
             else
                 ok_line "radiod pinned to CPUs: ${aff}"
             fi
@@ -1634,8 +1646,10 @@ section_summary() {
     local cmdline
     cmdline=$(cat /proc/cmdline 2>/dev/null || echo "")
     if ! echo "$cmdline" | grep -q 'isolcpus'; then
-        warn_line "isolcpus not set in kernel boot parameters"
-        (( issues++ )) || true
+        if (( NUMA_NODE_COUNT > 1 )); then
+            warn_line "isolcpus not set in kernel boot parameters"
+            (( issues++ )) || true
+        fi
     else
         local _isol_val
         _isol_val=$(echo "$cmdline" | grep -oP 'isolcpus=\S+' | sed 's/isolcpus=//' || echo "")

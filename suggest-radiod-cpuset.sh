@@ -63,14 +63,9 @@ if [[ $# -eq 0 ]]; then
 
     echo "Creating tmux session '$SESSION_NAME' and starting CPU pinning helper..."
     echo
-    echo "To detach from the session (without stopping it):"
-    echo "  Press Ctrl+B, then D"
-    echo
 
     tmux new-session -d -s "$SESSION_NAME" -n 'CPU Pinning' "bash $0 --_interactive; echo; echo; echo 'Press Enter to close...'; read"
 
-    echo "Tmux session '$SESSION_NAME' created and CPU pinning helper started!"
-    echo
     echo "Attaching to session now..."
     sleep 1
     tmux attach -t "$SESSION_NAME"

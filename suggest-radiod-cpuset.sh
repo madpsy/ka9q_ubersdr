@@ -67,6 +67,27 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ── Warning banner ────────────────────────────────────────────────────────────
+# Shown unless --quiet is passed.
+
+if ! $QUIET; then
+    echo ""
+    echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+    echo -e "\033[1;33m║  ⚠  MOST USERS DO NOT NEED TO RUN THIS SCRIPT                       ║\033[0m"
+    echo -e "\033[1;33m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
+    echo -e "\033[1;33m║  CPU pinning via cpuset / isolcpus is an advanced tuning measure     ║\033[0m"
+    echo -e "\033[1;33m║  intended to solve specific real-time latency problems, such as:     ║\033[0m"
+    echo -e "\033[1;33m║    • persistent audio drop-outs or buffer underruns                  ║\033[0m"
+    echo -e "\033[1;33m║    • measurable timing jitter on a heavily loaded system             ║\033[0m"
+    echo -e "\033[1;33m║    • running radiod alongside other CPU-intensive workloads          ║\033[0m"
+    echo -e "\033[1;33m║                                                                      ║\033[0m"
+    echo -e "\033[1;33m║  If radiod is working fine for you, stop here — applying cpuset      ║\033[0m"
+    echo -e "\033[1;33m║  will inflate your load average and requires a reboot to activate    ║\033[0m"
+    echo -e "\033[1;33m║  isolcpus.  It is NOT required for a normal UberSDR installation.   ║\033[0m"
+    echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+    echo ""
+fi
+
 if $INTERACTIVE; then
     echo ""
     echo "=== radiod CPU Pinning Helper ==="

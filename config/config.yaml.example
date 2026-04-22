@@ -1069,10 +1069,10 @@ noisefloor:
     
     - name: "10m"
       start: 28000000         # 28.0 MHz
-      end: 29700000           # 29.7 MHz
-      center_frequency: 28850000
+      end: 28300000           # 28.3 MHz (lower portion)
+      center_frequency: 28150000
       bin_count: 1000
-      bin_bandwidth: 1700     # 1.7 kHz resolution (wide band)
+      bin_bandwidth: 300     # 1.7 kHz resolution (wide band)
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
 
 # ==============================================================================

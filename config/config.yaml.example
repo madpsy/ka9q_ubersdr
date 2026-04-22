@@ -1072,7 +1072,7 @@ noisefloor:
       end: 28300000           # 28.3 MHz (lower portion)
       center_frequency: 28150000
       bin_count: 1000
-      bin_bandwidth: 300     # 1.7 kHz resolution (wide band)
+      bin_bandwidth: 300     # 300 Hz resolution
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
 
 # ==============================================================================

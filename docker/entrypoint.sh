@@ -232,6 +232,63 @@ fix_docker_networking() {
     echo "Docker bridge networking configuration applied"
 }
 
+# Migrate noisefloor bands: for any band that exists in both the user config and the
+# example config (matched by name), overwrite its fields with the canonical example values.
+# This corrects stale defaults from older installs without touching user-added bands.
+migrate_noisefloor_bands() {
+    local user_config="/app/config/config.yaml"
+    local example_config="/etc/ka9q_ubersdr/config.yaml.example"
+
+    if [ ! -f "$user_config" ] || [ ! -f "$example_config" ]; then
+        return
+    fi
+
+    echo "Migrating noisefloor bands to match example config..."
+
+    local updated=0
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+
+        # Check if this band name exists in the user config
+        local count
+        count=$(yq eval ".noisefloor.bands[] | select(.name == \"$name\") | .name" "$user_config" 2>/dev/null | wc -l)
+        if [ "$count" -gt 0 ]; then
+            # Read canonical values from example
+            local start end cf bc bb ft8
+            start=$(yq eval ".noisefloor.bands[] | select(.name == \"$name\") | .start"            "$example_config")
+            end=$(yq eval   ".noisefloor.bands[] | select(.name == \"$name\") | .end"              "$example_config")
+            cf=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .center_frequency" "$example_config")
+            bc=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .bin_count"        "$example_config")
+            bb=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .bin_bandwidth"    "$example_config")
+            ft8=$(yq eval   ".noisefloor.bands[] | select(.name == \"$name\") | .ft8_frequency"    "$example_config")
+
+            # Build the yq expression; only set ft8_frequency if the example has one
+            local expr
+            expr="(.noisefloor.bands[] | select(.name == \"$name\") | .start) = $start |
+                  (.noisefloor.bands[] | select(.name == \"$name\") | .end) = $end |
+                  (.noisefloor.bands[] | select(.name == \"$name\") | .center_frequency) = $cf |
+                  (.noisefloor.bands[] | select(.name == \"$name\") | .bin_count) = $bc |
+                  (.noisefloor.bands[] | select(.name == \"$name\") | .bin_bandwidth) = $bb"
+            if [ -n "$ft8" ] && [ "$ft8" != "null" ]; then
+                expr="$expr | (.noisefloor.bands[] | select(.name == \"$name\") | .ft8_frequency) = $ft8"
+            fi
+
+            if yq eval -i "$expr" "$user_config" 2>/dev/null; then
+                echo "  ✓ Updated noisefloor band: $name"
+                updated=$((updated + 1))
+            else
+                echo "  ⚠ Warning: Failed to update noisefloor band: $name"
+            fi
+        fi
+    done < <(yq eval '.noisefloor.bands[].name' "$example_config" 2>/dev/null)
+
+    if [ "$updated" -gt 0 ]; then
+        echo "✓ Noisefloor band migration complete ($updated band(s) updated)"
+    else
+        echo "✓ Noisefloor bands are up to date"
+    fi
+}
+
 # Initialize configuration files
 initialize_configs
 
@@ -239,6 +296,7 @@ initialize_configs
 if [ -f "/app/config/config.yaml" ]; then
     fix_docker_networking
     update_admin_password
+    migrate_noisefloor_bands
 else
     echo "Warning: Config file not found at /app/config/config.yaml"
 fi

@@ -36,6 +36,7 @@ set -euo pipefail
 
 QUIET=false
 APPLY=false
+SKIP_ISOLCPUS=false   # true when user explicitly declines docker-compose apply
 NUM_CORES=1
 NUM_CORES_SET=false   # true when --cores was explicitly passed
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -390,6 +391,7 @@ if $INTERACTIVE; then
         COMPOSE_FILE="$_compose_input"
     else
         echo "Skipping apply."
+        SKIP_ISOLCPUS=true
     fi
     echo ""
 fi
@@ -513,15 +515,40 @@ _suggest_isolcpus() {
     echo ""
 }
 
-if ! $QUIET; then
+# In interactive mode, only show isolcpus info if the user agreed to apply the
+# docker-compose change (SKIP_ISOLCPUS=false).  In non-interactive mode, always
+# show it unless --quiet was passed (the caller can decide what to do with it).
+if ! $QUIET && { ! $INTERACTIVE || ! $SKIP_ISOLCPUS; }; then
     _suggest_isolcpus "$best_cpuset"
 fi
 
 # Interactive: offer to apply isolcpus to grub
-if $INTERACTIVE; then
+# Skipped if the user already declined the docker-compose apply step.
+if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
     # Only offer if isolcpus isn't already correctly set
     _current_iso=$(cat /proc/cmdline 2>/dev/null | grep -oP 'isolcpus=\S+' | cut -d= -f2 || echo "")
     if [[ "$_current_iso" != "$best_cpuset" ]]; then
+
+        echo ""
+        echo -e "\033[1;31m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+        echo -e "\033[1;31m║  🚧  EXPERIMENTAL — KERNEL ISOLATION CHANGES                         ║\033[0m"
+        echo -e "\033[1;31m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
+        echo -e "\033[1;31m║  The isolcpus / nohz_full / rcu_nocbs kernel boot parameter          ║\033[0m"
+        echo -e "\033[1;31m║  changes below are UNDER ACTIVE TESTING and may NOT work             ║\033[0m"
+        echo -e "\033[1;31m║  correctly AT ALL on your system.                                    ║\033[0m"
+        echo -e "\033[1;31m║                                                                      ║\033[0m"
+        echo -e "\033[1;31m║  ➤  For most users, the Docker-only cpuset change above is           ║\033[0m"
+        echo -e "\033[1;31m║     sufficient (and usually not even needed).                        ║\033[0m"
+        echo -e "\033[1;31m║                                                                      ║\033[0m"
+        echo -e "\033[1;31m║  ➤  Applying kernel parameters modifies your bootloader config       ║\033[0m"
+        echo -e "\033[1;31m║     and requires a reboot. It can cause boot failures or other       ║\033[0m"
+        echo -e "\033[1;31m║     unexpected system behaviour.                                     ║\033[0m"
+        echo -e "\033[1;31m║                                                                      ║\033[0m"
+        echo -e "\033[1;31m║  ➤  RECOMMENDATION: answer N below and stick with the Docker         ║\033[0m"
+        echo -e "\033[1;31m║     cpuset change only, unless you know what you are doing.          ║\033[0m"
+        echo -e "\033[1;31m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+        echo ""
+
         read -rp "Do you want to add isolcpus=${best_cpuset} to your kernel boot parameters? [y/N]: " _iso_ans
         if [[ "${_iso_ans,,}" =~ ^y ]]; then
             _grub_file="/etc/default/grub"

@@ -774,6 +774,17 @@ fi
 
 if $INTERACTIVE && $APPLY; then
     _restart_script="$HOME/ubersdr/restart-ubersdr.sh"
+    echo ""
+    echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+    echo -e "\033[1;33m║  ⚠  YOU WILL LOSE CONNECTION BRIEFLY — THIS IS EXPECTED              ║\033[0m"
+    echo -e "\033[1;33m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
+    echo -e "\033[1;33m║  UberSDR is about to restart to apply the new cpuset.                ║\033[0m"
+    echo -e "\033[1;33m║  Your browser connection to the SDR will drop for ~30 seconds        ║\033[0m"
+    echo -e "\033[1;33m║  while Docker restarts the container.                                ║\033[0m"
+    echo -e "\033[1;33m║                                                                      ║\033[0m"
+    echo -e "\033[1;33m║  Simply refresh the page once UberSDR is back online.                ║\033[0m"
+    echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+    echo ""
     echo "  ✓ cpuset applied. Restarting UberSDR to activate the change..."
     echo ""
     if [[ -x "$_restart_script" ]]; then

@@ -554,7 +554,7 @@ func (md *MultiDecoder) processAudioPacket(band *DecoderBand, audioData []byte, 
 	if ds.WavFile != nil {
 		n, err := ds.WavFile.WriteBytes(audioData)
 		if err != nil {
-			log.Printf("Error writing audio data for %s: %v", band.Config.Name, err)
+			// suppress write errors (e.g. no space left on device)
 		} else {
 			ds.SamplesWritten += int64(n)
 			ds.TotalSamples += int64(n)
@@ -592,7 +592,6 @@ func (md *MultiDecoder) createNewFile(band *DecoderBand, cycleStart time.Time) {
 	// Create WAV writer
 	wavWriter, err := NewWAVWriter(filename, ds.SampleRate, ds.Channels, 16)
 	if err != nil {
-		log.Printf("Error creating WAV file %s: %v", filename, err)
 		return
 	}
 

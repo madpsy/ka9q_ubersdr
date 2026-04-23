@@ -1,15 +1,40 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// threadStat holds the parsed data for a single thread from the CSV.
+type threadStat struct {
+	cpuPct float64
+	cpuNum int
+}
+
+// ThreadCPUStats holds the summarised CPU usage from the radiod thread-stats CSV.
+// All *Pct fields are percentages of one logical CPU (100 = one full core).
+// Available is false when the CSV file has not been written yet (radiod just started).
+// The five Pct fields sum to TotalPct:
+//
+//	TotalPct = ProcRx888Pct + FftPct + RadioStatPct + ChannelsPct + OtherPct
+type ThreadCPUStats struct {
+	Available    bool    `json:"available"`
+	ProcRx888Pct float64 `json:"proc_rx888_pct"` // sum of proc_rx888 threads
+	FftPct       float64 `json:"fft_pct"`        // sum of fft* threads
+	RadioStatPct float64 `json:"radio_stat_pct"` // sum of "radio stat" threads
+	ChannelsPct  float64 `json:"channels_pct"`   // sum of threads matched to a channel SSRC (lin/spect/…)
+	OtherPct     float64 `json:"other_pct"`      // everything else (radiod main, libusb_event, agc_rx888, …)
+	TotalPct     float64 `json:"total_pct"`      // grand total of all threads
+}
 
 // RadiodChannelInfo represents a summary of a radiod channel for display
 type RadiodChannelInfo struct {
@@ -28,10 +53,12 @@ type RadiodChannelInfo struct {
 	OutputDataPackets int64     `json:"output_data_packets"`
 	LastUpdate        time.Time `json:"last_update"`
 	TimeSinceUpdate   string    `json:"time_since_update"`
-	ChannelType       string    `json:"channel_type"` // "decoder", "noisefloor", "reference", "user_audio", "user_spectrum", "unknown"
-	ChannelName       string    `json:"channel_name"` // Descriptive name based on type
-	SessionID         string    `json:"session_id"`   // UberSDR session ID if applicable
-	IsInternal        bool      `json:"is_internal"`  // True for decoder/noisefloor channels
+	ChannelType       string    `json:"channel_type"`   // "decoder", "noisefloor", "reference", "user_audio", "user_spectrum", "unknown"
+	ChannelName       string    `json:"channel_name"`   // Descriptive name based on type
+	SessionID         string    `json:"session_id"`     // UberSDR session ID if applicable
+	IsInternal        bool      `json:"is_internal"`    // True for decoder/noisefloor channels
+	ThreadCPUPct      float64   `json:"thread_cpu_pct"` // CPU% of the thread matched to this channel's SSRC; 0 if not found
+	ThreadCPUNum      int       `json:"thread_cpu_num"` // CPU core the thread last ran on; -1 if not found
 }
 
 // RadiodChannelsResponse is the API response for all radiod channels
@@ -41,6 +68,93 @@ type RadiodChannelsResponse struct {
 	DecoderCount  int                 `json:"decoder_count"`
 	OtherCount    int                 `json:"other_count"`
 	LastUpdate    time.Time           `json:"last_update"`
+	CPUStats      ThreadCPUStats      `json:"cpu_stats"`
+}
+
+// threadStatsPath is the CSV written by the radiod container every 2 seconds.
+const threadStatsPath = "/var/run/restart-trigger/radiod-thread-stats.csv"
+
+// readThreadStats parses the radiod thread-stats CSV and returns:
+//   - a map from thread name → threadStat (all rows, including duplicates summed)
+//   - available: false if the file does not exist yet
+//
+// The CSV format is:  name,cpu_pct,cpu_num
+// Thread names may contain spaces (e.g. "lin 215227422", "radio stat").
+// When multiple rows share the same name their cpu_pct values are summed and
+// cpu_num is taken from the last row (arbitrary but consistent).
+func readThreadStats() (map[string]threadStat, bool) {
+	f, err := os.Open(threadStatsPath)
+	if err != nil {
+		// File not present yet — radiod hasn't written its first sample
+		return nil, false
+	}
+	defer f.Close()
+
+	stats := make(map[string]threadStat)
+	scanner := bufio.NewScanner(f)
+	firstLine := true
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// Skip header row
+		if firstLine {
+			firstLine = false
+			if strings.HasPrefix(line, "name") {
+				continue
+			}
+		}
+		// Split on the last two commas so thread names with spaces are preserved.
+		// Format: <name>,<cpu_pct>,<cpu_num>
+		// We split from the right: find last comma for cpu_num, then second-to-last for cpu_pct.
+		lastComma := strings.LastIndex(line, ",")
+		if lastComma < 0 {
+			continue
+		}
+		cpuNumStr := line[lastComma+1:]
+		rest := line[:lastComma]
+
+		secondComma := strings.LastIndex(rest, ",")
+		if secondComma < 0 {
+			continue
+		}
+		cpuPctStr := rest[secondComma+1:]
+		name := rest[:secondComma]
+
+		cpuPct, err := strconv.ParseFloat(strings.TrimSpace(cpuPctStr), 64)
+		if err != nil {
+			continue
+		}
+		cpuNum, err := strconv.Atoi(strings.TrimSpace(cpuNumStr))
+		if err != nil {
+			continue
+		}
+
+		// Accumulate: sum cpu_pct for duplicate names, keep last cpu_num
+		existing := stats[name]
+		stats[name] = threadStat{
+			cpuPct: existing.cpuPct + cpuPct,
+			cpuNum: cpuNum,
+		}
+	}
+	return stats, true
+}
+
+// matchThreadToSSRC searches threadStats for a thread whose name contains the
+// decimal representation of ssrc as a whitespace-delimited token.
+// Returns the matched threadStat and true, or a zero value and false.
+func matchThreadToSSRC(threadStats map[string]threadStat, ssrc uint32) (threadStat, bool) {
+	target := strconv.FormatUint(uint64(ssrc), 10)
+	for name, stat := range threadStats {
+		// Split name on spaces and check each token
+		for _, token := range strings.Fields(name) {
+			if token == target {
+				return stat, true
+			}
+		}
+	}
+	return threadStat{}, false
 }
 
 // getUnknownChannelSSRCs returns a list of SSRCs that exist in radiod but not in the session manager
@@ -276,6 +390,77 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		channels = append(channels, channelInfo)
 	}
 
+	// ── Thread CPU stats ──────────────────────────────────────────────────────
+	threadStats, statsAvailable := readThreadStats()
+
+	cpuStats := ThreadCPUStats{Available: statsAvailable}
+
+	if statsAvailable {
+		// Build a set of SSRCs present in the channel list for fast lookup
+		channelSSRCs := make(map[uint32]bool, len(channels))
+		for _, ch := range channels {
+			// Parse the hex SSRC string back to uint32
+			var ssrcVal uint32
+			if _, err := fmt.Sscanf(ch.SSRC, "0x%08x", &ssrcVal); err == nil {
+				channelSSRCs[ssrcVal] = true
+			}
+		}
+
+		for name, stat := range threadStats {
+			cpuStats.TotalPct += stat.cpuPct
+
+			nameLower := strings.ToLower(name)
+			switch {
+			case nameLower == "proc_rx888":
+				cpuStats.ProcRx888Pct += stat.cpuPct
+			case strings.HasPrefix(nameLower, "fft"):
+				cpuStats.FftPct += stat.cpuPct
+			case nameLower == "radio stat":
+				cpuStats.RadioStatPct += stat.cpuPct
+			default:
+				// Check if this thread belongs to a known channel SSRC
+				matchedChannel := false
+				for _, token := range strings.Fields(name) {
+					if v, err := strconv.ParseUint(token, 10, 32); err == nil {
+						if channelSSRCs[uint32(v)] {
+							cpuStats.ChannelsPct += stat.cpuPct
+							matchedChannel = true
+							break
+						}
+					}
+				}
+				if !matchedChannel {
+					cpuStats.OtherPct += stat.cpuPct
+				}
+			}
+		}
+
+		// Round to 1 decimal place to avoid floating-point noise
+		round1 := func(f float64) float64 {
+			return math.Round(f*10) / 10
+		}
+		cpuStats.ProcRx888Pct = round1(cpuStats.ProcRx888Pct)
+		cpuStats.FftPct = round1(cpuStats.FftPct)
+		cpuStats.RadioStatPct = round1(cpuStats.RadioStatPct)
+		cpuStats.ChannelsPct = round1(cpuStats.ChannelsPct)
+		cpuStats.OtherPct = round1(cpuStats.OtherPct)
+		cpuStats.TotalPct = round1(cpuStats.TotalPct)
+	}
+
+	// Attach per-channel thread CPU info
+	for i := range channels {
+		channels[i].ThreadCPUNum = -1 // default: no match
+		if statsAvailable {
+			var ssrcVal uint32
+			if _, err := fmt.Sscanf(channels[i].SSRC, "0x%08x", &ssrcVal); err == nil {
+				if stat, found := matchThreadToSSRC(threadStats, ssrcVal); found {
+					channels[i].ThreadCPUPct = math.Round(stat.cpuPct*10) / 10
+					channels[i].ThreadCPUNum = stat.cpuNum
+				}
+			}
+		}
+	}
+
 	// Sort channels by frequency
 	sort.Slice(channels, func(i, j int) bool {
 		return channels[i].Frequency < channels[j].Frequency
@@ -293,6 +478,7 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		DecoderCount:  decoderCount,
 		OtherCount:    otherCount,
 		LastUpdate:    time.Now(),
+		CPUStats:      cpuStats,
 	}
 
 	log.Printf("DEBUG: Sending response with %d channels", len(response.Channels))

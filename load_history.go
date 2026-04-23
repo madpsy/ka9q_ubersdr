@@ -184,14 +184,14 @@ func (lht *LoadHistoryTracker) sampleLoop() {
 			return
 
 		case <-lht.sampleTicker.C:
-			// Prefer corrected load averages from real-load-daemon.sh (host daemon,
-			// bind-mounted read-only at /run/real-load-avg).  Fall back to
-			// /proc/loadavg when the file is absent, stale, or unparseable.
+			// Use standard /proc/loadavg.
+			// NOTE: readCorrectedLoadAvg() (real-load-daemon.sh) is available but
+			// temporarily disabled — use it by replacing the block below with:
+			//   if l1, l5, l15, ok := readCorrectedLoadAvg(); ok {
+			//       load1, load5, load15 = l1, l5, l15
+			//   } else { /* /proc/loadavg fallback */ }
 			var load1, load5, load15 float64
-			if l1, l5, l15, ok := readCorrectedLoadAvg(); ok {
-				load1, load5, load15 = l1, l5, l15
-			} else {
-				// Fall back to /proc/loadavg
+			{
 				data, err := os.ReadFile("/proc/loadavg")
 				if err != nil {
 					continue // Skip this sample if we can't read the file

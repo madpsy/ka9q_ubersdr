@@ -7910,6 +7910,7 @@ function resetStationIdColor() {
             wsprControl.innerHTML = `
                 <label style="font-weight: 500; min-width: 60px;">WSPR:</label>
                 <select id="bulkDepthWSPR" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1000" ${currentWSPRDepth === 1000 ? 'selected' : ''}>1000 cycles (Very Fast)</option>
                     <option value="5000" ${currentWSPRDepth === 5000 ? 'selected' : ''}>5000 cycles (Fast)</option>
                     <option value="10000" ${currentWSPRDepth === 10000 ? 'selected' : ''}>10000 cycles (Default)</option>
                     <option value="20000" ${currentWSPRDepth === 20000 ? 'selected' : ''}>20000 cycles (Deep)</option>
@@ -18452,6 +18453,10 @@ const tooltipLine2 = timeStr;
                         aVal = a.last_update ? new Date(a.last_update).getTime() : 0;
                         bVal = b.last_update ? new Date(b.last_update).getTime() : 0;
                         break;
+                    case 'cpu_pct':
+                        aVal = a.thread_cpu_pct !== undefined ? a.thread_cpu_pct : -1;
+                        bVal = b.thread_cpu_pct !== undefined ? b.thread_cpu_pct : -1;
+                        break;
                     case 'type':
                         aVal = a.channel_name;
                         bVal = b.channel_name;
@@ -18509,6 +18514,19 @@ const tooltipLine2 = timeStr;
                 <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
                 ${referenceCount > 0 ? `<span style="margin-left: 20px;">• Frequency Reference: <strong style="color: #ffc107;">${referenceCount}</strong></span>` : ''}
                 ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
+                ${data.cpu_stats && data.cpu_stats.available ? `
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+                    <strong>CPU:</strong>
+                    <span style="margin-left: 20px;">• Total: <strong style="color: #e53935;">${data.cpu_stats.total_pct.toFixed(1)}%</strong></span>
+                    <span style="margin-left: 20px;">• proc_rx888: <strong style="color: #e53935;">${data.cpu_stats.proc_rx888_pct.toFixed(1)}%</strong></span>
+                    <span style="margin-left: 20px;">• FFT: <strong style="color: #e53935;">${data.cpu_stats.fft_pct.toFixed(1)}%</strong></span>
+                    <span style="margin-left: 20px;">• radio stat: <strong style="color: #e53935;">${data.cpu_stats.radio_stat_pct.toFixed(1)}%</strong></span>
+                    <span style="margin-left: 20px;">• Channels: <strong style="color: #e53935;">${data.cpu_stats.channels_pct.toFixed(1)}%</strong></span>
+                    <span style="margin-left: 20px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}%</strong></span>
+                </div>` : data.cpu_stats && !data.cpu_stats.available ? `
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+                    <strong>CPU:</strong> <em style="color: #999;">waiting for thread stats…</em>
+                </div>` : ''}
             `;
 
             // Create or update filter section
@@ -18690,6 +18708,10 @@ const tooltipLine2 = timeStr;
                         aVal = a.last_update ? new Date(a.last_update).getTime() : 0;
                         bVal = b.last_update ? new Date(b.last_update).getTime() : 0;
                         break;
+                    case 'cpu_pct':
+                        aVal = a.thread_cpu_pct !== undefined ? a.thread_cpu_pct : -1;
+                        bVal = b.thread_cpu_pct !== undefined ? b.thread_cpu_pct : -1;
+                        break;
                     case 'type':
                         aVal = a.channel_name;
                         bVal = b.channel_name;
@@ -18738,6 +18760,19 @@ const tooltipLine2 = timeStr;
                     <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
                     ${referenceCount > 0 ? `<span style="margin-left: 20px;">• Frequency Reference: <strong style="color: #ffc107;">${referenceCount}</strong></span>` : ''}
                     ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
+                    ${data.cpu_stats && data.cpu_stats.available ? `
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+                        <strong>CPU:</strong>
+                        <span style="margin-left: 20px;">• Total: <strong style="color: #e53935;">${data.cpu_stats.total_pct.toFixed(1)}%</strong></span>
+                        <span style="margin-left: 20px;">• proc_rx888: <strong style="color: #e53935;">${data.cpu_stats.proc_rx888_pct.toFixed(1)}%</strong></span>
+                        <span style="margin-left: 20px;">• FFT: <strong style="color: #e53935;">${data.cpu_stats.fft_pct.toFixed(1)}%</strong></span>
+                        <span style="margin-left: 20px;">• radio stat: <strong style="color: #e53935;">${data.cpu_stats.radio_stat_pct.toFixed(1)}%</strong></span>
+                        <span style="margin-left: 20px;">• Channels: <strong style="color: #e53935;">${data.cpu_stats.channels_pct.toFixed(1)}%</strong></span>
+                        <span style="margin-left: 20px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}%</strong></span>
+                    </div>` : data.cpu_stats && !data.cpu_stats.available ? `
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+                        <strong>CPU:</strong> <em style="color: #999;">waiting for thread stats…</em>
+                    </div>` : ''}
                 `;
             }
 
@@ -18769,6 +18804,8 @@ const tooltipLine2 = timeStr;
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
                             <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('update')" title="Click to sort">Last Update${sortIcon('update')}</th>
+                            <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('cpu_pct')" title="Click to sort">CPU%${sortIcon('cpu_pct')}</th>
+                            <th style="padding: 10px; text-align: center;">CPU#</th>
                             <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
                         </tr>
                     </thead>
@@ -18789,6 +18826,8 @@ const tooltipLine2 = timeStr;
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
                     <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('update')" title="Click to sort">Last Update${sortIcon('update')}</th>
+                    <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('cpu_pct')" title="Click to sort">CPU%${sortIcon('cpu_pct')}</th>
+                    <th style="padding: 10px; text-align: center;">CPU#</th>
                     <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
                 `;
             }
@@ -18895,6 +18934,15 @@ const tooltipLine2 = timeStr;
                     return `<span style="color: #667eea; font-weight: bold;">${snr.toFixed(1)}</span>`;
                 };
 
+                // Format per-channel CPU% — dim if no thread matched (cpu_num === -1)
+                const hasCpuData = data.cpu_stats && data.cpu_stats.available && channel.thread_cpu_num !== -1;
+                const cpuPctCell = hasCpuData
+                    ? `<strong style="color: ${channel.thread_cpu_pct >= 5 ? '#e53935' : channel.thread_cpu_pct >= 2 ? '#ff9800' : '#555'};">${channel.thread_cpu_pct.toFixed(1)}%</strong>`
+                    : `<em style="color: #ccc;">—</em>`;
+                const cpuNumCell = hasCpuData
+                    ? `<span style="font-family: monospace; font-size: 11px; color: #555;">${channel.thread_cpu_num}</span>`
+                    : `<em style="color: #ccc;">—</em>`;
+
                 row.innerHTML = `
                     <td style="padding: 10px; font-family: monospace; font-size: 11px;">${channel.ssrc}</td>
                     <td style="padding: 10px; font-family: monospace; font-size: 12px;"><strong>${channel.frequency_mhz} MHz</strong></td>
@@ -18906,6 +18954,8 @@ const tooltipLine2 = timeStr;
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${formatSNR(channel.snr)}</td>
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${channel.output_data_packets ? channel.output_data_packets.toLocaleString() : '0'}</td>
                     <td style="padding: 10px; font-size: 11px;">${channel.time_since_update}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 12px;">${cpuPctCell}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 12px;">${cpuNumCell}</td>
                     <td style="padding: 10px; font-size: 12px;">${channelDisplay}</td>
                 `;
                 tbody.appendChild(row);
@@ -18918,7 +18968,8 @@ const tooltipLine2 = timeStr;
                 radiodChannelsSortDirection = radiodChannelsSortDirection === 'asc' ? 'desc' : 'asc';
             } else {
                 radiodChannelsSortColumn = column;
-                radiodChannelsSortDirection = 'asc';
+                // Default CPU% sort to descending (highest first) for convenience
+                radiodChannelsSortDirection = column === 'cpu_pct' ? 'desc' : 'asc';
             }
 
             // Re-render table only (not filters)

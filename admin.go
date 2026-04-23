@@ -2641,28 +2641,22 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Prefer corrected load averages from real-load-daemon.sh (host daemon,
-	// bind-mounted read-only at /run/real-load-avg).  Fall back to /proc/loadavg
-	// when the file is absent, stale, or unparseable.
+	// Use standard /proc/loadavg.
+	// NOTE: readCorrectedLoadAvg() (real-load-daemon.sh) is available but
+	// temporarily disabled — re-enable by wrapping the block below in:
+	//   if l1, l5, l15, ok := readCorrectedLoadAvg(); ok { ... } else { ... }
 	var load1Str, load5Str, load15Str string
 	var load15 float64
 
-	if l1, l5, l15, ok := readCorrectedLoadAvg(); ok {
-		load1Str = fmt.Sprintf("%.2f", l1)
-		load5Str = fmt.Sprintf("%.2f", l5)
-		load15Str = fmt.Sprintf("%.2f", l15)
-		load15 = l15
-	} else {
-		// Fall back to /proc/loadavg
+	{
+		// Read from /proc/loadavg
+		// Format: "0.52 0.58 0.59 1/1234 12345"
+		// We want the first three numbers (1, 5, 15 minute averages)
 		data, err := os.ReadFile("/proc/loadavg")
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to read /proc/loadavg: %v", err), http.StatusInternalServerError)
 			return
 		}
-
-		// Parse the load averages
-		// Format: "0.52 0.58 0.59 1/1234 12345"
-		// We want the first three numbers (1, 5, 15 minute averages)
 		fields := strings.Fields(string(data))
 		if len(fields) < 3 {
 			http.Error(w, "Invalid /proc/loadavg format", http.StatusInternalServerError)

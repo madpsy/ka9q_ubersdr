@@ -999,8 +999,8 @@ noisefloor:
       start: 1800000          # 1.8 MHz
       end: 2000000            # 2.0 MHz
       center_frequency: 1900000
-      bin_count: 1000
-      bin_bandwidth: 200      # 200 Hz resolution
+      bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
+      bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 1840000  # 1.840 MHz - FT8 calling frequency
     
     - name: "80m"
@@ -1015,16 +1015,16 @@ noisefloor:
       start: 5250000          # 5.25 MHz
       end: 5450000            # 5.45 MHz
       center_frequency: 5350000
-      bin_count: 1000
-      bin_bandwidth: 200      # 200 Hz resolution
+      bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
+      bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 5357000  # 5.357 MHz - FT8 calling frequency
     
     - name: "40m"
       start: 7000000          # 7.0 MHz
       end: 7200000            # 7.2 MHz
       center_frequency: 7100000
-      bin_count: 1000
-      bin_bandwidth: 200      # 200 Hz resolution
+      bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
+      bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 7074000  # 7.074 MHz - FT8 calling frequency
     
     - name: "30m"
@@ -1039,8 +1039,8 @@ noisefloor:
       start: 14000000         # 14.0 MHz
       end: 14350000           # 14.35 MHz
       center_frequency: 14175000
-      bin_count: 1000
-      bin_bandwidth: 350      # 350 Hz resolution
+      bin_count: 700          # 700 bins × 500 Hz = 350 kHz coverage (30% fewer bins vs 1000)
+      bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 14074000 # 14.074 MHz - FT8 calling frequency
     
     - name: "17m"
@@ -1055,8 +1055,8 @@ noisefloor:
       start: 21000000         # 21.0 MHz
       end: 21450000           # 21.45 MHz
       center_frequency: 21225000
-      bin_count: 1000
-      bin_bandwidth: 450      # 450 Hz resolution
+      bin_count: 900          # 900 bins × 500 Hz = 450 kHz coverage (10% fewer bins vs 1000)
+      bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 21074000 # 21.074 MHz - FT8 calling frequency
     
     - name: "12m"
@@ -1071,8 +1071,8 @@ noisefloor:
       start: 28000000         # 28.0 MHz
       end: 28300000           # 28.3 MHz (lower portion)
       center_frequency: 28150000
-      bin_count: 1000
-      bin_bandwidth: 300     # 300 Hz resolution
+      bin_count: 600          # 600 bins × 500 Hz = 300 kHz coverage (40% fewer bins vs 1000)
+      bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
 
 # ==============================================================================

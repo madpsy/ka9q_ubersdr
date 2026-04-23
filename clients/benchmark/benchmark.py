@@ -153,6 +153,16 @@ def build_parser() -> argparse.ArgumentParser:
             'Matches spectrum_display.py behaviour.'
         ),
     )
+    spec.add_argument(
+        '--spectrum-default', action='store_true',
+        help=(
+            'Do not send a zoom command after the config message — stay at '
+            'the server\'s default spectrum parameters. '
+            'All users with this flag share a single radiod spectrum channel '
+            '(the shared-default-spectrum-channel feature). '
+            'Mutually exclusive with --spectrum-zoom having any effect.'
+        ),
+    )
 
     # --- Feature flags ---
     feat = parser.add_argument_group('Feature flags')
@@ -251,6 +261,7 @@ def main() -> None:
         bandwidth_low=bandwidth_low,
         bandwidth_high=bandwidth_high,
         spectrum_zoom_khz=args.spectrum_zoom,
+        spectrum_default=args.spectrum_default,
         enable_audio=not args.no_audio,
         enable_spectrum=not args.no_spectrum,
         enable_dxcluster=not args.no_dxcluster,

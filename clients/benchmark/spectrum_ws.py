@@ -251,6 +251,11 @@ class SpectrumWebSocket:
         on the first 'config' message, compute binBandwidth from the server's
         binCount and send a zoom command centred on the tuned frequency.
 
+        When ``config.spectrum_default`` is True the zoom command is skipped
+        entirely so the server keeps the session at its default spectrum
+        parameters — this exercises the shared-default-spectrum-channel path
+        where all such users share a single radiod channel.
+
         Returns the new value of zoom_sent.
         """
         if zoom_sent:
@@ -258,6 +263,10 @@ class SpectrumWebSocket:
 
         if data.get('type') != 'config':
             return False
+
+        # --spectrum-default: stay at server defaults, never send zoom.
+        if self._cfg.spectrum_default:
+            return True  # mark as "done" so we never try again
 
         bin_count = data.get('binCount', 0)
         if bin_count <= 0:

@@ -113,7 +113,8 @@ python benchmark.py --url <URL> [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--spectrum-zoom KHZ` | 200 | Spectrum display bandwidth in kHz sent as the zoom command |
+| `--spectrum-zoom KHZ` | 200 | Spectrum display bandwidth in kHz sent as the zoom command after the first `config` message |
+| `--spectrum-default` | off | Skip the zoom command entirely — stay at the server's default spectrum parameters. All users with this flag share a single radiod channel (shared-default-spectrum-channel). |
 
 ### Feature flags
 
@@ -180,6 +181,20 @@ python benchmark.py \
     --users 100 --threads 10 --duration 600 \
     --ramp-up 30 --reconnect \
     -f 14200000 -m usb
+```
+
+### Shared default spectrum channel (spectrum-only load test)
+
+Simulates 100 users all at the server's default spectrum parameters.
+All users share a single radiod channel — useful for benchmarking the
+shared-default-spectrum-channel feature.
+
+```bash
+python benchmark.py \
+    --url http://localhost:8073 \
+    --users 100 --threads 10 --duration 120 \
+    --no-audio --no-dxcluster \
+    --spectrum-default
 ```
 
 ---

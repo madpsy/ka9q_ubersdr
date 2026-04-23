@@ -99,6 +99,11 @@ class BenchmarkConfig:
     spectrum_zoom_khz: float = 200.0
     """Total spectrum display bandwidth in kHz sent as the zoom command (default 200 kHz)."""
 
+    spectrum_default: bool = False
+    """When True, do not send a zoom command after the config message — use the server's
+    default spectrum parameters.  This exercises the shared-default-spectrum-channel path
+    where all users at default params share a single radiod channel."""
+
     # --- Feature flags ---
     enable_audio: bool = True
     """Connect the audio WebSocket (``/ws``)."""

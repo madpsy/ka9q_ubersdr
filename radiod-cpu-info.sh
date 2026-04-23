@@ -775,7 +775,7 @@ section_affinity() {
     if command -v docker &>/dev/null; then
         local container_id
         container_id=$(docker ps --format '{{.ID}} {{.Names}}' 2>/dev/null \
-            | grep -i 'ka9q\|radiod\|ubersdr' | awk '{print $1}' | head -1 || echo "")
+            | grep -i 'ka9q-radio' | awk '{print $1}' | head -1 || echo "")
         if [[ -n "$container_id" ]]; then
             # 1. Try docker inspect (works with --cpuset-cpus / API; may be empty with cgroup v2 + Compose)
             local docker_cpuset

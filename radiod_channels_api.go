@@ -36,9 +36,8 @@ type ThreadCPUStats struct {
 	NumLogicalCPUs int     `json:"num_logical_cpus"` // runtime.NumCPU()
 	ProcRx888Pct   float64 `json:"proc_rx888_pct"`   // sum of proc_rx888 threads
 	FftPct         float64 `json:"fft_pct"`          // sum of fft* threads
-	RadioStatPct   float64 `json:"radio_stat_pct"`   // sum of "radio stat" threads
 	ChannelsPct    float64 `json:"channels_pct"`     // sum of threads matched to a channel SSRC (lin/spect/…)
-	OtherPct       float64 `json:"other_pct"`        // everything else (radiod main, libusb_event, agc_rx888, …)
+	OtherPct       float64 `json:"other_pct"`        // everything else (radio stat, radiod main, libusb_event, agc_rx888, …)
 	TotalPct       float64 `json:"total_pct"`        // grand total of all threads
 }
 
@@ -424,8 +423,6 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 				cpuStats.ProcRx888Pct += stat.cpuPct
 			case strings.HasPrefix(nameLower, "fft"):
 				cpuStats.FftPct += stat.cpuPct
-			case nameLower == "radio stat":
-				cpuStats.RadioStatPct += stat.cpuPct
 			default:
 				// Check if this thread belongs to a known channel SSRC
 				matchedChannel := false
@@ -450,7 +447,6 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		}
 		cpuStats.ProcRx888Pct = round1(cpuStats.ProcRx888Pct)
 		cpuStats.FftPct = round1(cpuStats.FftPct)
-		cpuStats.RadioStatPct = round1(cpuStats.RadioStatPct)
 		cpuStats.ChannelsPct = round1(cpuStats.ChannelsPct)
 		cpuStats.OtherPct = round1(cpuStats.OtherPct)
 		cpuStats.TotalPct = round1(cpuStats.TotalPct)

@@ -18520,12 +18520,11 @@ const tooltipLine2 = timeStr;
                     return `
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
                     <strong>CPU:</strong>
-                    <span style="margin-left: 20px;">• Total: <strong style="color: #999;">${data.cpu_stats.total_pct.toFixed(1)}% (${norm(data.cpu_stats.total_pct)}%)</strong></span>
-                    <span style="margin-left: 20px;">• proc_rx888: <strong style="color: #999;">${data.cpu_stats.proc_rx888_pct.toFixed(1)}% (${norm(data.cpu_stats.proc_rx888_pct)}%)</strong></span>
-                    <span style="margin-left: 20px;">• FFT: <strong style="color: #999;">${data.cpu_stats.fft_pct.toFixed(1)}% (${norm(data.cpu_stats.fft_pct)}%)</strong></span>
-                    <span style="margin-left: 20px;">• radio stat: <strong style="color: #999;">${data.cpu_stats.radio_stat_pct.toFixed(1)}% (${norm(data.cpu_stats.radio_stat_pct)}%)</strong></span>
-                    <span style="margin-left: 20px;">• Channels: <strong style="color: #999;">${data.cpu_stats.channels_pct.toFixed(1)}% (${norm(data.cpu_stats.channels_pct)}%)</strong></span>
-                    <span style="margin-left: 20px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}% (${norm(data.cpu_stats.other_pct)}%)</strong></span>
+                    <span style="margin-left: 8px;">• Total: <strong style="color: #999;">${data.cpu_stats.total_pct.toFixed(1)}% (${norm(data.cpu_stats.total_pct)}%)</strong></span>
+                    <span style="margin-left: 8px;">• RX888: <strong style="color: #999;">${data.cpu_stats.proc_rx888_pct.toFixed(1)}% (${norm(data.cpu_stats.proc_rx888_pct)}%)</strong></span>
+                    <span style="margin-left: 8px;">• FFT: <strong style="color: #999;">${data.cpu_stats.fft_pct.toFixed(1)}% (${norm(data.cpu_stats.fft_pct)}%)</strong></span>
+                    <span style="margin-left: 8px;">• Channels: <strong style="color: #999;">${data.cpu_stats.channels_pct.toFixed(1)}% (${norm(data.cpu_stats.channels_pct)}%)</strong></span>
+                    <span style="margin-left: 8px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}% (${norm(data.cpu_stats.other_pct)}%)</strong></span>
                     <div style="margin-top: 6px; font-size: 11px; color: #aaa;">Values show per-core % and (normalised % of all ${n} logical CPUs)</div>
                 </div>`;
                 })() : data.cpu_stats && !data.cpu_stats.available ? `
@@ -18771,12 +18770,11 @@ const tooltipLine2 = timeStr;
                         return `
                     <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
                         <strong>CPU:</strong>
-                        <span style="margin-left: 20px;">• Total: <strong style="color: #999;">${data.cpu_stats.total_pct.toFixed(1)}% (${norm(data.cpu_stats.total_pct)}%)</strong></span>
-                        <span style="margin-left: 20px;">• proc_rx888: <strong style="color: #999;">${data.cpu_stats.proc_rx888_pct.toFixed(1)}% (${norm(data.cpu_stats.proc_rx888_pct)}%)</strong></span>
-                        <span style="margin-left: 20px;">• FFT: <strong style="color: #999;">${data.cpu_stats.fft_pct.toFixed(1)}% (${norm(data.cpu_stats.fft_pct)}%)</strong></span>
-                        <span style="margin-left: 20px;">• radio stat: <strong style="color: #999;">${data.cpu_stats.radio_stat_pct.toFixed(1)}% (${norm(data.cpu_stats.radio_stat_pct)}%)</strong></span>
-                        <span style="margin-left: 20px;">• Channels: <strong style="color: #999;">${data.cpu_stats.channels_pct.toFixed(1)}% (${norm(data.cpu_stats.channels_pct)}%)</strong></span>
-                        <span style="margin-left: 20px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}% (${norm(data.cpu_stats.other_pct)}%)</strong></span>
+                        <span style="margin-left: 8px;">• Total: <strong style="color: #999;">${data.cpu_stats.total_pct.toFixed(1)}% (${norm(data.cpu_stats.total_pct)}%)</strong></span>
+                        <span style="margin-left: 8px;">• RX888: <strong style="color: #999;">${data.cpu_stats.proc_rx888_pct.toFixed(1)}% (${norm(data.cpu_stats.proc_rx888_pct)}%)</strong></span>
+                        <span style="margin-left: 8px;">• FFT: <strong style="color: #999;">${data.cpu_stats.fft_pct.toFixed(1)}% (${norm(data.cpu_stats.fft_pct)}%)</strong></span>
+                        <span style="margin-left: 8px;">• Channels: <strong style="color: #999;">${data.cpu_stats.channels_pct.toFixed(1)}% (${norm(data.cpu_stats.channels_pct)}%)</strong></span>
+                        <span style="margin-left: 8px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}% (${norm(data.cpu_stats.other_pct)}%)</strong></span>
                         <div style="margin-top: 6px; font-size: 11px; color: #aaa;">Values show per-core % and (normalised % of all ${n} logical CPUs)</div>
                     </div>`;
                     })() : data.cpu_stats && !data.cpu_stats.available ? `
@@ -18813,7 +18811,7 @@ const tooltipLine2 = timeStr;
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('power')" title="Click to sort">Power${sortIcon('power')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
-                            <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('update')" title="Click to sort">Last Update${sortIcon('update')}</th>
+                            <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; width: 70px;" onclick="sortRadiodChannels('update')" title="Click to sort">Updated${sortIcon('update')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('cpu_pct')" title="Click to sort">CPU%${sortIcon('cpu_pct')}</th>
                             <th style="padding: 10px; text-align: center;">CPU#</th>
                             <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
@@ -18835,7 +18833,7 @@ const tooltipLine2 = timeStr;
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('power')" title="Click to sort">Power${sortIcon('power')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
-                    <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('update')" title="Click to sort">Last Update${sortIcon('update')}</th>
+                    <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; width: 70px;" onclick="sortRadiodChannels('update')" title="Click to sort">Updated${sortIcon('update')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('cpu_pct')" title="Click to sort">CPU%${sortIcon('cpu_pct')}</th>
                     <th style="padding: 10px; text-align: center;">CPU#</th>
                     <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
@@ -18963,7 +18961,7 @@ const tooltipLine2 = timeStr;
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${formatPower(channel.baseband_power)}</td>
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${formatSNR(channel.snr)}</td>
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${channel.output_data_packets ? channel.output_data_packets.toLocaleString() : '0'}</td>
-                    <td style="padding: 10px; font-size: 11px;">${channel.time_since_update}</td>
+                    <td style="padding: 10px; font-size: 11px; white-space: nowrap; width: 70px;">${channel.time_since_update}</td>
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${cpuPctCell}</td>
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${cpuNumCell}</td>
                     <td style="padding: 10px; font-size: 12px;">${channelDisplay}</td>

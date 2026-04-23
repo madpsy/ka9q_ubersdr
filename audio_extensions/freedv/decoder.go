@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"gopkg.in/hraban/opus.v2"
@@ -150,6 +151,10 @@ func (d *FreeDVDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []
 		_ = stdin.Close()
 		_ = stdout.Close()
 		return fmt.Errorf("failed to start %s: %w", binaryPath, err)
+	}
+	// Deprioritise the FreeDV decoder child — CPU-heavy but not latency-sensitive
+	if err := syscall.Setpriority(syscall.PRIO_PROCESS, cmd.Process.Pid, 10); err != nil {
+		log.Printf("[FreeDV] Warning: failed to renice decoder process %d: %v", cmd.Process.Pid, err)
 	}
 
 	d.cmd = cmd

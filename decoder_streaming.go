@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -129,6 +130,10 @@ func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderCo
 		stderr.Close()
 		return nil, fmt.Errorf("failed to start decoder: %w", err)
 	}
+	// Deprioritise the decoder child — CPU-heavy but not latency-sensitive
+	if err := syscall.Setpriority(syscall.PRIO_PROCESS, cmd.Process.Pid, 10); err != nil {
+		log.Printf("Warning: failed to renice streaming decoder process %d: %v", cmd.Process.Pid, err)
+	}
 
 	sd := &StreamingDecoder{
 		band:              band,
@@ -246,6 +251,10 @@ func (sd *StreamingDecoder) restart() error {
 		stdout.Close()
 		stderr.Close()
 		return fmt.Errorf("failed to start decoder: %w", err)
+	}
+	// Deprioritise the restarted decoder child — CPU-heavy but not latency-sensitive
+	if err := syscall.Setpriority(syscall.PRIO_PROCESS, cmd.Process.Pid, 10); err != nil {
+		log.Printf("Warning: failed to renice restarted streaming decoder process %d: %v", cmd.Process.Pid, err)
 	}
 
 	// Update decoder state

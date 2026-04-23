@@ -76,6 +76,10 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 	if err := cmd.Start(); err != nil {
 		return "", "", 0, fmt.Errorf("failed to start decoder: %w", err)
 	}
+	// Deprioritise the decoder child — CPU-heavy but not latency-sensitive
+	if err := syscall.Setpriority(syscall.PRIO_PROCESS, cmd.Process.Pid, 10); err != nil {
+		log.Printf("Warning: failed to renice decoder process %d: %v", cmd.Process.Pid, err)
+	}
 
 	// Wait for decoder to complete (with optional timeout)
 	var err error

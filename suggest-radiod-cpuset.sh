@@ -172,7 +172,7 @@ _do_remove() {
     echo "  ── Removing CPU pinning ─────────────────────────────────────────────"
     echo ""
 
-    # ── docker-compose: remove cpuset line ───────────────────────────────────
+    # ── docker-compose: remove cpuset lines from ka9q-radio and ubersdr ──────
     if [[ -n "$compose_file" ]]; then
         if [[ ! -f "$compose_file" ]]; then
             echo "  ERROR: docker-compose file not found: ${compose_file}" >&2
@@ -182,18 +182,20 @@ _do_remove() {
             if grep -qE '^[[:space:]]+cpuset:' "$compose_file"; then
                 local _bak="${compose_file}.bak.$(date +%Y%m%d%H%M%S)"
                 cp "$compose_file" "$_bak"
-                # Remove the cpuset line inside the ka9q-radio service block
+                # Remove cpuset lines from both ka9q-radio and ubersdr service blocks
                 awk '
-                    /^  ka9q-radio:[[:space:]]*(#.*)?$/ { in_service=1; print; next }
-                    in_service && /^  [^[:space:]#]/ { in_service=0 }
-                    in_service && /^[[:space:]]+cpuset:/ { next }
+                    /^  ka9q-radio:[[:space:]]*(#.*)?$/ { in_radiod=1; in_ubersdr=0; print; next }
+                    /^  ubersdr:[[:space:]]*(#.*)?$/ { in_ubersdr=1; in_radiod=0; print; next }
+                    in_radiod && /^  [^[:space:]#]/ { in_radiod=0 }
+                    in_ubersdr && /^  [^[:space:]#]/ { in_ubersdr=0 }
+                    (in_radiod || in_ubersdr) && /^[[:space:]]+cpuset:/ { next }
                     { print }
                 ' "$compose_file" > "${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
                 _compose_modified=true
-                echo "  ✓ Removed cpuset from ${compose_file}"
+                echo "  ✓ Removed cpuset from ka9q-radio and ubersdr in ${compose_file}"
                 echo "  Backup saved to: ${_bak}"
             else
-                echo "  ✓ No cpuset line found in ${compose_file} — nothing to remove."
+                echo "  ✓ No cpuset lines found in ${compose_file} — nothing to remove."
             fi
             echo ""
         fi
@@ -605,6 +607,30 @@ done
 IFS=$'\n' sorted_cpus=($(printf '%s\n' "${selected_cpus[@]}" | sort -n)); unset IFS
 best_cpuset=$(IFS=','; echo "${sorted_cpus[*]}")
 
+# ── Compute the complement cpuset for ubersdr ────────────────────────────────
+# ubersdr gets all logical CPUs that are NOT assigned to radiod.
+# This keeps the two containers on separate cores so radiod's real-time
+# workload is never preempted by the web-interface process.
+
+declare -A _radiod_cpu_set
+for _cpu in "${sorted_cpus[@]}"; do
+    _radiod_cpu_set["$_cpu"]=1
+done
+
+_ubersdr_cpus=()
+for entry in "${sorted_cores[@]}"; do
+    core_key="${entry#* }"
+    IFS=',' read -ra _core_cpus <<< "$core_key"
+    for _cpu in "${_core_cpus[@]}"; do
+        if [[ -z "${_radiod_cpu_set[$_cpu]:-}" ]]; then
+            _ubersdr_cpus+=("$_cpu")
+        fi
+    done
+done
+
+IFS=$'\n' _ubersdr_cpus_sorted=($(printf '%s\n' "${_ubersdr_cpus[@]}" | sort -n)); unset IFS
+ubersdr_cpuset=$(IFS=','; echo "${_ubersdr_cpus_sorted[*]:-}")
+
 # ── 4. Output ─────────────────────────────────────────────────────────────────
 
 # Count how many distinct L3 domains the selection spans
@@ -647,13 +673,17 @@ else
     echo "    ka9q-radio:"
     echo "      cpuset: \"${best_cpuset}\""
     echo ""
-    echo "  ⚠  Note: applying a cpuset will inflate /proc/loadavg significantly."
-    echo "     This is a Linux kernel artefact — the load average counts all threads"
-    echo "     in the cpuset run-queue, not actual CPU usage. Your system is not"
-    echo "     overloaded. Use 'mpstat 2 1' or 'docker stats' for real CPU usage."
-    echo "     Install real-load-daemon.sh for a corrected load average (see load/README.md)."
-    echo ""
-
+    if [[ -n "$ubersdr_cpuset" ]]; then
+        echo "  ubersdr (web interface) will be pinned to the remaining cores:"
+        echo ""
+        echo "    ubersdr:"
+        echo "      cpuset: \"${ubersdr_cpuset}\""
+        echo ""
+    else
+        echo "  ⚠  No remaining cores for ubersdr — all cores assigned to radiod."
+        echo "     Consider reducing --cores so ubersdr has at least one core."
+        echo ""
+    fi
     echo "  All detected physical cores on this system:"
     for entry in "${sorted_cores[@]}"; do
         core_key="${entry#* }"
@@ -711,52 +741,83 @@ if $APPLY; then
     BACKUP="${COMPOSE_FILE}.bak"
     cp "$COMPOSE_FILE" "$BACKUP"
 
-    # Single awk pass: handles both insert and replace correctly.
+    # Single awk pass: handles both insert and replace correctly for both
+    # ka9q-radio (radiod cpuset) and ubersdr (complement cpuset).
     # Service blocks in docker-compose use 2-space indent for service name,
-    # 4-space for properties. We enter the ka9q-radio block on its header
-    # and exit when we see the next 2-space non-blank, non-comment line.
-    awk -v new_cpuset="$best_cpuset" '
+    # 4-space for properties. We track which service block we are in and
+    # exit the block when we see the next 2-space non-blank, non-comment line.
+    awk -v radiod_cpuset="$best_cpuset" -v ubersdr_cpuset="$ubersdr_cpuset" '
         /^  ka9q-radio:[[:space:]]*(#.*)?$/ {
-            in_service = 1
-            replaced = 0
-            inserted = 0
-            print
-            next
+            in_radiod = 1; in_ubersdr = 0
+            radiod_inserted = 0
+            print; next
         }
 
-        in_service && /^  [^[:space:]#]/ {
-            in_service = 0
+        /^  ubersdr:[[:space:]]*(#.*)?$/ {
+            in_ubersdr = 1; in_radiod = 0
+            ubersdr_inserted = 0
+            print; next
         }
 
-        in_service && /^[[:space:]]+cpuset:/ {
+        # Leaving a service block
+        in_radiod && /^  [^[:space:]#]/ { in_radiod = 0 }
+        in_ubersdr && /^  [^[:space:]#]/ { in_ubersdr = 0 }
+
+        # Replace existing cpuset in ka9q-radio block
+        in_radiod && /^[[:space:]]+cpuset:/ {
             match($0, /^[[:space:]]+/)
             indent = substr($0, 1, RLENGTH)
-            print indent "cpuset: \"" new_cpuset "\""
-            replaced = 1
-            inserted = 1
-            action = "updated"
+            print indent "cpuset: \"" radiod_cpuset "\""
+            radiod_inserted = 1
+            radiod_action = "updated"
             next
         }
 
-        in_service && !inserted && /^    [^[:space:]#]/ {
-            print "    cpuset: \"" new_cpuset "\""
-            inserted = 1
-            action = "added"
+        # Insert cpuset into ka9q-radio block before first property
+        in_radiod && !radiod_inserted && /^    [^[:space:]#]/ {
+            print "    cpuset: \"" radiod_cpuset "\""
+            radiod_inserted = 1
+            radiod_action = "added"
+        }
+
+        # Replace existing cpuset in ubersdr block (only if we have a cpuset to set)
+        in_ubersdr && ubersdr_cpuset != "" && /^[[:space:]]+cpuset:/ {
+            match($0, /^[[:space:]]+/)
+            indent = substr($0, 1, RLENGTH)
+            print indent "cpuset: \"" ubersdr_cpuset "\""
+            ubersdr_inserted = 1
+            ubersdr_action = "updated"
+            next
+        }
+
+        # Insert cpuset into ubersdr block before first property (only if we have one)
+        in_ubersdr && ubersdr_cpuset != "" && !ubersdr_inserted && /^    [^[:space:]#]/ {
+            print "    cpuset: \"" ubersdr_cpuset "\""
+            ubersdr_inserted = 1
+            ubersdr_action = "added"
         }
 
         { print }
 
         END {
-            if (in_service && !inserted) {
-                print "    cpuset: \"" new_cpuset "\""
-                action = "added"
+            if (in_radiod && !radiod_inserted) {
+                print "    cpuset: \"" radiod_cpuset "\""
+                radiod_action = "added"
+            }
+            if (in_ubersdr && ubersdr_cpuset != "" && !ubersdr_inserted) {
+                print "    cpuset: \"" ubersdr_cpuset "\""
+                ubersdr_action = "added"
             }
         }
     ' "$COMPOSE_FILE" > "${COMPOSE_FILE}.tmp" && mv "${COMPOSE_FILE}.tmp" "$COMPOSE_FILE"
-    ACTION="${action:-added}"
 
     if ! $QUIET; then
-        echo "  ✓ ${ACTION^} cpuset: \"${best_cpuset}\" in ${COMPOSE_FILE}"
+        _radiod_verb="${radiod_action:-added}"
+        echo "  ✓ ${_radiod_verb^} cpuset: \"${best_cpuset}\" for ka9q-radio in ${COMPOSE_FILE}"
+        if [[ -n "$ubersdr_cpuset" ]]; then
+            _ubersdr_verb="${ubersdr_action:-added}"
+            echo "  ✓ ${_ubersdr_verb^} cpuset: \"${ubersdr_cpuset}\" for ubersdr in ${COMPOSE_FILE}"
+        fi
         echo "  Backup saved to: ${BACKUP}"
         echo ""
     fi

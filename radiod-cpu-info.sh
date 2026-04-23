@@ -103,8 +103,14 @@ RADIOD_PROC_CPU=""         # CPU% of proc_* threads (combined)
 RADIOD_SPECT_CPU=""        # CPU% of spect* threads (combined)
 RADIOD_LIN_CPU=""          # CPU% of lin* threads (combined)
 RADIOD_RADIOSTAT_CPU=""    # CPU% of "radio stat" threads (combined)
-# Global: set by section_numa; pinning advice is suppressed on single-NUMA systems
+# Global: set by section_numa; used for NUMA topology display
 NUMA_NODE_COUNT=1
+# Global: set by section_cache; used to gate pinning/isolation advice.
+# L3 cache domain is the real performance boundary — a single-socket AMD Ryzen
+# with multiple CCDs has multiple L3 domains on one NUMA node, and a simple
+# 4-core laptop has one L3 domain on one NUMA node.  Falls back to NUMA node
+# count when L3 sysfs is unavailable (matching suggest-radiod-cpuset.sh logic).
+L3_DOMAIN_COUNT=1
 
 # ── 1. CPU Model & Basic Topology ─────────────────────────────────────────────
 
@@ -210,11 +216,13 @@ section_cpu_model() {
                 ok_line "Hyper-Threading is ON — pinned CPUs form complete physical core(s), no split pairs"
             fi
         else
-            # radiod not running or not pinned — only advise pinning on multi-NUMA systems
-            if (( NUMA_NODE_COUNT > 1 )); then
+            # radiod not running or not pinned — advise pinning when multiple L3 domains exist
+            # (e.g. AMD Ryzen with multiple CCDs, or multi-socket systems)
+            if (( L3_DOMAIN_COUNT > 1 )); then
                 ht_colour="$YELLOW"
                 echo ""
-                warn_line "Hyper-Threading is ON. Pin radiod to dedicated physical core(s) for best RT performance."
+                warn_line "Hyper-Threading is ON and ${L3_DOMAIN_COUNT} L3 cache domains detected."
+                warn_line "Pin radiod to dedicated physical core(s) within one L3 domain for best RT performance."
             else
                 ht_colour="$YELLOW"
             fi
@@ -351,7 +359,10 @@ section_cache() {
             "$label" "$size" "$line_size" "$shared_cpu_list"
     done
 
-    # Count unique L3 instances across all CPUs
+    # Count unique L3 instances across all CPUs and export as L3_DOMAIN_COUNT.
+    # This is the authoritative topology boundary for pinning/isolation advice —
+    # more accurate than NUMA node count (e.g. AMD Ryzen with multiple CCDs has
+    # multiple L3 domains on a single NUMA node).
     declare -A _seen_l3
     local l3_total_kb=0 l3_count=0
     for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/cache/; do
@@ -371,10 +382,32 @@ section_cache() {
         done
     done 2>/dev/null || true
 
+    echo ""
     if (( l3_count > 1 )); then
-        echo ""
-        kv "L3 instances" "${l3_count} × (${l3_total_kb} KB total)"
-        info_line "Multiple L3 caches detected — see CPU Affinity section for pinning analysis"
+        kv "L3 domains (total)" "${l3_count} × (${l3_total_kb} KB total)" "$YELLOW"
+        warn_line "Multiple L3 cache domains detected — threads migrating between domains incur cache-miss latency"
+        info_line "Pin radiod to cores within one L3 domain — see CPU Affinity section"
+    elif (( l3_count == 1 )); then
+        kv "L3 domains (total)" "1 × (${l3_total_kb} KB total)" "$GREEN"
+        ok_line "Single L3 cache domain — all cores share one cache, no cross-domain latency"
+    else
+        kv "L3 domains (total)" "unknown (L3 sysfs not available)" "$DIM"
+    fi
+
+    # Export L3_DOMAIN_COUNT; fall back to NUMA node count when L3 sysfs is
+    # unavailable (matches suggest-radiod-cpuset.sh fallback logic).
+    # NOTE: section_cache runs before section_numa, so NUMA_NODE_COUNT is not
+    # yet set here — count NUMA nodes inline rather than using the global.
+    if (( l3_count > 0 )); then
+        L3_DOMAIN_COUNT="$l3_count"
+    else
+        # L3 sysfs not available — count NUMA nodes directly as proxy
+        local _numa_fallback=0
+        for _nd in /sys/devices/system/node/node[0-9]*/; do
+            [[ -d "$_nd" ]] && (( _numa_fallback++ )) || true
+        done
+        (( _numa_fallback < 1 )) && _numa_fallback=1
+        L3_DOMAIN_COUNT="$_numa_fallback"
     fi
 }
 
@@ -453,7 +486,7 @@ section_governor() {
         if [[ -n "${gov_cpus[performance]:-}" ]]; then
             ok_line "performance governor active"
         else
-            warn_line "Consider: sudo cpupower frequency-set -g performance"
+            warn_line "CPU governor is not 'performance' — use 'Manage CPU Governor' in UberSDR Admin to fix"
         fi
     fi
 
@@ -560,11 +593,11 @@ section_kernel_params() {
         fi
     fi
 
-    if ! $found_any && (( NUMA_NODE_COUNT > 1 )); then
+    if ! $found_any && (( L3_DOMAIN_COUNT > 1 )); then
         echo ""
-        warn_line "No CPU isolation parameters detected. For best real-time SDR performance:"
-        echo "    Add to /etc/default/grub GRUB_CMDLINE_LINUX:"
-        echo "      isolcpus=<cores> nohz_full=<cores> rcu_nocbs=<cores>"
+        warn_line "No CPU isolation parameters detected (${L3_DOMAIN_COUNT} L3 cache domains found — pinning recommended)."
+        info_line "Consider using the 'Manage CPU Pinning' feature in UberSDR Admin,"
+        info_line "or run: ./suggest-radiod-cpuset.sh --apply  to configure cpuset + isolcpus automatically."
     fi
 }
 
@@ -873,7 +906,7 @@ section_affinity() {
         local _l3_domain_count="${#_pinned_l3_domains[@]}"
         if (( _l3_domain_count > 1 )); then
             warn_line "Pinned CPUs span ${_l3_domain_count} L3 cache domains — cross-L3 buffer handoffs add latency"
-            warn_line "Run suggest-radiod-cpuset.sh to get a cpuset confined to one L3 domain"
+            info_line "Use 'Manage CPU Pinning' in UberSDR Admin, or run: ./suggest-radiod-cpuset.sh --apply"
         elif (( _l3_domain_count == 1 )); then
             ok_line "Pinned CPUs share a single L3 cache domain — optimal for buffer locality"
         fi
@@ -911,8 +944,10 @@ section_affinity() {
         fi
     else
         info_line "No CPU pinning detected — radiod can run on any CPU"
-        if (( NUMA_NODE_COUNT > 1 )); then
-            warn_line "Consider pinning radiod to dedicated cores for deterministic latency"
+        if (( L3_DOMAIN_COUNT > 1 )); then
+            warn_line "Consider pinning radiod to dedicated cores — ${L3_DOMAIN_COUNT} L3 cache domains detected"
+            info_line "Without pinning, threads may migrate between L3 domains, adding cache-miss latency"
+            info_line "Use 'Manage CPU Pinning' in UberSDR Admin, or run: ./suggest-radiod-cpuset.sh --apply"
         fi
     fi
 }
@@ -947,6 +982,9 @@ section_threads() {
     local spect_cpu=0
     local lin_cpu=0
     local radiostat_cpu=0
+
+    # Track threads found running outside pinned set (for end-of-section warning)
+    local threads_off_core=()   # "TID:name:cpu#" entries
 
     # We need two samples to get accurate CPU% per thread
     declare -A t1_utime t1_stime t1_total
@@ -1034,6 +1072,23 @@ sleep 5
         printf "  %-8s %-20s ${cpu_colour}%5s%%${RESET} %5s  %-12s  %s\n" \
             "$tid" "$tname" "$cpu_pct_t" "${last_cpu:-?}" "$sched_str" "$state_char"
 
+        # Check if this thread is running on an unexpected CPU (outside pinned set)
+        if [[ -n "$RADIOD_PINNED_CPUS" && "${last_cpu:-}" =~ ^[0-9]+$ ]]; then
+            local _in_pinned=false
+            local _pin_parts=()
+            IFS=',' read -ra _pin_parts <<< "$RADIOD_PINNED_CPUS"
+            for _pp in "${_pin_parts[@]}"; do
+                if [[ "$_pp" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                    (( last_cpu >= BASH_REMATCH[1] && last_cpu <= BASH_REMATCH[2] )) && _in_pinned=true && break
+                else
+                    [[ "$_pp" == "$last_cpu" ]] && _in_pinned=true && break
+                fi
+            done
+            if ! $_in_pinned; then
+                threads_off_core+=("${tid}:${tname}:${last_cpu}")
+            fi
+        fi
+
         (( thread_count++ )) || true
         total_cpu=$(echo "$total_cpu $cpu_pct_t" | awk '{printf "%.1f", $1+$2}')
 
@@ -1072,6 +1127,36 @@ sleep 5
     kv "Total CPU% (sum of all threads)" "${total_cpu}%"
     kv "Avg load per pinned core (÷${pinned_count} CPUs)" "${per_core_pct}%" "$CYAN"
     kv "Avg load per system core (÷${total_logical} CPUs)" "${normalised_pct}%" "$CYAN"
+
+    # ── CPU pinning verification ───────────────────────────────────────────────
+    # If CPU pinning is active, warn if any thread was observed running outside
+    # the pinned set.  This can happen if:
+    #   • the cpuset was applied to the container but a thread escaped (kernel bug)
+    #   • the taskset/cpuset was changed after radiod started
+    #   • the cgroup namespace shifts CPU numbers (host vs container view mismatch)
+    if [[ -n "$RADIOD_PINNED_CPUS" ]]; then
+        echo ""
+        if (( ${#threads_off_core[@]} == 0 )); then
+            ok_line "CPU pinning verified — all threads observed on pinned CPUs (${RADIOD_PINNED_CPUS})"
+        else
+            warn_line "CPU pinning is ACTIVE (${RADIOD_PINNED_CPUS}) but ${#threads_off_core[@]} thread(s) were observed on unexpected cores!"
+            warn_line "This may indicate a cpuset misconfiguration or a cgroup namespace CPU-number mismatch."
+            echo ""
+            printf "  ${BOLD}%-8s %-20s %s${RESET}\n" "TID" "Thread name" "Observed CPU#"
+            printf "  %s\n" "$(printf '%.0s─' {1..45})"
+            for _entry in "${threads_off_core[@]}"; do
+                local _t_tid _t_name _t_cpu
+                IFS=':' read -r _t_tid _t_name _t_cpu <<< "$_entry"
+                printf "  ${RED}%-8s %-20s %s${RESET}\n" "$_t_tid" "$_t_name" "$_t_cpu"
+            done
+            echo ""
+            info_line "Possible causes:"
+            info_line "  1. Docker cpuset (${RADIOD_PINNED_CPUS}) uses host CPU numbers; /proc shows container-namespace numbers"
+            info_line "  2. The cpuset was not applied before radiod started"
+            info_line "  3. A kernel or cgroup bug allowed threads to escape the cpuset"
+            info_line "Check: docker exec ka9q-radio taskset -cp 1  (should show pinned CPUs)"
+        fi
+    fi
 
     # Export for summary section
     RADIOD_TOTAL_CPU="$total_cpu"
@@ -1283,15 +1368,12 @@ section_irq_affinity() {
     echo ""
     if [[ -n "$RADIOD_PINNED_CPUS" && -n "$_suggest_cpu" ]]; then
         info_line "Ideal: USB controller IRQ should be handled by a non-radiod CPU"
-        info_line "       so radiod's RT threads (${RADIOD_PINNED_CPUS}) are never interrupted by USB DMA"
+        info_line "       so radiod's RT threads (${RADIOD_PINNED_CPUS}) are never interrupted by USB DMA completions"
         if $_isolcpus_covers_radiod; then
             info_line "Note:  isolcpus=${_isolcpus_val} prevents the scheduler from placing tasks on radiod's CPUs,"
             info_line "       but hardware IRQs bypass isolcpus — smp_affinity_list is a separate mechanism."
             info_line "       Explicit IRQ pinning is still recommended for lowest latency."
         fi
-        info_line "Fix:   echo ${_suggest_cpu} > /proc/irq/<N>/smp_affinity_list"
-    else
-        info_line "To move an IRQ to a specific CPU: echo <cpu_num> > /proc/irq/<N>/smp_affinity_list"
     fi
 }
 
@@ -1528,7 +1610,7 @@ section_summary() {
     done
     if $bad_gov; then
         warn_line "CPU governor is not 'performance'"
-        echo "    Fix: sudo cpupower frequency-set -g performance"
+        echo "    Fix: use 'Manage CPU Governor' in UberSDR Admin"
         (( issues++ )) || true
     else
         ok_line "CPU governor: performance"
@@ -1623,17 +1705,17 @@ section_summary() {
             local _sum_l3_count="${#_sum_l3_domains[@]}"
             if (( _sum_l3_count > 1 )); then
                 warn_line "Pinned CPUs span ${_sum_l3_count} L3 cache domains — cross-L3 buffer handoffs add latency"
-                echo "    Fix: ./suggest-radiod-cpuset.sh  (picks cores within one L3 domain)"
+                info_line "Use 'Manage CPU Pinning' in UberSDR Admin, or run: ./suggest-radiod-cpuset.sh --apply"
                 (( issues++ )) || true
             fi
         elif command -v taskset &>/dev/null; then
             local aff
             aff=$(taskset -cp "$RADIOD_PID" 2>/dev/null | grep -oP '(?<=affinity list: ).*' || echo "")
             if [[ "$aff" == "0-$(( total_logical - 1 ))" || -z "$aff" ]]; then
-                if (( NUMA_NODE_COUNT > 1 )); then
-                    warn_line "radiod is not pinned to specific CPUs"
-                    echo "    Fix: use cpuset in docker-compose.yml or taskset"
-                    echo "    See: ./suggest-radiod-cpuset.sh"
+                if (( L3_DOMAIN_COUNT > 1 )); then
+                    warn_line "radiod is not pinned to specific CPUs (${L3_DOMAIN_COUNT} L3 cache domains detected)"
+                    echo "    Without pinning, threads may migrate between L3 domains, adding cache-miss latency."
+                    info_line "Use 'Manage CPU Pinning' in UberSDR Admin, or run: ./suggest-radiod-cpuset.sh --apply"
                     (( issues++ )) || true
                 fi
             else
@@ -1646,8 +1728,8 @@ section_summary() {
     local cmdline
     cmdline=$(cat /proc/cmdline 2>/dev/null || echo "")
     if ! echo "$cmdline" | grep -q 'isolcpus'; then
-        if (( NUMA_NODE_COUNT > 1 )); then
-            warn_line "isolcpus not set in kernel boot parameters"
+        if (( L3_DOMAIN_COUNT > 1 )); then
+            warn_line "isolcpus not set in kernel boot parameters (${L3_DOMAIN_COUNT} L3 cache domains — isolation recommended)"
             (( issues++ )) || true
         fi
     else

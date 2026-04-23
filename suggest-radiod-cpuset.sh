@@ -513,8 +513,10 @@ if $INTERACTIVE; then
     echo -e "\033[1;33m║  ✗  radiod cannot use any other cores, even if they are idle.        ║\033[0m"
     echo -e "\033[1;33m║     Other processes can still run on the pinned cores freely.        ║\033[0m"
     echo -e "\033[1;33m║                                                                      ║\033[0m"
-    echo -e "\033[1;33m║  Choose only as many cores as radiod genuinely needs — assigning     ║\033[0m"
-    echo -e "\033[1;33m║  too few will starve it; too many wastes cores it cannot give back.  ║\033[0m"
+    echo -e "\033[1;33m║  Choose enough cores that radiod is never starved of CPU time.       ║\033[0m"
+    echo -e "\033[1;33m║  If you also apply kernel isolcpus (asked later), those cores will   ║\033[0m"
+    echo -e "\033[1;33m║  be fully reserved and unavailable to the rest of the system, so     ║\033[0m"
+    echo -e "\033[1;33m║  avoid over-allocating if you plan to enable that option.            ║\033[0m"
     echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
     echo ""
     while true; do

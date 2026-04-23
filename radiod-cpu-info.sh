@@ -14,7 +14,7 @@
 #   - Real-time scheduling policy and priority
 #   - Memory / NUMA locality of the process
 #   - IRQ affinity for USB/PCIe devices (SDR hardware)
-#   - Kernel isolcpus / nohz_full / rcu_nocbs boot parameters
+#   - Kernel nohz_full / rcu_nocbs boot parameters
 #   - Turbo Boost / P-state status
 #
 # Usage:
@@ -385,7 +385,7 @@ section_cache() {
     echo ""
     if (( l3_count > 1 )); then
         kv "L3 domains (total)" "${l3_count} × (${l3_total_kb} KB total)" "$YELLOW"
-        warn_line "Multiple L3 cache domains detected — threads migrating between domains incur cache-miss latency"
+        info_line "Multiple L3 cache domains detected — threads migrating between domains incur cache-miss latency"
         info_line "Pin radiod to cores within one L3 domain — see CPU Affinity section"
     elif (( l3_count == 1 )); then
         kv "L3 domains (total)" "1 × (${l3_total_kb} KB total)" "$GREEN"
@@ -542,16 +542,6 @@ section_kernel_params() {
 
     local found_any=false
 
-    local isolcpus
-    isolcpus=$(echo "$cmdline" | grep -oP 'isolcpus=\S+' || echo "")
-    if [[ -n "$isolcpus" ]]; then
-        ok_line "${isolcpus}  ← kernel won't schedule normal tasks here"
-        info_line "         (does NOT prevent hardware IRQs — set smp_affinity_list separately; see section 10)"
-        found_any=true
-    else
-        info_line "isolcpus: not set"
-    fi
-
     local nohz_full
     nohz_full=$(echo "$cmdline" | grep -oP 'nohz_full=\S+' || echo "")
     if [[ -n "$nohz_full" ]]; then
@@ -595,9 +585,9 @@ section_kernel_params() {
 
     if ! $found_any && (( L3_DOMAIN_COUNT > 1 )); then
         echo ""
-        warn_line "No CPU isolation parameters detected (${L3_DOMAIN_COUNT} L3 cache domains found — pinning recommended)."
-        info_line "Consider using the 'Manage CPU Pinning' feature in UberSDR Admin,"
-        info_line "or run: ./suggest-radiod-cpuset.sh --apply  to configure cpuset + isolcpus automatically."
+        info_line "No optional RT kernel parameters detected (${L3_DOMAIN_COUNT} L3 cache domains found)."
+        info_line "Consider nohz_full= and rcu_nocbs= for lower jitter on dedicated RT cores."
+        info_line "For CPU pinning, use 'Manage CPU Pinning' in UberSDR Admin or: ./suggest-radiod-cpuset.sh --apply"
     fi
 }
 
@@ -1258,13 +1248,6 @@ section_irq_affinity() {
             local total_logical_cpus
             total_logical_cpus=$(nproc --all 2>/dev/null || echo "8")
 
-            # Check whether isolcpus covers radiod's pinned CPUs (softens warning text)
-            local _isolcpus_covers_radiod=false
-            local _cmdline_irq
-            _cmdline_irq=$(cat /proc/cmdline 2>/dev/null || echo "")
-            local _isolcpus_val
-            _isolcpus_val=$(echo "$_cmdline_irq" | grep -oP 'isolcpus=\S+' | sed 's/isolcpus=//' || echo "")
-
             if [[ -n "$RADIOD_PINNED_CPUS" && "$affinity" != "?" ]]; then
                 # Check if affinity covers all CPUs (e.g. 0-7)
                 local _irq_cpus=()
@@ -1297,31 +1280,6 @@ section_irq_affinity() {
                         [[ "$_ic" == "$_pc" ]] && irq_overlaps_radiod=true && break 2
                     done
                 done
-
-                # Check if isolcpus covers all of radiod's pinned CPUs
-                if [[ -n "$_isolcpus_val" ]]; then
-                    local _isol_cpus=()
-                    IFS=',' read -ra _ip <<< "$_isolcpus_val"
-                    for _i in "${_ip[@]}"; do
-                        if [[ "$_i" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                            for (( _n=${BASH_REMATCH[1]}; _n<=${BASH_REMATCH[2]}; _n++ )); do
-                                _isol_cpus+=("$_n")
-                            done
-                        else
-                            _isol_cpus+=("$_i")
-                        fi
-                    done
-                    # All radiod pinned CPUs must appear in isolcpus list
-                    local _all_covered=true
-                    for _pc in "${_pin_cpus[@]}"; do
-                        local _found_in_isol=false
-                        for _ic2 in "${_isol_cpus[@]}"; do
-                            [[ "$_ic2" == "$_pc" ]] && _found_in_isol=true && break
-                        done
-                        $_found_in_isol || { _all_covered=false; break; }
-                    done
-                    $_all_covered && _isolcpus_covers_radiod=true
-                fi
             fi
 
             # Find a non-radiod CPU to suggest for the fix
@@ -1340,14 +1298,8 @@ section_irq_affinity() {
             local affinity_note=""
             if [[ -n "$RADIOD_PINNED_CPUS" ]]; then
                 if $irq_covers_all || $irq_overlaps_radiod; then
-                    if $_isolcpus_covers_radiod; then
-                        # isolcpus is set for radiod's CPUs — soften to info/advisory
-                        affinity_colour="$YELLOW"
-                        affinity_note=" ℹ includes radiod's CPUs — isolcpus reduces scheduler interference but hardware IRQs still use smp_affinity_list"
-                    else
-                        affinity_colour="$YELLOW"
-                        affinity_note=" ⚠ includes radiod's CPUs — IRQ may interrupt RT threads"
-                    fi
+                    affinity_colour="$YELLOW"
+                    affinity_note=" ⚠ includes radiod's CPUs — IRQ may interrupt RT threads"
                 else
                     affinity_colour="$GREEN"
                     affinity_note=" ✓ on non-radiod CPU"
@@ -1369,11 +1321,6 @@ section_irq_affinity() {
     if [[ -n "$RADIOD_PINNED_CPUS" && -n "$_suggest_cpu" ]]; then
         info_line "Ideal: USB controller IRQ should be handled by a non-radiod CPU"
         info_line "       so radiod's RT threads (${RADIOD_PINNED_CPUS}) are never interrupted by USB DMA completions"
-        if $_isolcpus_covers_radiod; then
-            info_line "Note:  isolcpus=${_isolcpus_val} prevents the scheduler from placing tasks on radiod's CPUs,"
-            info_line "       but hardware IRQs bypass isolcpus — smp_affinity_list is a separate mechanism."
-            info_line "       Explicit IRQ pinning is still recommended for lowest latency."
-        fi
     fi
 }
 
@@ -1724,21 +1671,6 @@ section_summary() {
         fi
     fi
 
-    # Kernel isolation
-    local cmdline
-    cmdline=$(cat /proc/cmdline 2>/dev/null || echo "")
-    if ! echo "$cmdline" | grep -q 'isolcpus'; then
-        if (( L3_DOMAIN_COUNT > 1 )); then
-            warn_line "isolcpus not set in kernel boot parameters (${L3_DOMAIN_COUNT} L3 cache domains — isolation recommended)"
-            (( issues++ )) || true
-        fi
-    else
-        local _isol_val
-        _isol_val=$(echo "$cmdline" | grep -oP 'isolcpus=\S+' | sed 's/isolcpus=//' || echo "")
-        ok_line "isolcpus=${_isol_val} configured (scheduler won't place tasks on these CPUs)"
-        info_line "       Note: isolcpus does not prevent hardware IRQs — set smp_affinity_list separately"
-    fi
-
     # AVX2
     if grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | grep -qw 'avx2'; then
         ok_line "AVX2 SIMD instructions available"
@@ -1794,7 +1726,7 @@ run_all() {
     echo ""
     echo -e "${BOLD}${MAGENTA}╔══════════════════════════════════════════════════════════════╗${RESET}"
     echo -e "${BOLD}${MAGENTA}║      UberSDR — radiod CPU & Performance Analysis             ║${RESET}"
-    echo -e "${BOLD}${MAGENTA}║  ${timestamp}$(printf '%*s' $(( 30 - ${#timestamp} )) '')║${RESET}"
+    echo -e "${BOLD}${MAGENTA}║  ${timestamp}$(printf '%*s' $(( 60 - ${#timestamp} )) '')║${RESET}"
     echo -e "${BOLD}${MAGENTA}╚══════════════════════════════════════════════════════════════╝${RESET}"
 
     section_cpu_model

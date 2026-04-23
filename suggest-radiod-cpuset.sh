@@ -12,8 +12,7 @@
 #      (falls back to NUMA node when L3 sysfs is unavailable)
 #   3. Select N cores from the largest L3 domain first (lowest CPU number
 #      order), spilling into other domains only if more cores are needed.
-#      Current idle% is not used — the system will be rebooted after applying
-#      isolcpus, making runtime load irrelevant.
+#      Current idle% is not used.
 #
 # Usage:
 #   ./suggest-radiod-cpuset.sh [--cores N] [--quiet] [--apply [--compose-file <path>]] [--remove]
@@ -22,7 +21,7 @@
 #   --cores N           Number of physical cores to assign (default: 1)
 #   --quiet             Output only the cpuset string, e.g. "0,4"
 #   --apply             Write the recommended cpuset into the docker-compose file
-#   --remove            Remove cpuset from docker-compose and isolcpus from grub
+#   --remove            Remove cpuset from docker-compose and nohz_full/rcu_nocbs from grub
 #   --compose-file PATH Path to docker-compose file (default: docker-compose.yml
 #                       in the same directory as this script)
 #
@@ -80,7 +79,7 @@ fi
 QUIET=false
 APPLY=false
 REMOVE=false
-SKIP_ISOLCPUS=false   # true when user explicitly declines docker-compose apply
+SKIP_GRUB=false   # true when user explicitly declines docker-compose apply
 NUM_CORES=1
 NUM_CORES_SET=false   # true when --cores was explicitly passed
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,15 +121,15 @@ if ! $QUIET; then
     echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
     echo -e "\033[1;33m║  ⚠  MOST USERS DO NOT NEED TO RUN THIS SCRIPT                       ║\033[0m"
     echo -e "\033[1;33m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
-    echo -e "\033[1;33m║  CPU pinning via cpuset / isolcpus is an advanced tuning measure     ║\033[0m"
-    echo -e "\033[1;33m║  intended to solve specific real-time latency problems, such as:     ║\033[0m"
+    echo -e "\033[1;33m║  CPU pinning via cpuset is an advanced tuning measure intended to    ║\033[0m"
+    echo -e "\033[1;33m║  solve specific real-time latency problems, such as:                 ║\033[0m"
     echo -e "\033[1;33m║    • persistent audio drop-outs or buffer underruns                  ║\033[0m"
     echo -e "\033[1;33m║    • measurable timing jitter on a heavily loaded system             ║\033[0m"
     echo -e "\033[1;33m║    • running radiod alongside other CPU-intensive workloads          ║\033[0m"
     echo -e "\033[1;33m║                                                                      ║\033[0m"
     echo -e "\033[1;33m║  If radiod is working fine for you, stop here — applying cpuset      ║\033[0m"
-    echo -e "\033[1;33m║  will inflate your load average and requires a reboot to activate    ║\033[0m"
-    echo -e "\033[1;33m║  isolcpus.  It is NOT required for a normal UberSDR installation.   ║\033[0m"
+    echo -e "\033[1;33m║  will inflate your load average.  It is NOT required for a normal   ║\033[0m"
+    echo -e "\033[1;33m║  UberSDR installation.                                               ║\033[0m"
     echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
     echo ""
 fi
@@ -160,7 +159,7 @@ if ! $REMOVE && $INTERACTIVE; then
 fi
 
 # ── Remove mode ───────────────────────────────────────────────────────────────
-# Removes cpuset from docker-compose and isolcpus/nohz_full/rcu_nocbs from grub.
+# Removes cpuset from docker-compose and nohz_full/rcu_nocbs from grub.
 # Runs early and exits — no CPU topology analysis needed.
 
 _do_remove() {
@@ -200,22 +199,22 @@ _do_remove() {
         fi
     fi
 
-    # ── grub: remove isolcpus / nohz_full / rcu_nocbs ────────────────────────
+    # ── grub: remove nohz_full / rcu_nocbs (and isolcpus if present) ─────────
     local _grub_file="/etc/default/grub"
     if [[ ! -f "$_grub_file" ]]; then
         echo "  ⚠  ${_grub_file} not found — skipping kernel parameter removal."
         echo ""
     elif ! grep -qE 'isolcpus=|nohz_full=|rcu_nocbs=' "$_grub_file" 2>/dev/null; then
-        echo "  ✓ No isolcpus/nohz_full/rcu_nocbs found in ${_grub_file} — nothing to remove."
+        echo "  ✓ No nohz_full/rcu_nocbs/isolcpus found in ${_grub_file} — nothing to remove."
         echo ""
     else
-        echo "  Found kernel isolation parameters in ${_grub_file}:"
+        echo "  Found kernel parameters in ${_grub_file}:"
         grep 'GRUB_CMDLINE_LINUX' "$_grub_file"
         echo ""
 
         local _proceed=true
         if [[ "$interactive" == "true" ]]; then
-            read -rp "  Remove isolcpus/nohz_full/rcu_nocbs from ${_grub_file}? [y/N]: " _grub_rm_ans
+            read -rp "  Remove nohz_full/rcu_nocbs/isolcpus from ${_grub_file}? [y/N]: " _grub_rm_ans
             [[ "${_grub_rm_ans,,}" =~ ^y ]] || _proceed=false
         fi
 
@@ -225,7 +224,7 @@ _do_remove() {
                 echo "  ERROR: could not back up ${_grub_file} (sudo cp failed)" >&2
             else
                 echo "  Backup saved to: ${_grub_backup}"
-                # Strip the three params (and any leading space left behind)
+                # Strip all three params (and any leading space left behind)
                 sudo sed -i \
                     -e 's/ isolcpus=[^ "]*//g' \
                     -e 's/ nohz_full=[^ "]*//g' \
@@ -234,7 +233,7 @@ _do_remove() {
                     -e 's/nohz_full=[^ "]*//g' \
                     -e 's/rcu_nocbs=[^ "]*//g' \
                     "$_grub_file"
-                echo "  ✓ Removed isolation parameters from ${_grub_file}"
+                echo "  ✓ Removed kernel parameters from ${_grub_file}"
                 echo ""
 
                 # Regenerate grub
@@ -264,7 +263,7 @@ _do_remove() {
                 fi
                 echo ""
 
-                echo "  A reboot is required to deactivate isolcpus."
+                echo "  A reboot is required to deactivate these kernel parameters."
                 echo ""
                 if [[ "$interactive" == "true" ]]; then
                     read -rp "  Reboot now? [y/N]: " _reboot_ans
@@ -505,18 +504,17 @@ if $INTERACTIVE; then
     echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
     echo -e "\033[1;33m║  ⚠  WHAT DOCKER CPUSET DOES                                          ║\033[0m"
     echo -e "\033[1;33m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
-    echo -e "\033[1;33m║  Assigning cores via cpuset is a two-way restriction on radiod:      ║\033[0m"
+    echo -e "\033[1;33m║  Assigning cores via cpuset restricts radiod to those cores:         ║\033[0m"
     echo -e "\033[1;33m║                                                                      ║\033[0m"
     echo -e "\033[1;33m║  ✓  radiod is kept on the chosen cores — ensuring it always runs     ║\033[0m"
     echo -e "\033[1;33m║     within the same L3 cache domain for best memory locality.        ║\033[0m"
+    echo -e "\033[1;33m║  ✓  The scheduler freely load-balances radiod's threads across all   ║\033[0m"
+    echo -e "\033[1;33m║     pinned cores — all cores will be used.                           ║\033[0m"
     echo -e "\033[1;33m║                                                                      ║\033[0m"
     echo -e "\033[1;33m║  ✗  radiod cannot use any other cores, even if they are idle.        ║\033[0m"
     echo -e "\033[1;33m║     Other processes can still run on the pinned cores freely.        ║\033[0m"
     echo -e "\033[1;33m║                                                                      ║\033[0m"
     echo -e "\033[1;33m║  Choose enough cores that radiod is never starved of CPU time.       ║\033[0m"
-    echo -e "\033[1;33m║  If you also apply kernel isolcpus (asked later), those cores will   ║\033[0m"
-    echo -e "\033[1;33m║  be fully reserved and unavailable to the rest of the system, so     ║\033[0m"
-    echo -e "\033[1;33m║  avoid over-allocating if you plan to enable that option.            ║\033[0m"
     echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
     echo ""
     while true; do
@@ -535,8 +533,7 @@ fi
 
 # ── 3. Select N physical cores, preferring a single L3 domain ────────────────
 #
-# Strategy (topology-only — idle% is not used because the system will be
-# rebooted after applying isolcpus, making current load irrelevant):
+# Strategy (topology-only — current idle% is not used):
 #   1. Count how many cores each L3 domain contains.
 #   2. Pick the domain with the most cores (ties broken by lowest first-CPU
 #      number, i.e. the "first" domain in physical order).
@@ -654,7 +651,7 @@ else
     echo "     This is a Linux kernel artefact — the load average counts all threads"
     echo "     in the cpuset run-queue, not actual CPU usage. Your system is not"
     echo "     overloaded. Use 'mpstat 2 1' or 'docker stats' for real CPU usage."
-    echo "     Run real-load.sh (with real-load-daemon.sh) for a corrected load average."
+    echo "     Install real-load-daemon.sh for a corrected load average (see load/README.md)."
     echo ""
 
     echo "  All detected physical cores on this system:"
@@ -693,7 +690,7 @@ if $INTERACTIVE; then
         COMPOSE_FILE="$_compose_input"
     else
         echo "Skipping apply."
-        SKIP_ISOLCPUS=true
+        SKIP_GRUB=true
     fi
     echo ""
 fi
@@ -765,130 +762,89 @@ if $APPLY; then
     fi
 fi
 
-# ── 7. isolcpus suggestion ────────────────────────────────────────────────────
-# cpuset keeps radiod ON the chosen cores; isolcpus keeps everything else OFF.
-# Together they give near-exclusive access to those cores.
+# ── 7. nohz_full / rcu_nocbs suggestion ──────────────────────────────────────
+# These reduce timer interrupt and RCU callback noise on the SDR cores,
+# minimising latency jitter.  Unlike isolcpus they do NOT affect load-balancing,
+# so radiod's threads will still spread across all pinned CPUs.
 
-_suggest_isolcpus() {
+_suggest_nohz() {
     local cpuset="$1"
 
-    # Check current kernel cmdline
     local cmdline
     cmdline=$(cat /proc/cmdline 2>/dev/null || echo "")
 
-    local current_isolcpus=""
-    current_isolcpus=$(echo "$cmdline" | grep -oP 'isolcpus=\S+' | cut -d= -f2 || echo "")
     local current_nohz=""
     current_nohz=$(echo "$cmdline" | grep -oP 'nohz_full=\S+' | cut -d= -f2 || echo "")
     local current_rcu=""
     current_rcu=$(echo "$cmdline" | grep -oP 'rcu_nocbs=\S+' | cut -d= -f2 || echo "")
 
     echo ""
-    echo "  ── Kernel CPU Isolation (isolcpus) ──────────────────────────────"
+    echo "  ── Optional: kernel timer / RCU noise reduction ─────────────────"
     echo ""
-    echo "  cpuset keeps radiod ON cores ${cpuset}."
-    echo "  isolcpus keeps all other tasks OFF those cores."
-    echo "  Together they give radiod near-exclusive access."
+    echo "  These kernel parameters reduce interrupt jitter on the SDR cores"
+    echo "  without affecting load-balancing (radiod will still use all pinned CPUs):"
+    echo ""
+    echo "    nohz_full=${cpuset}   ← suppress periodic timer ticks on SDR cores"
+    echo "    rcu_nocbs=${cpuset}   ← offload RCU callbacks off SDR cores"
     echo ""
 
-    if [[ -n "$current_isolcpus" ]]; then
-        if [[ "$current_isolcpus" == "$cpuset" ]]; then
-            echo "  ✓ isolcpus=${current_isolcpus} already matches — no change needed."
-            [[ -n "$current_nohz" ]] && echo "  ✓ nohz_full=${current_nohz}" || true
-            [[ -n "$current_rcu"  ]] && echo "  ✓ rcu_nocbs=${current_rcu}"  || true
-            echo ""
-            return
+    if [[ -n "$current_nohz" && -n "$current_rcu" ]]; then
+        if [[ "$current_nohz" == "$cpuset" && "$current_rcu" == "$cpuset" ]]; then
+            echo "  ✓ nohz_full and rcu_nocbs already set correctly — no change needed."
         else
-            echo "  ⚠  Current isolcpus=${current_isolcpus} does NOT match cpuset=${cpuset}"
-            echo "     Consider updating it to match."
-            echo ""
+            echo "  ⚠  Current values differ from the cpuset:"
+            echo "     nohz_full=${current_nohz}  rcu_nocbs=${current_rcu}"
+            echo "     Consider updating them to match: nohz_full=${cpuset} rcu_nocbs=${cpuset}"
         fi
     else
-        echo "  isolcpus is not currently set."
-        echo ""
+        echo "  These are optional — add to GRUB_CMDLINE_LINUX in /etc/default/grub"
+        echo "  then run: sudo update-grub && sudo reboot"
     fi
-
-    echo "  Recommended kernel parameters to add:"
-    echo ""
-    echo "    isolcpus=${cpuset} nohz_full=${cpuset} rcu_nocbs=${cpuset}"
-    echo ""
-    echo "  These reduce timer interrupts and RCU callbacks on the SDR cores,"
-    echo "  minimising latency jitter for real-time sample processing."
     echo ""
 }
 
-# In interactive mode, only show isolcpus info if the user agreed to apply the
-# docker-compose change (SKIP_ISOLCPUS=false).  In non-interactive mode, always
-# show it unless --quiet was passed (the caller can decide what to do with it).
-if ! $QUIET && { ! $INTERACTIVE || ! $SKIP_ISOLCPUS; }; then
-    _suggest_isolcpus "$best_cpuset"
+# Show nohz/rcu suggestion unless --quiet was passed.
+if ! $QUIET && { ! $INTERACTIVE || ! $SKIP_GRUB; }; then
+    _suggest_nohz "$best_cpuset"
 fi
 
-# Interactive: offer to apply isolcpus to grub
-# Skipped if the user already declined the docker-compose apply step.
-if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
-    # Only offer if isolcpus isn't already correctly set
-    _current_iso=$(cat /proc/cmdline 2>/dev/null | grep -oP 'isolcpus=\S+' | cut -d= -f2 || echo "")
-    if [[ "$_current_iso" != "$best_cpuset" ]]; then
+# Interactive: offer to apply nohz_full/rcu_nocbs to grub
+if $INTERACTIVE && ! $SKIP_GRUB; then
+    _current_nohz=$(cat /proc/cmdline 2>/dev/null | grep -oP 'nohz_full=\S+' | cut -d= -f2 || echo "")
+    _current_rcu=$(cat /proc/cmdline 2>/dev/null | grep -oP 'rcu_nocbs=\S+' | cut -d= -f2 || echo "")
 
-        echo ""
-        echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
-        echo -e "\033[1;33m║  ⚠  KERNEL CPU RESERVATION — READ BEFORE PROCEEDING                 ║\033[0m"
-        echo -e "\033[1;33m╠══════════════════════════════════════════════════════════════════════╣\033[0m"
-        echo -e "\033[1;33m║  For most users, the Docker cpuset applied above is sufficient.      ║\033[0m"
-        echo -e "\033[1;33m║  The kernel's CPU scheduler is generally good enough to ensure       ║\033[0m"
-        echo -e "\033[1;33m║  radiod gets the CPU time it needs.                                  ║\033[0m"
-        echo -e "\033[1;33m║                                                                      ║\033[0m"
-        echo -e "\033[1;33m║  isolcpus goes further: it reserves these cores exclusively for      ║\033[0m"
-        echo -e "\033[1;33m║  radiod and prevents ANY other process from using them — even        ║\033[0m"
-        echo -e "\033[1;33m║  when radiod is idle. This wastes CPU capacity and is only           ║\033[0m"
-        echo -e "\033[1;33m║  worthwhile if you need an absolute guarantee that nothing else      ║\033[0m"
-        echo -e "\033[1;33m║  ever touches these cores.                                           ║\033[0m"
-        echo -e "\033[1;33m║                                                                      ║\033[0m"
-        echo -e "\033[1;33m║  It also modifies your bootloader config and requires a reboot.      ║\033[0m"
-        echo -e "\033[1;33m║                                                                      ║\033[0m"
-        echo -e "\033[1;33m║  ➤  RECOMMENDATION: answer N and use the Docker cpuset only,        ║\033[0m"
-        echo -e "\033[1;33m║     unless you are certain you need hard kernel-level isolation.     ║\033[0m"
-        echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
-        echo ""
-
-        read -rp "Do you want to add isolcpus=${best_cpuset} to your kernel boot parameters? [y/N]: " _iso_ans
-        if [[ "${_iso_ans,,}" =~ ^y ]]; then
+    if [[ "$_current_nohz" != "$best_cpuset" || "$_current_rcu" != "$best_cpuset" ]]; then
+        read -rp "Do you want to add nohz_full/rcu_nocbs=${best_cpuset} to your kernel boot parameters? [y/N]: " _nohz_ans
+        if [[ "${_nohz_ans,,}" =~ ^y ]]; then
             _grub_file="/etc/default/grub"
 
             if [[ ! -f "$_grub_file" ]]; then
                 echo "  ERROR: ${_grub_file} not found — cannot apply automatically." >&2
 
-            # Check if any of these params already exist in grub (read is fine without sudo)
-            elif grep -qE 'isolcpus=|nohz_full=|rcu_nocbs=' "$_grub_file" 2>/dev/null; then
+            elif grep -qE 'nohz_full=|rcu_nocbs=' "$_grub_file" 2>/dev/null; then
                 echo ""
-                # Check if the existing values already match what we want
-                _grub_iso=$(grep -oP 'isolcpus=\S+' "$_grub_file" | cut -d= -f2 | tr -d '"' || echo "")
                 _grub_nohz=$(grep -oP 'nohz_full=\S+' "$_grub_file" | cut -d= -f2 | tr -d '"' || echo "")
                 _grub_rcu=$(grep -oP 'rcu_nocbs=\S+' "$_grub_file" | cut -d= -f2 | tr -d '"' || echo "")
 
-                if [[ "$_grub_iso" == "$best_cpuset" && "$_grub_nohz" == "$best_cpuset" && "$_grub_rcu" == "$best_cpuset" ]]; then
+                if [[ "$_grub_nohz" == "$best_cpuset" && "$_grub_rcu" == "$best_cpuset" ]]; then
                     echo "  ✓ ${_grub_file} already has the correct values:"
-                    echo "      isolcpus=${_grub_iso} nohz_full=${_grub_nohz} rcu_nocbs=${_grub_rcu}"
+                    echo "      nohz_full=${_grub_nohz} rcu_nocbs=${_grub_rcu}"
                     echo ""
                     echo "  Grub just needs to be regenerated and the system rebooted."
                     echo ""
-                    # Fall through to update-grub + reboot prompt by jumping to shared block
                     _do_grub_update=true
                 else
-                    echo "  ⚠  Existing isolcpus/nohz_full/rcu_nocbs found in ${_grub_file} with different values."
+                    echo "  ⚠  Existing nohz_full/rcu_nocbs found in ${_grub_file} with different values."
                     echo "  Current:"
                     grep 'GRUB_CMDLINE_LINUX' "$_grub_file"
                     echo ""
-                    echo "  Desired: isolcpus=${best_cpuset} nohz_full=${best_cpuset} rcu_nocbs=${best_cpuset}"
+                    echo "  Desired: nohz_full=${best_cpuset} rcu_nocbs=${best_cpuset}"
                     echo ""
                     read -rp "  Update these values automatically? [y/N]: " _update_ans
                     if [[ "${_update_ans,,}" =~ ^y ]]; then
                         _grub_backup="${_grub_file}.bak.$(date +%Y%m%d%H%M%S)"
                         sudo cp "$_grub_file" "$_grub_backup" && echo "  Backup: ${_grub_backup}"
-                        # Replace existing isolcpus/nohz_full/rcu_nocbs values in-place
                         sudo sed -i \
-                            -e "s/isolcpus=[^ \"]*/isolcpus=${best_cpuset}/g" \
                             -e "s/nohz_full=[^ \"]*/nohz_full=${best_cpuset}/g" \
                             -e "s/rcu_nocbs=[^ \"]*/rcu_nocbs=${best_cpuset}/g" \
                             "$_grub_file"
@@ -903,7 +859,7 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
                 fi
 
             else
-                # No existing isolcpus params — append them fresh
+                # No existing params — append them fresh
                 _grub_backup="${_grub_file}.bak.$(date +%Y%m%d%H%M%S)"
                 echo ""
                 if ! sudo cp "$_grub_file" "$_grub_backup" 2>/dev/null; then
@@ -911,7 +867,7 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
                     _do_grub_update=false
                 else
                     echo "  Backup saved to: ${_grub_backup}"
-                    if sudo sed -i "s/\(GRUB_CMDLINE_LINUX=\"[^\"]*\)\"/\1 isolcpus=${best_cpuset} nohz_full=${best_cpuset} rcu_nocbs=${best_cpuset}\"/" "$_grub_file"; then
+                    if sudo sed -i "s/\(GRUB_CMDLINE_LINUX=\"[^\"]*\)\"/\1 nohz_full=${best_cpuset} rcu_nocbs=${best_cpuset}\"/" "$_grub_file"; then
                         echo "  ✓ Updated ${_grub_file}"
                         echo ""
                         _do_grub_update=true
@@ -924,8 +880,6 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
 
             # ── Shared: run update-grub and offer reboot ──────────────────────
             if [[ "${_do_grub_update:-false}" == "true" ]]; then
-                # Find grub regeneration command — use full paths as /usr/sbin
-                # may not be in PATH in all sudo environments.
                 _grub_cmd=""
                 for _candidate in \
                     /usr/sbin/update-grub \
@@ -953,7 +907,7 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
                 fi
 
                 echo ""
-                echo "  A reboot is required to activate isolcpus=${best_cpuset}"
+                echo "  A reboot is required to activate nohz_full/rcu_nocbs=${best_cpuset}"
                 echo ""
 
                 read -rp "  Reboot now? [y/N]: " _reboot_ans
@@ -965,7 +919,7 @@ if $INTERACTIVE && ! $SKIP_ISOLCPUS; then
                 echo ""
             fi
         else
-            echo "  Skipping isolcpus configuration."
+            echo "  Skipping kernel parameter configuration."
             echo ""
         fi
     fi
@@ -1004,7 +958,7 @@ fi
 
 # ── 9. Deferred reboot ───────────────────────────────────────────────────────
 # Executed last so UberSDR is always restarted (picking up the new cpuset)
-# before the system reboots to activate isolcpus.
+# before the system reboots to activate nohz_full/rcu_nocbs.
 if [[ "${_do_reboot:-false}" == "true" ]]; then
     echo "  Rebooting in 5 seconds — press Ctrl+C to cancel..."
     sleep 5

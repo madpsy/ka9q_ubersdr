@@ -480,28 +480,74 @@ if $INTERACTIVE; then
     done
     echo ""
 
-    # Adjust recommended core count based on expected users
-    if (( _expected_users > 100 )); then
+    # ── Recommend physical cores based on expected concurrent users ───────────
+    # Tiers:
+    #   1 – 50  users  → 2 cores
+    #   51 – 100 users → 4 cores
+    #   each additional 100 users over 100 → +2 cores (101-200=6, 201-300=8, …)
+    # Hard cap: no more than half the total logical CPUs on this machine.
+    _total_logical=$(nproc --all 2>/dev/null || echo "$TOTAL_PHYSICAL")
+    _half_logical=$(( _total_logical / 2 ))
+    (( _half_logical < 1 )) && _half_logical=1
+
+    if (( _expected_users <= 50 )); then
         _recommended_cores=2
-        echo "  With ${_expected_users} concurrent users, we recommend 2 physical cores."
-        if $_ht_present; then
-            echo "  (2 physical cores = 4 logical CPUs on this HT system)"
-        fi
+    elif (( _expected_users <= 100 )); then
+        _recommended_cores=4
     else
-        _recommended_cores=1
-        echo "  With ${_expected_users} concurrent user(s), 1 physical core is sufficient."
-        if $_ht_present; then
-            echo "  (1 physical core = 2 logical CPUs on this HT system)"
-        fi
+        # 2 base cores for the first 100, then +2 per additional 100 users
+        _extra_hundreds=$(( (_expected_users - 100 + 99) / 100 ))
+        _recommended_cores=$(( 4 + _extra_hundreds * 2 ))
     fi
-    # Cap recommendation at the largest single L3 domain
-    (( _recommended_cores > _largest_l3 )) && _recommended_cores=$_largest_l3
+
+    # Cap at half the total logical CPUs (convert to physical cores)
+    # Each logical CPU maps to one physical core slot for the cpuset purpose;
+    # we cap the physical-core count so the logical CPU count stays ≤ half.
+    # Determine logical CPUs per physical core from the first core entry.
+    _first_core_key="${core_list[0]}"
+    _lcpus_per_core=1
+    IFS=',' read -ra _fc_cpus <<< "$_first_core_key"
+    _lcpus_per_core="${#_fc_cpus[@]}"
+    (( _lcpus_per_core < 1 )) && _lcpus_per_core=1
+
+    # Max physical cores such that (cores × logical_per_core) ≤ half_logical
+    _max_cores_by_half=$(( _half_logical / _lcpus_per_core ))
+    (( _max_cores_by_half < 1 )) && _max_cores_by_half=1
+
+    if (( _recommended_cores > _max_cores_by_half )); then
+        _recommended_cores=$_max_cores_by_half
+        echo "  Note: recommendation capped at ${_recommended_cores} physical core(s)"
+        echo "        (≤ half of ${_total_logical} logical CPUs on this system)."
+    fi
+
+    # Build a human-readable explanation of the recommendation
+    if (( _expected_users <= 50 )); then
+        echo "  With ${_expected_users} concurrent user(s) (≤ 50), we recommend 2 physical cores."
+    elif (( _expected_users <= 100 )); then
+        echo "  With ${_expected_users} concurrent users (51–100), we recommend 4 physical cores."
+    else
+        echo "  With ${_expected_users} concurrent users (>100), we recommend ${_recommended_cores} physical cores"
+        echo "  (+2 cores per 100 users above 100)."
+    fi
+    if $_ht_present; then
+        _logical_for_rec=$(( _recommended_cores * _lcpus_per_core ))
+        echo "  (${_recommended_cores} physical core(s) = ${_logical_for_rec} logical CPU(s) on this HT system)"
+    fi
+
+    # Warn if the recommendation crosses L3 domain boundaries, but let the user decide.
+    # Do NOT silently cap — the user may be happy to span domains for the extra capacity.
+    echo ""
+    if (( _recommended_cores > _largest_l3 )); then
+        echo -e "\033[1;33m  ⚠  The recommended ${_recommended_cores} core(s) span multiple L3 cache domains.\033[0m"
+        echo -e "\033[1;33m     (largest single L3 domain has ${_largest_l3} core(s))\033[0m"
+        echo -e "\033[1;33m     Cross-domain buffer handoffs add memory latency — acceptable for high user counts,\033[0m"
+        echo -e "\033[1;33m     but you can reduce the core count to ${_largest_l3} to stay within one L3 domain.\033[0m"
+    else
+        echo "  You can assign up to ${_largest_l3} core(s) and stay within one L3 cache domain."
+    fi
+    echo "  Using more than ${_largest_l3} core(s) will span multiple L3 domains, adding memory latency."
     # Update default if not already set by --cores
     NUM_CORES=$_recommended_cores
-
-    echo ""
-    echo "  You can assign up to ${_largest_l3} core(s) and stay within one L3 cache domain."
-    echo "  Using more than ${_largest_l3} core(s) will span multiple L3 domains, adding memory latency."
     echo ""
     echo -e "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
     echo -e "\033[1;33m║  ⚠  WHAT DOCKER CPUSET DOES                                          ║\033[0m"

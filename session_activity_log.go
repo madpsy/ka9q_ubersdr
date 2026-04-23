@@ -567,6 +567,8 @@ func ReadActivityLogs(dataDir string, startTime, endTime time.Time) ([]SessionAc
 
 		// Read line by line using bufio.Scanner to properly handle corrupted data
 		scanner := bufio.NewScanner(file)
+		// Increase buffer size to 10MB to handle large JSON lines
+		scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 		lineNum := 0
 		corruptedLines := 0
 		for scanner.Scan() {

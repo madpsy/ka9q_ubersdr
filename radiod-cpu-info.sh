@@ -487,6 +487,8 @@ section_governor() {
             ok_line "performance governor active"
         else
             warn_line "CPU governor is not 'performance' — use 'Manage CPU Governor' in UberSDR Admin to fix"
+            info_line "Note: 'performance' keeps the CPU at max frequency, reducing frequency-scaling latency."
+            info_line "      Trade-off: higher idle power consumption and increased heat output."
         fi
     fi
 
@@ -1558,6 +1560,8 @@ section_summary() {
     if $bad_gov; then
         warn_line "CPU governor is not 'performance'"
         echo "    Fix: use 'Manage CPU Governor' in UberSDR Admin"
+        info_line "Note: 'performance' eliminates frequency-scaling latency at the cost of higher power use and heat."
+        info_line "      Consider the trade-off if running on low-power or fanless hardware."
         (( issues++ )) || true
     else
         ok_line "CPU governor: performance"

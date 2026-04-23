@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,14 +27,19 @@ type threadStat struct {
 // The five Pct fields sum to TotalPct:
 //
 //	TotalPct = ProcRx888Pct + FftPct + RadioStatPct + ChannelsPct + OtherPct
+//
+// NumLogicalCPUs is runtime.NumCPU() — the number of logical CPUs visible to this
+// process (includes HT siblings).  Divide any *Pct value by NumLogicalCPUs to get
+// the fraction of total system CPU capacity used by that group.
 type ThreadCPUStats struct {
-	Available    bool    `json:"available"`
-	ProcRx888Pct float64 `json:"proc_rx888_pct"` // sum of proc_rx888 threads
-	FftPct       float64 `json:"fft_pct"`        // sum of fft* threads
-	RadioStatPct float64 `json:"radio_stat_pct"` // sum of "radio stat" threads
-	ChannelsPct  float64 `json:"channels_pct"`   // sum of threads matched to a channel SSRC (lin/spect/…)
-	OtherPct     float64 `json:"other_pct"`      // everything else (radiod main, libusb_event, agc_rx888, …)
-	TotalPct     float64 `json:"total_pct"`      // grand total of all threads
+	Available      bool    `json:"available"`
+	NumLogicalCPUs int     `json:"num_logical_cpus"` // runtime.NumCPU()
+	ProcRx888Pct   float64 `json:"proc_rx888_pct"`   // sum of proc_rx888 threads
+	FftPct         float64 `json:"fft_pct"`          // sum of fft* threads
+	RadioStatPct   float64 `json:"radio_stat_pct"`   // sum of "radio stat" threads
+	ChannelsPct    float64 `json:"channels_pct"`     // sum of threads matched to a channel SSRC (lin/spect/…)
+	OtherPct       float64 `json:"other_pct"`        // everything else (radiod main, libusb_event, agc_rx888, …)
+	TotalPct       float64 `json:"total_pct"`        // grand total of all threads
 }
 
 // RadiodChannelInfo represents a summary of a radiod channel for display
@@ -393,7 +399,10 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	// ── Thread CPU stats ──────────────────────────────────────────────────────
 	threadStats, statsAvailable := readThreadStats()
 
-	cpuStats := ThreadCPUStats{Available: statsAvailable}
+	cpuStats := ThreadCPUStats{
+		Available:      statsAvailable,
+		NumLogicalCPUs: runtime.NumCPU(),
+	}
 
 	if statsAvailable {
 		// Build a set of SSRCs present in the channel list for fast lookup

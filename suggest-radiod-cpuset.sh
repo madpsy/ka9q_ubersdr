@@ -56,12 +56,12 @@ if [[ $# -eq 0 ]]; then
 
     SESSION_NAME="radiod-cpuset"
 
-    # Check if session already exists
+    # If session already exists, re-attach to it (e.g. browser tab was closed)
     if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-        echo "Error: tmux session '$SESSION_NAME' already exists."
-        echo "Attach to it with: tmux attach -t $SESSION_NAME"
-        echo "Or kill it first with: tmux kill-session -t $SESSION_NAME"
-        exit 1
+        echo "Resuming existing tmux session '$SESSION_NAME'..."
+        echo
+        tmux attach -t "$SESSION_NAME"
+        exit 0
     fi
 
     echo "Creating tmux session '$SESSION_NAME' and starting CPU pinning helper..."

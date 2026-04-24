@@ -610,14 +610,26 @@ func (rc *RadiodController) DisableChannelSilent(name string, ssrc uint32) error
 	return nil
 }
 
-// TerminateChannel terminates a channel by setting frequency to 0
-// This is the same as DisableChannel - channels will expire after idle timeout
-// Note: This is a placeholder until we find a reliable way to immediately terminate channels
+// TerminateChannel terminates a channel by setting frequency to 0 and immediately
+// evicts it from the status cache so the admin panel stops showing it.
+// Channels at freq=0 are silent (no audio output) so radiod only sends one STATUS
+// packet for them (in response to the creation command) and never refreshes it.
+// Without the eager eviction the cache entry lingers for up to 30 seconds
+// (the cleanupStaleEntries threshold), causing the admin panel to show the channel
+// long after radiod has expired it.
 func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
-	// Just use DisableChannel - it's the most reliable method
+	// Just use DisableChannel - it's the most reliable method.
 	// Trying to force termination with DEMOD_TYPE=-1 or OUTPUT_SAMPRATE changes
-	// causes radiod to reload presets which recreates the channel
-	return rc.DisableChannel(name, ssrc)
+	// causes radiod to reload presets which recreates the channel.
+	err := rc.DisableChannel(name, ssrc)
+	// Eagerly remove from the status cache so the admin panel reflects the
+	// termination immediately rather than waiting up to 30 s for stale cleanup.
+	if rc.frontendTracker != nil {
+		rc.frontendTracker.mu.Lock()
+		delete(rc.frontendTracker.channelStatus, ssrc)
+		rc.frontendTracker.mu.Unlock()
+	}
+	return err
 }
 
 // buildCommand constructs a radiod control command packet

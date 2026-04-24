@@ -13,15 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Packet buffer pool to reduce allocations for spectrum binary packets
-var spectrumPacketPool = sync.Pool{
-	New: func() interface{} {
-		// Allocate max size: header (22 bytes) + full frame (1024 bins * 4 bytes = 4096)
-		// Round up to 8KB for safety
-		return make([]byte, 0, 8192)
-	},
-}
-
 // UserSpectrumWebSocketHandler handles per-user spectrum WebSocket connections
 type UserSpectrumWebSocketHandler struct {
 	sessions           *SessionManager
@@ -36,7 +27,24 @@ type spectrumState struct {
 	previousData   []float32
 	previousData8  []uint8 // For binary8 mode
 	useBinary8Mode bool    // Whether to use 8-bit encoding
-	mu             sync.RWMutex
+	// Reusable scratch buffers — allocated once per session, grown as needed.
+	// Avoids per-frame heap allocations at high user counts.
+	changesBuf  []changeEntry  // reused by sendBinarySpectrum
+	changes8Buf []changeEntry8 // reused by sendBinary8Spectrum
+	data8Buf    []uint8        // reused by sendBinary8Spectrum for float32→uint8 conversion
+	mu          sync.RWMutex
+}
+
+// changeEntry is a (index, float32 value) pair used for delta encoding.
+type changeEntry struct {
+	index uint16
+	value float32
+}
+
+// changeEntry8 is a (index, uint8 value) pair used for 8-bit delta encoding.
+type changeEntry8 struct {
+	index uint16
+	value uint8
 }
 
 // NewUserSpectrumWebSocketHandler creates a new per-user spectrum WebSocket handler
@@ -523,10 +531,6 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 //   - ChangeCount: uint16 (2 bytes)
 //   - Changes: array of [index: uint16, value: float32] (6 bytes each)
 func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, session *Session, spectrumData []float32, state *spectrumState) error {
-	const (
-		fullFrameInterval = 50 // Send full frame every N frames to prevent drift
-	)
-
 	// Get delta threshold from config (validated to be between 1.0 and 10.0 dB)
 	deltaThreshold := swsh.sessions.config.Spectrum.DeltaThresholdDB
 
@@ -542,20 +546,20 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 		sendFullFrame = true
 	}
 
-	// Calculate changes for delta encoding (no lock held - better concurrency)
-	type change struct {
-		index uint16
-		value float32
+	// Reuse the per-session changes scratch buffer (Fix 2: avoids per-frame heap allocation).
+	// The buffer is grown as needed but never shrinks, so it stabilises at worst-case size.
+	state.mu.Lock()
+	if cap(state.changesBuf) < len(spectrumData) {
+		state.changesBuf = make([]changeEntry, 0, len(spectrumData))
 	}
-	// Pre-allocate assuming ~10% of bins will change (typical for HF spectrum)
-	// This reduces allocations from ~10-50 to 1 per frame
-	changes := make([]change, 0, len(spectrumData)/10)
+	state.changesBuf = state.changesBuf[:0]
+	state.mu.Unlock()
 
 	if !sendFullFrame {
 		for i := 0; i < len(spectrumData); i++ {
 			diff := math.Abs(float64(spectrumData[i] - prevData[i]))
 			if diff > deltaThreshold {
-				changes = append(changes, change{
+				state.changesBuf = append(state.changesBuf, changeEntry{
 					index: uint16(i),
 					value: spectrumData[i],
 				})
@@ -564,7 +568,7 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 
 		// If too many changes (>80% of bins), send full frame instead
 		// More aggressive threshold for HF radio where small variations are normal
-		if len(changes) > (len(spectrumData)*4)/5 {
+		if len(state.changesBuf) > (len(spectrumData)*4)/5 {
 			sendFullFrame = true
 		}
 	}
@@ -572,14 +576,16 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 	// GPS-synchronized timestamp in nanoseconds (consistent with audio timestamps)
 	timestamp := time.Now().UnixNano()
 
-	// Get packet buffer from pool (reduces allocations)
+	// Allocate packet directly — do NOT use sync.Pool here.
+	// Pool buffers must not be sent to a buffered channel: the defer-based Put fires
+	// when this function returns, before the writer goroutine has consumed the packet,
+	// causing the pool to hand the same backing array to another goroutine (data
+	// corruption) and preventing reuse (pool grows without bound).
+	const headerSize = 22
 	var packet []byte
 	if sendFullFrame {
-		// Full frame format
-		headerSize := 22
 		packetSize := headerSize + len(spectrumData)*4
-		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
-		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
+		packet = make([]byte, packetSize)
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -613,12 +619,10 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 		copy(state.previousData, spectrumData)
 		state.mu.Unlock()
 	} else {
-		// Delta frame format
-		headerSize := 22
+		changes := state.changesBuf
 		changesSize := 2 + len(changes)*6 // changeCount (2 bytes) + changes
 		packetSize := headerSize + changesSize
-		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
-		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
+		packet = make([]byte, packetSize)
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -688,15 +692,18 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 //   - ChangeCount: uint16 (2 bytes)
 //   - Changes: array of [index: uint16, value: uint8] (3 bytes each)
 func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, session *Session, spectrumData []float32, state *spectrumState) error {
-	const (
-		fullFrameInterval = 50 // Send full frame every N frames to prevent drift
-	)
-
 	// Get delta threshold from config (validated to be between 1.0 and 10.0 dB)
 	deltaThreshold := swsh.sessions.config.Spectrum.DeltaThresholdDB
 
+	// Reuse per-session data8Buf for float32→uint8 conversion (Fix 3: avoids per-frame allocation).
+	state.mu.Lock()
+	if len(state.data8Buf) != len(spectrumData) {
+		state.data8Buf = make([]uint8, len(spectrumData))
+	}
+	spectrumData8 := state.data8Buf
+	state.mu.Unlock()
+
 	// Convert float32 dBFS to uint8 (0 = -256 dB, 255 = -1 dB)
-	spectrumData8 := make([]uint8, len(spectrumData))
 	for i, val := range spectrumData {
 		// Clamp to range [-256, 0] and convert to [0, 255]
 		dbValue := val
@@ -721,13 +728,13 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		sendFullFrame = true
 	}
 
-	// Calculate changes for delta encoding (no lock held - better concurrency)
-	type change struct {
-		index uint16
-		value uint8
+	// Reuse the per-session changes8 scratch buffer (Fix 2: avoids per-frame heap allocation).
+	state.mu.Lock()
+	if cap(state.changes8Buf) < len(spectrumData8) {
+		state.changes8Buf = make([]changeEntry8, 0, len(spectrumData8))
 	}
-	// Pre-allocate assuming ~10% of bins will change (typical for HF spectrum)
-	changes := make([]change, 0, len(spectrumData8)/10)
+	state.changes8Buf = state.changes8Buf[:0]
+	state.mu.Unlock()
 
 	if !sendFullFrame {
 		for i := 0; i < len(spectrumData8); i++ {
@@ -737,7 +744,7 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 			diff := math.Abs(newDB - oldDB)
 
 			if diff > deltaThreshold {
-				changes = append(changes, change{
+				state.changes8Buf = append(state.changes8Buf, changeEntry8{
 					index: uint16(i),
 					value: spectrumData8[i],
 				})
@@ -745,7 +752,7 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		}
 
 		// If too many changes (>80% of bins), send full frame instead
-		if len(changes) > (len(spectrumData8)*4)/5 {
+		if len(state.changes8Buf) > (len(spectrumData8)*4)/5 {
 			sendFullFrame = true
 		}
 	}
@@ -753,14 +760,13 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 	// GPS-synchronized timestamp in nanoseconds (consistent with audio timestamps)
 	timestamp := time.Now().UnixNano()
 
-	// Get packet buffer from pool (reduces allocations)
+	// Allocate packet directly — do NOT use sync.Pool here (see sendBinarySpectrum comment).
+	const headerSize = 22
 	var packet []byte
 	if sendFullFrame {
 		// Full frame format (uint8)
-		headerSize := 22
 		packetSize := headerSize + len(spectrumData8)
-		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
-		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
+		packet = make([]byte, packetSize)
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -792,11 +798,10 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		state.mu.Unlock()
 	} else {
 		// Delta frame format (uint8)
-		headerSize := 22
+		changes := state.changes8Buf
 		changesSize := 2 + len(changes)*3 // changeCount (2 bytes) + changes (3 bytes each)
 		packetSize := headerSize + changesSize
-		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
-		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
+		packet = make([]byte, packetSize)
 
 		// Magic
 		packet[0] = 0x53 // 'S'

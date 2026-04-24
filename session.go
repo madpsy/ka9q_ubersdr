@@ -14,6 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxRadiodChannels is the hard upper limit on total radiod channels (all types combined).
+// radiod itself supports up to 2000 channels; we enforce this here to reject new user
+// sessions before radiod silently drops them.
+const maxRadiodChannels = 2000
+
 // radiodController is the interface that SessionManager uses to talk to radiod.
 // *RadiodController satisfies this interface; tests can inject a stub.
 type radiodController interface {
@@ -247,6 +252,18 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	if userSessionID != "" {
 		if _, exists := sm.userSessionFirst[userSessionID]; !exists {
 			sm.userSessionFirst[userSessionID] = time.Now()
+		}
+	}
+
+	// Check total radiod channel cap. radiod supports a maximum of maxRadiodChannels
+	// channels; reject new user sessions when we are at or near that limit.
+	// Internal sessions (empty clientIP) are exempt — background channels (noisefloor,
+	// decoders, frequency-reference) must always be allowed to exist.
+	if clientIP != "" {
+		currentChannels := len(sm.radiod.GetAllChannelStatus())
+		if currentChannels >= maxRadiodChannels {
+			return nil, fmt.Errorf("radiod channel limit reached (%d/%d); try again later",
+				currentChannels, maxRadiodChannels)
 		}
 	}
 
@@ -513,6 +530,18 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	// Check session limit based on unique user_session_ids
 	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
 	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
+	// Check total radiod channel cap. radiod supports a maximum of maxRadiodChannels
+	// channels; reject new user sessions when we are at or near that limit.
+	// Internal sessions (empty clientIP) are exempt — background channels (noisefloor,
+	// decoders, frequency-reference) must always be allowed to exist.
+	if clientIP != "" {
+		currentChannels := len(sm.radiod.GetAllChannelStatus())
+		if currentChannels >= maxRadiodChannels {
+			return nil, fmt.Errorf("radiod channel limit reached (%d/%d); try again later",
+				currentChannels, maxRadiodChannels)
+		}
+	}
+
 	log.Printf("DEBUG SPECTRUM: Checking limits for IP %s, UUID %s, password provided: %v, bypass result: %v",
 		clientIP, userSessionID, password != "", sm.config.Server.IsIPTimeoutBypassed(clientIP, password))
 	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {

@@ -32,8 +32,9 @@ type UserSpectrumManager struct {
 	statusConn *net.UDPConn
 	statusAddr *net.UDPAddr
 
-	// Per-packet goroutine dispatch (replaces fixed worker pool + queue)
-	hasNonZeroFrequencyGain bool // true if any GainDBFrequencyRange has a non-zero gain_db
+	// Per-packet goroutine dispatch with semaphore to bound concurrency
+	dispatchSem             chan struct{} // semaphore: limits concurrent distributeSpectrum goroutines
+	hasNonZeroFrequencyGain bool          // true if any GainDBFrequencyRange has a non-zero gain_db
 
 	// Control
 	running                bool
@@ -71,6 +72,7 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 		pollInterval:            time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
 		backgroundPollInterval:  time.Duration(config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond,
 		hasNonZeroFrequencyGain: hasNonZeroGain,
+		dispatchSem:             make(chan struct{}, 2000), // allow up to 2000 concurrent distributeSpectrum goroutines
 	}
 
 	return usm, nil
@@ -489,13 +491,22 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 
 		// Dispatch distribution in a dedicated goroutine so the receive loop
 		// is never blocked and bursts of any size are absorbed without drops.
-		// distributeSpectrum is safe to call concurrently: it uses its own
-		// locks and has a defer/recover for closed-channel panics.
-		usm.wg.Add(1)
-		go func(s uint32, d []float32) {
-			defer usm.wg.Done()
-			usm.distributeSpectrum(s, d)
-		}(ssrc, binData)
+		// A semaphore (2000 slots) bounds peak concurrency: if all slots are
+		// occupied the packet is dropped, which only happens when
+		// distributeSpectrum() is consistently slower than the poll rate.
+		select {
+		case usm.dispatchSem <- struct{}{}:
+			usm.wg.Add(1)
+			go func(s uint32, d []float32) {
+				defer func() { <-usm.dispatchSem }()
+				defer usm.wg.Done()
+				usm.distributeSpectrum(s, d)
+			}(ssrc, binData)
+		default:
+			if DebugMode {
+				log.Printf("DEBUG: Spectrum dispatch semaphore full, dropping packet for SSRC 0x%08x", ssrc)
+			}
+		}
 	} else if foundSSRC {
 		// Handle audio channels (no bin data, but has frequency and filter edges)
 		if foundFreq && foundLowEdge && foundHighEdge {

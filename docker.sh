@@ -10,6 +10,7 @@ TAG_LATEST=true
 NO_CACHE=""
 BUILD_FLUENT_BIT=false
 SKIP_GEOIP=false
+NO_GIT=false
 
 for arg in "$@"; do
     case $arg in
@@ -29,9 +30,13 @@ for arg in "$@"; do
             SKIP_GEOIP=true
             echo "Running in --no-geoip mode (will skip GeoIP database download)"
             ;;
+        --no-git)
+            NO_GIT=true
+            echo "Running in --no-git mode (will skip git commit and push)"
+            ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip]"
+            echo "Usage: $0 [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git]"
             exit 1
             ;;
     esac
@@ -158,12 +163,12 @@ else
     echo "Skipping Fluent Bit push (not built)"
 fi
 
-# Commit and push version changes (unless --no-latest flag is set)
-if [ "$TAG_LATEST" = true ]; then
+# Commit and push version changes (unless --no-latest or --no-git flag is set)
+if [ "$TAG_LATEST" = true ] && [ "$NO_GIT" = false ]; then
     echo "Committing and pushing to git..."
     git add .
     git commit -m "$VERSION"
     git push -v
 else
-    echo "Skipping git commit and push (--no-latest flag set)"
+    echo "Skipping git commit and push (--no-latest or --no-git flag set)"
 fi

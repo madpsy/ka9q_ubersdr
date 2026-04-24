@@ -207,13 +207,24 @@ func (usm *UserSpectrumManager) pollLoop() {
 // pollUserSpectrumSessions sends poll commands for user-facing spectrum sessions only.
 // Background sessions (noisefloor, frequency-reference) are excluded and polled separately
 // at a lower rate to avoid saturating the radio stat thread with expensive wide-bin spectrum_poll() calls.
+// SSRCs are deduplicated so the shared default channel is only polled once regardless of
+// how many subscribers it has.
 func (usm *UserSpectrumManager) pollUserSpectrumSessions() {
 	usm.sessions.mu.RLock()
+	seen := make(map[uint32]bool)
 	spectrumSSRCs := make([]uint32, 0)
 	for _, session := range usm.sessions.sessions {
 		if session.IsSpectrum && !session.IsBackground {
-			spectrumSSRCs = append(spectrumSSRCs, session.SSRC)
+			if !seen[session.SSRC] {
+				seen[session.SSRC] = true
+				spectrumSSRCs = append(spectrumSSRCs, session.SSRC)
+			}
 		}
+	}
+	// Also poll the shared default channel SSRC if it is active and not already covered
+	// by a subscriber session (it always is, but this is a safety net).
+	if sdc := usm.sessions.sharedDefaultChan; sdc != nil && sdc.active && !seen[sdc.ssrc] {
+		spectrumSSRCs = append(spectrumSSRCs, sdc.ssrc)
 	}
 	usm.sessions.mu.RUnlock()
 
@@ -523,20 +534,39 @@ var (
 // checkSpectrumParameterMismatch compares radiod's actual spectrum parameters with our session state
 // and automatically retries the update if they don't match (rate-limited to avoid spam)
 func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radiodBinBW float32, radiodBinCount int) {
-	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
-	if !ok {
-		return
-	}
+	// Check whether this SSRC belongs to the shared default channel.
+	// If so, compare against the canonical shared-channel parameters rather than
+	// an individual subscriber's session (which would be the same values anyway,
+	// but this avoids a 1:1 SSRC→session assumption).
+	usm.sessions.mu.RLock()
+	sdc, isShared := usm.sessions.ssrcToShared[ssrc]
+	usm.sessions.mu.RUnlock()
 
-	if !session.IsSpectrum {
-		return
-	}
+	var sessionFreq uint64
+	var sessionBinBW float32
+	var sessionBinCount int
 
-	session.mu.RLock()
-	sessionFreq := session.Frequency
-	sessionBinBW := float32(session.BinBandwidth)
-	sessionBinCount := session.BinCount
-	session.mu.RUnlock()
+	if isShared {
+		// Use the shared channel's canonical (default) parameters.
+		def := usm.sessions.config.Spectrum.Default
+		sessionFreq = def.CenterFrequency
+		sessionBinBW = float32(def.BinBandwidth)
+		sessionBinCount = def.BinCount
+		_ = sdc // used only for the isShared check
+	} else {
+		session, ok := usm.sessions.GetSessionBySSRC(ssrc)
+		if !ok {
+			return
+		}
+		if !session.IsSpectrum {
+			return
+		}
+		session.mu.RLock()
+		sessionFreq = session.Frequency
+		sessionBinBW = float32(session.BinBandwidth)
+		sessionBinCount = session.BinCount
+		session.mu.RUnlock()
+	}
 
 	// Check if parameters match (with small tolerance for floating point comparison)
 	const tolerance = 0.01
@@ -668,10 +698,13 @@ func (usm *UserSpectrumManager) calculateBinFrequency(binIndex int, centerFreq u
 	return uint64(binFreq)
 }
 
-// distributeSpectrum sends spectrum data to the appropriate session
-// Applies frequency-specific gain based on the session's actual center frequency and bin bandwidth
+// distributeSpectrum sends spectrum data to the appropriate session(s).
+// For the shared default channel SSRC it fans out to all subscribers.
+// Applies frequency-specific gain based on the session's actual center frequency and bin bandwidth.
 func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) {
-	// Defer recovery to handle any panics from sending on closed channels
+	// Defer recovery to handle any panics from sending on closed channels.
+	// This must be the first statement so it covers both the shared fan-out and
+	// the private-channel path below.
 	defer func() {
 		if r := recover(); r != nil {
 			// Channel was likely closed during session cleanup - this is expected during shutdown
@@ -681,6 +714,37 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 		}
 	}()
 
+	// ── Shared channel fan-out ────────────────────────────────────────────────
+	// Check whether this SSRC belongs to the shared default channel.
+	// If so, deliver data to every subscriber independently.
+	usm.sessions.mu.RLock()
+	sdc, isShared := usm.sessions.ssrcToShared[ssrc]
+	usm.sessions.mu.RUnlock()
+
+	if isShared {
+		// Take a snapshot of subscribers under sdc.mu so we don't hold it
+		// while doing potentially-blocking channel sends.
+		sdc.mu.RLock()
+		subscribers := make([]*Session, 0, len(sdc.subscribers))
+		for _, sub := range sdc.subscribers {
+			subscribers = append(subscribers, sub)
+		}
+		sdc.mu.RUnlock()
+
+		for _, session := range subscribers {
+			// Skip sessions that are being destroyed.
+			select {
+			case <-session.Done:
+				continue
+			default:
+			}
+
+			usm.sendSpectrumToSession(session, data)
+		}
+		return
+	}
+
+	// ── Private channel path ──────────────────────────────────────────────────
 	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
 		return
@@ -699,6 +763,12 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 		// Session is still active, continue
 	}
 
+	usm.sendSpectrumToSession(session, data)
+}
+
+// sendSpectrumToSession delivers spectrum data to a single session, applying any
+// configured frequency-specific gain adjustments.
+func (usm *UserSpectrumManager) sendSpectrumToSession(session *Session, data []float32) {
 	// Apply frequency-specific gain per-session if configured
 	if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 {
 		// Get session parameters (these reflect the user's actual view)

@@ -178,6 +178,12 @@ func getUnknownChannelSSRCs(sessions *SessionManager, multiDecoder *MultiDecoder
 	for _, session := range sessions.sessions {
 		knownSSRCs[session.SSRC] = true
 	}
+	// Also mark the shared default spectrum channel SSRC as known so it is never
+	// treated as an orphan (shared subscribers carry the shared SSRC in session.SSRC
+	// so it is already covered above, but this is an explicit defence-in-depth guard).
+	for ssrc := range sessions.ssrcToShared {
+		knownSSRCs[ssrc] = true
+	}
 	sessions.mu.RUnlock()
 
 	// Also add decoder SSRCs if multiDecoder exists
@@ -254,6 +260,9 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Map all sessions (user, noise floor, decoder, etc.)
+	// Also capture the shared default spectrum channel SSRC and subscriber count.
+	sharedSSRC := uint32(0)
+	sharedSubscriberCount := 0
 	ah.sessions.mu.RLock()
 	for sessionID, session := range ah.sessions.sessions {
 		sessionSSRCs[session.SSRC] = sessionID
@@ -262,6 +271,12 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		} else {
 			sessionTypes[session.SSRC] = "audio"
 		}
+	}
+	if sdc := ah.sessions.sharedDefaultChan; sdc != nil && sdc.active {
+		sharedSSRC = sdc.ssrc
+		sdc.mu.RLock()
+		sharedSubscriberCount = len(sdc.subscribers)
+		sdc.mu.RUnlock()
 	}
 	ah.sessions.mu.RUnlock()
 
@@ -310,7 +325,13 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		var channelType, channelName, sessionID string
 		var isInternal bool
 
-		if decoderName, isDecoder := decoderSSRCs[ssrc]; isDecoder {
+		if sharedSSRC != 0 && ssrc == sharedSSRC {
+			// This is the shared default spectrum channel
+			channelType = "shared_spectrum"
+			channelName = fmt.Sprintf("Shared Spectrum (%d users)", sharedSubscriberCount)
+			isInternal = false
+			userCount++
+		} else if decoderName, isDecoder := decoderSSRCs[ssrc]; isDecoder {
 			// This is a decoder channel
 			channelType = "decoder"
 			channelName = fmt.Sprintf("Decoder: %s", decoderName)

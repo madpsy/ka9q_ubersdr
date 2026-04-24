@@ -7691,7 +7691,7 @@ function resetStationIdColor() {
 
             // WSJT-X UDP Enabled Modes
             const wsjtxModesLabel = document.createElement('label');
-            wsjtxModesLabel.textContent = 'Enabled Modes (mode-selective, not band-selective)';
+            wsjtxModesLabel.textContent = 'UDP Broadcast Modes (mode-selective, not band-selective)';
             wsjtxModesLabel.style.display = 'block';
             wsjtxModesLabel.style.marginTop = '15px';
             wsjtxModesLabel.style.marginBottom = '10px';
@@ -18478,6 +18478,7 @@ const tooltipLine2 = timeStr;
             let noiseFloorCount = 0;
             let userAudioCount = 0;
             let userSpectrumCount = 0;
+            let sharedSpectrumCount = 0;
             let referenceCount = 0;
             let unknownCount = 0;
 
@@ -18487,6 +18488,7 @@ const tooltipLine2 = timeStr;
                     case 'noisefloor': noiseFloorCount++; break;
                     case 'user_audio': userAudioCount++; break;
                     case 'user_spectrum': userSpectrumCount++; break;
+                    case 'shared_spectrum': sharedSpectrumCount++; break;
                     case 'reference': referenceCount++; break;
                     default: unknownCount++; break;
                 }
@@ -18512,6 +18514,7 @@ const tooltipLine2 = timeStr;
                 <span style="margin-left: 20px;">• Noise Floor: <strong style="color: #9c27b0;">${noiseFloorCount}</strong></span>
                 <span style="margin-left: 20px;">• User Audio: <strong style="color: #28a745;">${userAudioCount}</strong></span>
                 <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
+                ${sharedSpectrumCount > 0 ? `<span style="margin-left: 20px;">• Shared Spectrum: <strong style="color: #e91e63;">${sharedSpectrumCount}</strong></span>` : ''}
                 ${referenceCount > 0 ? `<span style="margin-left: 20px;">• Frequency Reference: <strong style="color: #ffc107;">${referenceCount}</strong></span>` : ''}
                 ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
                 ${data.cpu_stats && data.cpu_stats.available ? (() => {
@@ -18597,6 +18600,7 @@ const tooltipLine2 = timeStr;
                     'noisefloor': 'Noise Floor',
                     'user_audio': 'User Audio',
                     'user_spectrum': 'User Spectrum',
+                    'shared_spectrum': 'Shared Spectrum',
                     'reference': 'Frequency Reference',
                     'unknown': 'Unknown'
                 };
@@ -18737,6 +18741,7 @@ const tooltipLine2 = timeStr;
             let noiseFloorCount = 0;
             let userAudioCount = 0;
             let userSpectrumCount = 0;
+            let sharedSpectrumCount = 0;
             let referenceCount = 0;
             let unknownCount = 0;
 
@@ -18746,6 +18751,7 @@ const tooltipLine2 = timeStr;
                     case 'noisefloor': noiseFloorCount++; break;
                     case 'user_audio': userAudioCount++; break;
                     case 'user_spectrum': userSpectrumCount++; break;
+                    case 'shared_spectrum': sharedSpectrumCount++; break;
                     case 'reference': referenceCount++; break;
                     default: unknownCount++; break;
                 }
@@ -18762,6 +18768,7 @@ const tooltipLine2 = timeStr;
                     <span style="margin-left: 20px;">• Noise Floor: <strong style="color: #9c27b0;">${noiseFloorCount}</strong></span>
                     <span style="margin-left: 20px;">• User Audio: <strong style="color: #28a745;">${userAudioCount}</strong></span>
                     <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
+                    ${sharedSpectrumCount > 0 ? `<span style="margin-left: 20px;">• Shared Spectrum: <strong style="color: #e91e63;">${sharedSpectrumCount}</strong></span>` : ''}
                     ${referenceCount > 0 ? `<span style="margin-left: 20px;">• Frequency Reference: <strong style="color: #ffc107;">${referenceCount}</strong></span>` : ''}
                     ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
                     ${data.cpu_stats && data.cpu_stats.available ? (() => {
@@ -18892,6 +18899,10 @@ const tooltipLine2 = timeStr;
                             rowBg = '#fff3e0'; // Light orange
                             channelDisplay = `<span style="color: #ff9800;">📡 ${channel.channel_name}</span>`;
                             break;
+                        case 'shared_spectrum':
+                            rowBg = '#fce4ec'; // Light pink
+                            channelDisplay = `<span style="color: #e91e63;">📡 ${channel.channel_name}</span>`;
+                            break;
                         default:
                             rowBg = '#f5f5f5'; // Light gray
                             channelDisplay = `<span style="color: #999;">❓ ${channel.channel_name}</span>`;
@@ -18916,6 +18927,9 @@ const tooltipLine2 = timeStr;
                             break;
                         case 'user_spectrum':
                             channelDisplay = `<span style="color: #ff9800;">📡 ${channel.channel_name}</span>`;
+                            break;
+                        case 'shared_spectrum':
+                            channelDisplay = `<span style="color: #e91e63;">📡 ${channel.channel_name}</span>`;
                             break;
                         default:
                             channelDisplay = `<span style="color: #999;">❓ ${channel.channel_name}</span>`;

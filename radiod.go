@@ -777,6 +777,10 @@ func (rc *RadiodController) sendCommand(cmd []byte) error {
 	rc.cmdMu.Lock()
 	defer rc.cmdMu.Unlock()
 
+	if rc.conn == nil {
+		return fmt.Errorf("radiod connection not initialised")
+	}
+
 	// Set write deadline
 	if err := rc.conn.SetWriteDeadline(time.Now().Add(1 * time.Second)); err != nil {
 		return fmt.Errorf("failed to set write deadline: %w", err)

@@ -310,24 +310,38 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 		// Handle message based on type
 		switch msg.Type {
 		case "reset":
-			// Reset to full bandwidth view
+			// Reset to full bandwidth view.
+			// If the session currently has a private radiod channel, migrate it back
+			// to the shared default channel via ReturnToSharedChannel().
+			// If it is already on the shared channel (or already at defaults), just
+			// acknowledge with a status message.
 			defaultFreq := swsh.sessions.config.Spectrum.Default.CenterFrequency
 			defaultBinBW := swsh.sessions.config.Spectrum.Default.BinBandwidth
 			defaultBinCount := swsh.sessions.config.Spectrum.Default.BinCount
 
-			// Check if already at defaults
-			if session.Frequency == defaultFreq && session.BinBandwidth == defaultBinBW && session.BinCount == defaultBinCount {
-
-				// Still send status to acknowledge the request
+			if session.IsSharedSubscriber {
+				// Already on the shared channel — nothing to migrate.
+				// Update session params to defaults in case they drifted, then ack.
+				if session.Frequency != defaultFreq || session.BinBandwidth != defaultBinBW || session.BinCount != defaultBinCount {
+					if err := swsh.sessions.UpdateSpectrumSession(session.ID, defaultFreq, defaultBinBW, defaultBinCount); err != nil {
+						swsh.sendError(conn, "Failed to reset spectrum: "+err.Error())
+						continue
+					}
+				}
+				swsh.sendStatus(conn, session)
+			} else if session.Frequency == defaultFreq && session.BinBandwidth == defaultBinBW && session.BinCount == defaultBinCount {
+				// Private channel but already at default params — migrate back to shared.
+				if err := swsh.sessions.ReturnToSharedChannel(session.ID); err != nil {
+					swsh.sendError(conn, "Failed to return to shared channel: "+err.Error())
+					continue
+				}
 				swsh.sendStatus(conn, session)
 			} else {
-
-				if err := swsh.sessions.UpdateSpectrumSession(session.ID, defaultFreq, defaultBinBW, defaultBinCount); err != nil {
+				// Private channel with non-default params — update params first, then migrate.
+				if err := swsh.sessions.ReturnToSharedChannel(session.ID); err != nil {
 					swsh.sendError(conn, "Failed to reset spectrum: "+err.Error())
 					continue
 				}
-
-				// Send updated status
 				swsh.sendStatus(conn, session)
 			}
 

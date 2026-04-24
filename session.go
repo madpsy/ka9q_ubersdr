@@ -14,10 +14,39 @@ import (
 	"github.com/google/uuid"
 )
 
+// radiodController is the interface that SessionManager uses to talk to radiod.
+// *RadiodController satisfies this interface; tests can inject a stub.
+type radiodController interface {
+	CreateChannelWithBandwidth(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int) error
+	CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32) error
+	TerminateChannel(name string, ssrc uint32) error
+	UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error
+	UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error
+	UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error
+	GetFrontendStatus(ssrc uint32) *FrontendStatus
+	DisableChannelSilent(name string, ssrc uint32) error
+	GetAllChannelStatus() map[uint32]*ChannelStatus
+	GetChannelStatus(ssrc uint32) *ChannelStatus
+}
+
 // BytesSample represents a sample of bytes sent at a specific time
 type BytesSample struct {
 	Timestamp time.Time
 	Bytes     uint64
+}
+
+// SharedDefaultChannel holds the single on-demand radiod spectrum channel that is shared
+// among all users whose spectrum parameters match the configured defaults.
+// Lifecycle: created on first subscriber, torn down when the last subscriber leaves.
+// All fields except mu are protected by SessionManager.mu (held as write lock during
+// create/destroy transitions). mu is only used in distributeSpectrum() which runs
+// outside sm.mu to take a snapshot of subscribers for fan-out.
+type SharedDefaultChannel struct {
+	active      bool                // true while the radiod channel exists
+	ssrc        uint32              // SSRC assigned to the shared radiod channel
+	channelName string              // radiod channel name (e.g. "spectrum-shared-XXXXXXXX")
+	subscribers map[string]*Session // sessionID → *Session
+	mu          sync.RWMutex        // guards subscribers snapshot in distributeSpectrum only
 }
 
 // Session represents a user session with an associated radiod channel
@@ -52,11 +81,12 @@ type Session struct {
 	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle
 
 	// Spectrum-specific fields (only used when Mode == "spectrum")
-	IsSpectrum   bool
-	IsBackground bool          // True for internal/background spectrum sessions (noisefloor, frequency-reference) that should be polled at a slower rate
-	BinCount     int
-	BinBandwidth float64
-	SpectrumChan chan []float32 // Channel for spectrum data
+	IsSpectrum         bool
+	IsBackground       bool // True for internal/background spectrum sessions (noisefloor, frequency-reference) that should be polled at a slower rate
+	IsSharedSubscriber bool // True when this session is subscribed to the shared default spectrum channel
+	BinCount           int
+	BinBandwidth       float64
+	SpectrumChan       chan []float32 // Channel for spectrum data
 
 	// Network statistics (protected by mu)
 	AudioBytesSent     uint64 // Total audio bytes sent
@@ -95,21 +125,25 @@ type SessionManager struct {
 	rdnsCache            map[string]string          // Map of clientIP to resolved PTR hostname ("" = no record)
 	rdnsResolved         map[string]bool            // Map of clientIP to whether lookup has completed
 	rdnsMu               sync.RWMutex               // Separate mutex for rdns maps to avoid hot-path contention
-	mu                   sync.RWMutex
-	config               *Config
-	radiod               *RadiodController
-	maxSessions          int
-	timeout              time.Duration
-	maxSessionTime       time.Duration          // Maximum time a session can exist (0 = unlimited)
-	kickedUUIDTTL        time.Duration          // How long to remember kicked UUIDs (default 1 hour)
-	prometheusMetrics    *PrometheusMetrics     // Prometheus metrics for tracking
-	activityLogger       *SessionActivityLogger // Session activity logger for disk logging
-	geoIPService         *GeoIPService          // GeoIP service for country lookups (optional)
-	dxClusterWsHandler   interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
+	// Shared default spectrum channel — one radiod channel shared by all users at default params.
+	// Both fields are protected by sm.mu (write lock required for create/destroy transitions).
+	sharedDefaultChan  *SharedDefaultChannel            // The single shared channel (nil until first subscriber)
+	ssrcToShared       map[uint32]*SharedDefaultChannel // SSRC → shared channel (for fast lookup in distributeSpectrum)
+	mu                 sync.RWMutex
+	config             *Config
+	radiod             radiodController
+	maxSessions        int
+	timeout            time.Duration
+	maxSessionTime     time.Duration          // Maximum time a session can exist (0 = unlimited)
+	kickedUUIDTTL      time.Duration          // How long to remember kicked UUIDs (default 1 hour)
+	prometheusMetrics  *PrometheusMetrics     // Prometheus metrics for tracking
+	activityLogger     *SessionActivityLogger // Session activity logger for disk logging
+	geoIPService       *GeoIPService          // GeoIP service for country lookups (optional)
+	dxClusterWsHandler interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
 }
 
 // NewSessionManager creates a new session manager
-func NewSessionManager(config *Config, radiod *RadiodController, geoIPService *GeoIPService) *SessionManager {
+func NewSessionManager(config *Config, radiod radiodController, geoIPService *GeoIPService) *SessionManager {
 	sm := &SessionManager{
 		sessions:             make(map[string]*Session),
 		ssrcToSession:        make(map[uint32]*Session),
@@ -126,6 +160,7 @@ func NewSessionManager(config *Config, radiod *RadiodController, geoIPService *G
 		userSessionModes:     make(map[string]map[string]bool),
 		rdnsCache:            make(map[string]string),
 		rdnsResolved:         make(map[string]bool),
+		ssrcToShared:         make(map[uint32]*SharedDefaultChannel),
 		config:               config,
 		radiod:               radiod,
 		maxSessions:          config.Server.MaxSessions,
@@ -609,13 +644,30 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		session.Country, session.CountryCode = sm.geoIPService.LookupSafe(clientIP)
 	}
 
-	// Create radiod spectrum channel
-	if err := sm.radiod.CreateSpectrumChannel(channelName, frequency, binCount, binBandwidth, ssrc); err != nil {
-		return nil, fmt.Errorf("failed to create radiod spectrum channel: %w", err)
+	// Decide whether to use the shared default channel or create a private one.
+	// We use the shared channel when the session parameters exactly match the
+	// configured defaults (i.e. the user has not zoomed or panned yet).
+	if sm.isAtDefaultSpectrumParams(frequency, binBandwidth, binCount) {
+		// ── Shared channel path ──────────────────────────────────────────────
+		if err := sm.subscribeToSharedChannel(session); err != nil {
+			return nil, err
+		}
+		sm.sessions[sessionID] = session
+		// NOTE: shared subscribers are NOT added to ssrcToSession — distributeSpectrum
+		// uses ssrcToShared for fan-out instead.
+		sdc := sm.sharedDefaultChan
+		log.Printf("Spectrum session created (shared channel): %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s, subscribers: %d)",
+			sessionID, sdc.ssrc, frequency, binCount, binBandwidth, userSessionID, len(sdc.subscribers))
+	} else {
+		// ── Private channel path ─────────────────────────────────────────────
+		if err := sm.radiod.CreateSpectrumChannel(channelName, frequency, binCount, binBandwidth, ssrc); err != nil {
+			return nil, fmt.Errorf("failed to create radiod spectrum channel: %w", err)
+		}
+		sm.sessions[sessionID] = session
+		sm.ssrcToSession[ssrc] = session
+		log.Printf("Spectrum session created (private channel): %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s)",
+			sessionID, ssrc, frequency, binCount, binBandwidth, userSessionID)
 	}
-
-	sm.sessions[sessionID] = session
-	sm.ssrcToSession[ssrc] = session
 
 	// Track if this is a new UUID (for activity logging)
 	isNewUUID := false
@@ -642,9 +694,6 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		sm.ipToUUIDs[clientIP][userSessionID] = true
 	}
 
-	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s)",
-		sessionID, ssrc, frequency, binCount, binBandwidth, userSessionID)
-
 	// Log session activity if this is a NEW UUID OR if adding spectrum to existing audio-only session
 	if sm.activityLogger != nil && (isNewUUID || !hadSpectrumBefore) {
 		if err := sm.activityLogger.LogSessionCreated(); err != nil {
@@ -655,8 +704,69 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	return session, nil
 }
 
-// UpdateSpectrumSession updates spectrum parameters (for zoom/pan)
-// Supports dynamic bin_count adjustment for deep zoom levels beyond 256x
+// isAtDefaultSpectrumParams returns true when the given spectrum parameters exactly match
+// the configured defaults (i.e. the user is at the fully-zoomed-out default view).
+// Called with sm.mu held (read or write).
+func (sm *SessionManager) isAtDefaultSpectrumParams(frequency uint64, binBandwidth float64, binCount int) bool {
+	def := sm.config.Spectrum.Default
+	return frequency == def.CenterFrequency &&
+		binBandwidth == def.BinBandwidth &&
+		binCount == def.BinCount
+}
+
+// subscribeToSharedChannel adds a session to the shared default spectrum channel,
+// creating the radiod channel on-demand if it does not yet exist.
+// Must be called with sm.mu held as a write lock.
+// On success the session's SSRC, ChannelName and IsSharedSubscriber fields are updated.
+func (sm *SessionManager) subscribeToSharedChannel(session *Session) error {
+	sdc := sm.sharedDefaultChan
+	if sdc == nil || !sdc.active {
+		// First subscriber — spin up the shared radiod channel.
+		sharedSSRC := uint32(rand.Int31())
+		if sharedSSRC == 0 || sharedSSRC == 0xffffffff {
+			sharedSSRC = 1
+		}
+		for {
+			_, inSession := sm.ssrcToSession[sharedSSRC]
+			_, inShared := sm.ssrcToShared[sharedSSRC]
+			if !inSession && !inShared {
+				break
+			}
+			sharedSSRC = uint32(rand.Int31())
+			if sharedSSRC == 0 || sharedSSRC == 0xffffffff {
+				sharedSSRC = 1
+			}
+		}
+		def := sm.config.Spectrum.Default
+		sharedName := fmt.Sprintf("spectrum-shared-%08x", sharedSSRC)
+		if err := sm.radiod.CreateSpectrumChannel(sharedName, def.CenterFrequency, def.BinCount, def.BinBandwidth, sharedSSRC); err != nil {
+			return fmt.Errorf("failed to create shared radiod spectrum channel: %w", err)
+		}
+		sdc = &SharedDefaultChannel{
+			active:      true,
+			ssrc:        sharedSSRC,
+			channelName: sharedName,
+			subscribers: make(map[string]*Session),
+		}
+		sm.sharedDefaultChan = sdc
+		sm.ssrcToShared[sharedSSRC] = sdc
+		log.Printf("Shared default spectrum channel created: %s (SSRC: 0x%08x)", sharedName, sharedSSRC)
+	}
+	session.SSRC = sdc.ssrc
+	session.ChannelName = sdc.channelName
+	session.IsSharedSubscriber = true
+	sdc.mu.Lock()
+	sdc.subscribers[session.ID] = session
+	sdc.mu.Unlock()
+	return nil
+}
+
+// UpdateSpectrumSession updates spectrum parameters (for zoom/pan).
+// Supports dynamic bin_count adjustment for deep zoom levels beyond 256x.
+//
+// If the session is currently a shared-channel subscriber and the new parameters
+// differ from the defaults, the session is transparently migrated to a private
+// radiod channel so that only this user sees the zoomed view.
 func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint64, binBandwidth float64, binCount int) error {
 	session, ok := sm.GetSession(sessionID)
 	if !ok {
@@ -673,6 +783,97 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		return fmt.Errorf("invalid spectrum frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
 	}
 
+	// Compute the effective new parameters (fall back to current values for zeros).
+	session.mu.RLock()
+	newFreq := session.Frequency
+	newBinBW := session.BinBandwidth
+	newBinCount := session.BinCount
+	session.mu.RUnlock()
+	if frequency > 0 {
+		newFreq = frequency
+	}
+	if binBandwidth > 0 {
+		newBinBW = binBandwidth
+	}
+	if binCount > 0 {
+		newBinCount = binCount
+	}
+
+	// ── Shared → private migration ───────────────────────────────────────────
+	// If the session is currently on the shared channel and the new params are
+	// NOT the defaults, we must give it a private radiod channel.
+	if session.IsSharedSubscriber && !sm.isAtDefaultSpectrumParams(newFreq, newBinBW, newBinCount) {
+		sm.mu.Lock()
+
+		// Generate a fresh private SSRC.
+		privateSSRC := uint32(rand.Int31())
+		if privateSSRC == 0 || privateSSRC == 0xffffffff {
+			privateSSRC = 1
+		}
+		for {
+			_, inSession := sm.ssrcToSession[privateSSRC]
+			_, inShared := sm.ssrcToShared[privateSSRC]
+			if !inSession && !inShared {
+				break
+			}
+			privateSSRC = uint32(rand.Int31())
+			if privateSSRC == 0 || privateSSRC == 0xffffffff {
+				privateSSRC = 1
+			}
+		}
+
+		// Unsubscribe from the shared channel.
+		oldSSRC := session.SSRC
+		oldChannelName := session.ChannelName
+		if sdc := sm.sharedDefaultChan; sdc != nil {
+			sdc.mu.Lock()
+			delete(sdc.subscribers, sessionID)
+			remaining := len(sdc.subscribers)
+			sdc.mu.Unlock()
+			if sdc.active && remaining == 0 {
+				sdc.active = false
+				delete(sm.ssrcToShared, sdc.ssrc)
+				sm.sharedDefaultChan = nil
+				log.Printf("Shared default spectrum channel will be terminated (last subscriber zoomed away): %s (SSRC: 0x%08x)",
+					sdc.channelName, sdc.ssrc)
+				// Terminate outside the lock (below).
+			}
+		}
+
+		// Create the private radiod channel.
+		privateName := fmt.Sprintf("spectrum-%s", sessionID[:8])
+		if err := sm.radiod.CreateSpectrumChannel(privateName, newFreq, newBinCount, newBinBW, privateSSRC); err != nil {
+			sm.mu.Unlock()
+			return fmt.Errorf("failed to create private spectrum channel during zoom: %w", err)
+		}
+
+		// Update session fields.
+		session.mu.Lock()
+		session.SSRC = privateSSRC
+		session.ChannelName = privateName
+		session.IsSharedSubscriber = false
+		session.Frequency = newFreq
+		session.BinBandwidth = newBinBW
+		session.BinCount = newBinCount
+		session.LastActive = time.Now()
+		session.mu.Unlock()
+
+		sm.ssrcToSession[privateSSRC] = session
+		sm.mu.Unlock()
+
+		// If we were the last shared subscriber, terminate the old shared channel now.
+		if _, stillActive := sm.ssrcToShared[oldSSRC]; !stillActive {
+			if err := sm.radiod.TerminateChannel(oldChannelName, oldSSRC); err != nil {
+				log.Printf("Warning: failed to terminate shared spectrum channel %s after zoom: %v", oldChannelName, err)
+			}
+		}
+
+		log.Printf("Spectrum session migrated to private channel: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz)",
+			sessionID, privateSSRC, newFreq, newBinCount, newBinBW)
+		return nil
+	}
+
+	// ── Normal update (already private, or still at defaults) ────────────────
 	// Track if bin_count changed
 	binCountChanged := false
 
@@ -701,6 +902,61 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		return fmt.Errorf("failed to update radiod spectrum channel: %w", err)
 	}
 
+	return nil
+}
+
+// ReturnToSharedChannel migrates a session that currently has a private spectrum
+// channel back to the shared default channel (called when the user resets zoom).
+// Must NOT be called with sm.mu held.
+func (sm *SessionManager) ReturnToSharedChannel(sessionID string) error {
+	session, ok := sm.GetSession(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	if !session.IsSpectrum {
+		return fmt.Errorf("session %s is not a spectrum session", sessionID)
+	}
+	if session.IsSharedSubscriber {
+		// Already on the shared channel — nothing to do.
+		return nil
+	}
+
+	sm.mu.Lock()
+
+	// Remember the private channel details so we can terminate it after releasing the lock.
+	oldSSRC := session.SSRC
+	oldChannelName := session.ChannelName
+
+	// Remove from ssrcToSession (private channel).
+	delete(sm.ssrcToSession, oldSSRC)
+
+	// Subscribe to the shared channel (creates it on-demand if needed).
+	if err := sm.subscribeToSharedChannel(session); err != nil {
+		// Rollback: put the private SSRC back.
+		sm.ssrcToSession[oldSSRC] = session
+		sm.mu.Unlock()
+		return fmt.Errorf("failed to subscribe to shared channel: %w", err)
+	}
+
+	// Reset session parameters to defaults.
+	def := sm.config.Spectrum.Default
+	session.mu.Lock()
+	session.Frequency = def.CenterFrequency
+	session.BinBandwidth = def.BinBandwidth
+	session.BinCount = def.BinCount
+	session.LastActive = time.Now()
+	session.mu.Unlock()
+
+	sdc := sm.sharedDefaultChan
+	sm.mu.Unlock()
+
+	// Terminate the old private radiod channel outside the lock.
+	if err := sm.radiod.TerminateChannel(oldChannelName, oldSSRC); err != nil {
+		log.Printf("Warning: failed to terminate private spectrum channel %s on reset: %v", oldChannelName, err)
+	}
+
+	log.Printf("Spectrum session returned to shared channel: %s (SSRC: 0x%08x, subscribers: %d)",
+		sessionID, sdc.ssrc, len(sdc.subscribers))
 	return nil
 }
 
@@ -1113,7 +1369,30 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 
 	// Now remove the session from the map
 	delete(sm.sessions, sessionID)
-	delete(sm.ssrcToSession, session.SSRC)
+	// Shared subscribers are not in ssrcToSession; only remove private sessions.
+	if !session.IsSharedSubscriber {
+		delete(sm.ssrcToSession, session.SSRC)
+	}
+	// If this was a shared subscriber, remove it from the shared channel's subscriber map.
+	// If it was the last subscriber, tear down the shared radiod channel.
+	if session.IsSharedSubscriber {
+		if sdc := sm.sharedDefaultChan; sdc != nil {
+			sdc.mu.Lock()
+			delete(sdc.subscribers, sessionID)
+			remaining := len(sdc.subscribers)
+			sdc.mu.Unlock()
+			if sdc.active && remaining == 0 {
+				// Last subscriber gone — mark inactive and schedule termination.
+				// We capture the channel details before releasing sm.mu so the
+				// TerminateChannel call (below, outside sm.mu) uses the right values.
+				sdc.active = false
+				delete(sm.ssrcToShared, sdc.ssrc)
+				sm.sharedDefaultChan = nil
+				log.Printf("Shared default spectrum channel will be terminated (last subscriber left): %s (SSRC: 0x%08x)",
+					sdc.channelName, sdc.ssrc)
+			}
+		}
+	}
 
 	// Update UUID tracking
 	if session.UserSessionID != "" {
@@ -1180,9 +1459,28 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 
 	// Terminate radiod channel (set demod_type to -1 to properly clean up)
-	// This immediately stops the demod thread and prevents orphaned channels at freq=0
-	if err := sm.radiod.TerminateChannel(session.ChannelName, session.SSRC); err != nil {
-		log.Printf("Warning: failed to terminate channel %s: %v", session.ChannelName, err)
+	// This immediately stops the demod thread and prevents orphaned channels at freq=0.
+	// For shared subscribers we only terminate when the last subscriber has left
+	// (detected above in the shared-channel cleanup block — sharedDefaultChan is nil
+	// and active is false when we reach here in that case).
+	if !session.IsSharedSubscriber {
+		// Private channel — always terminate.
+		if err := sm.radiod.TerminateChannel(session.ChannelName, session.SSRC); err != nil {
+			log.Printf("Warning: failed to terminate private spectrum channel %s: %v", session.ChannelName, err)
+		}
+	} else {
+		// Shared subscriber — only terminate if we just cleared the last subscriber
+		// (sharedDefaultChan was set to nil above in that case).
+		// We detect this by checking whether the SSRC is still in ssrcToShared.
+		sm.mu.RLock()
+		_, stillActive := sm.ssrcToShared[session.SSRC]
+		sm.mu.RUnlock()
+		if !stillActive {
+			// We were the last subscriber; terminate the shared radiod channel.
+			if err := sm.radiod.TerminateChannel(session.ChannelName, session.SSRC); err != nil {
+				log.Printf("Warning: failed to terminate shared spectrum channel %s: %v", session.ChannelName, err)
+			}
+		}
 	}
 
 	// Close appropriate channel based on session type
@@ -1202,8 +1500,12 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	if len(userID) > 8 {
 		userID = userID[:8]
 	}
-	log.Printf("Session destroyed: %s (channel: %s, SSRC: 0x%08x, user: %s)",
-		sessionID, session.ChannelName, session.SSRC, userID)
+	channelKind := "private"
+	if session.IsSharedSubscriber {
+		channelKind = "shared"
+	}
+	log.Printf("Session destroyed: %s (channel: %s [%s], SSRC: 0x%08x, user: %s)",
+		sessionID, session.ChannelName, channelKind, session.SSRC, userID)
 
 	return nil
 }

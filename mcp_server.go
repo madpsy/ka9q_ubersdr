@@ -319,7 +319,7 @@ func (m *MCPServer) handleGetSpaceWeather(ctx context.Context, request mcp.CallT
 
 	if format == "text" {
 		text := fmt.Sprintf("Space Weather Conditions:\n"+
-			"Solar Flux Index (SFI): %d\n"+
+			"Solar Flux Index (SFI): %.1f\n"+
 			"A-index: %d\n"+
 			"K-index: %d\n"+
 			"Last Updated: %s\n\n"+

@@ -28,7 +28,7 @@ type KiwiWebSocketHandler struct {
 	rateLimiterManager *RateLimiterManager
 	connRateLimiter    *IPConnectionRateLimiter
 	prometheusMetrics  *PrometheusMetrics
-	radiod             *RadiodController
+	radiod             radiodController
 	noiseFloorMonitor  *NoiseFloorMonitor
 	kiwiRXSlots        map[string]int    // Map userSessionID to RX channel number
 	kiwiGeolocations   map[string]string // Map userSessionID to geolocation string
@@ -343,7 +343,7 @@ type kiwiConn struct {
 	audioReceiver      *AudioReceiver
 	config             *Config
 	rateLimiterManager *RateLimiterManager
-	radiod             *RadiodController
+	radiod             radiodController
 	handler            *KiwiWebSocketHandler // Reference to handler for RX slot management
 	session            *Session
 	userSessionID      string

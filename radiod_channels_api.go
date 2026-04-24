@@ -487,6 +487,17 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Filter out unknown channels unless ?unknown=true is specified
+	if r.URL.Query().Get("unknown") != "true" {
+		filtered := channels[:0]
+		for _, ch := range channels {
+			if ch.ChannelType != "unknown" {
+				filtered = append(filtered, ch)
+			}
+		}
+		channels = filtered
+	}
+
 	// Sort channels by frequency
 	sort.Slice(channels, func(i, j int) bool {
 		return channels[i].Frequency < channels[j].Frequency

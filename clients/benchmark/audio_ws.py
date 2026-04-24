@@ -161,7 +161,7 @@ class AudioWebSocket:
             'frequency': str(state.frequency),
             'mode': state.mode,
             'user_session_id': self._stats.session_id,
-            'format': 'pcm-zstd',
+            'format': 'opus',
             'version': '2',
         }
 

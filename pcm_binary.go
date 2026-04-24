@@ -98,12 +98,32 @@ const (
 	PCMMinimalHeaderSize = 13 // Minimal header (timestamp only)
 )
 
+// sharedZstdEncoder is a single package-level zstd encoder used for all EncodeAll calls.
+//
+// Background: zstd.Encoder.EncodeAll() is goroutine-safe — the klauspost/compress library
+// documents this explicitly. Internal per-call state (match buffers, hash tables) is
+// allocated from a pool inside the encoder on each EncodeAll call and released when it
+// returns. The encoder object itself only holds the compression level configuration and
+// a small amount of shared state (~1-2 MB), NOT a per-call 20-30 MB history window.
+//
+// The previous design called zstdEncoderPool.Get() at session creation and stored the
+// encoder for the entire session lifetime. With N concurrent sessions this kept N live
+// *zstd.Encoder instances simultaneously, each holding ~27 MB of internal state
+// (SpeedDefault uses a 4 MB history window + multiple large hash tables).
+// At 437 sessions that was ~11.8 GB — the dominant source of memory growth.
+//
+// Using two shared encoders (one per compression level) reduces this to ~54 MB total
+// regardless of how many concurrent sessions are active.
+var (
+	sharedZstdEncoder, _     = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	sharedZstdFastEncoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
+)
+
 // PCMBinaryEncoder handles encoding PCM audio to binary format with optional compression
 type PCMBinaryEncoder struct {
 	// Compression
 	useCompression bool
-	fastMode       bool // true = use SpeedFastest pool (for IQ/incompressible data)
-	zstdEncoder    *zstd.Encoder
+	fastMode       bool // true = use SpeedFastest shared encoder (for IQ/incompressible data)
 	encoderMu      sync.Mutex
 
 	// Metadata tracking for hybrid approach
@@ -113,26 +133,6 @@ type PCMBinaryEncoder struct {
 
 	// Protocol version
 	version uint8
-}
-
-// zstdEncoderPool provides reusable zstd encoders at SpeedDefault for audio modes
-var zstdEncoderPool = sync.Pool{
-	New: func() interface{} {
-		// Use compression level 3 (default) for good balance of speed/compression
-		// Level 3 provides ~2.5-3.5x compression with ~1ms latency
-		encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
-		return encoder
-	},
-}
-
-// zstdFastEncoderPool provides reusable zstd encoders at SpeedFastest for IQ/incompressible data.
-// SpeedFastest uses ~3-5x less CPU than SpeedDefault with identical output size on random/IQ data,
-// preventing CPU scheduler starvation when many IQ sessions are active simultaneously.
-var zstdFastEncoderPool = sync.Pool{
-	New: func() interface{} {
-		encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
-		return encoder
-	},
 }
 
 // NewPCMBinaryEncoder creates a new PCM binary encoder (version 1)
@@ -150,7 +150,7 @@ func NewPCMBinaryEncoderWithVersion(useCompression bool, version uint8) *PCMBina
 // this is appropriate for IQ modes where data is essentially incompressible (white noise), so
 // SpeedDefault wastes CPU without any compression benefit.
 func NewPCMBinaryEncoderWithVersionAndLevel(fastMode bool, version uint8) *PCMBinaryEncoder {
-	encoder := &PCMBinaryEncoder{
+	return &PCMBinaryEncoder{
 		useCompression: true,
 		fastMode:       fastMode,
 		lastSampleRate: -1, // Force full header on first packet
@@ -158,14 +158,6 @@ func NewPCMBinaryEncoderWithVersionAndLevel(fastMode bool, version uint8) *PCMBi
 		packetCount:    0,
 		version:        version,
 	}
-
-	if fastMode {
-		encoder.zstdEncoder = zstdFastEncoderPool.Get().(*zstd.Encoder)
-	} else {
-		encoder.zstdEncoder = zstdEncoderPool.Get().(*zstd.Encoder)
-	}
-
-	return encoder
 }
 
 // EncodePCMPacket encodes a PCM audio packet with hybrid header strategy
@@ -225,11 +217,17 @@ func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsT
 		packet = e.buildMinimalHeaderPacket(pcmData, gpsTimeNs)
 	}
 
-	// Apply compression if enabled
-	if e.useCompression && e.zstdEncoder != nil {
+	// Apply compression if enabled.
+	// EncodeAll on the shared encoder is goroutine-safe; see sharedZstdEncoder comment.
+	if e.useCompression {
 		// Compress the entire packet (header + data)
 		// zstd compression provides ~2.5-3.5x reduction for voice/SDR signals
-		compressed := e.zstdEncoder.EncodeAll(packet, make([]byte, 0, len(packet)))
+		var compressed []byte
+		if e.fastMode {
+			compressed = sharedZstdFastEncoder.EncodeAll(packet, make([]byte, 0, len(packet)))
+		} else {
+			compressed = sharedZstdEncoder.EncodeAll(packet, make([]byte, 0, len(packet)))
+		}
 		return compressed, nil
 	}
 
@@ -335,18 +333,9 @@ func (e *PCMBinaryEncoder) buildMinimalHeaderPacket(pcmData []byte, gpsTimeNs in
 	return packet
 }
 
-// Close releases resources used by the encoder
-func (e *PCMBinaryEncoder) Close() {
-	if e.zstdEncoder != nil {
-		// Return encoder to the correct pool based on which level was used
-		if e.fastMode {
-			zstdFastEncoderPool.Put(e.zstdEncoder)
-		} else {
-			zstdEncoderPool.Put(e.zstdEncoder)
-		}
-		e.zstdEncoder = nil
-	}
-}
+// Close releases resources used by the encoder.
+// With shared zstd encoders there is nothing to return to a pool.
+func (e *PCMBinaryEncoder) Close() {}
 
 // GetStats returns statistics about the encoder's operation
 func (e *PCMBinaryEncoder) GetStats() map[string]interface{} {

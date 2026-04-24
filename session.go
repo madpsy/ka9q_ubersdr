@@ -1572,7 +1572,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 
 // cleanupLoop periodically checks for and removes inactive sessions, expired kicked UUIDs, and orphaned User-Agent entries
 func (sm *SessionManager) cleanupLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {

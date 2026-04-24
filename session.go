@@ -259,8 +259,19 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	// channels; reject new user sessions when we are at or near that limit.
 	// Internal sessions (empty clientIP) are exempt — background channels (noisefloor,
 	// decoders, frequency-reference) must always be allowed to exist.
+	//
+	// The shared default spectrum channel counts as 1 radiod channel now, but each
+	// subscriber could create a private channel the moment they zoom/pan. We therefore
+	// add (sharedSubscribers - 1) to the current count to reserve capacity for that
+	// worst-case expansion.
 	if clientIP != "" {
 		currentChannels := len(sm.radiod.GetAllChannelStatus())
+		if sm.sharedDefaultChan != nil && sm.sharedDefaultChan.active {
+			extra := len(sm.sharedDefaultChan.subscribers) - 1
+			if extra > 0 {
+				currentChannels += extra
+			}
+		}
 		if currentChannels >= maxRadiodChannels {
 			return nil, fmt.Errorf("radiod channel limit reached (%d/%d); try again later",
 				currentChannels, maxRadiodChannels)
@@ -534,8 +545,19 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	// channels; reject new user sessions when we are at or near that limit.
 	// Internal sessions (empty clientIP) are exempt — background channels (noisefloor,
 	// decoders, frequency-reference) must always be allowed to exist.
+	//
+	// The shared default spectrum channel counts as 1 radiod channel now, but each
+	// subscriber could create a private channel the moment they zoom/pan. We therefore
+	// add (sharedSubscribers - 1) to the current count to reserve capacity for that
+	// worst-case expansion.
 	if clientIP != "" {
 		currentChannels := len(sm.radiod.GetAllChannelStatus())
+		if sm.sharedDefaultChan != nil && sm.sharedDefaultChan.active {
+			extra := len(sm.sharedDefaultChan.subscribers) - 1
+			if extra > 0 {
+				currentChannels += extra
+			}
+		}
 		if currentChannels >= maxRadiodChannels {
 			return nil, fmt.Errorf("radiod channel limit reached (%d/%d); try again later",
 				currentChannels, maxRadiodChannels)

@@ -461,7 +461,7 @@ spectrum:
   #   2 = minimal (suitable for <20 users)
   #   4 = balanced (suitable for 20-50 users) - default
   #   8 = high performance (suitable for 50+ users)
-  worker_count: 4
+  worker_count: 8
   # Master gain adjustment in dB applied to all spectrum data
   # This is a global offset applied to all frequencies
   # Positive values increase displayed signal levels (brighten)

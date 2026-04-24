@@ -11,6 +11,11 @@ WebSocket URL format (mirrors radio_client.py build_websocket_url()):
         [&password=<pw>]
 
 Keepalive: {"type": "ping"} every 30 seconds (matches real client).
+
+In random-frequency mode the handler watches UserState.generation; when it
+changes (i.e. the VirtualUser rotation task has picked a new frequency) a
+{"type": "tune", ...} message is sent over the existing connection — no
+reconnect is needed (mirrors how radio_client.py / the GUI retune).
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from urllib.parse import urlencode
 import websockets
 import websockets.exceptions
 
-from config import BenchmarkConfig
+from config import BenchmarkConfig, UserState
 from stats import UserStats
 from ws_utils import SessionError, debug_log, get_handshake_status, is_retriable_handshake_error
 
@@ -33,6 +38,9 @@ _INVALID_SESSION_PHRASES = ('invalid session', 'please refresh')
 
 # How often to send a JSON ping keepalive (seconds) — matches real client
 _KEEPALIVE_INTERVAL = 30.0
+
+# How often to poll UserState.generation for a frequency change (seconds)
+_GENERATION_POLL_INTERVAL = 0.5
 
 # Back-off parameters for network/connection errors (--reconnect)
 _BACKOFF_BASE = 2.0
@@ -54,10 +62,12 @@ class AudioWebSocket:
         self,
         config: BenchmarkConfig,
         stats: UserStats,
+        state: UserState,
         stop_event: threading.Event,
     ) -> None:
         self._cfg = config
         self._stats = stats
+        self._state = state
         self._stop = stop_event
 
     # ------------------------------------------------------------------
@@ -139,25 +149,28 @@ class AudioWebSocket:
     # ------------------------------------------------------------------
 
     def _build_url(self) -> str:
-        """Build the audio WebSocket URL.
+        """Build the audio WebSocket URL using the current UserState.
 
         Mirrors ``RadioClient.build_websocket_url()`` in radio_client.py.
+        The URL is built once at connect time; subsequent frequency/mode
+        changes are sent as 'tune' messages over the live connection.
         """
         cfg = self._cfg
+        state = self._state
         params: dict[str, str] = {
-            'frequency': str(cfg.frequency),
-            'mode': cfg.mode,
+            'frequency': str(state.frequency),
+            'mode': state.mode,
             'user_session_id': self._stats.session_id,
             'format': 'pcm-zstd',
             'version': '2',
         }
 
         # Only include bandwidth for non-IQ modes (matches original client)
-        if not cfg.is_iq_mode:
-            if cfg.bandwidth_low is not None:
-                params['bandwidthLow'] = str(cfg.bandwidth_low)
-            if cfg.bandwidth_high is not None:
-                params['bandwidthHigh'] = str(cfg.bandwidth_high)
+        if not state.is_iq_mode:
+            if state.bandwidth_low is not None:
+                params['bandwidthLow'] = str(state.bandwidth_low)
+            if state.bandwidth_high is not None:
+                params['bandwidthHigh'] = str(state.bandwidth_high)
 
         if cfg.password:
             params['password'] = cfg.password
@@ -180,19 +193,28 @@ class AudioWebSocket:
             # Request initial status (matches real client run_once())
             await ws.send(json.dumps({'type': 'get_status'}))
 
-            # Run receive loop and keepalive concurrently
+            # Snapshot the generation at connect time so we can detect changes
+            connected_generation = self._state.generation
+
+            # Run receive loop, keepalive, stop-watcher, and (optionally)
+            # tune-sender concurrently.
             receive_task = asyncio.create_task(self._receive_loop(ws))
             keepalive_task = asyncio.create_task(self._keepalive_loop(ws))
             stop_task = asyncio.create_task(self._stop_watcher(ws))
+            tune_task = asyncio.create_task(
+                self._tune_loop(ws, connected_generation)
+            )
+
+            all_tasks = {receive_task, keepalive_task, stop_task, tune_task}
 
             try:
                 # Wait for whichever finishes first
                 done, pending = await asyncio.wait(
-                    {receive_task, keepalive_task, stop_task},
+                    all_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
             finally:
-                for t in (receive_task, keepalive_task, stop_task):
+                for t in all_tasks:
                     if not t.done():
                         t.cancel()
                         try:
@@ -238,6 +260,69 @@ class AudioWebSocket:
                 except (json.JSONDecodeError, AttributeError):
                     pass
             # Binary frames (PCM-zstd): just counted above, discarded
+
+    async def _tune_loop(
+        self,
+        ws: websockets.WebSocketClientProtocol,
+        connected_generation: int,
+    ) -> None:
+        """Watch for frequency/mode changes and send a 'tune' message.
+
+        Only active in random-frequency mode.  Polls UserState.generation;
+        when it differs from the last seen value, sends a tune message over
+        the existing connection — no reconnect needed.
+
+        Mirrors the tune message sent by radio_client.py / the GUI when the
+        user changes frequency or mode:
+            {"type": "tune", "frequency": <hz>, "mode": <mode>,
+             "bandwidthLow": <n>, "bandwidthHigh": <n>}
+
+        In non-random-frequency mode this task sleeps indefinitely and is
+        cancelled by the caller when the connection closes.
+        """
+        if not self._cfg.random_frequency:
+            # Not in random-frequency mode — sleep indefinitely until cancelled
+            try:
+                await asyncio.sleep(float('inf'))
+            except asyncio.CancelledError:
+                pass
+            return
+
+        last_generation = connected_generation
+
+        while not self._stop.is_set():
+            await asyncio.sleep(_GENERATION_POLL_INTERVAL)
+
+            if self._stop.is_set():
+                break
+
+            current_gen = self._state.generation
+            if current_gen == last_generation:
+                continue
+
+            last_generation = current_gen
+            state = self._state
+
+            tune_msg: dict = {
+                'type': 'tune',
+                'frequency': state.frequency,
+                'mode': state.mode,
+            }
+            if not state.is_iq_mode:
+                if state.bandwidth_low is not None:
+                    tune_msg['bandwidthLow'] = state.bandwidth_low
+                if state.bandwidth_high is not None:
+                    tune_msg['bandwidthHigh'] = state.bandwidth_high
+
+            debug_log(
+                self._stats.user_id, 'audio',
+                f"tune → {state.frequency / 1e6:.3f} MHz {state.mode.upper()}"
+            )
+
+            try:
+                await ws.send(json.dumps(tune_msg))
+            except websockets.exceptions.ConnectionClosed:
+                break
 
     async def _keepalive_loop(self, ws: websockets.WebSocketClientProtocol) -> None:
         """Send {"type": "ping"} every 30 seconds (matches real client)."""

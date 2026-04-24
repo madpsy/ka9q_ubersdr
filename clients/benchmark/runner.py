@@ -74,6 +74,8 @@ class BenchmarkRunner:
         cfg = self._cfg
         batches = cfg.user_batches()
 
+        from config import RANDOM_FREQ_MIN_HZ, RANDOM_FREQ_MAX_HZ, RANDOM_ROTATE_INTERVAL_MIN, RANDOM_ROTATE_INTERVAL_MAX
+
         print(f"\nUberSDR Benchmark")
         print(f"{'─' * 50}")
         print(f"  URL:             {cfg.url}")
@@ -82,11 +84,18 @@ class BenchmarkRunner:
         print(f"  Users/thread:    {cfg.users_per_thread}")
         print(f"  Duration:        {cfg.duration:.0f}s")
         print(f"  Ramp-up:         {cfg.ramp_up:.1f}s")
-        print(f"  Frequency:       {cfg.frequency / 1e6:.6f} MHz")
-        print(f"  Mode:            {cfg.mode.upper()}")
-        if not cfg.is_iq_mode and cfg.bandwidth_low is not None:
-            print(f"  Bandwidth:       {cfg.bandwidth_low} to {cfg.bandwidth_high} Hz")
-        print(f"  Spectrum zoom:   {cfg.spectrum_zoom_khz:.0f} kHz")
+        if cfg.random_frequency:
+            print(f"  Frequency:       random {RANDOM_FREQ_MIN_HZ / 1e3:.0f} kHz – "
+                  f"{RANDOM_FREQ_MAX_HZ / 1e6:.0f} MHz "
+                  f"(rotates every {RANDOM_ROTATE_INTERVAL_MIN:.0f}–{RANDOM_ROTATE_INTERVAL_MAX:.0f}s)")
+            print(f"  Mode:            auto (LSB <10 MHz, USB ≥10 MHz)")
+            print(f"  Spectrum zoom:   random (rotates with frequency)")
+        else:
+            print(f"  Frequency:       {cfg.frequency / 1e6:.6f} MHz")
+            print(f"  Mode:            {cfg.mode.upper()}")
+            if not cfg.is_iq_mode and cfg.bandwidth_low is not None:
+                print(f"  Bandwidth:       {cfg.bandwidth_low} to {cfg.bandwidth_high} Hz")
+            print(f"  Spectrum zoom:   {cfg.spectrum_zoom_khz:.0f} kHz")
         print(f"  Audio WS:        {'yes' if cfg.enable_audio else 'no'}")
         print(f"  Spectrum WS:     {'yes' if cfg.enable_spectrum else 'no'}")
         print(f"  DX Cluster WS:   {'yes' if cfg.enable_dxcluster else 'no'}")

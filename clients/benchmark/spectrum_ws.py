@@ -11,7 +11,9 @@ WebSocket URL format (mirrors spectrum_display.py connect()):
 On first config message the real client sends a zoom command:
     {"type": "zoom", "frequency": <tuned_hz>, "binBandwidth": <zoom_hz / binCount>}
 
-This is replicated here so the server behaves identically to a real user.
+In random-frequency mode the handler watches UserState.generation; when it
+changes (i.e. the VirtualUser rotation task has picked a new frequency/zoom)
+a new zoom message is sent over the existing connection — no reconnect needed.
 """
 
 from __future__ import annotations
@@ -19,14 +21,13 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
-import struct
 import threading
 from urllib.parse import urlencode
 
 import websockets
 import websockets.exceptions
 
-from config import BenchmarkConfig
+from config import BenchmarkConfig, UserState
 from stats import UserStats
 from ws_utils import SessionError, debug_log, get_handshake_status, is_retriable_handshake_error
 
@@ -40,6 +41,9 @@ _BACKOFF_MAX = 60.0
 # Back-off parameters for server-capacity errors (always retry)
 _SERVER_ERROR_BACKOFF_BASE = 2.0
 _SERVER_ERROR_BACKOFF_MAX = 15.0
+
+# How often to poll UserState.generation for a frequency/zoom change (seconds)
+_GENERATION_POLL_INTERVAL = 0.5
 
 # Binary spectrum protocol magic header
 _SPEC_MAGIC = b'SPEC'
@@ -55,10 +59,12 @@ class SpectrumWebSocket:
         self,
         config: BenchmarkConfig,
         stats: UserStats,
+        state: UserState,
         stop_event: threading.Event,
     ) -> None:
         self._cfg = config
         self._stats = stats
+        self._state = state
         self._stop = stop_event
 
     # ------------------------------------------------------------------
@@ -164,16 +170,30 @@ class SpectrumWebSocket:
         ) as ws:
             self._stats.spectrum_connected = True
 
-            receive_task = asyncio.create_task(self._receive_loop(ws))
+            # Snapshot the generation at connect time
+            connected_generation = self._state.generation
+
+            # Shared state for the zoom loop and receive loop to coordinate
+            # which bin_count to use when sending zoom commands.
+            zoom_state = {'bin_count': 0, 'zoom_sent': False}
+
+            receive_task = asyncio.create_task(
+                self._receive_loop(ws, connected_generation, zoom_state)
+            )
+            zoom_task = asyncio.create_task(
+                self._zoom_loop(ws, connected_generation, zoom_state)
+            )
             stop_task = asyncio.create_task(self._stop_watcher(ws))
+
+            all_tasks = {receive_task, zoom_task, stop_task}
 
             try:
                 done, pending = await asyncio.wait(
-                    {receive_task, stop_task},
+                    all_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
             finally:
-                for t in (receive_task, stop_task):
+                for t in all_tasks:
                     if not t.done():
                         t.cancel()
                         try:
@@ -188,10 +208,17 @@ class SpectrumWebSocket:
                 if exc:
                     raise exc
 
-    async def _receive_loop(self, ws: websockets.WebSocketClientProtocol) -> None:
-        """Receive messages, send zoom on first config, discard all data."""
-        zoom_sent = False
+    async def _receive_loop(
+        self,
+        ws: websockets.WebSocketClientProtocol,
+        connected_generation: int,
+        zoom_state: dict,
+    ) -> None:
+        """Receive messages, send zoom on first config message.
 
+        After the initial zoom is sent, the dedicated _zoom_loop task handles
+        subsequent zoom updates when the generation changes.
+        """
         async for message in ws:
             if self._stop.is_set():
                 break
@@ -206,17 +233,20 @@ class SpectrumWebSocket:
 
             # ---- Binary messages ----
             if isinstance(message, (bytes, bytearray)):
-                # Check for binary SPEC protocol (magic header b'SPEC')
                 if len(message) >= 4 and message[0:4] == _SPEC_MAGIC:
-                    # Binary spectrum frame — just counted, discarded
+                    # Binary SPEC frame — counted, discarded.
                     pass
                 else:
                     # Legacy: gzip-compressed JSON
-                    if not zoom_sent:
+                    if not zoom_state['zoom_sent']:
                         try:
-                            decompressed = gzip.decompress(message)
-                            data = json.loads(decompressed.decode('utf-8'))
-                            zoom_sent = await self._maybe_send_zoom(ws, data, zoom_sent)
+                            data = json.loads(gzip.decompress(message).decode('utf-8'))
+                            sent, bin_count = await self._maybe_send_initial_zoom(
+                                ws, data, zoom_state['bin_count']
+                            )
+                            if sent:
+                                zoom_state['zoom_sent'] = True
+                                zoom_state['bin_count'] = bin_count
                         except Exception:
                             pass
                 continue
@@ -224,70 +254,129 @@ class SpectrumWebSocket:
             # ---- Text (JSON) messages ----
             try:
                 data = json.loads(message)
-                if data.get('type') == 'error':
-                    reason = data.get('error') or 'unknown error'
-                    status = data.get('status', 0)
-                    err_str = f"{reason} (status={status})" if status else reason
-                    self._stats.spectrum_last_error = err_str
-                    reason_lower = reason.lower()
-                    if any(p in reason_lower for p in _INVALID_SESSION_PHRASES):
-                        raise SessionError(err_str)
-                    exc = RuntimeError(err_str)
-                    exc.ws_status = status  # type: ignore[attr-defined]
-                    raise exc
-                zoom_sent = await self._maybe_send_zoom(ws, data, zoom_sent)
             except (json.JSONDecodeError, AttributeError):
-                pass
+                continue
 
-    async def _maybe_send_zoom(
+            if data.get('type') == 'error':
+                reason = data.get('error') or 'unknown error'
+                status = data.get('status', 0)
+                err_str = f"{reason} (status={status})" if status else reason
+                self._stats.spectrum_last_error = err_str
+                reason_lower = reason.lower()
+                if any(p in reason_lower for p in _INVALID_SESSION_PHRASES):
+                    raise SessionError(err_str)
+                exc = RuntimeError(err_str)
+                exc.ws_status = status  # type: ignore[attr-defined]
+                raise exc
+
+            if not zoom_state['zoom_sent']:
+                sent, bin_count = await self._maybe_send_initial_zoom(
+                    ws, data, zoom_state['bin_count']
+                )
+                if sent:
+                    zoom_state['zoom_sent'] = True
+                    zoom_state['bin_count'] = bin_count
+
+    async def _zoom_loop(
+        self,
+        ws: websockets.WebSocketClientProtocol,
+        connected_generation: int,
+        zoom_state: dict,
+    ) -> None:
+        """Dedicated task: poll UserState.generation and send zoom on change.
+
+        Runs independently of the receive loop so zoom updates are sent
+        promptly (every _GENERATION_POLL_INTERVAL seconds) regardless of
+        how frequently the server sends spectrum messages.
+
+        Waits until the initial zoom has been sent (zoom_state['zoom_sent'])
+        before watching for generation changes.
+        """
+        if not self._cfg.random_frequency:
+            # Not in random-frequency mode — sleep indefinitely until cancelled
+            try:
+                await asyncio.sleep(float('inf'))
+            except asyncio.CancelledError:
+                pass
+            return
+
+        last_generation = connected_generation
+
+        while not self._stop.is_set():
+            await asyncio.sleep(_GENERATION_POLL_INTERVAL)
+
+            if self._stop.is_set():
+                break
+
+            # Wait until the receive loop has sent the initial zoom
+            if not zoom_state['zoom_sent']:
+                continue
+
+            bin_count = zoom_state['bin_count']
+            if bin_count <= 0:
+                continue
+
+            current_gen = self._state.generation
+            if current_gen == last_generation:
+                continue
+
+            last_generation = current_gen
+            await self._send_zoom(ws, bin_count)
+
+    async def _maybe_send_initial_zoom(
         self,
         ws: websockets.WebSocketClientProtocol,
         data: dict,
-        zoom_sent: bool,
-    ) -> bool:
-        """Send a zoom command after the first config message.
+        last_bin_count: int,
+    ) -> tuple[bool, int]:
+        """Send the initial zoom command on the first 'config' message.
 
-        Mirrors spectrum_display.py _websocket_handler() / _handle_message():
-        on the first 'config' message, compute binBandwidth from the server's
-        binCount and send a zoom command centred on the tuned frequency.
-
-        When ``config.spectrum_default`` is True the zoom command is skipped
-        entirely so the server keeps the session at its default spectrum
-        parameters — this exercises the shared-default-spectrum-channel path
-        where all such users share a single radiod channel.
-
-        Returns the new value of zoom_sent.
+        Returns (zoom_sent, bin_count).
         """
-        if zoom_sent:
-            return True
-
         if data.get('type') != 'config':
-            return False
+            return False, last_bin_count
 
         # --spectrum-default: stay at server defaults, never send zoom.
         if self._cfg.spectrum_default:
-            return True  # mark as "done" so we never try again
+            return True, last_bin_count
 
         bin_count = data.get('binCount', 0)
         if bin_count <= 0:
-            return False
+            return False, last_bin_count
 
-        # binBandwidth = desired_total_bandwidth / binCount
-        # (matches spectrum_display.py _send_zoom_command())
-        bin_bandwidth = self._cfg.spectrum_zoom_hz / bin_count
+        await self._send_zoom(ws, bin_count)
+        return True, bin_count
+
+    async def _send_zoom(
+        self,
+        ws: websockets.WebSocketClientProtocol,
+        bin_count: int,
+    ) -> None:
+        """Send a zoom command using the current UserState frequency and zoom.
+
+        binBandwidth = desired_total_bandwidth / binCount
+        (matches spectrum_display.py _send_zoom_command())
+        """
+        state = self._state
+        bin_bandwidth = state.spectrum_zoom_hz / bin_count
 
         zoom_cmd = {
             'type': 'zoom',
-            'frequency': self._cfg.frequency,   # tuned frequency, not spectrum centre
+            'frequency': state.frequency,
             'binBandwidth': bin_bandwidth,
         }
+
+        debug_log(
+            self._stats.user_id, 'spectrum',
+            f"zoom → {state.frequency / 1e6:.3f} MHz  "
+            f"bw={state.spectrum_zoom_khz:.0f} kHz  "
+            f"binBw={bin_bandwidth:.2f}"
+        )
 
         try:
             await ws.send(json.dumps(zoom_cmd))
         except websockets.exceptions.ConnectionClosed:
             pass
-
-        return True
 
     async def _stop_watcher(self, ws: websockets.WebSocketClientProtocol) -> None:
         """Poll the threading.Event and close the WebSocket when it fires."""

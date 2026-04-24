@@ -198,7 +198,6 @@ type SpectrumConfig struct {
 	PollPeriodMs           int                           `yaml:"poll_period_ms"`
 	BackgroundPollPeriodMs int                           `yaml:"background_poll_period_ms"` // Poll interval for internal background sessions (noisefloor, frequency-reference); default 1000ms
 	MaxSessionsPerUser     int                           `yaml:"max_sessions_per_user"`
-	WorkerCount            int                           `yaml:"worker_count"`             // Number of parallel workers for spectrum packet distribution
 	GainDB                 float64                       `yaml:"gain_db"`                  // Master gain adjustment in dB applied to all spectrum data
 	GainDBFrequencyRanges  map[string]FrequencyGainRange `yaml:"gain_db_frequency_ranges"` // Per-frequency gain adjustments (added to master gain_db), keyed by name
 	DeltaThresholdDB       float64                       `yaml:"delta_threshold_db"`       // Delta encoding threshold in dB for binary mode

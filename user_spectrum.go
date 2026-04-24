@@ -32,9 +32,7 @@ type UserSpectrumManager struct {
 	statusConn *net.UDPConn
 	statusAddr *net.UDPAddr
 
-	// Worker pool for parallel packet processing
-	workerCount             int
-	packetQueue             chan spectrumPacket
+	// Per-packet goroutine dispatch (replaces fixed worker pool + queue)
 	hasNonZeroFrequencyGain bool // true if any GainDBFrequencyRange has a non-zero gain_db
 
 	// Control
@@ -51,12 +49,6 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 	statusAddr, err := resolveMulticastAddr(config.Radiod.StatusGroup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve status address: %w", err)
-	}
-
-	// Determine worker count from config, default to 4 if not set or invalid
-	workerCount := config.Spectrum.WorkerCount
-	if workerCount <= 0 {
-		workerCount = 4 // Default to 4 workers for parallel processing
 	}
 
 	// Pre-compute whether any frequency gain range has a non-zero gain_db.
@@ -78,8 +70,6 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 		stopChan:                make(chan struct{}),
 		pollInterval:            time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
 		backgroundPollInterval:  time.Duration(config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond,
-		workerCount:             workerCount,
-		packetQueue:             make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
 		hasNonZeroFrequencyGain: hasNonZeroGain,
 	}
 
@@ -96,18 +86,12 @@ func (usm *UserSpectrumManager) Start() error {
 			return fmt.Errorf("failed to setup status listener: %w", err)
 		}
 
-		// Start worker pool for parallel packet distribution
-		for i := 0; i < usm.workerCount; i++ {
-			usm.wg.Add(1)
-			go usm.distributionWorker(i)
-		}
-
 		// Start polling loop
 		usm.wg.Add(1)
 		go usm.pollLoop()
 
-		log.Printf("User spectrum manager started (poll interval: %v, background poll interval: %v, workers: %d)",
-			usm.pollInterval, usm.backgroundPollInterval, usm.workerCount)
+		log.Printf("User spectrum manager started (poll interval: %v, background poll interval: %v)",
+			usm.pollInterval, usm.backgroundPollInterval)
 	} else {
 		log.Printf("User spectrum manager disabled in config")
 	}
@@ -125,10 +109,7 @@ func (usm *UserSpectrumManager) Stop() {
 	// Signal stop
 	close(usm.stopChan)
 
-	// Close packet queue to signal workers to exit
-	close(usm.packetQueue)
-
-	// Wait for polling loop and workers to finish
+	// Wait for polling loop and any in-flight distributeSpectrum goroutines to finish
 	usm.wg.Wait()
 
 	// Close status listener
@@ -316,18 +297,11 @@ func (usm *UserSpectrumManager) receiveLoop() {
 			continue
 		}
 
-		// Parse STATUS packet and queue for worker pool
+		// Parse STATUS packet and dispatch distribution in a goroutine.
+		// Using per-packet goroutines instead of a fixed worker pool + queue
+		// means bursts of any size (e.g. 2000 channels) are handled without
+		// dropping packets due to a full queue.
 		usm.parseStatusPacket(buffer[1:n])
-	}
-}
-
-// distributionWorker processes spectrum packets from the queue in parallel
-func (usm *UserSpectrumManager) distributionWorker(workerID int) {
-	defer usm.wg.Done()
-
-	for packet := range usm.packetQueue {
-		// Distribute spectrum data to the appropriate session
-		usm.distributeSpectrum(packet.ssrc, packet.binData)
 	}
 }
 
@@ -513,16 +487,15 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 			usm.checkSpectrumParameterMismatch(ssrc, radiodBinBW, radiodBinCount)
 		}
 
-		// Queue packet for worker pool (non-blocking)
-		select {
-		case usm.packetQueue <- spectrumPacket{ssrc: ssrc, binData: binData}:
-			// Packet queued successfully
-		default:
-			// Queue full - drop packet (should be rare with 100-packet buffer)
-			if DebugMode {
-				log.Printf("DEBUG: Spectrum packet queue full, dropping packet for SSRC 0x%08x", ssrc)
-			}
-		}
+		// Dispatch distribution in a dedicated goroutine so the receive loop
+		// is never blocked and bursts of any size are absorbed without drops.
+		// distributeSpectrum is safe to call concurrently: it uses its own
+		// locks and has a defer/recover for closed-channel panics.
+		usm.wg.Add(1)
+		go func(s uint32, d []float32) {
+			defer usm.wg.Done()
+			usm.distributeSpectrum(s, d)
+		}(ssrc, binData)
 	} else if foundSSRC {
 		// Handle audio channels (no bin data, but has frequency and filter edges)
 		if foundFreq && foundLowEdge && foundHighEdge {

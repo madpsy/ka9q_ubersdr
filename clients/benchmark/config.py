@@ -228,6 +228,10 @@ class BenchmarkConfig:
     default spectrum parameters.  This exercises the shared-default-spectrum-channel path
     where all users at default params share a single radiod channel."""
 
+    # --- Audio format ---
+    audio_format: str = 'opus'
+    """Audio encoding format sent to the server: ``'opus'`` (default) or ``'pcm-zstd'``."""
+
     # --- Feature flags ---
     enable_audio: bool = True
     """Connect the audio WebSocket (``/ws``)."""
@@ -296,18 +300,33 @@ class BenchmarkConfig:
         return self.spectrum_zoom_khz * 1000.0
 
     @property
+    def actual_threads(self) -> int:
+        """Effective thread count: min(threads, users) — can't have more threads than users."""
+        return min(self.threads, max(1, self.users))
+
+    @property
     def users_per_thread(self) -> int:
         """Number of users assigned to each thread (ceiling division)."""
-        return math.ceil(self.users / max(1, self.threads))
+        return math.ceil(self.users / self.actual_threads)
 
     def user_batches(self) -> list[list[int]]:
-        """Split user IDs (0-based) into per-thread batches.
+        """Split user IDs (0-based) into exactly actual_threads batches.
 
+        Users are distributed as evenly as possible (some threads may get
+        one fewer user than others when users is not divisible by threads).
         Returns a list of lists, one inner list per thread.
         """
         all_ids = list(range(self.users))
-        size = self.users_per_thread
-        return [all_ids[i:i + size] for i in range(0, self.users, size)]
+        n = self.actual_threads
+        # Distribute evenly: first (users % n) threads get one extra user
+        q, r = divmod(self.users, n)
+        batches = []
+        start = 0
+        for i in range(n):
+            size = q + (1 if i < r else 0)
+            batches.append(all_ids[start:start + size])
+            start += size
+        return [b for b in batches if b]  # drop any empty batches (shouldn't happen)
 
     def ramp_delay_for(self, user_id: int) -> float:
         """Return the pre-connect sleep duration (seconds) for a given user.

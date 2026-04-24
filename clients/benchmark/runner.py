@@ -80,7 +80,7 @@ class BenchmarkRunner:
         print(f"{'─' * 50}")
         print(f"  URL:             {cfg.url}")
         print(f"  Users:           {cfg.users}")
-        print(f"  Threads:         {len(batches)}")
+        print(f"  Threads:         {cfg.actual_threads}")
         print(f"  Users/thread:    {cfg.users_per_thread}")
         print(f"  Duration:        {cfg.duration:.0f}s")
         print(f"  Ramp-up:         {cfg.ramp_up:.1f}s")
@@ -136,6 +136,10 @@ class BenchmarkRunner:
         finally:
             # Signal all workers to stop (idempotent)
             self._stop_event.set()
+
+            # Tell the reporter to suppress further periodic updates — the
+            # partial teardown state (connections closing) is misleading.
+            self._reporter.mark_shutting_down()
 
             print(f"\n  Stopping all users (waiting up to 10s)...")
 

@@ -9,11 +9,12 @@ swapping out the snapshot list.
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -98,24 +99,31 @@ class AggregateStats:
 
     # Audio
     audio_connected: int = 0
+    audio_peak_connected: int = 0  # highest audio_connected seen across all snapshots
     audio_bytes_rx: int = 0
     audio_messages: int = 0
     audio_errors: int = 0
 
     # Spectrum
     spectrum_connected: int = 0
+    spectrum_peak_connected: int = 0
     spectrum_bytes_rx: int = 0
     spectrum_messages: int = 0
     spectrum_errors: int = 0
 
     # DX Cluster
     dx_connected: int = 0
+    dx_peak_connected: int = 0
     dx_messages: int = 0
     dx_errors: int = 0
 
 
-def aggregate(snapshots: List[UserStats], elapsed: float) -> AggregateStats:
-    """Aggregate a list of UserStats snapshots into a single AggregateStats."""
+def aggregate(snapshots: List[UserStats], elapsed: float, prev: Optional["AggregateStats"] = None) -> AggregateStats:
+    """Aggregate a list of UserStats snapshots into a single AggregateStats.
+
+    If *prev* is given, peak connected counts are carried forward so they
+    never decrease (even during shutdown when connections are closing).
+    """
     agg = AggregateStats(elapsed=elapsed, total_users=len(snapshots))
     for s in snapshots:
         if s.any_ws_connected:
@@ -139,6 +147,16 @@ def aggregate(snapshots: List[UserStats], elapsed: float) -> AggregateStats:
             agg.dx_connected += 1
         agg.dx_messages += s.dx_messages
         agg.dx_errors += s.dx_errors
+
+    # Peak connected = max of current and all previous peaks
+    if prev is not None:
+        agg.audio_peak_connected = max(agg.audio_connected, prev.audio_peak_connected)
+        agg.spectrum_peak_connected = max(agg.spectrum_connected, prev.spectrum_peak_connected)
+        agg.dx_peak_connected = max(agg.dx_connected, prev.dx_peak_connected)
+    else:
+        agg.audio_peak_connected = agg.audio_connected
+        agg.spectrum_peak_connected = agg.spectrum_connected
+        agg.dx_peak_connected = agg.dx_connected
 
     return agg
 
@@ -175,6 +193,7 @@ class StatsReporter:
         self._start_time = time.monotonic()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._shutting_down = threading.Event()  # set before workers stop; suppresses partial update
 
         # Keep the last two aggregates to compute per-second rates
         self._prev_agg: Optional[AggregateStats] = None
@@ -202,25 +221,33 @@ class StatsReporter:
         if self._thread:
             self._thread.join(timeout=5.0)
 
+    def mark_shutting_down(self) -> None:
+        """Call this before workers begin stopping to suppress the partial shutdown update."""
+        self._shutting_down.set()
+
     def print_final_summary(self) -> None:
         """Print a final summary after the benchmark ends.
 
         Rates are shown as averages over the entire run (total / elapsed),
         not as a delta vs the last periodic snapshot (which would be zero
         because no new data arrives after workers stop).
+        Peak connected counts are used so shutdown teardown doesn't show 0.
         """
         elapsed = time.monotonic() - self._start_time
         with self._snapshots_lock:
             snapshots = list(self._latest_snapshots)
-        agg = aggregate(snapshots, elapsed)
+        # Build final aggregate carrying forward peaks from the last periodic agg
+        agg = aggregate(snapshots, elapsed, prev=self._prev_agg)
         print()
-        print("=" * 60)
+        print("=" * 62)
         print("  FINAL BENCHMARK SUMMARY")
-        print("=" * 60)
+        print("=" * 62)
         # Pass prev=None so deltas equal the cumulative totals, and use
         # elapsed as the interval → rates become overall averages.
-        self._print_table(agg, prev=None, interval=elapsed)
-        print("=" * 60)
+        # Use peak_connected for the connected column.
+        self._print_table(agg, prev=None, interval=elapsed, use_peak=True)
+        print(f"  System load (1/5/15 min): {self._load_avg()}")
+        print("=" * 62)
 
     # ------------------------------------------------------------------
     # Internal
@@ -236,13 +263,16 @@ class StatsReporter:
 
             now = time.monotonic()
             if now >= next_report:
-                elapsed = now - self._start_time
-                with self._snapshots_lock:
-                    snapshots = list(self._latest_snapshots)
-                agg = aggregate(snapshots, elapsed)
-                self._print_table(agg, prev=self._prev_agg, interval=self._interval)
-                self._prev_agg = agg
-                self._prev_agg_time = now
+                # Suppress periodic updates once shutdown has started — the
+                # partial teardown state (connections closing) is misleading.
+                if not self._shutting_down.is_set():
+                    elapsed = now - self._start_time
+                    with self._snapshots_lock:
+                        snapshots = list(self._latest_snapshots)
+                    agg = aggregate(snapshots, elapsed, prev=self._prev_agg)
+                    self._print_table(agg, prev=self._prev_agg, interval=self._interval)
+                    self._prev_agg = agg
+                    self._prev_agg_time = now
                 next_report = now + self._interval
 
             time.sleep(0.1)
@@ -274,6 +304,16 @@ class StatsReporter:
     # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_avg() -> str:
+        """Return a formatted 1/5/15-minute load average string, or '' if unavailable."""
+        try:
+            l1, l5, l15 = os.getloadavg()
+            return f"{l1:.2f}  {l5:.2f}  {l15:.2f}"
+        except (AttributeError, OSError):
+            # os.getloadavg() is not available on Windows
+            return "n/a"
 
     @staticmethod
     def _fmt_bytes(n: int) -> str:
@@ -322,8 +362,14 @@ class StatsReporter:
         agg: AggregateStats,
         prev: Optional[AggregateStats],
         interval: float,
+        use_peak: bool = False,
     ) -> None:
-        """Print the live report table."""
+        """Print the live report table.
+
+        When *use_peak* is True, the Connected column shows peak_connected
+        instead of the current connected count (used in the final summary to
+        avoid showing teardown-time zeros).
+        """
         elapsed_str = self._fmt_elapsed(agg.elapsed)
 
         # Compute deltas vs previous aggregate
@@ -349,11 +395,19 @@ class StatsReporter:
         total_rate = self._fmt_rate(d_total_bytes, interval)
 
         # "connected" in the header = users with at least one active WS right now
-        ws_connected = max(
-            agg.audio_connected if self._enable_audio else 0,
-            agg.spectrum_connected if self._enable_spectrum else 0,
-            agg.dx_connected if self._enable_dxcluster else 0,
-        )
+        # (or peak, in the final summary)
+        if use_peak:
+            ws_connected = max(
+                agg.audio_peak_connected if self._enable_audio else 0,
+                agg.spectrum_peak_connected if self._enable_spectrum else 0,
+                agg.dx_peak_connected if self._enable_dxcluster else 0,
+            )
+        else:
+            ws_connected = max(
+                agg.audio_connected if self._enable_audio else 0,
+                agg.spectrum_connected if self._enable_spectrum else 0,
+                agg.dx_connected if self._enable_dxcluster else 0,
+            )
         print()
         print(f"{'─' * 62}")
         print(
@@ -370,10 +424,14 @@ class StatsReporter:
         )
         print(f"  {'─' * 16} {'─' * 10} {'─' * 10} {'─' * 12} {'─' * 12} {'─' * 7}")
 
+        audio_conn = agg.audio_peak_connected if use_peak else agg.audio_connected
+        spec_conn = agg.spectrum_peak_connected if use_peak else agg.spectrum_connected
+        dx_conn = agg.dx_peak_connected if use_peak else agg.dx_connected
+
         if self._enable_audio:
             print(
                 f"  {'Audio':<16} "
-                f"{agg.audio_connected:>4}/{self._total_users:<5} "
+                f"{audio_conn:>4}/{self._total_users:<5} "
                 f"{self._fmt_msg_rate(d_audio_msgs, interval):>10} "
                 f"{self._fmt_rate(d_audio_bytes, interval):>12} "
                 f"{self._fmt_bytes(agg.audio_bytes_rx):>12} "
@@ -383,7 +441,7 @@ class StatsReporter:
         if self._enable_spectrum:
             print(
                 f"  {'Spectrum':<16} "
-                f"{agg.spectrum_connected:>4}/{self._total_users:<5} "
+                f"{spec_conn:>4}/{self._total_users:<5} "
                 f"{self._fmt_msg_rate(d_spec_msgs, interval):>10} "
                 f"{self._fmt_rate(d_spec_bytes, interval):>12} "
                 f"{self._fmt_bytes(agg.spectrum_bytes_rx):>12} "
@@ -393,7 +451,7 @@ class StatsReporter:
         if self._enable_dxcluster:
             print(
                 f"  {'DX Cluster':<16} "
-                f"{agg.dx_connected:>4}/{self._total_users:<5} "
+                f"{dx_conn:>4}/{self._total_users:<5} "
                 f"{self._fmt_msg_rate(d_dx_msgs, interval):>10} "
                 f"{'—':>12} "
                 f"{'—':>12} "
@@ -403,5 +461,6 @@ class StatsReporter:
         print(f"{'─' * 62}")
         print(
             f"  Total RX: {self._fmt_bytes(total_rx):<14}  "
-            f"Rate: {total_rate}"
+            f"Rate: {total_rate:<14}  "
+            f"Load: {self._load_avg()}"
         )

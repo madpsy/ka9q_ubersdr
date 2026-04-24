@@ -579,6 +579,14 @@ echo "Fetching install_cwskimmer.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/refs/heads/main/install-hub.sh -o "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
 
+echo "Fetching benchmark binary..."
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/benchmark -o "$ACTUAL_HOME/ubersdr/benchmark" 2>/dev/null; then
+    chmod +x "$ACTUAL_HOME/ubersdr/benchmark"
+    echo "benchmark binary installed to ~/ubersdr/benchmark."
+else
+    echo "Warning: Failed to download benchmark binary. Skipping."
+fi
+
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)
 #OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
 #WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"

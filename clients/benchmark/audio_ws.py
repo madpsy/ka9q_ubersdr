@@ -6,7 +6,7 @@ binary PCM-zstd (or Opus) frames, counts bytes/messages, and discards the
 data.  No decoding or audio output is performed.
 
 WebSocket URL format (mirrors radio_client.py build_websocket_url()):
-    /ws?frequency=<hz>&mode=<mode>&format=pcm-zstd&version=2
+    /ws?frequency=<hz>&mode=<mode>&format=<opus|pcm-zstd>&version=2
         &user_session_id=<uuid>[&bandwidthLow=<n>&bandwidthHigh=<n>]
         [&password=<pw>]
 
@@ -161,7 +161,7 @@ class AudioWebSocket:
             'frequency': str(state.frequency),
             'mode': state.mode,
             'user_session_id': self._stats.session_id,
-            'format': 'opus',
+            'format': self._cfg.audio_format,
             'version': '2',
         }
 

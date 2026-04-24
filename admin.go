@@ -2234,6 +2234,45 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions := ah.sessions.GetAllSessionsInfo()
 
+	// Enrich each session with per-channel CPU usage from the radiod thread-stats CSV.
+	// thread_cpu_pct      — raw per-core % for this channel's thread (same scale as radiod channels tab)
+	// thread_cpu_norm_pct — normalised: divided by num_logical_cpus (fraction of total system CPU)
+	// Shared spectrum subscribers always get 0.0 for both fields: the shared radiod channel's CPU
+	// cost is not attributable to any individual user (they all share one thread).
+	{
+		threadStats, statsAvailable := readThreadStats()
+		numCPUs := runtime.NumCPU()
+		for i := range sessions {
+			// Shared spectrum subscribers contribute 0 CPU — the channel is shared
+			if isShared, _ := sessions[i]["is_shared_subscriber"].(bool); isShared {
+				sessions[i]["thread_cpu_pct"] = 0.0
+				sessions[i]["thread_cpu_norm_pct"] = 0.0
+				continue
+			}
+			if !statsAvailable {
+				sessions[i]["thread_cpu_pct"] = nil
+				sessions[i]["thread_cpu_norm_pct"] = nil
+				continue
+			}
+			ssrcStr, _ := sessions[i]["ssrc"].(string)
+			var ssrcVal uint32
+			if _, err := fmt.Sscanf(ssrcStr, "0x%08x", &ssrcVal); err != nil {
+				sessions[i]["thread_cpu_pct"] = nil
+				sessions[i]["thread_cpu_norm_pct"] = nil
+				continue
+			}
+			if stat, found := matchThreadToSSRC(threadStats, ssrcVal); found {
+				pct := math.Round(stat.cpuPct*10) / 10
+				norm := math.Round(stat.cpuPct/float64(numCPUs)*10) / 10
+				sessions[i]["thread_cpu_pct"] = pct
+				sessions[i]["thread_cpu_norm_pct"] = norm
+			} else {
+				sessions[i]["thread_cpu_pct"] = nil
+				sessions[i]["thread_cpu_norm_pct"] = nil
+			}
+		}
+	}
+
 	// Enhance with chat usernames and LastSeen if DX cluster websocket handler (with chat) is available
 	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
 		for i := range sessions {

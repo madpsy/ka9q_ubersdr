@@ -5507,6 +5507,7 @@
                         <th style="padding: 12px; text-align: center; width: 80px;">Audio (kbps)</th>
                         <th style="padding: 12px; text-align: center; width: 80px;">Spectrum (kbps)</th>
                         <th style="padding: 12px; text-align: center; width: 80px;">DX (kbps)</th>
+                        <th style="padding: 12px; text-align: center; width: 70px;" title="Normalised CPU% across all this user's radiod channels (audio + spectrum)">CPU%</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
@@ -5666,6 +5667,23 @@
                         dxClusterThroughput = dxKbps.toString();
                     }
 
+                    // Calculate normalised CPU% across all this user's radiod channels (audio + spectrum).
+                    // Each session object carries thread_cpu_norm_pct from the backend (null if unavailable).
+                    let cpuNormDisplay = '<em style="color: #ccc;">—</em>';
+                    {
+                        let total = 0;
+                        let hasData = false;
+                        for (const s of [...sessions.audio, ...sessions.spectrum]) {
+                            if (s.thread_cpu_norm_pct != null) {
+                                total += s.thread_cpu_norm_pct;
+                                hasData = true;
+                            }
+                        }
+                        if (hasData) {
+                            cpuNormDisplay = `${total.toFixed(1)}%`;
+                        }
+                    }
+
                     // Format chat username with LastSeen time
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
@@ -5676,6 +5694,7 @@
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${audioThroughput}</td>
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${spectrumThroughput}</td>
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${dxClusterThroughput}</td>
+                        <td style="padding: 12px; font-size: 12px; text-align: center;">${cpuNormDisplay}</td>
                         <td style="padding: 12px; font-size: 12px;">${details}</td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
                     `;
@@ -18818,7 +18837,7 @@ const tooltipLine2 = timeStr;
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('power')" title="Click to sort">Power${sortIcon('power')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
-                            <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; width: 70px;" onclick="sortRadiodChannels('update')" title="Click to sort">Updated${sortIcon('update')}</th>
+                            <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; width: 70px;" onclick="sortRadiodChannels('update')" title="Click to sort">Last${sortIcon('update')}</th>
                             <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('cpu_pct')" title="Click to sort">CPU%${sortIcon('cpu_pct')}</th>
                             <th style="padding: 10px; text-align: center;">CPU#</th>
                             <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
@@ -18840,7 +18859,7 @@ const tooltipLine2 = timeStr;
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('power')" title="Click to sort">Power${sortIcon('power')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
-                    <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; width: 70px;" onclick="sortRadiodChannels('update')" title="Click to sort">Updated${sortIcon('update')}</th>
+                    <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; width: 70px;" onclick="sortRadiodChannels('update')" title="Click to sort">Last${sortIcon('update')}</th>
                     <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('cpu_pct')" title="Click to sort">CPU%${sortIcon('cpu_pct')}</th>
                     <th style="padding: 10px; text-align: center;">CPU#</th>
                     <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
@@ -18959,7 +18978,7 @@ const tooltipLine2 = timeStr;
                 // Format per-channel CPU% — dim if no thread matched (cpu_num === -1)
                 const hasCpuData = data.cpu_stats && data.cpu_stats.available && channel.thread_cpu_num !== -1;
                 const cpuPctCell = hasCpuData
-                    ? `<strong>${channel.thread_cpu_pct.toFixed(1)}%</strong>`
+                    ? (() => { const n = data.cpu_stats.num_logical_cpus || 1; return `<strong>${channel.thread_cpu_pct.toFixed(1)}% <span style="color: #999; font-weight: normal;">(${(channel.thread_cpu_pct / n).toFixed(1)}%)</span></strong>`; })()
                     : `<em style="color: #ccc;">—</em>`;
                 const cpuNumCell = hasCpuData
                     ? `<span style="font-family: monospace; font-size: 11px; color: #555;">${channel.thread_cpu_num}</span>`

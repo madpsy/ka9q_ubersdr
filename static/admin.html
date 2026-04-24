@@ -1494,9 +1494,13 @@
                                         The benchmark tool launches in a terminal window and simulates concurrent listeners to stress-test this system.
                                         It supports up to <strong>1,000 simulated users</strong> (2,000 channels) and measures how the system performs under load.
                                     </p>
-                                    <p style="margin: 0; font-size: 13px; color: #bf360c;">
+                                    <p style="margin: 0 0 8px 0; font-size: 13px; color: #bf360c;">
                                         ⚠️ <strong>Start low and work up.</strong> Begin with a small number of users and gradually increase, confirming the system remains stable at each step before going higher.
                                         Monitor CPU, memory, and audio quality during each run before increasing the load further.
+                                    </p>
+                                    <p style="margin: 0; font-size: 13px; color: #bf360c;">
+                                        💡 <strong>It is advised to have the web UI open</strong> and tuned to a known clean signal during each run.
+                                        Watch the spectrum display and listen for any audio stalling or jittering — these are the first signs the system is approaching its limit.
                                     </p>
                                 </div>
                                 <button class="btn" onclick="openBenchmark()" style="background: #f9a825; color: white; font-weight: bold; white-space: nowrap;">

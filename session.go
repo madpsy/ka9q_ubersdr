@@ -88,6 +88,15 @@ type Session struct {
 	BinBandwidth       float64
 	SpectrumChan       chan []float32 // Channel for spectrum data
 
+	// Per-session frequency-gain LUT (lookup table).
+	// gainLUT[j] holds the pre-computed dB offset for bin j, derived from the
+	// configured GainDBFrequencyRanges.  It is rebuilt lazily in
+	// sendSpectrumToSession whenever the session's Frequency or BinBandwidth
+	// changes, avoiding the O(bins × ranges) nested loop on every packet.
+	gainLUT     []float32 // pre-computed per-bin gain offsets (dB)
+	gainLUTFreq uint64    // Frequency used when gainLUT was last built
+	gainLUTBW   float64   // BinBandwidth used when gainLUT was last built
+
 	// Network statistics (protected by mu)
 	AudioBytesSent     uint64 // Total audio bytes sent
 	WaterfallBytesSent uint64 // Total waterfall/spectrum bytes sent

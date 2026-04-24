@@ -33,8 +33,9 @@ type UserSpectrumManager struct {
 	statusAddr *net.UDPAddr
 
 	// Worker pool for parallel packet processing
-	workerCount int
-	packetQueue chan spectrumPacket
+	workerCount             int
+	packetQueue             chan spectrumPacket
+	hasNonZeroFrequencyGain bool // true if any GainDBFrequencyRange has a non-zero gain_db
 
 	// Control
 	running                bool
@@ -58,16 +59,28 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 		workerCount = 4 // Default to 4 workers for parallel processing
 	}
 
+	// Pre-compute whether any frequency gain range has a non-zero gain_db.
+	// This avoids the expensive O(bins × ranges) loop in sendSpectrumToSession
+	// when all ranges are 0 dB (the common case for uncalibrated setups).
+	hasNonZeroGain := false
+	for _, r := range config.Spectrum.GainDBFrequencyRanges {
+		if r.GainDB != 0.0 {
+			hasNonZeroGain = true
+			break
+		}
+	}
+
 	usm := &UserSpectrumManager{
-		radiod:                 radiod,
-		config:                 config,
-		sessions:               sessions,
-		statusAddr:             statusAddr,
-		stopChan:               make(chan struct{}),
-		pollInterval:           time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
-		backgroundPollInterval: time.Duration(config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond,
-		workerCount:            workerCount,
-		packetQueue:            make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
+		radiod:                  radiod,
+		config:                  config,
+		sessions:                sessions,
+		statusAddr:              statusAddr,
+		stopChan:                make(chan struct{}),
+		pollInterval:            time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
+		backgroundPollInterval:  time.Duration(config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond,
+		workerCount:             workerCount,
+		packetQueue:             make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
+		hasNonZeroFrequencyGain: hasNonZeroGain,
 	}
 
 	return usm, nil
@@ -769,91 +782,92 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 // sendSpectrumToSession delivers spectrum data to a single session, applying any
 // configured frequency-specific gain adjustments.
 func (usm *UserSpectrumManager) sendSpectrumToSession(session *Session, data []float32) {
-	// Apply frequency-specific gain per-session if configured
-	if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 {
-		// Get session parameters (these reflect the user's actual view)
+	// Apply frequency-specific gain per-session if configured.
+	// Skip entirely when all ranges have gain_db == 0.0 (hasNonZeroFrequencyGain is false)
+	// to avoid the expensive O(bins × ranges) nested loop for zero net effect.
+	if usm.hasNonZeroFrequencyGain {
+		// Read session parameters under the lock.
 		session.mu.RLock()
 		sessionFreq := session.Frequency
 		sessionBinBW := session.BinBandwidth
+		// Check whether the cached LUT is still valid for this freq/BW.
+		lutValid := session.gainLUT != nil &&
+			len(session.gainLUT) == len(data) &&
+			session.gainLUTFreq == sessionFreq &&
+			session.gainLUTBW == sessionBinBW
 		session.mu.RUnlock()
 
-		// Create a copy of the data to apply session-specific gain
-		sessionData := make([]float32, len(data))
-		copy(sessionData, data)
+		if !lutValid {
+			// Rebuild the LUT for the current session view.
+			// Data is in FFT order: [positive freqs (DC to +Nyquist), negative freqs (-Nyquist to DC)]
+			lut := make([]float32, len(data))
+			halfBins := len(lut) / 2
+			for j := 0; j < len(lut); j++ {
+				var binFreq uint64
+				if j < halfBins {
+					binFreq = sessionFreq + uint64(float64(j)*sessionBinBW)
+				} else {
+					binFreq = sessionFreq - uint64(float64(len(lut)-j)*sessionBinBW)
+				}
 
-		// Apply frequency-specific gain to each bin
-		// Data is in FFT order: [positive freqs (DC to +Nyquist), negative freqs (-Nyquist to DC)]
-		// Calculate bin frequencies in FFT order to match the data layout (more efficient than unwrap/wrap)
-		halfBins := len(sessionData) / 2
-		for j := 0; j < len(sessionData); j++ {
-			// Calculate bin frequency in FFT order
-			var binFreq uint64
-			if j < halfBins {
-				// First half: positive frequencies (DC to +Nyquist)
-				// Bin 0 = centerFreq, Bin halfBins-1 = centerFreq + (halfBins-1)*binBW
-				binFreq = sessionFreq + uint64(float64(j)*sessionBinBW)
-			} else {
-				// Second half: negative frequencies (-Nyquist to -DC)
-				// Bin halfBins = centerFreq - halfBins*binBW, Bin N-1 = centerFreq - binBW
-				binFreq = sessionFreq - uint64(float64(len(sessionData)-j)*sessionBinBW)
-			}
+				for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+					var gainMultiplier float32
 
-			// Find matching frequency range and apply its gain with optional transition
-			for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
-				var gainMultiplier float32 = 0.0
-
-				// Check if we're in the full gain zone (inside the range)
-				if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
-					gainMultiplier = 1.0
-				} else if freqRange.TransitionHz > 0 {
-					// Apply linear transition zones outside the range
-					if binFreq < freqRange.StartFreq {
-						// Below start frequency - check if in transition zone
-						distanceOutside := freqRange.StartFreq - binFreq
-						if distanceOutside <= freqRange.TransitionHz {
-							// Linear ramp: 0 at (start - transition), 1.0 at start
-							gainMultiplier = float32(freqRange.TransitionHz-distanceOutside) / float32(freqRange.TransitionHz)
+					if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
+						gainMultiplier = 1.0
+					} else if freqRange.TransitionHz > 0 {
+						if binFreq < freqRange.StartFreq {
+							distanceOutside := freqRange.StartFreq - binFreq
+							if distanceOutside <= freqRange.TransitionHz {
+								gainMultiplier = float32(freqRange.TransitionHz-distanceOutside) / float32(freqRange.TransitionHz)
+							}
+						} else {
+							distanceOutside := binFreq - freqRange.EndFreq
+							if distanceOutside <= freqRange.TransitionHz {
+								gainMultiplier = float32(freqRange.TransitionHz-distanceOutside) / float32(freqRange.TransitionHz)
+							}
 						}
-						// else: too far below, gainMultiplier stays 0
-					} else if binFreq > freqRange.EndFreq {
-						// Above end frequency - check if in transition zone
-						distanceOutside := binFreq - freqRange.EndFreq
-						if distanceOutside <= freqRange.TransitionHz {
-							// Linear ramp: 1.0 at end, 0 at (end + transition)
-							gainMultiplier = float32(freqRange.TransitionHz-distanceOutside) / float32(freqRange.TransitionHz)
-						}
-						// else: too far above, gainMultiplier stays 0
+					}
+
+					if gainMultiplier > 0 {
+						lut[j] = float32(freqRange.GainDB) * gainMultiplier
+						break // first matching range wins
 					}
 				}
-
-				// Apply the gain with the multiplier
-				if gainMultiplier > 0 {
-					sessionData[j] += float32(freqRange.GainDB) * gainMultiplier
-					break // Use first matching range
-				}
 			}
+
+			// Store the new LUT under the write lock.
+			session.mu.Lock()
+			session.gainLUT = lut
+			session.gainLUTFreq = sessionFreq
+			session.gainLUTBW = sessionBinBW
+			session.mu.Unlock()
 		}
 
-		// Send session-specific data
-		// Double-check session.Done to avoid race with DestroySession()
+		// Apply the LUT: single O(N) pass, no inner range loop.
+		sessionData := make([]float32, len(data))
+		copy(sessionData, data)
+		session.mu.RLock()
+		lut := session.gainLUT
+		session.mu.RUnlock()
+		for j := range sessionData {
+			sessionData[j] += lut[j]
+		}
+
+		// Send session-specific data.
 		select {
 		case <-session.Done:
-			// Session destroyed during processing, skip
 			return
 		case session.SpectrumChan <- sessionData:
-			// Data sent successfully
 		default:
 			// Channel full, drop data
 		}
 	} else {
-		// No frequency-specific gain configured, send original data
-		// Double-check session.Done to avoid race with DestroySession()
+		// No non-zero frequency gain configured — send original data directly.
 		select {
 		case <-session.Done:
-			// Session destroyed during processing, skip
 			return
 		case session.SpectrumChan <- data:
-			// Data sent successfully
 		default:
 			// Channel full, drop data
 		}

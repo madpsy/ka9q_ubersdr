@@ -947,6 +947,12 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>Info:</strong> This shows all active channels in radiod, including decoder channels, user audio/spectrum sessions, and noise floor monitors. Auto-refreshes every 5 seconds.
                     </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="showUnknownChannels" onchange="loadRadiodChannels()">
+                            Show Unknown Channels
+                        </label>
+                    </div>
                     <div id="radiodChannelsList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading radiod channels...</p>
@@ -2872,6 +2878,9 @@
                 document.querySelector('.tab:nth-child(8)').classList.add('active');
                 document.getElementById('radiodChannelsTab').classList.add('active');
                 document.getElementById('radiodChannelsButtons').style.display = 'flex';
+                // Always reset to unchecked so browser-restored state doesn't silently
+                // include unknown channels without the user explicitly opting in.
+                document.getElementById('showUnknownChannels').checked = false;
                 loadRadiodChannels();
                 startRadiodChannelsAutoRefresh();
             } else if (tab === 'bookmarks') {
@@ -18381,7 +18390,9 @@ const tooltipLine2 = timeStr;
 
         async function loadRadiodChannels() {
             try {
-                const response = await authenticatedFetch('/admin/radiod-channels');
+                const showUnknown = document.getElementById('showUnknownChannels')?.checked;
+                const url = showUnknown ? '/admin/radiod-channels?unknown=true' : '/admin/radiod-channels';
+                const response = await authenticatedFetch(url);
                 if (!response) {
                     // Auth failed, stop auto-refresh
                     stopRadiodChannelsAutoRefresh();

@@ -379,6 +379,26 @@ if (( NUM_CORES > TOTAL_PHYSICAL )); then
     exit 1
 fi
 
+# Enforce the half-core cap for non-interactive --cores usage.
+# (Interactive mode enforces this cap inside the prompt loop below.)
+if $NUM_CORES_SET && ! $INTERACTIVE; then
+    _total_logical_early=$(nproc --all 2>/dev/null || echo "$TOTAL_PHYSICAL")
+    _half_logical_early=$(( _total_logical_early / 2 ))
+    (( _half_logical_early < 1 )) && _half_logical_early=1
+    _first_core_key_early="${core_list[0]}"
+    _lcpus_per_core_early=1
+    IFS=',' read -ra _fc_early <<< "$_first_core_key_early"
+    _lcpus_per_core_early="${#_fc_early[@]}"
+    (( _lcpus_per_core_early < 1 )) && _lcpus_per_core_early=1
+    _max_cores_early=$(( _half_logical_early / _lcpus_per_core_early ))
+    (( _max_cores_early < 1 )) && _max_cores_early=1
+    if (( NUM_CORES > _max_cores_early )); then
+        echo "ERROR: --cores ${NUM_CORES} exceeds the maximum of ${_max_cores_early} physical core(s)" >&2
+        echo "       (half of ${_total_logical_early} logical CPUs on this system)." >&2
+        exit 1
+    fi
+fi
+
 # ── 2. Map each physical core to its L3 cache domain ─────────────────────────
 # Read /sys/devices/system/cpu/cpuN/cache/index*/shared_cpu_list for the L3
 # (level=3, type=Unified).  Cores sharing the same shared_cpu_list belong to
@@ -495,7 +515,7 @@ if $INTERACTIVE; then
     elif (( _expected_users <= 100 )); then
         _recommended_cores=4
     else
-        # 2 base cores for the first 100, then +2 per additional 100 users
+        # 4 base cores for the first 100, then +2 per additional 100 users
         _extra_hundreds=$(( (_expected_users - 100 + 99) / 100 ))
         _recommended_cores=$(( 4 + _extra_hundreds * 2 ))
     fi
@@ -514,24 +534,29 @@ if $INTERACTIVE; then
     _max_cores_by_half=$(( _half_logical / _lcpus_per_core ))
     (( _max_cores_by_half < 1 )) && _max_cores_by_half=1
 
+    _capped=false
     if (( _recommended_cores > _max_cores_by_half )); then
         _recommended_cores=$_max_cores_by_half
-        echo "  Note: recommendation capped at ${_recommended_cores} physical core(s)"
-        echo "        (≤ half of ${_total_logical} logical CPUs on this system)."
+        _capped=true
     fi
 
     # Build a human-readable explanation of the recommendation
     if (( _expected_users <= 50 )); then
-        echo "  With ${_expected_users} concurrent user(s) (≤ 50), we recommend 2 physical cores."
+        echo "  With ${_expected_users} concurrent user(s) (≤ 50), we recommend ${_recommended_cores} physical core(s)."
     elif (( _expected_users <= 100 )); then
-        echo "  With ${_expected_users} concurrent users (51–100), we recommend 4 physical cores."
+        echo "  With ${_expected_users} concurrent users (51–100), we recommend ${_recommended_cores} physical core(s)."
     else
-        echo "  With ${_expected_users} concurrent users (>100), we recommend ${_recommended_cores} physical cores"
-        echo "  (+2 cores per 100 users above 100)."
+        echo "  With ${_expected_users} concurrent users (>100), we recommend ${_recommended_cores} physical core(s)"
+        echo "  (4 cores for the first 100 users, +2 cores per additional 100 users)."
     fi
     if $_ht_present; then
         _logical_for_rec=$(( _recommended_cores * _lcpus_per_core ))
         echo "  (${_recommended_cores} physical core(s) = ${_logical_for_rec} logical CPU(s) on this HT system)"
+    fi
+    if $_capped; then
+        echo ""
+        echo -e "\033[1;33m  ⚠  Recommendation capped at ${_recommended_cores} physical core(s) — the maximum allowed\033[0m"
+        echo -e "\033[1;33m     (≤ half of ${_total_logical} logical CPUs on this system).\033[0m"
     fi
 
     # Warn if the recommendation crosses L3 domain boundaries, but let the user decide.
@@ -566,14 +591,14 @@ if $INTERACTIVE; then
     echo -e "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
     echo ""
     while true; do
-        read -rp "How many physical cores do you want to assign to radiod? [1-${TOTAL_PHYSICAL}] (default: ${NUM_CORES}): " _input
+        read -rp "How many physical cores do you want to assign to radiod? [1-${_max_cores_by_half}] (default: ${NUM_CORES}): " _input
         _input="${_input:-${NUM_CORES}}"
-        if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= TOTAL_PHYSICAL )); then
+        if [[ "$_input" =~ ^[1-9][0-9]*$ ]] && (( _input >= 1 && _input <= _max_cores_by_half )); then
             NUM_CORES="$_input"
             NUM_CORES_SET=true
             break
         else
-            echo "  Please enter a number between 1 and ${TOTAL_PHYSICAL}."
+            echo "  Please enter a number between 1 and ${_max_cores_by_half} (half of ${_total_logical} logical CPUs)."
         fi
     done
     echo ""

@@ -1481,6 +1481,31 @@
                 <!-- System Tab -->
                 <div id="systemTab" class="tab-content">
 
+                    <!-- Benchmark Card -->
+                    <div style="margin-bottom: 20px; background: #fff8e1; border-radius: 5px; border: 1px solid #f9a825;">
+                        <div onclick="toggleCollapsible('benchmarkBody', 'benchmarkArrow')" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 15px; cursor: pointer; user-select: none;">
+                            <span style="color: #e65100; font-weight: bold;">🏋️ Benchmark</span>
+                            <span id="benchmarkArrow" style="color: #f9a825; font-size: 14px; transition: transform 0.2s;">▶</span>
+                        </div>
+                        <div id="benchmarkBody" style="display: none; padding: 0 15px 15px 15px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                                <div style="flex: 1; color: #e65100;">
+                                    <p style="margin: 0 0 8px 0; font-size: 13px; color: #bf360c;">
+                                        The benchmark tool launches in a terminal window and simulates concurrent listeners to stress-test this system.
+                                        It supports up to <strong>1,000 simulated users</strong> (2,000 channels) and measures how the system performs under load.
+                                    </p>
+                                    <p style="margin: 0; font-size: 13px; color: #bf360c;">
+                                        ⚠️ <strong>Start low and work up.</strong> Begin with a small number of users and gradually increase, confirming the system remains stable at each step before going higher.
+                                        Monitor CPU, memory, and audio quality during each run before increasing the load further.
+                                    </p>
+                                </div>
+                                <button class="btn" onclick="openBenchmark()" style="background: #f9a825; color: white; font-weight: bold; white-space: nowrap;">
+                                    🏋️ Run Benchmark
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- CPU Governor Card -->
                     <div style="margin-bottom: 20px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
                         <div onclick="toggleCollapsible('cpuGovernorBody', 'cpuGovernorArrow')" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 15px; cursor: pointer; user-select: none;">
@@ -3224,6 +3249,19 @@
                 body.style.display = 'none';
                 arrow.style.transform = 'rotate(0deg)';
             }
+        }
+
+        // Open Benchmark tool in popup terminal window
+        function openBenchmark() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/benchmark';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 900, height = 600;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'benchmark_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 
         // Open CPU Governor management script in popup terminal window

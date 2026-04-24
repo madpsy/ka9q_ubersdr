@@ -84,6 +84,10 @@ import subprocess as _subprocess
 import sys
 import urllib.error
 import urllib.request
+try:
+    import termios as _termios
+except ImportError:
+    _termios = None  # type: ignore[assignment]
 from dataclasses import replace as dataclass_replace
 from typing import Optional, Tuple
 
@@ -663,6 +667,16 @@ def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str])
 
             # Use this run's user/duration as defaults for the next run
             current_config = dataclass_replace(current_config, users=users, duration=float(duration))
+
+            # Drain any newlines/characters that were buffered in stdin during
+            # the benchmark run (e.g. Enter presses while waiting).  Without
+            # this the "Run another?" input() call consumes them immediately
+            # and skips the prompt.
+            if _termios is not None:
+                try:
+                    _termios.tcflush(sys.stdin, _termios.TCIFLUSH)
+                except Exception:
+                    pass  # Not a tty — ignore
 
             print()
             try:

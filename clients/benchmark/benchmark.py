@@ -20,6 +20,18 @@ Default behaviour
 
   Pass --users to run once non-interactively and exit.
 
+Channel capacity
+----------------
+  radiod has a hard limit of 2000 channels.  Each simulated user consumes
+  2 channels (one audio + one spectrum).  On startup the tool attempts to
+  fetch the current channel count from GET /admin/radiod-channels using the
+  X-Admin-Password header (requires --admin-password).  If successful it
+  shows how many channels are already in use and automatically clamps the
+  requested user count so the total never exceeds 2000 channels.
+
+  If the admin password is not provided, or the request fails, a warning is
+  printed and the hard cap of MAX_USERS is used instead.
+
 Usage examples
 --------------
 # Interactive mode — prompts for users/duration each run
@@ -56,18 +68,30 @@ python benchmark.py --url http://localhost:8080 \\
 # Use lossless pcm-zstd audio (higher server memory, tests zstd path)
 python benchmark.py --url http://localhost:8080 \\
     --users 50 -f 14074000 -m usb --audio-format pcm-zstd
+
+# Fetch live channel count and auto-clamp user limit
+python benchmark.py --url http://localhost:8080 \\
+    --users 100 --admin-password mypassword
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import re as _re
+import subprocess as _subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import replace as dataclass_replace
 from typing import Optional, Tuple
 
 from config import BenchmarkConfig, VALID_MODES
 
-MAX_USERS = 1000  # Hard cap — matches radiod's maximum channel limit
+MAX_USERS = 1000          # Hard cap when channel count cannot be determined
+RADIOD_CHANNEL_LIMIT = 2000  # radiod's absolute maximum channel count
+CHANNELS_PER_USER = 2     # Each user needs 1 audio + 1 spectrum channel
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +115,66 @@ def parse_bandwidth(value: str) -> Tuple[int, int]:
             f"Bandwidth must be in format 'low:high' (e.g. '50:2700' or '-2700:-50'), "
             f"got: {value!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Channel count fetcher
+# ---------------------------------------------------------------------------
+
+def _fetch_radiod_channels(http_url: str, admin_password: str) -> Optional[dict]:
+    """Fetch the full /admin/radiod-channels JSON response.
+
+    Returns the parsed dict on success, or None on any failure.
+    """
+    url = f"{http_url.rstrip('/')}/admin/radiod-channels"
+    req = urllib.request.Request(url)
+    req.add_header("X-Admin-Password", admin_password)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        print(f"  ⚠  Could not fetch radiod channels: HTTP {exc.code} from {url}", file=sys.stderr)
+    except urllib.error.URLError as exc:
+        print(f"  ⚠  Could not fetch radiod channels: {exc.reason}", file=sys.stderr)
+    except Exception as exc:
+        print(f"  ⚠  Could not fetch radiod channels: {exc}", file=sys.stderr)
+    return None
+
+
+def fetch_existing_channel_count(http_url: str, admin_password: str) -> Optional[int]:
+    """Fetch the current radiod channel count from GET /admin/radiod-channels.
+
+    Returns the total_channels integer on success, or None on any failure.
+    """
+    data = _fetch_radiod_channels(http_url, admin_password)
+    if data is None:
+        return None
+    return int(data.get("total_channels", 0))
+
+
+def fetch_radiod_cpu_stats(http_url: str, admin_password: str) -> Optional[dict]:
+    """Fetch the cpu_stats block from GET /admin/radiod-channels.
+
+    Returns a dict with keys: available, num_logical_cpus, total_pct,
+    proc_rx888_pct, fft_pct, channels_pct, other_pct — or None on failure.
+    """
+    data = _fetch_radiod_channels(http_url, admin_password)
+    if data is None:
+        return None
+    cpu = data.get("cpu_stats")
+    if not isinstance(cpu, dict) or not cpu.get("available"):
+        return None
+    return cpu
+
+
+def compute_max_users(existing_channels: int) -> int:
+    """Return the maximum number of users that can be added without exceeding
+    the radiod channel limit of RADIOD_CHANNEL_LIMIT.
+
+    Each user consumes CHANNELS_PER_USER channels.
+    """
+    available = max(0, RADIOD_CHANNEL_LIMIT - existing_channels)
+    return available // CHANNELS_PER_USER
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +205,17 @@ def build_parser() -> argparse.ArgumentParser:
     conn.add_argument(
         '--password', metavar='PW', default=None,
         help='Bypass password (sent to POST /connection and audio WebSocket)',
+    )
+    conn.add_argument(
+        '--admin-password', metavar='PW', default=None,
+        help=(
+            'Admin password used to query GET /admin/radiod-channels via the '
+            'X-Admin-Password header.  When provided, the tool fetches the '
+            'current channel count at startup and automatically clamps --users '
+            'so the total never exceeds the radiod limit of '
+            f'{RADIOD_CHANNEL_LIMIT} channels '
+            f'({CHANNELS_PER_USER} channels per user).'
+        ),
     )
     conn.add_argument(
         '--ssl', action='store_true',
@@ -314,6 +409,147 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 
 # ---------------------------------------------------------------------------
+# Admin password auto-discovery (mirrors get-password.sh)
+# ---------------------------------------------------------------------------
+
+# Path to the UberSDR config inside the Docker volume — same as get-password.sh
+_CONFIG_PATH = "/var/lib/docker/volumes/ubersdr_ubersdr-config/_data/config.yaml"
+
+
+def _parse_admin_password(lines: list) -> Optional[str]:
+    """Extract the admin password value from a list of config.yaml lines.
+
+    Looks for the pattern:
+        admin:
+          ...
+          password: "somevalue"
+
+    Returns the password string, or None if not found or still the default.
+    """
+    in_admin = False
+    for line in lines:
+        stripped = line.rstrip('\n')
+        if stripped.startswith('admin:'):
+            in_admin = True
+            continue
+        if in_admin:
+            # Stop at the next top-level key
+            if stripped and not stripped[0].isspace():
+                break
+            m = _re.match(r'\s+password:\s+"([^"]+)"', stripped)
+            if m:
+                pw = m.group(1)
+                if pw and pw != 'mypassword':
+                    return pw
+                return None  # default / empty — treat as not found
+    return None
+
+
+def read_admin_password_from_config(path: str = _CONFIG_PATH) -> Optional[str]:
+    """Try to extract the admin password from the UberSDR config.yaml.
+
+    Replicates the logic of get-password.sh.  The Docker volume file is
+    owned by root, so a direct open() may fail for non-root users.
+    Resolution order:
+      1. Direct open() — works when running as root or if permissions allow.
+      2. ``sudo cat <path>`` — mirrors the ``sudo grep`` used in get-password.sh;
+         requires the user to have passwordless sudo for cat, or for sudo to
+         be configured to allow it (standard UberSDR install grants this).
+
+    Returns the password string on success, or None on any failure.
+    """
+    # 1. Try direct read first (fast path — works as root)
+    try:
+        with open(path, 'r') as fh:
+            lines = fh.readlines()
+        return _parse_admin_password(lines)
+    except OSError:
+        pass
+
+    # 2. Fall back to sudo cat (mirrors get-password.sh's use of sudo grep)
+    try:
+        result = _subprocess.run(
+            ['sudo', 'cat', path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return _parse_admin_password(result.stdout.splitlines(keepends=True))
+    except (OSError, _subprocess.TimeoutExpired):
+        pass
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Channel-capacity check (run once at startup)
+# ---------------------------------------------------------------------------
+
+def check_channel_capacity(http_url: str, admin_password: Optional[str],
+                            requested_users: int) -> Tuple[int, int]:
+    """Query the server for the current channel count and compute the effective
+    user limit.
+
+    *admin_password* should already be resolved by the caller (via
+    ``read_admin_password_from_config()`` or the ``--admin-password`` flag).
+
+    Returns (effective_users, dynamic_max) where:
+      - effective_users  is the (possibly clamped) number of users to run
+      - dynamic_max      is the computed cap (MAX_USERS if lookup failed)
+
+    Prints informational / warning messages to stdout/stderr.
+    """
+    if not admin_password:
+        print(
+            f"  ⚠  No admin password available; "
+            f"skipping live channel count check. "
+            f"Using hard cap of {MAX_USERS} users.",
+            file=sys.stderr,
+        )
+        dynamic_max = MAX_USERS
+    else:
+        print("  Checking current radiod channel usage…", end=' ', flush=True)
+        existing = fetch_existing_channel_count(http_url, admin_password)
+        if existing is None:
+            print("failed.", file=sys.stderr)
+            print(
+                f"  ⚠  Could not determine channel count; using hard cap of {MAX_USERS} users.",
+                file=sys.stderr,
+            )
+            dynamic_max = MAX_USERS
+        else:
+            dynamic_max = compute_max_users(existing)
+            available_channels = RADIOD_CHANNEL_LIMIT - existing
+            print(
+                f"\n"
+                f"  📡 radiod channels in use: {existing} / {RADIOD_CHANNEL_LIMIT}\n"
+                f"     Available channels: {available_channels}  "
+                f"→  max testable users: {dynamic_max} "
+                f"({CHANNELS_PER_USER} channels each)"
+            )
+
+    effective_users = requested_users
+    if effective_users > dynamic_max:
+        print(
+            f"\n  ⚠  WARNING: requested {requested_users} users but only {dynamic_max} "
+            f"can be tested without exceeding the {RADIOD_CHANNEL_LIMIT}-channel radiod limit.\n"
+            f"     Clamping to {dynamic_max} users.",
+            file=sys.stderr,
+        )
+        effective_users = dynamic_max
+
+    if effective_users < 1:
+        print(
+            "  ⚠  WARNING: no capacity for any users (server is at or near channel limit).",
+            file=sys.stderr,
+        )
+        effective_users = 0
+
+    return effective_users, dynamic_max
+
+
+# ---------------------------------------------------------------------------
 # Interactive mode
 # ---------------------------------------------------------------------------
 
@@ -341,8 +577,13 @@ def _prompt_int(prompt: str, default: int, min_val: int = 1, max_val: Optional[i
             print(f"  ✗ Please enter a whole number (or press Enter for default).")
 
 
-def run_interactive(base_config: BenchmarkConfig) -> None:
-    """Interactive loop: prompt for users/duration, run, repeat until quit."""
+def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str]) -> None:
+    """Interactive loop: prompt for users/duration, run, repeat until quit.
+
+    The channel count is re-fetched before every run so the cap always
+    reflects the current server state (previous runs add/remove channels,
+    real users connect/disconnect between runs).
+    """
     from runner import BenchmarkRunner
 
     print()
@@ -358,55 +599,92 @@ def run_interactive(base_config: BenchmarkConfig) -> None:
     current_config = base_config
     run_number = 0
 
-    while True:
-        run_number += 1
-        print(f"─── Run #{run_number} ───────────────────────────────────────────────")
+    try:
+        while True:
+            run_number += 1
+            print(f"─── Run #{run_number} ───────────────────────────────────────────────")
 
-        users = _prompt_int("Number of users", default=current_config.users, min_val=1, max_val=MAX_USERS)
-        if users is None:
-            print("\n  Exiting interactive mode. Goodbye!")
-            break
+            # Re-fetch channel count before every run so the cap is always fresh.
+            # Pass current_config.users as the "requested" value purely so
+            # check_channel_capacity can print a clamp warning if needed; we use
+            # the returned dynamic_max (not effective_users) to drive the prompt.
+            _, dynamic_max = check_channel_capacity(
+                base_config.http_url,
+                admin_password,
+                current_config.users,
+            )
 
-        duration = _prompt_int("Duration (seconds)", default=int(current_config.duration), min_val=1)
-        if duration is None:
-            print("\n  Exiting interactive mode. Goodbye!")
-            break
+            users = _prompt_int(
+                "Number of users",
+                default=min(current_config.users, dynamic_max),
+                min_val=1,
+                max_val=dynamic_max,
+            )
+            if users is None:
+                print("\n  Exiting interactive mode. Goodbye!")
+                break
 
-        # Use the configured thread count, but scale up if users > threads*25
-        threads = current_config.threads
-        if threads < max(1, min(32, (users + 24) // 25)):
-            threads = max(1, min(32, (users + 24) // 25))
+            # Warn and clamp if somehow above dynamic_max (shouldn't happen with max_val set)
+            if users > dynamic_max:
+                print(
+                    f"  ⚠  Clamping {users} → {dynamic_max} users "
+                    f"(radiod channel limit).",
+                    file=sys.stderr,
+                )
+                users = dynamic_max
 
-        # Build a config for this run (override users/duration/threads only)
-        run_config = dataclass_replace(
-            current_config,
-            users=users,
-            duration=float(duration),
-            threads=threads,
-        )
+            duration = _prompt_int("Duration (seconds)", default=int(current_config.duration), min_val=1)
+            if duration is None:
+                print("\n  Exiting interactive mode. Goodbye!")
+                break
 
-        print(f"\n  → {users} users for {duration}s on {threads} thread(s)")
-        print()
+            # Use the configured thread count, but scale up if users > threads*25
+            threads = current_config.threads
+            if threads < max(1, min(32, (users + 24) // 25)):
+                threads = max(1, min(32, (users + 24) // 25))
 
+            # Build a config for this run (override users/duration/threads only)
+            run_config = dataclass_replace(
+                current_config,
+                users=users,
+                duration=float(duration),
+                threads=threads,
+            )
+
+            print(f"\n  → {users} users for {duration}s on {threads} thread(s)")
+            print()
+
+            try:
+                runner = BenchmarkRunner(run_config)
+                runner.run()
+            except KeyboardInterrupt:
+                # Ctrl-C during a run: stop the run but stay in the loop
+                print("\n  Run interrupted.")
+
+            # Use this run's user/duration as defaults for the next run
+            current_config = dataclass_replace(current_config, users=users, duration=float(duration))
+
+            print()
+            try:
+                again = input("  Run another benchmark? [Y/n]: ").strip().lower()
+            except EOFError:
+                print("\n  Exiting interactive mode. Goodbye!")
+                break
+            if again in ('n', 'no', 'q', 'quit'):
+                print("  Goodbye!")
+                break
+
+    except KeyboardInterrupt:
+        # Ctrl-C at any prompt (users, duration, "run again?") — exit cleanly.
+        # Use os.write() (async-signal-safe) instead of print() to avoid a
+        # second KeyboardInterrupt being raised inside the handler itself,
+        # which happens in PyInstaller binaries when the signal arrives during
+        # a buffered write to stdout.
         try:
-            runner = BenchmarkRunner(run_config)
-            runner.run()
-        except KeyboardInterrupt:
-            # Ctrl-C during a run: stop the run but stay in the loop
-            print("\n  Run interrupted.")
-
-        # Use this run's user/duration as defaults for the next run
-        current_config = dataclass_replace(current_config, users=users, duration=float(duration))
-
-        print()
-        try:
-            again = input("  Run another benchmark? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Exiting interactive mode. Goodbye!")
-            break
-        if again in ('n', 'no', 'q', 'quit'):
-            print("  Goodbye!")
-            break
+            sys.stdout.flush()
+        except Exception:
+            pass
+        os.write(sys.stdout.fileno(), b"\n\n  Exiting interactive mode. Goodbye!\n")
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +746,7 @@ def main() -> None:
             enable_spectrum=not args.no_spectrum,
             enable_dxcluster=not args.no_dxcluster,
             debug=args.debug,
+            admin_password=None,  # filled in after password resolution below
         )
     else:
         config = BenchmarkConfig(
@@ -492,10 +771,41 @@ def main() -> None:
             enable_spectrum=not args.no_spectrum,
             enable_dxcluster=not args.no_dxcluster,
             debug=args.debug,
+            admin_password=None,  # filled in after password resolution below
         )
 
+    # ── Resolve admin password (flag → config file → None) ───────────────
+    # check_channel_capacity does this internally too, but we resolve it once
+    # here so we can store it in BenchmarkConfig for the StatsReporter to use.
+    resolved_admin_pw: Optional[str] = args.admin_password
+    if not resolved_admin_pw:
+        resolved_admin_pw = read_admin_password_from_config()
+        if resolved_admin_pw:
+            print(f"  🔑 Admin password read from config file ({_CONFIG_PATH})")
+    config = dataclass_replace(config, admin_password=resolved_admin_pw)
+
+    # ── Channel capacity check ────────────────────────────────────────────
+    # Derive the HTTP base URL from the config (already normalised in __post_init__)
+    effective_users, dynamic_max = check_channel_capacity(
+        config.http_url,
+        resolved_admin_pw,
+        config.users,
+    )
+
+    if not interactive:
+        if effective_users == 0:
+            print("  No capacity available — aborting.", file=sys.stderr)
+            sys.exit(1)
+        if effective_users != config.users:
+            config = dataclass_replace(config, users=effective_users)
+    else:
+        # In interactive mode, clamp the default suggestion but let the prompt
+        # enforce the cap via max_val.
+        if effective_users != config.users:
+            config = dataclass_replace(config, users=effective_users)
+
     if interactive:
-        run_interactive(config)
+        run_interactive(config, resolved_admin_pw)
     else:
         # Import here so import errors are reported cleanly
         from runner import BenchmarkRunner
@@ -504,4 +814,14 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Top-level safety net: suppress traceback for Ctrl-C at any point
+        # outside the interactive loop (e.g. during startup checks).
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        os.write(sys.stdout.fileno(), b"\n  Interrupted.\n")
+        sys.exit(0)

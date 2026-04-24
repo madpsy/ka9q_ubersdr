@@ -24,6 +24,28 @@ connection counts, message rates, and byte throughput.
 
 ---
 
+## Channel capacity
+
+radiod has a hard limit of **2000 channels**.  Each simulated user consumes
+**2 channels** (one audio + one spectrum).  This means the absolute maximum is
+1000 simultaneous users — but in practice the server will already have channels
+in use for decoders, noise-floor monitors, and real listeners.
+
+When `--admin-password` is provided the tool queries
+`GET /admin/radiod-channels` (using the `X-Admin-Password` header) at startup
+and:
+
+- Prints how many channels are currently in use.
+- Calculates how many users can be added without exceeding the 2000-channel
+  limit.
+- **Automatically clamps** `--users` to that value and warns you if your
+  requested count was higher.
+
+If the admin password is not provided, or the request fails, a warning is
+printed and the hard cap of 1000 users is used instead.
+
+---
+
 ## Requirements
 
 - Python **3.10+**
@@ -72,15 +94,16 @@ python benchmark.py --url <URL> [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--url URL` | *(required)* | Server base URL, e.g. `http://localhost:8073` or `https://radio.example.com`. WebSocket URLs are derived automatically (`http`→`ws`, `https`→`wss`). |
+| `--url URL` | `http://localhost:8080` | Server base URL, e.g. `http://localhost:8073` or `https://radio.example.com`. WebSocket URLs are derived automatically (`http`→`ws`, `https`→`wss`). |
 | `--password PW` | — | Bypass password (sent to `POST /connection` and audio WebSocket) |
+| `--admin-password PW` | — | Admin password used to query `GET /admin/radiod-channels` via `X-Admin-Password` header. Enables live channel-count check and automatic user-count clamping. |
 | `--ssl` | off | Force WSS/HTTPS (also inferred automatically from an `https://` URL) |
 
 ### Scale
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--users N` | 10 | Number of simulated concurrent users |
+| `--users N` | 10 | Number of simulated concurrent users (automatically clamped based on available channels when `--admin-password` is given) |
 | `--threads N` | 4 | OS threads; each runs its own asyncio event loop |
 | `--duration SECS` | 60 | Benchmark duration in seconds |
 | `--ramp-up SECS` | 5 | Seconds over which all users are staggered at startup |
@@ -145,6 +168,35 @@ python benchmark.py \
     --users 100 --threads 10 --duration 300 \
     -f 7100000 -m lsb -b -2700:-50 \
     --spectrum-zoom 500 --password secret
+```
+
+### With live channel-count check and auto-clamping
+
+Provide `--admin-password` to query the server's current channel usage.
+The tool will print how many channels are in use and clamp `--users`
+automatically if needed.
+
+```bash
+python benchmark.py \
+    --url http://localhost:8080 \
+    --users 200 --admin-password mypassword \
+    -f 14074000 -m usb
+```
+
+Example output when 120 channels are already in use:
+
+```
+  Checking current radiod channel usage…
+  📡 radiod channels in use: 120 / 2000
+     Available channels: 1880  →  max testable users: 940 (2 channels each)
+```
+
+If you request more users than are available:
+
+```
+  ⚠  WARNING: requested 200 users but only 940 can be tested without
+     exceeding the 2000-channel radiod limit.
+     Clamping to 940 users.
 ```
 
 ### TLS instance (HTTPS → WSS derived automatically)

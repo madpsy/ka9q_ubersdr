@@ -9,12 +9,15 @@ swapping out the snapshot list.
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +185,8 @@ class StatsReporter:
         enable_audio: bool = True,
         enable_spectrum: bool = True,
         enable_dxcluster: bool = True,
+        http_url: Optional[str] = None,
+        admin_password: Optional[str] = None,
     ) -> None:
         self._queue = stats_queue
         self._interval = report_interval
@@ -189,6 +194,8 @@ class StatsReporter:
         self._enable_audio = enable_audio
         self._enable_spectrum = enable_spectrum
         self._enable_dxcluster = enable_dxcluster
+        self._http_url = http_url
+        self._admin_password = admin_password
 
         self._start_time = time.monotonic()
         self._thread: Optional[threading.Thread] = None
@@ -202,6 +209,9 @@ class StatsReporter:
         # Latest merged snapshot list (updated from queue)
         self._latest_snapshots: List[UserStats] = []
         self._snapshots_lock = threading.Lock()
+
+        # Last known radiod CPU stats (fetched before each periodic report)
+        self._last_cpu_stats: Optional[Dict] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -232,6 +242,7 @@ class StatsReporter:
         not as a delta vs the last periodic snapshot (which would be zero
         because no new data arrives after workers stop).
         Peak connected counts are used so shutdown teardown doesn't show 0.
+        CPU stats use the last known values — no re-fetch at summary time.
         """
         elapsed = time.monotonic() - self._start_time
         with self._snapshots_lock:
@@ -245,7 +256,9 @@ class StatsReporter:
         # Pass prev=None so deltas equal the cumulative totals, and use
         # elapsed as the interval → rates become overall averages.
         # Use peak_connected for the connected column.
-        self._print_table(agg, prev=None, interval=elapsed, use_peak=True)
+        # Use last known CPU stats (no re-fetch).
+        self._print_table(agg, prev=None, interval=elapsed, use_peak=True,
+                          cpu_stats=self._last_cpu_stats)
         print(f"  System load (1/5/15 min): {self._load_avg()}")
         print("=" * 62)
 
@@ -266,11 +279,17 @@ class StatsReporter:
                 # Suppress periodic updates once shutdown has started — the
                 # partial teardown state (connections closing) is misleading.
                 if not self._shutting_down.is_set():
+                    # Fetch fresh CPU stats before printing (store as last known)
+                    cpu_stats = self._fetch_cpu_stats()
+                    if cpu_stats is not None:
+                        self._last_cpu_stats = cpu_stats
+
                     elapsed = now - self._start_time
                     with self._snapshots_lock:
                         snapshots = list(self._latest_snapshots)
                     agg = aggregate(snapshots, elapsed, prev=self._prev_agg)
-                    self._print_table(agg, prev=self._prev_agg, interval=self._interval)
+                    self._print_table(agg, prev=self._prev_agg, interval=self._interval,
+                                      cpu_stats=self._last_cpu_stats)
                     self._prev_agg = agg
                     self._prev_agg_time = now
                 next_report = now + self._interval
@@ -300,6 +319,36 @@ class StatsReporter:
             }
             merged.update(incoming)
             self._latest_snapshots = list(merged.values())
+
+    # ------------------------------------------------------------------
+    # CPU stats fetcher
+    # ------------------------------------------------------------------
+
+    def _fetch_cpu_stats(self) -> Optional[Dict]:
+        """Fetch the radiod CPU stats from GET /admin/radiod-channels.
+
+        Returns the cpu_stats dict (with available=True) or None if the
+        admin password is not configured or the request fails.
+        Errors are silently swallowed — CPU stats are best-effort.
+
+        The HTTP call is inlined here (rather than imported from benchmark.py)
+        to avoid module-name issues when running as a packaged binary where
+        the entry-point module is __main__, not 'benchmark'.
+        """
+        if not self._http_url or not self._admin_password:
+            return None
+        try:
+            url = f"{self._http_url.rstrip('/')}/admin/radiod-channels"
+            req = urllib.request.Request(url)
+            req.add_header("X-Admin-Password", self._admin_password)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            cpu = data.get("cpu_stats")
+            if isinstance(cpu, dict) and cpu.get("available"):
+                return cpu
+            return None
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Formatting helpers
@@ -357,18 +406,44 @@ class StatsReporter:
             return f"{m}m {s:02d}s"
         return f"{s}s"
 
+    @staticmethod
+    def _fmt_cpu_stats(cpu: Optional[Dict], n_cpus: int) -> str:
+        """Format a cpu_stats dict as a single summary line.
+
+        Shows per-core percentages and (normalised % of all logical CPUs),
+        matching the layout used in the admin.html radiod channels tab.
+        """
+        if not cpu or not cpu.get("available"):
+            return ""
+        n = cpu.get("num_logical_cpus") or n_cpus or 1
+
+        def pct(key: str) -> str:
+            v = cpu.get(key, 0.0)
+            return f"{v:.1f}% ({v / n:.1f}%)"
+
+        return (
+            f"  radiod CPU — "
+            f"Total: {pct('total_pct')}  "
+            f"RX888: {pct('proc_rx888_pct')}  "
+            f"FFT: {pct('fft_pct')}  "
+            f"Channels: {pct('channels_pct')}  "
+            f"Other: {pct('other_pct')}"
+        )
+
     def _print_table(
         self,
         agg: AggregateStats,
         prev: Optional[AggregateStats],
         interval: float,
         use_peak: bool = False,
+        cpu_stats: Optional[Dict] = None,
     ) -> None:
         """Print the live report table.
 
         When *use_peak* is True, the Connected column shows peak_connected
         instead of the current connected count (used in the final summary to
         avoid showing teardown-time zeros).
+        When *cpu_stats* is provided, a radiod CPU summary line is appended.
         """
         elapsed_str = self._fmt_elapsed(agg.elapsed)
 
@@ -464,3 +539,11 @@ class StatsReporter:
             f"Rate: {total_rate:<14}  "
             f"Load: {self._load_avg()}"
         )
+        try:
+            import os as _os
+            n_cpus = _os.cpu_count() or 1
+        except Exception:
+            n_cpus = 1
+        cpu_line = self._fmt_cpu_stats(cpu_stats, n_cpus)
+        if cpu_line:
+            print(cpu_line)

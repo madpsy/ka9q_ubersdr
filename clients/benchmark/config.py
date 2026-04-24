@@ -178,6 +178,11 @@ class BenchmarkConfig:
     password: Optional[str] = None
     """Bypass password sent to ``POST /connection`` and audio WS."""
 
+    admin_password: Optional[str] = None
+    """Admin password used to query ``GET /admin/radiod-channels`` via the
+    ``X-Admin-Password`` header.  Used for channel-capacity checks and live
+    CPU stats during the benchmark run."""
+
     # --- Scale ---
     users: int = 10
     """Total number of simulated concurrent users."""

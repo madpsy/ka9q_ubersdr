@@ -63,6 +63,8 @@ class BenchmarkRunner:
             enable_audio=config.enable_audio,
             enable_spectrum=config.enable_spectrum,
             enable_dxcluster=config.enable_dxcluster,
+            http_url=config.http_url,
+            admin_password=config.admin_password,
         )
 
     # ------------------------------------------------------------------

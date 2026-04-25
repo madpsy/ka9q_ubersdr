@@ -1,0 +1,842 @@
+package main
+
+// websdr_websocket.go — WebSDR protocol emulation layer
+//
+// Implements the WebSDR frontend protocol as described in
+// VertexSDR/plans/frontend-protocol-spec.md.  Runs on a dedicated TCP port
+// (default :8901) separate from the main UberSDR HTTP server.
+//
+// Supported paths:
+//   WebSocket:  /~~stream        — audio stream
+//               /~~waterstream   — waterfall stream
+//               /~~waterstream0  — waterfall stream (band 0 explicit)
+//   HTTP GET:   /~~orgstatus     — band/server config
+//               /~~othersj       — user list + stats (legacy JS)
+//               /~~othersjj      — user list + stats (compact JS)
+//               /~~chat          — chat messages
+//               /~~fetchdx       — station info
+//               /~~histogram     — hourly user counts
+//               /~~otherstable   — full user table HTML
+//               /~~status        — internal diagnostics
+//               /~~logbook       — logbook entries
+//   HTTP POST:  /~~chat          — post a chat message
+//   Sysop:      /~~waterfalltext, /~~configreload, /~~setconfig,
+//               /~~setdir, /~~chatcensor, /~~blockmee
+//   Static:     everything else served from websdr_static_dir (two-dir search)
+
+import (
+	"bufio"
+	"encoding/binary"
+	"fmt"
+	"html"
+	"io"
+	"log"
+	"math"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// chseq — shared change-sequence-number state (§9)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type websdrChseq struct {
+	mu      sync.Mutex
+	current int // always odd, starts at 3
+}
+
+func newWebSDRChseq() *websdrChseq { return &websdrChseq{current: 3} }
+
+func (c *websdrChseq) bump() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.current += 2
+	return c.current
+}
+
+func (c *websdrChseq) get() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.current
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chat store (§6.4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const websdrChatSlots = 20
+
+type websdrChatMsg struct {
+	text  string
+	chseq int
+}
+
+type websdrChatStore struct {
+	mu   sync.Mutex
+	msgs [websdrChatSlots]websdrChatMsg
+	head int
+	last time.Time
+}
+
+func (cs *websdrChatStore) add(name, text string, seq int) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	now := time.Now().UTC()
+	var formatted string
+	if now.Sub(cs.last) > 6*time.Hour || now.Day() != cs.last.Day() {
+		formatted = fmt.Sprintf("%02d%02d %02d%02dz %s: %s\n",
+			now.Day(), int(now.Month()), now.Hour(), now.Minute(), name, text)
+	} else {
+		formatted = fmt.Sprintf("%02d%02dz %s: %s\n",
+			now.Hour(), now.Minute(), name, text)
+	}
+	cs.last = now
+	cs.msgs[cs.head] = websdrChatMsg{text: formatted, chseq: seq}
+	cs.head = (cs.head + 1) % websdrChatSlots
+}
+
+func (cs *websdrChatStore) since(clientChseq int) []string {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	var out []string
+	for i := 0; i < websdrChatSlots; i++ {
+		m := cs.msgs[i]
+		if m.text != "" && m.chseq > clientChseq {
+			out = append(out, m.text)
+		}
+	}
+	return out
+}
+
+func (cs *websdrChatStore) all() []string {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	var out []string
+	for i := 0; i < websdrChatSlots; i++ {
+		idx := (cs.head + i) % websdrChatSlots
+		if cs.msgs[idx].text != "" {
+			out = append(out, cs.msgs[idx].text)
+		}
+	}
+	return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// websdrUserEntry — per-connection user state for user-list tracking (FEAT-11)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// websdrUserEntry tracks per-user state for uu_chseq incremental updates.
+type websdrUserEntry struct {
+	sessionID string
+	username  string
+	clientIP  string
+	tuneKHz   float64
+	band      int
+	uuChseq   int // set to current chseq when position/name changes
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSDRHandler — top-level handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+// WebSDRHandler handles all WebSDR protocol connections on the dedicated port.
+type WebSDRHandler struct {
+	sessions          *SessionManager
+	audioReceiver     *AudioReceiver
+	config            *Config
+	ipBanManager      *IPBanManager
+	noiseFloorMonitor *NoiseFloorMonitor
+
+	chseq        *websdrChseq
+	chat         *websdrChatStore
+	configSerial int32
+
+	histogram    [24]int32
+	histogramMu  sync.Mutex
+	histLastHour int
+
+	audioUserCount int32
+
+	// FEAT-11: per-user tracking map (sessionID → entry)
+	users   map[string]*websdrUserEntry
+	usersMu sync.RWMutex
+
+	// FEAT-8: runtime sysop overrides
+	sysopMaxUsers int
+	sysopSkipMute int
+	wfTextRows    [][]byte // 32 rows × 1024 bytes waterfall text overlay
+	wfTextMu      sync.Mutex
+
+	// FEAT-8: trusted-IP config
+	trustLocalhost bool
+	trustLocalNet  bool
+	trustIPs       []string
+}
+
+// NewWebSDRHandler creates a new WebSDR handler.
+func NewWebSDRHandler(
+	sessions *SessionManager,
+	audioReceiver *AudioReceiver,
+	config *Config,
+	ipBanManager *IPBanManager,
+	noiseFloorMonitor *NoiseFloorMonitor,
+) *WebSDRHandler {
+	h := &WebSDRHandler{
+		sessions:          sessions,
+		audioReceiver:     audioReceiver,
+		config:            config,
+		ipBanManager:      ipBanManager,
+		noiseFloorMonitor: noiseFloorMonitor,
+		chseq:             newWebSDRChseq(),
+		chat:              &websdrChatStore{},
+		configSerial:      int32(time.Now().Unix()),
+		users:             make(map[string]*websdrUserEntry),
+		trustLocalhost:    true,
+	}
+	go h.histogramLoop()
+	return h
+}
+
+func (h *WebSDRHandler) histogramLoop() {
+	for {
+		now := time.Now()
+		hour := now.Hour()
+		h.histogramMu.Lock()
+		if hour != h.histLastHour {
+			h.histLastHour = hour
+			atomic.StoreInt32(&h.histogram[hour], atomic.LoadInt32(&h.audioUserCount))
+		}
+		h.histogramMu.Unlock()
+		time.Sleep(time.Minute)
+	}
+}
+
+// registerUser adds a user entry to the tracking map.
+func (h *WebSDRHandler) registerUser(entry *websdrUserEntry) {
+	h.usersMu.Lock()
+	h.users[entry.sessionID] = entry
+	h.usersMu.Unlock()
+}
+
+// unregisterUser removes a user entry from the tracking map.
+func (h *WebSDRHandler) unregisterUser(sessionID string) {
+	h.usersMu.Lock()
+	delete(h.users, sessionID)
+	h.usersMu.Unlock()
+}
+
+// getUsers returns a snapshot of all user entries.
+func (h *WebSDRHandler) getUsers() []*websdrUserEntry {
+	h.usersMu.RLock()
+	defer h.usersMu.RUnlock()
+	out := make([]*websdrUserEntry, 0, len(h.users))
+	for _, u := range h.users {
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out
+}
+
+// isTrustedIP returns true if the IP is trusted for sysop endpoints (FEAT-8).
+func (h *WebSDRHandler) isTrustedIP(ip string) bool {
+	// Strip port if present
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	if h.trustLocalhost && (ip == "127.0.0.1" || ip == "::1") {
+		return true
+	}
+	if h.trustLocalNet {
+		if strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168.") {
+			return true
+		}
+		// 172.16.0.0/12
+		if strings.HasPrefix(ip, "172.") {
+			parts := strings.Split(ip, ".")
+			if len(parts) >= 2 {
+				second, _ := strconv.Atoi(parts[1])
+				if second >= 16 && second <= 31 {
+					return true
+				}
+			}
+		}
+	}
+	for _, trusted := range h.trustIPs {
+		if ip == trusted {
+			return true
+		}
+	}
+	return false
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP routing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ServeHTTP dispatches all requests on the WebSDR port.
+func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// WebSocket upgrade paths
+	if isWebSocketUpgrade(r) {
+		switch {
+		case path == "/~~stream" || strings.HasPrefix(path, "/~~stream?"):
+			h.handleAudioStream(w, r)
+		case strings.HasPrefix(path, "/~~waterstream"):
+			h.handleWaterfallStream(w, r)
+		default:
+			http.Error(w, "unknown websocket path", http.StatusNotFound)
+		}
+		return
+	}
+
+	// HTTP endpoints
+	switch {
+	case path == "/~~orgstatus":
+		h.handleOrgStatus(w, r)
+	case path == "/~~othersj":
+		h.handleOthersJ(w, r)
+	case path == "/~~othersjj":
+		h.handleOthersJJ(w, r)
+	case path == "/~~chat":
+		h.handleChat(w, r)
+	case path == "/~~fetchdx":
+		h.handleFetchDX(w, r)
+	case path == "/~~histogram":
+		h.handleHistogram(w, r)
+	case path == "/~~otherstable":
+		h.handleOthersTable(w, r)
+	case path == "/~~status":
+		h.handleStatus(w, r)
+	case path == "/~~logbook": // FEAT-7
+		h.handleLogbook(w, r)
+
+	// Sysop endpoints (FEAT-8) — require trusted IP
+	case path == "/~~waterfalltext":
+		h.handleSysopWaterfallText(w, r)
+	case path == "/~~configreload":
+		h.handleSysopConfigReload(w, r)
+	case path == "/~~setconfig":
+		h.handleSysopSetConfig(w, r)
+	case path == "/~~setdir":
+		h.handleSysopSetDir(w, r)
+	case path == "/~~chatcensor":
+		h.handleSysopChatCensor(w, r)
+	case path == "/~~blockmee":
+		h.handleSysopBlockMee(w, r)
+
+	default:
+		h.serveStaticFile(w, r) // FEAT-9, FEAT-10
+	}
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSocket upgrader
+// ─────────────────────────────────────────────────────────────────────────────
+
+var websdrUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// websdrConn — per-connection state
+// ─────────────────────────────────────────────────────────────────────────────
+
+type websdrConn struct {
+	conn      *websocket.Conn
+	writeMu   sync.Mutex
+	handler   *WebSDRHandler
+	clientIP  string
+	session   *Session
+	sessionID string // for uu_chseq tracking
+	userEntry *websdrUserEntry
+
+	// Audio parameters (from /~~param)
+	tuneKHz   float64
+	loKHz     float64
+	hiKHz     float64
+	mode      int
+	squelch   int
+	autonotch int // FEAT-14
+	mute      int
+	agcMode   int
+	gainDB    float64
+	ppm       float64 // FEAT-14
+	ppml      float64 // FEAT-14
+	username  string
+	band      int // FEAT-14
+
+	// Waterfall parameters (from /~~waterparam)
+	wfBand   int
+	wfZoom   int
+	wfStart  int
+	wfWidth  int
+	wfSlow   int
+	wfScale  int
+	wfFormat int
+
+	// Codec state
+	adpcm         *WebSDRAdpcmEncoder
+	wfState       *WebSDRWaterfallState
+	audioSeq      uint16
+	headerCounter int
+
+	// Audio rate tracking for tag 0x81 re-emission (BUG-4)
+	lastAudioRate int
+
+	// AM-Sync state for tag 0x85 (FEAT-6)
+	amSyncFrameCounter int
+	amSyncLastStatus   int
+	amSyncLastFreqMHz  uint64
+
+	// Idle timeout tracking (FEAT-12)
+	lastActivity time.Time
+
+	mu sync.RWMutex
+}
+
+func newWebSDRConn(conn *websocket.Conn, handler *WebSDRHandler, clientIP string) *websdrConn {
+	return &websdrConn{
+		conn:         conn,
+		handler:      handler,
+		clientIP:     clientIP,
+		tuneKHz:      14175.0,
+		loKHz:        -3.0,
+		hiKHz:        -0.3,
+		mode:         0,
+		agcMode:      1,
+		gainDB:       120,
+		wfWidth:      1024,
+		wfSlow:       4,
+		wfFormat:     9,
+		adpcm:        NewWebSDRAdpcmEncoder(),
+		wfState:      NewWebSDRWaterfallState(9),
+		audioSeq:     0,
+		lastActivity: time.Now(),
+	}
+}
+
+func (c *websdrConn) sendBinary(data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return c.conn.WriteMessage(websocket.BinaryMessage, data)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio stream handler (§3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request) {
+	clientIP := getClientIP(r)
+	if h.ipBanManager.IsBanned(clientIP) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	conn, err := websdrUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSDR: audio upgrade error: %v", err)
+		return
+	}
+
+	q := r.URL.Query()
+	format, _ := strconv.Atoi(q.Get("format"))
+	if format == 0 {
+		format = 23
+	}
+	if format != 23 && format != 36 {
+		log.Printf("WebSDR: rejected unknown format %d", format)
+		conn.Close()
+		return
+	}
+
+	c := newWebSDRConn(conn, h, clientIP)
+
+	// MINOR-15: parse mute= and band= from initial URL query
+	if v := q.Get("mute"); v != "" {
+		c.mute, _ = strconv.Atoi(v)
+	}
+	if v := q.Get("band"); v != "" {
+		c.band, _ = strconv.Atoi(v)
+	}
+
+	atomic.AddInt32(&h.audioUserCount, 1)
+	defer atomic.AddInt32(&h.audioUserCount, -1)
+
+	userSessionID := fmt.Sprintf("websdr-%d-%s", time.Now().UnixNano(), clientIP)
+	c.sessionID = userSessionID
+	h.sessions.SetUserAgent(userSessionID, "WebSDR Client")
+
+	// FEAT-11: register user entry
+	entry := &websdrUserEntry{
+		sessionID: userSessionID,
+		clientIP:  clientIP,
+		tuneKHz:   c.tuneKHz,
+		band:      c.band,
+	}
+	c.userEntry = entry
+	h.registerUser(entry)
+	defer h.unregisterUser(userSessionID)
+
+	freqHz := uint64(c.tuneKHz * 1000)
+	session, err := h.sessions.CreateSessionWithBandwidthAndPassword(
+		freqHz, "usb", 3000, clientIP, clientIP, userSessionID, "")
+	if err != nil {
+		log.Printf("WebSDR: failed to create audio session: %v", err)
+		conn.Close()
+		return
+	}
+	c.session = session
+	h.audioReceiver.GetChannelAudio(session)
+
+	defer func() {
+		h.audioReceiver.ReleaseChannelAudio(session)
+		_ = h.sessions.DestroySession(session.ID)
+		conn.Close()
+	}()
+
+	done := make(chan struct{})
+	go c.readAudioCommands(done)
+
+	if format == 36 {
+		<-done
+		return
+	}
+
+	// BUG-4: send block-size and conv-type tags; rate tag 0x81 is emitted
+	// in streamAudio when the first packet arrives with a known sample rate.
+	initTags := []byte{
+		0x82, 0x00, 0x80, // block size 128
+		0x83, 0x00, // conv_type 0
+	}
+	if err := c.sendBinary(initTags); err != nil {
+		return
+	}
+
+	c.streamAudio(done)
+}
+
+func (c *websdrConn) readAudioCommands(done chan struct{}) {
+	defer close(done)
+	idleTimeout := time.Duration(c.handler.config.Server.WebSDRIdleTimeout) * time.Second
+	for {
+		// FEAT-12: set read deadline for idle timeout
+		if idleTimeout > 0 {
+			_ = c.conn.SetReadDeadline(time.Now().Add(idleTimeout))
+		}
+		_, msg, err := c.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		// FEAT-12: update idle timer on any message
+		c.mu.Lock()
+		c.lastActivity = time.Now()
+		c.mu.Unlock()
+
+		text := strings.TrimSpace(string(msg))
+		text = strings.TrimPrefix(text, "GET ")
+		if strings.HasPrefix(text, "/~~param") {
+			c.applyParamCommand(text)
+		} else if strings.HasPrefix(text, "/~~waterparam") {
+			c.applyWaterparamCommand(text)
+		}
+	}
+}
+
+func (c *websdrConn) applyParamCommand(text string) {
+	idx := strings.Index(text, "?")
+	if idx < 0 {
+		return
+	}
+	vals, err := url.ParseQuery(text[idx+1:])
+	if err != nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	changed := false
+
+	if v := vals.Get("f"); v != "" {
+		newFreq, _ := strconv.ParseFloat(v, 64)
+		if newFreq != c.tuneKHz {
+			c.tuneKHz = newFreq
+			changed = true
+		}
+	}
+	if v := vals.Get("lo"); v != "" {
+		c.loKHz, _ = strconv.ParseFloat(v, 64)
+	}
+	if v := vals.Get("hi"); v != "" {
+		c.hiKHz, _ = strconv.ParseFloat(v, 64)
+	}
+	if v := vals.Get("mode"); v != "" {
+		c.mode, _ = strconv.Atoi(v)
+	}
+	if v := vals.Get("squelch"); v != "" {
+		c.squelch, _ = strconv.Atoi(v)
+	}
+	if v := vals.Get("mute"); v != "" {
+		c.mute, _ = strconv.Atoi(v)
+	}
+	if v := vals.Get("gain"); v != "" {
+		g, _ := strconv.ParseFloat(v, 64)
+		if g >= 9999 {
+			c.agcMode = 1
+		} else {
+			c.agcMode = 0
+			c.gainDB = g
+		}
+	}
+	if v := vals.Get("name"); v != "" {
+		decoded, _ := url.QueryUnescape(v)
+		// Max 31 printable chars (§5.1)
+		var nb strings.Builder
+		count := 0
+		for _, r := range decoded {
+			if r >= 0x20 && count < 31 {
+				nb.WriteRune(r)
+				count++
+			}
+		}
+		newName := nb.String()
+		if newName != c.username {
+			c.username = newName
+			changed = true
+		}
+	}
+	// FEAT-14: ppm, ppml, autonotch, band
+	if v := vals.Get("ppm"); v != "" {
+		c.ppm, _ = strconv.ParseFloat(v, 64)
+	}
+	if v := vals.Get("ppml"); v != "" {
+		c.ppml, _ = strconv.ParseFloat(v, 64)
+	}
+	if v := vals.Get("autonotch"); v != "" {
+		c.autonotch, _ = strconv.Atoi(v)
+	}
+	if v := vals.Get("band"); v != "" {
+		newBand, _ := strconv.Atoi(v)
+		if newBand != c.band {
+			c.band = newBand
+			changed = true
+		}
+	}
+
+	// FEAT-11: bump uu_chseq if position/name/band changed
+	if changed && c.userEntry != nil {
+		seq := c.handler.chseq.bump()
+		c.userEntry.uuChseq = seq
+		c.userEntry.tuneKHz = c.tuneKHz
+		c.userEntry.username = c.username
+		c.userEntry.band = c.band
+	}
+
+	if c.session != nil {
+		freqHz := uint64(c.tuneKHz * 1000)
+		modeStr := websdrModeString(c.mode, c.loKHz, c.hiKHz)
+		loHz := int(c.loKHz * 1000)
+		hiHz := int(c.hiKHz * 1000)
+		_ = c.handler.sessions.UpdateSessionWithEdges(c.session.ID, freqHz, modeStr, loHz, hiHz, true)
+	}
+}
+
+func (c *websdrConn) applyWaterparamCommand(text string) {
+	idx := strings.Index(text, "?")
+	if idx < 0 {
+		return
+	}
+	vals, err := url.ParseQuery(text[idx+1:])
+	if err != nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	reset := false
+	if v := vals.Get("band"); v != "" {
+		n, _ := strconv.Atoi(v)
+		if n != c.wfBand {
+			c.wfBand = n
+			reset = true
+		}
+	}
+	if v := vals.Get("zoom"); v != "" {
+		n, _ := strconv.Atoi(v)
+		if n != c.wfZoom {
+			c.wfZoom = n
+			reset = true
+		}
+	}
+	if v := vals.Get("start"); v != "" {
+		n, _ := strconv.Atoi(v)
+		if n != 0x80000001 && n != c.wfStart {
+			c.wfStart = n
+			reset = true
+		}
+	}
+	if v := vals.Get("width"); v != "" {
+		n, _ := strconv.Atoi(v)
+		if n >= 1 && n <= 1024 && n != c.wfWidth {
+			c.wfWidth = n
+			reset = true
+		}
+	}
+	if v := vals.Get("speed"); v != "" {
+		n, _ := strconv.Atoi(v)
+		if n > 0 {
+			slow := 4 / n
+			if slow < 1 {
+				slow = 1
+			}
+			c.wfSlow = slow
+		}
+	}
+	if v := vals.Get("slow"); v != "" {
+		n, _ := strconv.Atoi(v)
+		if n > 0 {
+			c.wfSlow = n
+		}
+	}
+	if v := vals.Get("scale"); v != "" {
+		c.wfScale, _ = strconv.Atoi(v)
+	}
+
+	if reset {
+		c.audioSeq = 0
+		if c.wfState != nil {
+			c.wfState.Reset()
+		}
+	}
+}
+
+func websdrModeString(mode int, loKHz, hiKHz float64) string {
+	switch mode {
+	case 1:
+		return "am"
+	case 2:
+		return "sam"
+	case 4:
+		return "fm"
+	default:
+		if loKHz < 0 && hiKHz <= 0 {
+			return "lsb"
+		}
+		return "usb"
+	}
+}
+
+func (c *websdrConn) streamAudio(done <-chan struct{}) {
+	for {
+		select {
+		case <-done:
+			return
+		case <-c.session.Done:
+			return
+		case pkt, ok := <-c.session.AudioChan:
+			if !ok {
+				return
+			}
+
+			c.mu.RLock()
+			isMuted := c.mute != 0
+			agcMode := c.agcMode
+			gainDB := c.gainDB
+			squelchOn := c.squelch != 0
+			curMode := c.mode
+			c.mu.RUnlock()
+
+			var frame []byte
+
+			// BUG-4: re-emit tag 0x81 if sample rate changed
+			pktRate := pkt.SampleRate
+			if pktRate <= 0 {
+				pktRate = c.handler.config.Audio.DefaultSampleRate
+			}
+			if pktRate > 0 && pktRate != c.lastAudioRate {
+				c.lastAudioRate = pktRate
+				frame = append(frame,
+					0x81, byte(pktRate>>8), byte(pktRate&0xFF))
+			}
+
+			// S-meter tag every 8 frames (§3.3 tag 0xF0–0xFF)
+			c.headerCounter--
+			if c.headerCounter <= 0 {
+				c.headerCounter = 8
+				smeter := c.computeSmeter()
+				frame = append(frame, byte(0xF0|((smeter>>8)&0x0F)), byte(smeter&0xFF))
+			}
+
+			// FEAT-6: tag 0x85 AM-Sync status when mode=2
+			if curMode == 2 {
+				c.amSyncFrameCounter++
+				amTag := c.buildAMSyncTag()
+				if amTag != nil {
+					frame = append(frame, amTag...)
+				}
+			}
+
+			if isMuted {
+				frame = append(frame, 0x84)
+				if err := c.sendBinary(frame); err != nil {
+					return
+				}
+				continue
+			}
+
+			samples := pcmBytesToFloat32(pkt.PCMData)
+
+			var scale float32
+			if agcMode == 1 {
+				scale = c.adpcm.UpdateAGC(samples)
+			} else {
+				scale = ManualScale(gainDB)
+			}
+
+			// FEAT-5: squelch threshold (ratio-based, §3.6)
+			const squelchThreshold = 0.1
+			audioPayload, sqResult := c.adpcm.Encode(samples, scale, squelchOn, squelchThreshold)
+			if sqResult == SquelchClosed {
+				frame = append(frame, 0x84)
+				if err := c.sendBinary(frame); err != nil {
+					return
+				}
+				continue
+			}
+			frame = append(frame, audioPayload...)
+
+			if err := c.sendBinary(frame); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// buildAMSyncTag builds tag 0x85 if it should be emitted this frame (FEAT-6).
+// Returns nil if no tag should be sent.
+func (c *websdrConn) buildAMSyncTag() []byte {
+	// Emit every 64 frames
+	if c.amSyncFrameCounter < 64 {
+		return nil
+	}
+	c.amSyncFrameCounter = 0
+
+	// We don't have real

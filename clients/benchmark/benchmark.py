@@ -340,6 +340,14 @@ def build_parser() -> argparse.ArgumentParser:
         help='Disable DX cluster WebSocket connections (/ws/dxcluster)',
     )
     feat.add_argument(
+        '--no-load-abort', action='store_true',
+        help=(
+            'Disable the automatic abort when the 1-minute system load average '
+            'exceeds the number of logical CPUs.  By default the benchmark stops '
+            'early and shows a warning if the machine appears overloaded.'
+        ),
+    )
+    feat.add_argument(
         '--debug', action='store_true',
         help='Print per-connection error details to stderr (useful for diagnosing failures)',
     )
@@ -581,6 +589,25 @@ def _prompt_int(prompt: str, default: int, min_val: int = 1, max_val: Optional[i
             print(f"  ✗ Please enter a whole number (or press Enter for default).")
 
 
+def _prompt_bool(prompt: str, default: bool) -> Optional[bool]:
+    """Prompt for a yes/no answer, returning None if the user wants to quit."""
+    default_str = "Y/n" if default else "y/N"
+    while True:
+        try:
+            raw = input(f"  {prompt} [{default_str}]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if raw == '':
+            return default
+        if raw in ('q', 'quit', 'exit'):
+            return None
+        if raw in ('y', 'yes'):
+            return True
+        if raw in ('n', 'no'):
+            return False
+        print(f"  ✗ Please enter y or n (or press Enter for default).")
+
+
 def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str]) -> None:
     """Interactive loop: prompt for users/duration, run, repeat until quit.
 
@@ -642,20 +669,31 @@ def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str])
                 print("\n  Exiting interactive mode. Goodbye!")
                 break
 
+            # Prompt for load-abort (yes/no, default matches current_config)
+            load_abort = _prompt_bool(
+                "Abort if system load exceeds CPU count",
+                default=current_config.load_abort,
+            )
+            if load_abort is None:
+                print("\n  Exiting interactive mode. Goodbye!")
+                break
+
             # Use the configured thread count, but scale up if users > threads*25
             threads = current_config.threads
             if threads < max(1, min(32, (users + 24) // 25)):
                 threads = max(1, min(32, (users + 24) // 25))
 
-            # Build a config for this run (override users/duration/threads only)
+            # Build a config for this run (override users/duration/threads/load_abort)
             run_config = dataclass_replace(
                 current_config,
                 users=users,
                 duration=float(duration),
                 threads=threads,
+                load_abort=load_abort,
             )
 
-            print(f"\n  → {users} users for {duration}s on {threads} thread(s)")
+            load_abort_str = "enabled" if load_abort else "disabled"
+            print(f"\n  → {users} users for {duration}s on {threads} thread(s)  (load-abort: {load_abort_str})")
             print()
 
             try:
@@ -665,8 +703,13 @@ def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str])
                 # Ctrl-C during a run: stop the run but stay in the loop
                 print("\n  Run interrupted.")
 
-            # Use this run's user/duration as defaults for the next run
-            current_config = dataclass_replace(current_config, users=users, duration=float(duration))
+            # Use this run's user/duration/load_abort as defaults for the next run
+            current_config = dataclass_replace(
+                current_config,
+                users=users,
+                duration=float(duration),
+                load_abort=load_abort,
+            )
 
             # Drain any newlines/characters that were buffered in stdin during
             # the benchmark run (e.g. Enter presses while waiting).  Without
@@ -759,6 +802,7 @@ def main() -> None:
             enable_audio=not args.no_audio,
             enable_spectrum=not args.no_spectrum,
             enable_dxcluster=not args.no_dxcluster,
+            load_abort=not args.no_load_abort,
             debug=args.debug,
             admin_password=None,  # filled in after password resolution below
         )
@@ -784,6 +828,7 @@ def main() -> None:
             enable_audio=not args.no_audio,
             enable_spectrum=not args.no_spectrum,
             enable_dxcluster=not args.no_dxcluster,
+            load_abort=not args.no_load_abort,
             debug=args.debug,
             admin_password=None,  # filled in after password resolution below
         )

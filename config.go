@@ -153,6 +153,21 @@ type ServerConfig struct {
 	KiwiSDRListen                 string               `yaml:"kiwisdr_listen"`                    // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
 	KiwiSDRPublicEmail            string               `yaml:"kiwisdr_public_email"`              // Public email for KiwiSDR status endpoint (default: "admin@example.com")
 	KiwiSDRSmeterOffset           float32              `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	EnableWebSDR                  bool                 `yaml:"enable_websdr"`                     // Enable WebSDR protocol compatibility server (default: false)
+	WebSDRListen                  string               `yaml:"websdr_listen"`                     // WebSDR server listen address (e.g., ":8901", default: ":8901")
+	WebSDRStaticDir               string               `yaml:"websdr_static_dir"`                 // Directory for WebSDR static files (default: "websdr")
+	WebSDRStaticDir2              string               `yaml:"websdr_static_dir2"`                // Secondary (overlay) directory for WebSDR static files — searched first (FEAT-10)
+	WebSDRIdleTimeout             int                  `yaml:"websdr_idle_timeout"`               // Idle timeout in seconds for WebSDR WebSocket clients (0 = disabled, FEAT-12)
+	WebSDRWaterfallCalibration    float32              `yaml:"websdr_waterfall_calibration"`      // Waterfall dBFS→pixel calibration offset (default: -13.0)
+	WebSDROrgInfo                 string               `yaml:"websdr_org_info"`                   // Multi-line org_info block (Description:, Qth:, etc.)
+	WebSDRMaxUsers                int                  `yaml:"websdr_max_users"`                  // Max concurrent audio users (0 = use max_sessions)
+	WebSDRRegisterWebSDROrg       bool                 `yaml:"websdr_register_websdrorg"`         // Register with websdr.org directory (default: false)
+	WebSDRRegisterWebSDROrgServer string               `yaml:"websdr_register_websdrorg_server"`  // websdr.org registration server (default: "websdr.ewi.utwente.nl 80")
+	WebSDRRegisterSdrList         bool                 `yaml:"websdr_register_sdrlist"`           // Register with sdr-list.xyz directory (default: false)
+	WebSDRSdrListHost             string               `yaml:"websdr_register_sdrlist_host"`      // sdr-list.xyz host (default: "sdr-list.xyz")
+	WebSDRHostname                string               `yaml:"websdr_hostname"`                   // Public hostname for directory registration (empty = use admin.public_url host)
+	WebSDRTCPPort                 int                  `yaml:"websdr_tcp_port"`                   // Public TCP port for directory registration (0 = parse from websdr_listen)
+	WebSDRNoOrgServer             bool                 `yaml:"websdr_no_org_server"`              // Send de-registration notices to websdr.org instead of registering (FEAT-13)
 	LogFileEnabled                bool                 `yaml:"logfile_enabled"`                   // Enable HTTP request logging (default: false)
 	LogFile                       string               `yaml:"logfile"`                           // HTTP request log file path
 	SessionActivityLogEnabled     bool                 `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk
@@ -620,6 +635,22 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRSmeterOffset == 0 {
 		config.Server.KiwiSDRSmeterOffset = 30.0 // Default S-meter calibration offset
+	}
+	// WebSDR compatibility defaults
+	if config.Server.EnableWebSDR && config.Server.WebSDRListen == "" {
+		config.Server.WebSDRListen = ":8901"
+	}
+	if config.Server.EnableWebSDR && config.Server.WebSDRStaticDir == "" {
+		config.Server.WebSDRStaticDir = "websdr"
+	}
+	if config.Server.EnableWebSDR && config.Server.WebSDRWaterfallCalibration == 0 {
+		config.Server.WebSDRWaterfallCalibration = -13.0
+	}
+	if config.Server.EnableWebSDR && config.Server.WebSDRRegisterWebSDROrgServer == "" {
+		config.Server.WebSDRRegisterWebSDROrgServer = "websdr.ewi.utwente.nl 80"
+	}
+	if config.Server.EnableWebSDR && config.Server.WebSDRSdrListHost == "" {
+		config.Server.WebSDRSdrListHost = "sdr-list.xyz"
 	}
 	if config.Audio.BufferSize == 0 {
 		config.Audio.BufferSize = 4096

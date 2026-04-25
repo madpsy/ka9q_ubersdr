@@ -46,6 +46,9 @@ _STATS_PUSH_INTERVAL = 1.0
 class BenchmarkRunner:
     """Orchestrates the full benchmark run."""
 
+    # How often (seconds) to check the system load average for the abort threshold
+    _LOAD_CHECK_INTERVAL = 5.0
+
     def __init__(self, config: BenchmarkConfig) -> None:
         self._cfg = config
         self._stop_event = threading.Event()
@@ -54,6 +57,9 @@ class BenchmarkRunner:
         # All UserStats objects, keyed by user_id (populated before threads start)
         self._all_stats: dict[int, UserStats] = {}
         self._stats_lock = threading.Lock()
+
+        # Set to a non-empty string if the run was aborted early (e.g. high load)
+        self._abort_reason: str = ""
 
         # Reporter
         self._reporter = StatsReporter(
@@ -127,13 +133,21 @@ class BenchmarkRunner:
             t.start()
             threads.append(t)
 
-        # Wait for the configured duration (or until Ctrl-C)
+        # Wait for the configured duration (or until Ctrl-C / high-load abort)
         start = time.monotonic()
+        last_load_check = time.monotonic()
         try:
             while not self._stop_event.is_set():
                 elapsed = time.monotonic() - start
                 if elapsed >= cfg.duration:
                     break
+
+                # Periodically check system load average
+                now = time.monotonic()
+                if now - last_load_check >= self._LOAD_CHECK_INTERVAL:
+                    last_load_check = now
+                    self._check_load_abort()
+
                 time.sleep(0.1)
         finally:
             # Signal all workers to stop (idempotent)
@@ -143,6 +157,8 @@ class BenchmarkRunner:
             # partial teardown state (connections closing) is misleading.
             self._reporter.mark_shutting_down()
 
+            if self._abort_reason:
+                print(f"\n  ⚠  Aborting benchmark: {self._abort_reason}")
             print(f"\n  Stopping all users (waiting up to 10s)...")
 
             # Wait for all threads to finish
@@ -151,7 +167,9 @@ class BenchmarkRunner:
 
             # Stop reporter and print final summary
             self._reporter.stop()
-            self._reporter.print_final_summary()
+            self._reporter.print_final_summary(
+                abort_reason=self._abort_reason or None
+            )
 
             # Restore original SIGINT handler
             signal.signal(signal.SIGINT, original_sigint)
@@ -235,6 +253,35 @@ class BenchmarkRunner:
     # ------------------------------------------------------------------
     # Signal handling
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Load-average abort check
+    # ------------------------------------------------------------------
+
+    def _check_load_abort(self) -> None:
+        """Abort the benchmark if the 1-minute load average exceeds the CPU count.
+
+        Uses os.getloadavg() which is available on Linux/macOS but not Windows.
+        On Windows (or any platform where getloadavg is unavailable) this is a
+        no-op so the benchmark continues normally.
+
+        Does nothing when config.load_abort is False.
+        """
+        if not self._cfg.load_abort:
+            return
+
+        try:
+            l1, _l5, _l15 = os.getloadavg()
+        except (AttributeError, OSError):
+            # Not available on this platform — skip the check
+            return
+
+        n_cpus = os.cpu_count() or 1
+        if l1 > n_cpus:
+            self._abort_reason = (
+                f"1-minute load average {l1:.2f} exceeds CPU count ({n_cpus})"
+            )
+            self._stop_event.set()
 
     def _handle_sigint(self, signum, frame) -> None:
         """Handle Ctrl-C: set stop_event and let the run() loop exit cleanly.

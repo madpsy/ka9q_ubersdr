@@ -1733,6 +1733,7 @@ func main() {
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)                         // New per-user spectrum
 	kiwiHandler := NewKiwiWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics, noiseFloorMonitor) // KiwiSDR compatibility
+	websdrHandler := NewWebSDRHandler(sessions, audioReceiver, config, ipBanManager, noiseFloorMonitor)                                                              // WebSDR compatibility
 
 	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
 	// This must be called after sessions is initialized but before HTTP server starts
@@ -2412,6 +2413,40 @@ func main() {
 		log.Printf("KiwiSDR protocol compatibility enabled but kiwisdr_listen not configured (will use default :8073)")
 	} else {
 		log.Printf("KiwiSDR protocol compatibility disabled")
+	}
+
+	// Start WebSDR compatibility server on separate port if enabled
+	var websdrServer *http.Server
+	if config.Server.EnableWebSDR && config.Server.WebSDRListen != "" {
+		websdrServer = &http.Server{
+			Addr:    config.Server.WebSDRListen,
+			Handler: websdrHandler,
+		}
+
+		go func() {
+			log.Printf("WebSDR protocol server listening on %s", config.Server.WebSDRListen)
+			log.Printf("WebSDR clients can connect to this port (e.g., http://host%s)", config.Server.WebSDRListen)
+			if err := websdrServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("WebSDR server error: %v", err)
+			}
+		}()
+
+		// Start directory registration if configured
+		websdrRegistrar := NewWebSDRRegistrar(config, websdrHandler)
+		websdrRegistrar.Start()
+
+		defer func() {
+			websdrRegistrar.Stop()
+			if websdrServer != nil {
+				if err := websdrServer.Close(); err != nil {
+					log.Printf("Error closing WebSDR server: %v", err)
+				}
+			}
+		}()
+	} else if config.Server.EnableWebSDR {
+		log.Printf("WebSDR protocol compatibility enabled but websdr_listen not configured (will use default :8901)")
+	} else {
+		log.Printf("WebSDR protocol compatibility disabled")
 	}
 
 	// Start server

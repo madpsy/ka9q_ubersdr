@@ -235,7 +235,7 @@ class StatsReporter:
         """Call this before workers begin stopping to suppress the partial shutdown update."""
         self._shutting_down.set()
 
-    def print_final_summary(self) -> None:
+    def print_final_summary(self, abort_reason: Optional[str] = None) -> None:
         """Print a final summary after the benchmark ends.
 
         Rates are shown as averages over the entire run (total / elapsed),
@@ -243,6 +243,9 @@ class StatsReporter:
         because no new data arrives after workers stop).
         Peak connected counts are used so shutdown teardown doesn't show 0.
         CPU stats use the last known values — no re-fetch at summary time.
+
+        If *abort_reason* is provided, a warning is printed at the top of the
+        summary indicating the benchmark was aborted early.
         """
         elapsed = time.monotonic() - self._start_time
         with self._snapshots_lock:
@@ -251,6 +254,9 @@ class StatsReporter:
         agg = aggregate(snapshots, elapsed, prev=self._prev_agg)
         print()
         print("=" * 62)
+        if abort_reason:
+            print(f"  ⚠  BENCHMARK ABORTED: {abort_reason}")
+            print("=" * 62)
         print("  FINAL BENCHMARK SUMMARY")
         print("=" * 62)
         # Pass prev=None so deltas equal the cumulative totals, and use
@@ -259,8 +265,10 @@ class StatsReporter:
         # Use last known CPU stats (no re-fetch).
         self._print_table(agg, prev=None, interval=elapsed, use_peak=True,
                           cpu_stats=self._last_cpu_stats)
-        print(f"  System load (1/5/15 min): {self._load_avg()}")
         print("=" * 62)
+        if abort_reason:
+            print(f"  ⚠  Aborted: {abort_reason}")
+            print("=" * 62)
 
     # ------------------------------------------------------------------
     # Internal
@@ -355,14 +363,35 @@ class StatsReporter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _load_avg() -> str:
-        """Return a formatted 1/5/15-minute load average string, or '' if unavailable."""
+    def _cpu_count() -> int:
+        """Return the number of logical CPUs, or 1 if unavailable."""
+        try:
+            return os.cpu_count() or 1
+        except Exception:
+            return 1
+
+    @staticmethod
+    def _load_avg() -> Tuple[Optional[Tuple[float, float, float]], int]:
+        """Return (load_averages, cpu_count).
+
+        load_averages is a (1min, 5min, 15min) tuple, or None on Windows/error.
+        cpu_count is the number of logical CPUs (always >= 1).
+        """
+        n_cpus = StatsReporter._cpu_count()
         try:
             l1, l5, l15 = os.getloadavg()
-            return f"{l1:.2f}  {l5:.2f}  {l15:.2f}"
+            return (l1, l5, l15), n_cpus
         except (AttributeError, OSError):
-            # os.getloadavg() is not available on Windows
-            return "n/a"
+            return None, n_cpus
+
+    @staticmethod
+    def _fmt_load_avg() -> str:
+        """Return a formatted load-average string including CPU count."""
+        avgs, n_cpus = StatsReporter._load_avg()
+        if avgs is None:
+            return f"n/a  ({n_cpus} CPUs)"
+        l1, l5, l15 = avgs
+        return f"{l1:.2f}  {l5:.2f}  {l15:.2f}  ({n_cpus} CPUs)"
 
     @staticmethod
     def _fmt_bytes(n: int) -> str:
@@ -537,13 +566,9 @@ class StatsReporter:
         print(
             f"  Total RX: {self._fmt_bytes(total_rx):<14}  "
             f"Rate: {total_rate:<14}  "
-            f"Load: {self._load_avg()}"
+            f"Load: {self._fmt_load_avg()}"
         )
-        try:
-            import os as _os
-            n_cpus = _os.cpu_count() or 1
-        except Exception:
-            n_cpus = 1
+        _, n_cpus = self._load_avg()
         cpu_line = self._fmt_cpu_stats(cpu_stats, n_cpus)
         if cpu_line:
             print(cpu_line)

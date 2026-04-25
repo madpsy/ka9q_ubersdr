@@ -311,6 +311,71 @@ server:
   kiwisdr_public_email: "admin@example.com"
   kiwisdr_smeter_offset: 20.0
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # WebSDR Protocol Compatibility
+  # ─────────────────────────────────────────────────────────────────────────
+  #
+  # UberSDR can emulate a WebSDR server (websdr.org software) on a separate
+  # TCP port.  This allows the original WebSDR browser frontend and any
+  # WebSDR-compatible tools to connect directly.
+  #
+  # Protocol reference: VertexSDR/plans/frontend-protocol-spec.md
+  #
+  # enable_websdr: Enable/disable WebSDR compatibility server (default: false)
+  # websdr_listen: Listen address for WebSDR server (default: ":8901")
+  #   Format: ":port" or "address:port"
+  # websdr_static_dir: Directory containing WebSDR static files (index.html etc.)
+  #   Default: "websdr"  — create this directory and place the WebSDR frontend
+  #   files there (index.html, websdr.js, etc. from a real WebSDR installation).
+  # websdr_waterfall_calibration: dBFS→pixel calibration offset (default: -13.0)
+  #   Adjust this if the waterfall appears too bright or too dark.
+  # websdr_max_users: Maximum concurrent audio users (0 = use max_sessions)
+  #
+  # org_info block — multi-line server description shown in the WebSDR UI.
+  # Recognised fields (case-insensitive):
+  #   Description: <text>   — server description shown in the UI
+  #   Qth: <locator>        — Maidenhead grid locator (e.g. IO91)
+  #
+  # Directory registration (both disabled by default):
+  #
+  # websdr_register_websdrorg: Register with the legacy websdr.org directory
+  #   (plain HTTP, ~60 s interval).  Requires websdr_hostname to be set.
+  # websdr_register_websdrorg_server: Registration server (default: "websdr.ewi.utwente.nl 80")
+  # websdr_no_org_server: If true, send de-registration notices (/~~websdrNOorg) instead of
+  #   registering.  State machine: every 900 s for first notice, then every 86400 s.
+  #
+  # websdr_register_sdrlist: Register with sdr-list.xyz directory
+  #   (HTTPS/JSON POST, ~60 s interval).  Requires websdr_hostname to be set.
+  # websdr_register_sdrlist_host: sdr-list.xyz host (default: "sdr-list.xyz")
+  #
+  # websdr_hostname: Public hostname sent to directory servers.
+  #   If empty, falls back to admin.public_url host.
+  # websdr_tcp_port: Public TCP port sent to directory servers.
+  #   If 0, parsed from websdr_listen.
+  #
+  # websdr_static_dir2: Optional overlay directory searched before websdr_static_dir.
+  #   Useful for site-specific overrides without modifying the base WebSDR files.
+  #
+  # websdr_idle_timeout: Disconnect WebSocket clients idle for this many seconds (0 = disabled).
+  #
+  enable_websdr: false
+  websdr_listen: ":8901"
+  websdr_static_dir: "websdr"
+  websdr_static_dir2: ""
+  websdr_waterfall_calibration: -13.0
+  websdr_max_users: 0
+  websdr_idle_timeout: 0
+  websdr_org_info: |
+    Description: My SDR
+    Qth: IO91
+  websdr_register_websdrorg: false
+  websdr_register_websdrorg_server: "websdr.ewi.utwente.nl 80"
+  websdr_no_org_server: false
+  websdr_register_sdrlist: false
+  websdr_register_sdrlist_host: "sdr-list.xyz"
+  websdr_hostname: ""
+  websdr_tcp_port: 0
+
   # HTTP request logging (Apache combined log format)
   # Enable/disable HTTP request logging to disk (default: false)
   # When enabled, logs all HTTP requests to the specified logfile

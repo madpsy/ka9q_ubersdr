@@ -250,6 +250,11 @@ class BenchmarkConfig:
     debug: bool = False
     """Print per-user error details to stderr (useful for diagnosing connection failures)."""
 
+    load_abort: bool = True
+    """When True, abort the benchmark if the 1-minute system load average exceeds the
+    number of logical CPUs (indicates the machine is overloaded).  Set to False to
+    disable this safety check."""
+
     # --- Derived (set in __post_init__) ---
     http_url: str = field(init=False, repr=False)
     """Normalised HTTP base URL (no trailing slash, no path) used for ``POST /connection``."""

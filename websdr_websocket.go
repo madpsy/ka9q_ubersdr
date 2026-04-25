@@ -1295,12 +1295,13 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		// Pass through any "Key: value" line, obfuscating the Email: value
+		// Pass through any "Key: value" line, obfuscating the Email: value.
+		// val is trimmed of leading whitespace; output always uses "Key: value" format.
 		if colon := strings.Index(line, ":"); colon > 0 {
 			key := line[:colon]
-			val := line[colon+1:] // includes leading space
+			val := strings.TrimLeft(line[colon+1:], " \t")
 			if strings.EqualFold(strings.TrimSpace(key), "email") {
-				// XOR each byte of the value with 0x01
+				// XOR each byte of the email address with 0x01
 				b := []byte(val)
 				for i := range b {
 					if b[i] > 31 {
@@ -1309,7 +1310,7 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 				}
 				val = string(b)
 			}
-			fmt.Fprintf(w, "%s:%s\r\n", key, val)
+			fmt.Fprintf(w, "%s: %s\r\n", key, val)
 		}
 	}
 

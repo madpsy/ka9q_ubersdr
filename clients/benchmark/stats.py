@@ -10,6 +10,7 @@ swapping out the snapshot list.
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import threading
@@ -266,6 +267,22 @@ class StatsReporter:
         self._print_table(agg, prev=None, interval=elapsed, use_peak=True,
                           cpu_stats=self._last_cpu_stats)
         print("=" * 62)
+
+        # Minimum upload bandwidth recommendation
+        # Convert average total data rate (bytes/s) → Mbps, then add 10% margin.
+        if elapsed > 0:
+            total_bytes = agg.audio_bytes_rx + agg.spectrum_bytes_rx
+            avg_bps = total_bytes / elapsed          # bytes per second
+            avg_mbps = avg_bps * 8 / 1_000_000      # megabits per second
+            recommended_mbps = math.ceil(avg_mbps * 1.1)  # +10% headroom, rounded up
+            print(
+                f"  📶 Minimum recommended upload bandwidth for "
+                f"{self._total_users} user(s):\n"
+                f"     {recommended_mbps} Mbps  "
+                f"(avg {avg_mbps:.1f} Mbps + 10% margin, rounded up)"
+            )
+            print("=" * 62)
+
         if abort_reason:
             print(f"  ⚠  Aborted: {abort_reason}")
             print("=" * 62)

@@ -1087,10 +1087,8 @@ var sup_mozaudio = false;
 try { if (typeof(Audio)==='function' && typeof(new Audio().mozSetup)=='function') sup_mozaudio = true; } catch (e) {};
 
 function html5javawarn()
-{ 
-   // show warning regarding support for HTML5 or Java if needed
-   document.getElementById("javawarning").style.display= (usejavasound && javaerr) ? "block" : "none";
-   document.getElementById("html5warning").style.display= (!usejavasound && !sup_webaudio && !sup_mozaudio) ? "block" : "none";
+{
+   // HTML5-only mode: no Java warning divs exist, nothing to show/hide.
 }
 
 
@@ -1144,21 +1142,19 @@ function iOS_audio_start()
 
 function html5orjavamenu()
 {
-   var s;
+   // HTML5-only mode: always use HTML5 waterfall and sound; Java is not supported.
    if (sup_webaudio) {
-      if (sup_webaudio) {
-         if (!document['ct']) document['ct']= new sup_webaudio;
-         try {
-            var cc=document['ct'].createConvolver;
-         } catch (e) {
-            document['ct']=null; // firefox 23 supports webaudio, but not yet createConvolver(), making it unusable.
-            sup_webaudio=false;
-         };
-      }
+      if (!document['ct']) document['ct']= new sup_webaudio;
+      try {
+         var cc=document['ct'].createConvolver;
+      } catch (e) {
+         document['ct']=null; // firefox 23 supports webaudio, but not yet createConvolver(), making it unusable.
+         sup_webaudio=false;
+      };
    }
    sup_iOS = 0;   // global!
    sup_android = 0;   // global!
-   try { 
+   try {
       var n=navigator.userAgent.toLowerCase();
       if (n.indexOf('iphone')!=-1) sup_iOS=1;
       if (n.indexOf('ipad')!=-1) sup_iOS=1;
@@ -1167,28 +1163,9 @@ function html5orjavamenu()
       if (n.indexOf('android')!=-1) sup_android=1;
    } catch (e) {};
    if (sup_iOS) isTouchDev=true;
-   var usecookie= readCookie('usejava');
-   if (!usecookie) {
-      if (sup_socket && sup_canvas) usecookie="n"; else usecookie="y";
-      if (sup_socket && (sup_webaudio || sup_mozaudio)) usecookie+="n"; else usecookie+="y";
-   }
-   usejavawaterfall=(usecookie.substring(0,1)=='y');
-   usejavasound=(usecookie.substring(1,2)=='y');
-   
-   var javacolor=checkjava();
-   s='<b>Waterfall:</b>';
-   s+='<span style="color: '+javacolor+'"><input type="radio" name="groupw" value="Java" onclick="html5orjava(0,1);"'+(usejavawaterfall?" checked":"")+'>Java</span>';
-   if (sup_socket && sup_canvas) s+='<span style="color:green">'; else s+='<span style="color:red">';
-   s+='<input type="radio" name="groupw" value="HTML5" onclick="html5orjava(0,0);"'+(!usejavawaterfall?" checked":"")+'>HTML5</span>';
-   s+='&nbsp;&nbsp;&nbsp;<b>Sound:</b>';
-   s+='<span style="color: '+javacolor+'"><input type="radio" name="groupa" value="Java" onclick="html5orjava(1,1);"'+(usejavasound?" checked":"")+'>Java</span>';
-   if (sup_socket && sup_webaudio) s+='<span style="color: green">';
-   else if (sup_socket && sup_mozaudio) s+='<span style="color: blue">';
-   else s+='<span style="color: red">';
-   s+='<input type="radio" name="groupa" value="HTML5" onclick="html5orjava(1,0);"'+(!usejavasound?" checked":"")+'>HTML5</span>';
-   if (sup_iOS && sup_socket && sup_webaudio) s+='<input type="button" value="iOS audio start" onclick="iOS_audio_start()">';
-   document.getElementById('html5choice').innerHTML = s;
-   document.getElementById('record_span').style.display = usejavasound ? "none" : "inline";
+   usejavawaterfall=false;
+   usejavasound=false;
+   document.getElementById('record_span').style.display = "inline";
 }
 
 

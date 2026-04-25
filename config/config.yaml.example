@@ -319,7 +319,6 @@ server:
   # TCP port.  This allows the original WebSDR browser frontend and any
   # WebSDR-compatible tools to connect directly.
   #
-  # Protocol reference: VertexSDR/plans/frontend-protocol-spec.md
   #
   # enable_websdr: Enable/disable WebSDR compatibility server (default: false)
   # websdr_listen: Listen address for WebSDR server (default: ":8901")
@@ -331,10 +330,13 @@ server:
   #   Adjust this if the waterfall appears too bright or too dark.
   # websdr_max_users: Maximum concurrent audio users (0 = use max_sessions)
   #
-  # org_info block — multi-line server description shown in the WebSDR UI.
+  # org_info block — multi-line server description shown in the WebSDR UI and
+  # returned to the websdr.org directory server on its /~~orgstatus callback.
   # Recognised fields (case-insensitive):
   #   Description: <text>   — server description shown in the UI
   #   Qth: <locator>        — Maidenhead grid locator (e.g. IO91)
+  #   Email: <address>      — operator contact address (required for websdr.org listing;
+  #                           obfuscated before transmission)
   #
   # Directory registration (both disabled by default):
   #
@@ -358,23 +360,24 @@ server:
   #
   # websdr_idle_timeout: Disconnect WebSocket clients idle for this many seconds (0 = disabled).
   #
-  enable_websdr: false
+  enable_websdr: true
   websdr_listen: ":8901"
   websdr_static_dir: "websdr"
   websdr_static_dir2: ""
-  websdr_waterfall_calibration: -13.0
+  websdr_waterfall_calibration: 12.0
   websdr_max_users: 0
   websdr_idle_timeout: 0
   websdr_org_info: |
     Description: My SDR
     Qth: IO91
+    Email: operator@example.com
   websdr_register_websdrorg: false
   websdr_register_websdrorg_server: "websdr.ewi.utwente.nl 80"
   websdr_no_org_server: false
   websdr_register_sdrlist: false
   websdr_register_sdrlist_host: "sdr-list.xyz"
   websdr_hostname: ""
-  websdr_tcp_port: 0
+  websdr_tcp_port: 8901
 
   # HTTP request logging (Apache combined log format)
   # Enable/disable HTTP request logging to disk (default: false)

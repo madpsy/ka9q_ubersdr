@@ -4,9 +4,8 @@ import "math"
 
 // websdr_waterfall.go — WebSDR waterfall row encoder
 //
-// Implements format 9 (§4.3) and format 10 (§4.4) row encoding from the
-// VertexSDR frontend-protocol-spec.md, plus the init frames (§4.2) and
-// escape rule (§4.5).
+// Implements format 9 (§4.3) and format 10 (§4.4) waterfall row encoding,
+// plus the init frames (§4.2) and escape rule (§4.5).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Huffman symbol tables (§4.3)

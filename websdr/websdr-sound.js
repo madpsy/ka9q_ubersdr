@@ -1,41 +1,415 @@
-//WebSDR HTML5 client side - Copyright 2013-2014, pa3fwm@websdr.org - all rights reserved
-//Since the intended use of this code involves sending a copy to the client computer, I (PA3FWM) hereby allow making it available unmodified, via my original WebSDR server software, to original WebSDR clients. Other use, including distribution in part or entirety or as part of other software, or reverse engineering, is not allowed without my explicit prior permission.
-(function(){var m=null,aa=window.AudioContext||window.webkitAudioContext;if(aa){document.ct||(document.ct=new aa);var ba;try{ba=document.ct.createConvolver}catch(ja){}ba||(document.ct=m,sup_webaudio=!1)}var r=32768;
-function ta(){function ca(a){var b=a.outputBuffer.getChannelData(0),c=a.outputBuffer.length;ka++;for(a=0;a<c;a++){var e=t[q],g=B*C/h;k+=g;if(1<=k){k-=1;t[q]=0;q++;q>=r&&(q-=r);var d=t[q];da&&(e=(k*d+(g-k)*e)/g)}K&&(e=0);b[a]=2E-5*e*S}T=(new Date).getTime();a=(new Date).getTime();U&&(c=a-U,c>ea&&(ea=c));U=a;F&&0==b[0]&&H++}function la(a){a=a.inputBuffer.getChannelData(0);K||(N?N--:0!=a[0]?H=5:(H--,H||(H=5,N=25,F++,f.disconnect(),f.onaudioprocess=m,f=g.createScriptProcessor(I,1,1),f.onaudioprocess=
-ca,this.p=f,f.connect(w),f.connect(D))))}document.getElementById("soundappletdiv").innerHTML="<div onclick=\"var e=document.getElementById('soundappletdebug'); e.style.display=(e.style.display=='none')?'block':'none';\" style=\"max-width:400px; min-height:50px; border-style:solid; border-color:black; background-color:white; border-width:1px; margin:2px; padding:2px; font-family:sans-serif; font-size:x-small;\">WebSDR HTML5 sound - Copyright 2007-2014, P.T. de Boer, pa3fwm@websdr.org<br><span id=\"soundappletdebug\" style=\"display:none\"></span></div>";
-var t=new Int16Array(r),l=0,q=6144,k=0,C=8E3,h=48E3,B=1,S=1,V=-1,L,x=0,y=[],ma=[-5504,-5248,-6016,-5760,-4480,-4224,-4992,-4736,-7552,-7296,-8064,-7808,-6528,-6272,-7040,-6784,-2752,-2624,-3008,-2880,-2240,-2112,-2496,-2368,-3776,-3648,-4032,-3904,-3264,-3136,-3520,-3392,-22016,-20992,-24064,-23040,-17920,-16896,-19968,-18944,-30208,-29184,-32256,-31232,-26112,-25088,-28160,-27136,-11008,-10496,-12032,-11520,-8960,-8448,-9984,-9472,-15104,-14592,-16128,-15616,-13056,-12544,-14080,-13568,-344,-328,
--376,-360,-280,-264,-312,-296,-472,-456,-504,-488,-408,-392,-440,-424,-88,-72,-120,-104,-24,-8,-56,-40,-216,-200,-248,-232,-152,-136,-184,-168,-1376,-1312,-1504,-1440,-1120,-1056,-1248,-1184,-1888,-1824,-2016,-1952,-1632,-1568,-1760,-1696,-688,-656,-752,-720,-560,-528,-624,-592,-944,-912,-1008,-976,-816,-784,-880,-848,5504,5248,6016,5760,4480,4224,4992,4736,7552,7296,8064,7808,6528,6272,7040,6784,2752,2624,3008,2880,2240,2112,2496,2368,3776,3648,4032,3904,3264,3136,3520,3392,22016,20992,24064,23040,
-17920,16896,19968,18944,30208,29184,32256,31232,26112,25088,28160,27136,11008,10496,12032,11520,8960,8448,9984,9472,15104,14592,16128,15616,13056,12544,14080,13568,344,328,376,360,280,264,312,296,472,456,504,488,408,392,440,424,88,72,120,104,24,8,56,40,216,200,248,232,152,136,184,168,1376,1312,1504,1440,1120,1056,1248,1184,1888,1824,2016,1952,1632,1568,1760,1696,688,656,752,720,560,528,624,592,944,912,1008,976,816,784,880,848],na=[0.0084619,3.6183E-4,2.0264E-4,-4.8621E-5,-3.6771E-4,-7.0991E-4,-0.0010355,
--0.0012935,-0.0014506,-0.0014733,-0.0013571,-0.0011019,-7.4253E-4,-3.0836E-4,1.358E-4,5.6517E-4,8.8996E-4,0.0010664,0.0010912,9.2941E-4,6.0906E-4,1.5494E-4,-3.7203E-4,-9.1186E-4,-0.001389,-0.0017416,-0.0019133,-0.0018764,-0.0016225,-0.0011768,-5.8255E-4,9.2361E-5,7.5528E-4,0.0013306,0.0017366,0.0019135,0.0018299,0.0014834,9.0902E-4,1.6944E-4,-6.4513E-4,-0.0014333,-0.0020901,-0.002526,-0.0026728,-0.0024998,-0.0020096,-0.0012556,-3.2129E-4,6.8312E-4,0.0016291,0.0023941,0.0028705,0.0029846,0.002705,
-0.0020504,0.0010884,-7.0093E-5,-0.0012848,-0.0024011,-0.0032709,-0.0037692,-0.0038134,-0.0033791,-0.0024966,-0.0012601,1.8871E-4,0.0016733,0.0030042,0.0040027,0.0045239,0.0044775,0.0038421,0.0026705,0.0010869,-7.2511E-4,-0.0025439,-0.0041336,-0.0052788,-0.0058077,-0.0056185,-0.0046979,-0.0031235,-0.0010625,0.0012472,0.0035218,0.005466,0.0068099,0.0073449,0.0069525,0.0056265,0.0034784,7.3321E-4,-0.0022942,-0.005233,-0.007697,-0.0093357,-0.0098779,-0.0091724,-0.0072151,-0.0041599,-3.1209E-4,0.0038988,
-0.007962,0.011341,0.013538,0.014156,0.012956,0.0099028,0.0051811,-7.971E-4,-0.0074221,-0.013934,-0.019491,-0.023251,-0.024456,-0.02252,-0.017099,-0.0081382,0.0040987,0.019038,0.035829,0.053411,0.070595,0.086169,0.098999,0.10813,0.11288,0.11288,0.10813,0.098999,0.086169,0.070595,0.053411,0.035829,0.019038,0.0040987,-0.0081382,-0.017099,-0.02252,-0.024456,-0.023251,-0.019491,-0.013934,-0.0074221,-7.971E-4,0.0051811,0.0099028,0.012956,0.014156,0.013538,0.011341,0.007962,0.0038988,-3.1209E-4,-0.0041599,
--0.0072151,-0.0091724,-0.0098779,-0.0093357,-0.007697,-0.005233,-0.0022942,7.3321E-4,0.0034784,0.0056265,0.0069525,0.0073449,0.0068099,0.005466,0.0035218,0.0012472,-0.0010625,-0.0031235,-0.0046979,-0.0056185,-0.0058077,-0.0052788,-0.0041336,-0.0025439,-7.2511E-4,0.0010869,0.0026705,0.0038421,0.0044775,0.0045239,0.0040027,0.0030042,0.0016733,1.8871E-4,-0.0012601,-0.0024966,-0.0033791,-0.0038134,-0.0037692,-0.0032709,-0.0024011,-0.0012848,-7.0093E-5,0.0010884,0.0020504,0.002705,0.0029846,0.0028705,
-0.0023941,0.0016291,6.8312E-4,-3.2129E-4,-0.0012556,-0.0020096,-0.0024998,-0.0026728,-0.002526,0.0035218,0.0012472,-0.0010625,-0.0031235,-0.0046979,-0.0056185,-0.0058077,-0.0052788,-0.0041336,-0.0025439,-7.2511E-4,0.0010869,0.0026705,0.0038421,0.0044775,0.0045239,0.0040027,0.0030042,0.0016733,1.8871E-4,-0.0012601,-0.0024966,-0.0033791,-0.0038134,-0.0037692,-0.0032709,-0.0024011,-0.0012848,-7.0093E-5,0.0010884,0.0020504,0.002705,0.0029846,0.0028705,0.0023941,0.0016291,6.8312E-4,-3.2129E-4,-0.0012556,
--0.0020096,-0.0024998,-0.0026728,-0.002526,-0.0020901,-0.0014333,-6.4513E-4,1.6944E-4,9.0902E-4,0.0014834,0.0018299,0.0019135,0.0017366,0.0013306,7.5528E-4,9.2361E-5,-5.8255E-4,-0.0011768,-0.0016225,-0.0018764,-0.0019133,-0.0017416,-0.001389,-9.1186E-4,-3.7203E-4,1.5494E-4,6.0906E-4,9.2941E-4,0.0010912,0.0010664,8.8996E-4,5.6517E-4,1.358E-4,-3.0836E-4,-7.4253E-4,-0.0011019,-0.0013571,-0.0014733,-0.0014506,-0.0012935,-0.0010355,-7.0991E-4,-3.6771E-4,-4.8621E-5,2.0264E-4,3.6183E-4,0.0084619],oa=[-6.0729E-4,
-0.005547,0.0012025,5.5133E-4,1.6992E-4,-2.3195E-4,-5.9426E-4,-8.2206E-4,-8.4752E-4,-6.5061E-4,-2.6977E-4,2.0642E-4,6.5721E-4,9.6247E-4,0.001032,8.3416E-4,4.0395E-4,-1.5769E-4,-7.1117E-4,-0.0011087,-0.0012377,-0.0010475,-5.7139E-4,8.2522E-5,7.5058E-4,0.001259,0.001464,0.0012963,7.7829E-4,2.8808E-5,-7.6962E-4,-0.0014083,-0.001713,-0.0015833,-0.001033,-1.8129E-4,7.6089E-4,0.0015551,0.0019797,0.0019098,0.0013313,3.7702E-4,-7.2555E-4,-0.0016986,-0.0022625,-0.0022768,-0.0016922,-6.3215E-4,6.491E-4,0.0018212,
-0.002576,0.0026933,0.0021119,9.4722E-4,-5.2351E-4,-0.0019315,-0.0029037,-0.0031646,-0.002609,-0.0013427,3.3954E-4,0.0020171,0.0032517,0.0036965,0.003196,0.0018324,-8.0558E-5,-0.0020711,-0.0036212,-0.004303,-0.0038921,-0.0024398,-2.7089E-4,0.0020837,0.0040178,0.0050015,0.0047273,0.003197,7.4395E-4,-0.0020419,-0.0044463,-0.0058212,-0.0057441,-0.0041549,-0.0013781,0.0019266,0.004923,0.0068105,0.0070197,0.0053925,0.0022394,-0.00171,-0.0054734,-0.0080484,-0.0086754,-0.0070524,-0.0034446,0.001345,0.0061452,
-0.0096921,0.010951,0.009402,0.0052149,-7.3621E-4,-0.0070399,-0.012063,-0.014353,-0.013025,-0.0080465,-3.2853E-4,0.0084029,0.015957,0.020176,0.019477,0.013318,0.0024682,-0.010997,-0.023996,-0.032993,-0.034705,-0.026822,-0.0085825,0.018925,0.052806,0.088761,0.12179,0.14705,0.16074,0.16074,0.14705,0.12179,0.088761,0.052806,0.018925,-0.0085825,-0.026822,-0.034705,-0.032993,-0.023996,-0.010997,0.0024682,0.013318,0.019477,0.020176,0.015957,0.0084029,-3.2853E-4,-0.0080465,-0.013025,-0.014353,-0.012063,-0.0070399,
--7.3621E-4,0.0052149,0.009402,0.010951,0.0096921,0.0061452,0.001345,-0.0034446,-0.0070524,-0.0086754,-0.0080484,-0.0054734,-0.00171,0.0022394,0.0053925,0.0070197,0.0068105,0.004923,0.0019266,-0.0013781,-0.0041549,-0.0057441,-0.0058212,-0.0044463,-0.0020419,7.4395E-4,0.003197,0.0047273,0.0050015,0.0040178,0.0020837,-2.7089E-4,-0.0024398,-0.0038921,-0.004303,-0.0036212,-0.0020711,-8.0558E-5,0.0018324,0.003196,0.0036965,0.0032517,0.0020171,3.3954E-4,-0.0013427,-0.002609,-0.0031646,-0.0029037,-0.0019315,
--5.2351E-4,9.4722E-4,0.0021119,0.0026933,0.002576,0.0018212,6.491E-4,-6.3215E-4,-0.0016922,-0.0022768,-0.0022625,-0.0016986,-7.2555E-4,3.7702E-4,0.0013313,0.0019098,0.0019797,0.0015551,7.6089E-4,-1.8129E-4,-0.001033,-0.0015833,-0.001713,-0.0014083,-7.6962E-4,2.8808E-5,7.7829E-4,0.0012963,0.001464,0.001259,7.5058E-4,8.2522E-5,-5.7139E-4,-0.0010475,-0.0012377,-0.0011087,-7.1117E-4,-1.5769E-4,4.0395E-4,8.3416E-4,0.001032,9.6247E-4,6.5721E-4,2.0642E-4,-2.6977E-4,-6.5061E-4,-8.4752E-4,-8.2206E-4,-5.9426E-4,
--2.3195E-4,1.6992E-4,5.5133E-4,0.0012025,0.005547,-6.0729E-4],pa=[-0.0057279,-3.55E-4,-3.4657E-4,-3.2265E-4,-2.8568E-4,-2.3281E-4,-1.673E-4,-8.6773E-5,4.4005E-6,1.0817E-4,2.1895E-4,3.3872E-4,4.6081E-4,5.89E-4,7.1566E-4,8.5449E-4,9.6872E-4,0.0010826,0.0011887,0.0012785,0.0013539,0.0014097,0.0014451,0.0014572,0.0014449,0.0014071,0.0013429,0.001253,0.0011363,9.944E-4,8.2476E-4,6.3679E-4,4.284E-4,2.0073E-4,-3.878E-5,-2.8944E-4,-5.4502E-4,-8.0225E-4,-0.0010553,-0.0012998,-0.0015302,-0.001742,-0.00193,
--0.0020897,-0.0022163,-0.0023046,-0.0023534,-0.0023594,-0.0023179,-0.0022306,-0.0020944,-0.0019112,-0.0016809,-0.0014065,-0.0010903,-7.3703E-4,-3.507E-4,6.2545E-5,4.9677E-4,9.4413E-4,0.0013968,0.001847,0.0022869,0.0027056,0.0030964,0.003449,0.0037558,0.0040081,0.0041989,0.0043211,0.0043693,0.0043381,0.0042245,0.0040256,0.0037411,0.0033716,0.0029193,0.002387,0.0017819,0.0011093,3.7879E-4,-4.0024E-4,-0.0012159,-0.002056,-0.0029064,-0.0037527,-0.0045791,-0.0053699,-0.0061082,-0.006778,-0.007363,-0.0078475,
--0.0082153,-0.0084535,-0.0085479,-0.0084873,-0.0082614,-0.007862,-0.0072826,-0.0065194,-0.00557,-0.0044354,-0.0031181,-0.0016241,3.9188E-5,0.0018614,0.00383,0.0059296,0.008144,0.010454,0.012839,0.015277,0.017745,0.020218,0.022673,0.025085,0.027427,0.029676,0.031808,0.0338,0.035631,0.037279,0.038728,0.039961,0.040964,0.041727,0.04224,0.042498,0.042498,0.04224,0.041727,0.040964,0.039961,0.038728,0.037279,0.035631,0.0338,0.031808,0.029676,0.027427,0.025085,0.022673,0.020218,0.017745,0.015277,0.012839,
-0.010454,0.008144,0.0059296,0.00383,0.0018614,3.9188E-5,-0.0016241,-0.0031181,-0.0044354,-0.00557,-0.0065194,-0.0072826,-0.007862,-0.0082614,-0.0084873,-0.0085479,-0.0084535,-0.0082153,-0.0078475,-0.007363,-0.006778,-0.0061082,-0.0053699,-0.0045791,-0.0037527,-0.0029064,-0.002056,-0.0012159,-4.0024E-4,3.7879E-4,0.0011093,0.0017819,0.002387,0.0029193,0.0033716,0.0037411,0.0040256,0.0042245,0.0043381,0.0043693,0.0043211,0.0041989,0.0040081,0.0037558,0.003449,0.0030964,0.0027056,0.0022869,0.001847,0.0013968,
-9.4413E-4,4.9677E-4,6.2545E-5,-3.507E-4,-7.3703E-4,-0.0010903,-0.0014065,-0.0016809,-0.0019112,-0.0020944,-0.0022306,-0.0023179,-0.0023594,-0.0023534,-0.0023046,-0.0022163,-0.0020897,-0.00193,-0.001742,-0.0015302,-0.0012998,-0.0010553,-8.0225E-4,-5.4502E-4,-2.8944E-4,-3.878E-5,2.0073E-4,4.284E-4,6.3679E-4,8.2476E-4,9.944E-4,0.0011363,0.001253,0.0013429,0.0014071,0.0014449,0.0014572,0.0014451,0.0014097,0.0013539,0.0012785,0.0011887,0.0010826,9.6872E-4,8.5449E-4,7.1566E-4,5.89E-4,4.6081E-4,3.3872E-4,
-2.1895E-4,1.0817E-4,4.4005E-6,-8.6773E-5,-1.673E-4,-2.3281E-4,-2.8568E-4,-3.2265E-4,-3.4657E-4,-3.55E-4,-0.0057279],qa=[1.4796E-5,5.4604E-4,1.0129E-4,-1.1334E-6,-1.3189E-4,-1.9395E-4,-1.3571E-4,2.1337E-5,1.8632E-4,2.5029E-4,1.5699E-4,-5.2509E-5,-2.543E-4,-3.138E-4,-1.739E-4,9.7403E-5,3.3704E-4,3.8346E-4,1.8391E-4,-1.5855E-4,-4.3525E-4,-4.5776E-4,-1.8388E-4,2.3889E-4,5.5005E-4,5.3497E-4,1.7021E-4,-3.4174E-4,-6.8209E-4,-6.1268E-4,-1.3912E-4,4.6928E-4,8.3027E-4,6.8693E-4,8.6099E-5,-6.2455E-4,-9.9487E-4,
--7.5513E-4,-6.7519E-6,8.1051E-4,0.0011744,8.1167E-4,-1.0417E-4,-0.0010287,-0.001367,-8.5273E-4,2.5207E-4,0.0012819,0.0015701,8.7113E-4,-4.4169E-4,-0.0015723,-0.0017801,-8.6101E-4,6.801E-4,0.0019007,0.0019933,8.1468E-4,-9.7311E-4,-0.0022683,-0.0022045,-7.237E-4,0.0013276,0.0026763,0.002408,5.7881E-4,-0.0017511,-0.0031255,-0.0025968,-3.6912E-4,0.0022518,0.0036165,0.0027634,8.2343E-5,-0.0028398,-0.0041506,-0.0028982,2.9666E-4,0.0035272,0.0047294,0.0029905,-7.8603E-4,-0.0043296,-0.0053562,-0.0030274,
-0.0014094,0.0052683,0.0060364,0.0029929,-0.0021982,-0.0063734,-0.0067797,-0.0028658,0.003197,0.0076896,0.0076028,0.0026174,-0.0044718,-0.0092868,-0.008534,-0.0022054,0.0061279,0.01128,0.0096244,0.0015614,-0.0083444,-0.013874,-0.010969,-5.6468E-4,0.011455,0.017461,0.01276,-0.0010262,-0.016164,-0.022908,-0.015444,0.0037854,0.024249,0.03255,0.020318,-0.0095077,-0.041874,-0.055528,-0.033308,0.02819,0.11468,0.19857,0.25007,0.25007,0.19857,0.11468,0.02819,-0.033308,-0.055528,-0.041874,-0.0095077,0.020318,
-0.03255,0.024249,0.0037854,-0.015444,-0.022908,-0.016164,-0.0010262,0.01276,0.017461,0.011455,-5.6468E-4,-0.010969,-0.013874,-0.0083444,0.0015614,0.0096244,0.01128,0.0061279,-0.0022054,-0.008534,-0.0092868,-0.0044718,0.0026174,0.0076028,0.0076896,0.003197,-0.0028658,-0.0067797,-0.0063734,-0.0021982,0.0029929,0.0060364,0.0052683,0.0014094,-0.0030274,-0.0053562,-0.0043296,-7.8603E-4,0.0029905,0.0047294,0.0035272,2.9666E-4,-0.0028982,-0.0041506,-0.0028398,8.2343E-5,0.0027634,0.0036165,0.0022518,-3.6912E-4,
--0.0025968,-0.0031255,-0.0017511,5.7881E-4,0.002408,0.0026763,0.0013276,-7.237E-4,-0.0022045,-0.0022683,-9.7311E-4,8.1468E-4,0.0019933,0.0019007,6.801E-4,-8.6101E-4,-0.0017801,-0.0015723,-4.4169E-4,8.7113E-4,0.0015701,0.0012819,2.5207E-4,-8.5273E-4,-0.001367,-0.0010287,-1.0417E-4,8.1167E-4,0.0011744,8.1051E-4,-6.7519E-6,-7.5513E-4,-9.9487E-4,-6.2455E-4,8.6099E-5,6.8693E-4,8.3027E-4,4.6928E-4,-1.3912E-4,-6.1268E-4,-6.8209E-4,-3.4174E-4,1.7021E-4,5.3497E-4,5.5005E-4,2.3889E-4,-1.8388E-4,-4.5776E-4,
--4.3525E-4,-1.5855E-4,1.8391E-4,3.8346E-4,3.3704E-4,9.7403E-5,-1.739E-4,-3.138E-4,-2.543E-4,-5.2509E-5,1.5699E-4,2.5029E-4,1.8632E-4,2.1337E-5,-1.3571E-4,-1.9395E-4,-1.3189E-4,-1.1334E-6,1.0129E-4,5.4604E-4,1.4796E-5],fa=[0.0065862,-0.0022838,-0.0059202,-0.0112239,-0.0169697,-0.0214685,-0.022742,-0.0189184,-0.0086407,0.0084932,0.0316914,0.0588926,0.0870663,0.1126093,0.1320398,0.1425063,0.1425063,0.1320398,0.1126093,0.0870663,0.0588926,0.0316914,0.0084932,-0.0086407,-0.0189184,-0.022742,-0.0214685,
--0.0169697,-0.0112239,-0.0059202,-0.0022838,0.0065862],ra=[-0.0086492,-0.0044524,-0.0043664,-0.0030946,-3.094E-4,0.0042348,0.010627,0.018809,0.028525,0.039333,0.050605,0.061655,0.071697,0.079997,0.085925,0.089013,0.089013,0.085925,0.079997,0.071697,0.061655,0.050605,0.039333,0.028525,0.018809,0.010627,0.0042348,-3.094E-4,-0.0030946,-0.0043664,-0.0044524,-0.0086492],sa=[0.0080236,0.001488,-0.0074204,-0.0175495,-0.0195816,-0.0075536,0.0136434,0.0283156,0.020311,-0.0121801,-0.0489419,-0.0561146,-0.0078976,
-0.0922184,0.2069483,0.2833355,0.2833355,0.2069483,0.0922184,-0.0078976,-0.0561146,-0.0489419,-0.0121801,0.020311,0.0283156,0.0136434,-0.0075536,-0.0195816,-0.0175495,-0.0074204,0.001488,0.0080236],da=!0,G=1E3,K=!1,T=0,U=0,ea=0,ka=0,H=5,N=25,g,f,w,u=[],F=0,D,z,O=0,W=0,ga=0,P=0,X=0,Y=0,ha=0;if(g=document.ct){/firefox\/([0-9]+)/i.exec(navigator.userAgent)&&(F=1);g.sampleRate=h;var h=g.sampleRate,I=2048,I=2*I;try{f=g.createScriptProcessor(I,0,1)}catch(ua){f=g.createJavaScriptNode(I,1,1)}f.onaudioprocess=
-ca;this.p=f;w=g.createConvolver();f.connect(w);w.connect(g.destination);var j,e;window.sup_android?(e=g.createBuffer(1,32,h),j=e.getChannelData(0),j.set(fa),u[0]=e,e=g.createBuffer(1,32,h),j=e.getChannelData(0),j.set(fa),u[1]=e,e=g.createBuffer(1,32,h),j=e.getChannelData(0),j.set(ra),u[2]=e,e=g.createBuffer(1,32,h),j=e.getChannelData(0),j.set(sa)):(e=g.createBuffer(1,512,h),j=e.getChannelData(0),j.set(oa),u[0]=e,e=g.createBuffer(1,512,h),j=e.getChannelData(0),j.set(na),u[1]=e,e=g.createBuffer(1,512,
-h),j=e.getChannelData(0),j.set(pa),u[2]=e,e=g.createBuffer(1,512,h),j=e.getChannelData(0),j.set(qa));u[3]=e;w.normalize=!1;w.buffer=u[0];F&&(D=g.createScriptProcessor(I,1,1),f.connect(D),D.onaudioprocess=la)}else(z=new Audio)&&z.mozSetup?z.mozSetup(1,h):(z=m,window.browsersupporterror&&window.browsersupporterror());var Z=0,Q=0.3*h,R;doe=function(){if(z){var a=z.mozCurrentSampleOffset(),b=Math.round(Q-(O-a));0==Z&&(0==a?b=Math.round(0.05*h):(Z=O,Q=Z+Math.round(0.05*h),Q<0.25*h&&(Q=Math.round(0.25*
-h))));for(var c=[],a=0;a<b;a++){var e=t[q],g=B*C/h;k+=g;if(1<=k){k-=1;t[q]=0;q++;q>=r&&(q-=r);var d=t[q];da&&(e=(k*d+(g-k)*e)/g)}K&&(e=0);(e=2E-5*e*S)||(e=0);g=0.044*e+0.088*W+0.044*ga- -1.354*P-0.53*X;d=0.044*g+0.088*P+0.044*X- -1.354*Y-0.53*ha;ga=W;W=e;X=P;P=g;ha=Y;Y=d;c[a]=d;3==R&&(c[a]=e)}T=(new Date).getTime();b=z.mozWriteAudio(c);O+=b}};var ia,v,$,J=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],A=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],M=0,n=new WebSocket("ws://"+window.location.host+"/~~stream?v=11");
-n.binaryType="arraybuffer";var E=500;n.onmessage=function(a){g||doe();var b=(2*r+l-q-((new Date).getTime()-T)*C/1E3)%r;E+=0.01*(b-E);E>2*G&&(q=(r+l-G)%r,b=E=G);B=1+1E-5*(E-G);1.002<B&&(B=1.002);0.998>B&&(B=0.998);b=Math.round(b)+" "+Math.round(G)+" "+Math.round(E)+" "+Math.round(1E6*(B-1))+" "+Math.round(C);b+=g?" WebAudio":z?" MozAudio":" none";b+="<br>";F&&(b+=" FFbug "+(F-1)+"("+H+","+N+")");document.getElementById("soundappletdebug").innerHTML=b;var b=new Uint8Array(a.data),c;a=l;for(c=0;c<b.length;c++){var e=
-0,h=0;if(240==(b[c]&240))smeter=256*(b[c]&15)+b[c+1],c++;else if(128==b[c]){var d;for(d=0;128>d;d++)t[l+d]=ma[b[c+1+d]];l+=128;l>=r&&(l-=r);c+=128;var f;for(f=0;20>f;f++)J[f]=A[f]=0;M=0}else if(144<=b[c]&&223>=b[c])h=4,e=2,v=14-(b[c]>>4);else if(128!=(b[c]&128))h=1,e=2;else if(129==b[c])C=256*b[c+1]+b[c+2],0<C?V=1:(V=0,stopall()),c+=2;else if(130==b[c])ia=256*b[c+1]+b[c+2],c+=2;else if(131==b[c])$=b[c+1],f=b[c+1]&15,f!=R&&(R=f,w&&(w.buffer=u[R])),c++;else if(132==b[c]){for(d=0;128>d;d++)t[l+d]=0;
-l+=128;l>=r&&(l-=r);for(f=0;20>f;f++)J[f]=A[f]=0;M=0}if(2==e){e=0;for(f=16==($&16)?12:14;128>e;){d=b[c+3]&255|(b[c+2]&255)<<8|(b[c+1]&255)<<16|(b[c+0]&255)<<24;d<<=h;var p=0,j;j=15-v;var k=ia,s=[999,999,8,4,2,1,99,99];if(0!=d)for(;0==(d&2147483648)&&p<j;)d<<=1,p++;p<j?(j=p,p++,d<<=1):(j=d>>24&255,p+=8,d<<=8);var n=0;j>=s[v]&&n++;j>=s[v-1]&&n++;n>v-1&&(n=v-1);s=(d>>16&65535)>>17-v&-1<<n;s+=j<<v-1;0!=(d&1<<32-v+n)&&(s|=(1<<n)-1,s=~s);for(h+=p+v-n;8<=h;)c++,h-=8;for(d=p=0;20>d;d++)p+=J[d]*A[d];p|=0;
-p=0<=p?p>>12:p+4095>>12;k=s*k+k/2;s=k>>4;for(d=19;0<=d;d--){J[d]+=-(J[d]>>7)+(A[d]*s>>f);if(0==d)break;A[d]=A[d-1]}A[0]=p+k;k=A[0]+(M>>4);M=16==($&16)?0:M+(A[0]<<4>>3);t[l++]=k;l>=r&&(l-=r);e++}0==h&&c--}}if(L)for(;a!=l;){if(1E4>C||a&1)L.setInt16(x,t[a],!0),x+=2,65536<=x&&(b=new ArrayBuffer(65536),x=0,L=new DataView(b),y.push(b));a++;a>=r&&(a-=r)}};n.onopen=function(){soundappletstarted()};n.onclose=function(){for(var a=0;a<r;a++)t[a]=0;n.onclose=m;n=n.onmessage=m};this.setparam=function(a){n.send("GET /~~param?"+
-a)};this.smeter=function(){return 10*smeter};this.getid=function(){return V};this.mute=function(){K=!K};this.setvolume=function(a){S=a};this.setdelay1=function(a){E=G=a;q=(r+l-G)%r};stopall=function(){g?(n.close(),f.onaudioprocess=m,f.disconnect(),f.destination=m,F&&(D.onaudioprocess=m,D.disconnect(D),D.destination=m),j=u=this.p=g=w=f=m):(n.close(),z=m)};this.destroy=function(){stopall();window.soundapplet=m};this.rec_start=function(){x=0;var a=new ArrayBuffer(65536);L=new DataView(a);y=[a]};this.rec_finish=
-function(){y[y.length-1]=y[y.length-1].slice(0,x);L=m;var a={};a.wavdata=y;a.len=65536*(y.length-1)+x;a.sr=C;1E4<=a.sr&&(a.sr/=2);return a};this.rec_length_kB=function(){return(65536*(y.length-1)+x)/1024}}window.prep_html5sound=function(){window.soundapplet=new ta};prep_html5sound();})();
+// websdr-sound.js — UberSDR Opus audio decoder for the WebSDR frontend
+//
+// Replaces the original PA3FWM ADPCM decoder.  Connects to /~~stream,
+// receives UberSDR Opus Version-2 binary packets, decodes them with the
+// wasm-audio-decoders OpusDecoder library (same library used by the main
+// UberSDR frontend), and plays them via the Web Audio API.
+//
+// Wire format (Version 2, 21-byte header):
+//   [timestamp:8 LE uint64][sampleRate:4 LE uint32][channels:1]
+//   [basebandPower:4 LE float32][noiseDensity:4 LE float32][opusData...]
+//
+// Public interface (called by websdr-base.js):
+//   window.prep_html5sound()          — create window.soundapplet
+//   window.soundapplet.setparam(qs)   — send /~~param?<qs> over WebSocket
+//   window.soundapplet.mute()         — toggle mute
+//   window.soundapplet.setvolume(v)   — set volume (0.0–1.0 typical)
+//   window.soundapplet.smeter()       — return S-meter value (0–1270 range)
+//   window.soundapplet.getid()        — return connection ID (1 when connected)
+//   window.soundapplet.destroy()      — close connection and release resources
+
+(function () {
+  'use strict';
+
+  // ── Constants ──────────────────────────────────────────────────────────────
+
+  var HEADER_SIZE      = 21;      // bytes before Opus payload
+  var DEFAULT_SR       = 48000;
+  var MIN_BUFFER_SEC   = 0.05;    // minimum scheduling lookahead (50 ms)
+  var MAX_BUFFER_SEC   = 1.5;     // drop packets if buffer exceeds this
+
+  // ── Library loader ─────────────────────────────────────────────────────────
+  // Inject opus-decoder.min.js once, then call back when ready.
+
+  var _libReady    = false;
+  var _libPending  = false;
+  var _libCallbacks = [];
+
+  function _loadLib(cb) {
+    if (_libReady) { cb(); return; }
+    _libCallbacks.push(cb);
+    if (_libPending) return;
+    _libPending = true;
+
+    var s = document.createElement('script');
+    s.src  = 'opus-decoder.min.js';
+    s.type = 'text/javascript';
+    s.onload = function () {
+      _libReady = true;
+      var cbs = _libCallbacks.slice();
+      _libCallbacks = [];
+      for (var i = 0; i < cbs.length; i++) { try { cbs[i](); } catch(e) {} }
+    };
+    s.onerror = function () {
+      console.error('WebSDR: failed to load opus-decoder.min.js');
+    };
+    document.head.appendChild(s);
+  }
+
+  // ── UberSDRSound constructor ───────────────────────────────────────────────
+
+  function UberSDRSound() {
+    this._ws            = null;
+    this._audioCtx      = null;
+    this._gainNode      = null;
+    this._nextPlayTime  = 0;
+    this._audioSR       = 0;      // sample rate of current AudioContext
+
+    // Opus decoder (wasm-audio-decoders OpusDecoder instance)
+    this._decoder       = null;
+    this._decoderSR     = 0;
+    this._decoderCh     = 0;
+    this._decoderReady  = false;  // true after decoder.ready resolves
+
+    // Playback state
+    this._muted         = false;
+    this._volume        = 1.0;
+    this._connected     = false;
+
+    // S-meter: basebandPower in dBFS from packet header
+    this._basebandPower = -999.0;
+
+    // Queue of packets that arrived before the decoder was ready
+    this._pendingPackets = [];
+
+    this._connect();
+  }
+
+  // ── WebSocket connection ───────────────────────────────────────────────────
+
+  UberSDRSound.prototype._connect = function () {
+    var self = this;
+    var proto = (window.location.protocol === 'https:') ? 'wss:' : 'ws:';
+    var url   = proto + '//' + window.location.host + '/~~stream';
+
+    self._ws = new WebSocket(url);
+    self._ws.binaryType = 'arraybuffer';
+
+    self._ws.onopen = function () {
+      self._connected = true;
+      if (window.soundappletstarted) {
+        window.soundappletstarted();
+      }
+    };
+
+    self._ws.onmessage = function (event) {
+      self._onMessage(event.data);
+    };
+
+    self._ws.onclose = function () {
+      self._connected = false;
+    };
+
+    self._ws.onerror = function (e) {
+      console.error('WebSDR audio WebSocket error', e);
+    };
+  };
+
+  // ── Packet parsing ─────────────────────────────────────────────────────────
+
+  UberSDRSound.prototype._onMessage = function (buf) {
+    if (buf.byteLength < HEADER_SIZE + 1) {
+      return;
+    }
+
+    var dv         = new DataView(buf);
+    var sampleRate = dv.getUint32(8, true);
+    var channels   = dv.getUint8(12);
+    var bbPower    = dv.getFloat32(13, true);
+
+    if (sampleRate < 8000 || sampleRate > 192000) { sampleRate = DEFAULT_SR; }
+    if (channels < 1 || channels > 2)             { channels   = 1; }
+
+    this._basebandPower = bbPower;
+
+    var opusData = new Uint8Array(buf, HEADER_SIZE);
+
+    this._ensureAudio(sampleRate);
+    this._ensureDecoder(sampleRate, channels, opusData);
+  };
+
+  // ── Web Audio setup ────────────────────────────────────────────────────────
+
+  UberSDRSound.prototype._ensureAudio = function (sampleRate) {
+    var self = this;
+
+    // Recreate AudioContext if sample rate changed
+    if (self._audioCtx && self._audioSR !== sampleRate) {
+      self._teardownAudio();
+    }
+
+    if (self._audioCtx) {
+      if (self._audioCtx.state === 'suspended') {
+        self._audioCtx.resume().catch(function () {});
+      }
+      return;
+    }
+
+    self._audioSR = sampleRate;
+
+    try {
+      self._audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate });
+    } catch (e) {
+      self._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      self._audioSR  = self._audioCtx.sampleRate;
+    }
+
+    // Store in document.ct so the existing audio_start() button can call
+    // document.ct.resume() to unlock the AudioContext on user gesture.
+    document.ct = self._audioCtx;
+
+    self._gainNode = self._audioCtx.createGain();
+    self._gainNode.gain.value = self._muted ? 0.0 : self._volume;
+    self._gainNode.connect(self._audioCtx.destination);
+
+    self._nextPlayTime = self._audioCtx.currentTime;
+
+    self._audioCtx.resume().catch(function () {});
+  };
+
+  UberSDRSound.prototype._teardownAudio = function () {
+    if (this._gainNode) {
+      try { this._gainNode.disconnect(); } catch (e) {}
+      this._gainNode = null;
+    }
+    if (this._audioCtx) {
+      if (document.ct === this._audioCtx) {
+        document.ct = null;
+      }
+      try { this._audioCtx.close(); } catch (e) {}
+      this._audioCtx = null;
+    }
+    this._audioSR      = 0;
+    this._nextPlayTime = 0;
+  };
+
+  // ── Opus decoder (wasm-audio-decoders) ────────────────────────────────────
+
+  UberSDRSound.prototype._ensureDecoder = function (sampleRate, channels, opusData) {
+    var self = this;
+
+    // If decoder already matches, decode immediately
+    if (self._decoderReady &&
+        self._decoderSR === sampleRate &&
+        self._decoderCh === channels) {
+      self._decodeFrame(opusData);
+      return;
+    }
+
+    // Queue this packet while we (re)initialise
+    self._pendingPackets.push({ data: opusData, sr: sampleRate, ch: channels });
+
+    // If already initialising for the same config, just wait
+    if (!self._decoderReady &&
+        self._decoderSR === sampleRate &&
+        self._decoderCh === channels) {
+      return;
+    }
+
+    // Tear down old decoder and start fresh
+    self._teardownDecoder();
+    self._decoderSR = sampleRate;
+    self._decoderCh = channels;
+
+    _loadLib(function () {
+      // Resolve OpusDecoder class (same lookup as main frontend)
+      var OpusDecoderClass = null;
+      if (typeof OpusDecoder !== 'undefined') {
+        OpusDecoderClass = OpusDecoder;
+      } else if (window['opus-decoder'] && window['opus-decoder'].OpusDecoder) {
+        OpusDecoderClass = window['opus-decoder'].OpusDecoder;
+      }
+
+      if (!OpusDecoderClass) {
+        console.error('WebSDR: OpusDecoder class not found after library load');
+        return;
+      }
+
+      var dec;
+      try {
+        dec = new OpusDecoderClass({ sampleRate: sampleRate, channels: channels });
+      } catch (e) {
+        console.error('WebSDR: OpusDecoder constructor error:', e);
+        return;
+      }
+
+      dec.ready.then(function () {
+        // Check we haven't been destroyed or superseded
+        if (self._decoderSR !== sampleRate || self._decoderCh !== channels) {
+          try { dec.free(); } catch (e) {}
+          return;
+        }
+        self._decoder      = dec;
+        self._decoderReady = true;
+
+        // Drain queued packets (only those matching current config)
+        var pending = self._pendingPackets;
+        self._pendingPackets = [];
+        for (var i = 0; i < pending.length; i++) {
+          var p = pending[i];
+          if (p.sr === sampleRate && p.ch === channels) {
+            self._decodeFrame(p.data);
+          }
+        }
+      }).catch(function (e) {
+        console.error('WebSDR: OpusDecoder.ready rejected:', e);
+      });
+    });
+  };
+
+  UberSDRSound.prototype._decodeFrame = function (opusData) {
+    if (!this._decoder || !this._decoderReady) { return; }
+
+    var decoded;
+    try {
+      decoded = this._decoder.decodeFrame(opusData);
+    } catch (e) {
+      console.error('WebSDR: decodeFrame error:', e);
+      return;
+    }
+
+    if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
+      return;
+    }
+    this._playDecoded(decoded);
+  };
+
+  UberSDRSound.prototype._teardownDecoder = function () {
+    if (this._decoder) {
+      try { this._decoder.free(); } catch (e) {}
+      this._decoder = null;
+    }
+    this._decoderReady   = false;
+    this._decoderSR      = 0;
+    this._decoderCh      = 0;
+    this._pendingPackets = [];
+  };
+
+  // ── Audio playback ─────────────────────────────────────────────────────────
+
+  UberSDRSound.prototype._playDecoded = function (decoded) {
+    var self = this;
+    var ctx  = self._audioCtx;
+    if (!ctx || ctx.state === 'closed') { return; }
+
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(function () {});
+      return; // drop this frame; next one will play after resume
+    }
+
+    var numFrames  = decoded.channelData[0].length;
+    var numCh      = Math.max(2, decoded.channelData.length);
+    var sampleRate = self._decoderSR;
+
+    var buffer = ctx.createBuffer(numCh, numFrames, sampleRate);
+
+    if (decoded.channelData.length === 1) {
+      // Mono — duplicate to both channels
+      buffer.getChannelData(0).set(decoded.channelData[0]);
+      buffer.getChannelData(1).set(decoded.channelData[0]);
+    } else {
+      for (var ch = 0; ch < decoded.channelData.length && ch < 2; ch++) {
+        buffer.getChannelData(ch).set(decoded.channelData[ch]);
+      }
+    }
+
+    var source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(self._gainNode);
+
+    var currentTime = ctx.currentTime;
+
+    // Underrun: reset schedule
+    if (self._nextPlayTime < currentTime) {
+      self._nextPlayTime = currentTime + MIN_BUFFER_SEC;
+    }
+    // Overrun: drop packet to prevent lag accumulation
+    else if ((self._nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
+      return;
+    }
+
+    source.start(self._nextPlayTime);
+    self._nextPlayTime += buffer.duration;
+  };
+
+  // ── Public interface ───────────────────────────────────────────────────────
+
+  // Send a /~~param command over the WebSocket (called by websdr-base.js).
+  UberSDRSound.prototype.setparam = function (qs) {
+    if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+      this._ws.send('GET /~~param?' + qs);
+    }
+  };
+
+  // Toggle mute.
+  UberSDRSound.prototype.mute = function () {
+    this._muted = !this._muted;
+    if (this._gainNode) {
+      this._gainNode.gain.value = this._muted ? 0.0 : this._volume;
+    }
+  };
+
+  // Set volume (0.0–1.0 typical; websdr-base.js passes values in that range).
+  UberSDRSound.prototype.setvolume = function (v) {
+    this._volume = v;
+    if (!this._muted && this._gainNode) {
+      this._gainNode.gain.value = v;
+    }
+  };
+
+  // Return S-meter value in the range expected by websdr-base.js updatesmeter():
+  //   displayed_dBFS = s / 100.0 - 127
+  // so we encode: s = (dbfs + 127) * 100
+  // Range: 0 (= -127 dBFS) to 12700 (= 0 dBFS).
+  // basebandPower is in dBFS (e.g. -80.0).
+  UberSDRSound.prototype.smeter = function () {
+    var dbfs = this._basebandPower;
+    if (dbfs < -127) { dbfs = -127; }
+    if (dbfs >    0) { dbfs =    0; }
+    return Math.round((dbfs + 127.0) * 100.0);
+  };
+
+  // Return connection ID: 1 when connected, 0 otherwise.
+  UberSDRSound.prototype.getid = function () {
+    return this._connected ? 1 : 0;
+  };
+
+  // Tear down everything.
+  UberSDRSound.prototype.destroy = function () {
+    this._teardownDecoder();
+    this._teardownAudio();
+    if (this._ws) {
+      this._ws.onopen    = null;
+      this._ws.onmessage = null;
+      this._ws.onclose   = null;
+      this._ws.onerror   = null;
+      try { this._ws.close(); } catch (e) {}
+      this._ws = null;
+    }
+    this._connected = false;
+    window.soundapplet = null;
+  };
+
+  // ── Entry point ────────────────────────────────────────────────────────────
+
+  window.prep_html5sound = function () {
+    if (window.soundapplet) {
+      window.soundapplet.destroy();
+    }
+    window.soundapplet = new UberSDRSound();
+  };
+
+  // Auto-start (mirrors original websdr-sound.js behaviour).
+  window.prep_html5sound();
+
+}());

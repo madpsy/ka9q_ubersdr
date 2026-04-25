@@ -2,8 +2,7 @@ package main
 
 // websdr_registration.go — WebSDR directory registration
 //
-// Implements two outbound registration protocols described in §12 of the
-// VertexSDR frontend-protocol-spec.md:
+// Implements two outbound registration protocols:
 //
 //   §12.2  Legacy websdr.org registration (plain HTTP, ~60 s interval)
 //   §12.3  sdr-list.xyz registration (HTTPS/JSON POST, ~60 s interval)
@@ -37,7 +36,6 @@ const (
 	sdrListUpdateInterval = 60 * time.Second
 	sdrListBackoffBase    = 30 * time.Second
 	sdrListBackoffMax     = 3600 * time.Second
-	sdrListUserAgent      = "WebSDR-UberSDR/registration (+https://github.com/madpsy/ka9q_ubersdr)"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,12 +164,12 @@ func (reg *WebSDRRegistrar) websdrOrgLoop() {
 		case <-time.After(10 * time.Second):
 		}
 
-		// Read up to 1024 bytes of response (not parsed)
+		// Read up to 1024 bytes of response and log it (sanitised)
 		buf := make([]byte, 1024)
 		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		_, _ = conn.Read(buf)
-
-		log.Printf("WebSDR: registered with websdr.org (host=%s, port=%d)", hostname, listenPort)
+		n, _ := conn.Read(buf)
+		respSnippet := sanitiseLogString(buf[:n], 120)
+		log.Printf("WebSDR: registered with websdr.org (host=%s, port=%d) response: %q", hostname, listenPort, respSnippet)
 
 		select {
 		case <-reg.stop:
@@ -222,11 +220,12 @@ func (reg *WebSDRRegistrar) websdrOrgDeregLoop() {
 			if _, err = fmt.Fprint(conn, reqLine); err != nil {
 				log.Printf("WebSDR: websdr.org de-registration write error: %v", err)
 			} else {
-				// Read and discard response
+				// Read response and log it (sanitised)
 				buf := make([]byte, 1024)
 				_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				_, _ = conn.Read(buf)
-				log.Printf("WebSDR: sent de-registration to websdr.org (port=%d, state=%d)", listenPort, orgState)
+				n, _ := conn.Read(buf)
+				respSnippet := sanitiseLogString(buf[:n], 120)
+				log.Printf("WebSDR: sent de-registration to websdr.org (port=%d, state=%d) response: %q", listenPort, orgState, respSnippet)
 			}
 			conn.Close()
 		}
@@ -289,14 +288,14 @@ func (reg *WebSDRRegistrar) sdrListLoop() {
 	}
 }
 
-func (reg *WebSDRRegistrar) sdrListUpdate(host string) error {
-	// One POST per band (§12.3: "A separate POST is made for each configured band")
-	bands := reg.config.Bands
-	if len(bands) == 0 {
-		// Synthesise a single band covering 0–30 MHz
-		bands = []Band{{Label: "HF", Start: 0, End: 30000000}}
-	}
+// Hardware frequency coverage is fixed for UberSDR: 10 kHz – 30 MHz.
+// These constants are not user-configurable.
+const (
+	uberSDRRangeStartHz = int64(10_000)     // 10 kHz
+	uberSDRRangeEndHz   = int64(30_000_000) // 30 MHz
+)
 
+func (reg *WebSDRRegistrar) sdrListUpdate(host string) error {
 	hostname := reg.publicHostname()
 	if hostname == "" {
 		log.Printf("WebSDR: sdr-list.xyz registration skipped: no hostname configured")
@@ -322,10 +321,12 @@ func (reg *WebSDRRegistrar) sdrListUpdate(host string) error {
 	antenna := reg.config.Admin.Antenna
 
 	numUsers := int(atomic.LoadInt32(&reg.handler.audioUserCount))
-	receiverCount := len(bands)
-	if receiverCount == 0 {
-		receiverCount = 1
-	}
+
+	// Fixed hardware range: 10 kHz – 30 MHz (UberSDR limitation, not user-configurable)
+	rangeStart := uberSDRRangeStartHz
+	rangeEnd := uberSDRRangeEndHz
+	bw := rangeEnd - rangeStart
+	centerFreq := int64(15_000_000) // fixed centre for 10 kHz–30 MHz HF band
 
 	tlsConfig := &tls.Config{
 		ServerName: host,
@@ -338,94 +339,73 @@ func (reg *WebSDRRegistrar) sdrListUpdate(host string) error {
 		},
 	}
 
-	for idx, band := range bands {
-		bw := int64(band.End - band.Start)
-		if bw <= 0 {
-			bw = 30000000
-		}
-		rangeStart := int64(band.Start)
-		if rangeStart < 0 {
-			rangeStart = 0
-		}
-		rangeEnd := rangeStart + bw
-		centerFreq := rangeStart + bw/2
+	body := fmt.Sprintf(`{`+
+		`"id":%s,`+
+		`"name":%s,`+
+		`"antenna":%s,`+
+		`"bandwidth":%d,`+
+		`"users":%d,`+
+		`"center_frequency":%d,`+
+		`"grid_locator":%s,`+
+		`"hostname":%s,`+
+		`"max_users":%d,`+
+		`"port":%d,`+
+		`"software":"WebSDR",`+
+		`"backend":"ubersdr",`+
+		`"version":%s,`+
+		`"receiver_count":1,`+
+		`"receiver_id":%s,`+
+		`"range_start_hz":%d,`+
+		`"range_end_hz":%d`+
+		`}`,
+		jsonStr(reg.instanceID),
+		jsonStr(description),
+		jsonStr(antenna),
+		bw,
+		numUsers,
+		centerFreq,
+		jsonStr(qth),
+		jsonStr(hostname),
+		maxUsers,
+		listenPort,
+		jsonStr(Version),
+		jsonStr("ubersdr-hf"),
+		rangeStart,
+		rangeEnd,
+	)
 
-		bandName := band.Label
-		if bandName == "" {
-			bandName = fmt.Sprintf("band-%d", idx)
-		}
-		receiverID := fmt.Sprintf("band-%d-%s", idx, bandName)
-
-		body := fmt.Sprintf(`{`+
-			`"id":%s,`+
-			`"name":%s,`+
-			`"antenna":%s,`+
-			`"bandwidth":%d,`+
-			`"users":%d,`+
-			`"center_frequency":%d,`+
-			`"grid_locator":%s,`+
-			`"hostname":%s,`+
-			`"max_users":%d,`+
-			`"port":%d,`+
-			`"software":"WebSDR",`+
-			`"backend":"ubersdr",`+
-			`"version":%s,`+
-			`"receiver_count":%d,`+
-			`"receiver_id":%s,`+
-			`"range_start_hz":%d,`+
-			`"range_end_hz":%d`+
-			`}`,
-			jsonStr(reg.instanceID),
-			jsonStr(description),
-			jsonStr(antenna),
-			bw,
-			numUsers,
-			centerFreq,
-			jsonStr(qth),
-			jsonStr(hostname),
-			maxUsers,
-			listenPort,
-			jsonStr(Version),
-			receiverCount,
-			jsonStr(receiverID),
-			rangeStart,
-			rangeEnd,
-		)
-
-		req, err := http.NewRequest("POST",
-			fmt.Sprintf("https://%s/api/update_websdr", host),
-			bytes.NewBufferString(body))
-		if err != nil {
-			return fmt.Errorf("build request: %w", err)
-		}
-		req.Header.Set("Host", host)
-		req.Header.Set("User-Agent", sdrListUserAgent)
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Connection", "close")
-		req.ContentLength = int64(len(body))
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("POST band %d: %w", idx, err)
-		}
-
-		// Read response body (up to 8192 bytes) before closing (MINOR-23 / §12.3)
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		resp.Body.Close()
-
-		// Success criterion: 2xx status (§12.3)
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			// Log first 120 chars of body on failure
-			snippet := string(bodyBytes)
-			if len(snippet) > 120 {
-				snippet = snippet[:120]
-			}
-			return fmt.Errorf("POST band %d: HTTP %d: %s", idx, resp.StatusCode, snippet)
-		}
-
-		log.Printf("WebSDR: sdr-list.xyz registered band %d (%s) at %d Hz", idx, bandName, centerFreq)
+	req, err := http.NewRequest("POST",
+		fmt.Sprintf("https://%s/api/update_websdr", host),
+		bytes.NewBufferString(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
 	}
+	req.Header.Set("Host", host)
+	req.Header.Set("User-Agent", "") // suppress Go's default User-Agent
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connection", "close")
+	req.ContentLength = int64(len(body))
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST: %w", err)
+	}
+
+	// Read response body (up to 8192 bytes) before closing (MINOR-23 / §12.3)
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	resp.Body.Close()
+
+	// Success criterion: 2xx status (§12.3)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet := string(bodyBytes)
+		if len(snippet) > 120 {
+			snippet = snippet[:120]
+		}
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
+	}
+
+	log.Printf("WebSDR: sdr-list.xyz registered (10 kHz – 30 MHz, center %d Hz)", centerFreq)
 	return nil
 }
 
@@ -522,4 +502,32 @@ func jsonStr(s string) string {
 // processID returns the current process ID as an int.
 func processID() int {
 	return os.Getpid()
+}
+
+// sanitiseLogString converts raw bytes to a printable string safe for logging.
+// Non-printable characters (< 0x20, except tab) and DEL (0x7f) are replaced
+// with '?'. The result is trimmed of leading/trailing whitespace and capped at
+// maxLen runes.
+func sanitiseLogString(b []byte, maxLen int) string {
+	var sb strings.Builder
+	for _, c := range b {
+		if c == 0 {
+			break // stop at first NUL (end of unread buffer)
+		}
+		if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') || c == 0x7f {
+			sb.WriteByte('?')
+		} else {
+			sb.WriteByte(c)
+		}
+	}
+	s := strings.TrimSpace(sb.String())
+	// Collapse embedded newlines to spaces for single-line log output
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		runes = runes[:maxLen]
+	}
+	return string(runes)
 }

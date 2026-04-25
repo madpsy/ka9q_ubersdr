@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"html"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -126,6 +128,13 @@ type WebSDRHandler struct {
 
 	audioUserCount int32
 
+	// Throughput counters for the stats display (WebSDR-specific).
+	// Incremented atomically; swapped to 0 on each /~~othersjj poll.
+	statAudioBytes int64
+	statWFBytes    int64
+	statHTTPBytes  int64
+	statLastReset  int64 // Unix nanoseconds of last swap
+
 	users   map[string]*websdrUserEntry
 	usersMu sync.RWMutex
 
@@ -157,6 +166,7 @@ func NewWebSDRHandler(
 		configSerial:      int32(time.Now().Unix()),
 		users:             make(map[string]*websdrUserEntry),
 		trustLocalhost:    true,
+		statLastReset:     time.Now().UnixNano(),
 	}
 	go h.histogramLoop()
 	return h
@@ -248,8 +258,44 @@ func (h *WebSDRHandler) findStaticFile(name string) string {
 	return ""
 }
 
+// countingResponseWriter wraps http.ResponseWriter to count bytes written.
+// It also implements http.Hijacker (required by the WebSocket upgrader) and
+// http.Flusher by delegating to the underlying writer when available.
+type countingResponseWriter struct {
+	http.ResponseWriter
+	counter *int64
+}
+
+func (c *countingResponseWriter) Write(b []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(b)
+	if n > 0 {
+		atomic.AddInt64(c.counter, int64(n))
+	}
+	return n, err
+}
+
+// Hijack implements http.Hijacker so that the WebSocket upgrader can take
+// over the underlying TCP connection.
+func (c *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := c.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("countingResponseWriter: underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// Flush implements http.Flusher.
+func (c *countingResponseWriter) Flush() {
+	if fl, ok := c.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
 func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+
+	// Wrap the response writer to count HTTP bytes for the stats display.
+	cw := &countingResponseWriter{ResponseWriter: w, counter: &h.statHTTPBytes}
+	w = cw
 
 	if isWebSocketUpgrade(r) {
 		switch {
@@ -299,10 +345,9 @@ func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Dynamic bootstrap JS consumed by websdr-base.js on every page load
 	case path == "/tmp/bandinfo.js":
 		h.handleBandInfoJS(w, r)
-	// Frequency scale images — serve scaleblack.png as placeholder for any
-	// tmp/<id>-b<N>z<Z>i<I>.png that the real WebSDR server would generate
-	case strings.HasPrefix(path, "/tmp/") && strings.HasSuffix(path, ".png"):
-		http.Redirect(w, r, "/scaleblack.png", http.StatusFound)
+	// Dynamically generated frequency-scale PNG tiles (replaces scaleblack.png placeholder)
+	case strings.HasPrefix(path, "/~~scale"):
+		h.handleScalePNG(w, r)
 	default:
 		h.serveStaticFile(w, r)
 	}
@@ -317,13 +362,14 @@ var websdrUpgrader = websocket.Upgrader{
 }
 
 type websdrConn struct {
-	conn      *websocket.Conn
-	writeMu   sync.Mutex
-	handler   *WebSDRHandler
-	clientIP  string
-	session   *Session
-	sessionID string
-	userEntry *websdrUserEntry
+	conn        *websocket.Conn
+	writeMu     sync.Mutex
+	handler     *WebSDRHandler
+	clientIP    string
+	session     *Session
+	sessionID   string
+	userEntry   *websdrUserEntry
+	statCounter *int64 // points to handler.statAudioBytes or statWFBytes
 
 	tuneKHz   float64
 	loKHz     float64
@@ -347,16 +393,10 @@ type websdrConn struct {
 	wfScale  int
 	wfFormat int
 
-	adpcm         *WebSDRAdpcmEncoder
-	wfState       *WebSDRWaterfallState
-	audioSeq      uint16
-	headerCounter int
-
-	lastAudioRate int
-
-	amSyncFrameCounter int
-	amSyncLastStatus   int
-	amSyncLastFreqMHz  uint64
+	opusEncoder       *OpusEncoderWrapper
+	wfState           *WebSDRWaterfallState
+	pendingInitFrame1 []byte // init frame 1 queued by applyWaterparamCommand, drained by streamWaterfall
+	pendingInitFrame2 []byte // init frame 2 queued by applyWaterparamCommand, drained by streamWaterfall
 
 	lastActivity time.Time
 
@@ -377,9 +417,7 @@ func newWebSDRConn(conn *websocket.Conn, handler *WebSDRHandler, clientIP string
 		wfWidth:      1024,
 		wfSlow:       4,
 		wfFormat:     9,
-		adpcm:        NewWebSDRAdpcmEncoder(),
 		wfState:      NewWebSDRWaterfallState(9),
-		audioSeq:     0,
 		lastActivity: time.Now(),
 	}
 }
@@ -388,7 +426,11 @@ func (c *websdrConn) sendBinary(data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return c.conn.WriteMessage(websocket.BinaryMessage, data)
+	err := c.conn.WriteMessage(websocket.BinaryMessage, data)
+	if err == nil && c.statCounter != nil {
+		atomic.AddInt64(c.statCounter, int64(len(data)))
+	}
+	return err
 }
 
 func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request) {
@@ -405,19 +447,11 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	}
 
 	q := r.URL.Query()
-	format, _ := strconv.Atoi(q.Get("format"))
-	if format == 0 {
-		format = 23
-	}
-	if format != 23 && format != 36 {
-		log.Printf("WebSDR: rejected unknown format %d", format)
-		conn.Close()
-		return
-	}
 
 	c := newWebSDRConn(conn, h, clientIP)
+	c.statCounter = &h.statAudioBytes
 
-	// MINOR-15: parse mute= and band= from initial URL query
+	// Parse mute= and band= from initial URL query
 	if v := q.Get("mute"); v != "" {
 		c.mute, _ = strconv.Atoi(v)
 	}
@@ -428,14 +462,17 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	atomic.AddInt32(&h.audioUserCount, 1)
 	defer atomic.AddInt32(&h.audioUserCount, -1)
 
-	// BUG-C: Use clientIP as the shared userSessionID base so that the audio
-	// and waterfall WebSocket connections from the same browser appear as a
-	// single user in the session list (mirrors KiwiSDR's timestamp+IP scheme).
-	userSessionID := fmt.Sprintf("websdr-%s", clientIP)
+	// Use timestamp (seconds) + IP as the userSessionID so that audio and
+	// waterfall WebSocket connections from the same page load share the same
+	// UUID (they connect within the same second), while a new tab opened later
+	// gets a different timestamp → different UUID → independent sessions.
+	// This mirrors the KiwiSDR emulation's "kiwi-<timestamp>-<IP>" scheme.
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+	userSessionID := fmt.Sprintf("websdr-%s-%s", timestamp, clientIP)
 	c.sessionID = userSessionID
 	h.sessions.SetUserAgent(userSessionID, "WebSDR Client")
 
-	// FEAT-11: register user entry
+	// Register user entry
 	entry := &websdrUserEntry{
 		sessionID: userSessionID,
 		clientIP:  clientIP,
@@ -457,6 +494,24 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	c.session = session
 	h.audioReceiver.GetChannelAudio(session)
 
+	// Initialise Opus encoder using the same config as the main WebSocket handler.
+	bitrate := h.config.Audio.Opus.Bitrate
+	if bitrate == 0 {
+		bitrate = 24000
+	}
+	complexity := h.config.Audio.Opus.Complexity
+	if complexity == 0 {
+		complexity = 5
+	}
+	opusEnc, encErr := NewOpusEncoderForClient(session.SampleRate, bitrate, complexity)
+	if encErr != nil {
+		log.Printf("WebSDR: failed to create Opus encoder: %v", encErr)
+		conn.Close()
+		_ = h.sessions.DestroySession(session.ID)
+		return
+	}
+	c.opusEncoder = opusEnc
+
 	defer func() {
 		h.audioReceiver.ReleaseChannelAudio(session)
 		_ = h.sessions.DestroySession(session.ID)
@@ -465,20 +520,7 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 
 	done := make(chan struct{})
 	go c.readAudioCommands(done)
-
-	if format == 36 {
-		<-done
-		return
-	}
-
-	// BUG-4: send block-size and conv-type tags; rate tag 0x81 emitted in
-	// streamAudio when first packet arrives with known sample rate.
-	initTags := []byte{0x82, 0x00, 0x80, 0x83, 0x00}
-	if err := c.sendBinary(initTags); err != nil {
-		return
-	}
-
-	c.streamAudio(done)
+	c.streamOpusAudio(done)
 }
 
 func (c *websdrConn) readAudioCommands(done chan struct{}) {
@@ -524,9 +566,25 @@ func (c *websdrConn) applyParamCommand(text string) {
 
 	if v := vals.Get("f"); v != "" {
 		newFreq, _ := strconv.ParseFloat(v, 64)
+		// Clamp to valid HF range: 10 kHz – 30 MHz
+		if newFreq < 10.0 {
+			newFreq = 10.0
+		} else if newFreq > 30000.0 {
+			newFreq = 30000.0
+		}
 		if newFreq != c.tuneKHz {
 			c.tuneKHz = newFreq
 			changed = true
+		}
+	}
+	// Parse mode first so the lo/hi Nyquist clamp below uses the correct limit.
+	// Only accept known mode integers: 0=SSB/CW, 1=AM, 2=SAM, 4=FM.
+	if v := vals.Get("mode"); v != "" {
+		m, _ := strconv.Atoi(v)
+		switch m {
+		case 0, 1, 2, 4:
+			c.mode = m
+			// unknown values are silently ignored; c.mode retains its previous value
 		}
 	}
 	if v := vals.Get("lo"); v != "" {
@@ -535,8 +593,27 @@ func (c *websdrConn) applyParamCommand(text string) {
 	if v := vals.Get("hi"); v != "" {
 		c.hiKHz, _ = strconv.ParseFloat(v, 64)
 	}
-	if v := vals.Get("mode"); v != "" {
-		c.mode, _ = strconv.Atoi(v)
+
+	// Clamp lo/hi to the Nyquist limit of the audio path.
+	// FM uses 24 kHz sample rate (Nyquist = 12 kHz); all other modes use
+	// 12 kHz sample rate (Nyquist = 6 kHz).  lo must be ≤ 0, hi must be ≥ 0.
+	{
+		maxBWKHz := 6.0  // SSB / CW / AM
+		if c.mode == 4 { // FM
+			maxBWKHz = 12.0
+		}
+		if c.loKHz < -maxBWKHz {
+			c.loKHz = -maxBWKHz
+		}
+		if c.loKHz > 0 {
+			c.loKHz = 0
+		}
+		if c.hiKHz > maxBWKHz {
+			c.hiKHz = maxBWKHz
+		}
+		if c.hiKHz < 0 {
+			c.hiKHz = 0
+		}
 	}
 	if v := vals.Get("squelch"); v != "" {
 		c.squelch, _ = strconv.Atoi(v)
@@ -563,7 +640,9 @@ func (c *websdrConn) applyParamCommand(text string) {
 				count++
 			}
 		}
-		newName := nb.String()
+		// HTML-escape so that usernames injected into innerHTML by douu() cannot
+		// carry XSS payloads (e.g. <script> tags).
+		newName := html.EscapeString(nb.String())
 		if newName != c.username {
 			c.username = newName
 			changed = true
@@ -616,7 +695,6 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	reset := false
 	if v := vals.Get("band"); v != "" {
@@ -634,10 +712,16 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		}
 	}
 	if v := vals.Get("start"); v != "" {
-		n, _ := strconv.Atoi(v)
-		if n != 0x80000001 && n != c.wfStart {
-			c.wfStart = n
-			reset = true
+		// The JS sends start as a float (e.g. "122676.085") due to floating-point
+		// arithmetic in the zoom calculation.  strconv.Atoi would return 0 for
+		// any non-integer string, so we parse as float64 and round to int.
+		f, err := strconv.ParseFloat(v, 64)
+		if err == nil {
+			n := int(math.Round(f))
+			if n != 0x80000001 && n != c.wfStart {
+				c.wfStart = n
+				reset = true
+			}
 		}
 	}
 	if v := vals.Get("width"); v != "" {
@@ -667,48 +751,103 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		c.wfScale, _ = strconv.Atoi(v)
 	}
 
-	if reset {
-		c.audioSeq = 0
-		if c.wfState != nil {
-			c.wfState.Reset()
-		}
+	if !reset {
+		c.mu.Unlock()
+		return
+	}
 
-		// BUG-D: tune the spectrum session to the visible frequency range.
-		// The hardcoded HF band is 10 kHz–30 MHz (bandwidth = 29990 kHz).
-		// At zoom level z, the visible bandwidth is bandBW / 2^z.
-		// The visible window starts at: bandStart + start * bandBW / (2^z * 1024)
-		// Center = visibleStart + visibleBW/2
-		// binBandwidth = visibleBW / binCount  (binCount = wfWidth, default 1024)
-		if c.session != nil {
-			const bandStartHz = 10000.0  // 10 kHz
-			const bandEndHz = 30000000.0 // 30 MHz
-			const bandBWHz = bandEndHz - bandStartHz
+	if c.wfState != nil {
+		c.wfState.Reset()
+	}
 
-			zoom := c.wfZoom
-			if zoom < 0 {
-				zoom = 0
-			}
-			zoomFactor := float64(int(1) << uint(zoom)) // 2^zoom
-			visibleBWHz := bandBWHz / zoomFactor
+	// Compute spectrum session parameters and pending init frames under the
+	// lock, then release the lock before calling UpdateSpectrumSession.
+	// UpdateSpectrumSession makes network calls to radiod which can block;
+	// holding c.mu during those calls would deadlock streamWaterfall (which
+	// needs c.mu to drain SpectrumChan, and radiod blocks waiting for that
+	// drain before it can respond to the update).
+	//
+	// The hardcoded HF band is 10 kHz–30 MHz (bandwidth = 29990 kHz).
+	// maxZoom is 8 (matching handleBandInfoJS), giving a maxzoom grid of
+	// 1024 × 2^8 = 262144 pixels spanning the full band.
+	//
+	// Radiod requires binBW ≥ ~500 Hz for 1024 bins (empirically: 114 Hz fails).
+	// To allow deep zoom without violating this constraint, we halve binCount for
+	// each zoom level beyond 5, keeping binBW ≈ 915 Hz constant:
+	//   zoom 0–5: binCount=1024, binBW = bandBW/2^z/1024
+	//   zoom 6:   binCount=512,  binBW = bandBW/64/512  ≈ 915 Hz
+	//   zoom 7:   binCount=256,  binBW = bandBW/128/256 ≈ 915 Hz
+	//   zoom 8:   binCount=128,  binBW = bandBW/256/128 ≈ 915 Hz
+	// spectrumToPixels() upsamples binCount→wfWidth pixels (nearest-neighbour),
+	// so the client always receives wfWidth=1024 pixels per row.
+	//
+	// The `start` value sent by the client is a pixel offset in the
+	// maxzoom grid (NOT in the current-zoom pixel grid).  To convert:
+	//   startOffsetHz = start * bandBWHz / (1024 * 2^maxZoom)
+	//
+	// At zoom level z, the visible bandwidth is bandBW / 2^z.
+	// Center = visibleStart + visibleBW/2
+	// binBandwidth = visibleBW / binCount
+	const bandStartHz = 10000.0  // 10 kHz
+	const bandEndHz = 30000000.0 // 30 MHz
+	const bandBWHz = bandEndHz - bandStartHz
+	const maxZoom = 8
+	const maxZoomPixels = 1024 * (1 << maxZoom) // 262144
+	const minBinBWHz = 500.0                    // radiod minimum bin bandwidth (Hz)
 
-			wfWidth := c.wfWidth
-			if wfWidth < 1 {
-				wfWidth = 1024
-			}
+	zoom := c.wfZoom
+	if zoom < 0 {
+		zoom = 0
+	}
+	if zoom > maxZoom {
+		zoom = maxZoom
+	}
+	zoomFactor := float64(int(1) << uint(zoom)) // 2^zoom
+	visibleBWHz := bandBWHz / zoomFactor
 
-			// start is in units of (visibleBW / wfWidth) pixels from band left edge
-			startOffsetHz := float64(c.wfStart) * visibleBWHz / float64(wfWidth)
-			visibleStartHz := bandStartHz + startOffsetHz
-			centerHz := visibleStartHz + visibleBWHz/2.0
+	wfWidth := c.wfWidth
+	if wfWidth < 1 {
+		wfWidth = 1024
+	}
 
-			binBandwidthHz := visibleBWHz / float64(wfWidth)
+	// Compute adaptive binCount: halve for each zoom level beyond 5 to keep
+	// binBW ≥ minBinBWHz.  spectrumToPixels() upsamples binCount→wfWidth pixels.
+	binCount := wfWidth
+	for binCount > 1 && visibleBWHz/float64(binCount) < minBinBWHz {
+		binCount /= 2
+	}
+	if binCount < 1 {
+		binCount = 1
+	}
 
-			_ = c.handler.sessions.UpdateSpectrumSession(
-				c.session.ID,
-				uint64(centerHz),
-				binBandwidthHz,
-				wfWidth,
-			)
+	// start is in maxzoom-grid pixels from the band left edge
+	startOffsetHz := float64(c.wfStart) * bandBWHz / float64(maxZoomPixels)
+	visibleStartHz := bandStartHz + startOffsetHz
+	centerHz := visibleStartHz + visibleBWHz/2.0
+	binBandwidthHz := visibleBWHz / float64(binCount)
+
+	sessionID := ""
+	if c.session != nil {
+		sessionID = c.session.ID
+	}
+
+	// Queue init frames for streamWaterfall to send before the next data row.
+	frame1, frame2 := WebSDRWaterfallInitFrames(zoom, c.wfStart, wfWidth)
+	c.pendingInitFrame1 = frame1
+	c.pendingInitFrame2 = frame2
+
+	c.mu.Unlock()
+
+	// Call UpdateSpectrumSession outside the lock to avoid deadlock with
+	// streamWaterfall (which holds c.mu while draining SpectrumChan).
+	if sessionID != "" {
+		if err := c.handler.sessions.UpdateSpectrumSession(
+			sessionID,
+			uint64(centerHz),
+			binBandwidthHz,
+			binCount,
+		); err != nil {
+			log.Printf("WebSDR waterparam: UpdateSpectrumSession error: %v", err)
 		}
 	}
 }
@@ -729,7 +868,24 @@ func websdrModeString(mode int, loKHz, hiKHz float64) string {
 	}
 }
 
-func (c *websdrConn) streamAudio(done <-chan struct{}) {
+// streamOpusAudio streams audio to the client using the UberSDR Opus binary format.
+// Wire format (Version 2, identical to the main WebSocket handler):
+//
+//	[timestamp:8 LE uint64][sampleRate:4 LE uint32][channels:1]
+//	[basebandPower:4 LE float32][noiseDensity:4 LE float32][opusData...]
+func (c *websdrConn) streamOpusAudio(done <-chan struct{}) {
+	// Cache Opus config so we can recreate the encoder if sample rate changes
+	// (e.g. when the user switches mode and radiod changes the output sample rate).
+	bitrate := c.handler.config.Audio.Opus.Bitrate
+	if bitrate == 0 {
+		bitrate = 24000
+	}
+	complexity := c.handler.config.Audio.Opus.Complexity
+	if complexity == 0 {
+		complexity = 5
+	}
+	encoderSampleRate := c.session.SampleRate
+
 	for {
 		select {
 		case <-done:
@@ -743,154 +899,63 @@ func (c *websdrConn) streamAudio(done <-chan struct{}) {
 
 			c.mu.RLock()
 			isMuted := c.mute != 0
-			agcMode := c.agcMode
-			gainDB := c.gainDB
-			squelchOn := c.squelch != 0
-			curMode := c.mode
 			c.mu.RUnlock()
 
-			// BUG-4: re-emit tag 0x81 if sample rate changed
-			pktRate := pkt.SampleRate
-			if pktRate <= 0 {
-				pktRate = c.handler.config.Audio.DefaultSampleRate
+			// Resolve signal quality from radiod.
+			var basebandPower, noiseDensity float32 = -999.0, -999.0
+			if rc := c.handler.sessions.radiod; rc != nil {
+				if cs := rc.GetChannelStatus(c.session.SSRC); cs != nil {
+					basebandPower = cs.BasebandPower
+					noiseDensity = cs.NoiseDensity
+				}
 			}
 
-			// BUG-A: radiod packets may contain many samples (e.g. 960 at 48 kHz).
-			// The ADPCM encoder processes exactly websdrBlockSamples (128) per call.
-			// We must loop over the PCM data in 128-sample chunks so that all audio
-			// is encoded and sent — not just the first 128 samples.
-			allSamples := pcmBytesToFloat32(pkt.PCMData)
-			for offset := 0; offset < len(allSamples); offset += websdrBlockSamples {
-				end := offset + websdrBlockSamples
-				if end > len(allSamples) {
-					end = len(allSamples)
-				}
-				chunk := allSamples[offset:end]
+			sampleRate := pkt.SampleRate
+			if sampleRate <= 0 {
+				sampleRate = c.handler.config.Audio.DefaultSampleRate
+			}
 
-				var frame []byte
-
-				// Emit rate tag on first chunk of a packet where rate changed
-				if offset == 0 && pktRate > 0 && pktRate != c.lastAudioRate {
-					c.lastAudioRate = pktRate
-					frame = append(frame, 0x81, byte(pktRate>>8), byte(pktRate&0xFF))
-				}
-
-				// S-meter tag every 8 frames
-				c.headerCounter--
-				if c.headerCounter <= 0 {
-					c.headerCounter = 8
-					smeter := c.computeSmeter()
-					frame = append(frame, byte(0xF0|((smeter>>8)&0x0F)), byte(smeter&0xFF))
-				}
-
-				// FEAT-6: tag 0x85 AM-Sync status when mode=2
-				if curMode == 2 {
-					c.amSyncFrameCounter++
-					amTag := c.buildAMSyncTag()
-					if amTag != nil {
-						frame = append(frame, amTag...)
-					}
-				}
-
-				if isMuted {
-					frame = append(frame, 0x84)
-					if err := c.sendBinary(frame); err != nil {
-						return
-					}
+			// Recreate the Opus encoder if the sample rate changed (e.g. mode switch).
+			if sampleRate != encoderSampleRate {
+				newEnc, err := NewOpusEncoderForClient(sampleRate, bitrate, complexity)
+				if err != nil {
+					log.Printf("WebSDR: failed to recreate Opus encoder at %d Hz: %v", sampleRate, err)
 					continue
 				}
+				c.opusEncoder = newEnc
+				encoderSampleRate = sampleRate
+				log.Printf("WebSDR: Opus encoder recreated at %d Hz", sampleRate)
+			}
 
-				var scale float32
-				if agcMode == 1 {
-					scale = c.adpcm.UpdateAGC(chunk)
-				} else {
-					scale = ManualScale(gainDB)
-				}
+			var pcmData []byte
+			if isMuted {
+				// Send silence: 20 ms of zero PCM (big-endian int16, matching radiod format).
+				silenceSamples := sampleRate / 50
+				pcmData = make([]byte, silenceSamples*2)
+			} else {
+				pcmData = pkt.PCMData
+			}
 
-				// FEAT-5: squelch threshold (ratio-based, §3.6)
-				const squelchThreshold = 0.1
-				audioPayload, sqResult := c.adpcm.Encode(chunk, scale, squelchOn, squelchThreshold)
-				if sqResult == SquelchClosed {
-					frame = append(frame, 0x84)
-					if err := c.sendBinary(frame); err != nil {
-						return
-					}
-					continue
-				}
-				frame = append(frame, audioPayload...)
+			opusData, err := c.opusEncoder.EncodeBinary(pcmData)
+			if err != nil {
+				log.Printf("WebSDR: Opus encode error: %v", err)
+				continue
+			}
 
-				if err := c.sendBinary(frame); err != nil {
-					return
-				}
+			// Build Version 2 packet (21-byte header + Opus payload).
+			packet := make([]byte, 21+len(opusData))
+			binary.LittleEndian.PutUint64(packet[0:8], uint64(pkt.GPSTimeNs))
+			binary.LittleEndian.PutUint32(packet[8:12], uint32(sampleRate))
+			packet[12] = 1 // mono
+			binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
+			binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseDensity))
+			copy(packet[21:], opusData)
+
+			if err := c.sendBinary(packet); err != nil {
+				return
 			}
 		}
 	}
-}
-
-// buildAMSyncTag builds tag 0x85 if it should be emitted this frame (FEAT-6).
-func (c *websdrConn) buildAMSyncTag() []byte {
-	if c.amSyncFrameCounter < 64 {
-		return nil
-	}
-	c.amSyncFrameCounter = 0
-
-	status := 0
-	c.mu.RLock()
-	tuneKHz := c.tuneKHz
-	c.mu.RUnlock()
-	freqMHz := uint64(tuneKHz * 1e6)
-
-	if status == c.amSyncLastStatus && freqMHz == c.amSyncLastFreqMHz {
-		return nil
-	}
-	c.amSyncLastStatus = status
-	c.amSyncLastFreqMHz = freqMHz
-
-	tag := make([]byte, 7)
-	tag[0] = 0x85
-	tag[1] = byte((status << 4) | int((freqMHz>>40)&0x0F))
-	tag[2] = byte((freqMHz >> 32) & 0xFF)
-	tag[3] = byte((freqMHz >> 24) & 0xFF)
-	tag[4] = byte((freqMHz >> 16) & 0xFF)
-	tag[5] = byte((freqMHz >> 8) & 0xFF)
-	tag[6] = byte(freqMHz & 0xFF)
-	return tag
-}
-
-func (c *websdrConn) computeSmeter() uint16 {
-	if c.session == nil {
-		return 0
-	}
-	if radiodCtrl := c.handler.sessions.radiod; radiodCtrl != nil {
-		if cs := radiodCtrl.GetChannelStatus(c.session.SSRC); cs != nil {
-			// BasebandPower is in dBFS (e.g. -80.0).
-			// The browser displays: dB = smeter/10 - 127
-			// So smeter = (dbfs + 127) * 10 maps dBFS directly to the display.
-			// -127 dBFS → 0   → displayed -127 dB (noise floor / no signal)
-			//  -80 dBFS → 470 → displayed  -80 dB
-			//    0 dBFS → 1270 → displayed   0 dB
-			dbfs := float64(cs.BasebandPower)
-			smeterEnc := int((dbfs + 127.0) * 10.0)
-			if smeterEnc < 0 {
-				smeterEnc = 0
-			}
-			if smeterEnc > 0x0FFF {
-				smeterEnc = 0x0FFF
-			}
-			return uint16(smeterEnc)
-		}
-	}
-	return 0
-}
-
-func pcmBytesToFloat32(data []byte) []float32 {
-	n := len(data) / 2
-	out := make([]float32, n)
-	for i := 0; i < n; i++ {
-		s := int16(binary.BigEndian.Uint16(data[i*2:]))
-		out[i] = float32(s) / 32768.0
-	}
-	return out
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -926,25 +991,33 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	}
 
 	c := newWebSDRConn(conn, h, clientIP)
+	c.statCounter = &h.statWFBytes
 	c.wfBand = bandIdx
 	c.wfWidth = 1024
 	c.wfFormat = 9
 
-	// Send init frames (§4.2)
-	frame1, frame2 := WebSDRWaterfallInitFrames(0, 0, c.wfWidth)
-	if err := c.sendBinary(frame1); err != nil {
-		conn.Close()
-		return
-	}
-	if err := c.sendBinary(frame2); err != nil {
-		conn.Close()
-		return
+	// Send init frames (§4.2) as two separate WebSocket binary messages.
+	// Frame 1 (0xFF 0x01 ...): sets zoom and scroll offset (a.g, a.f).
+	// Frame 2 (0xFF 0x02 ...): sets pixel width (a.m).
+	{
+		frame1, frame2 := WebSDRWaterfallInitFrames(0, 0, c.wfWidth)
+		if err := c.sendBinary(frame1); err != nil {
+			conn.Close()
+			return
+		}
+		if err := c.sendBinary(frame2); err != nil {
+			conn.Close()
+			return
+		}
 	}
 
-	// BUG-C: Use the same userSessionID as the audio session so that audio and
-	// waterfall connections from the same browser appear as one user in the
-	// session list (mirrors KiwiSDR's timestamp+IP shared-UUID scheme).
-	userSessionID := fmt.Sprintf("websdr-%s", clientIP)
+	// Use timestamp (seconds) + IP as the userSessionID so that audio and
+	// waterfall WebSocket connections from the same page load share the same
+	// UUID (they connect within the same second), while a new tab opened later
+	// gets a different timestamp → different UUID → independent sessions.
+	// This mirrors the KiwiSDR emulation's "kiwi-<timestamp>-<IP>" scheme.
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+	userSessionID := fmt.Sprintf("websdr-%s-%s", timestamp, clientIP)
 	session, err := h.sessions.CreateSpectrumSessionWithUserID(clientIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("WebSDR: failed to create waterfall session: %v", err)
@@ -1005,9 +1078,25 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 				return
 			}
 
-			c.mu.RLock()
+			c.mu.Lock()
 			wfWidth := c.wfWidth
-			c.mu.RUnlock()
+			pf1 := c.pendingInitFrame1
+			pf2 := c.pendingInitFrame2
+			c.pendingInitFrame1 = nil
+			c.pendingInitFrame2 = nil
+			c.mu.Unlock()
+
+			// Flush any pending init frames (queued by applyWaterparamCommand
+			// on zoom/pan/width change) before sending the next data row.
+			// Sent as two separate WebSocket binary messages.
+			if len(pf1) > 0 {
+				if err := c.sendBinary(pf1); err != nil {
+					return
+				}
+				if err := c.sendBinary(pf2); err != nil {
+					return
+				}
+			}
 
 			if wfWidth < 1 {
 				wfWidth = 1024
@@ -1139,71 +1228,95 @@ func jsEscape(s string) string {
 	return s
 }
 
-// websdrXOREmail XOR-obfuscates an email address for org_info output (MINOR-21).
-// Each byte is XORed with 0x5A and the result is hex-encoded.
-func websdrXOREmail(email string) string {
-	if email == "" {
-		return ""
+// sanitizeChatField strips control characters and truncates to maxLen runes.
+func sanitizeChatField(s string, maxLen int) string {
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if r >= 0x20 && count < maxLen {
+			b.WriteRune(r)
+			count++
+		}
 	}
-	var sb strings.Builder
-	for i := 0; i < len(email); i++ {
-		sb.WriteString(fmt.Sprintf("%02x", email[i]^0x5A))
-	}
-	return sb.String()
+	return b.String()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /~~orgstatus (§6.5)
+//
+// websdr.org connects back to this endpoint to verify the SDR is live and to
+// retrieve its configuration.  The response MUST be plain text in the format
+// used by the reference WebSDR implementation:
+//
+//   Config: <serial>\r\n
+//   <org_info block (with email XOR-obfuscated)>
+//   Mobile: m.html\r\n
+//   Bands: 1\r\n
+//   Band: 0 15000.000000 29990.000000 HF\r\n
+//   Users: <n>\r\n
+//
+// If the request includes ?config=<serial> matching the current serial, only
+// "Users: <n>\r\n" is returned (cache optimisation).
 // ─────────────────────────────────────────────────────────────────────────────
+
+// orgStatusSerial is a process-lifetime serial number for the /~~orgstatus
+// Config: field.  Initialised once from the Unix timestamp at startup.
+var orgStatusSerial = int(time.Now().Unix() & 0x7fffffff)
 
 func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) {
 	noCacheHeaders(w)
-	w.Header().Set("Content-Type", "application/javascript")
+	w.Header().Set("Content-Type", "text/plain")
 
-	// Use Admin config for server identity; WebSDR-specific fields from Server config
-	serverName := jsEscape(h.config.Admin.Name)
-	if serverName == "" {
-		serverName = jsEscape(h.config.Admin.Description)
-	}
-	location := jsEscape(h.config.Admin.Location)
-	antenna := jsEscape(h.config.Admin.Antenna)
-	sdrHW := jsEscape(h.config.Server.WebSDROrgInfo)
-	adminEmail := websdrXOREmail(h.config.Admin.Email) // MINOR-21
+	users := int(atomic.LoadInt32(&h.audioUserCount))
 
-	// Band info: one entry per configured band
-	// Band struct has: Label, Start, End, Group, Mode
-	var bandInfoSB strings.Builder
-	bandInfoSB.WriteString("bands_info=[")
-	for i, b := range h.config.Bands {
-		if i > 0 {
-			bandInfoSB.WriteString(",")
+	// Cache optimisation: if caller already has our config serial, send only user count.
+	if reqCfg := r.URL.Query().Get("config"); reqCfg != "" {
+		if reqCfg == strconv.Itoa(orgStatusSerial) {
+			fmt.Fprintf(w, "Users: %d\r\n", users)
+			return
 		}
-		midFreq := (b.Start + b.End) / 2
-		bandInfoSB.WriteString(fmt.Sprintf(
-			`{"name":"%s","lo":%d,"hi":%d,"tune":%d}`,
-			jsEscape(b.Label),
-			int(b.Start),
-			int(b.End),
-			int(midFreq),
-		))
-	}
-	bandInfoSB.WriteString("];\n")
-
-	maxUsers := h.config.Server.WebSDRMaxUsers
-	if maxUsers == 0 {
-		maxUsers = h.config.Server.MaxSessions
 	}
 
-	fmt.Fprintf(w, "org_info={")
-	fmt.Fprintf(w, `"name":"%s",`, serverName)
-	fmt.Fprintf(w, `"loc":"%s",`, location)
-	fmt.Fprintf(w, `"ant":"%s",`, antenna)
-	fmt.Fprintf(w, `"sdr":"%s",`, sdrHW)
-	fmt.Fprintf(w, `"email":"%s",`, adminEmail)
-	fmt.Fprintf(w, `"users":%d,`, atomic.LoadInt32(&h.audioUserCount))
-	fmt.Fprintf(w, `"maxusers":%d`, maxUsers)
-	fmt.Fprintf(w, "};\n")
-	fmt.Fprintf(w, "%s", bandInfoSB.String())
+	fmt.Fprintf(w, "Config: %d\r\n", orgStatusSerial)
+
+	// Emit org_info block (raw multi-line text from config) with email obfuscated.
+	if info := h.config.Server.WebSDROrgInfo; info != "" {
+		obfuscated := orgStatusObfuscateEmail(info)
+		// Ensure the block ends with a newline
+		fmt.Fprintf(w, "%s", obfuscated)
+		if len(obfuscated) > 0 && obfuscated[len(obfuscated)-1] != '\n' {
+			fmt.Fprintf(w, "\r\n")
+		}
+	}
+
+	// Mobile page (we serve m.html)
+	fmt.Fprintf(w, "Mobile: m.html\r\n")
+
+	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
+	// Format: Band: <idx> <centerfreq_khz> <bandwidth_khz> <name>
+	fmt.Fprintf(w, "Bands: 1\r\n")
+	fmt.Fprintf(w, "Band: 0 15000.000000 29990.000000 HF\r\n")
+
+	fmt.Fprintf(w, "Users: %d\r\n", users)
+}
+
+// orgStatusObfuscateEmail XOR-obfuscates the value on any "Email: " line in
+// the org_info block by flipping bit 0 of each byte, matching the reference
+// WebSDR implementation's email obfuscation.
+func orgStatusObfuscateEmail(s string) string {
+	const prefix = "Email: "
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if idx := strings.Index(strings.ToLower(line), strings.ToLower(prefix)); idx >= 0 {
+			valStart := idx + len(prefix)
+			runes := []byte(line)
+			for j := valStart; j < len(runes) && runes[j] > 31; j++ {
+				runes[j] ^= 0x01
+			}
+			lines[i] = string(runes)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1215,46 +1328,43 @@ func (h *WebSDRHandler) handleOthersJ(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
 
 	clientChseq, _ := strconv.Atoi(r.URL.Query().Get("chseq"))
+	_ = clientChseq
 	currentChseq := h.chseq.get()
-
 	users := h.getUsers()
-	userCount := len(users)
-
-	// MINOR-19: correct stats format with real user count
-	fmt.Fprintf(w, "users_chseq=%d;\n", currentChseq)
-	fmt.Fprintf(w, "users_tot=%d;\n", userCount)
-	fmt.Fprintf(w, "users_cpu=0;\n")
-	fmt.Fprintf(w, "users_bw=0;\n")
-
-	// FEAT-11: emit only users whose uu_chseq > clientChseq (incremental)
-	fmt.Fprintf(w, "users_uu=[\n")
-	first := true
-	for _, u := range users {
-		if u.uuChseq <= clientChseq {
-			continue
-		}
-		if !first {
-			fmt.Fprintf(w, ",\n")
-		}
-		first = false
-		// MINOR-22: use u.username (from /~~param?name=)
+	audioUsers := int(atomic.LoadInt32(&h.audioUserCount))
+	maxUsers := h.config.Server.WebSDRMaxUsers
+	if maxUsers == 0 {
+		maxUsers = h.config.Server.MaxSessions
+	}
+	// Reset the uu_* arrays so stale users are cleared, then emit uu() calls.
+	fmt.Fprintf(w, "uu_chseq=%d;\n", currentChseq)
+	fmt.Fprintf(w, "uu_names=[];\n")
+	fmt.Fprintf(w, "uu_bands=[];\n")
+	fmt.Fprintf(w, "uu_freqs=[];\n")
+	for i, u := range users {
 		displayName := u.username
 		if displayName == "" {
 			displayName = maskIP(u.clientIP)
 		}
-		freqKHz := websdrNormFreq(u.tuneKHz)
-		fmt.Fprintf(w, `[%d,"%s",%s,%d]`,
-			u.uuChseq,
-			jsEscape(displayName),
-			freqKHz,
+		normFreq := websdrNormalizeFreq(u.tuneKHz)
+		fmt.Fprintf(w, "uu(%d,%q,%d,%.6f);\n",
+			i,
+			displayName,
 			u.band,
+			normFreq,
 		)
 	}
-	fmt.Fprintf(w, "\n];\n")
+	// Populate the stats div with WebSDR-specific information.
+	// /~~othersj is the legacy endpoint; throughput stats are not reset here
+	// (only /~~othersjj resets them, since that's what the JS polls every 1 s).
+	audioKBps, wfKBps, httpKBps := h.websdrThroughputStats()
+	statsHTML := fmt.Sprintf("Past ~1s: %d users; audio %.1f kb/s, waterfall %.1f kb/s, http %.1f kb/s",
+		audioUsers, audioKBps, wfKBps, httpKBps)
+	fmt.Fprintf(w, "if(statsobj)statsobj.innerHTML=%q;\n", statsHTML)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /~~othersjj (§6.3) — compact user list
+// /~~othersjj (§6.3) — compact user list (polled by ajaxFunction3 every 1 s)
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (h *WebSDRHandler) handleOthersJJ(w http.ResponseWriter, r *http.Request) {
@@ -1263,28 +1373,74 @@ func (h *WebSDRHandler) handleOthersJJ(w http.ResponseWriter, r *http.Request) {
 
 	users := h.getUsers()
 	currentChseq := h.chseq.get()
-
+	audioUsers := int(atomic.LoadInt32(&h.audioUserCount))
+	maxUsers := h.config.Server.WebSDRMaxUsers
+	if maxUsers == 0 {
+		maxUsers = h.config.Server.MaxSessions
+	}
+	// Reset the uu_* arrays so stale users are cleared, then emit uu() calls.
+	// douu() reads uu_names[], uu_bands[], uu_freqs[] which are populated by uu().
+	// freq must be a normalized 0–1 fraction of the band width so that douu()
+	// can compute the correct pixel offset on the 1024px-wide band display.
 	fmt.Fprintf(w, "uu_chseq=%d;\n", currentChseq)
-	fmt.Fprintf(w, "uu_n=%d;\n", len(users))
-	fmt.Fprintf(w, "uu=[\n")
+	fmt.Fprintf(w, "uu_names=[];\n")
+	fmt.Fprintf(w, "uu_bands=[];\n")
+	fmt.Fprintf(w, "uu_freqs=[];\n")
 	for i, u := range users {
-		if i > 0 {
-			fmt.Fprintf(w, ",\n")
-		}
-		// MINOR-22: use u.username
 		displayName := u.username
 		if displayName == "" {
 			displayName = maskIP(u.clientIP)
 		}
-		freqKHz := websdrNormFreq(u.tuneKHz)
-		fmt.Fprintf(w, `[%d,"%s",%s,%d]`,
-			u.uuChseq,
-			jsEscape(displayName),
-			freqKHz,
+		normFreq := websdrNormalizeFreq(u.tuneKHz)
+		fmt.Fprintf(w, "uu(%d,%q,%d,%.6f);\n",
+			i,
+			displayName,
 			u.band,
+			normFreq,
 		)
 	}
-	fmt.Fprintf(w, "\n];\n")
+	// Populate the stats div with throughput matching the real WebSDR format:
+	// "Past ~1s: CPUload=N%, X users; audio Y kb/s, waterfall Z kb/s, http W kb/s"
+	// We omit CPU load (not available); the JS polls this every 1 s so the
+	// elapsed window is approximately 1 second.
+	audioKBps, wfKBps, httpKBps := h.websdrThroughputStats()
+	statsHTML := fmt.Sprintf("Past ~1s: %d users; audio %.1f kb/s, waterfall %.1f kb/s, http %.1f kb/s",
+		audioUsers, audioKBps, wfKBps, httpKBps)
+	fmt.Fprintf(w, "if(statsobj)statsobj.innerHTML=%q;\n", statsHTML)
+}
+
+// websdrThroughputStats atomically swaps the byte counters and returns kb/s
+// for audio, waterfall, and HTTP over the elapsed interval since last call.
+func (h *WebSDRHandler) websdrThroughputStats() (audioKBps, wfKBps, httpKBps float64) {
+	now := time.Now().UnixNano()
+	lastReset := atomic.SwapInt64(&h.statLastReset, now)
+	elapsedSec := float64(now-lastReset) / 1e9
+	if elapsedSec < 0.001 {
+		elapsedSec = 0.001
+	}
+	audioBytes := atomic.SwapInt64(&h.statAudioBytes, 0)
+	wfBytes := atomic.SwapInt64(&h.statWFBytes, 0)
+	httpBytes := atomic.SwapInt64(&h.statHTTPBytes, 0)
+	audioKBps = float64(audioBytes) / 1024.0 / elapsedSec
+	wfKBps = float64(wfBytes) / 1024.0 / elapsedSec
+	httpKBps = float64(httpBytes) / 1024.0 / elapsedSec
+	return
+}
+
+// websdrNormalizeFreq converts a tuning frequency in kHz to a normalized 0–1
+// fraction of the HF band (10 kHz – 30 MHz).  The WebSDR frontend's douu()
+// function multiplies this by 1024 to get a pixel offset on the band display.
+func websdrNormalizeFreq(tuneKHz float64) float64 {
+	const bandStartKHz = 10.0
+	const bandBWKHz = 29990.0 // 30000 - 10
+	norm := (tuneKHz - bandStartKHz) / bandBWKHz
+	if norm < 0 {
+		norm = 0
+	}
+	if norm > 1 {
+		norm = 1
+	}
+	return norm
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1302,12 +1458,13 @@ func (h *WebSDRHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 		if name == "" {
 			name = "anon"
 		}
-		if len(name) > 31 {
-			name = name[:31]
-		}
-		if len(text) > 200 {
-			text = text[:200]
-		}
+		// Strip control characters from name and text.
+		name = sanitizeChatField(name, 31)
+		text = sanitizeChatField(text, 200)
+		// HTML-escape both fields: chatnewline() injects them into innerHTML
+		// without any client-side escaping, so we must sanitise server-side.
+		name = html.EscapeString(name)
+		text = html.EscapeString(text)
 		if text != "" {
 			seq := h.chseq.bump()
 			h.chat.add(name, text, seq)
@@ -1552,20 +1709,23 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 		if bwKHz <= 0 {
 			bwKHz = 192.0
 		}
-		centerKHz := startKHz + bwKHz/2.0
+		centerKHz := 15000.0       // fixed centre for 10 kHz–30 MHz HF band
 		vfoKHz := centerKHz + 10.0 // default VFO 10 kHz above centre
 
 		// tuningstep: 1/32 kHz (31.25 Hz), matching real WebSDR default
 		tuningStep := 1.0 / 32.0
 
-		// maxlinbw: half the sample rate, capped at 4 kHz (real WebSDR convention)
-		maxLinBW := bwKHz / 2.0
-		if maxLinBW > 4.0 {
-			maxLinBW = 4.0
-		}
+		// maxlinbw: maximum one-sided filter bandwidth in kHz.
+		// updbw() in websdr-base.js clamps lo/hi to ±maxlinbw*0.95.
+		// We allow 6 kHz (matching the 12 kHz SSB/AM sample rate Nyquist limit).
+		maxLinBW := 6.0
 
-		// maxzoom: 3 gives 8× zoom (2^3), sufficient for most bands
-		maxZoom := 3
+		// maxzoom: 8 gives 256× zoom (2^8).
+		// The maxzoom grid is 1024×2^8 = 262144 pixels spanning the full HF band.
+		// At zoom=8 the visible bandwidth is ~117 kHz; binBW is kept ≥ 500 Hz by
+		// halving binCount at deep zoom levels (see applyWaterparamCommand).
+		// This constant MUST match the maxZoom constant in applyWaterparamCommand.
+		maxZoom := 8
 
 		name := b.Label
 		if name == "" {
@@ -1589,13 +1749,13 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 		fmt.Fprintf(w, "    name: '%s',\n", strings.ReplaceAll(name, "'", "\\'"))
 		fmt.Fprintf(w, "    scaleimgs: [\n")
 		for z := 0; z <= maxZoom; z++ {
-			numImgs := 1 << uint(z) // zoom 0→1 img, zoom 1→2 imgs, zoom 2→4, zoom 3→8
+			numImgs := 1 << uint(z) // zoom 0→1 img, zoom 1→2 imgs, zoom 2→4, …
 			fmt.Fprintf(w, "      [")
 			for img := 0; img < numImgs; img++ {
 				if img > 0 {
 					fmt.Fprintf(w, ",")
 				}
-				fmt.Fprintf(w, `"scaleblack.png"`)
+				fmt.Fprintf(w, `"~~scale?band=%d&zoom=%d&tile=%d"`, i, z, img)
 			}
 			if z < maxZoom {
 				fmt.Fprintf(w, "],\n")
@@ -1924,19 +2084,34 @@ func websdrNormFreq(kHz float64) string {
 	return fmt.Sprintf("%.3f", kHz)
 }
 
-// maskIP masks the last octet of an IPv4 address for privacy.
+// maskIP masks the last two octets of an IPv4 address (or equivalent for IPv6)
+// for privacy, matching the reference WebSDR implementation.
 func maskIP(ip string) string {
 	// Strip port if present
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}
+	if ip == "" {
+		return "-"
+	}
+	// Strip IPv4-mapped IPv6 prefix
+	ip = strings.TrimPrefix(ip, "::ffff:")
+	// IPv4: mask last two octets → a.b.x.x
 	parts := strings.Split(ip, ".")
 	if len(parts) == 4 {
-		return parts[0] + "." + parts[1] + "." + parts[2] + ".xxx"
+		return parts[0] + "." + parts[1] + ".x.x"
 	}
-	// IPv6: mask last 16 chars
-	if len(ip) > 8 {
-		return ip[:len(ip)-4] + "xxxx"
+	// IPv6: remove last two colon-separated groups → prefix:x:x
+	if strings.Contains(ip, ":") {
+		last := strings.LastIndex(ip, ":")
+		if last > 0 {
+			trimmed := ip[:last]
+			prev := strings.LastIndex(trimmed, ":")
+			if prev > 0 {
+				return trimmed[:prev] + ":x:x"
+			}
+			return trimmed + ":x"
+		}
 	}
 	return ip
 }

@@ -1747,25 +1747,29 @@ func (h *WebSDRHandler) handleIndexHTML(w http.ResponseWriter, r *http.Request) 
 	}
 	title := strings.Join(titleParts, " — ")
 
-	// Build description paragraph from config fields.
-	// Falls back to a generic line if nothing is configured.
-	description := cfg.Admin.Description
-	if description == "" {
-		var parts []string
-		if callsign != "WebSDR" {
-			parts = append(parts, "WebSDR operated by "+callsign)
+	// Build description paragraph from the same config fields as the title.
+	// Format: "<Callsign> WebSDR — <Name>, <Location>. Antenna: <Antenna>."
+	var descParts []string
+	if callsign != "WebSDR" {
+		base := callsign + " WebSDR"
+		if name != "" {
+			base += " — " + name
 		}
 		if location != "" {
-			parts = append(parts, "from "+location)
+			base += ", " + location
 		}
-		if cfg.Admin.Antenna != "" {
-			parts = append(parts, "Antenna: "+cfg.Admin.Antenna)
-		}
-		if len(parts) > 0 {
-			description = strings.Join(parts, ". ") + "."
-		} else {
-			description = "WebSDR receiver."
-		}
+		descParts = append(descParts, base)
+	} else if location != "" {
+		descParts = append(descParts, "WebSDR in "+location)
+	}
+	if cfg.Admin.Antenna != "" {
+		descParts = append(descParts, "Antenna: "+cfg.Admin.Antenna)
+	}
+	var description string
+	if len(descParts) > 0 {
+		description = strings.Join(descParts, ". ") + "."
+	} else {
+		description = "WebSDR receiver."
 	}
 
 	// Expand SSI includes for websdr-head.html and websdr-controls.html.
@@ -1784,6 +1788,9 @@ func (h *WebSDRHandler) handleIndexHTML(w http.ResponseWriter, r *http.Request) 
 	head := expandSSI("websdr-head.html")
 	controls := expandSSI("websdr-controls.html")
 
+	// Get the public URL for the UberSDR frontend link.
+	publicURL := cfg.InstanceReporting.ConstructPublicURL()
+
 	// Render the page.  Structure is identical to the original index.html so
 	// that all existing JS (bodyonload, etc.) continues to work.
 	page := `<!DOCTYPE HTML>
@@ -1794,8 +1801,9 @@ func (h *WebSDRHandler) handleIndexHTML(w http.ResponseWriter, r *http.Request) 
 
 <body onload=bodyonload()>
 
+This SDR runs <a href="https://ubersdr.org">UberSDR</a>. It uses the <a href="http://www.websdr.org">WebSDR</a> frontend.
 ` + html.EscapeString(description) + `
-More information about the WebSDR project can be found on <a href="http://www.websdr.org">http://www.websdr.org</a>.
+<br>You can also visit the <a href="` + html.EscapeString(publicURL) + `">UberSDR frontend</a> for this receiver.
 <p>
 <hr>
 

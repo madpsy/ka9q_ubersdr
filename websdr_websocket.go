@@ -992,7 +992,6 @@ func (c *websdrConn) readWaterfallCommands(done chan struct{}) {
 
 // streamWaterfall streams waterfall rows to the client.
 func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
-	slowCounter := 0
 	for {
 		select {
 		case <-done:
@@ -1005,26 +1004,29 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			c.mu.RLock()
-			slow := c.wfSlow
 			wfWidth := c.wfWidth
 			c.mu.RUnlock()
-
-			if slow < 1 {
-				slow = 1
-			}
-			slowCounter++
-			if slowCounter < slow {
-				continue
-			}
-			slowCounter = 0
 
 			if wfWidth < 1 {
 				wfWidth = 1024
 			}
 
-			// Convert spectrum to pixels (BUG-2 fix inside spectrumToPixels)
-			// SpectrumChan is chan []float32, so pkt IS the []float32 slice
-			pixels := spectrumToPixels(pkt, wfWidth, c.handler)
+			// BUG-I: Unwrap FFT data from radiod's DC-centred layout to
+			// low-frequency-first order expected by the WebSDR waterfall.
+			// Radiod sends: [DC … +Nyquist, -Nyquist … -DC]
+			// We need:      [-Nyquist … DC … +Nyquist]  (low → high)
+			n := len(pkt)
+			unwrapped := make([]float32, n)
+			if n > 0 {
+				half := n / 2
+				copy(unwrapped[0:half], pkt[half:n])
+				copy(unwrapped[half:n], pkt[0:half])
+			}
+
+			// BUG-H: The browser's `slow` parameter is an animation-frame
+			// skip count on the client side — it does NOT mean the server
+			// should drop packets.  Send every spectrum packet we receive.
+			pixels := spectrumToPixels(unwrapped, wfWidth, c.handler)
 
 			// MINOR-24: apply waterfall text overlay before encoding
 			c.handler.wfTextMu.Lock()

@@ -1,12 +1,17 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -299,4 +304,224 @@ type uiValidationError struct {
 
 func (e *uiValidationError) Error() string {
 	return e.message
+}
+
+// HandleUIConfigExport builds a ZIP archive containing:
+//   - ui.yaml  (the current UI configuration)
+//   - spectrum-bg.png  (the background image, if one has been uploaded)
+//
+// GET /admin/ui-config-export
+func (ah *AdminHandler) HandleUIConfigExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Read ui.yaml (may not exist — that's fine, we write an empty file)
+	uiPath := "ui.yaml"
+	if ah.configDir != "" && ah.configDir != "." {
+		uiPath = ah.configDir + "/ui.yaml"
+	}
+	uiYAML, err := os.ReadFile(uiPath)
+	if err != nil && !os.IsNotExist(err) {
+		http.Error(w, "Failed to read ui.yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// If the file doesn't exist yet, export an empty YAML document
+	if uiYAML == nil {
+		uiYAML = []byte{}
+	}
+
+	// Read spectrum background image (optional)
+	bgPath := ah.spectrumBgPath()
+	bgData, bgErr := os.ReadFile(bgPath)
+	hasBg := bgErr == nil
+
+	// Build ZIP in memory
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+
+	// Add ui.yaml
+	fw, err := zw.Create("ui.yaml")
+	if err != nil {
+		http.Error(w, "Failed to create ZIP entry: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := fw.Write(uiYAML); err != nil {
+		http.Error(w, "Failed to write ui.yaml to ZIP: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Add spectrum-bg.png if present
+	if hasBg {
+		fw2, err := zw.Create("spectrum-bg.png")
+		if err != nil {
+			http.Error(w, "Failed to create ZIP entry for image: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if _, err := fw2.Write(bgData); err != nil {
+			http.Error(w, "Failed to write image to ZIP: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		http.Error(w, "Failed to finalise ZIP: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="ui-config.zip"`)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf.Bytes())
+	log.Printf("UI config exported as ZIP (ui.yaml=%d bytes, bg_image=%v)", len(uiYAML), hasBg)
+}
+
+// HandleUIConfigImport accepts a ZIP archive and restores:
+//   - ui.yaml  (required inside the ZIP)
+//   - spectrum-bg.png  (optional; if absent the existing image is left untouched)
+//
+// POST /admin/ui-config-import  multipart/form-data, field "file"
+func (ah *AdminHandler) HandleUIConfigImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	// Max ZIP size: 500 KB image + ~10 KB YAML + ZIP framing overhead → 600 KB is a safe ceiling.
+	const maxZipBytes = 600 * 1024
+	r.Body = http.MaxBytesReader(w, r.Body, maxZipBytes+1024)
+
+	if err := r.ParseMultipartForm(maxZipBytes); err != nil {
+		http.Error(w, `{"error":"File too large or invalid form (max 600 KB)"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, `{"error":"Missing 'file' field in form"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	if header.Size > maxZipBytes {
+		http.Error(w, `{"error":"ZIP file exceeds 600 KB limit"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Read the entire ZIP into memory so we can use zip.NewReader
+	zipBytes, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, `{"error":"Failed to read uploaded file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		http.Error(w, `{"error":"Invalid ZIP file: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	var uiYAML []byte
+	var bgData []byte
+
+	for _, f := range zr.File {
+		name := strings.ToLower(filepath.Base(f.Name))
+		switch name {
+		case "ui.yaml":
+			rc, err := f.Open()
+			if err != nil {
+				http.Error(w, `{"error":"Failed to open ui.yaml inside ZIP"}`, http.StatusBadRequest)
+				return
+			}
+			uiYAML, err = io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				http.Error(w, `{"error":"Failed to read ui.yaml inside ZIP"}`, http.StatusInternalServerError)
+				return
+			}
+		case "spectrum-bg.png":
+			rc, err := f.Open()
+			if err != nil {
+				http.Error(w, `{"error":"Failed to open spectrum-bg.png inside ZIP"}`, http.StatusBadRequest)
+				return
+			}
+			bgData, err = io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				http.Error(w, `{"error":"Failed to read spectrum-bg.png inside ZIP"}`, http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if uiYAML == nil {
+		http.Error(w, `{"error":"ZIP does not contain ui.yaml"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Validate the YAML parses into a UIConfig
+	var parsed struct {
+		UI UIConfig `yaml:"ui"`
+	}
+	if err := yaml.Unmarshal(uiYAML, &parsed); err != nil {
+		http.Error(w, `{"error":"ui.yaml is not valid YAML: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Validate PNG magic bytes if an image was included
+	if bgData != nil {
+		if len(bgData) < 8 ||
+			bgData[0] != 0x89 || bgData[1] != 0x50 || bgData[2] != 0x4E || bgData[3] != 0x47 ||
+			bgData[4] != 0x0D || bgData[5] != 0x0A || bgData[6] != 0x1A || bgData[7] != 0x0A {
+			http.Error(w, `{"error":"spectrum-bg.png is not a valid PNG image"}`, http.StatusBadRequest)
+			return
+		}
+		if len(bgData) > spectrumBgMaxBytes {
+			http.Error(w, `{"error":"spectrum-bg.png exceeds 500 KB limit"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
+
+	// Write ui.yaml
+	uiPath := "ui.yaml"
+	if ah.configDir != "" && ah.configDir != "." {
+		uiPath = ah.configDir + "/ui.yaml"
+	}
+	if err := os.WriteFile(uiPath, uiYAML, 0644); err != nil {
+		http.Error(w, `{"error":"Failed to write ui.yaml: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Update in-memory config immediately
+	ah.config.UI = parsed.UI
+
+	// Write spectrum-bg.png if provided
+	importedBg := false
+	if bgData != nil {
+		if err := os.MkdirAll(ah.assetsDir(), 0755); err != nil {
+			http.Error(w, `{"error":"Failed to create assets directory"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(ah.spectrumBgPath(), bgData, 0644); err != nil {
+			http.Error(w, `{"error":"Failed to write spectrum-bg.png: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}`, http.StatusInternalServerError)
+			return
+		}
+		importedBg = true
+	}
+
+	msg := "UI configuration imported successfully."
+	if importedBg {
+		msg += " Background image restored."
+	}
+	log.Printf("UI config imported from ZIP (ui.yaml=%d bytes, bg_image=%v)", len(uiYAML), importedBg)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "success",
+		"message":  msg,
+		"bg_image": importedBg,
+	})
 }

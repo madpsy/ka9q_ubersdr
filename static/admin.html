@@ -530,6 +530,7 @@
     </style>
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="jszip.min.js"></script>
     <script src="suncalc.js"></script>
     <script src="maidenhead.js"></script>
     <script src="radiod_config_analyzer.js"></script>
@@ -1917,6 +1918,8 @@
                     <button class="btn" onclick="saveRadiodConfig()">Save Configuration</button>
                     <button class="btn btn-danger" onclick="saveRadiodConfigAndRestart()">Save & Restart Radiod</button>
                     <button class="btn btn-secondary" onclick="loadRadiodConfig()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportRadiodConfig()">Export Config</button>
+                    <button class="btn btn-secondary" onclick="importRadiodConfig()">Import Config</button>
                 </div>
                 <div class="button-group" id="radiodChannelsButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadRadiodChannels()">Refresh</button>
@@ -1965,6 +1968,8 @@
                 <div class="button-group" id="uiButtons" style="display: none;">
                     <button class="btn" onclick="saveUIConfig()">Save UI Defaults</button>
                     <button class="btn btn-secondary" onclick="loadAdminUIConfig()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportUIConfig()">Export Config</button>
+                    <button class="btn btn-secondary" onclick="importUIConfig()">Import Config</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
@@ -1974,6 +1979,8 @@
                 <input type="file" id="decoderConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleDecoderConfigImport(event)">
                 <input type="file" id="cwskimmerConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleCWSkimmerConfigImport(event)">
                 <input type="file" id="rotatorScheduleFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleRotatorScheduleImport(event)">
+                <input type="file" id="uiConfigZipFileInput" accept=".zip" style="display: none;" onchange="handleUIConfigImport(event)">
+                <input type="file" id="radiodConfigFileInput" accept=".conf,.yaml,.yml,.ini,.txt" style="display: none;" onchange="handleRadiodConfigImport(event)">
             </div>
         </div>
 
@@ -7494,6 +7501,83 @@ function resetStationIdColor() {
             }
         }
 
+        /**
+         * Export the UI config as a ZIP file (ui.yaml + spectrum-bg.png if set).
+         * Calls GET /admin/ui-config-export which returns the ZIP directly.
+         */
+        async function exportUIConfig() {
+            try {
+                const response = await authenticatedFetch('/admin/ui-config-export');
+                if (!response) return; // Auth failed
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Export failed');
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'ui-config.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showAlert('UI configuration exported as ui-config.zip', 'success');
+            } catch (error) {
+                showAlert('Error exporting UI configuration: ' + error.message, 'error');
+            }
+        }
+
+        /**
+         * Trigger the hidden ZIP file picker for UI config import.
+         */
+        function importUIConfig() {
+            document.getElementById('uiConfigZipFileInput').click();
+        }
+
+        /**
+         * Handle the ZIP file selected for UI config import.
+         * Uploads to POST /admin/ui-config-import, then reloads the UI config form.
+         */
+        async function handleUIConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            // Reset so the same file can be re-selected if needed
+            event.target.value = '';
+
+            if (!file.name.toLowerCase().endsWith('.zip')) {
+                showAlert('Please select a .zip file exported from the UI Config tab.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await authenticatedFetch('/admin/ui-config-import', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response) return; // Auth failed
+                if (!response.ok) {
+                    let errMsg = 'Import failed';
+                    try {
+                        const errData = await response.json();
+                        errMsg = errData.error || errMsg;
+                    } catch (_) {
+                        errMsg = await response.text() || errMsg;
+                    }
+                    throw new Error(errMsg);
+                }
+                const result = await response.json();
+                showAlert(result.message || 'UI configuration imported successfully.', 'success');
+                // Reload the form so all fields reflect the imported values
+                await loadAdminUIConfig();
+            } catch (error) {
+                showAlert('Error importing UI configuration: ' + error.message, 'error');
+            }
+        }
+
         // ── End UI Config Tab ─────────────────────────────────────────────────────
 
         async function loadDecoderConfig() {
@@ -12507,6 +12591,70 @@ const tooltipLine2 = timeStr;
                 return;
             }
             await saveRadiodConfig(true);
+        }
+
+        /**
+         * Export the current radiod config as a plain-text .conf file.
+         * Pure browser-side — no server round-trip needed.
+         */
+        function exportRadiodConfig() {
+            const content = currentRadiodConfig;
+            if (!content) {
+                showAlert('No radiod configuration loaded. Please load the config first.', 'error');
+                return;
+            }
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'radiod.conf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Radiod configuration exported as radiod.conf', 'success');
+        }
+
+        /**
+         * Open the file picker to import a radiod config file.
+         */
+        function importRadiodConfig() {
+            document.getElementById('radiodConfigFileInput').click();
+        }
+
+        /**
+         * Handle the file selected for radiod config import.
+         * Reads the file text and loads it into the editor — does NOT save automatically.
+         * The user must still click Save (or Save & Restart) to persist the change.
+         */
+        async function handleRadiodConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            event.target.value = ''; // reset so same file can be re-selected
+
+            try {
+                const text = await file.text();
+                if (!text.trim()) {
+                    showAlert('The selected file is empty.', 'error');
+                    return;
+                }
+
+                // Load into editor and update in-memory state
+                const editor = document.getElementById('radiodConfigEditor');
+                if (editor) {
+                    editor.value = text;
+                    editor.style.display = 'block';
+                }
+                currentRadiodConfig = text;
+                document.getElementById('radiodConfig').style.display = 'none';
+
+                // Run the config analyser warnings on the imported content
+                updateRadiodConfigWarnings(text);
+
+                showAlert('Radiod configuration imported from ' + file.name + '. Review the config, then click Save or Save & Restart to apply.', 'info');
+            } catch (error) {
+                showAlert('Error reading file: ' + error.message, 'error');
+            }
         }
 
         // System statistics management

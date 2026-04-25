@@ -3,8 +3,8 @@ package main
 // websdr_adpcm.go — WebSDR custom audio codec
 //
 // Implements the 20-tap adaptive linear predictor + Rice-like bitstream encoder
-// described in the VertexSDR frontend-protocol-spec.md §3.5–3.6, plus the
-// G.711 µ-law fallback (§3.4).
+// used by VertexSDR / WebSDR servers, as documented by the reference C
+// implementation in VertexSDR/src/client.c (send_audio_compressed3).
 //
 // The codec operates on blocks of 128 float32 samples (normalised ±1.0 range
 // from radiod) and produces a variable-length byte slice per block.
@@ -21,41 +21,25 @@ const (
 	websdrBlockSamples = 128 // samples per audio block
 	websdrPredTaps     = 20  // predictor taps
 
-	// blockSize is the quantisation step used in the predictor update loop (§3.6).
+	// blockSize is the quantisation step used in the predictor update loop.
 	// The spec says this is driven by server config audioformat (40/128/256/512).
 	// We use 128 as the default (audioformat index 1), which matches the block
 	// sample count and is the most common WebSDR server setting.
 	websdrPredBlockSize = 128
 )
 
-// quantisation mode table (mode index 1–5)
-// quant_step, quotient_limit, reduced_mant_bits
-var websdrQuantModes = [6]struct {
-	step         int
-	quotientLim  int
-	reducedMant  int
-	shrinkThresh [2]int // thresholds for first and second mantissa shrink
-}{
-	0: {}, // unused (mode 0 not valid)
-	// Shrink thresholds derived from the browser decoder's s[] array:
-	//   s = [999, 999, 8, 4, 2, 1, 99, 99]
-	// For mode v: 1st threshold = s[v], 2nd threshold = s[v-1].
-	1: {step: 1, quotientLim: 14, reducedMant: 0, shrinkThresh: [2]int{999, 999}},
-	2: {step: 2, quotientLim: 13, reducedMant: 1, shrinkThresh: [2]int{8, 999}},
-	3: {step: 4, quotientLim: 12, reducedMant: 2, shrinkThresh: [2]int{4, 8}},
-	4: {step: 8, quotientLim: 11, reducedMant: 3, shrinkThresh: [2]int{2, 4}},
-	5: {step: 16, quotientLim: 10, reducedMant: 4, shrinkThresh: [2]int{1, 2}},
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // WebSDRAdpcmEncoder — per-client state
 // ─────────────────────────────────────────────────────────────────────────────
 
 // WebSDRAdpcmEncoder holds the per-connection codec state.
+// All arithmetic-sensitive fields use int32 to match the C reference exactly
+// (C uses plain 'int' which is 32-bit on all target platforms, and relies on
+// natural 32-bit overflow in the predictor coefficient/delay-line products).
 type WebSDRAdpcmEncoder struct {
-	predH     [websdrPredTaps]int // predictor coefficients
-	predX     [websdrPredTaps]int // predictor delay line
-	predAccum int                 // running accumulator (× 16)
+	predH     [websdrPredTaps]int32 // predictor coefficients  (pred_h in C)
+	predX     [websdrPredTaps]int32 // predictor delay line    (pred_x in C)
+	predAccum int32                 // running accumulator     (pred_accum in C)
 
 	// conv_type bit 4: if set, non-accumulating predictor (adpcm_shift=12)
 	// if clear, accumulating predictor (adpcm_shift=14)
@@ -65,17 +49,17 @@ type WebSDRAdpcmEncoder struct {
 	agcGain float32
 
 	// last quant mode (for mode-change detection in bitstream header)
-	lastQuantMode int
+	quantMode int
 
-	// Squelch state (§3.6)
-	squelchCounter int // counts frames where squelch is closed; silence after >899
+	// Squelch state
+	squelchCounter int
 }
 
 // NewWebSDRAdpcmEncoder creates a fresh encoder with all state zeroed.
 func NewWebSDRAdpcmEncoder() *WebSDRAdpcmEncoder {
 	return &WebSDRAdpcmEncoder{
-		agcGain:       1.0,
-		lastQuantMode: 0, // force mode byte on first frame
+		agcGain:   1.0,
+		quantMode: 0, // force mode byte on first frame
 	}
 }
 
@@ -88,7 +72,7 @@ func (e *WebSDRAdpcmEncoder) Reset() {
 		e.predX[i] = 0
 	}
 	e.predAccum = 0
-	e.lastQuantMode = 0
+	e.quantMode = 0
 	e.squelchCounter = 0
 }
 
@@ -116,56 +100,56 @@ const (
 // using AGC and the adaptive predictor.  Returns the complete binary payload
 // (tag bytes are prepended by the caller) and a squelch result.
 //
-// scale is the linear gain factor (computed by caller from AGC or manual gain).
-// squelchEnabled: if true, squelch evaluation is performed (§3.6).
-// squelchThreshold: ratio threshold for squelch (e.g. 0.1).
+// This is a direct port of send_audio_compressed3() from VertexSDR/src/client.c.
 func (e *WebSDRAdpcmEncoder) Encode(samples []float32, scale float32, squelchEnabled bool, squelchThreshold float64) ([]byte, SquelchResult) {
 	if len(samples) > websdrBlockSamples {
 		samples = samples[:websdrBlockSamples]
 	}
 	n := len(samples)
 
-	// ── 1. Compute residuals and check for overflow ──────────────────────────
-	residuals := make([]int, n)
-	rawDeltas := make([]int, n)
-	errors := make([]int, n)
+	adpcmShift := e.adpcmShift()
+	blk := int32(websdrPredBlockSize)
+	negHalf := -(blk / 2) // = -64  (matches C: neg_half = -(blk/2))
+	blkShift := blk << 16 // = 8388608
+
+	residuals := make([]int32, n)
 	overflow := false
+	var sumAbs, sumPred, sumRaw float64
 
-	shift := e.adpcmShift()
-	blockSize := websdrPredBlockSize
-
-	// Snapshot predictor state so we can roll back on overflow
-	snapH := e.predH
-	snapX := e.predX
-	snapAccum := e.predAccum
+	// Compute pred_sum fresh at the start of each block, using int32 arithmetic
+	// to match C's natural 32-bit overflow behaviour.
+	// C reference lines 775-777:
+	//   int pred_sum = 0;
+	//   for (int j = 0; j < 20; j++)
+	//       pred_sum += c->pred_h[j] * c->pred_x[j];
+	var predSum int32
+	for j := 0; j < websdrPredTaps; j++ {
+		predSum += e.predH[j] * e.predX[j]
+	}
 
 	for i := 0; i < n; i++ {
-		// Prediction: sum(h[j]*x[j]) / 4096
-		predSum := 0
-		for j := 0; j < websdrPredTaps; j++ {
-			predSum += e.predH[j] * e.predX[j]
-		}
-		prediction := predSum / 4096
+		oldAccum := e.predAccum
+		prediction := int(predSum) / 4096
 
-		// Input scaled to integer
-		rawDelta := int(samples[i]*scale) - (e.predAccum >> 4)
-		rawDeltas[i] = rawDelta
-
-		// Residual
+		// Input scaled to integer, subtract DC accumulator
+		rawDelta := int(samples[i]*scale) - int(oldAccum>>4)
+		rawDeltaSq := rawDelta * rawDelta
 		err := rawDelta - prediction
-		errors[i] = err
 
-		// Quantise residual using blockSize as the quantisation step (§3.6)
-		negHalf := -(blockSize / 2)
-		blkShift := blockSize << 16
-		wrapped := (negHalf+blkShift+err)/blockSize - 0x10000
+		sumRaw += float64(rawDeltaSq)
+		sumPred += float64(err * err)
 
-		// Clamp magnitude
+		// Quantise residual using neg_half (matches C reference exactly).
+		// C line 799: wrapped = (neg_half + blk_shift + error) / blk - 0x10000
+		// For err=0: (-64 + 8388608 + 0)/128 - 65536 = 65535 - 65536 = -1
+		wrapped := int32((negHalf+blkShift+int32(err))/blk) - 0x10000
+
+		// Clamp magnitude (matches C: mask = -1, -2, or -4)
 		aw := wrapped
 		if aw < 0 {
 			aw = -aw
 		}
-		mask := -1
+		var mask int32 = -1
 		if aw > 16 {
 			if aw <= 32 {
 				mask = -2
@@ -176,166 +160,227 @@ func (e *WebSDRAdpcmEncoder) Encode(samples []float32, scale float32, squelchEna
 		wrapped = mask & wrapped
 		residuals[i] = wrapped
 
-		// Overflow check
-		absWrapped := wrapped
-		if absWrapped < 0 {
-			absWrapped = -absWrapped
-		}
-		if absWrapped > 1000 {
+		// abs_res = val ^ (val >> 31)  — sign-magnitude, NOT standard abs.
+		// For negative val this gives |val|-1, matching C and browser decoder.
+		// C line 806: int abs_res = wrapped ^ (wrapped >> 31);
+		absRes := wrapped ^ (wrapped >> 31)
+		sumAbs += float64(absRes)
+
+		if absRes > 1000 {
 			overflow = true
+			break
 		}
 
-		// Adapt sample for coefficient update
-		scaled := blockSize*wrapped + (blockSize / 2)
-		adaptSample := scaled >> 4
+		// Dequantised residual (matches C: scaled = blk*wrapped + blk/2)
+		scaled := blk*wrapped + (blk / 2)
+		adaptSample := int32(scaled >> 4)
 
-		// Update delay line and coefficients (tap 19 down to 1)
+		// Update coefficients and delay line.
+		// C reference lines 815-833:
+		//   for j=19 down to 1:
+		//     xprev  = pred_x[j-1]
+		//     new_hj = h[j] + (adapt_sample * x[j] >> shift) - (h[j] >> 7)
+		//     pred_h[j] = new_hj
+		//     pred_x[j] = xprev
+		//     partial += xprev * new_hj
+		//   old_x0 = pred_x[0]
+		//   new_h0 = h[0] + (old_x0 * adapt_sample >> shift) - (h[0] >> 7)
+		//   pred_x[0] = prediction + scaled
+		//   pred_h[0] = new_h0
+		//   pred_sum = (prediction+scaled)*new_h0 + partial
+		var partial int32
 		for j := websdrPredTaps - 1; j >= 1; j-- {
-			newH := e.predH[j] + ((adaptSample * e.predX[j]) >> shift) - (e.predH[j] >> 7)
-			e.predX[j] = e.predX[j-1]
-			e.predH[j] = newH
+			xprev := e.predX[j-1]
+			hj := e.predH[j]
+			xj := e.predX[j]
+			newHj := hj + int32((int(adaptSample)*int(xj))>>adpcmShift) - (hj >> 7)
+			e.predH[j] = newHj
+			e.predX[j] = xprev
+			partial += xprev * newHj
 		}
-		// Tap 0
-		newH0 := e.predH[0] + ((e.predX[0] * adaptSample) >> shift) - (e.predH[0] >> 7)
-		e.predX[0] = prediction + scaled
+
+		oldX0 := e.predX[0]
+		h0 := e.predH[0]
+		newH0 := h0 + int32((int(oldX0)*int(adaptSample))>>adpcmShift) - (h0 >> 7)
+		predictedSample := int32(prediction) + scaled
+		e.predX[0] = predictedSample
 		e.predH[0] = newH0
 
-		// Update accumulator
+		// Incremental pred_sum for next iteration (matches C line 833)
+		predSum = predictedSample*newH0 + partial
+
+		// Update accumulator (matches C lines 835-838)
 		if e.convType&0x10 != 0 {
 			e.predAccum = 0
 		} else {
-			e.predAccum = e.predAccum + ((16 * (prediction + scaled)) >> 3)
+			e.predAccum = oldAccum + int32((16*int(predictedSample))>>3)
 		}
 	}
 
 	// ── 2. Overflow → µ-law fallback ────────────────────────────────────────
 	if overflow {
-		// Restore predictor state and reset
-		e.predH = snapH
-		e.predX = snapX
-		e.predAccum = snapAccum
 		e.Reset()
-		e.lastQuantMode = 0
-
 		return encodeMulaw(samples, scale), SquelchOpen
 	}
 
-	// ── 3. Squelch evaluation (§3.6) ────────────────────────────────────────
+	// ── 3. Squelch evaluation ────────────────────────────────────────────────
+	// Matches C lines 843-872 (squelch_counter logic).
 	if squelchEnabled {
-		var sumRaw, sumPred float64
-		for i := 0; i < n; i++ {
-			rd := float64(rawDeltas[i])
-			er := float64(errors[i])
-			sumRaw += rd * rd
-			sumPred += er * er
-		}
 		sqOpen := sumRaw > 1e-10 && (sumPred/sumRaw) > squelchThreshold
 		if !sqOpen {
-			e.squelchCounter++
-			if e.squelchCounter > 899 {
-				e.Reset()
-				return nil, SquelchClosed
+			sc := e.squelchCounter
+			if sc <= 999 {
+				e.squelchCounter = 0
+			} else {
+				e.squelchCounter = sc - 1
 			}
+		} else if e.squelchCounter <= 30 {
+			e.squelchCounter++
 		} else {
-			e.squelchCounter = 0
+			e.squelchCounter = 1002
+		}
+
+		if e.squelchCounter > 899 {
+			e.Reset()
+			return nil, SquelchClosed
 		}
 	}
 
 	// ── 4. Choose quantisation mode from avg_residual ────────────────────────
-	sumAbs := 0
-	for _, r := range residuals {
-		if r < 0 {
-			sumAbs += -r
+	// Matches C lines 898-918.
+	// C: avg_residual = sum_abs * 0.0078125f  (= sum_abs / 128)
+	avgResidual := float32(sumAbs) * 0.0078125
+
+	var quantMode, quantStep, reducedMantBits, quotientLimit int
+	if avgResidual >= 3.81 {
+		if avgResidual < 8.0 {
+			quotientLimit = 12
+			quantStep = 4
+			reducedMantBits = 2
+			quantMode = 3
+		} else if avgResidual < 16.3 {
+			quotientLimit = 11
+			quantStep = 8
+			reducedMantBits = 3
+			quantMode = 4
 		} else {
-			sumAbs += r
+			quotientLimit = 10
+			quantStep = 16
+			reducedMantBits = 4
+			quantMode = 5
+		}
+	} else {
+		if avgResidual < 1.65 {
+			quotientLimit = 14
+			quantStep = 1
+			reducedMantBits = 0
+			quantMode = 1
+		} else {
+			quotientLimit = 13
+			quantStep = 2
+			reducedMantBits = 1
+			quantMode = 2
 		}
 	}
-	avgResidual := float64(sumAbs) / float64(n)
-
-	quantMode := chooseQuantMode(avgResidual)
 
 	// ── 5. Encode bitstream ──────────────────────────────────────────────────
-	bs := &bitWriter{}
+	// Matches C lines 920-998.
+	//
+	// The C encoder uses a 32-bit shift register to pack bits MSB-first into
+	// successive bytes.  We replicate that exactly.
 
-	modeChanged := quantMode != e.lastQuantMode
-	if modeChanged {
-		// Mode byte: (16 * (6 - quant_mode)) ^ 0x80, bitpos starts at 4
-		modeByte := byte((16 * (6 - quantMode)) ^ 0x80)
-		bs.writeByte(modeByte)
-		bs.bitPos = 4 // first 4 bits of mode byte are used by the mode encoding
-		e.lastQuantMode = quantMode
+	// Allocate output buffer (worst case: 128 samples × ~23 bits + header)
+	out := make([]byte, 0, 400)
+
+	// Mode byte and initial bitpos (matches C lines 924-930)
+	var firstByte byte
+	var bitpos int
+	if e.quantMode == quantMode {
+		firstByte = 0x00
+		bitpos = 1
 	} else {
-		// Mode byte: 0x00, bitpos starts at 1
-		bs.writeByte(0x00)
-		bs.bitPos = 1
+		firstByte = byte((16 * (6 - quantMode)) ^ 0x80)
+		bitpos = 4
 	}
+	out = append(out, firstByte)
+	e.quantMode = quantMode
 
-	qm := websdrQuantModes[quantMode]
+	// mantissa_shrink_thresholds[8] = {999, 999, 8, 4, 2, 1, 99, 99}
+	// (matches C line 921)
+	mantissaShrinkThresholds := [8]int{999, 999, 8, 4, 2, 1, 99, 99}
 
-	for _, val := range residuals {
-		// Spec §3.5: sign = val >> 31 (arithmetic shift: 0 for positive, 1 for negative)
-		// abs_val = val ^ (val >> 31)  — this is NOT standard abs; for negative val it
-		// gives |val| - 1 (sign-magnitude encoding where the sign bit is separate).
-		// Using true |val| here would produce wrong quotient/mantissa values.
-		signShift := val >> 31 // 0 for val>=0, -1 (all 1s) for val<0
-		sign := signShift & 1  // 0 or 1
-		absVal := val ^ signShift
+	bp := 0 // index into out[] of current byte being filled
 
-		quotient := absVal / qm.step
-		mantissa := absVal & (qm.step - 1)
-		mantBits := quantMode
+	for i := 0; i < n; i++ {
+		val := int(residuals[i])
+		// sign = (unsigned)val >> 31  (0 for val>=0, 1 for val<0)
+		// C line 937: int sign = (unsigned int)val >> 31;
+		sign := (uint(val) >> 31) & 1
+		// abs_val = val ^ (val >> 31)  — sign-magnitude (NOT standard abs)
+		// C line 938: int abs_val = val ^ (val >> 31);
+		absVal := val ^ (val >> 31)
 
-		// Mantissa shrink
-		if quotient >= qm.shrinkThresh[0] {
-			mantissa >>= 1
-			mantBits = qm.reducedMant
-		}
-		if quotient >= qm.shrinkThresh[1] {
-			mantissa >>= 1
-			mantBits--
-		}
-		if mantBits < 1 {
-			mantBits = 1
-		}
+		quotient := absVal / quantStep
 
-		// Prefix coding
 		var prefixLen, prefixVal int
-		if quotient >= qm.quotientLim {
+		if quotient >= quotientLimit {
 			prefixLen = 23 - quantMode
 			prefixVal = quotient
 		} else {
-			prefixLen = quotient + 1 // unary: quotient zeros then a one
+			prefixLen = quotient + 1
 			prefixVal = 1
 		}
 
-		// Final code word
-		code := (prefixVal << mantBits) | (2*mantissa + sign)
+		mantissa := absVal & (quantStep - 1)
+		mantBits := quantMode
+
+		if quotient >= mantissaShrinkThresholds[quantMode] {
+			mantissa >>= 1
+			mantBits = reducedMantBits
+		}
+		if quotient >= mantissaShrinkThresholds[reducedMantBits] {
+			mantissa >>= 1
+			mantBits--
+		}
+		if mantBits <= 0 {
+			mantBits = 1
+		}
+
+		code := (prefixVal << mantBits) | (2*mantissa + int(sign))
 		codeLen := mantBits + prefixLen
 
-		bs.writeBits(code, codeLen)
+		// Pack bits MSB-first using the same 32-bit shift approach as C.
+		// C lines 967-980:
+		//   shift_amt = 32 - code_len - bitpos
+		//   shifted = code << shift_amt
+		//   *bp |= (uint8_t)(shifted >> 24)
+		//   bitpos += code_len
+		//   if bitpos > 7:
+		//     extra = bitpos - 8
+		//     end = bp + 1 + (extra >> 3)
+		//     while bp < end: shifted <<= 8; *(++bp) = shifted >> 24
+		//     bitpos = extra - 8*(extra>>3)
+		shiftAmt := 32 - codeLen - bitpos
+		shifted := code << shiftAmt
+		out[bp] |= byte(shifted >> 24)
+		bitpos += codeLen
+		if bitpos > 7 {
+			extra := bitpos - 8
+			endBp := bp + 1 + (extra >> 3)
+			for bp < endBp {
+				shifted <<= 8
+				bp++
+				out = append(out, byte(shifted>>24))
+			}
+			bitpos = extra - 8*(extra>>3)
+		}
 	}
 
-	return bs.bytes(), SquelchOpen
-}
-
-// chooseQuantMode selects quantisation mode 1–5 based on avg_residual.
-func chooseQuantMode(avg float64) int {
-	switch {
-	case avg < 1.65:
-		return 1
-	case avg < 3.81:
-		return 2
-	case avg < 8.0:
-		return 3
-	case avg < 16.3:
-		return 4
-	default:
-		return 5
-	}
+	return out, SquelchOpen
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// µ-law fallback (§3.4)
+// µ-law fallback
 // ─────────────────────────────────────────────────────────────────────────────
 
 // mulawLog2 maps byte values 0–255 to floor(log2) (0–7).
@@ -354,6 +399,7 @@ func init() {
 }
 
 // pcm16ToMulaw encodes a 16-bit signed PCM sample to G.711 µ-law.
+// Matches C reference pcm16_to_mulaw() in client.c exactly.
 func pcm16ToMulaw(sample int16) byte {
 	signBit := ((^int(sample)) >> 8) & 0x80
 	magnitude := int(sample)
@@ -366,8 +412,8 @@ func pcm16ToMulaw(sample int16) byte {
 	if magnitude <= 255 {
 		return byte(signBit ^ 0x55 ^ int(uint(magnitude)>>4))
 	}
-	// Use log2 table: exponent = floor(log2(magnitude >> 7)) + 1
-	idx := magnitude >> 7
+	// C line 658: int exponent = mulaw_log2[(unsigned)magnitude >> 8] + 1;
+	idx := magnitude >> 8
 	if idx > 255 {
 		idx = 255
 	}
@@ -376,8 +422,9 @@ func pcm16ToMulaw(sample int16) byte {
 		(((magnitude >> (exponent + 3)) & 0xF) | (16 * exponent)))
 }
 
-// encodeMulaw encodes 128 samples as the µ-law fallback payload (§3.4).
+// encodeMulaw encodes 128 samples as the µ-law fallback payload.
 // Returns [0x80][128 µ-law bytes] = 129 bytes.
+// Matches C reference overflow path in send_audio_compressed3().
 func encodeMulaw(samples []float32, scale float32) []byte {
 	out := make([]byte, 1+websdrBlockSamples)
 	out[0] = 0x80
@@ -395,65 +442,31 @@ func encodeMulaw(samples []float32, scale float32) []byte {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// bitWriter — MSB-first bit packing
-// ─────────────────────────────────────────────────────────────────────────────
-
-type bitWriter struct {
-	buf    []byte
-	bitPos int // bits written into current (last) byte (0 = byte not yet started)
-}
-
-// writeByte appends a full byte and sets bitPos to 8 (byte fully used).
-func (bw *bitWriter) writeByte(b byte) {
-	bw.buf = append(bw.buf, b)
-	bw.bitPos = 0
-}
-
-// writeBits writes the lowest `n` bits of `val` MSB-first into the stream.
-func (bw *bitWriter) writeBits(val, n int) {
-	for n > 0 {
-		// How many bits can we fit in the current byte?
-		if bw.bitPos == 0 || bw.bitPos == 8 {
-			bw.buf = append(bw.buf, 0)
-			bw.bitPos = 0
-		}
-		avail := 8 - bw.bitPos
-		take := n
-		if take > avail {
-			take = avail
-		}
-		// Extract the top `take` bits of val (from bit n-1 down to n-take)
-		shift := n - take
-		bits := (val >> shift) & ((1 << take) - 1)
-		// Place them into the current byte at the correct position
-		bw.buf[len(bw.buf)-1] |= byte(bits << (avail - take))
-		bw.bitPos += take
-		n -= take
-	}
-}
-
-// bytes returns the packed byte slice (last byte zero-padded on right).
-func (bw *bitWriter) bytes() []byte {
-	return bw.buf
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // AGC helpers (used by the websocket handler)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// UpdateAGC updates the AGC gain given the RMS power of the current block.
+// UpdateAGC updates the AGC gain given the peak amplitude of the current block.
 // Returns the new scale factor (agcGain * 32000).
+// Matches C reference AGC logic in client_dispatch_audio():
+//
+//	sqrt_power = max(|sample|) * 2
+//	new_gain = 1 / (sqrt_power + 1e-30)
+//	if new_gain > old_gain: blend 1% new + 99% old
 func (e *WebSDRAdpcmEncoder) UpdateAGC(samples []float32) float32 {
-	// Compute RMS power
-	var sumSq float64
+	var maxAbs float32
 	for _, s := range samples {
-		sumSq += float64(s) * float64(s)
+		if s < 0 {
+			s = -s
+		}
+		if s > maxAbs {
+			maxAbs = s
+		}
 	}
-	sqrtPower := float32(math.Sqrt(sumSq / float64(len(samples))))
+	sqrtPower := maxAbs * 2.0
 
 	newGain := float32(1.0) / (sqrtPower + 1e-30)
 	if newGain > e.agcGain {
-		// Slow attack: blend 1% new + 99% old
+		// Slow attack: blend 1% new + 99% old (matches C)
 		newGain = newGain*0.01 + e.agcGain*0.99
 	}
 	e.agcGain = newGain

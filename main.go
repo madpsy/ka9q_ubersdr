@@ -2134,6 +2134,8 @@ func main() {
 	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
 	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))
 	http.HandleFunc("/admin/ui-config", adminHandler.AuthMiddleware(adminHandler.HandleUIConfig))
+	http.HandleFunc("/admin/ui-config-export", adminHandler.AuthMiddleware(adminHandler.HandleUIConfigExport))
+	http.HandleFunc("/admin/ui-config-import", adminHandler.AuthMiddleware(adminHandler.HandleUIConfigImport))
 	http.HandleFunc("/admin/spectrum-bg-image", adminHandler.AuthMiddleware(adminHandler.HandleSpectrumBgImage))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))

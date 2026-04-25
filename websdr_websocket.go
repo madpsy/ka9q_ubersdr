@@ -1214,6 +1214,44 @@ func applyWaterfallTextOverlay(pixels []byte, textRows [][]byte, wfWidth int) {
 // HTTP helper utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
+// websdrServerVersion is the Server: header value sent on every WebSDR HTTP
+// response.  The format matches the real WebSDR software (YYYYMMDD.HHMM-64)
+// so that the websdr.org directory server recognises us as a WebSDR instance
+// when it makes its /~~orgstatus callback.
+const websdrServerVersion = "WebSDR/20260425.0000-64"
+
+// serverHeaderWriter wraps an http.ResponseWriter to inject the WebSDR
+// Server: header before the first Write or WriteHeader call.
+type serverHeaderWriter struct {
+	http.ResponseWriter
+	written bool
+}
+
+func (s *serverHeaderWriter) ensureHeader() {
+	if !s.written {
+		s.written = true
+		s.ResponseWriter.Header().Set("Server", websdrServerVersion)
+	}
+}
+
+func (s *serverHeaderWriter) WriteHeader(code int) {
+	s.ensureHeader()
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *serverHeaderWriter) Write(b []byte) (int, error) {
+	s.ensureHeader()
+	return s.ResponseWriter.Write(b)
+}
+
+// WebSDRServerHeaderMiddleware injects "Server: WebSDR/..." on every response
+// served by the WebSDR HTTP server.
+func WebSDRServerHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&serverHeaderWriter{ResponseWriter: w}, r)
+	})
+}
+
 func noCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
@@ -1325,7 +1363,7 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 		antenna = "HF"
 	}
 	fmt.Fprintf(w, "Bands: 1\r\n")
-	fmt.Fprintf(w, "Band: 0 15000.000000 29990.000000 %s\r\n", antenna)
+	fmt.Fprintf(w, "Band: 0 15005.000000 29990.000000 %s\r\n", antenna)
 
 	fmt.Fprintf(w, "Users: %d\r\n", users)
 }
@@ -1720,7 +1758,7 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 		if bwKHz <= 0 {
 			bwKHz = 192.0
 		}
-		centerKHz := 15000.0       // fixed centre for 10 kHz–30 MHz HF band
+		centerKHz := 15005.0       // true centre of 10 kHz–30 MHz HF band (midpoint of 10–30000 kHz)
 		vfoKHz := centerKHz + 10.0 // default VFO 10 kHz above centre
 
 		// tuningstep: 1/32 kHz (31.25 Hz), matching real WebSDR default

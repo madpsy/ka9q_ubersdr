@@ -2422,7 +2422,7 @@ func main() {
 	if config.Server.EnableWebSDR && config.Server.WebSDRListen != "" {
 		websdrServer = &http.Server{
 			Addr:    config.Server.WebSDRListen,
-			Handler: websdrHandler,
+			Handler: WebSDRServerHeaderMiddleware(websdrHandler),
 		}
 
 		go func() {

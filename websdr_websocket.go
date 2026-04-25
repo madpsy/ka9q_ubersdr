@@ -1347,7 +1347,8 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Mobile page (only emitted when m.html exists; always present for UberSDR).
+	// Logo and mobile page (matching real WebSDR field order).
+	fmt.Fprintf(w, "Logo: logo.png\n")
 	fmt.Fprintf(w, "Mobile: m.html\n")
 
 	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
@@ -1365,6 +1366,10 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 // orgInfoObfuscateEmail returns a copy of the org_info block with the value
 // portion of any "Email: ..." line XOR'd byte-by-byte with 0x01 (matching the
 // obfuscation used by the reference WebSDR and VertexSDR implementations).
+//
+// The VertexSDR reference (network.c orgstatus_obfuscate_email) searches for
+// "Email: " (with the space) and starts XOR'ing from the character after the
+// space — so the ": " separator is never obfuscated.
 func orgInfoObfuscateEmail(orgInfo string) string {
 	lines := strings.Split(orgInfo, "\n")
 	for i, line := range lines {
@@ -1377,14 +1382,22 @@ func orgInfoObfuscateEmail(orgInfo string) string {
 		}
 		key := line[:colon]
 		if strings.EqualFold(strings.TrimSpace(key), "email") {
-			val := line[colon+1:] // keep leading space as-is (real WebSDR does)
-			b := []byte(val)
-			for j := range b {
-				if b[j] > 31 {
-					b[j] ^= 0x01
+			// Preserve everything up to and including ": " (colon + any leading
+			// whitespace), then XOR only the actual address bytes.
+			rest := line[colon+1:] // e.g. " me@example.com"
+			// Find where the address starts (skip leading spaces/tabs).
+			addrStart := 0
+			for addrStart < len(rest) && (rest[addrStart] == ' ' || rest[addrStart] == '\t') {
+				addrStart++
+			}
+			prefix := line[:colon+1] + rest[:addrStart] // "Email: "
+			addr := []byte(rest[addrStart:])
+			for j := range addr {
+				if addr[j] > 31 {
+					addr[j] ^= 0x01
 				}
 			}
-			lines[i] = key + ":" + string(b)
+			lines[i] = prefix + string(addr)
 		} else {
 			lines[i] = line
 		}

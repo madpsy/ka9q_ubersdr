@@ -1267,15 +1267,23 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/plain")
 
+	callerIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(callerIP); err == nil {
+		callerIP = host
+	}
+
 	users := int(atomic.LoadInt32(&h.audioUserCount))
 
 	// Cache optimisation: if caller already has our config serial, send only user count.
 	if reqCfg := r.URL.Query().Get("config"); reqCfg != "" {
 		if reqCfg == strconv.Itoa(orgStatusSerial) {
+			log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
 			fmt.Fprintf(w, "Users: %d\r\n", users)
 			return
 		}
 	}
+
+	log.Printf("WebSDR: /~~orgstatus callback from %s (full response, users=%d)", callerIP, users)
 
 	fmt.Fprintf(w, "Config: %d\r\n", orgStatusSerial)
 

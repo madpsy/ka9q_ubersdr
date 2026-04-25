@@ -136,7 +136,7 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     echo "Running pre-flight checks..."
     echo
 
-    ports=(80 443 8080 8073)
+    ports=(80 443 8080 8073 8901)
     VENDOR=04b4
     VALID_PRODUCTS=(00f1 00f3)
 

@@ -164,12 +164,20 @@ func (reg *WebSDRRegistrar) websdrOrgLoop() {
 		case <-time.After(10 * time.Second):
 		}
 
-		// Read up to 1024 bytes of response and log it (sanitised)
+		// Read up to 1024 bytes of response and log it (sanitised).
+		// If the server closed the connection (n==0, err==io.EOF or similar),
+		// reset conn so the next iteration reconnects rather than writing on a
+		// dead socket and wasting a full 60 s cycle.
 		buf := make([]byte, 1024)
 		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		n, _ := conn.Read(buf)
+		n, readErr := conn.Read(buf)
 		respSnippet := sanitiseLogString(buf[:n], 120)
 		log.Printf("WebSDR: registered with websdr.org (host=%s, port=%d) response: %q", hostname, listenPort, respSnippet)
+		if n == 0 || readErr != nil {
+			// Server closed or errored — drop the connection so we reconnect next cycle.
+			conn.Close()
+			conn = nil
+		}
 
 		select {
 		case <-reg.stop:

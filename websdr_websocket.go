@@ -1293,17 +1293,17 @@ func sanitizeChatField(s string, maxLen int) string {
 //
 // websdr.org connects back to this endpoint to verify the SDR is live and to
 // retrieve its configuration.  The response MUST be plain text in the format
-// used by the reference WebSDR implementation:
+// used by the reference WebSDR implementation (LF line endings, not CRLF):
 //
-//   Config: <serial>\r\n
-//   <org_info block (with email XOR-obfuscated)>
-//   Mobile: m.html\r\n
-//   Bands: 1\r\n
-//   Band: 0 15000.000000 29990.000000 HF\r\n
-//   Users: <n>\r\n
+//   Config: <serial>\n
+//   <org_info block verbatim, with email XOR-obfuscated>\n
+//   Mobile: m.html\n
+//   Bands: 1\n
+//   Band: 0 15005.000000 29990.000000 HF\n
+//   Users: <n>\n
 //
 // If the request includes ?config=<serial> matching the current serial, only
-// "Users: <n>\r\n" is returned (cache optimisation).
+// "Users: <n>\n" is returned (cache optimisation).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // orgStatusSerial is a process-lifetime serial number for the /~~orgstatus
@@ -1325,56 +1325,71 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 	if reqCfg := r.URL.Query().Get("config"); reqCfg != "" {
 		if reqCfg == strconv.Itoa(orgStatusSerial) {
 			log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
-			fmt.Fprintf(w, "Users: %d\r\n", users)
+			fmt.Fprintf(w, "Users: %d\n", users)
 			return
 		}
 	}
 
 	log.Printf("WebSDR: /~~orgstatus callback from %s (full response, users=%d)", callerIP, users)
 
-	fmt.Fprintf(w, "Config: %d\r\n", orgStatusSerial)
+	fmt.Fprintf(w, "Config: %d\n", orgStatusSerial)
 
-	// Emit individual fields from org_info block directly (matching real WebSDR format).
-	// Fields are emitted as top-level lines: Qth:, Description:, Email:, Logo: etc.
-	// The Email: value is XOR-obfuscated (each byte ^ 0x01) before transmission.
-	for _, line := range strings.Split(h.config.Server.WebSDROrgInfo, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		// Pass through any "Key: value" line, obfuscating the Email: value.
-		// val is trimmed of leading whitespace; output always uses "Key: value" format.
-		if colon := strings.Index(line, ":"); colon > 0 {
-			key := line[:colon]
-			val := strings.TrimLeft(line[colon+1:], " \t")
-			if strings.EqualFold(strings.TrimSpace(key), "email") {
-				// XOR each byte of the email address with 0x01
-				b := []byte(val)
-				for i := range b {
-					if b[i] > 31 {
-						b[i] ^= 0x01
-					}
-				}
-				val = string(b)
-			}
-			fmt.Fprintf(w, "%s: %s\r\n", key, val)
+	// Emit the org_info block verbatim (matching real WebSDR / VertexSDR behaviour).
+	// The block is dumped as-is after XOR-obfuscating the Email: field value.
+	// We do NOT re-parse and re-emit field-by-field — the server expects the raw block.
+	if orgInfo := h.config.Server.WebSDROrgInfo; orgInfo != "" {
+		// Obfuscate Email: value in-place: XOR each byte > 0x1f with 0x01.
+		obfuscated := orgInfoObfuscateEmail(orgInfo)
+		// Ensure the block ends with exactly one newline before the next field.
+		fmt.Fprint(w, obfuscated)
+		if len(obfuscated) > 0 && obfuscated[len(obfuscated)-1] != '\n' {
+			fmt.Fprint(w, "\n")
 		}
 	}
 
-	// Logo and mobile page
-	fmt.Fprintf(w, "Logo: logo.png\r\n")
-	fmt.Fprintf(w, "Mobile: m.html\r\n")
+	// Mobile page (only emitted when m.html exists; always present for UberSDR).
+	fmt.Fprintf(w, "Mobile: m.html\n")
 
 	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
-	// Format: Band: <idx> <centerfreq_khz> <bandwidth_khz> <antenna>
+	// Format: Band: <idx> <centerfreq_khz> <bandwidth_khz> <antenna_name>
 	antenna := h.config.Admin.Antenna
 	if antenna == "" {
 		antenna = "HF"
 	}
-	fmt.Fprintf(w, "Bands: 1\r\n")
-	fmt.Fprintf(w, "Band: 0 15005.000000 29990.000000 %s\r\n", antenna)
+	fmt.Fprintf(w, "Bands: 1\n")
+	fmt.Fprintf(w, "Band: 0 15005.000000 29990.000000 %s\n", antenna)
 
-	fmt.Fprintf(w, "Users: %d\r\n", users)
+	fmt.Fprintf(w, "Users: %d\n", users)
+}
+
+// orgInfoObfuscateEmail returns a copy of the org_info block with the value
+// portion of any "Email: ..." line XOR'd byte-by-byte with 0x01 (matching the
+// obfuscation used by the reference WebSDR and VertexSDR implementations).
+func orgInfoObfuscateEmail(orgInfo string) string {
+	lines := strings.Split(orgInfo, "\n")
+	for i, line := range lines {
+		// Strip trailing \r so we work with clean lines regardless of input endings.
+		line = strings.TrimRight(line, "\r")
+		colon := strings.Index(line, ":")
+		if colon <= 0 {
+			lines[i] = line
+			continue
+		}
+		key := line[:colon]
+		if strings.EqualFold(strings.TrimSpace(key), "email") {
+			val := line[colon+1:] // keep leading space as-is (real WebSDR does)
+			b := []byte(val)
+			for j := range b {
+				if b[j] > 31 {
+					b[j] ^= 0x01
+				}
+			}
+			lines[i] = key + ":" + string(b)
+		} else {
+			lines[i] = line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

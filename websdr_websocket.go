@@ -1244,6 +1244,15 @@ func (s *serverHeaderWriter) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
+// Hijack implements http.Hijacker so that WebSocket upgrades work through
+// this middleware wrapper.
+func (s *serverHeaderWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := s.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("serverHeaderWriter: underlying ResponseWriter does not implement http.Hijacker")
+}
+
 // WebSDRServerHeaderMiddleware injects "Server: WebSDR/..." on every response
 // served by the WebSDR HTTP server.
 func WebSDRServerHeaderMiddleware(next http.Handler) http.Handler {

@@ -1289,20 +1289,32 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 
 	// Emit individual fields from org_info block directly (matching real WebSDR format).
 	// Fields are emitted as top-level lines: Qth:, Description:, Email:, Logo: etc.
-	// Any line from websdr_org_info that has a recognised "Key: value" format is passed
-	// through as-is; unrecognised lines are skipped.
+	// The Email: value is XOR-obfuscated (each byte ^ 0x01) before transmission.
 	for _, line := range strings.Split(h.config.Server.WebSDROrgInfo, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		// Pass through any "Key: value" line directly
-		if idx := strings.Index(line, ":"); idx > 0 {
-			fmt.Fprintf(w, "%s\r\n", line)
+		// Pass through any "Key: value" line, obfuscating the Email: value
+		if colon := strings.Index(line, ":"); colon > 0 {
+			key := line[:colon]
+			val := line[colon+1:] // includes leading space
+			if strings.EqualFold(strings.TrimSpace(key), "email") {
+				// XOR each byte of the value with 0x01
+				b := []byte(val)
+				for i := range b {
+					if b[i] > 31 {
+						b[i] ^= 0x01
+					}
+				}
+				val = string(b)
+			}
+			fmt.Fprintf(w, "%s:%s\r\n", key, val)
 		}
 	}
 
-	// Mobile page (we serve m.html)
+	// Logo and mobile page
+	fmt.Fprintf(w, "Logo: logo.png\r\n")
 	fmt.Fprintf(w, "Mobile: m.html\r\n")
 
 	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)

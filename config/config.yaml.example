@@ -335,7 +335,8 @@ server:
   # Recognised fields (case-insensitive):
   #   Description: <text>   — server description shown in the UI
   #   Qth: <locator>        — Maidenhead grid locator (e.g. IO91)
-  #   Email: <address>      — operator contact address (required for websdr.org listing)
+  #   Email: <address>      — operator contact address (required for websdr.org listing;
+  #                           XOR-obfuscated before transmission)
   #
   # Directory registration (both disabled by default):
   #

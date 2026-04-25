@@ -65,6 +65,7 @@ services:
     ports:
       - 8080:8080   # Main UberSDR web interface
       - 8073:8073   # KiwiSDR protocol compatibility (if enabled in config)
+      - 8901:8901   # WebSDR protocol compatibility (if enabled in config)
 
     # Environment variables
     environment:

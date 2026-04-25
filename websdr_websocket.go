@@ -6,7 +6,6 @@ import (
 	"html"
 	"io"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -427,7 +426,10 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	atomic.AddInt32(&h.audioUserCount, 1)
 	defer atomic.AddInt32(&h.audioUserCount, -1)
 
-	userSessionID := fmt.Sprintf("websdr-%d-%s", time.Now().UnixNano(), clientIP)
+	// BUG-C: Use clientIP as the shared userSessionID base so that the audio
+	// and waterfall WebSocket connections from the same browser appear as a
+	// single user in the session list (mirrors KiwiSDR's timestamp+IP scheme).
+	userSessionID := fmt.Sprintf("websdr-%s", clientIP)
 	c.sessionID = userSessionID
 	h.sessions.SetUserAgent(userSessionID, "WebSDR Client")
 
@@ -668,6 +670,44 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		if c.wfState != nil {
 			c.wfState.Reset()
 		}
+
+		// BUG-D: tune the spectrum session to the visible frequency range.
+		// The hardcoded HF band is 10 kHz–30 MHz (bandwidth = 29990 kHz).
+		// At zoom level z, the visible bandwidth is bandBW / 2^z.
+		// The visible window starts at: bandStart + start * bandBW / (2^z * 1024)
+		// Center = visibleStart + visibleBW/2
+		// binBandwidth = visibleBW / binCount  (binCount = wfWidth, default 1024)
+		if c.session != nil {
+			const bandStartHz = 10000.0  // 10 kHz
+			const bandEndHz = 30000000.0 // 30 MHz
+			const bandBWHz = bandEndHz - bandStartHz
+
+			zoom := c.wfZoom
+			if zoom < 0 {
+				zoom = 0
+			}
+			zoomFactor := float64(int(1) << uint(zoom)) // 2^zoom
+			visibleBWHz := bandBWHz / zoomFactor
+
+			wfWidth := c.wfWidth
+			if wfWidth < 1 {
+				wfWidth = 1024
+			}
+
+			// start is in units of (visibleBW / wfWidth) pixels from band left edge
+			startOffsetHz := float64(c.wfStart) * visibleBWHz / float64(wfWidth)
+			visibleStartHz := bandStartHz + startOffsetHz
+			centerHz := visibleStartHz + visibleBWHz/2.0
+
+			binBandwidthHz := visibleBWHz / float64(wfWidth)
+
+			_ = c.handler.sessions.UpdateSpectrumSession(
+				c.session.ID,
+				uint64(centerHz),
+				binBandwidthHz,
+				wfWidth,
+			)
+		}
 	}
 }
 
@@ -707,66 +747,79 @@ func (c *websdrConn) streamAudio(done <-chan struct{}) {
 			curMode := c.mode
 			c.mu.RUnlock()
 
-			var frame []byte
-
 			// BUG-4: re-emit tag 0x81 if sample rate changed
 			pktRate := pkt.SampleRate
 			if pktRate <= 0 {
 				pktRate = c.handler.config.Audio.DefaultSampleRate
 			}
-			if pktRate > 0 && pktRate != c.lastAudioRate {
-				c.lastAudioRate = pktRate
-				frame = append(frame, 0x81, byte(pktRate>>8), byte(pktRate&0xFF))
-			}
 
-			// S-meter tag every 8 frames
-			c.headerCounter--
-			if c.headerCounter <= 0 {
-				c.headerCounter = 8
-				smeter := c.computeSmeter()
-				frame = append(frame, byte(0xF0|((smeter>>8)&0x0F)), byte(smeter&0xFF))
-			}
-
-			// FEAT-6: tag 0x85 AM-Sync status when mode=2
-			if curMode == 2 {
-				c.amSyncFrameCounter++
-				amTag := c.buildAMSyncTag()
-				if amTag != nil {
-					frame = append(frame, amTag...)
+			// BUG-A: radiod packets may contain many samples (e.g. 960 at 48 kHz).
+			// The ADPCM encoder processes exactly websdrBlockSamples (128) per call.
+			// We must loop over the PCM data in 128-sample chunks so that all audio
+			// is encoded and sent — not just the first 128 samples.
+			allSamples := pcmBytesToFloat32(pkt.PCMData)
+			for offset := 0; offset < len(allSamples); offset += websdrBlockSamples {
+				end := offset + websdrBlockSamples
+				if end > len(allSamples) {
+					end = len(allSamples)
 				}
-			}
+				chunk := allSamples[offset:end]
 
-			if isMuted {
-				frame = append(frame, 0x84)
+				var frame []byte
+
+				// Emit rate tag on first chunk of a packet where rate changed
+				if offset == 0 && pktRate > 0 && pktRate != c.lastAudioRate {
+					c.lastAudioRate = pktRate
+					frame = append(frame, 0x81, byte(pktRate>>8), byte(pktRate&0xFF))
+				}
+
+				// S-meter tag every 8 frames
+				c.headerCounter--
+				if c.headerCounter <= 0 {
+					c.headerCounter = 8
+					smeter := c.computeSmeter()
+					frame = append(frame, byte(0xF0|((smeter>>8)&0x0F)), byte(smeter&0xFF))
+				}
+
+				// FEAT-6: tag 0x85 AM-Sync status when mode=2
+				if curMode == 2 {
+					c.amSyncFrameCounter++
+					amTag := c.buildAMSyncTag()
+					if amTag != nil {
+						frame = append(frame, amTag...)
+					}
+				}
+
+				if isMuted {
+					frame = append(frame, 0x84)
+					if err := c.sendBinary(frame); err != nil {
+						return
+					}
+					continue
+				}
+
+				var scale float32
+				if agcMode == 1 {
+					scale = c.adpcm.UpdateAGC(chunk)
+				} else {
+					scale = ManualScale(gainDB)
+				}
+
+				// FEAT-5: squelch threshold (ratio-based, §3.6)
+				const squelchThreshold = 0.1
+				audioPayload, sqResult := c.adpcm.Encode(chunk, scale, squelchOn, squelchThreshold)
+				if sqResult == SquelchClosed {
+					frame = append(frame, 0x84)
+					if err := c.sendBinary(frame); err != nil {
+						return
+					}
+					continue
+				}
+				frame = append(frame, audioPayload...)
+
 				if err := c.sendBinary(frame); err != nil {
 					return
 				}
-				continue
-			}
-
-			samples := pcmBytesToFloat32(pkt.PCMData)
-
-			var scale float32
-			if agcMode == 1 {
-				scale = c.adpcm.UpdateAGC(samples)
-			} else {
-				scale = ManualScale(gainDB)
-			}
-
-			// FEAT-5: squelch threshold (ratio-based, §3.6)
-			const squelchThreshold = 0.1
-			audioPayload, sqResult := c.adpcm.Encode(samples, scale, squelchOn, squelchThreshold)
-			if sqResult == SquelchClosed {
-				frame = append(frame, 0x84)
-				if err := c.sendBinary(frame); err != nil {
-					return
-				}
-				continue
-			}
-			frame = append(frame, audioPayload...)
-
-			if err := c.sendBinary(frame); err != nil {
-				return
 			}
 		}
 	}
@@ -808,14 +861,14 @@ func (c *websdrConn) computeSmeter() uint16 {
 	}
 	if radiodCtrl := c.handler.sessions.radiod; radiodCtrl != nil {
 		if cs := radiodCtrl.GetChannelStatus(c.session.SSRC); cs != nil {
-			// BUG-3: spec formula: smeter_raw = log10(power)*1000 - 5400
+			// BasebandPower is in dBFS (e.g. -80.0).
+			// The browser displays: dB = smeter/10 - 127
+			// So smeter = (dbfs + 127) * 10 maps dBFS directly to the display.
+			// -127 dBFS → 0   → displayed -127 dB (noise floor / no signal)
+			//  -80 dBFS → 470 → displayed  -80 dB
+			//    0 dBFS → 1270 → displayed   0 dB
 			dbfs := float64(cs.BasebandPower)
-			linearPower := math.Pow(10.0, dbfs/10.0)
-			if linearPower <= 0 {
-				return 0
-			}
-			smeterRaw := int(math.Log10(linearPower)*1000.0 - 5400.0)
-			smeterEnc := smeterRaw / 10
+			smeterEnc := int((dbfs + 127.0) * 10.0)
 			if smeterEnc < 0 {
 				smeterEnc = 0
 			}
@@ -886,8 +939,10 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Create a spectrum session
-	userSessionID := fmt.Sprintf("websdr-wf-%d-%s", time.Now().UnixNano(), clientIP)
+	// BUG-C: Use the same userSessionID as the audio session so that audio and
+	// waterfall connections from the same browser appear as one user in the
+	// session list (mirrors KiwiSDR's timestamp+IP shared-UUID scheme).
+	userSessionID := fmt.Sprintf("websdr-%s", clientIP)
 	session, err := h.sessions.CreateSpectrumSessionWithUserID(clientIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("WebSDR: failed to create waterfall session: %v", err)
@@ -896,6 +951,18 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	}
 	c.session = session
 	c.sessionID = userSessionID
+
+	// BUG-D: tune the spectrum session immediately to the full HF band view
+	// (zoom=0, start=0) so the waterfall shows data before the first
+	// /~~waterparam command arrives.
+	{
+		const bandStartHz = 10000.0
+		const bandEndHz = 30000000.0
+		const bandBWHz = bandEndHz - bandStartHz
+		centerHz := bandStartHz + bandBWHz/2.0
+		binBandwidthHz := bandBWHz / float64(c.wfWidth)
+		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(centerHz), binBandwidthHz, c.wfWidth)
+	}
 
 	defer func() {
 		_ = h.sessions.DestroySession(session.ID)
@@ -977,7 +1044,19 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 }
 
 // spectrumToPixels converts FFT power data (dBFS float32) to waterfall pixel values.
-// BUG-2 fix: convert dBFS → linear power before calling WebSDRPixelFromPower.
+//
+// The SpectrumChan carries dBFS values (e.g. -120.0 … 0.0).  The WebSDR
+// waterfall pixel range is 0–255 where 0 = noise floor and 255 = full scale.
+// We map linearly:
+//
+//	pixel = clamp((dBFS - floorDBFS) * 255 / rangeDB, 0, 255)
+//
+// floorDBFS defaults to -120 dBFS and rangeDB to 100 dB, giving:
+//
+//	-120 dBFS → 0   (noise floor)
+//	 -20 dBFS → 255 (strong signal)
+//
+// WebSDRWaterfallCalibration shifts the floor up/down (positive = brighter).
 func spectrumToPixels(fftData []float32, width int, h *WebSDRHandler) []byte {
 	pixels := make([]byte, width)
 	n := len(fftData)
@@ -985,23 +1064,32 @@ func spectrumToPixels(fftData []float32, width int, h *WebSDRHandler) []byte {
 		return pixels
 	}
 
-	gainAdj := float32(0)
+	// Calibration offset in dB (positive = brighter / lower noise floor).
+	calibration := float32(0)
 	if h != nil && h.config != nil {
-		gainAdj = h.config.Server.WebSDRWaterfallCalibration
+		calibration = h.config.Server.WebSDRWaterfallCalibration
 	}
 
+	const floorDBFS = float32(-120.0)
+	const rangeDB = float32(100.0)
+
 	for i := 0; i < width; i++ {
-		// Map pixel column to FFT bin
+		// Map pixel column to FFT bin (nearest-neighbour).
 		srcIdx := i * n / width
 		if srcIdx >= n {
 			srcIdx = n - 1
 		}
-		dbfs := float64(fftData[srcIdx])
+		dbfs := fftData[srcIdx] + calibration
 
-		// BUG-2: convert dBFS to linear power: power = 10^(dBFS/10)
-		linearPower := float32(math.Pow(10.0, dbfs/10.0))
-
-		pixels[i] = WebSDRPixelFromPower(linearPower, gainAdj)
+		// Linear dBFS → pixel mapping.
+		idx := int((dbfs - floorDBFS) * 255.0 / rangeDB)
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > 255 {
+			idx = 255
+		}
+		pixels[i] = byte(idx)
 	}
 
 	return pixels
@@ -1660,7 +1748,8 @@ func (h *WebSDRHandler) serveStaticFile(w http.ResponseWriter, r *http.Request) 
 	http.ServeFile(w, r, filePath)
 }
 
-// serveHTMLWithSSI reads an HTML file and processes <!--#include virtual="..." --> directives.
+// serveHTMLWithSSI reads an HTML file and processes <!--#include virtual="..." --> and
+// <!--#include file="..." --> directives (both forms are used by WebSDR HTML files).
 func (h *WebSDRHandler) serveHTMLWithSSI(w http.ResponseWriter, r *http.Request, filePath string) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -1670,8 +1759,8 @@ func (h *WebSDRHandler) serveHTMLWithSSI(w http.ResponseWriter, r *http.Request,
 
 	content := string(data)
 
-	// Process SSI includes: <!--#include virtual="path" -->
-	ssiRe := regexp.MustCompile(`<!--#include\s+virtual="([^"]+)"\s*-->`)
+	// Process SSI includes: <!--#include virtual="path" --> or <!--#include file="path" -->
+	ssiRe := regexp.MustCompile(`<!--#include\s+(?:virtual|file)="([^"]+)"\s*-->`)
 	content = ssiRe.ReplaceAllStringFunc(content, func(match string) string {
 		sub := ssiRe.FindStringSubmatch(match)
 		if len(sub) < 2 {

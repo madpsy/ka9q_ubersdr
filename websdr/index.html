@@ -23,12 +23,11 @@ More information about the WebSDR project can be found on <a href="http://www.we
     <script>
      function audio_start()
      {
-      if (!document.ct) document.ct= new webkitAudioContext();
+      if (!document.ct) document.ct= new (window.AudioContext || window.webkitAudioContext)();
       var s = document.ct.createBufferSource();
       s.connect(document.ct.destination);
       document.ct.resume();
-      try { s.start(0); } catch(e) { s.noteOn(0);}
-       i
+      try { s.start(0); } catch(e) { s.noteOn(0); }
       var e = document.getElementById("audiostartbutton");
       e.style.display = (e.style.display == 'block') ? 'none' : 'block';
       }

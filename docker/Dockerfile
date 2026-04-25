@@ -104,7 +104,11 @@ RUN chmod +x /entrypoint.sh
 
 # Expose default ports
 # 8080 - Web interface (as configured in config.yaml)
+# 8073 - KiwiSDR protocol compatibility (if enabled in config)
+# 8901 - WebSDR protocol compatibility (if enabled in config)
 EXPOSE 8080/tcp
+EXPOSE 8073/tcp
+EXPOSE 8901/tcp
 
 # Environment variables
 ENV TZ=UTC

@@ -37,11 +37,14 @@ var websdrQuantModes = [6]struct {
 	shrinkThresh [2]int // thresholds for first and second mantissa shrink
 }{
 	0: {}, // unused (mode 0 not valid)
+	// Shrink thresholds derived from the browser decoder's s[] array:
+	//   s = [999, 999, 8, 4, 2, 1, 99, 99]
+	// For mode v: 1st threshold = s[v], 2nd threshold = s[v-1].
 	1: {step: 1, quotientLim: 14, reducedMant: 0, shrinkThresh: [2]int{999, 999}},
 	2: {step: 2, quotientLim: 13, reducedMant: 1, shrinkThresh: [2]int{8, 999}},
-	3: {step: 4, quotientLim: 12, reducedMant: 2, shrinkThresh: [2]int{4, 999}},
-	4: {step: 8, quotientLim: 11, reducedMant: 3, shrinkThresh: [2]int{2, 8}},
-	5: {step: 16, quotientLim: 10, reducedMant: 4, shrinkThresh: [2]int{1, 4}},
+	3: {step: 4, quotientLim: 12, reducedMant: 2, shrinkThresh: [2]int{4, 8}},
+	4: {step: 8, quotientLim: 11, reducedMant: 3, shrinkThresh: [2]int{2, 4}},
+	5: {step: 16, quotientLim: 10, reducedMant: 4, shrinkThresh: [2]int{1, 2}},
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,14 +273,13 @@ func (e *WebSDRAdpcmEncoder) Encode(samples []float32, scale float32, squelchEna
 	qm := websdrQuantModes[quantMode]
 
 	for _, val := range residuals {
-		sign := 0
-		if val < 0 {
-			sign = 1
-		}
-		absVal := val
-		if absVal < 0 {
-			absVal = -absVal
-		}
+		// Spec §3.5: sign = val >> 31 (arithmetic shift: 0 for positive, 1 for negative)
+		// abs_val = val ^ (val >> 31)  — this is NOT standard abs; for negative val it
+		// gives |val| - 1 (sign-magnitude encoding where the sign bit is separate).
+		// Using true |val| here would produce wrong quotient/mantissa values.
+		signShift := val >> 31 // 0 for val>=0, -1 (all 1s) for val<0
+		sign := signShift & 1  // 0 or 1
+		absVal := val ^ signShift
 
 		quotient := absVal / qm.step
 		mantissa := absVal & (qm.step - 1)

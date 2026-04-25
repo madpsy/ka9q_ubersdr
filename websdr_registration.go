@@ -88,6 +88,15 @@ func (reg *WebSDRRegistrar) Stop() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (reg *WebSDRRegistrar) websdrOrgLoop() {
+	// Wait 2 minutes before the first registration attempt so that the WebSDR
+	// HTTP server is fully warmed up and ready to respond to the /~~orgstatus
+	// callback that websdr.org makes immediately after receiving the registration.
+	select {
+	case <-reg.stop:
+		return
+	case <-time.After(2 * time.Minute):
+	}
+
 	serverSpec := reg.config.Server.WebSDRRegisterWebSDROrgServer
 	if serverSpec == "" {
 		serverSpec = "websdr.ewi.utwente.nl 80"

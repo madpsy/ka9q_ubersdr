@@ -264,6 +264,8 @@ func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case path == "/" || path == "/index.html":
+		h.handleIndexHTML(w, r)
 	case path == "/~~orgstatus":
 		h.handleOrgStatus(w, r)
 	case path == "/~~othersj":
@@ -1718,7 +1720,115 @@ func (h *WebSDRHandler) handleSysopBlockMee(w http.ResponseWriter, r *http.Reque
 // Static file serving with SSI (§8) — FEAT-9, FEAT-10
 // ─────────────────────────────────────────────────────────────────────────────
 
-// serveStaticFile serves a file from the two-directory search path.
+// handleIndexHTML generates index.html dynamically from the server config so
+// that the page title and description reflect the operator's callsign, name,
+// location, and antenna without requiring a hand-edited static file.
+//
+// The body text mirrors the user-supplied description from websdr/index.html;
+// the SSI includes (websdr-head.html, websdr-controls.html) are expanded
+// inline using the same logic as serveHTMLWithSSI.
+func (h *WebSDRHandler) handleIndexHTML(w http.ResponseWriter, r *http.Request) {
+	cfg := h.config
+
+	// Build page title: "<Callsign> WebSDR — <Name>, <Location>"
+	callsign := cfg.Admin.Callsign
+	if callsign == "" {
+		callsign = "WebSDR"
+	}
+	name := cfg.Admin.Name
+	location := cfg.Admin.Location
+	var titleParts []string
+	titleParts = append(titleParts, callsign+" WebSDR")
+	if name != "" {
+		titleParts = append(titleParts, name)
+	}
+	if location != "" {
+		titleParts = append(titleParts, location)
+	}
+	title := strings.Join(titleParts, " — ")
+
+	// Build description paragraph from config fields.
+	// Falls back to a generic line if nothing is configured.
+	description := cfg.Admin.Description
+	if description == "" {
+		var parts []string
+		if callsign != "WebSDR" {
+			parts = append(parts, "WebSDR operated by "+callsign)
+		}
+		if location != "" {
+			parts = append(parts, "from "+location)
+		}
+		if cfg.Admin.Antenna != "" {
+			parts = append(parts, "Antenna: "+cfg.Admin.Antenna)
+		}
+		if len(parts) > 0 {
+			description = strings.Join(parts, ". ") + "."
+		} else {
+			description = "WebSDR receiver."
+		}
+	}
+
+	// Expand SSI includes for websdr-head.html and websdr-controls.html.
+	expandSSI := func(filename string) string {
+		p := h.findStaticFile(filename)
+		if p == "" {
+			return ""
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
+
+	head := expandSSI("websdr-head.html")
+	controls := expandSSI("websdr-controls.html")
+
+	// Render the page.  Structure is identical to the original index.html so
+	// that all existing JS (bodyonload, etc.) continues to work.
+	page := `<!DOCTYPE HTML>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+<title>` + html.EscapeString(title) + `</title>
+` + head + `
+</head>
+
+<body onload=bodyonload()>
+
+` + html.EscapeString(description) + `
+More information about the WebSDR project can be found on <a href="http://www.websdr.org">http://www.websdr.org</a>.
+<p>
+<hr>
+
+<div style="display: block; position: fixed; top: 0px; left: 0px; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000;" id="audiostartbutton">
+	 <div class="ctl" style="margin:50px; padding:20px;">
+	   Click here to start audio:
+	   <input type="button" value="start audio" onclick="audio_start()">
+	   <script>
+	    function audio_start()
+	    {
+	     if (!document.ct) document.ct= new (window.AudioContext || window.webkitAudioContext)();
+	     var s = document.ct.createBufferSource();
+	     s.connect(document.ct.destination);
+	     document.ct.resume();
+	     try { s.start(0); } catch(e) { s.noteOn(0); }
+	     var e = document.getElementById("audiostartbutton");
+	     e.style.display = (e.style.display == 'block') ? 'none' : 'block';
+	     }
+	   </script>
+	 </div>
+</div>
+
+` + controls + `
+
+</body>
+</html>
+`
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	noCacheHeaders(w)
+	fmt.Fprint(w, page)
+}
+
 // For .html files, SSI directives (<!--#include virtual="..." -->) are processed.
 func (h *WebSDRHandler) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	// Sanitise path

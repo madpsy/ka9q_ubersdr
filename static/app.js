@@ -688,6 +688,9 @@ function updateIOSMediaSession() {
             { src: '/images/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' }
         ]
     });
+
+    // Explicitly set playback state so Android Chrome shows the media notification
+    navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
 }
 
 // Initialize on page load
@@ -1028,9 +1031,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         navigator.mediaSession.setActionHandler('play', () => {
                             if (isMuted) toggleMute();
                             iosMediaElement?.play().catch(() => {});
+                            navigator.mediaSession.playbackState = 'playing';
                         });
                         navigator.mediaSession.setActionHandler('pause', () => {
                             if (!isMuted) toggleMute();
+                            navigator.mediaSession.playbackState = 'paused';
                         });
                     }
                 } catch (e) {
@@ -3372,6 +3377,7 @@ function playAudioBuffer(buffer) {
     if (!_mediaSessionActivated && iosMediaElement && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateIOSMediaSession();
+        navigator.mediaSession.playbackState = 'playing';
         // Ensure the media element is playing (may have been paused by the OS)
         iosMediaElement.play().catch(() => {});
     }
@@ -4761,6 +4767,11 @@ function toggleMute() {
     // Notify extensions (and the bridge popup) of mute state change
     if (window.radioAPI) {
         window.radioAPI.notifyMuteChange(isMuted);
+    }
+
+    // Keep Media Session playback state in sync with mute
+    if ('mediaSession' in navigator && _mediaSessionActivated) {
+        navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
     }
 }
 

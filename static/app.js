@@ -11127,17 +11127,18 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
     // Track the edge-tune state before wheel mode was activated so we can restore it
     let edgeTuneStateBeforeWheel = null;
-    const MOBILE_BREAKPOINT = 1024;
 
-    function isMobile() {
-        return window.innerWidth <= MOBILE_BREAKPOINT;
+    // Detect mobile by whether the CSS has made the toggle visible.
+    // This is the authoritative signal — avoids hardcoded pixel breakpoints.
+    function isMobileLayout() {
+        return getComputedStyle(modeToggle).display !== 'none';
     }
 
     function applyMode(mode) {
         const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
 
-        // On desktop (wide screen) always show buttons regardless of saved preference
-        if (!isMobile()) {
+        // On desktop the toggle is CSS-hidden; always show buttons, hide wheel
+        if (!isMobileLayout()) {
             tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
             // Restore edge tune if it was overridden by a previous wheel session
@@ -11151,6 +11152,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             return;
         }
 
+        // Mobile layout — respect the user's choice
         if (mode === 'wheel') {
             tuningBtns.style.display = 'none';
             wheelCont.style.display  = 'block';
@@ -11176,7 +11178,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         }
     }
 
-    // Re-apply correct mode when window is resized across the mobile breakpoint
+    // Re-apply correct mode when window is resized (e.g. crossing the CSS breakpoint)
     window.addEventListener('resize', function () {
         applyMode(localStorage.getItem(STORAGE_KEY) || 'buttons');
     });

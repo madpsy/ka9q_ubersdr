@@ -1848,7 +1848,7 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .site-footer .footer-mobile {
-        display: inline-block;
+        display: inline-block !important;
     }
 
     #local-time {

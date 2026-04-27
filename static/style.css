@@ -1847,6 +1847,10 @@ input[type="range"]::-moz-range-thumb {
         display: inline-block;
     }
 
+    #local-time {
+        display: none;
+    }
+
     .controls {
         grid-template-columns: 1fr;
         transform: scale(0.9);

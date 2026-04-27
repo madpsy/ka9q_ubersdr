@@ -1066,7 +1066,7 @@ body {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 18%;
+    width: 28%;
     pointer-events: none;
     z-index: 2;
 }
@@ -1076,8 +1076,9 @@ body {
     left: 0;
     background: linear-gradient(
         to right,
-        rgba(20, 30, 40, 0.85) 0%,
-        rgba(20, 30, 40, 0.4)  40%,
+        rgba(10, 18, 28, 0.96) 0%,
+        rgba(10, 18, 28, 0.6)  35%,
+        rgba(10, 18, 28, 0.15) 70%,
         transparent            100%
     );
 }
@@ -1087,8 +1088,9 @@ body {
     right: 0;
     background: linear-gradient(
         to left,
-        rgba(20, 30, 40, 0.85) 0%,
-        rgba(20, 30, 40, 0.4)  40%,
+        rgba(10, 18, 28, 0.96) 0%,
+        rgba(10, 18, 28, 0.6)  35%,
+        rgba(10, 18, 28, 0.15) 70%,
         transparent            100%
     );
 }

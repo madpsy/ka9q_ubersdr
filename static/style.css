@@ -527,6 +527,10 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+.site-footer .footer-mobile {
+    display: none;
+}
+
 .site-footer a {
     color: #3498db;
     text-decoration: none;
@@ -1835,6 +1839,14 @@ input[type="range"]::-moz-range-thumb {
 
 /* Responsive design */
 @media (max-width: 1024px) {
+    .site-footer .footer-desktop {
+        display: none;
+    }
+
+    .site-footer .footer-mobile {
+        display: inline-block;
+    }
+
     .controls {
         grid-template-columns: 1fr;
         transform: scale(0.9);

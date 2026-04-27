@@ -224,6 +224,14 @@ let currentAudioContextSampleRate = 0; // Track current AudioContext sample rate
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
 let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist chosen output device
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
+let iosMediaElement = null;  // Hidden <audio> element for iOS background audio (MediaStreamDestination bridge)
+
+// iOS Safari detection — used to decide whether to create the media element bridge.
+// The bridge keeps the audio session alive when Safari is backgrounded on iPhone/iPad.
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad on iOS 13+
+const _isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+const _needsIOSBridge = _isSafari; // covers both iOS Safari and macOS Safari (both suspend AudioContext)
 // Expose audioContext globally for recorder
 window.audioContext = null;
 // Expose ws globally for compatibility (will be set by wsManager)
@@ -659,6 +667,28 @@ function updatePageTitle() {
     }
 }
 
+// Update iOS / macOS Safari lock-screen / Control Centre media metadata.
+// Called whenever frequency or mode changes so the lock screen stays current.
+function updateIOSMediaSession() {
+    if (!_needsIOSBridge || !('mediaSession' in navigator)) return;
+
+    const freqInput = document.getElementById('frequency');
+    const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+    const freqMHz = (!isNaN(freq) && freq > 0) ? (freq / 1_000_000).toFixed(3) + ' MHz' : '';
+    const modeStr = currentMode ? currentMode.toUpperCase() : '';
+    const callsign = window.instanceDescription?.receiver?.callsign || '';
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title:  callsign ? `UberSDR — ${callsign}` : 'UberSDR',
+        artist: [freqMHz, modeStr].filter(Boolean).join(' '),
+        album:  'Live SDR',
+        artwork: [
+            { src: '/images/android-chrome-512x512.png', sizes: '512x512', type: 'image/png' },
+            { src: '/images/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' }
+        ]
+    });
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     // Load settings from URL parameters first
@@ -966,6 +996,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (err) {
                     console.error('Failed to resume AudioContext:', err);
                     log('Failed to activate audio context', 'error');
+                }
+            }
+
+            // iOS/Safari background audio bridge.
+            // Creates a MediaStreamDestination → <audio> element path so iOS treats
+            // this as a proper media session and keeps audio alive when backgrounded.
+            // MUST be inside a user-gesture handler so audio.play() is allowed.
+            if (_needsIOSBridge && !iosMediaElement && audioContext) {
+                try {
+                    const dest = audioContext.createMediaStreamDestination();
+                    audioContext._iosStreamDest = dest;
+                    iosMediaElement = document.createElement('audio');
+                    iosMediaElement.setAttribute('playsinline', '');
+                    iosMediaElement.style.display = 'none';
+                    iosMediaElement.srcObject = dest.stream;
+                    document.body.appendChild(iosMediaElement);
+                    await iosMediaElement.play();
+                    console.log('[iOS] MediaStreamDestination bridge created and playing');
+
+                    // Set up Media Session API for lock-screen / Control Centre controls
+                    if ('mediaSession' in navigator) {
+                        updateIOSMediaSession();
+
+                        // Disable skip buttons (meaningless for live radio)
+                        navigator.mediaSession.setActionHandler('previoustrack', null);
+                        navigator.mediaSession.setActionHandler('nexttrack', null);
+
+                        // Map play/pause to mute/unmute (can't truly pause a live stream)
+                        navigator.mediaSession.setActionHandler('play', () => {
+                            if (isMuted) toggleMute();
+                            iosMediaElement?.play().catch(() => {});
+                        });
+                        navigator.mediaSession.setActionHandler('pause', () => {
+                            if (!isMuted) toggleMute();
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[iOS] Could not create media element bridge:', e.message);
+                    iosMediaElement = null;
+                    if (audioContext) audioContext._iosStreamDest = null;
                 }
             }
 
@@ -2645,6 +2715,15 @@ async function handleBinaryMessage(data) {
             audioStartTime = audioContext.currentTime;
             // Clear the old _sinkGain so applyAudioSink() creates a fresh one
             audioContext._sinkGain = null;
+            // Tear down iOS bridge — it belongs to the old context.
+            // It cannot be rebuilt here (not a user gesture); the user must tap again.
+            if (iosMediaElement) {
+                iosMediaElement.pause();
+                iosMediaElement.srcObject = null;
+                if (iosMediaElement.parentNode) iosMediaElement.parentNode.removeChild(iosMediaElement);
+                iosMediaElement = null;
+            }
+            audioContext._iosStreamDest = null;
             applyAudioSink();
 
             // Reinitialize all audio nodes
@@ -3054,6 +3133,15 @@ async function handlePCMAudio(msg) {
         audioStartTime = audioContext.currentTime;
         // Clear the old _sinkGain so applyAudioSink() creates a fresh one
         audioContext._sinkGain = null;
+        // Tear down iOS bridge — it belongs to the old context.
+        // It cannot be rebuilt here (not a user gesture); the user must tap again.
+        if (iosMediaElement) {
+            iosMediaElement.pause();
+            iosMediaElement.srcObject = null;
+            if (iosMediaElement.parentNode) iosMediaElement.parentNode.removeChild(iosMediaElement);
+            iosMediaElement = null;
+        }
+        audioContext._iosStreamDest = null;
         applyAudioSink();
 
         // Reinitialize all audio nodes
@@ -3583,11 +3671,18 @@ function playAudioBuffer(buffer) {
     }
 
     // Step 12: Final output to destination
-    // If the Firefox HTMLMediaElement sink path is active (_sinkGain exists and a specific
-    // device is selected), route audio exclusively through _sinkGain → MediaStreamDestination
-    // → <audio>.setSinkId() to avoid double output on both default and chosen device.
+    // Priority:
+    //   1. Firefox HTMLMediaElement sink path (_sinkGain + specific device selected)
+    //   2. iOS/Safari MediaStreamDestination bridge (_iosStreamDest) — keeps audio alive in background
+    //   3. Direct audioContext.destination (all other browsers)
     if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
+    } else if (audioContext._iosStreamDest && audioContext._iosStreamDest.context === audioContext) {
+        // iOS/Safari path: connect to the media element bridge AND to destination.
+        // The bridge registers a proper media session so iOS keeps audio alive when backgrounded.
+        // Connecting to destination as well ensures desktop Safari still outputs normally.
+        outputNode.connect(audioContext._iosStreamDest);
+        outputNode.connect(audioContext.destination);
     } else {
         outputNode.connect(audioContext.destination);
     }
@@ -3596,6 +3691,10 @@ function playAudioBuffer(buffer) {
     // by autoplay policy on page load; retry once the user has interacted with the page)
     if (audioSinkElement && audioSinkElement.paused) {
         audioSinkElement.play().catch(() => {});
+    }
+    // iOS bridge: ensure the media element is still playing (iOS may pause it on interruption)
+    if (iosMediaElement && iosMediaElement.paused) {
+        iosMediaElement.play().catch(() => {});
     }
 
     // Buffer management using configurable threshold
@@ -4146,8 +4245,9 @@ function setMode(mode, preserveBandwidth = false) {
     currentMode = mode;
     window.currentMode = mode; // Update global reference
 
-    // Update page title
+    // Update page title and iOS media session metadata
     updatePageTitle();
+    updateIOSMediaSession();
 
     // Update button states
     document.querySelectorAll('.mode-btn').forEach(btn => {

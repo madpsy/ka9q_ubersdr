@@ -1836,7 +1836,6 @@ input[type="range"]::-moz-range-thumb {
     #spectrum-label-edge-tune,
     #spectrum-label-manual,
     #spectrum-control-group-manual,
-    #spectrum-auto-range-controls,
     #spectrum-manual-range-controls {
         display: none !important;
     }

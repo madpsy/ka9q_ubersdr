@@ -225,6 +225,7 @@ let audioUserDisconnected = false; // Flag to prevent reconnection after user di
 let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist chosen output device
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 let iosMediaElement = null;  // Hidden <audio> element for iOS background audio (MediaStreamDestination bridge)
+let _mediaSessionActivated = false; // True once Media Session metadata has been set after real audio flows
 
 // Mobile device detection — used to decide whether to create the media element bridge.
 // The bridge keeps audio alive when the browser is backgrounded and enables lock-screen
@@ -2724,6 +2725,7 @@ async function handleBinaryMessage(data) {
                 iosMediaElement = null;
             }
             audioContext._iosStreamDest = null;
+            _mediaSessionActivated = false; // Reset so it re-activates on next audio buffer
             applyAudioSink();
 
             // Reinitialize all audio nodes
@@ -3142,6 +3144,7 @@ async function handlePCMAudio(msg) {
             iosMediaElement = null;
         }
         audioContext._iosStreamDest = null;
+        _mediaSessionActivated = false; // Reset so it re-activates on next audio buffer
         applyAudioSink();
 
         // Reinitialize all audio nodes
@@ -3359,6 +3362,17 @@ function playAudioBuffer(buffer) {
         });
         // Return early to skip this buffer - next buffer will play after resume
         return;
+    }
+
+    // On first real audio buffer, (re-)activate the Media Session so Android Chrome
+    // shows the notification. Chrome requires audio to actually be flowing through the
+    // <audio> element before it registers a media session — setting metadata at bridge
+    // creation time (before audio flows) is not enough.
+    if (!_mediaSessionActivated && iosMediaElement && 'mediaSession' in navigator) {
+        _mediaSessionActivated = true;
+        updateIOSMediaSession();
+        // Ensure the media element is playing (may have been paused by the OS)
+        iosMediaElement.play().catch(() => {});
     }
 
     // Safety check: ensure analysers belong to current context

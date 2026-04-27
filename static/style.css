@@ -1743,12 +1743,13 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 768px) {
     .controls {
         grid-template-columns: 1fr;
-        transform: none;
-        margin-top: 0;
-        margin-bottom: 0;
+        transform: scale(0.9);
+        transform-origin: top center;
+        margin-top: -10px;
+        margin-bottom: -30px;
         padding: 10px 0;
         gap: 15px;
-        width: 100%;
+        width: max-content;
     }
     
     .info-grid {

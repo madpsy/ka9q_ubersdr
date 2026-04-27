@@ -11140,24 +11140,30 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (mode === 'wheel') {
             tuningBtns.style.display = 'none';
             wheelCont.style.display  = 'block';
-            // Enable edge tune so the spectrum follows the wheel — save previous state first
-            if (edgeTuneCheckbox) {
-                edgeTuneStateBeforeWheel = edgeTuneCheckbox.checked;
-                if (!edgeTuneCheckbox.checked) {
-                    edgeTuneCheckbox.checked = true;
-                    edgeTuneCheckbox.dispatchEvent(new Event('change'));
-                }
+            // Enable edge tune so the spectrum follows the wheel.
+            // Save the previous localStorage value so we can restore it later.
+            if (edgeTuneStateBeforeWheel === null) {
+                edgeTuneStateBeforeWheel = localStorage.getItem('edgeTuneEnabled') === 'true';
             }
+            // Set checkbox + localStorage so spectrum-display.js picks it up
+            // whether it has already initialised or not.
+            if (edgeTuneCheckbox) {
+                edgeTuneCheckbox.checked = true;
+                edgeTuneCheckbox.dispatchEvent(new Event('change'));
+            }
+            localStorage.setItem('edgeTuneEnabled', 'true');
         } else {
             tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
             // Restore edge tune to whatever it was before wheel mode
-            if (edgeTuneCheckbox && edgeTuneStateBeforeWheel !== null) {
-                if (edgeTuneCheckbox.checked !== edgeTuneStateBeforeWheel) {
-                    edgeTuneCheckbox.checked = edgeTuneStateBeforeWheel;
+            if (edgeTuneStateBeforeWheel !== null) {
+                const restore = edgeTuneStateBeforeWheel;
+                edgeTuneStateBeforeWheel = null;
+                localStorage.setItem('edgeTuneEnabled', restore.toString());
+                if (edgeTuneCheckbox) {
+                    edgeTuneCheckbox.checked = restore;
                     edgeTuneCheckbox.dispatchEvent(new Event('change'));
                 }
-                edgeTuneStateBeforeWheel = null;
             }
         }
     }

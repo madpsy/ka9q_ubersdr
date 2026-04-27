@@ -11107,37 +11107,21 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // Only wire up if the toggle is present (it's hidden on desktop but still in DOM)
     if (!modeToggle || !radioBtns || !radioWheel || !tuningBtns || !wheelCont) return;
 
-    // ── Restore saved preference (default: 'buttons') ────────────────────────
-    const saved = localStorage.getItem(STORAGE_KEY) || 'buttons';
-    applyMode(saved);
-    if (saved === 'wheel') {
-        radioWheel.checked = true;
-    } else {
-        radioBtns.checked = true;
-    }
-
-    radioBtns.addEventListener('change', function () {
-        applyMode('buttons');
-        localStorage.setItem(STORAGE_KEY, 'buttons');
-    });
-    radioWheel.addEventListener('change', function () {
-        applyMode('wheel');
-        localStorage.setItem(STORAGE_KEY, 'wheel');
-    });
-
     // Track the edge-tune state before wheel mode was activated so we can restore it
     let edgeTuneStateBeforeWheel = null;
 
-    // Detect mobile by whether the CSS has made the toggle visible.
-    // This is the authoritative signal — avoids hardcoded pixel breakpoints.
+    // Detect mobile: use matchMedia to match the same breakpoint as the CSS
+    const mobileQuery = window.matchMedia('(max-width: 1024px)');
+
     function isMobileLayout() {
-        return getComputedStyle(modeToggle).display !== 'none';
+        return mobileQuery.matches;
     }
 
+    // ── Mode application ──────────────────────────────────────────────────────
     function applyMode(mode) {
         const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
 
-        // On desktop the toggle is CSS-hidden; always show buttons, hide wheel
+        // On desktop always show buttons, hide wheel
         if (!isMobileLayout()) {
             tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
@@ -11178,8 +11162,26 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         }
     }
 
-    // Re-apply correct mode when window is resized (e.g. crossing the CSS breakpoint)
-    window.addEventListener('resize', function () {
+    // ── Restore saved preference (default: 'buttons') ────────────────────────
+    const saved = localStorage.getItem(STORAGE_KEY) || 'buttons';
+    if (saved === 'wheel') {
+        radioWheel.checked = true;
+    } else {
+        radioBtns.checked = true;
+    }
+    applyMode(saved);
+
+    radioBtns.addEventListener('change', function () {
+        applyMode('buttons');
+        localStorage.setItem(STORAGE_KEY, 'buttons');
+    });
+    radioWheel.addEventListener('change', function () {
+        applyMode('wheel');
+        localStorage.setItem(STORAGE_KEY, 'wheel');
+    });
+
+    // Re-apply when viewport crosses the breakpoint
+    mobileQuery.addEventListener('change', function () {
         applyMode(localStorage.getItem(STORAGE_KEY) || 'buttons');
     });
 

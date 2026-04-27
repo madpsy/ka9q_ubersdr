@@ -1842,10 +1842,8 @@ input[type="range"]::-moz-range-thumb {
 
     #spectrum-btn-zoom-in,
     #spectrum-btn-zoom-out {
-        font-size: 1.4em;
-        padding: 8px 16px;
-        min-width: 48px;
-        min-height: 44px;
+        font-size: 0.9em;
+        padding: 8px;
     }
 
     input[type="range"] {

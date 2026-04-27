@@ -11136,59 +11136,59 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     }
 
     // ── Wheel drag logic ──────────────────────────────────────────────────────
-    // Velocity (px/s) → frequency step size mapping
-    const SPEED_STEPS = [
-        { maxSpeed: 30,       hz: 10     },
-        { maxSpeed: 80,       hz: 100    },
-        { maxSpeed: 200,      hz: 1000   },
-        { maxSpeed: 500,      hz: 10000  },
-        { maxSpeed: Infinity, hz: 100000 },
-    ];
-    // Pixels of drag required to fire one frequency step
-    const PX_PER_STEP = 8;
+    // Step size always comes from the dropdown (frequencyScrollStep global).
+    // Drag speed controls how many steps fire — faster drag = more pixels per
+    // frame = more steps. One step fires every PX_PER_STEP pixels of drag.
+    const PX_PER_STEP = 12;
 
-    function speedToHz(pxPerSec) {
-        for (const s of SPEED_STEPS) {
-            if (Math.abs(pxPerSec) < s.maxSpeed) return s.hz;
-        }
-        return 100000;
+    function getCurrentStepHz() {
+        // frequencyScrollStep is kept in sync by updateFrequencyScrollMode()
+        return (typeof frequencyScrollStep === 'number' && frequencyScrollStep > 0)
+            ? frequencyScrollStep
+            : 500;
     }
 
     function formatHz(hz) {
         return hz >= 1000 ? (hz / 1000) + ' kHz' : hz + ' Hz';
     }
 
-    let active   = false;
-    let lastX    = 0;
-    let lastT    = 0;
-    let accumPx  = 0;
-    let drumPos  = 0;
+    function updateStepLabel() {
+        if (stepLabel) stepLabel.textContent = formatHz(getCurrentStepHz()) + ' / step';
+    }
+
+    let active  = false;
+    let lastX   = 0;
+    let accumPx = 0;
+    let drumPos = 0;
+
+    // Show current step on load
+    updateStepLabel();
+
+    // Keep label in sync if user changes the dropdown
+    const scrollDropdown = document.getElementById('frequency-scroll-mode');
+    if (scrollDropdown) {
+        scrollDropdown.addEventListener('change', updateStepLabel);
+    }
 
     wheel.addEventListener('pointerdown', function (e) {
         active  = true;
         lastX   = e.clientX;
-        lastT   = performance.now();
         accumPx = 0;
         wheel.setPointerCapture(e.pointerId);
         wheel.style.cursor = 'grabbing';
+        updateStepLabel();
     });
 
     wheel.addEventListener('pointermove', function (e) {
         if (!active) return;
 
-        const now   = performance.now();
-        const dx    = e.clientX - lastX;
-        const dt    = Math.max(1, now - lastT);
-        const speed = (dx / dt) * 1000; // px/s
-
-        const hz = speedToHz(speed);
-        if (stepLabel) stepLabel.textContent = formatHz(hz);
+        const dx = e.clientX - lastX;
 
         // Accumulate pixels; fire adjustFrequency each time threshold is crossed
         accumPx += dx;
         const steps = Math.trunc(accumPx / PX_PER_STEP);
         if (steps !== 0) {
-            adjustFrequency(steps * hz);
+            adjustFrequency(steps * getCurrentStepHz());
             accumPx -= steps * PX_PER_STEP;
         }
 
@@ -11197,18 +11197,15 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (drum) drum.style.backgroundPositionX = drumPos + 'px';
 
         lastX = e.clientX;
-        lastT = now;
     });
 
     wheel.addEventListener('pointerup', function () {
         active = false;
         wheel.style.cursor = 'grab';
-        if (stepLabel) stepLabel.textContent = 'drag to tune';
     });
 
     wheel.addEventListener('pointercancel', function () {
         active = false;
         wheel.style.cursor = 'grab';
-        if (stepLabel) stepLabel.textContent = 'drag to tune';
     });
 })();

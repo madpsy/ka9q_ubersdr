@@ -1059,6 +1059,40 @@ body {
     pointer-events: none;
 }
 
+/* Left and right curved-edge overlays — make the drum look cylindrical */
+.tuning-wheel::before,
+.tuning-wheel::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 18%;
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* Left edge: fades to dark, simulating the drum curving away */
+.tuning-wheel::before {
+    left: 0;
+    background: linear-gradient(
+        to right,
+        rgba(20, 30, 40, 0.85) 0%,
+        rgba(20, 30, 40, 0.4)  40%,
+        transparent            100%
+    );
+}
+
+/* Right edge: mirror of left */
+.tuning-wheel::after {
+    right: 0;
+    background: linear-gradient(
+        to left,
+        rgba(20, 30, 40, 0.85) 0%,
+        rgba(20, 30, 40, 0.4)  40%,
+        transparent            100%
+    );
+}
+
 .tuning-wheel-step-label {
     text-align: center;
     font-size: 0.72em;

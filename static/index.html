@@ -231,50 +231,50 @@
                 <canvas id="spectrum-display-canvas"></canvas>
                 <!-- All controls overlay on bottom of spectrum -->
                 <div class="spectrum-display-controls">
-                    <div class="spectrum-control-group">
+                    <div id="spectrum-control-group-main" class="spectrum-control-group">
                         <!-- VFO A/B Toggle -->
-                        <div class="vfo-toggle" onclick="toggleVFO()" title="Toggle between VFO A and VFO B (T key)">
+                        <div id="spectrum-vfo-toggle" class="vfo-toggle" onclick="toggleVFO()" title="Toggle between VFO A and VFO B (T key)">
                             <div class="vfo-toggle-slider">
                                 <span class="vfo-label vfo-label-a active">A</span>
                                 <span class="vfo-label vfo-label-b">B</span>
                             </div>
                         </div>
-                        <button onclick="spectrumResetZoom()" title="Reset Zoom (Q key)">Reset</button>
-                        <button onclick="spectrumZoomOut()" title="Zoom Out (S key)">−</button>
-                        <button onclick="spectrumZoomIn()" title="Zoom In (W key)">+</button>
-                        <button onclick="spectrumMaxZoom()" title="Maximum Zoom (E key)">Max</button>
-                        <button onclick="spectrumCenterFrequency()" title="Center current frequency in waterfall/spectrum">◎</button>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Scroll wheel zooms in/out. Hold Ctrl/Shift to change frequency instead.">
+                        <button id="spectrum-btn-reset" onclick="spectrumResetZoom()" title="Reset Zoom (Q key)">Reset</button>
+                        <button id="spectrum-btn-zoom-out" onclick="spectrumZoomOut()" title="Zoom Out (S key)">−</button>
+                        <button id="spectrum-btn-zoom-in" onclick="spectrumZoomIn()" title="Zoom In (W key)">+</button>
+                        <button id="spectrum-btn-max-zoom" onclick="spectrumMaxZoom()" title="Maximum Zoom (E key)">Max</button>
+                        <button id="spectrum-btn-center" onclick="spectrumCenterFrequency()" title="Center current frequency in waterfall/spectrum">◎</button>
+                        <label id="spectrum-label-scroll" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Scroll wheel zooms in/out. Hold Ctrl/Shift to change frequency instead.">
                             <input type="checkbox" id="spectrum-zoom-scroll-enable" checked>
                             <span>Scroll</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" id="spectrum-snap-label">
+                        <label id="spectrum-label-snap" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-snap-enable" checked>
                             <span>Snap</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Automatically retune when frequency marker scrolls off edge">
+                        <label id="spectrum-label-edge-tune" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Automatically retune when frequency marker scrolls off edge">
                             <input type="checkbox" id="spectrum-edge-tune-enable">
                             <span>Edge Tune</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                        <label id="spectrum-label-spectrum" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-line-graph-enable">
                             <span>Spectrum</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                        <label id="spectrum-label-smooth" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-smooth-enable">
                             <span>Smooth</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="GPU sub-pixel waterfall scrolling — smoother motion at 60fps using CSS transform compositing">
+                        <label id="spectrum-label-gpu" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="GPU sub-pixel waterfall scrolling — smoother motion at 60fps using CSS transform compositing">
                             <input type="checkbox" id="spectrum-gpu-scroll-enable">
                             <span>GPU</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                        <label id="spectrum-label-hold" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-hold-enable" checked>
                             <span>Hold</span>
                         </label>
                     </div>
-                    <div class="spectrum-control-group">
-                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                    <div id="spectrum-control-group-manual" class="spectrum-control-group">
+                        <label id="spectrum-label-manual" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-manual-range-enable">
                             <span>Manual</span>
                         </label>
@@ -300,7 +300,7 @@
                             <span id="spectrum-max-db-value" style="min-width: 40px; font-size: 0.8em; text-align: right;">-40</span>
                         </div>
                     </div>
-                    <div class="spectrum-control-group">
+                    <div id="spectrum-control-group-colorscheme" class="spectrum-control-group">
                         <select id="spectrum-colorscheme" onchange="updateSpectrumColorScheme()">
                             <option value="turbo">Turbo</option>
                             <option value="viridis">Viridis</option>
@@ -308,7 +308,7 @@
                             <option value="jet" selected>Jet</option>
                         </select>
                     </div>
-                    <div class="spectrum-control-group">
+                    <div id="spectrum-control-group-signal" class="spectrum-control-group">
                         <div class="signal-meter">
                             <div id="signal-meter-bar" class="signal-meter-bar"></div>
                         </div>

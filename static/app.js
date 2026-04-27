@@ -11125,15 +11125,61 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         localStorage.setItem(STORAGE_KEY, 'wheel');
     });
 
+    // Track the edge-tune state before wheel mode was activated so we can restore it
+    let edgeTuneStateBeforeWheel = null;
+    const MOBILE_BREAKPOINT = 1024;
+
+    function isMobile() {
+        return window.innerWidth <= MOBILE_BREAKPOINT;
+    }
+
     function applyMode(mode) {
+        const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+
+        // On desktop (wide screen) always show buttons regardless of saved preference
+        if (!isMobile()) {
+            tuningBtns.style.display = 'flex';
+            wheelCont.style.display  = 'none';
+            // Restore edge tune if it was overridden by a previous wheel session
+            if (edgeTuneCheckbox && edgeTuneStateBeforeWheel !== null) {
+                if (edgeTuneCheckbox.checked !== edgeTuneStateBeforeWheel) {
+                    edgeTuneCheckbox.checked = edgeTuneStateBeforeWheel;
+                    edgeTuneCheckbox.dispatchEvent(new Event('change'));
+                }
+                edgeTuneStateBeforeWheel = null;
+            }
+            return;
+        }
+
         if (mode === 'wheel') {
             tuningBtns.style.display = 'none';
             wheelCont.style.display  = 'block';
+            // Enable edge tune so the spectrum follows the wheel — save previous state first
+            if (edgeTuneCheckbox) {
+                edgeTuneStateBeforeWheel = edgeTuneCheckbox.checked;
+                if (!edgeTuneCheckbox.checked) {
+                    edgeTuneCheckbox.checked = true;
+                    edgeTuneCheckbox.dispatchEvent(new Event('change'));
+                }
+            }
         } else {
             tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
+            // Restore edge tune to whatever it was before wheel mode
+            if (edgeTuneCheckbox && edgeTuneStateBeforeWheel !== null) {
+                if (edgeTuneCheckbox.checked !== edgeTuneStateBeforeWheel) {
+                    edgeTuneCheckbox.checked = edgeTuneStateBeforeWheel;
+                    edgeTuneCheckbox.dispatchEvent(new Event('change'));
+                }
+                edgeTuneStateBeforeWheel = null;
+            }
         }
     }
+
+    // Re-apply correct mode when window is resized across the mobile breakpoint
+    window.addEventListener('resize', function () {
+        applyMode(localStorage.getItem(STORAGE_KEY) || 'buttons');
+    });
 
     // ── Wheel drag logic ──────────────────────────────────────────────────────
     // Step size always comes from the dropdown (frequencyScrollStep global).

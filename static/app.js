@@ -2230,7 +2230,8 @@ async function fetchSiteDescription() {
 
                                 const locationStr = parts.join(', ');
                                 const distanceStr = myipData.distance_km ? ` (${Math.round(myipData.distance_km)} km)` : '';
-                                userLocationText = `Hello ${locationStr}${distanceStr}`;
+                                const deviceEmoji = _isMobile ? ' 📱' : ' 🖥️';
+                                userLocationText = `Hello ${locationStr}${distanceStr}${deviceEmoji}`;
                             }
                         }
                     } catch (err) {

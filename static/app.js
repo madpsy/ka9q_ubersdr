@@ -692,8 +692,11 @@ function updateIOSMediaSession() {
         artist: [freqMHz, modeStr].filter(Boolean).join(' '),
         album:  'Live SDR',
         artwork: [
-            { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' },
-            { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' }
+            // apple-touch-icon fills the full canvas (no transparent padding) so iOS lock screen
+            // shows no white edges. android-chrome variants kept as fallback for other sizes.
+            { src: `${_artworkBase}/images/apple-touch-icon.png`, sizes: '180x180', type: 'image/png' },
+            { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' },
+            { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' }
         ]
     });
 

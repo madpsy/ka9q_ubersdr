@@ -1792,7 +1792,28 @@ input[type="range"]::-moz-range-thumb {
     body > div[style*="position: fixed"][style*="monospace"] {
         display: none !important;
     }
-    
+
+    /* Hide band status badges bar on mobile */
+    .band-status-bar {
+        display: none !important;
+    }
+
+    /* Hide band selector dropdown on mobile */
+    #band-selector {
+        display: none !important;
+    }
+
+    /* Hide bookmark selectors on mobile */
+    #bookmark-selector,
+    #local-bookmark-selector {
+        display: none !important;
+    }
+
+    /* Hide addons dropdown on mobile */
+    #addons-dropdown {
+        display: none !important;
+    }
+
     input[type="range"] {
         width: 100%;
     }

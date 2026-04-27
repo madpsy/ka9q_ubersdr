@@ -362,7 +362,7 @@ server:
   # websdr_tcp_port: Public TCP port sent to directory servers (default: 8901).
   #
   enable_websdr: true
-  websdr_waterfall_calibration: 12.0
+  websdr_waterfall_calibration: 20.0
   websdr_email: "operator@example.com"
   websdr_register_websdrorg: false
   websdr_hostname: "websdr.mydomain.com"

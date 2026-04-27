@@ -1017,6 +1017,57 @@ body {
     margin-bottom: 5px;
 }
 
+/* Mobile tuning mode toggle (Buttons / Wheel radios) — hidden on desktop */
+#tuning-mode-toggle {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* Mobile tuning wheel — hidden by default; JS shows/hides based on radio selection */
+.tuning-wheel-container {
+    display: none;
+    margin: 10px 0 5px;
+}
+
+.tuning-wheel {
+    width: 100%;
+    height: 44px;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 2px solid #4a5568;
+    background: linear-gradient(180deg, #3d5166 0%, #2c3e50 50%, #3d5166 100%);
+    cursor: grab;
+    touch-action: pan-y;
+    position: relative;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.tuning-wheel:active {
+    cursor: grabbing;
+}
+
+.tuning-wheel-drum {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        90deg,
+        transparent 0px, transparent 9px,
+        rgba(255, 255, 255, 0.15) 9px, rgba(255, 255, 255, 0.15) 11px
+    );
+    pointer-events: none;
+}
+
+.tuning-wheel-step-label {
+    text-align: center;
+    font-size: 0.72em;
+    color: #95a5a6;
+    margin-top: 2px;
+    height: 14px;
+    letter-spacing: 0.03em;
+}
+
 .tuning-buttons button {
     padding: 8px 12px;
     background: #e9ecef;
@@ -1824,6 +1875,11 @@ input[type="range"]::-moz-range-thumb {
     /* The scroll mode selector is kept as it controls step size for tuning buttons too */
     #frequency-scroll-label {
         display: none !important;
+    }
+
+    /* Show Buttons/Wheel radio toggle on mobile (replaces the hidden Scroll checkbox) */
+    #tuning-mode-toggle {
+        display: flex !important;
     }
 
     /* Hide spectrum controls not needed on mobile */

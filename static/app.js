@@ -11090,3 +11090,125 @@ window.initializeVoiceActivityButton = initializeVoiceActivityButton;
 window.getActiveBand = getActiveBand;
 window.openChannelsMap = openChannelsMap;
 window.updateChannelsMapPopup = updateChannelsMapPopup;
+
+// ── Mobile Tuning Controls (Buttons / Wheel toggle + drag wheel) ─────────────
+(function initTuningControls() {
+    const STORAGE_KEY = 'tuningMode'; // 'buttons' | 'wheel'
+
+    const modeToggle = document.getElementById('tuning-mode-toggle');
+    const radioBtns  = document.getElementById('tuning-mode-buttons');
+    const radioWheel = document.getElementById('tuning-mode-wheel');
+    const tuningBtns = document.querySelector('.tuning-buttons');
+    const wheelCont  = document.getElementById('tuning-wheel-container');
+    const wheel      = document.getElementById('tuning-wheel');
+    const drum       = document.getElementById('tuning-wheel-drum');
+    const stepLabel  = document.getElementById('tuning-wheel-step-label');
+
+    // Only wire up if the toggle is present (it's hidden on desktop but still in DOM)
+    if (!modeToggle || !radioBtns || !radioWheel || !tuningBtns || !wheelCont) return;
+
+    // ── Restore saved preference (default: 'buttons') ────────────────────────
+    const saved = localStorage.getItem(STORAGE_KEY) || 'buttons';
+    applyMode(saved);
+    if (saved === 'wheel') {
+        radioWheel.checked = true;
+    } else {
+        radioBtns.checked = true;
+    }
+
+    radioBtns.addEventListener('change', function () {
+        applyMode('buttons');
+        localStorage.setItem(STORAGE_KEY, 'buttons');
+    });
+    radioWheel.addEventListener('change', function () {
+        applyMode('wheel');
+        localStorage.setItem(STORAGE_KEY, 'wheel');
+    });
+
+    function applyMode(mode) {
+        if (mode === 'wheel') {
+            tuningBtns.style.display = 'none';
+            wheelCont.style.display  = '';
+        } else {
+            tuningBtns.style.display = '';
+            wheelCont.style.display  = 'none';
+        }
+    }
+
+    // ── Wheel drag logic ──────────────────────────────────────────────────────
+    // Velocity (px/s) → frequency step size mapping
+    const SPEED_STEPS = [
+        { maxSpeed: 30,       hz: 10     },
+        { maxSpeed: 80,       hz: 100    },
+        { maxSpeed: 200,      hz: 1000   },
+        { maxSpeed: 500,      hz: 10000  },
+        { maxSpeed: Infinity, hz: 100000 },
+    ];
+    // Pixels of drag required to fire one frequency step
+    const PX_PER_STEP = 8;
+
+    function speedToHz(pxPerSec) {
+        for (const s of SPEED_STEPS) {
+            if (Math.abs(pxPerSec) < s.maxSpeed) return s.hz;
+        }
+        return 100000;
+    }
+
+    function formatHz(hz) {
+        return hz >= 1000 ? (hz / 1000) + ' kHz' : hz + ' Hz';
+    }
+
+    let active   = false;
+    let lastX    = 0;
+    let lastT    = 0;
+    let accumPx  = 0;
+    let drumPos  = 0;
+
+    wheel.addEventListener('pointerdown', function (e) {
+        active  = true;
+        lastX   = e.clientX;
+        lastT   = performance.now();
+        accumPx = 0;
+        wheel.setPointerCapture(e.pointerId);
+        wheel.style.cursor = 'grabbing';
+    });
+
+    wheel.addEventListener('pointermove', function (e) {
+        if (!active) return;
+
+        const now   = performance.now();
+        const dx    = e.clientX - lastX;
+        const dt    = Math.max(1, now - lastT);
+        const speed = (dx / dt) * 1000; // px/s
+
+        const hz = speedToHz(speed);
+        if (stepLabel) stepLabel.textContent = formatHz(hz);
+
+        // Accumulate pixels; fire adjustFrequency each time threshold is crossed
+        accumPx += dx;
+        const steps = Math.trunc(accumPx / PX_PER_STEP);
+        if (steps !== 0) {
+            adjustFrequency(steps * hz);
+            accumPx -= steps * PX_PER_STEP;
+        }
+
+        // Animate knurling texture to simulate drum rotation
+        drumPos = ((drumPos + dx) % 20 + 20) % 20;
+        if (drum) drum.style.backgroundPositionX = drumPos + 'px';
+
+        lastX = e.clientX;
+        lastT = now;
+    });
+
+    wheel.addEventListener('pointerup', function () {
+        active = false;
+        wheel.style.cursor = 'grab';
+        if (stepLabel) stepLabel.textContent = 'drag to tune';
+    });
+
+    wheel.addEventListener('pointercancel', function () {
+        active = false;
+        wheel.style.cursor = 'grab';
+        if (stepLabel) stepLabel.textContent = 'drag to tune';
+    });
+})();

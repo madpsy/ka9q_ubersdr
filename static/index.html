@@ -369,6 +369,17 @@
                             <input type="checkbox" id="spectrum-scroll-enable">
                             <span>Scroll</span>
                         </label>
+                        <!-- Mobile: Buttons / Wheel toggle (hidden on desktop, shown on mobile via CSS) -->
+                        <div id="tuning-mode-toggle">
+                            <label style="display: flex; align-items: center; gap: 3px; font-size: 0.85em; white-space: nowrap; cursor: pointer; margin: 0;">
+                                <input type="radio" name="tuning-mode" id="tuning-mode-buttons" value="buttons" checked>
+                                <span>Btns</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 3px; font-size: 0.85em; white-space: nowrap; cursor: pointer; margin: 0;">
+                                <input type="radio" name="tuning-mode" id="tuning-mode-wheel" value="wheel">
+                                <span>Wheel</span>
+                            </label>
+                        </div>
                         <select id="frequency-scroll-mode" style="padding: 2px 4px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.85em;" onchange="updateFrequencyScrollMode()">
                             <option value="10-slow">10 Hz slow</option>
                             <option value="10-fast">10 Hz fast</option>
@@ -390,6 +401,13 @@
                     <button onclick="adjustFrequency(10)" title="Up 10 Hz">▸</button>
                     <button onclick="adjustFrequency(100)" title="Up 100 Hz (D key)">►</button>
                     <button onclick="adjustFrequency(1000)" title="Up 1 kHz (Right Arrow →)">►►</button>
+                </div>
+                <!-- Mobile tuning wheel (shown/hidden by JS based on Buttons/Wheel radio toggle) -->
+                <div id="tuning-wheel-container" class="tuning-wheel-container">
+                    <div id="tuning-wheel" class="tuning-wheel">
+                        <div id="tuning-wheel-drum" class="tuning-wheel-drum"></div>
+                    </div>
+                    <div id="tuning-wheel-step-label" class="tuning-wheel-step-label">drag to tune</div>
                 </div>
                 <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
                     <option value="">Select Band...</option>

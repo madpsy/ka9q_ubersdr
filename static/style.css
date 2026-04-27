@@ -1840,6 +1840,13 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    #spectrum-btn-zoom-in,
+    #spectrum-btn-zoom-out {
+        font-size: 0.9em;
+        padding: 8px;
+        min-width: 36px;
+    }
+
     input[type="range"] {
         width: 100%;
     }

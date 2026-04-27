@@ -1020,8 +1020,9 @@ body {
 /* Mobile tuning mode toggle (Buttons / Wheel radios) — hidden on desktop */
 #tuning-mode-toggle {
     display: none;
-    flex-direction: column;
-    gap: 2px;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
 }
 
 /* Mobile tuning wheel — hidden by default; JS shows/hides based on radio selection */

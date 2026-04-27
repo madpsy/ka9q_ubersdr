@@ -1826,6 +1826,12 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Hide frequency scroll checkbox on mobile (no mouse wheel on touch) */
+    /* The scroll mode selector is kept as it controls step size for tuning buttons too */
+    #frequency-scroll-label {
+        display: none !important;
+    }
+
     /* Hide spectrum controls not needed on mobile */
     #spectrum-vfo-toggle,
     #spectrum-btn-reset,

@@ -11128,9 +11128,9 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     function applyMode(mode) {
         if (mode === 'wheel') {
             tuningBtns.style.display = 'none';
-            wheelCont.style.display  = '';
+            wheelCont.style.display  = 'block';
         } else {
-            tuningBtns.style.display = '';
+            tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
         }
     }

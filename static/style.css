@@ -1847,6 +1847,10 @@ input[type="range"]::-moz-range-thumb {
         min-width: 36px;
     }
 
+    #spectrum-btn-zoom-in {
+        margin-right: 8px;
+    }
+
     input[type="range"] {
         width: 100%;
     }
@@ -2690,6 +2694,11 @@ input[type="range"]::-moz-range-thumb {
     font-size: 0.85em;
     min-width: 30px;
 }
+
+#spectrum-btn-center {
+    margin-right: 8px;
+}
+
 
 .spectrum-control-group select {
     padding: 3px 6px; /* Scaled down */

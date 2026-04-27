@@ -1826,6 +1826,21 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Hide spectrum controls not needed on mobile */
+    #spectrum-vfo-toggle,
+    #spectrum-btn-reset,
+    #spectrum-btn-max-zoom,
+    #spectrum-btn-center,
+    #spectrum-label-scroll,
+    #spectrum-label-snap,
+    #spectrum-label-edge-tune,
+    #spectrum-label-manual,
+    #spectrum-control-group-manual,
+    #spectrum-auto-range-controls,
+    #spectrum-manual-range-controls {
+        display: none !important;
+    }
+
     input[type="range"] {
         width: 100%;
     }

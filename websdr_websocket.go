@@ -1339,25 +1339,27 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 
 	fmt.Fprintf(w, "Config: %d\n", orgStatusSerial)
 
-	// Emit the org_info block (matching real WebSDR / VertexSDR behaviour).
-	// Description and Qth are derived from existing admin config fields;
-	// Email uses websdr_email if set, falling back to admin.email.
+	// Emit the org_info block in the order expected by websdr.org:
+	// Qth, Description, Logo, Email.
+
+	// Qth: Maidenhead grid locator derived from GPS coordinates
+	qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
+	fmt.Fprintln(w, "Qth: "+qth)
+
+	// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]"
+	descParts := []string{"0-30 MHz SDR"}
+	if h.config.Admin.Callsign != "" {
+		descParts = append(descParts, h.config.Admin.Callsign)
+	}
+	if h.config.Admin.Location != "" {
+		descParts = append(descParts, h.config.Admin.Location)
+	}
+	fmt.Fprintln(w, "Description: "+strings.Join(descParts, ", "))
+
+	fmt.Fprintf(w, "Logo: logo.png\n")
+
+	// Email: websdr_email if set, otherwise fall back to admin.email
 	{
-		// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]" — same pattern as KiwiSDR /status name field
-		descParts := []string{"0-30 MHz SDR"}
-		if h.config.Admin.Callsign != "" {
-			descParts = append(descParts, h.config.Admin.Callsign)
-		}
-		if h.config.Admin.Location != "" {
-			descParts = append(descParts, h.config.Admin.Location)
-		}
-		fmt.Fprintln(w, "Description: "+strings.Join(descParts, ", "))
-
-		// Qth: Maidenhead grid locator derived from GPS coordinates
-		qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
-		fmt.Fprintln(w, "Qth: "+qth)
-
-		// Email: websdr_email if set, otherwise fall back to admin.email
 		email := h.config.Server.WebSDREmail
 		if email == "" {
 			email = h.config.Admin.Email

@@ -4783,6 +4783,8 @@ function autoTune() {
     if (wsManager.isConnected()) {
         tune();
     }
+    // Keep lock-screen / Control Centre metadata current whenever frequency or mode changes
+    updateIOSMediaSession();
 }
 
 // Toggle mute

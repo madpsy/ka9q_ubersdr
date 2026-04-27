@@ -370,7 +370,7 @@
                             <span>Scroll</span>
                         </label>
                         <!-- Mobile: Buttons / Wheel toggle (hidden on desktop, shown on mobile via CSS) -->
-                        <div id="tuning-mode-toggle">
+                        <div id="tuning-mode-toggle" style="display: none">
                             <label style="display: flex; align-items: center; gap: 3px; font-size: 0.85em; white-space: nowrap; cursor: pointer; margin: 0;">
                                 <input type="radio" name="tuning-mode" id="tuning-mode-buttons" value="buttons" checked>
                                 <span>Btns</span>
@@ -1333,7 +1333,7 @@
     <!-- Footer -->
     <footer class="site-footer">
         <p class="footer-desktop">Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/noisefloor.html" target="_blank">Noise Floor Graphs</a> • <a href="/bandconditions.html" target="_blank">Band Conditions</a> • <a href="/session_stats.html" target="_blank">Listener Map</a> <span id="footer-version"></span></p>
-        <p class="footer-mobile"><a href="https://ubersdr.org" target="_blank">UberSDR</a> • <a href="/admin.html" target="_blank">Admin</a> • <a href="/noisefloor.html" target="_blank">Noise Graphs</a> • <a href="/bandconditions.html" target="_blank">Conditions</a></p>
+        <p class="footer-mobile" style="display: none"><a href="https://ubersdr.org" target="_blank">UberSDR</a> • <a href="/admin.html" target="_blank">Admin</a> • <a href="/noisefloor.html" target="_blank">Noise Graphs</a> • <a href="/bandconditions.html" target="_blank">Conditions</a></p>
     </footer>
 
     <script src="bands_state.js"></script>

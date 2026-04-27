@@ -226,12 +226,12 @@ let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist 
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 let iosMediaElement = null;  // Hidden <audio> element for iOS background audio (MediaStreamDestination bridge)
 
-// iOS Safari detection — used to decide whether to create the media element bridge.
-// The bridge keeps the audio session alive when Safari is backgrounded on iPhone/iPad.
-const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad on iOS 13+
-const _isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-const _needsIOSBridge = _isSafari; // covers both iOS Safari and macOS Safari (both suspend AudioContext)
+// Mobile device detection — used to decide whether to create the media element bridge.
+// The bridge keeps audio alive when the browser is backgrounded and enables lock-screen
+// / Control Centre media controls on both iOS and Android.
+const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                  navigator.maxTouchPoints > 1;
+const _needsMobileBridge = _isMobile;
 // Expose audioContext globally for recorder
 window.audioContext = null;
 // Expose ws globally for compatibility (will be set by wsManager)
@@ -667,10 +667,10 @@ function updatePageTitle() {
     }
 }
 
-// Update iOS / macOS Safari lock-screen / Control Centre media metadata.
+// Update mobile lock-screen / Control Centre media metadata (iOS and Android).
 // Called whenever frequency or mode changes so the lock screen stays current.
 function updateIOSMediaSession() {
-    if (!_needsIOSBridge || !('mediaSession' in navigator)) return;
+    if (!_needsMobileBridge || !('mediaSession' in navigator)) return;
 
     const freqInput = document.getElementById('frequency');
     const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
@@ -1003,7 +1003,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Creates a MediaStreamDestination → <audio> element path so iOS treats
             // this as a proper media session and keeps audio alive when backgrounded.
             // MUST be inside a user-gesture handler so audio.play() is allowed.
-            if (_needsIOSBridge && !iosMediaElement && audioContext) {
+            if (_needsMobileBridge && !iosMediaElement && audioContext) {
                 try {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._iosStreamDest = dest;

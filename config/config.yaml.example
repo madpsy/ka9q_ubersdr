@@ -1203,8 +1203,7 @@ instance_reporting:
   # May include an explicit scheme for non-HTTPS servers:
   #   "sdr-list.xyz"             — HTTPS (default when no scheme given)
   #   "https://sdr-list.xyz"     — HTTPS (explicit)
-  #   "http://list.novasdr.fun"  — plain HTTP (Phantom/NovaSdr servers)
-  register_sdrlist_host: "sdr-list.xyz"
+  register_sdrlist_host: "https://sdr-list.xyz"
 
   # Create DNS subdomain for this instance (optional)
   # When enabled, the collector will create a DNS A record pointing

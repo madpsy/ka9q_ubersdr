@@ -1821,6 +1821,11 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Hide green per-digit frequency readout on mobile */
+    #freq-readout-container {
+        display: none !important;
+    }
+
     input[type="range"] {
         width: 100%;
     }

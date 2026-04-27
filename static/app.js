@@ -167,7 +167,7 @@ const wsManager = new WebSocketManager({
             // Open extensions from URL parameter if specified
             if (window.extensionsToOpen && window.extensionsToOpen.length > 0) {
                 // Check if we're on a mobile/narrow screen
-                const isMobile = window.matchMedia('(max-width: 768px)').matches;
+                const isMobile = window.matchMedia('(max-width: 1024px)').matches;
                 if (isMobile) {
                     log('📱 Mobile device detected - skipping URL extension loading');
                     delete window.extensionsToOpen;

@@ -1740,7 +1740,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* Responsive design */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
     .controls {
         grid-template-columns: 1fr;
         transform: scale(0.9);

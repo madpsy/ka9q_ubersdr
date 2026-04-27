@@ -60,7 +60,6 @@ class LocalBookmarksUI {
                     <button class="local-bookmarks-close">&times;</button>
                 </div>
                 <div id="local-bookmarks-alert-container"></div>
-                <div class="local-bookmarks-stats" id="local-bookmarks-stats"></div>
                 <div class="local-bookmarks-toolbar">
                     <input type="text" class="local-bookmarks-search" id="local-bookmarks-search" placeholder="🔍 Search bookmarks...">
                     <button class="local-bookmarks-btn success" id="local-bookmarks-add-btn">+ Add</button>
@@ -186,7 +185,6 @@ class LocalBookmarksUI {
 
     // Show management modal
     show() {
-        this.renderStats();
         this.renderFilterTags();
         this.renderBookmarkList();
         document.getElementById('local-bookmarks-management-modal').classList.add('active');
@@ -218,37 +216,6 @@ class LocalBookmarksUI {
                 alertContainer.innerHTML = '';
             }, 3000);
         }
-    }
-
-    // Render statistics
-    renderStats() {
-        const stats = this.manager.getStats();
-        const container = document.getElementById('local-bookmarks-stats');
-        
-        if (stats.total === 0) {
-            container.style.display = 'none';
-            return;
-        }
-
-        container.style.display = 'grid';
-        container.innerHTML = `
-            <div class="local-bookmarks-stat">
-                <div class="local-bookmarks-stat-value">${stats.total}</div>
-                <div class="local-bookmarks-stat-label">Total</div>
-            </div>
-            <div class="local-bookmarks-stat">
-                <div class="local-bookmarks-stat-value">${stats.groups}</div>
-                <div class="local-bookmarks-stat-label">Groups</div>
-            </div>
-            <div class="local-bookmarks-stat">
-                <div class="local-bookmarks-stat-value">${stats.modes}</div>
-                <div class="local-bookmarks-stat-label">Modes</div>
-            </div>
-            <div class="local-bookmarks-stat">
-                <div class="local-bookmarks-stat-value">${stats.withExtensions}</div>
-                <div class="local-bookmarks-stat-label">With Extensions</div>
-            </div>
-        `;
     }
 
     // Render filter tags
@@ -454,7 +421,6 @@ class LocalBookmarksUI {
                 try {
                     await this.manager.delete(name);
                     this.showAlert('management', 'success', `Deleted bookmark "${name}"`);
-                    this.renderStats();
                     this.renderFilterTags();
                     this.renderBookmarkList();
                     this.updateMainDropdown();
@@ -479,7 +445,6 @@ class LocalBookmarksUI {
                 try {
                     await this.manager.deleteAll();
                     this.showAlert('management', 'success', `Deleted all ${count} bookmark(s)`);
-                    this.renderStats();
                     this.renderFilterTags();
                     this.renderBookmarkList();
                     this.updateMainDropdown();
@@ -570,7 +535,6 @@ class LocalBookmarksUI {
             }
 
             document.getElementById('local-bookmarks-edit-modal').classList.remove('active');
-            this.renderStats();
             this.renderFilterTags();
             this.renderBookmarkList();
             this.updateMainDropdown();
@@ -684,7 +648,6 @@ class LocalBookmarksUI {
                 }
 
                 this.showAlert('ie', 'success', `Imported ${result.imported} bookmarks (${result.skipped} skipped, ${result.errors} errors)`);
-                this.renderStats();
                 this.renderFilterTags();
                 this.renderBookmarkList();
                 this.updateMainDropdown();

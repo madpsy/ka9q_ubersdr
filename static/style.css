@@ -1810,9 +1810,8 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* Hide bookmark selectors on mobile */
-    #bookmark-selector,
-    #local-bookmark-selector {
+    /* Hide server bookmark selector on mobile; keep My Bookmarks */
+    #bookmark-selector {
         display: none !important;
     }
 

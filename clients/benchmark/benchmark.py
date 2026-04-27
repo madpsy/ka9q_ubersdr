@@ -343,8 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
         '--no-load-abort', action='store_true',
         help=(
             'Disable the automatic abort when the 1-minute system load average '
-            'exceeds the number of logical CPUs.  By default the benchmark stops '
-            'early and shows a warning if the machine appears overloaded.'
+            'exceeds 1.5× the number of logical CPUs.  By default the benchmark '
+            'stops early and shows a warning if the machine appears overloaded.'
         ),
     )
     feat.add_argument(
@@ -671,7 +671,7 @@ def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str])
 
             # Prompt for load-abort (yes/no, default matches current_config)
             load_abort = _prompt_bool(
-                "Abort if system load exceeds CPU count",
+                "Abort if system load exceeds 1.5× CPU count",
                 default=current_config.load_abort,
             )
             if load_abort is None:

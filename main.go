@@ -2290,8 +2290,9 @@ func main() {
 	}()
 
 	// Start KiwiSDR compatibility server on separate port if enabled
+	const kiwiSDRListenAddr = ":8073"
 	var kiwiServer *http.Server
-	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen != "" {
+	if config.Server.EnableKiwiSDR {
 		// Create separate HTTP server for KiwiSDR protocol
 		kiwiMux := http.NewServeMux()
 
@@ -2391,13 +2392,13 @@ func main() {
 		})
 
 		kiwiServer = &http.Server{
-			Addr:    config.Server.KiwiSDRListen,
+			Addr:    kiwiSDRListenAddr,
 			Handler: kiwiMux,
 		}
 
 		go func() {
-			log.Printf("KiwiSDR protocol server listening on %s", config.Server.KiwiSDRListen)
-			log.Printf("KiwiSDR clients can connect to this port (e.g., kiwirecorder.py -s host -p %s)", strings.TrimPrefix(config.Server.KiwiSDRListen, ":"))
+			log.Printf("KiwiSDR protocol server listening on %s", kiwiSDRListenAddr)
+			log.Printf("KiwiSDR clients can connect to this port (e.g., kiwirecorder.py -s host -p %s)", strings.TrimPrefix(kiwiSDRListenAddr, ":"))
 			if err := kiwiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Printf("KiwiSDR server error: %v", err)
 			}
@@ -2411,30 +2412,29 @@ func main() {
 				}
 			}
 		}()
-	} else if config.Server.EnableKiwiSDR {
-		log.Printf("KiwiSDR protocol compatibility enabled but kiwisdr_listen not configured (will use default :8073)")
 	} else {
 		log.Printf("KiwiSDR protocol compatibility disabled")
 	}
 
 	// Start WebSDR compatibility server on separate port if enabled
+	const websdrListenAddr = ":8901"
 	var websdrServer *http.Server
-	if config.Server.EnableWebSDR && config.Server.WebSDRListen != "" {
+	if config.Server.EnableWebSDR {
 		websdrServer = &http.Server{
-			Addr:    config.Server.WebSDRListen,
+			Addr:    websdrListenAddr,
 			Handler: WebSDRServerHeaderMiddleware(websdrHandler),
 		}
 
 		go func() {
-			log.Printf("WebSDR protocol server listening on %s", config.Server.WebSDRListen)
-			log.Printf("WebSDR clients can connect to this port (e.g., http://host%s)", config.Server.WebSDRListen)
+			log.Printf("WebSDR protocol server listening on %s", websdrListenAddr)
+			log.Printf("WebSDR clients can connect to this port (e.g., http://host%s)", websdrListenAddr)
 			if err := websdrServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Printf("WebSDR server error: %v", err)
 			}
 		}()
 
-		// Start directory registration if configured
-		websdrRegistrar := NewWebSDRRegistrar(config, websdrHandler)
+		// Start websdr.org directory registration if configured
+		websdrRegistrar := NewWebSDRRegistrar(config)
 		websdrRegistrar.Start()
 
 		defer func() {
@@ -2445,8 +2445,6 @@ func main() {
 				}
 			}
 		}()
-	} else if config.Server.EnableWebSDR {
-		log.Printf("WebSDR protocol compatibility enabled but websdr_listen not configured (will use default :8901)")
 	} else {
 		log.Printf("WebSDR protocol compatibility disabled")
 	}
@@ -2462,6 +2460,31 @@ func main() {
 		} else {
 			defer instanceReporter.Stop()
 		}
+	}
+
+	// Start sdr-list.xyz registration if configured (independent of WebSDR protocol)
+	if config.InstanceReporting.Enabled && config.InstanceReporting.RegisterSdrList {
+		sdrListRegistrar := NewSdrListRegistrar(config, sessions, instanceReporter)
+		sdrListRegistrar.Start()
+		defer sdrListRegistrar.Stop()
+	}
+
+	// Start rx.kiwisdr.com public directory registration if configured.
+	// Requires both enable_kiwisdr (KiwiSDR protocol server) and
+	// kiwisdr_register_kiwisdrcom to be true, because the directory entry
+	// points clients at the KiwiSDR-compatible port.
+	//
+	// Two-phase registration (mirroring KiwiSDR firmware net/services.cpp):
+	//   Phase 1: periodic GET /php/update.php every 45 min (pub=not_valid until
+	//            kiwisdr.com reverse-probes our /status endpoint).
+	//   Phase 2: one-shot GET /php/my_kiwi.php after first reverse probe succeeds.
+	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRRegisterKiwiSDRCom {
+		kiwiRegistrar := NewKiwiSDRComRegistrar(config)
+		// Wire the registrar into the /status handler so reverse probes are detected.
+		kiwiHandler.SetKiwiRegistrar(kiwiRegistrar)
+		kiwiRegistrar.Start()
+		defer kiwiRegistrar.Stop()
+		log.Printf("kiwisdr.com: public directory registration enabled (update.php every 45 min + one-shot my_kiwi.php)")
 	}
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -287,8 +287,11 @@ server:
   # This creates standard UberSDR sessions with full IP tracking and authentication
   #
   # enable_kiwisdr: Enable/disable KiwiSDR compatibility (default: false)
-  # kiwisdr_listen: Listen address for KiwiSDR server (default: ":8073")
-  #   Format: ":port" (e.g., ":8073") or "address:port" (e.g., "0.0.0.0:8073")
+  # The KiwiSDR server always listens on port 8073 (standard KiwiSDR port).
+  #
+  # kiwisdr_port: Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
+  #   This is the port KiwiSDR clients will use to connect from the public directory.
+  #   Change this if your KiwiSDR port is exposed publicly on a different port (e.g. via NAT).
   #
   # kiwisdr_public_email: Public email address shown in KiwiSDR status endpoint
   #   This is the operator contact email displayed to KiwiSDR clients
@@ -307,9 +310,25 @@ server:
   #   python3 kiwirecorder.py -s your-host -p 8073 -f 14074 -m usb --tlimit 60
   #
   enable_kiwisdr: true
-  kiwisdr_listen: ":8073"
+  kiwisdr_port: 8073
   kiwisdr_public_email: "admin@example.com"
   kiwisdr_smeter_offset: 20.0
+
+  # Public hostname advertised to rx.kiwisdr.com (required for registration)
+  # This is the hostname that KiwiSDR clients will use to connect to your SDR.
+  # Must be a publicly reachable hostname or IP address.
+  # Example: "mysdr.example.com" or "203.0.113.42"
+  # Leave empty to disable registration even if kiwisdr_register_kiwisdrcom is true.
+  kiwisdr_host: "kiwisdr.mydomain.com"
+
+  # Register with the rx.kiwisdr.com public receiver directory (default: false)
+  # Requires enable_kiwisdr: true — the directory entry points clients at port
+  # 8073, so the KiwiSDR server must be running for the listing to be useful.
+  # Also requires kiwisdr_host to be set to your public hostname.
+  # When enabled, sends a GET to kiwisdr.com/php/update.php every 45 minutes
+  # with station metadata (name, location, antenna, URL, user count, version).
+  # Setting to false sends a deregister packet on the next cycle.
+  kiwisdr_register_kiwisdrcom: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # WebSDR Protocol Compatibility
@@ -321,62 +340,32 @@ server:
   #
   #
   # enable_websdr: Enable/disable WebSDR compatibility server (default: false)
-  # websdr_listen: Listen address for WebSDR server (default: ":8901")
-  #   Format: ":port" or "address:port"
-  # websdr_static_dir: Directory containing WebSDR static files (index.html etc.)
-  #   Default: "websdr"  — create this directory and place the WebSDR frontend
-  #   files there (index.html, websdr.js, etc. from a real WebSDR installation).
   # websdr_waterfall_calibration: dBFS→pixel calibration offset (default: -13.0)
   #   Adjust this if the waterfall appears too bright or too dark.
-  # websdr_max_users: Maximum concurrent audio users (0 = use max_sessions)
   #
-  # org_info block — multi-line server description shown in the WebSDR UI and
-  # returned to the websdr.org directory server on its /~~orgstatus callback.
-  # Recognised fields (case-insensitive):
-  #   Description: <text>   — server description shown in the UI
-  #   Qth: <locator>        — Maidenhead grid locator (e.g. IO91)
-  #   Email: <address>      — operator contact address (required for websdr.org listing;
-  #                           XOR-obfuscated before transmission)
+  # WebSDR Org Info — returned to the websdr.org directory server on its
+  # /~~orgstatus callback and shown in the WebSDR UI.
+  #   Description: auto-built as "<callsign> - <admin.name>"
+  #   Qth:         auto-derived from admin.gps lat/lon as a Maidenhead grid locator
+  #   websdr_email: operator contact address (required for websdr.org listing;
+  #                 XOR-obfuscated before transmission; defaults to admin.email)
+  #   Max users and idle timeout use server.max_sessions and server.session_timeout.
   #
   # Directory registration (both disabled by default):
   #
   # websdr_register_websdrorg: Register with the legacy websdr.org directory
   #   (plain HTTP, ~60 s interval).  Requires websdr_hostname to be set.
-  # websdr_register_websdrorg_server: Registration server (default: "websdr.ewi.utwente.nl 80")
-  # websdr_no_org_server: If true, send de-registration notices (/~~websdrNOorg) instead of
-  #   registering.  State machine: every 900 s for first notice, then every 86400 s.
-  #
-  # websdr_register_sdrlist: Register with sdr-list.xyz directory
-  #   (HTTPS/JSON POST, ~60 s interval).  Requires websdr_hostname to be set.
-  # websdr_register_sdrlist_host: sdr-list.xyz host (default: "sdr-list.xyz")
+  #   Registration server is hardcoded to "websdr.ewi.utwente.nl 80".
   #
   # websdr_hostname: Public hostname sent to directory servers.
   #   If empty, falls back to admin.public_url host.
-  # websdr_tcp_port: Public TCP port sent to directory servers.
-  #   If 0, parsed from websdr_listen.
-  #
-  # websdr_static_dir2: Optional overlay directory searched before websdr_static_dir.
-  #   Useful for site-specific overrides without modifying the base WebSDR files.
-  #
-  # websdr_idle_timeout: Disconnect WebSocket clients idle for this many seconds (0 = disabled).
+  # websdr_tcp_port: Public TCP port sent to directory servers (default: 8901).
   #
   enable_websdr: true
-  websdr_listen: ":8901"
-  websdr_static_dir: "websdr"
-  websdr_static_dir2: ""
   websdr_waterfall_calibration: 12.0
-  websdr_max_users: 0
-  websdr_idle_timeout: 0
-  websdr_org_info: |
-    Description: My SDR
-    Qth: IO91
-    Email: operator@example.com
+  websdr_email: "operator@example.com"
   websdr_register_websdrorg: false
-  websdr_register_websdrorg_server: "websdr.ewi.utwente.nl 80"
-  websdr_no_org_server: false
-  websdr_register_sdrlist: false
-  websdr_register_sdrlist_host: "sdr-list.xyz"
-  websdr_hostname: ""
+  websdr_hostname: "websdr.mydomain.com"
   websdr_tcp_port: 8901
 
   # HTTP request logging (Apache combined log format)
@@ -1203,6 +1192,19 @@ instance_reporting:
   # When enabled, sends an immediate notification to the central server when
   # this instance starts up, before the first regular reporting interval
   notify_instance_startup: false
+
+  # Register with sdr-list.xyz directory (default: false)
+  # Sends a JSON POST every 60 s to advertise this instance in the sdr-list.xyz directory.
+  # Connection details (host/port) are taken from instance.host / instance.port above.
+  # Requires instance.host to be set.
+  register_sdrlist: false
+
+  # Directory server host (default: "sdr-list.xyz")
+  # May include an explicit scheme for non-HTTPS servers:
+  #   "sdr-list.xyz"             — HTTPS (default when no scheme given)
+  #   "https://sdr-list.xyz"     — HTTPS (explicit)
+  #   "http://list.novasdr.fun"  — plain HTTP (Phantom/NovaSdr servers)
+  register_sdrlist_host: "sdr-list.xyz"
 
   # Create DNS subdomain for this instance (optional)
   # When enabled, the collector will create a DNS A record pointing

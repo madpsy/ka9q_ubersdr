@@ -259,7 +259,7 @@ class BenchmarkRunner:
     # ------------------------------------------------------------------
 
     def _check_load_abort(self) -> None:
-        """Abort the benchmark if the 1-minute load average exceeds the CPU count.
+        """Abort the benchmark if the 1-minute load average exceeds 1.5× the CPU count.
 
         Uses os.getloadavg() which is available on Linux/macOS but not Windows.
         On Windows (or any platform where getloadavg is unavailable) this is a
@@ -277,9 +277,10 @@ class BenchmarkRunner:
             return
 
         n_cpus = os.cpu_count() or 1
-        if l1 > n_cpus:
+        threshold = n_cpus * 1.5
+        if l1 > threshold:
             self._abort_reason = (
-                f"1-minute load average {l1:.2f} exceeds CPU count ({n_cpus})"
+                f"1-minute load average {l1:.2f} exceeds 1.5× CPU count ({n_cpus} × 1.5 = {threshold:.1f})"
             )
             self._stop_event.set()
 

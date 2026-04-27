@@ -30,10 +30,17 @@ type KiwiWebSocketHandler struct {
 	prometheusMetrics  *PrometheusMetrics
 	radiod             radiodController
 	noiseFloorMonitor  *NoiseFloorMonitor
-	kiwiRXSlots        map[string]int    // Map userSessionID to RX channel number
-	kiwiGeolocations   map[string]string // Map userSessionID to geolocation string
-	nextRXSlot         int               // Next available RX slot
-	mu                 sync.RWMutex      // Protects kiwiRXSlots, kiwiGeolocations, and nextRXSlot
+	kiwiRegistrar      *KiwiSDRComRegistrar // may be nil if registration is disabled
+	kiwiRXSlots        map[string]int       // Map userSessionID to RX channel number
+	kiwiVacatedSlots   map[string]int       // Slots that need a clearing user_cb entry on next sendUserList
+	kiwiGeolocations   map[string]string    // Map userSessionID to geolocation string
+	nextRXSlot         int                  // Next available RX slot
+	mu                 sync.RWMutex         // Protects kiwiRXSlots, kiwiVacatedSlots, kiwiGeolocations, and nextRXSlot
+
+	// Registry of active SND connections for push-on-disconnect.
+	// Keyed by userSessionID; value is the kiwiConn that owns the SND stream.
+	activeSNDConns map[string]*kiwiConn
+	connsMu        sync.RWMutex // Protects activeSNDConns
 }
 
 // NewKiwiWebSocketHandler creates a new KiwiSDR WebSocket handler
@@ -49,9 +56,17 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		radiod:             sessions.radiod, // Get radiod from sessions
 		noiseFloorMonitor:  noiseFloorMonitor,
 		kiwiRXSlots:        make(map[string]int),
+		kiwiVacatedSlots:   make(map[string]int),
 		kiwiGeolocations:   make(map[string]string),
 		nextRXSlot:         0,
+		activeSNDConns:     make(map[string]*kiwiConn),
 	}
+}
+
+// SetKiwiRegistrar attaches the directory registrar so the /status handler can
+// notify it when kiwisdr.com performs its reverse reachability probe.
+func (kwsh *KiwiWebSocketHandler) SetKiwiRegistrar(r *KiwiSDRComRegistrar) {
+	kwsh.kiwiRegistrar = r
 }
 
 // getOrAssignRXSlot gets or assigns an RX slot number for a Kiwi user
@@ -74,8 +89,53 @@ func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
 		kwsh.nextRXSlot = 0
 	}
 
-	log.Printf("DEBUG: Assigned RX slot %d to user %s (nextRXSlot now %d)", slot, userSessionID, kwsh.nextRXSlot)
 	return slot
+}
+
+// releaseRXSlot moves a disconnected user's slot from kiwiRXSlots into
+// kiwiVacatedSlots.  The slot stays visible to sendUserList() so it can emit
+// a clearing {"i": slot} entry to the KiwiSDR frontend on the next user_cb
+// push.  sendUserList() is responsible for deleting entries from
+// kiwiVacatedSlots once the clearing entry has been sent.
+func (kwsh *KiwiWebSocketHandler) releaseRXSlot(userSessionID string) {
+	kwsh.mu.Lock()
+	defer kwsh.mu.Unlock()
+	if slot, exists := kwsh.kiwiRXSlots[userSessionID]; exists {
+		delete(kwsh.kiwiRXSlots, userSessionID)
+		kwsh.kiwiVacatedSlots[userSessionID] = slot
+	}
+}
+
+// registerSNDConn adds a SND connection to the active registry so that
+// broadcastUserList() can push user_cb updates to it.
+func (kwsh *KiwiWebSocketHandler) registerSNDConn(kc *kiwiConn) {
+	kwsh.connsMu.Lock()
+	defer kwsh.connsMu.Unlock()
+	kwsh.activeSNDConns[kc.userSessionID] = kc
+}
+
+// unregisterSNDConn removes a SND connection from the active registry.
+func (kwsh *KiwiWebSocketHandler) unregisterSNDConn(userSessionID string) {
+	kwsh.connsMu.Lock()
+	defer kwsh.connsMu.Unlock()
+	delete(kwsh.activeSNDConns, userSessionID)
+}
+
+// broadcastUserList pushes a fresh user_cb message to every currently-connected
+// KiwiSDR SND client.  It is called whenever a user connects or disconnects so
+// that all observers see the change immediately without waiting for their next
+// SET GET_USERS poll.
+func (kwsh *KiwiWebSocketHandler) broadcastUserList() {
+	kwsh.connsMu.RLock()
+	conns := make([]*kiwiConn, 0, len(kwsh.activeSNDConns))
+	for _, kc := range kwsh.activeSNDConns {
+		conns = append(conns, kc)
+	}
+	kwsh.connsMu.RUnlock()
+
+	for _, kc := range conns {
+		kc.sendUserList()
+	}
 }
 
 // setGeolocation stores the geolocation for a Kiwi user
@@ -96,8 +156,18 @@ func (kwsh *KiwiWebSocketHandler) getGeolocation(userSessionID string) string {
 }
 
 // HandleKiwiStatus handles KiwiSDR /status HTTP endpoint
-// Returns server status in KiwiSDR key=value format
+// Returns server status in KiwiSDR key=value format.
+//
+// kiwisdr.com calls this endpoint as a reverse reachability probe immediately
+// after receiving our update.php registration. We notify the registrar so it
+// can learn our public IP and proceed with the my_kiwi.php call.
 func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *http.Request) {
+	// Notify the registrar that kiwisdr.com has probed us (reverse probe).
+	// This unblocks the my_kiwi.php one-shot registration call.
+	if kwsh.kiwiRegistrar != nil {
+		kwsh.kiwiRegistrar.NotifyReverseProbe(r.RemoteAddr)
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
@@ -112,15 +182,20 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	status.WriteString("status=active\n")
 	status.WriteString("offline=no\n")
 
-	// Server name and location
-	if kwsh.config.Admin.Name != "" {
-		status.WriteString(fmt.Sprintf("name=%s\n", kwsh.config.Admin.Name))
-	} else {
-		status.WriteString("name=UberSDR\n")
+	// Name in KiwiSDR directory format: "0-30 MHz SDR, <callsign>, <location>"
+	{
+		nameParts := []string{"0-30 MHz SDR"}
+		if kwsh.config.Admin.Callsign != "" {
+			nameParts = append(nameParts, kwsh.config.Admin.Callsign)
+		}
+		if kwsh.config.Admin.Location != "" {
+			nameParts = append(nameParts, kwsh.config.Admin.Location)
+		}
+		status.WriteString(fmt.Sprintf("name=%s\n", strings.Join(nameParts, ", ")))
 	}
 
-	// Hardware info
-	status.WriteString(fmt.Sprintf("sdr_hw=UberSDR %s\n", Version))
+	// Hardware info — verbatim copy of real KiwiSDR 2 v1.837 sdr_hw value
+	status.WriteString("sdr_hw=KiwiSDR 2 v1.837 ⁣ 📡 GPS ⁣ ⏳🚫 Limits\n")
 
 	// Admin email (use kiwisdr_public_email if set, otherwise fall back to admin email)
 	publicEmail := kwsh.config.Server.KiwiSDRPublicEmail
@@ -134,11 +209,14 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	// Frequency range (0-30 MHz in Hz)
 	status.WriteString("bands=0-30000000\n")
 	status.WriteString("freq_offset=0.000\n")
+	status.WriteString("mode=rx4_wf4\n")
 
 	// User counts
 	status.WriteString(fmt.Sprintf("users=%d\n", currentUsers))
 	status.WriteString(fmt.Sprintf("users_max=%d\n", maxUsers))
+	status.WriteString("ext_api=4\n")
 	status.WriteString("preempt=0\n")
+	status.WriteString(fmt.Sprintf("avatar_ctime=%d\n", StartTime.Unix()))
 
 	// GPS coordinates
 	if kwsh.config.Admin.GPS.Lat != 0 || kwsh.config.Admin.GPS.Lon != 0 {
@@ -174,16 +252,26 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 		status.WriteString(fmt.Sprintf("loc=%s\n", kwsh.config.Admin.Location))
 	}
 
-	// Software version
-	status.WriteString(fmt.Sprintf("sw_version=UberSDR_%s\n", Version))
+	// Software version — must match KiwiSDR format for directory compatibility
+	status.WriteString("sw_version=KiwiSDR_v1.837\n")
 
 	// Antenna info
 	if kwsh.config.Admin.Antenna != "" {
 		status.WriteString(fmt.Sprintf("antenna=%s\n", kwsh.config.Admin.Antenna))
 	}
 
-	// SNR (dummy values)
-	status.WriteString("snr=20,20\n")
+	// SNR — real values from the wideband noise floor monitor (0-30 MHz and 1.8-30 MHz)
+	snr0_30, snr1_8_30 := 0, 0
+	if kwsh.noiseFloorMonitor != nil {
+		s0, s1 := kwsh.noiseFloorMonitor.GetWidebandSNR()
+		if s0 > 0 {
+			snr0_30 = int(s0)
+		}
+		if s1 > 0 {
+			snr1_8_30 = int(s1)
+		}
+	}
+	status.WriteString(fmt.Sprintf("snr=%d,%d\n", snr0_30, snr1_8_30))
 	status.WriteString("ant_connected=1\n")
 
 	// ADC overflow count (dummy)
@@ -202,10 +290,13 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	status.WriteString(fmt.Sprintf("gps_date=0,0\n"))
 	status.WriteString(fmt.Sprintf("date=%s\n", now.Format("Mon Jan _2 15:04:05 2006")))
 
-	// IP blacklist (dummy)
-	status.WriteString("ip_blacklist=00000000\n")
+	// IP blacklist hash — empty string until the blacklist has been loaded.
+	// The real KiwiSDR sends "" on first boot and a CRC32 hex string once loaded.
+	// We don't fetch the blacklist ourselves, so always send empty.
+	status.WriteString("ip_blacklist=\n")
 
-	// DX file info (dummy)
+	// DX file info — format is "version,crc32hex,size_bytes".
+	// We don't cache the DX community file, so send zeros.
 	status.WriteString("dx_file=0,00000000,0\n")
 
 	w.Write([]byte(status.String()))
@@ -377,8 +468,19 @@ func (kc *kiwiConn) handle() {
 	// userSessionID is already set in HandleKiwiWebSocket using timestamp+IP
 	// This ensures SND and W/F connections from the same client share the same UUID
 
-	// Register User-Agent for this session (required by UberSDR)
-	kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
+	// Register User-Agent for this session only if no name has been stored yet.
+	// KiwiSDR opens two WebSocket connections per page load (SND + W/F) that share
+	// the same userSessionID.  Unconditionally overwriting here would wipe a name
+	// that the user already set on the paired connection that started first.
+	if kc.sessions.GetUserAgent(kc.userSessionID) == "" {
+		kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
+	}
+
+	// Register SND connections in the active registry so broadcastUserList()
+	// can push user_cb updates to them when any user connects or disconnects.
+	if kc.connType == "SND" && kc.handler != nil {
+		kc.handler.registerSNDConn(kc)
+	}
 
 	// Don't send initialization messages yet - wait for SET auth command
 	// The client must send "SET auth t=kiwi p=#" (or with a password) first
@@ -393,11 +495,32 @@ func (kc *kiwiConn) handle() {
 		kc.streamWaterfall(done)
 	}
 
-	// Cleanup
+	// Cleanup: destroy the radiod session and release the RX slot.
+	//
+	// Order matters:
+	//   1. Unregister this SND conn FIRST so broadcastUserList() does not try
+	//      to send to an already-closed WebSocket.
+	//   2. Destroy the session so GetNonBypassedAudioUsers() no longer returns
+	//      this user.
+	//   3. Move the slot to kiwiVacatedSlots via releaseRXSlot() so the next
+	//      sendUserList() call emits a clearing {"i":slot} entry.
+	//   4. broadcastUserList() pushes the updated list (with the clearing entry)
+	//      to every remaining connected KiwiSDR SND client immediately.
+	if kc.connType == "SND" && kc.handler != nil {
+		kc.handler.unregisterSNDConn(kc.userSessionID)
+	}
 	if kc.session != nil {
 		kc.audioReceiver.ReleaseChannelAudio(kc.session)
 		if err := kc.sessions.DestroySession(kc.session.ID); err != nil {
 			log.Printf("Error destroying KiwiSDR session: %v", err)
+		}
+	}
+	if kc.handler != nil && kc.userSessionID != "" {
+		kc.handler.releaseRXSlot(kc.userSessionID)
+		if kc.connType == "SND" {
+			// Push the updated user list (with the clearing entry for this slot)
+			// to all remaining connected KiwiSDR SND clients immediately.
+			kc.handler.broadcastUserList()
 		}
 	}
 }
@@ -413,11 +536,6 @@ func (kc *kiwiConn) sendMsg(name, value string) {
 
 	// KiwiSDR protocol: MSG tag (3 bytes) + space + message
 	packet := append([]byte("MSG "), []byte(msg)...)
-
-	// Log large messages for debugging
-	if len(packet) > 500 {
-		log.Printf("Sending large MSG: %s (total %d bytes, msg %d bytes)", name, len(packet), len(msg))
-	}
 
 	kc.conn.writeMu.Lock()
 	// Increase write deadline for large messages
@@ -435,9 +553,7 @@ func (kc *kiwiConn) sendMsg(name, value string) {
 	kc.conn.writeMu.Unlock()
 
 	if err != nil {
-		log.Printf("Error sending MSG to Kiwi client: %v", err)
-	} else if len(packet) > 500 {
-		log.Printf("Successfully sent large MSG: %s", name)
+		log.Printf("KiwiSDR: error sending MSG to client: %v", err)
 	}
 }
 
@@ -446,21 +562,14 @@ func (kc *kiwiConn) handleMessages(done chan struct{}) {
 	defer close(done)
 
 	for {
-		msgType, message, err := kc.conn.conn.ReadMessage()
+		_, message, err := kc.conn.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("KiwiSDR WebSocket error: %v", err)
-			}
 			break
 		}
 
 		// Parse message (should be text "SET ..." commands)
 		msgStr := string(message)
 
-		// Log all incoming messages (disabled for keepalive and GET_USERS to reduce noise)
-		if !strings.Contains(msgStr, "keepalive") && !strings.Contains(msgStr, "GET_USERS") {
-			log.Printf("KiwiSDR %s received message (type=%d, len=%d): %q", kc.connType, msgType, len(message), msgStr)
-		}
 		if strings.HasPrefix(msgStr, "SET ") {
 			kc.handleSetCommand(msgStr[4:])
 		}
@@ -538,7 +647,11 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 
 		// Create or update session
-		if kc.session == nil {
+		kc.mu.RLock()
+		existingSession := kc.session
+		kc.mu.RUnlock()
+
+		if existingSession == nil {
 			// Create initial session (only for SND connections)
 			if kc.connType == "SND" {
 				session, err := kc.sessions.CreateSessionWithBandwidthAndPassword(
@@ -547,14 +660,16 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 					log.Printf("Failed to create KiwiSDR session: %v", err)
 					return
 				}
+				kc.mu.Lock()
 				kc.session = session
+				kc.mu.Unlock()
 				kc.audioReceiver.GetChannelAudio(session)
 			}
 		} else {
 			// Update existing session
 			if freq > 0 || mode != "" || (lowCut != 0 && highCut != 0) {
 				sendBW := lowCut != 0 && highCut != 0
-				err := kc.sessions.UpdateSessionWithEdges(kc.session.ID, freq, mode, lowCut, highCut, sendBW)
+				err := kc.sessions.UpdateSessionWithEdges(existingSession.ID, freq, mode, lowCut, highCut, sendBW)
 				if err != nil {
 					log.Printf("Failed to update KiwiSDR session: %v", err)
 				}
@@ -570,14 +685,10 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// Ignore zoom parameter in MARKER commands - these are just display parameters
 		// and should not trigger spectrum frequency updates
 		if _, isMarker := params["MARKER"]; isMarker {
-			log.Printf("DEBUG ZOOM: Ignoring zoom in MARKER command")
 			return
 		}
 
 		zoom, _ := strconv.Atoi(zoomStr)
-
-		log.Printf("DEBUG ZOOM: Received zoom command on %s connection: zoom=%d, params=%v, userSessionID=%s",
-			kc.connType, zoom, params, kc.userSessionID)
 
 		// Store zoom level
 		kc.mu.Lock()
@@ -590,12 +701,12 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
-		// Important: x_bin is always relative to MAX zoom level (zoom 14)
-		// max_bins = 1024 << 14 = 16777216 bins across 30 MHz
+		// Important: x_bin is always relative to MAX zoom level (zoom 7)
+		// max_bins = 1024 << 7 = 131072 bins across 30 MHz
 		// bin_to_freq: freq = (bin / max_bins) * bandwidth
 		// freq_to_bin: bin = (freq / bandwidth) * max_bins
-		const maxZoom = 14
-		maxBins := 1024 << maxZoom // 16777216
+		const maxZoom = 7
+		maxBins := 1024 << maxZoom // 131072
 
 		// Parse x_bin and calculate center frequency FIRST (before bin count determination)
 		var freq uint64
@@ -612,8 +723,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			binsAtCurrentZoom := 1024 << uint(maxZoom-zoom)
 			// xBin is the start position, so it's center minus half the window
 			xBin = uint32(centerBin - float64(binsAtCurrentZoom)/2)
-			log.Printf("DEBUG ZOOM: Using cf parameter: cfKHz=%.3f, centerBin=%.0f, binsAtZoom=%d, xBin=%d",
-				cfKHz, centerBin, binsAtCurrentZoom, xBin)
 		} else if startStr, ok := params["start"]; ok {
 			// Handle start parameter (x_bin position at max zoom resolution)
 			xBin64, _ := strconv.ParseUint(startStr, 10, 32)
@@ -633,50 +742,29 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			// Convert bin to frequency: freq = (bin / max_bins) * bandwidth
 			totalBandwidthHz := fullSpanKHz * 1000.0
 			freq = uint64((centerBin / float64(maxBins)) * totalBandwidthHz)
-
-			log.Printf("DEBUG ZOOM: Using start parameter: xBin=%d, binsAtZoom=%d, centerBin=%.0f, freq=%d Hz (%.3f kHz)",
-				xBin, binsAtZoom, centerBin, freq, float64(freq)/1000.0)
 		} else {
 			// No cf or start provided, use current center (15 MHz)
 			freq = 15000000
 			xBin = 0
-			log.Printf("DEBUG ZOOM: No cf or start parameter, using default: freq=15 MHz, xBin=0")
 		}
 
-		// NOW determine bin count and bandwidth based on radiod constraints
-		// The center frequency is already calculated correctly above
-		// Radiod has minimum bin bandwidth constraints that depend on bin count
-		// From UberSDR testing: 256 bins at 50 Hz/bin works (not 25 Hz!)
-		// The constraint is related to FFT size and filter design
+		// Always use 1024 bins (matching real KiwiSDR FPGA hardware behaviour).
+		//
+		// The KiwiSDR client uses the echoed x_bin and zoom from the W/F packet
+		// header to draw the frequency axis, assuming the server always returns
+		// exactly wf_fft_size (1024) bins covering the full 30MHz/2^zoom span.
+		// Reducing binCount silently narrows the actual radiod window while the
+		// client still labels the axis for the full span, causing signals to
+		// appear at the wrong frequency position when zoomed in.
+		//
+		// If the requested binBW falls below radiod's minimum (~60 Hz/bin for
+		// 1024 bins), clamp it.  The waterfall resolution stops improving beyond
+		// that zoom level but the frequency axis remains accurate.
+		const minBinBW = 60.0 // radiod minimum Hz/bin for 1024 bins
 		binCount := 1024
 		binBandwidth := requestedBinBandwidth
-		const minBinBW1024 = 60.0 // Minimum Hz/bin for 1024 bins
-		const minBinBW512 = 50.0  // Minimum Hz/bin for 512 bins
-		const minBinBW256 = 50.0  // Minimum Hz/bin for 256 bins (from UberSDR actual usage)
-
-		if requestedBinBandwidth < minBinBW1024 {
-			// Try 512 bins
-			binCount = 512
-			binBandwidth = (spanKHz * 1000) / float64(binCount)
-
-			if binBandwidth < minBinBW512 {
-				// Try 256 bins
-				binCount = 256
-				binBandwidth = (spanKHz * 1000) / float64(binCount)
-
-				if binBandwidth < minBinBW256 {
-					// Clamp to minimum
-					binBandwidth = minBinBW256
-					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, clamped to %d bins at %.2f Hz/bin (span %.3f kHz, requested %.3f kHz)",
-						zoom, requestedBinBandwidth, binCount, binBandwidth, float64(binCount)*binBandwidth/1000, spanKHz)
-				} else {
-					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
-						zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
-				}
-			} else {
-				log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
-					zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
-			}
+		if binBandwidth < minBinBW {
+			binBandwidth = minBinBW
 		}
 
 		// Store xBin
@@ -684,24 +772,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		kc.xBin = xBin
 		kc.mu.Unlock()
 
-		// Debug logging
-		log.Printf("DEBUG ZOOM: Calculated values: zoom=%d, xBin=%d, freq=%d Hz (%.3f kHz), binBW=%.2f Hz, spanKHz=%.3f",
-			zoom, xBin, freq, float64(freq)/1000.0, binBandwidth, spanKHz)
-
-		// Find and update the spectrum session for this userSessionID
-		// The zoom command can come on either SND or W/F connection
+		// Find and update the spectrum session for this userSessionID.
+		// The zoom command can arrive on either SND or W/F connection.
+		// It is normal for the update to fail on the SND connection when the
+		// W/F connection has not yet created the spectrum session (benign race
+		// during connection setup), so no error is logged on failure.
 		if kc.userSessionID != "" {
-			log.Printf("DEBUG ZOOM: Calling UpdateSpectrumSessionByUserIDWithBinCount with userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d",
-				kc.userSessionID, freq, binBandwidth, binCount)
-			updated := kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount)
-			if !updated {
-				log.Printf("ERROR ZOOM: Failed to update spectrum session for zoom command (userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d)",
-					kc.userSessionID, freq, binBandwidth, binCount)
-			} else {
-				log.Printf("DEBUG ZOOM: Successfully updated spectrum session")
-			}
-		} else {
-			log.Printf("ERROR ZOOM: userSessionID is empty, cannot update spectrum session")
+			kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount)
 		}
 		return
 	}
@@ -751,14 +828,26 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
-	// Handle ident_user command
+	// Handle ident_user command.
+	// The JS sends the value URL-encoded (encodeURIComponent), e.g.
+	// "SET ident_user=John%20Smith".  Decode it before storing so that
+	// GetNonBypassedAudioUsers() returns plain text and kiwiEncodeString()
+	// in sendUserList() encodes it exactly once for the JSON response.
+	// Ignore empty names — an empty ident_user would show as "N/A" in the
+	// session user-agent and "(no identity)" in the KiwiSDR user list.
 	if identUser, hasIdent := params["ident_user"]; hasIdent {
-		kc.mu.Lock()
-		kc.identUser = identUser
-		kc.mu.Unlock()
-		// Also update the User-Agent for this session to use the ident_user
-		if kc.userSessionID != "" {
-			kc.sessions.SetUserAgent(kc.userSessionID, identUser)
+		decoded, err := url.QueryUnescape(identUser)
+		if err != nil {
+			decoded = identUser
+		}
+		decoded = strings.TrimSpace(decoded)
+		if decoded != "" {
+			kc.mu.Lock()
+			kc.identUser = decoded
+			kc.mu.Unlock()
+			if kc.userSessionID != "" {
+				kc.sessions.SetUserAgent(kc.userSessionID, decoded)
+			}
 		}
 		return
 	}
@@ -813,7 +902,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 						kc.mu.Unlock()
 						// Store in handler's map for retrieval in user list
 						kc.handler.setGeolocation(kc.userSessionID, sanitized)
-						log.Printf("KiwiSDR: User %s geolocation from JSON: %s", kc.userSessionID, sanitized)
 					}
 				}
 			}
@@ -966,7 +1054,6 @@ func (kc *kiwiConn) sendStatsCallback() {
 				sessionsFound++
 				// Get the actual session to access instantaneous throughput
 				sessionID, _ := sessionInfo["id"].(string)
-				isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
 				if session, ok := kc.sessions.GetSession(sessionID); ok {
 					// Use instantaneous throughput (1-second sliding window) instead of average
 					audioKbps := session.GetInstantaneousAudioKbps()
@@ -976,13 +1063,9 @@ func (kc *kiwiConn) sendStatsCallback() {
 					audioKBytesPerSec += audioKbps / 8.0
 					waterfallKBytesPerSec += waterfallKbps / 8.0
 
-					log.Printf("STATS: Session %s (spectrum=%v): audio=%.2f kB/s, waterfall=%.2f kB/s",
-						sessionID[:8], isSpectrum, audioKbps/8.0, waterfallKbps/8.0)
 				}
 			}
 		}
-		log.Printf("STATS: Found %d sessions for user %s, total: audio=%.2f kB/s, waterfall=%.2f kB/s",
-			sessionsFound, kc.userSessionID, audioKBytesPerSec, waterfallKBytesPerSec)
 	}
 
 	// Calculate waterfall FPS from poll period
@@ -1063,7 +1146,6 @@ func (kc *kiwiConn) sendStatsCallback() {
 				sh = int(hfDynamicRange)
 			}
 
-			log.Printf("SNR stats: sa (0-30 MHz) = %d dB, sh (1.8-30 MHz) = %d dB", sa, sh)
 		}
 	}
 
@@ -1081,7 +1163,6 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// Send as MSG stats_cb=<json>
 	// The JSON is sent raw (not URL-encoded) as per KiwiSDR protocol
 	jsonStr := string(jsonData)
-	log.Printf("Sending stats_cb: %s", jsonStr)
 	kc.sendMsg("stats_cb", jsonStr)
 }
 
@@ -1150,7 +1231,6 @@ func (kc *kiwiConn) sendConfigCallback() {
 
 	// Send as MSG config_cb=<json>
 	jsonStr := string(jsonData)
-	log.Printf("Sending config_cb: %s", jsonStr)
 	kc.sendMsg("config_cb", jsonStr)
 }
 
@@ -1205,7 +1285,13 @@ func (kc *kiwiConn) sendInitMessages() {
 	// Use callsign for owner_info (displays in center of top bar)
 	ownerInfo := kc.config.Admin.Callsign
 
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","rx_antenna":"` + kc.config.Admin.Antenna + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"` + ownerInfo + `","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	// RX_TITLE: "CALLSIGN - Name" (e.g. "MM3NDH - my SDR")
+	rxTitle := kc.config.Admin.Name
+	if kc.config.Admin.Callsign != "" {
+		rxTitle = kc.config.Admin.Callsign + " - " + kc.config.Admin.Name
+	}
+
+	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","rx_antenna":"` + kc.config.Admin.Antenna + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + rxTitle + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"` + ownerInfo + `","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	cfgJSONEncoded = strings.ReplaceAll(cfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
@@ -1261,7 +1347,7 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.sendMsg("wf_fft_size", "1024")
 		kc.sendMsg("wf_fps", "23")
 		kc.sendMsg("wf_fps_max", "23")
-		kc.sendMsg("zoom_max", "14")
+		kc.sendMsg("zoom_max", "7")
 		kc.sendMsg("wf_chans", fmt.Sprintf("%d", maxSessions))
 		kc.sendMsg("wf_chans_real", fmt.Sprintf("%d", maxSessions))
 		kc.sendMsg("wf_cal", "-3")
@@ -1295,7 +1381,6 @@ func (kc *kiwiConn) sendInitMessages() {
 				return
 			}
 			kc.session = session
-			log.Printf("Created spectrum session for W/F connection: %s", kc.session.ID)
 
 			// Configure initial spectrum parameters (zoom 0 = full 30 MHz span)
 			// Full span = 30 MHz, zoom 0 = 30000 kHz / 1024 bins = 29.296875 kHz/bin
@@ -1304,8 +1389,6 @@ func (kc *kiwiConn) sendInitMessages() {
 			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, initialFreq, initialBinBandwidth)
 			if !updated {
 				log.Printf("Warning: Failed to configure initial spectrum session")
-			} else {
-				log.Printf("Configured spectrum session: freq=%d Hz, binBW=%.2f Hz", initialFreq, initialBinBandwidth)
 			}
 		}
 	}
@@ -1381,8 +1464,6 @@ func hslToRGB(h, s, l float64) (uint8, uint8, uint8) {
 // Note: DX labels (bookmarks) are NOT sent here - they require a separate server-side database
 // and are loaded via SET MARKER commands. This function only handles band bars and their services.
 func (kc *kiwiConn) buildDXConfig() string {
-	log.Printf("DEBUG: buildDXConfig called with %d bands, %d bookmarks", len(kc.config.Bands), len(kc.config.Bookmarks))
-
 	// Create dx_type array (16 entries for bookmark types)
 	// Map bookmark groups to types and generate colors
 	groupToType := make(map[string]int)
@@ -1401,7 +1482,6 @@ func (kc *kiwiConn) buildDXConfig() string {
 			groupToType[group] = nextType
 			typeNames[nextType] = group
 			typeColors[nextType] = generatePastelColor(group)
-			log.Printf("DEBUG: Bookmark type: group=%s, type=%d, color=%s", group, nextType, typeColors[nextType])
 			nextType++
 		}
 	}
@@ -1446,7 +1526,6 @@ func (kc *kiwiConn) buildDXConfig() string {
 			groupToSvc[group] = svcKey
 
 			color := generatePastelColor(group)
-			log.Printf("DEBUG: Band service: group=%s, key=%s, color=%s", group, svcKey, color)
 
 			bandSvc = append(bandSvc, map[string]interface{}{
 				"key":   svcKey,
@@ -1456,8 +1535,6 @@ func (kc *kiwiConn) buildDXConfig() string {
 			svcIndex++
 		}
 	}
-
-	log.Printf("DEBUG: Created %d band services", len(bandSvc))
 
 	// Convert UberSDR bands to Kiwi bands format
 	// Kiwi bands are ONLY for the band bar display (frequency ranges)
@@ -1507,160 +1584,147 @@ func (kc *kiwiConn) buildDXConfig() string {
 	return string(dxcfgJSON)
 }
 
-// KiwiUserInfo represents a user in KiwiSDR format for JSON marshaling
+// KiwiUserInfo represents a user in KiwiSDR format for JSON marshaling.
+//
+// IMPORTANT: Name uses omitempty so that vacated-slot entries (where Name=="")
+// are serialised as {"i":N} with no "n" key.  The KiwiSDR JS user_cb() checks
+// isDefined(obj.n) to decide whether to render or clear a slot.  In JavaScript
+// isDefined("") is true, so sending "n":"" causes the slot to be rendered as
+// "(no identity) 0.00 KHz" and never cleared — producing a permanent build-up
+// of ghost users.  Omitting "n" entirely makes obj.n undefined, isDefined
+// returns false, and the slot is properly cleared.
 type KiwiUserInfo struct {
 	Index           int     `json:"i"`
-	Name            string  `json:"n"`
-	Location        string  `json:"g"`
-	Frequency       int     `json:"f"`
-	Mode            string  `json:"m"`
-	Zoom            int     `json:"z"`
-	Waterfall       int     `json:"wf"`
-	FreqChange      int     `json:"fc"`
-	Time            string  `json:"t"`
-	InactivityTimer int     `json:"rt"`
-	RecordNum       int     `json:"rn"`
-	AckTime         string  `json:"rs"`
-	Extension       string  `json:"e"`
-	Antenna         string  `json:"a"`
-	Compression     float64 `json:"c"`
-	FreqOffset      float64 `json:"fo"`
-	ColorAnt        int     `json:"ca"`
-	NoiseCancel     int     `json:"nc"`
-	NoiseSubtract   int     `json:"ns"`
+	Name            string  `json:"n,omitempty"`
+	Location        string  `json:"g,omitempty"`
+	Frequency       int     `json:"f,omitempty"`
+	Mode            string  `json:"m,omitempty"`
+	Zoom            int     `json:"z,omitempty"`
+	Waterfall       int     `json:"wf,omitempty"`
+	FreqChange      int     `json:"fc,omitempty"`
+	Time            string  `json:"t,omitempty"`
+	InactivityTimer int     `json:"rt,omitempty"`
+	RecordNum       int     `json:"rn,omitempty"`
+	AckTime         string  `json:"rs,omitempty"`
+	Extension       string  `json:"e,omitempty"`
+	Antenna         string  `json:"a,omitempty"`
+	Compression     float64 `json:"c,omitempty"`
+	FreqOffset      float64 `json:"fo,omitempty"`
+	ColorAnt        int     `json:"ca,omitempty"`
+	NoiseCancel     int     `json:"nc,omitempty"`
+	NoiseSubtract   int     `json:"ns,omitempty"`
 }
 
-// sendUserList sends the list of active users in KiwiSDR format
+// sendUserList sends the list of active users in KiwiSDR format.
+// It includes all non-bypassed audio listeners regardless of which protocol
+// they connected through (KiwiSDR, WebSDR, or native UberSDR).
 func (kc *kiwiConn) sendUserList() {
-	// Get all active sessions from the session manager
-	allSessions := kc.sessions.GetAllSessionsInfo()
+	allUsers := kc.sessions.GetNonBypassedAudioUsers()
 
-	// Build user list in KiwiSDR format
-	// Only show Kiwi protocol users (not native UberSDR users, decoders, etc.)
-	// Group sessions by user_session_id to combine audio and spectrum sessions
-	userMap := make(map[string]*KiwiUserInfo)
+	// Build KiwiUserInfo entries, assigning a stable RX slot per user session.
+	userMap := make(map[string]*KiwiUserInfo, len(allUsers))
 
-	// First pass: Process audio sessions to create user entries
-	for _, sessionInfo := range allSessions {
-		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
-		if isSpectrum {
-			continue // Skip spectrum sessions in first pass
+	for _, u := range allUsers {
+		if _, exists := userMap[u.UserSessionID]; exists {
+			continue
 		}
-
-		// Skip internal sessions (no client IP)
-		clientIP, _ := sessionInfo["client_ip"].(string)
-		if clientIP == "" {
+		// Safety net: never send a zero-frequency entry to the client.
+		// GetNonBypassedAudioUsers already filters these, but guard here too
+		// in case a session is in a transient untuned state.
+		if u.FrequencyHz == 0 {
 			continue
 		}
 
-		userSessionID, _ := sessionInfo["user_session_id"].(string)
-		if userSessionID == "" {
-			continue // Skip sessions without UUID
+		rxSlot := kc.handler.getOrAssignRXSlot(u.UserSessionID)
+
+		// For KiwiSDR users, also look up geolocation set via SET geoloc.
+		geoloc := ""
+		if u.Protocol == "kiwi" {
+			geoloc = kc.handler.getGeolocation(u.UserSessionID)
 		}
 
-		// Only include Kiwi protocol users
-		if !strings.HasPrefix(userSessionID, "kiwi-") {
-			continue // Skip non-Kiwi users (native UberSDR clients, decoders, etc.)
+		timeConnected := int(time.Since(u.CreatedAt).Seconds())
+
+		entry := &KiwiUserInfo{
+			Index:           rxSlot,
+			Name:            kiwiEncodeString(u.DisplayName),
+			Location:        kiwiEncodeString(geoloc),
+			Frequency:       int(u.FrequencyHz),
+			Mode:            u.Mode,
+			Zoom:            0,
+			Waterfall:       0,
+			FreqChange:      0,
+			Time:            fmt.Sprintf("%ds", timeConnected),
+			InactivityTimer: 0,
+			RecordNum:       0,
+			AckTime:         "",
+			Extension:       u.Protocol, // show protocol as extension label
+			Antenna:         "",
+			Compression:     0.0,
+			FreqOffset:      0.0,
+			ColorAnt:        0,
+			NoiseCancel:     0,
+			NoiseSubtract:   0,
 		}
-
-		// Check if we already have this user
-		if _, exists := userMap[userSessionID]; !exists {
-			// Get or assign RX slot for this Kiwi user
-			rxSlot := kc.handler.getOrAssignRXSlot(userSessionID)
-
-			// New Kiwi user, create entry
-			user := &KiwiUserInfo{
-				Index:           rxSlot, // Use assigned RX slot number
-				Name:            "Unknown",
-				Location:        "",
-				Frequency:       0,
-				Mode:            "",
-				Zoom:            0,
-				Waterfall:       0,
-				FreqChange:      0,
-				Time:            "",
-				InactivityTimer: 0,
-				RecordNum:       0,
-				AckTime:         "",
-				Extension:       "Unknown",
-				Antenna:         "", // Leave empty - client will not display if empty
-				Compression:     0.0,
-				FreqOffset:      0.0,
-				ColorAnt:        0,
-				NoiseCancel:     0,
-				NoiseSubtract:   0,
-			}
-
-			// Get user agent if available
-			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {
-				// Encode using %20 for spaces (not +)
-				user.Name = kiwiEncodeString(userAgent)
-			}
-
-			// Get geolocation from the handler's map (populated when SET geoloc is received)
-			// Encode it the same way as Name to ensure proper JSON encoding
-			geoloc := kc.handler.getGeolocation(userSessionID)
-			if geoloc != "" {
-				user.Location = kiwiEncodeString(geoloc)
-			}
-
-			// Get creation time
-			if createdAt, ok := sessionInfo["created_at"].(string); ok && createdAt != "" {
-				if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-					// Calculate time connected in seconds
-					timeConnected := int(time.Since(t).Seconds())
-					user.Time = fmt.Sprintf("%ds", timeConnected)
-				}
-			}
-
-			// Extension - use mode or "Unknown"
-			if mode, ok := sessionInfo["mode"].(string); ok && mode != "" {
-				user.Extension = mode
-			}
-
-			userMap[userSessionID] = user
-		}
-
-		// Update frequency and mode from this session (audio only in first pass)
-		user := userMap[userSessionID]
-
-		// Set frequency and mode from audio session
-		if freq, ok := sessionInfo["frequency"].(uint64); ok {
-			user.Frequency = int(freq)
-		}
-		if mode, ok := sessionInfo["mode"].(string); ok {
-			user.Mode = mode
-		}
+		userMap[u.UserSessionID] = entry
 	}
 
-	// Convert map to array and sort by index for consistent ordering
+	// Build the final slice: active users + empty entries for vacated slots.
+	// The JS user_cb() clears a slot when it receives an entry with an
+	// undefined/empty "n" field, so we must send {"i": slot} for every slot
+	// that is assigned but no longer occupied.
 	users := make([]KiwiUserInfo, 0, len(userMap))
+
+	// Active users.
 	for _, user := range userMap {
 		users = append(users, *user)
 	}
 
-	// Sort by index to ensure consistent ordering
-	// This prevents the user list from jumping around on each update
+	// Collect clearing entries and the set of vacated sessionIDs to delete
+	// after we drop the read lock.
+	var toDelete []string
+
+	kc.handler.mu.RLock()
+	// 1. Slots that were explicitly vacated by releaseRXSlot() on disconnect.
+	//    These MUST be cleared even if the session no longer appears in
+	//    kiwiRXSlots (which is the whole point of kiwiVacatedSlots).
+	for sessionID, slot := range kc.handler.kiwiVacatedSlots {
+		if _, active := userMap[sessionID]; !active {
+			users = append(users, KiwiUserInfo{Index: slot})
+			toDelete = append(toDelete, sessionID)
+		}
+	}
+	// 2. Slots still in kiwiRXSlots that belong to sessions no longer active
+	//    (e.g. WebSDR users whose slots were assigned here but never released).
+	for sessionID, slot := range kc.handler.kiwiRXSlots {
+		if _, active := userMap[sessionID]; !active {
+			users = append(users, KiwiUserInfo{Index: slot})
+		}
+	}
+	kc.handler.mu.RUnlock()
+
+	// Delete the vacated entries now that the clearing message has been built.
+	if len(toDelete) > 0 {
+		kc.handler.mu.Lock()
+		for _, sessionID := range toDelete {
+			delete(kc.handler.kiwiVacatedSlots, sessionID)
+		}
+		kc.handler.mu.Unlock()
+	}
+
+	// Sort by RX slot for consistent ordering.
 	sort.Slice(users, func(i, j int) bool {
 		return users[i].Index < users[j].Index
 	})
 
-	// Marshal to JSON (compact, no indentation)
+	// Marshal to compact JSON and send as MSG user_cb=<json>.
 	jsonData, err := json.Marshal(users)
 	if err != nil {
 		log.Printf("Error marshaling user list: %v", err)
 		return
 	}
-
-	// Send as MSG user_cb=<json>
-	// The JSON must be sent as a single message without line breaks
-	jsonStr := string(jsonData)
-	// Remove any newlines that might have been added
-	jsonStr = strings.ReplaceAll(jsonStr, "\n", "")
+	jsonStr := strings.ReplaceAll(string(jsonData), "\n", "")
 	jsonStr = strings.ReplaceAll(jsonStr, "\r", "")
-
-	// user_cb is NOT URL-decoded by the Kiwi client, so send raw JSON
-	// Spaces in string values have been replaced with underscores above
 	kc.sendMsg("user_cb", jsonStr)
 }
 
@@ -1690,8 +1754,6 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 	// Convert to Hz for comparison with UberSDR bookmarks
 	minHz := uint64(minKHz * 1000)
 	maxHz := uint64(maxKHz * 1000)
-
-	log.Printf("KiwiSDR: MARKER request for %.3f - %.3f kHz", minKHz, maxKHz)
 
 	// Build bookmark type mapping (group -> type index)
 	groupToType := make(map[string]int)
@@ -1767,8 +1829,6 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 		}
 	}
 
-	log.Printf("KiwiSDR: Found %d bookmarks in range", len(matchingBookmarks))
-
 	// Build response array with header
 	response := make([]interface{}, len(matchingBookmarks)+1)
 
@@ -1804,15 +1864,10 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 		return
 	}
 
-	// Log first bookmark for debugging
-	if len(matchingBookmarks) > 0 {
-		log.Printf("KiwiSDR: Sample bookmark: %+v", matchingBookmarks[0])
-	}
 	// mkr is NOT URL-decoded by the Kiwi client, so send raw JSON
 	// Spaces in string values have been replaced with underscores above
 	jsonStr := string(jsonData)
 
-	log.Printf("KiwiSDR: Sending mkr (%d bytes, %d bookmarks)", len(jsonStr), len(matchingBookmarks))
 	kc.sendMsg("mkr", jsonStr)
 }
 
@@ -1820,16 +1875,23 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 	log.Printf("Starting KiwiSDR audio stream")
 
-	// Create initial session if not created by SET mod command
-	if kc.session == nil {
-		session, err := kc.sessions.CreateSessionWithBandwidthAndPassword(
-			14074000, "usb", 3000, kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
-		if err != nil {
-			log.Printf("Failed to create KiwiSDR audio session: %v", err)
-			return
+	// Wait for handleMessages to create the session via SET mod.
+	// Do NOT create a fallback session here — that races with handleMessages
+	// and produces a ghost session at a hardcoded frequency that permanently
+	// corrupts the user list (shows 0.00 KHz / wrong frequency even after tuning).
+	for {
+		kc.mu.RLock()
+		sess := kc.session
+		kc.mu.RUnlock()
+		if sess != nil {
+			break
 		}
-		kc.session = session
-		kc.audioReceiver.GetChannelAudio(session)
+		select {
+		case <-done:
+			return
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	packetCount := 0
@@ -1959,11 +2021,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 			packetCount++
 
-			// Debug: Log first packet to verify we're receiving data
-			if packetCount == 1 {
-				log.Printf("First waterfall packet: len=%d, first 10 values: %v", len(spectrumData), spectrumData[:10])
-			}
-
 			// Unwrap FFT data for KiwiSDR
 			// Radiod sends wrapped FFT: [DC...+Nyquist, -Nyquist...-DC]
 			// KiwiSDR expects unwrapped: [-Nyquist...DC...+Nyquist]
@@ -1975,11 +2032,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			copy(unwrapped[0:halfBins], spectrumData[halfBins:N])
 			// Copy first half (positive frequencies) to end
 			copy(unwrapped[halfBins:N], spectrumData[0:halfBins])
-
-			// Debug: Log unwrapped data
-			if packetCount == 1 {
-				log.Printf("Unwrapped: first 10 values: %v", unwrapped[:10])
-			}
 
 			// Get current zoom, xBin, and compression flag for packet building
 			kc.mu.RLock()
@@ -2005,10 +2057,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 					} else {
 						interpolated[i] = unwrapped[srcIdx]
 					}
-				}
-
-				if packetCount == 1 {
-					log.Printf("INTERPOLATE: Radiod sent %d bins, interpolated to %d for KiwiSDR", N, targetBins)
 				}
 
 				unwrapped = interpolated
@@ -2055,11 +2103,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				wfData[i] = byte(byteVal)
 			}
 
-			// Debug: Log encoded data
-			if packetCount == 1 {
-				log.Printf("Encoded wfData: first 10 values: %v", wfData[:10])
-			}
-
 			// Prepare encoded data (compression flag already read above)
 			var encodedData []byte
 			var flags uint32
@@ -2090,17 +2133,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			binary.LittleEndian.PutUint32(packet[4:8], (flags<<16)|uint32(currentZoom&0xffff)) // flags_zoom
 			binary.LittleEndian.PutUint32(packet[8:12], wfSequence)                            // sequence
 			copy(packet[12:], encodedData)
-
-			// Debug: Log packet structure for first few packets
-			if packetCount <= 3 {
-				log.Printf("W/F packet #%d: xBin=%d, zoom=%d, flags=%d, seq=%d, dataLen=%d, compressed=%v",
-					packetCount, currentXBin, currentZoom, flags, wfSequence, len(encodedData), useCompression)
-				log.Printf("First 10 bytes of encoded data: %v", encodedData[:10])
-				// Calculate what frequency range this represents
-				if kc.session != nil {
-					log.Printf("Session freq=%d Hz, binBW=%.2f Hz", kc.session.Frequency, kc.session.BinBandwidth)
-				}
-			}
 
 			// Send with "W/F" tag + skip byte
 			fullPacket := append([]byte("W/F\x00"), packet...)

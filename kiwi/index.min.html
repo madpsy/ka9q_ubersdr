@@ -158,5 +158,38 @@ This file is part of OpenWebRX.
                 <div class="id-w3-misc-container"></div>
             </div>
         </div>
+	<div id="kiwi-zoom-toast" style="
+		position: fixed;
+		top: 16px;
+		right: 16px;
+		z-index: 99999;
+		background: rgba(30, 30, 30, 0.92);
+		color: #f0f0f0;
+		padding: 12px 18px;
+		border-radius: 8px;
+		font-family: sans-serif;
+		font-size: 14px;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		opacity: 1;
+		transition: opacity 0.5s ease;
+		pointer-events: none;
+	">
+		<span style="font-size: 18px;">🔍</span>
+		<span>Zoom level is currently limited to level&nbsp;7</span>
+	</div>
+	<script>
+		(function() {
+			var toast = document.getElementById('kiwi-zoom-toast');
+			setTimeout(function() {
+				toast.style.opacity = '0';
+				setTimeout(function() {
+					if (toast.parentNode) toast.parentNode.removeChild(toast);
+				}, 500);
+			}, 3000);
+		})();
+	</script>
 	</body>
 </html>

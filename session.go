@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1033,21 +1034,13 @@ func (sm *SessionManager) UpdateSpectrumSessionByUserID(userSessionID string, fr
 // Returns true if a spectrum session was found and updated, false otherwise
 func (sm *SessionManager) UpdateSpectrumSessionByUserIDWithBinCount(userSessionID string, frequency uint64, binBandwidth float64, binCount int) bool {
 	if userSessionID == "" {
-		log.Printf("DEBUG SESSION: UpdateSpectrumSessionByUserID called with empty userSessionID")
 		return false
 	}
-
-	log.Printf("DEBUG SESSION: UpdateSpectrumSessionByUserID called: userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d",
-		userSessionID, frequency, binBandwidth, binCount)
 
 	sm.mu.RLock()
 	// Find the spectrum session for this userSessionID
 	var spectrumSessionID string
 	for _, session := range sm.sessions {
-		if session.IsSpectrum {
-			log.Printf("DEBUG SESSION: Found spectrum session: ID=%s, UserSessionID=%s, Freq=%d",
-				session.ID, session.UserSessionID, session.Frequency)
-		}
 		if session.UserSessionID == userSessionID && session.IsSpectrum {
 			spectrumSessionID = session.ID
 			break
@@ -1055,24 +1048,17 @@ func (sm *SessionManager) UpdateSpectrumSessionByUserIDWithBinCount(userSessionI
 	}
 	sm.mu.RUnlock()
 
-	log.Printf("DEBUG SESSION: Search complete: found_match=%v", spectrumSessionID != "")
-
 	if spectrumSessionID == "" {
-		log.Printf("DEBUG SESSION: No spectrum session found for userSessionID=%s", userSessionID)
 		return false
 	}
-
-	log.Printf("DEBUG SESSION: Found spectrum session %s, updating to freq=%d, binBW=%.2f, binCount=%d",
-		spectrumSessionID, frequency, binBandwidth, binCount)
 
 	// Update the spectrum session
 	err := sm.UpdateSpectrumSession(spectrumSessionID, frequency, binBandwidth, binCount)
 	if err != nil {
-		log.Printf("DEBUG SESSION: UpdateSpectrumSession failed: %v", err)
+		log.Printf("KiwiSDR: UpdateSpectrumSession failed: %v", err)
 		return false
 	}
 
-	log.Printf("DEBUG SESSION: Successfully updated spectrum session %s", spectrumSessionID)
 	return true
 }
 
@@ -1854,6 +1840,107 @@ func (sm *SessionManager) GetNonBypassedUserCount() int {
 	}
 
 	return len(nonBypassedUUIDs)
+}
+
+// UnifiedUserInfo is a protocol-agnostic view of a connected listener,
+// used to present a unified user list across KiwiSDR, WebSDR, and native UberSDR interfaces.
+type UnifiedUserInfo struct {
+	UserSessionID string
+	DisplayName   string // from userAgents map, or masked IP fallback
+	FrequencyHz   uint64
+	Mode          string
+	ClientIP      string
+	CreatedAt     time.Time
+	Protocol      string // "kiwi", "websdr", or "native"
+}
+
+// GetNonBypassedAudioUsers returns one entry per unique non-bypassed audio listener,
+// across all protocols (KiwiSDR, WebSDR, native UberSDR).
+// Spectrum-only sessions, internal/bypassed sessions, and sessions with no tuned
+// frequency (Frequency == 0) are excluded — zero-frequency sessions are transient
+// states before the client has sent its first SET mod / tune command and must not
+// appear in user lists.
+func (sm *SessionManager) GetNonBypassedAudioUsers() []UnifiedUserInfo {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	seen := make(map[string]*UnifiedUserInfo)
+
+	for _, session := range sm.sessions {
+		if session.IsSpectrum {
+			continue
+		}
+		if session.ClientIP == "" {
+			continue
+		}
+		if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+			continue
+		}
+		if session.UserSessionID == "" {
+			continue
+		}
+		// Skip sessions that have not yet been tuned to a frequency.
+		// These are transient states (e.g. race between SET mod and streamAudio)
+		// and must never appear in user lists as "(no identity) 0.00 KHz".
+		if session.Frequency == 0 {
+			continue
+		}
+
+		uid := session.UserSessionID
+		if _, exists := seen[uid]; !exists {
+			proto := "native"
+			if strings.HasPrefix(uid, "kiwi-") {
+				proto = "kiwi"
+			} else if strings.HasPrefix(uid, "websdr-") {
+				proto = "websdr"
+			}
+			name := sm.userAgents[uid]
+			// Fall back to a protocol label when no user-supplied name is available.
+			if name == "" || name == "KiwiSDR Client" || name == "WebSDR Client" ||
+				strings.HasPrefix(name, "Mozilla/") || strings.HasPrefix(name, "Opera/") {
+				switch proto {
+				case "kiwi":
+					name = "KiwiSDR"
+				case "websdr":
+					name = "WebSDR"
+				default:
+					name = "UberSDR"
+				}
+			}
+			seen[uid] = &UnifiedUserInfo{
+				UserSessionID: uid,
+				DisplayName:   name,
+				FrequencyHz:   session.Frequency,
+				Mode:          session.Mode,
+				ClientIP:      session.ClientIP,
+				CreatedAt:     session.CreatedAt,
+				Protocol:      proto,
+			}
+		} else {
+			u := seen[uid]
+			if session.Frequency > 0 {
+				u.FrequencyHz = session.Frequency
+				u.Mode = session.Mode
+			}
+		}
+	}
+
+	users := make([]UnifiedUserInfo, 0, len(seen))
+	for _, u := range seen {
+		users = append(users, *u)
+	}
+	// Sort by CreatedAt ascending (oldest user first) so each user keeps a
+	// stable index across successive /~~othersjj polls.  Without this, Go's
+	// random map iteration order causes the index — and therefore the colour
+	// assigned by the WebSDR JS — to change every second.
+	// UserSessionID is used as a tiebreaker for determinism.
+	sort.Slice(users, func(i, j int) bool {
+		if users[i].CreatedAt.Equal(users[j].CreatedAt) {
+			return users[i].UserSessionID < users[j].UserSessionID
+		}
+		return users[i].CreatedAt.Before(users[j].CreatedAt)
+	})
+	return users
 }
 
 // canAcceptNewUUIDLocked checks if a new UUID can be accepted without exceeding max_sessions.

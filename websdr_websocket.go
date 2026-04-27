@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"html"
@@ -238,22 +239,11 @@ func (h *WebSDRHandler) isTrustedIP(ip string) bool {
 	return false
 }
 
-// findStaticFile searches public2_dir then public_dir for a file (FEAT-10).
+// findStaticFile searches the "websdr" directory for a file.
 func (h *WebSDRHandler) findStaticFile(name string) string {
-	dirs := []string{}
-	if h.config.Server.WebSDRStaticDir2 != "" {
-		dirs = append(dirs, h.config.Server.WebSDRStaticDir2)
-	}
-	staticDir := h.config.Server.WebSDRStaticDir
-	if staticDir == "" {
-		staticDir = "websdr"
-	}
-	dirs = append(dirs, staticDir)
-	for _, d := range dirs {
-		p := filepath.Join(d, name)
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
+	p := filepath.Join("websdr", name)
+	if _, err := os.Stat(p); err == nil {
+		return p
 	}
 	return ""
 }
@@ -525,7 +515,7 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 
 func (c *websdrConn) readAudioCommands(done chan struct{}) {
 	defer close(done)
-	idleTimeout := time.Duration(c.handler.config.Server.WebSDRIdleTimeout) * time.Second
+	idleTimeout := time.Duration(c.handler.config.Server.SessionTimeout) * time.Second
 	for {
 		// FEAT-12: set read deadline for idle timeout
 		if idleTimeout > 0 {
@@ -646,6 +636,11 @@ func (c *websdrConn) applyParamCommand(text string) {
 		if newName != c.username {
 			c.username = newName
 			changed = true
+			// Propagate the display name to the shared session manager so that
+			// KiwiSDR and native UberSDR user lists can show the WebSDR user's name.
+			if c.sessionID != "" {
+				c.handler.sessions.SetUserAgent(c.sessionID, newName)
+			}
 		}
 	}
 	// FEAT-14: ppm, ppml, autonotch, band
@@ -954,6 +949,8 @@ func (c *websdrConn) streamOpusAudio(done <-chan struct{}) {
 			if err := c.sendBinary(packet); err != nil {
 				return
 			}
+			// Track audio bytes sent in session (feeds admin panel throughput display)
+			c.session.AddAudioBytes(uint64(len(packet)))
 		}
 	}
 }
@@ -1132,6 +1129,8 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 			if err := c.sendBinary(encoded); err != nil {
 				return
 			}
+			// Track waterfall bytes sent in session (feeds admin panel throughput display)
+			c.session.AddWaterfallBytes(uint64(len(encoded)))
 		}
 	}
 }
@@ -1314,12 +1313,18 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/plain")
 
+	// Set-Cookie: ID=<12-hex> — required by websdr.org to identify the receiver.
+	// The real WebSDR binary sends this on every /~~orgstatus response; without it
+	// websdr.org does not list the receiver in its directory.
+	// We derive a stable 6-byte ID from the instance UUID (same approach as stableMAC).
+	w.Header().Set("Set-Cookie", "ID="+websdrOrgStatusID(h.config)+"; expires=Thu, 31-Dec-2099 00:00:00 GMT")
+
 	callerIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(callerIP); err == nil {
 		callerIP = host
 	}
 
-	users := int(atomic.LoadInt32(&h.audioUserCount))
+	users := h.sessions.GetNonBypassedUserCount()
 
 	// Cache optimisation: if caller already has our config serial, send only user count.
 	if reqCfg := r.URL.Query().Get("config"); reqCfg != "" {
@@ -1334,22 +1339,50 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 
 	fmt.Fprintf(w, "Config: %d\n", orgStatusSerial)
 
-	// Emit the org_info block verbatim (matching real WebSDR / VertexSDR behaviour).
-	// The block is dumped as-is after XOR-obfuscating the Email: field value.
-	// We do NOT re-parse and re-emit field-by-field — the server expects the raw block.
-	if orgInfo := h.config.Server.WebSDROrgInfo; orgInfo != "" {
-		// Obfuscate Email: value in-place: XOR each byte > 0x1f with 0x01.
-		obfuscated := orgInfoObfuscateEmail(orgInfo)
-		// Ensure the block ends with exactly one newline before the next field.
-		fmt.Fprint(w, obfuscated)
-		if len(obfuscated) > 0 && obfuscated[len(obfuscated)-1] != '\n' {
-			fmt.Fprint(w, "\n")
+	// Emit the org_info block (matching real WebSDR / VertexSDR behaviour).
+	// Description and Qth are derived from existing admin config fields;
+	// Email uses websdr_email if set, falling back to admin.email.
+	{
+		// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]" — same pattern as KiwiSDR /status name field
+		descParts := []string{"0-30 MHz SDR"}
+		if h.config.Admin.Callsign != "" {
+			descParts = append(descParts, h.config.Admin.Callsign)
+		}
+		if h.config.Admin.Location != "" {
+			descParts = append(descParts, h.config.Admin.Location)
+		}
+		fmt.Fprintln(w, "Description: "+strings.Join(descParts, ", "))
+
+		// Qth: Maidenhead grid locator derived from GPS coordinates
+		qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
+		fmt.Fprintln(w, "Qth: "+qth)
+
+		// Email: websdr_email if set, otherwise fall back to admin.email
+		email := h.config.Server.WebSDREmail
+		if email == "" {
+			email = h.config.Admin.Email
+		}
+		if email != "" {
+			// XOR-obfuscate the email address value (bytes > 0x1f XOR'd with 0x01).
+			addr := []byte(email)
+			for j := range addr {
+				if addr[j] > 31 {
+					addr[j] ^= 0x01
+				}
+			}
+			fmt.Fprintln(w, "Email: "+string(addr))
 		}
 	}
 
-	// Logo and mobile page (matching real WebSDR field order).
-	fmt.Fprintf(w, "Logo: logo.png\n")
-	fmt.Fprintf(w, "Mobile: m.html\n")
+	// Mobile page: emit only if a mobile HTML file exists in the static dirs.
+	// Candidates match VertexSDR's orgstatus_mobile_path() logic.
+	mobileCandidates := []string{"m.html", "mobile.html", "mobile/index.html"}
+	for _, candidate := range mobileCandidates {
+		if h.findStaticFile(candidate) != "" {
+			fmt.Fprintf(w, "Mobile: %s\n", candidate)
+			break
+		}
+	}
 
 	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
 	// Format: Band: <idx> <centerfreq_khz> <bandwidth_khz> <antenna_name>
@@ -1363,48 +1396,6 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintf(w, "Users: %d\n", users)
 }
 
-// orgInfoObfuscateEmail returns a copy of the org_info block with the value
-// portion of any "Email: ..." line XOR'd byte-by-byte with 0x01 (matching the
-// obfuscation used by the reference WebSDR and VertexSDR implementations).
-//
-// The VertexSDR reference (network.c orgstatus_obfuscate_email) searches for
-// "Email: " (with the space) and starts XOR'ing from the character after the
-// space — so the ": " separator is never obfuscated.
-func orgInfoObfuscateEmail(orgInfo string) string {
-	lines := strings.Split(orgInfo, "\n")
-	for i, line := range lines {
-		// Strip trailing \r so we work with clean lines regardless of input endings.
-		line = strings.TrimRight(line, "\r")
-		colon := strings.Index(line, ":")
-		if colon <= 0 {
-			lines[i] = line
-			continue
-		}
-		key := line[:colon]
-		if strings.EqualFold(strings.TrimSpace(key), "email") {
-			// Preserve everything up to and including ": " (colon + any leading
-			// whitespace), then XOR only the actual address bytes.
-			rest := line[colon+1:] // e.g. " me@example.com"
-			// Find where the address starts (skip leading spaces/tabs).
-			addrStart := 0
-			for addrStart < len(rest) && (rest[addrStart] == ' ' || rest[addrStart] == '\t') {
-				addrStart++
-			}
-			prefix := line[:colon+1] + rest[:addrStart] // "Email: "
-			addr := []byte(rest[addrStart:])
-			for j := range addr {
-				if addr[j] > 31 {
-					addr[j] ^= 0x01
-				}
-			}
-			lines[i] = prefix + string(addr)
-		} else {
-			lines[i] = line
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // /~~othersj (§6.2) — legacy user list + stats
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1416,27 +1407,19 @@ func (h *WebSDRHandler) handleOthersJ(w http.ResponseWriter, r *http.Request) {
 	clientChseq, _ := strconv.Atoi(r.URL.Query().Get("chseq"))
 	_ = clientChseq
 	currentChseq := h.chseq.get()
-	users := h.getUsers()
-	audioUsers := int(atomic.LoadInt32(&h.audioUserCount))
-	maxUsers := h.config.Server.WebSDRMaxUsers
-	if maxUsers == 0 {
-		maxUsers = h.config.Server.MaxSessions
-	}
+	users := h.sessions.GetNonBypassedAudioUsers()
+	audioUsers := h.sessions.GetNonBypassedUserCount()
 	// Reset the uu_* arrays so stale users are cleared, then emit uu() calls.
 	fmt.Fprintf(w, "uu_chseq=%d;\n", currentChseq)
 	fmt.Fprintf(w, "uu_names=[];\n")
 	fmt.Fprintf(w, "uu_bands=[];\n")
 	fmt.Fprintf(w, "uu_freqs=[];\n")
 	for i, u := range users {
-		displayName := u.username
-		if displayName == "" {
-			displayName = maskIP(u.clientIP)
-		}
-		normFreq := websdrNormalizeFreq(u.tuneKHz)
+		normFreq := websdrNormalizeFreq(float64(u.FrequencyHz) / 1000.0)
 		fmt.Fprintf(w, "uu(%d,%q,%d,%.6f);\n",
 			i,
-			displayName,
-			u.band,
+			u.DisplayName,
+			0, // band not tracked in unified view; use 0 (all-band)
 			normFreq,
 		)
 	}
@@ -1457,13 +1440,9 @@ func (h *WebSDRHandler) handleOthersJJ(w http.ResponseWriter, r *http.Request) {
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/javascript")
 
-	users := h.getUsers()
+	users := h.sessions.GetNonBypassedAudioUsers()
 	currentChseq := h.chseq.get()
-	audioUsers := int(atomic.LoadInt32(&h.audioUserCount))
-	maxUsers := h.config.Server.WebSDRMaxUsers
-	if maxUsers == 0 {
-		maxUsers = h.config.Server.MaxSessions
-	}
+	audioUsers := h.sessions.GetNonBypassedUserCount()
 	// Reset the uu_* arrays so stale users are cleared, then emit uu() calls.
 	// douu() reads uu_names[], uu_bands[], uu_freqs[] which are populated by uu().
 	// freq must be a normalized 0–1 fraction of the band width so that douu()
@@ -1473,15 +1452,11 @@ func (h *WebSDRHandler) handleOthersJJ(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "uu_bands=[];\n")
 	fmt.Fprintf(w, "uu_freqs=[];\n")
 	for i, u := range users {
-		displayName := u.username
-		if displayName == "" {
-			displayName = maskIP(u.clientIP)
-		}
-		normFreq := websdrNormalizeFreq(u.tuneKHz)
+		normFreq := websdrNormalizeFreq(float64(u.FrequencyHz) / 1000.0)
 		fmt.Fprintf(w, "uu(%d,%q,%d,%.6f);\n",
 			i,
-			displayName,
-			u.band,
+			u.DisplayName,
+			0, // band not tracked in unified view; use 0 (all-band)
 			normFreq,
 		)
 	}
@@ -1672,25 +1647,21 @@ func (h *WebSDRHandler) handleOthersTable(w http.ResponseWriter, r *http.Request
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	users := h.getUsers()
+	users := h.sessions.GetNonBypassedAudioUsers()
 
 	fmt.Fprintf(w, `<table class="others-table" border="1" cellpadding="3" cellspacing="0">`)
-	fmt.Fprintf(w, "<tr><th>#</th><th>Name</th><th>Freq (kHz)</th><th>Band</th><th>IP</th></tr>\n")
+	fmt.Fprintf(w, "<tr><th>#</th><th>Name</th><th>Freq (kHz)</th><th>Protocol</th><th>IP</th></tr>\n")
 
 	for i, u := range users {
-		displayName := u.username
-		if displayName == "" {
-			displayName = "(anon)"
-		}
 		colorClass := websdrUserColors(i)
 		fmt.Fprintf(w,
-			`<tr class="%s"><td>%d</td><td>%s</td><td>%.3f</td><td>%d</td><td>%s</td></tr>`+"\n",
+			`<tr class="%s"><td>%d</td><td>%s</td><td>%.3f</td><td>%s</td><td>%s</td></tr>`+"\n",
 			colorClass,
 			i+1,
-			html.EscapeString(displayName),
-			u.tuneKHz,
-			u.band,
-			html.EscapeString(maskIP(u.clientIP)),
+			html.EscapeString(u.DisplayName),
+			float64(u.FrequencyHz)/1000.0,
+			html.EscapeString(u.Protocol),
+			html.EscapeString(maskIP(u.ClientIP)),
 		)
 	}
 
@@ -1775,8 +1746,8 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 	bands := []Band{{Label: "HF", Start: 10000, End: 30000000}}
 
 	idleMS := 0
-	if h.config.Server.WebSDRIdleTimeout > 0 {
-		idleMS = h.config.Server.WebSDRIdleTimeout * 1000
+	if h.config.Server.SessionTimeout > 0 {
+		idleMS = h.config.Server.SessionTimeout * 1000
 	}
 
 	chseq := h.chseq.get()
@@ -1927,15 +1898,7 @@ func (h *WebSDRHandler) handleSysopSetDir(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
-	_ = r.ParseForm()
-	if v := r.FormValue("dir"); v != "" {
-		// Sanitise: no path traversal
-		clean := filepath.Clean(v)
-		if !strings.Contains(clean, "..") {
-			h.config.Server.WebSDRStaticDir = clean
-			log.Printf("WebSDR: sysop set static dir to %q", clean)
-		}
-	}
+	// Static dir is hardcoded to "websdr" — no runtime override supported.
 	fmt.Fprintf(w, "ok\n")
 }
 
@@ -2206,4 +2169,17 @@ func maskIP(ip string) string {
 func websdrUserColors(idx int) string {
 	colors := []string{"row-even", "row-odd"}
 	return colors[idx%len(colors)]
+}
+
+// websdrOrgStatusID returns a stable 12-hex-char receiver ID for the
+// Set-Cookie: ID= header in /~~orgstatus responses.
+// The real WebSDR binary uses the NIC MAC address; we derive a stable
+// 6-byte value from the instance UUID (first 4 bytes of SHA-256 + 2 zero bytes).
+func websdrOrgStatusID(cfg *Config) string {
+	key := cfg.InstanceReporting.InstanceUUID
+	if key == "" {
+		return "000000000000"
+	}
+	h := sha256.Sum256([]byte("ubersdr-websdr-id:" + key))
+	return fmt.Sprintf("%02x%02x%02x%02x0000", h[0], h[1], h[2], h[3])
 }

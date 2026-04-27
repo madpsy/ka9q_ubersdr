@@ -1014,15 +1014,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // Mobile background audio bridge.
-            // 1. MediaStreamDestination → <audio srcObject> keeps iOS AudioContext alive when backgrounded.
-            // 2. A separate <audio src="/silent.mp3"> anchors the Media Session API so Android Chrome
-            //    and iOS Safari show lock-screen / notification controls.
-            //    (Browsers only register a media session for <audio src="url">, not srcObject streams.)
+            // Part 1: Mobile background audio bridge (MediaStreamDestination → <audio srcObject>).
+            // Keeps iOS AudioContext alive when the browser is backgrounded.
+            // Only needed on mobile; gated on _needsMobileBridge.
             // MUST be inside a user-gesture handler so audio.play() is allowed.
             if (_needsMobileBridge && !iosMediaElement && audioContext) {
                 try {
-                    // Part 1: MediaStreamDestination bridge (keeps iOS AudioContext alive)
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._iosStreamDest = dest;
                     iosMediaElement = document.createElement('audio');
@@ -1032,56 +1029,61 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.body.appendChild(iosMediaElement);
                     await iosMediaElement.play();
                     console.log('[Mobile] MediaStreamDestination bridge created and playing');
-
-                    // Part 2: Silent audio anchor for Media Session API
-                    // Browsers require <audio src="url"> (not srcObject) to register a media session.
-                    if (!_mediaSessionAnchor) {
-                        _mediaSessionAnchor = document.createElement('audio');
-                        _mediaSessionAnchor.setAttribute('playsinline', '');
-                        _mediaSessionAnchor.loop = true;
-                        _mediaSessionAnchor.volume = 0.001; // near-silent, not zero
-                        _mediaSessionAnchor.src = '/silent.mp3';
-                        _mediaSessionAnchor.style.display = 'none';
-                        document.body.appendChild(_mediaSessionAnchor);
-                        await _mediaSessionAnchor.play();
-                        console.log('[Mobile] Media session anchor playing');
-                    }
-
-                    // Set up Media Session API for lock-screen / Control Centre controls
-                    if ('mediaSession' in navigator) {
-                        // Set metadata first, then playbackState — Android Chrome requires
-                        // metadata to be present before it will show the notification.
-                        updateIOSMediaSession();
-                        // Set playbackState after metadata and after anchor is confirmed playing.
-                        // Android Chrome is strict about this ordering.
-                        navigator.mediaSession.playbackState = 'playing';
-
-                        // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step
-                        const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
-                        const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
-                        navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
-                        navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
-                        // seekbackward / seekforward used by some platforms instead of previoustrack/nexttrack
-                        try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
-                        try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
-
-                        // Map play/pause to mute/unmute (can't truly pause a live stream)
-                        navigator.mediaSession.setActionHandler('play', () => {
-                            if (isMuted) toggleMute();
-                            iosMediaElement?.play().catch(() => {});
-                            _mediaSessionAnchor?.play().catch(() => {});
-                            navigator.mediaSession.playbackState = 'playing';
-                        });
-                        navigator.mediaSession.setActionHandler('pause', () => {
-                            if (!isMuted) toggleMute();
-                            navigator.mediaSession.playbackState = 'paused';
-                        });
-                    }
                 } catch (e) {
-                    console.warn('[Mobile] Could not create media bridge:', e.message);
+                    console.warn('[Mobile] Could not create MediaStreamDestination bridge:', e.message);
                     iosMediaElement = null;
-                    _mediaSessionAnchor = null;
                     if (audioContext) audioContext._iosStreamDest = null;
+                }
+            }
+
+            // Part 2: Media Session anchor (<audio src="/silent.mp3">) + handler registration.
+            // Browsers only register a media session for <audio src="url">, not srcObject streams.
+            // This is intentionally NOT gated on _needsMobileBridge — the MediaSession API is
+            // available on desktop Safari and desktop Chrome too, and UA sniffing can miss iOS
+            // devices in "Request Desktop Website" mode.
+            // MUST be inside a user-gesture handler so audio.play() is allowed.
+            if ('mediaSession' in navigator && !_mediaSessionAnchor) {
+                try {
+                    _mediaSessionAnchor = document.createElement('audio');
+                    _mediaSessionAnchor.setAttribute('playsinline', '');
+                    _mediaSessionAnchor.loop = true;
+                    _mediaSessionAnchor.volume = 0.001; // near-silent, not zero
+                    _mediaSessionAnchor.src = '/silent.mp3';
+                    _mediaSessionAnchor.style.display = 'none';
+                    document.body.appendChild(_mediaSessionAnchor);
+                    await _mediaSessionAnchor.play();
+                    console.log('[MediaSession] Anchor playing');
+
+                    // Set metadata first, then playbackState — Android Chrome requires
+                    // metadata to be present before it will show the notification.
+                    updateIOSMediaSession();
+                    // Set playbackState after metadata and after anchor is confirmed playing.
+                    // Android Chrome is strict about this ordering.
+                    navigator.mediaSession.playbackState = 'playing';
+
+                    // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step
+                    const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
+                    const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
+                    navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
+                    navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
+                    // seekbackward / seekforward used by some platforms instead of previoustrack/nexttrack
+                    try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
+                    try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
+
+                    // Map play/pause to mute/unmute (can't truly pause a live stream)
+                    navigator.mediaSession.setActionHandler('play', () => {
+                        if (isMuted) toggleMute();
+                        iosMediaElement?.play().catch(() => {});
+                        _mediaSessionAnchor?.play().catch(() => {});
+                        navigator.mediaSession.playbackState = 'playing';
+                    });
+                    navigator.mediaSession.setActionHandler('pause', () => {
+                        if (!isMuted) toggleMute();
+                        navigator.mediaSession.playbackState = 'paused';
+                    });
+                } catch (e) {
+                    console.warn('[MediaSession] Could not create anchor or register handlers:', e.message);
+                    _mediaSessionAnchor = null;
                 }
             }
 
@@ -3426,13 +3428,16 @@ function playAudioBuffer(buffer) {
     // shows the notification. Chrome requires audio to actually be flowing through the
     // <audio> element before it registers a media session — setting metadata at bridge
     // creation time (before audio flows) is not enough.
-    if (!_mediaSessionActivated && iosMediaElement && 'mediaSession' in navigator) {
+    // Gate on _mediaSessionAnchor (not iosMediaElement) so this fires on any device
+    // that supports the MediaSession API, including iOS in "Request Desktop Website" mode
+    // where _needsMobileBridge is false and iosMediaElement is never created.
+    if (!_mediaSessionActivated && _mediaSessionAnchor && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateIOSMediaSession();
         navigator.mediaSession.playbackState = 'playing';
         // Ensure both bridge elements are playing (may have been paused by the OS)
-        iosMediaElement.play().catch(() => {});
-        if (_mediaSessionAnchor) _mediaSessionAnchor.play().catch(() => {});
+        if (iosMediaElement) iosMediaElement.play().catch(() => {});
+        _mediaSessionAnchor.play().catch(() => {});
     }
 
     // Safety check: ensure analysers belong to current context

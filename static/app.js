@@ -1042,9 +1042,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         updateIOSMediaSession();
                         navigator.mediaSession.playbackState = 'playing';
 
-                        // Disable skip buttons (meaningless for live radio)
-                        navigator.mediaSession.setActionHandler('previoustrack', null);
-                        navigator.mediaSession.setActionHandler('nexttrack', null);
+                        // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step
+                        const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
+                        const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
+                        navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
+                        navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
+                        // seekbackward / seekforward used by some platforms instead of previoustrack/nexttrack
+                        try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
+                        try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
 
                         // Map play/pause to mute/unmute (can't truly pause a live stream)
                         navigator.mediaSession.setActionHandler('play', () => {

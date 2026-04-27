@@ -672,7 +672,11 @@ function updatePageTitle() {
 // Update mobile lock-screen / Control Centre media metadata (iOS and Android).
 // Called whenever frequency or mode changes so the lock screen stays current.
 function updateIOSMediaSession() {
-    if (!_needsMobileBridge || !('mediaSession' in navigator)) return;
+    // Don't gate on _needsMobileBridge — Android Chrome in "Desktop site" mode strips
+    // the Android UA token and sets maxTouchPoints=0, so _needsMobileBridge would be
+    // false even though the MediaSession API is available and the anchor is playing.
+    // Only skip if the API is absent or the anchor hasn't been created yet.
+    if (!('mediaSession' in navigator) || !_mediaSessionAnchor) return;
 
     const freqInput = document.getElementById('frequency');
     const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
@@ -680,13 +684,16 @@ function updateIOSMediaSession() {
     const modeStr = currentMode ? currentMode.toUpperCase() : '';
     const callsign = window.instanceDescription?.receiver?.callsign || '';
 
+    // Use absolute URLs for artwork — Android Chrome fails to load root-relative paths
+    // when the page is served behind a reverse proxy or on a non-standard port.
+    const _artworkBase = window.location.origin;
     navigator.mediaSession.metadata = new MediaMetadata({
         title:  callsign ? `UberSDR — ${callsign}` : 'UberSDR',
         artist: [freqMHz, modeStr].filter(Boolean).join(' '),
         album:  'Live SDR',
         artwork: [
-            { src: '/images/android-chrome-512x512.png', sizes: '512x512', type: 'image/png' },
-            { src: '/images/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' }
+            { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' },
+            { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' }
         ]
     });
 
@@ -1039,7 +1046,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     // Set up Media Session API for lock-screen / Control Centre controls
                     if ('mediaSession' in navigator) {
+                        // Set metadata first, then playbackState — Android Chrome requires
+                        // metadata to be present before it will show the notification.
                         updateIOSMediaSession();
+                        // Set playbackState after metadata and after anchor is confirmed playing.
+                        // Android Chrome is strict about this ordering.
                         navigator.mediaSession.playbackState = 'playing';
 
                         // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step

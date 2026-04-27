@@ -2693,6 +2693,7 @@ input[type="range"]::-moz-range-thumb {
     padding: 4px 8px; /* Scaled down from default */
     font-size: 0.85em;
     min-width: 30px;
+    touch-action: manipulation; /* Prevent double-tap browser zoom on mobile */
 }
 
 #spectrum-btn-center {

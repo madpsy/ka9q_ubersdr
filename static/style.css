@@ -1029,6 +1029,7 @@ body {
 .tuning-wheel-container {
     display: none;
     margin: 10px 0 5px;
+    position: relative;
 }
 
 .tuning-wheel {
@@ -1096,13 +1097,18 @@ body {
     );
 }
 
+/* Step label overlaid inside the wheel — takes no extra vertical space */
 .tuning-wheel-step-label {
+    position: absolute;
+    bottom: 3px;
+    left: 0;
+    right: 0;
     text-align: center;
-    font-size: 0.72em;
-    color: #95a5a6;
-    margin-top: 2px;
-    height: 14px;
+    font-size: 0.68em;
+    color: rgba(255, 255, 255, 0.55);
     letter-spacing: 0.03em;
+    pointer-events: none;
+    z-index: 3;
 }
 
 .tuning-buttons button {

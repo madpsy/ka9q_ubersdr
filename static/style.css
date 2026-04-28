@@ -2771,7 +2771,7 @@ input[type="range"]::-moz-range-thumb {
 #spectrum-vzoom-slider {
     display: none;
     position: absolute;
-    right: -34px;
+    right: -46px;
     top: 50%;
     transform: translateY(-50%) rotate(-90deg);
     transform-origin: center center;
@@ -2779,7 +2779,7 @@ input[type="range"]::-moz-range-thumb {
     pointer-events: auto;
 
     width: 140px;          /* visual height after rotation */
-    height: 44px;          /* touch-target thickness — wider for easier touch */
+    height: 20px;          /* touch-target thickness */
     cursor: pointer;
     -webkit-appearance: none;
     appearance: none;
@@ -2792,23 +2792,15 @@ input[type="range"]::-moz-range-thumb {
     opacity: 1;
 }
 
-/* Track — thin white line with tick marks, vertically centred in the 44px hit area */
+/* Track — thin white line with tick marks */
 #spectrum-vzoom-slider::-webkit-slider-runnable-track {
-    height: 44px;
+    height: 3px;
     background: repeating-linear-gradient(
         to right,
         #fff 0px, #fff 2px,
         rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
     );
-    /* Mask to show only a 3px line in the vertical centre */
-    -webkit-mask: linear-gradient(to bottom,
-        transparent 0%, transparent calc(50% - 1.5px),
-        #fff calc(50% - 1.5px), #fff calc(50% + 1.5px),
-        transparent calc(50% + 1.5px), transparent 100%);
-    mask: linear-gradient(to bottom,
-        transparent 0%, transparent calc(50% - 1.5px),
-        #fff calc(50% - 1.5px), #fff calc(50% + 1.5px),
-        transparent calc(50% + 1.5px), transparent 100%);
+    border-radius: 2px;
 }
 
 #spectrum-vzoom-slider::-moz-range-track {
@@ -2818,29 +2810,30 @@ input[type="range"]::-moz-range-thumb {
         #fff 0px, #fff 2px,
         rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
     );
+    border-radius: 2px;
 }
 
-/* Thumb — small white circle, centred on the track */
+/* Thumb — small white circle */
 #spectrum-vzoom-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: #fff;
     border: none;
-    margin-top: -15px;  /* centre 14px thumb in 44px track: -(44/2 - 14/2) = -15px */
-    box-shadow: 0 0 5px rgba(0,0,0,0.7);
+    margin-top: -7px;   /* centre 18px thumb on 3px track: -(18/2 - 3/2) = -7.5px */
+    box-shadow: 0 0 6px rgba(0,0,0,0.8);
     cursor: pointer;
 }
 
 #spectrum-vzoom-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: #fff;
     border: none;
-    box-shadow: 0 0 5px rgba(0,0,0,0.7);
+    box-shadow: 0 0 6px rgba(0,0,0,0.8);
     cursor: pointer;
 }
 

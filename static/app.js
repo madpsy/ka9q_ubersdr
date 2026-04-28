@@ -8645,7 +8645,6 @@ function spectrumZoomSlider(position, sliderEl) {
  * Skipped while the user is actively dragging the slider.
  */
 function updateZoomSlider() {
-    if (_zoomSliderDragging) return;
     if (!spectrumDisplay) return;
 
     const initial = spectrumDisplay.initialBinBandwidth;
@@ -8681,12 +8680,15 @@ function updateZoomSlider() {
     const maxBinCountSteps = (maxBinCount > minBinCount) ? Math.round(Math.log2(maxBinCount / minBinCount)) : 0;
     const dynamicMax = maxBwSteps + maxBinCountSteps;
 
-    // Helper: apply computed step to a slider element (horizontal or vertical)
+    // Helper: apply computed step to a slider element (horizontal or vertical).
+    // Always updates max (so the slider range is correct during drag).
+    // Only updates value when not dragging (prevents snap-back fighting the user).
     function applyToSlider(el) {
         if (!el) return;
         if (dynamicMax > 0 && parseInt(el.max) !== dynamicMax) {
             el.max = dynamicMax;
         }
+        if (_zoomSliderDragging) return; // don't overwrite value while user is dragging
         const sliderMax = parseInt(el.max) || ZOOM_SLIDER_MAX;
         if (current >= initial && binCountSteps === 0) {
             el.value = 0;

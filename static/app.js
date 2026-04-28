@@ -999,9 +999,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('⚠️ Wake lock not available on this browser - mobile may suspend after 60s idle');
             }
 
+            // Create AudioContext if it doesn't exist yet (WebSocket may not have connected)
+            // This MUST be done inside a user gesture handler for mobile browsers
+            if (!audioContext) {
+                console.log('[MediaSession] Creating AudioContext from user gesture');
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                window.audioContext = audioContext;
+                currentAudioContextSampleRate = audioContext.sampleRate;
+                nextPlayTime = audioContext.currentTime;
+                window.nextPlayTime = nextPlayTime;
+                audioStartTime = audioContext.currentTime;
+                log(`Audio context created from user gesture (sample rate: ${audioContext.sampleRate} Hz)`);
+            }
+
             // Resume AudioContext if suspended (required for iOS Safari)
             // MUST await this to ensure it completes before audio playback
-            if (audioContext && audioContext.state === 'suspended') {
+            if (audioContext.state === 'suspended') {
                 try {
                     await audioContext.resume();
                     console.log('AudioContext resumed for iOS/Safari - state:', audioContext.state);

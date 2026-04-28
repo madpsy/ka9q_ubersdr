@@ -474,21 +474,26 @@ class SMeterNeedle {
 
         // Store SNR if provided and smooth the SNR needle value
         if (snrValue !== undefined && snrValue !== null) {
-            const firstReading = this.currentSNR === null;
-            this.currentSNR = snrValue;
-            const newTarget = Math.max(this.snrMin, Math.min(this.snrMax, snrValue));
-            if (firstReading) {
-                // Snap immediately on first real data — prevents the needle from
-                // appearing stuck at the initial position during page load startup
-                this.snrNeedleTarget = newTarget;
-                this.snrNeedleValue = newTarget;
-                console.log(`[SMeter] First SNR reading: ${snrValue.toFixed(1)} dB → needle snapped to ${newTarget.toFixed(1)}`);
-            } else if (Math.abs(newTarget - this.snrNeedleTarget) > 1) {
-                // Log significant target changes (>1 dB) to avoid spam
-                console.log(`[SMeter] SNR target: ${this.snrNeedleTarget.toFixed(1)} → ${newTarget.toFixed(1)} (raw=${snrValue.toFixed(1)}, needleVal=${this.snrNeedleValue.toFixed(1)})`);
-                this.snrNeedleTarget = newTarget;
+            // Guard against NaN — can arrive from malformed audio packets
+            if (!isFinite(snrValue)) {
+                console.warn(`[SMeter] Ignoring non-finite SNR value: ${snrValue}`);
             } else {
-                this.snrNeedleTarget = newTarget;
+                const firstReading = this.currentSNR === null;
+                this.currentSNR = snrValue;
+                const newTarget = Math.max(this.snrMin, Math.min(this.snrMax, snrValue));
+                if (firstReading) {
+                    // Snap immediately on first real data — prevents the needle from
+                    // appearing stuck at the initial position during page load startup
+                    this.snrNeedleTarget = newTarget;
+                    this.snrNeedleValue = newTarget;
+                    console.log(`[SMeter] First SNR reading: ${snrValue.toFixed(1)} dB → needle snapped to ${newTarget.toFixed(1)}`);
+                } else if (Math.abs(newTarget - this.snrNeedleTarget) > 1) {
+                    // Log significant target changes (>1 dB) to avoid spam
+                    console.log(`[SMeter] SNR target: ${this.snrNeedleTarget.toFixed(1)} → ${newTarget.toFixed(1)} (raw=${snrValue.toFixed(1)}, needleVal=${this.snrNeedleValue.toFixed(1)})`);
+                    this.snrNeedleTarget = newTarget;
+                } else {
+                    this.snrNeedleTarget = newTarget;
+                }
             }
         }
         // Only animate once we have real SNR data — prevents the smoothing from

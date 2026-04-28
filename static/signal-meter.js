@@ -242,7 +242,11 @@ class SignalMeter {
 
         // Update S-meter needle if it exists
         if (typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {
-            const snr = (noiseDensity !== -999 && basebandPower !== -999)
+            // Guard against NaN/non-finite values from getFloat32() on malformed packets,
+            // and against the -999 sentinel used when audio hasn't arrived yet.
+            const bpValid = isFinite(basebandPower) && basebandPower !== -999;
+            const ndValid = isFinite(noiseDensity) && noiseDensity !== -999;
+            const snr = (bpValid && ndValid)
                 ? Math.max(0, basebandPower - noiseDensity)
                 : null;
             // Log transitions between null and valid SNR (not every frame)

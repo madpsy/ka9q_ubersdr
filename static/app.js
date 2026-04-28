@@ -1026,6 +1026,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // - Desktop: Lock-screen controls work on Safari/Chrome
             //
             // MUST be inside a user-gesture handler so audio.play() is allowed.
+            console.log('[MediaSession] Checking conditions:', {
+                hasMediaSession: 'mediaSession' in navigator,
+                mediaElementExists: !!mediaElement,
+                audioContextExists: !!audioContext,
+                audioContextState: audioContext?.state
+            });
+
             if ('mediaSession' in navigator && !mediaElement && audioContext) {
                 try {
                     const dest = audioContext.createMediaStreamDestination();
@@ -1035,6 +1042,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     mediaElement.style.display = 'none';
                     mediaElement.srcObject = dest.stream;
                     document.body.appendChild(mediaElement);
+                    console.log('[MediaSession] Created audio element, attempting to play...');
                     await mediaElement.play();
                     console.log('[MediaSession] Audio bridge created and playing');
 
@@ -1044,6 +1052,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // setting it now ensures the notification appears immediately.
                     updateMediaSession();
                     navigator.mediaSession.playbackState = 'playing';
+                    console.log('[MediaSession] Metadata set, playbackState = playing');
 
                     // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step
                     const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
@@ -1064,11 +1073,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!isMuted) toggleMute();
                         navigator.mediaSession.playbackState = 'paused';
                     });
+                    console.log('[MediaSession] Action handlers registered');
                 } catch (e) {
-                    console.warn('[MediaSession] Could not create audio bridge:', e.message);
+                    console.error('[MediaSession] Could not create audio bridge:', e.message, e);
                     mediaElement = null;
                     if (audioContext) audioContext._mediaStreamDest = null;
                 }
+            } else {
+                console.warn('[MediaSession] Skipped - conditions not met');
             }
 
             // Start audio by triggering the current mode (from URL or default)

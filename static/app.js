@@ -8537,13 +8537,11 @@ function spectrumMaxZoom() {
         return;
     }
 
-    // Use the actual minimum binBandwidth seen from the server (= true max zoom).
-    // Only use minBinBandwidth if it is genuinely less than initialBinBandwidth
-    // (i.e. we've actually observed a zoomed-in state). Otherwise send 1.0 and
-    // let the server clamp to its own minimum.
-    const _minSeen = spectrumDisplay.minBinBandwidth;
-    const _initial = spectrumDisplay.initialBinBandwidth;
-    const maxZoomBinBandwidth = (_minSeen && _initial && _minSeen < _initial) ? _minSeen : 1.0;
+    // Always send 1.0 Hz/bin for max zoom and let the server clamp to its own
+    // minimum.  Using minBinBandwidth here would stop 2 levels short of the
+    // server's true maximum because minBinBandwidth only reflects the first
+    // observed minimum, not the absolute floor the server enforces.
+    const maxZoomBinBandwidth = 1.0;
 
     // Send zoom request to maximum at current frequency
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
@@ -8625,14 +8623,10 @@ function spectrumZoomSlider(position) {
     // Determine the target binBandwidth
     let targetBinBandwidth;
     if (position >= sliderMax) {
-        // Same as Max — use the actual minimum binBandwidth seen from the server.
-        // Only use minBinBandwidth if it is genuinely less than initialBinBandwidth
-        // (i.e. we've actually observed a zoomed-in state). Otherwise send 1.0 and
-        // let the server clamp to its own minimum.
-        const minSeen = spectrumDisplay.minBinBandwidth;
-        const initial = spectrumDisplay.initialBinBandwidth;
-        const hasSeenZoom = minSeen && initial && minSeen < initial;
-        targetBinBandwidth = hasSeenZoom ? minSeen : 1.0;
+        // Always send 1.0 Hz/bin for max zoom — let the server clamp to its own
+        // minimum.  Using minBinBandwidth would stop short of the server's true
+        // maximum zoom (minBinBandwidth only tracks the first observed minimum).
+        targetBinBandwidth = 1.0;
     } else {
         const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
         targetBinBandwidth = initial / Math.pow(2, position);

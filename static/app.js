@@ -9768,6 +9768,16 @@ async function populateOutputDevices() {
  * Called when the user picks a device from the dropdown.
  */
 async function setOutputDevice(deviceId) {
+    // When a specific output device is chosen, MediaSession must be disabled first.
+    // MediaSession routes audio through a hidden <audio> element which ignores the
+    // AudioContext sink — the two are incompatible. Disable it silently so the user
+    // doesn't have to do it manually, and update the checkbox to reflect the change.
+    if (deviceId && mediaSessionEnabled) {
+        await setMediaSessionEnabled(false);
+        const msCheckbox = document.getElementById('media-session-enabled');
+        if (msCheckbox) msCheckbox.checked = false;
+    }
+
     selectedAudioSinkId = deviceId;
     localStorage.setItem('audioSinkId', deviceId);
     await applyAudioSink();

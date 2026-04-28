@@ -8575,6 +8575,7 @@ function spectrumZoomSlider(position, sliderEl) {
     const hSlider = document.getElementById('spectrum-zoom-slider');
     const sliderRef = sliderEl || vSlider || hSlider;
     const sliderMax = sliderRef ? parseInt(sliderRef.max) : ZOOM_SLIDER_MAX;
+    console.log(`[vzoom] spectrumZoomSlider: position=${position}, sliderMax=${sliderMax}, sliderEl.max=${sliderEl ? sliderEl.max : 'n/a'}`);
 
     // Boundary positions (min=0, max=sliderMax) always execute — never throttled.
     // Intermediate positions are throttled to avoid flooding the server.

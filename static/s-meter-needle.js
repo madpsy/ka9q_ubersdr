@@ -476,17 +476,31 @@ class SMeterNeedle {
         if (snrValue !== undefined && snrValue !== null) {
             const firstReading = this.currentSNR === null;
             this.currentSNR = snrValue;
-            this.snrNeedleTarget = Math.max(this.snrMin, Math.min(this.snrMax, snrValue));
+            const newTarget = Math.max(this.snrMin, Math.min(this.snrMax, snrValue));
             if (firstReading) {
                 // Snap immediately on first real data — prevents the needle from
                 // appearing stuck at the initial position during page load startup
-                this.snrNeedleValue = this.snrNeedleTarget;
+                this.snrNeedleTarget = newTarget;
+                this.snrNeedleValue = newTarget;
+                console.log(`[SMeter] First SNR reading: ${snrValue.toFixed(1)} dB → needle snapped to ${newTarget.toFixed(1)}`);
+            } else if (Math.abs(newTarget - this.snrNeedleTarget) > 1) {
+                // Log significant target changes (>1 dB) to avoid spam
+                console.log(`[SMeter] SNR target: ${this.snrNeedleTarget.toFixed(1)} → ${newTarget.toFixed(1)} (raw=${snrValue.toFixed(1)}, needleVal=${this.snrNeedleValue.toFixed(1)})`);
+                this.snrNeedleTarget = newTarget;
+            } else {
+                this.snrNeedleTarget = newTarget;
             }
         }
         // Only animate once we have real SNR data — prevents the smoothing from
         // "committing" to the initial value (snrMin) before audio data arrives
         if (this.currentSNR !== null) {
+            const prevNeedleVal = this.snrNeedleValue;
             this.snrNeedleValue += (this.snrNeedleTarget - this.snrNeedleValue) * this.animationSpeed;
+            // Log if needle is stuck (target differs by >2 but needle barely moved)
+            if (Math.abs(this.snrNeedleTarget - prevNeedleVal) > 2 &&
+                Math.abs(this.snrNeedleValue - prevNeedleVal) < 0.01) {
+                console.warn(`[SMeter] SNR needle appears stuck: value=${this.snrNeedleValue.toFixed(2)}, target=${this.snrNeedleTarget.toFixed(2)}, speed=${this.animationSpeed}`);
+            }
         }
 
         // Store original (unclamped) value for display

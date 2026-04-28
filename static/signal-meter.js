@@ -245,6 +245,14 @@ class SignalMeter {
             const snr = (noiseDensity !== -999 && basebandPower !== -999)
                 ? Math.max(0, basebandPower - noiseDensity)
                 : null;
+            // Log transitions between null and valid SNR (not every frame)
+            if (snr === null && this._lastSnrWasValid) {
+                console.warn(`[SignalMeter] SNR went null: bp=${basebandPower}, nd=${noiseDensity}`);
+                this._lastSnrWasValid = false;
+            } else if (snr !== null && !this._lastSnrWasValid) {
+                console.log(`[SignalMeter] SNR now valid: ${snr.toFixed(1)} dB (bp=${basebandPower.toFixed(1)}, nd=${noiseDensity.toFixed(1)})`);
+                this._lastSnrWasValid = true;
+            }
             sMeterNeedle.update(basebandPower, snr);
         }
         

@@ -1077,8 +1077,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     mediaElement.srcObject = dest.stream;
                     // MEDIA_SESSION_SILENT_BRIDGE: mute the bridge element so the user hears
                     // audio through audioContext.destination instead (avoids Android stutter).
-                    // Set to 0 here; if MEDIA_SESSION_SILENT_BRIDGE is false this is overridden below.
-                    if (MEDIA_SESSION_SILENT_BRIDGE) mediaElement.volume = 0;
+                    // Use both muted=true AND volume=0: volume alone is ignored by Android's
+                    // media pipeline; muted is a hard browser-level mute that cannot be overridden.
+                    if (MEDIA_SESSION_SILENT_BRIDGE) {
+                        mediaElement.muted = true;
+                        mediaElement.volume = 0;
+                    }
                     document.body.appendChild(mediaElement);
                     console.log('[MediaSession] Created audio element, attempting to play...');
                     await mediaElement.play();

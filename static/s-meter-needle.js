@@ -474,11 +474,20 @@ class SMeterNeedle {
 
         // Store SNR if provided and smooth the SNR needle value
         if (snrValue !== undefined && snrValue !== null) {
+            const firstReading = this.currentSNR === null;
             this.currentSNR = snrValue;
             this.snrNeedleTarget = Math.max(this.snrMin, Math.min(this.snrMax, snrValue));
+            if (firstReading) {
+                // Snap immediately on first real data — prevents the needle from
+                // appearing stuck at the initial position during page load startup
+                this.snrNeedleValue = this.snrNeedleTarget;
+            }
         }
-        // Smooth SNR needle movement
-        this.snrNeedleValue += (this.snrNeedleTarget - this.snrNeedleValue) * this.animationSpeed;
+        // Only animate once we have real SNR data — prevents the smoothing from
+        // "committing" to the initial value (snrMin) before audio data arrives
+        if (this.currentSNR !== null) {
+            this.snrNeedleValue += (this.snrNeedleTarget - this.snrNeedleValue) * this.animationSpeed;
+        }
 
         // Store original (unclamped) value for display
         this.originalValue = dbfsValue;

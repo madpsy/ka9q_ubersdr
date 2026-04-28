@@ -8560,15 +8560,14 @@ function spectrumZoomSliderDragEnd() {}
  * position sliderMax → send { type:'zoom', binBandwidth: minBinBandwidth }  (same as Max button / E key)
  * positions 1..sliderMax-1 → send { type:'zoom', binBandwidth: initialBinBandwidth / 2^position }
  */
-function spectrumZoomSlider(position) {
+function spectrumZoomSlider(position, sliderEl) {
     position = parseInt(position, 10);
 
-    // Get the slider's current max (dynamically updated by updateZoomSlider).
-    // Prefer the vertical slider (the one actually in the DOM); fall back to
-    // the legacy horizontal slider id, then the hardcoded constant.
+    // Use the calling element's max if provided (most accurate — reflects dynamic updates).
+    // Fall back to the vertical slider, then the legacy horizontal slider, then the constant.
     const vSlider = document.getElementById('spectrum-vzoom-slider');
     const hSlider = document.getElementById('spectrum-zoom-slider');
-    const sliderRef = vSlider || hSlider;
+    const sliderRef = sliderEl || vSlider || hSlider;
     const sliderMax = sliderRef ? parseInt(sliderRef.max) : ZOOM_SLIDER_MAX;
 
     // Boundary positions (min=0, max=sliderMax) always execute — never throttled.

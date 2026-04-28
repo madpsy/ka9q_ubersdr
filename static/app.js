@@ -237,14 +237,13 @@ let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist 
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 let mediaElement = null;  // Hidden <audio> element for MediaSession and background audio (MediaStreamDestination bridge)
 let _mediaSessionActivated = false; // True once Media Session metadata has been set after real audio flows
-let mediaSessionEnabled = localStorage.getItem('mediaSessionEnabled') !== 'false'; // Default true; persisted to localStorage
-
-// MEDIA SESSION AUDIO ROUTING FLAG
-// When true:  audio goes to audioContext.destination (clean, no stutter) AND _mediaStreamDest
-//             (silent bridge, volume=0) — fixes Android stutter while keeping MediaSession alive.
-// When false: audio goes ONLY through _mediaStreamDest → <audio> element (original behaviour).
-//             Use false if iOS backgrounding breaks with the dual-path approach.
-const MEDIA_SESSION_SILENT_BRIDGE = true;
+// Android detection — MediaSession causes audio stutter on Android due to the
+// MediaStreamDestination → <audio> element clock mismatch with AudioFlinger.
+// Default to disabled on Android; the user can still enable it via Audio Settings.
+const _isAndroid = /Android/i.test(navigator.userAgent);
+let mediaSessionEnabled = _isAndroid
+    ? localStorage.getItem('mediaSessionEnabled') === 'true'   // Android: default OFF (opt-in)
+    : localStorage.getItem('mediaSessionEnabled') !== 'false'; // Others:  default ON (opt-out)
 
 // Mobile device detection — used for UI display (device emoji)
 const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
@@ -1075,14 +1074,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     mediaElement.setAttribute('playsinline', '');
                     mediaElement.style.display = 'none';
                     mediaElement.srcObject = dest.stream;
-                    // MEDIA_SESSION_SILENT_BRIDGE: mute the bridge element so the user hears
-                    // audio through audioContext.destination instead (avoids Android stutter).
-                    // Use both muted=true AND volume=0: volume alone is ignored by Android's
-                    // media pipeline; muted is a hard browser-level mute that cannot be overridden.
-                    if (MEDIA_SESSION_SILENT_BRIDGE) {
-                        mediaElement.muted = true;
-                        mediaElement.volume = 0;
-                    }
                     document.body.appendChild(mediaElement);
                     console.log('[MediaSession] Created audio element, attempting to play...');
                     await mediaElement.play();
@@ -3824,20 +3815,10 @@ function playAudioBuffer(buffer) {
     if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
     } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
-        if (MEDIA_SESSION_SILENT_BRIDGE) {
-            // Dual-path: real audio → audioContext.destination (clean, no stutter on Android).
-            // Also feed _mediaStreamDest so the silent <audio> element keeps MediaSession alive.
-            // mediaElement.volume is 0 so the user only hears the destination path.
-            // Toggle MEDIA_SESSION_SILENT_BRIDGE = false to revert to the original single-path
-            // behaviour (audio only through the <audio> element) if iOS backgrounding breaks.
-            outputNode.connect(audioContext.destination);
-            outputNode.connect(audioContext._mediaStreamDest);
-        } else {
-            // Original behaviour: connect ONLY to the media element bridge.
-            // The mediaElement plays the audio from _mediaStreamDest, so we don't need to
-            // also connect to destination (that would cause audio to play twice).
-            outputNode.connect(audioContext._mediaStreamDest);
-        }
+        // MediaSession path: connect ONLY to the media element bridge.
+        // The mediaElement plays the audio from _mediaStreamDest, so we don't need to
+        // also connect to destination (that would cause audio to play twice).
+        outputNode.connect(audioContext._mediaStreamDest);
     } else {
         outputNode.connect(audioContext.destination);
     }

@@ -761,6 +761,16 @@ func (ir *InstanceReporter) sendReport() error {
 	return lastErr
 }
 
+// IsRegistered returns true if the last report to the ubersdr.org collector succeeded.
+// A successful registration requires a 200/201 HTTP response and a non-empty public_uuid
+// returned by the collector, confirming the instance is publicly visible.
+func (ir *InstanceReporter) IsRegistered() bool {
+	ir.mu.RLock()
+	defer ir.mu.RUnlock()
+	return (ir.lastResponseCode == http.StatusOK || ir.lastResponseCode == http.StatusCreated) &&
+		ir.lastPublicUUID != ""
+}
+
 // GetReportStatus returns the current instance reporting status
 func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
 	ir.mu.RLock()

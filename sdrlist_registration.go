@@ -13,6 +13,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,6 +22,12 @@ import (
 	"strings"
 	"time"
 )
+
+// errWaitingForReporter is returned by update() when the ubersdr.org instance
+// reporter has not yet received a successful acknowledgement. loop() uses this
+// sentinel to apply a short fixed retry rather than the exponential backoff
+// used for real network errors.
+var errWaitingForReporter = errors.New("waiting for ubersdr.org confirmation")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants (from spec §12.3)
@@ -53,6 +60,7 @@ type SdrListRegistrar struct {
 	instanceReporter *InstanceReporter // may be nil if instance reporting is disabled
 	instanceID       string            // decimal string of (time ^ pid), used as sdr-list "id"
 	stop             chan struct{}
+	waitingAttempts  int // counts how many times we've deferred due to reporter not yet confirmed
 }
 
 // NewSdrListRegistrar creates a registrar. Call Start() to begin registration.
@@ -106,16 +114,22 @@ func (r *SdrListRegistrar) loop() {
 
 		err := r.update(sdrListHost, displayName)
 		if err != nil {
-			log.Printf("sdr-list: %s registration error: %v", displayName, err)
-			shift := attempt
-			if shift > 16 {
-				shift = 16
+			if errors.Is(err, errWaitingForReporter) {
+				// Not a real error — poll every 15 seconds until the instance
+				// reporter confirms, without touching the exponential backoff state.
+				backoff = 15 * time.Second
+			} else {
+				log.Printf("sdr-list: %s registration error: %v", displayName, err)
+				shift := attempt
+				if shift > 16 {
+					shift = 16
+				}
+				backoff = time.Duration(math.Min(
+					float64(sdrListBackoffBase)*(math.Pow(2, float64(shift))),
+					float64(sdrListBackoffMax),
+				))
+				attempt++
 			}
-			backoff = time.Duration(math.Min(
-				float64(sdrListBackoffBase)*(math.Pow(2, float64(shift))),
-				float64(sdrListBackoffMax),
-			))
-			attempt++
 		} else {
 			attempt = 0
 			backoff = sdrListUpdateInterval
@@ -128,6 +142,27 @@ func (r *SdrListRegistrar) loop() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (r *SdrListRegistrar) update(host, displayName string) error {
+	// ── Gate: wait for ubersdr.org confirmation ───────────────────────────────
+	// Do not advertise on sdr-list.xyz until the main instance reporter has
+	// received a successful acknowledgement from the ubersdr.org collector.
+	// This ensures the instance is publicly reachable before being listed.
+	if r.instanceReporter != nil && !r.instanceReporter.IsRegistered() {
+		r.waitingAttempts++
+		// Log on the first attempt and then every 5th (every ~75 s at 15 s poll
+		// interval) so progress is visible without flooding the log.
+		if r.waitingAttempts == 1 || r.waitingAttempts%5 == 0 {
+			log.Printf("sdr-list: %s registration deferred (attempt %d) — waiting for ubersdr.org to confirm this instance",
+				displayName, r.waitingAttempts)
+		}
+		return errWaitingForReporter
+	}
+	// Instance reporter confirmed — log once when we transition from waiting.
+	if r.waitingAttempts > 0 {
+		log.Printf("sdr-list: ubersdr.org confirmed after %d poll(s) — proceeding with %s registration",
+			r.waitingAttempts, displayName)
+		r.waitingAttempts = 0
+	}
+
 	// ── Hostname ──────────────────────────────────────────────────────────────
 	// Use the instance reporter's effective host (handles use_myip auto-detection).
 	// Fall back to the statically configured instance host.
@@ -156,7 +191,7 @@ func (r *SdrListRegistrar) update(host, displayName string) error {
 	}
 
 	// ── Station metadata ──────────────────────────────────────────────────────
-	description := r.config.Admin.Name
+	description := r.config.Admin.Callsign + " - " + r.config.Admin.Name
 	qth := latLonToGridSquare(r.config.Admin.GPS.Lat, r.config.Admin.GPS.Lon)
 	antenna := r.config.Admin.Antenna
 

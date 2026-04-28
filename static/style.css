@@ -2771,7 +2771,7 @@ input[type="range"]::-moz-range-thumb {
 #spectrum-vzoom-slider {
     display: none;
     position: absolute;
-    right: -60px;
+    right: -46px;
     top: 50%;
     transform: translateY(-50%) rotate(-90deg);
     transform-origin: center center;

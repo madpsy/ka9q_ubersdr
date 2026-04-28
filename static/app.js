@@ -987,6 +987,7 @@ document.addEventListener('DOMContentLoaded', () => {
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, bypassPassword || undefined);
 
         const startAudio = async () => {
+            console.log('[startAudio] VERSION 2026-04-28-v2 - MediaSession fix');
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 
@@ -1026,6 +1027,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // MediaSession + Background Audio Bridge (unified approach for ALL devices).
+            // VERSION: 2026-04-28-v2 - Creates AudioContext in startAudio if needed
             //
             // Modern iOS (17+) and Android require the MediaSession to be attached to an
             // <audio> element that's actually playing real audio — a silent MP3 trick no

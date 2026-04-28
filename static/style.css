@@ -2776,15 +2776,15 @@ input[type="range"]::-moz-range-thumb {
 #spectrum-vzoom-slider {
     display: none;
     position: absolute;
-    right: -46px;
+    right: -61px;
     top: 50%;
     transform: translateY(-50%) rotate(-90deg);
     transform-origin: center center;
     z-index: 20;
     pointer-events: auto;
 
-    width: 140px;          /* visual height after rotation */
-    height: 20px;          /* touch-target thickness */
+    width: 186px;          /* visual height after rotation */
+    height: 27px;          /* touch-target thickness */
     cursor: pointer;
     -webkit-appearance: none;
     appearance: none;

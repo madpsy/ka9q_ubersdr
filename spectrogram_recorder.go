@@ -2556,6 +2556,199 @@ func handleSpectrogramRowSpectrum(w http.ResponseWriter, r *http.Request,
 	enc.Encode(resp)
 }
 
+// AllRowsRow is one row in the /api/spectrogram/allrows response.
+type AllRowsRow struct {
+	Row        int         `json:"row"`
+	UTCTime    string      `json:"utc_time"`
+	Unix       int64       `json:"unix"`
+	NoiseFloor float64     `json:"noise_floor"`
+	Bins       interface{} `json:"bins"`
+}
+
+// AllRowsResponse is the JSON response for GET /api/spectrogram/allrows.
+type AllRowsResponse struct {
+	Date        string       `json:"date"`
+	Band        string       `json:"band,omitempty"`
+	StartFreqHz float64      `json:"start_freq_hz"`
+	EndFreqHz   float64      `json:"end_freq_hz"`
+	BinWidthHz  float64      `json:"bin_width_hz"`
+	BinCount    int          `json:"bin_count"`
+	RowCount    int          `json:"row_count"`
+	Rows        []AllRowsRow `json:"rows"`
+}
+
+// handleSpectrogramAllRows serves all rows of spectrogram data in a single JSON response,
+// suitable for client-side preloading before animated playback.
+//
+//	GET /api/spectrogram/allrows
+//	GET /api/spectrogram/allrows?date=YYYY-MM-DD
+//	GET /api/spectrogram/allrows?rolling=1
+//	GET /api/spectrogram/allrows?band=80m
+//
+// The response contains every row's bins array plus per-row metadata (utc_time, unix,
+// noise_floor), allowing the client to animate through the spectrogram at any speed
+// without further API calls.
+func handleSpectrogramAllRows(w http.ResponseWriter, r *http.Request,
+	recorder *SpectrogramRecorder,
+	rateLimiter *FFTRateLimiter,
+	ipBanManager *IPBanManager) {
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if ipBanManager != nil && ipBanManager.IsBanned(getClientIP(r)) {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "spectrogram-allrows") {
+		http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+		return
+	}
+
+	if recorder == nil {
+		http.Error(w, `{"error":"spectrogram not enabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	q := r.URL.Query()
+	dateStr := q.Get("date")
+	isRolling := q.Get("rolling") == "1"
+	bandParam := q.Get("band")
+	today := time.Now().UTC().Format("2006-01-02")
+	if dateStr == "" && !isRolling {
+		dateStr = today
+	}
+	if dateStr != "" && !isRolling {
+		if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`).MatchString(dateStr) {
+			http.Error(w, `{"error":"invalid date format, use YYYY-MM-DD"}`, http.StatusBadRequest)
+			return
+		}
+	}
+
+	binWidthHz := float64(recorder.endFreqHz-recorder.startFreqHz) / float64(recorder.binCount)
+
+	var rows [][]float32
+	var metaRows []SpectrogramRowMeta
+
+	if isRolling {
+		rr := recorder.getRolling24hRows()
+		rows = rr.rows
+		metaRows = rr.metaRows
+		dateStr = "rolling-24h"
+	} else {
+		isToday := dateStr == today
+		if isToday {
+			recorder.mu.Lock()
+			rowCount := recorder.rowCount
+			rows = make([][]float32, rowCount)
+			for i := 0; i < rowCount; i++ {
+				row := make([]float32, recorder.binCount)
+				copy(row, recorder.rows[i])
+				rows[i] = row
+			}
+			recorder.mu.Unlock()
+			jsonlMap := make(map[int]SpectrogramRowMeta)
+			for _, rm := range recorder.readJSONL(dateStr) {
+				jsonlMap[rm.Row] = rm
+			}
+			todayDate, _ := time.Parse("2006-01-02", dateStr)
+			midnight := time.Date(todayDate.Year(), todayDate.Month(), todayDate.Day(), 0, 0, 0, 0, time.UTC)
+			metaRows = make([]SpectrogramRowMeta, rowCount)
+			for i := 0; i < rowCount; i++ {
+				if m, ok := jsonlMap[i]; ok {
+					metaRows[i] = m
+				} else {
+					t := midnight.Add(time.Duration(i) * time.Minute)
+					metaRows[i] = SpectrogramRowMeta{Row: i, UTCTime: t.Format("15:04"), Unix: t.Unix()}
+				}
+			}
+		} else {
+			safeDateStr := regexp.MustCompile(`[^0-9\-]`).ReplaceAllString(dateStr, "")
+			binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
+			binData, err := os.ReadFile(binPath)
+			if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+				http.Error(w, `{"error":"no data available for this date"}`, http.StatusNotFound)
+				return
+			}
+			rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
+			fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
+			if rowCount <= 0 || rowCount > spectrogramMaxRows || fileBinCount != recorder.binCount {
+				http.Error(w, `{"error":"incompatible data file"}`, http.StatusInternalServerError)
+				return
+			}
+			rows = make([][]float32, rowCount)
+			for i := 0; i < rowCount; i++ {
+				row := make([]float32, recorder.binCount)
+				offset := 24 + i*recorder.binCount*4
+				for j := 0; j < recorder.binCount; j++ {
+					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
+					row[j] = math.Float32frombits(bits)
+					offset += 4
+				}
+				rows[i] = row
+			}
+			jsonlMap := make(map[int]SpectrogramRowMeta)
+			for _, rm := range recorder.readJSONL(safeDateStr) {
+				jsonlMap[rm.Row] = rm
+			}
+			archDate, _ := time.Parse("2006-01-02", safeDateStr)
+			midnight := time.Date(archDate.Year(), archDate.Month(), archDate.Day(), 0, 0, 0, 0, time.UTC)
+			metaRows = make([]SpectrogramRowMeta, rowCount)
+			for i := 0; i < rowCount; i++ {
+				if m, ok := jsonlMap[i]; ok {
+					metaRows[i] = m
+				} else {
+					t := midnight.Add(time.Duration(i) * time.Minute)
+					metaRows[i] = SpectrogramRowMeta{Row: i, UTCTime: t.Format("15:04"), Unix: t.Unix()}
+				}
+			}
+			dateStr = safeDateStr
+		}
+	}
+
+	// Build response rows
+	allRows := make([]AllRowsRow, len(rows))
+	for i, rowData := range rows {
+		var rm SpectrogramRowMeta
+		if i < len(metaRows) {
+			rm = metaRows[i]
+		}
+		bins := make([]interface{}, len(rowData))
+		for j, v := range rowData {
+			if math.IsInf(float64(v), -1) || math.IsNaN(float64(v)) {
+				bins[j] = nil
+			} else {
+				bins[j] = math.Round(float64(v)*10) / 10
+			}
+		}
+		allRows[i] = AllRowsRow{
+			Row:        i,
+			UTCTime:    rm.UTCTime,
+			Unix:       rm.Unix,
+			NoiseFloor: math.Round(float64(rm.NoiseFloor)*10) / 10,
+			Bins:       bins,
+		}
+	}
+
+	resp := AllRowsResponse{
+		Date:        dateStr,
+		Band:        bandParam,
+		StartFreqHz: float64(recorder.startFreqHz),
+		EndFreqHz:   float64(recorder.endFreqHz),
+		BinWidthHz:  math.Round(binWidthHz*100) / 100,
+		BinCount:    recorder.binCount,
+		RowCount:    len(rows),
+		Rows:        allRows,
+	}
+
+	// Cache for 60 s (same as rowspectrum); today's data may grow
+	w.Header().Set("Cache-Control", "max-age=60")
+	enc := json.NewEncoder(w)
+	enc.Encode(resp)
+}
+
 // TimesliceResponse is the JSON response for GET /api/spectrogram/timeslice.
 type TimesliceResponse struct {
 	FreqHz       float64        `json:"freq_hz"`

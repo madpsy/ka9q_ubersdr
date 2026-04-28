@@ -1986,6 +1986,9 @@ func main() {
 	http.HandleFunc("/api/spectrogram/rowspectrum", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectrogramRowSpectrum(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
 	})
+	http.HandleFunc("/api/spectrogram/allrows", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleSpectrogramAllRows(w, r, selectSpectrogramRecorder(r), fftRateLimiter, ipBanManager)
+	}))
 	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))

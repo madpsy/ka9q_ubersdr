@@ -605,10 +605,7 @@
         <div class="audio-visualization-section">
             <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
                 <h3>Audio Visualisation</h3>
-                <div style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
-                    <button id="audio-viz-pause-btn" onclick="toggleAudioVisualizationPause()" style="padding: 3px 10px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;" title="Pause visualization updates (freeze display)">⏸ Pause</button>
-                    <span id="audio-viz-toggle" class="toggle-icon">▼</span>
-                </div>
+                <span id="audio-viz-toggle" class="toggle-icon">▼</span>
             </div>
             <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
                 <div class="visualizer-panel">
@@ -657,6 +654,7 @@
                             <button id="auto-scale-btn" onclick="autoScaleOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle continuous auto-scaling of Y-axis">Auto Scale</button>
                             <button id="osc-markers-btn" onclick="toggleOscilloscopeMarkers()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle time markers A/B — drag to measure time between two points">Markers</button>
                             <button id="set-1khz-btn" onclick="shiftFrequencyTo1kHz()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;" title="Shift detected signal to 1 kHz">Set 1 kHz</button>
+                            <button id="audio-viz-pause-btn" onclick="toggleAudioVisualizationPause()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;" title="Pause visualization updates (freeze display)">⏸ Pause</button>
                         </div>
                     </div>
                 </div>

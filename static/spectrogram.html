@@ -57,6 +57,14 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 /* Legend */
 .legend{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:.78em;opacity:.8;padding-left:46px}
 #legend-canvas{width:200px;height:13px;border-radius:3px}
+/* Spectrogram playback controls — right-aligned in the legend row */
+.sg-play-controls{margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+.sg-play-btn{background:rgba(0,220,255,.2);border:1px solid rgba(0,220,255,.5);color:#0ff;border-radius:6px;padding:4px 14px;font-size:.85em;cursor:pointer;font-weight:700;transition:background .12s;min-width:68px;white-space:nowrap}
+.sg-play-btn:hover{background:rgba(0,220,255,.35)}
+.sg-play-btn:disabled{opacity:.35;cursor:not-allowed}
+.sg-spd-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:5px;padding:3px 9px;font-size:.8em;cursor:pointer;transition:background .12s;white-space:nowrap}
+.sg-spd-btn.active{background:rgba(0,220,255,.3);border-color:rgba(0,220,255,.6);color:#0ff;font-weight:700}
+.sg-spd-btn:hover:not(.active){background:rgba(255,255,255,.22)}
 /* Tooltip */
 #tt{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:8px 12px;font-size:.8em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.85;box-shadow:0 4px 18px rgba(0,0,0,.45);min-width:175px}
 .tt-freq{font-size:1.05em;font-weight:600;color:#7df}
@@ -297,6 +305,16 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <canvas id="legend-canvas" width="200" height="13"></canvas>
     <span id="lmax">-60 dBFS</span>
     <span style="margin-left:14px;opacity:.45">noise floor &rarr; signal peak</span>
+    <!-- Spectrogram playback controls -->
+    <div class="sg-play-controls">
+      <button class="sg-play-btn" id="sg-play-btn" onclick="sgPlayToggle()">&#x25B6; Play</button>
+      <span style="font-size:.75em;opacity:.55;margin-right:2px">Speed:</span>
+      <button class="sg-spd-btn active" id="sg-spd-1"  onclick="sgSetSpeed(1)">1&times;</button>
+      <button class="sg-spd-btn"        id="sg-spd-2"  onclick="sgSetSpeed(2)">2&times;</button>
+      <button class="sg-spd-btn"        id="sg-spd-4"  onclick="sgSetSpeed(4)">4&times;</button>
+      <button class="sg-spd-btn"        id="sg-spd-8"  onclick="sgSetSpeed(8)">8&times;</button>
+      <button class="sg-spd-btn"        id="sg-spd-16" onclick="sgSetSpeed(16)">16&times;</button>
+    </div>
   </div>
   <details class="api-ref" style="margin-top:14px">
     <summary>API endpoints</summary>
@@ -2788,20 +2806,33 @@ function sgRowTimeStr(rowIdx){
 }
 
 /* Set the selected row, update the indicator, and fetch the spectrum.
-   rowIdx is the row index in the spectrogram data (0 = oldest = top). */
-function sgSelectRow(rowIdx){
+   rowIdx is the row index in the spectrogram data (0 = oldest = top).
+   userInteraction=true stops playback and uses the cache if available. */
+function sgSelectRow(rowIdx, userInteraction){
   if(!meta)return;
   if(rowIdx<0)rowIdx=0;
   if(rowIdx>=meta.row_count)rowIdx=meta.row_count-1;
   sgSelectedRow=rowIdx;
 
+  /* If the user manually clicks/drags while playing, stop playback */
+  if(userInteraction && sgPlay && sgPlay.isPlaying){
+    sgPlayStop();
+  }
+
   /* Position the arrow indicator with time label */
   var screenFrac=sgRowToScreenFrac(rowIdx+0.5); /* centre of the row */
   sgRowIndicatorSetFrac(screenFrac,sgRowTimeStr(rowIdx));
 
-  /* Debounce fetch by 80 ms so dragging doesn't hammer the API */
-  clearTimeout(sgRowFetchTimer);
-  sgRowFetchTimer=setTimeout(function(){sgFetchRowSpectrum(rowIdx);},80);
+  /* If the allrows cache is loaded, render from it immediately (no API call).
+     Otherwise fall back to the debounced rowspectrum fetch. */
+  if(sgPlay && sgPlay.cache){
+    clearTimeout(sgRowFetchTimer);
+    sgPlayRenderFromCache(rowIdx);
+  } else {
+    /* Debounce fetch by 80 ms so dragging doesn't hammer the API */
+    clearTimeout(sgRowFetchTimer);
+    sgRowFetchTimer=setTimeout(function(){sgFetchRowSpectrum(rowIdx);},80);
+  }
 }
 
 /* Set up click and drag handlers on the row-indicator strip and the canvas area. */
@@ -2825,7 +2856,7 @@ function setupRowIndicator(){
     var row=Math.floor(frac*meta.row_count);
     if(row<0)row=0;
     if(row>=meta.row_count)row=meta.row_count-1;
-    sgSelectRow(row);
+    sgSelectRow(row,true);
   });
 
   /* Click on the spectrogram canvas area also selects the row */
@@ -2839,7 +2870,7 @@ function setupRowIndicator(){
     if(e.clientX<cr.left||e.clientX>cr.right||e.clientY<cr.top||e.clientY>cr.bottom)return;
     var yp=(e.clientY-cr.top)/cr.height;
     var row=Math.min(Math.floor(yp*meta.row_count),meta.row_count-1);
-    sgSelectRow(row);
+    sgSelectRow(row,true);
   });
 
   /* Drag on the indicator strip */
@@ -2848,7 +2879,7 @@ function setupRowIndicator(){
   window.addEventListener('mousemove',function(e){
     if(!draggingStrip||!meta)return;
     var row=clientYToRow(e.clientY);
-    sgSelectRow(row);
+    sgSelectRow(row,true);
   });
   window.addEventListener('mouseup',function(){draggingStrip=false;});
 
@@ -2857,7 +2888,7 @@ function setupRowIndicator(){
   window.addEventListener('touchmove',function(e){
     if(!draggingStrip||!meta)return;
     var row=clientYToRow(e.touches[0].clientY);
-    sgSelectRow(row);
+    sgSelectRow(row,true);
   },{passive:true});
   window.addEventListener('touchend',function(){draggingStrip=false;});
 }
@@ -2886,6 +2917,221 @@ applyZoom=function(){
   /* Redraw spectrum canvas with updated zoom — only if data is loaded */
   sgRedrawRowSpectrum();
 };
+
+/* ── Spectrogram Playback Engine ─────────────────────────────────────────────
+   Preloads all rows via /api/spectrogram/allrows, then animates the row
+   indicator downward at the selected speed using requestAnimationFrame.
+   The spectrum chart below updates from the in-memory cache — no API calls
+   during playback.
+
+   Speed table (mirrors Time Travel):
+     1×  = 24 rows/sec  → full day in ~60 s
+     2×  = 48 rows/sec  → ~30 s
+     4×  = 96 rows/sec  → ~15 s
+     8×  = 192 rows/sec → ~7.5 s
+     16× = 384 rows/sec → ~3.75 s
+   ─────────────────────────────────────────────────────────────────────────── */
+
+var sgPlay={
+  isPlaying:   false,
+  speedMult:   1,
+  baseRPS:     24,       /* base rows per second at 1× */
+  lastFrameTs: null,
+  rafId:       null,
+  cache:       null,     /* AllRowsResponse object once loaded */
+  loading:     false,
+  rowAccum:    0         /* fractional row accumulator for sub-integer speeds */
+};
+
+/* Build the allrows URL using the same params as sgFetchRowSpectrum */
+function sgAllRowsUrl(){
+  var sel=document.getElementById('dsel');
+  var ds=sel?sel.value:'';
+  var params='';
+  if(ds==='rolling-24h'){
+    params='?rolling=1';
+  } else if(ds&&/^\d{4}-\d{2}-\d{2}$/.test(ds)){
+    params='?date='+encodeURIComponent(ds);
+  }
+  if(urlBand&&urlBand!=='wideband'){
+    params+=(params?'&':'?')+'band='+encodeURIComponent(urlBand);
+  }
+  return '/api/spectrogram/allrows'+params;
+}
+
+/* Render the spectrum chart from the in-memory cache row (no API call) */
+function sgPlayRenderFromCache(rowIdx){
+  if(!sgPlay.cache||rowIdx>=sgPlay.cache.rows.length)return;
+  var r=sgPlay.cache.rows[rowIdx];
+  /* Build a data object that matches what sgRenderRowSpectrum / sgDrawRowSpectrumCanvas expect */
+  var data={
+    row:          r.row,
+    utc_time:     r.utc_time,
+    unix:         r.unix,
+    noise_floor:  r.noise_floor,
+    bins:         r.bins,
+    bin_count:    sgPlay.cache.bin_count,
+    bin_width_hz: sgPlay.cache.bin_width_hz,
+    start_freq_hz:sgPlay.cache.start_freq_hz,
+    end_freq_hz:  sgPlay.cache.end_freq_hz,
+    date:         sgPlay.cache.date
+  };
+  /* Store as the current row data so hover tooltip works */
+  sgRowData=data;
+  sgRenderRowSpectrum(data);
+}
+
+/* Auto-scroll the zoom viewport to keep the selected row centred vertically */
+function sgPlayAutoScroll(rowIdx){
+  if(!meta||meta.row_count===0)return;
+  if(zoom.scale<=1)return; /* no scroll needed when not zoomed */
+  var container=document.querySelector('.sg-right');
+  var ch=container?container.getBoundingClientRect().height:600;
+  if(ch===0)return;
+  var rowFrac=(rowIdx+0.5)/meta.row_count;
+  /* Target: row sits at vertical centre of the viewport
+     screenFrac = rowFrac * scale + ty/ch = 0.5
+     → ty = (0.5 - rowFrac * scale) * ch */
+  zoom.ty=(0.5-rowFrac*zoom.scale)*ch;
+  clampZoom();
+  applyZoom();
+}
+
+/* requestAnimationFrame loop */
+function sgPlayFrame(ts){
+  if(!sgPlay.isPlaying)return;
+  if(sgPlay.lastFrameTs===null){sgPlay.lastFrameTs=ts;}
+  var elapsed=(ts-sgPlay.lastFrameTs)/1000; /* seconds */
+  sgPlay.lastFrameTs=ts;
+
+  /* Clamp elapsed to 200 ms to avoid huge jumps after tab switch */
+  if(elapsed>0.2)elapsed=0.2;
+
+  var rowsPerSec=sgPlay.baseRPS*sgPlay.speedMult;
+  sgPlay.rowAccum+=elapsed*rowsPerSec;
+
+  var steps=Math.floor(sgPlay.rowAccum);
+  if(steps>0){
+    sgPlay.rowAccum-=steps;
+    var newRow=sgSelectedRow+steps;
+    var maxRow=(meta?meta.row_count:1)-1;
+
+    if(newRow>=maxRow){
+      /* Reached the end — stop */
+      newRow=maxRow;
+      sgSelectRow(newRow);
+      sgPlayRenderFromCache(newRow);
+      sgPlayStop();
+      return;
+    }
+
+    sgSelectedRow=newRow;
+    /* Move the arrow indicator */
+    var screenFrac=sgRowToScreenFrac(newRow+0.5);
+    sgRowIndicatorSetFrac(screenFrac,sgRowTimeStr(newRow));
+    /* Auto-scroll to keep arrow visible when zoomed */
+    sgPlayAutoScroll(newRow);
+    /* Render spectrum from cache */
+    sgPlayRenderFromCache(newRow);
+  }
+
+  sgPlay.rafId=requestAnimationFrame(sgPlayFrame);
+}
+
+function sgPlayStart(){
+  if(!sgPlay.cache||!meta)return;
+  sgPlay.isPlaying=true;
+  sgPlay.lastFrameTs=null;
+  sgPlay.rowAccum=0;
+  var btn=document.getElementById('sg-play-btn');
+  if(btn)btn.textContent='\u23F8 Pause';
+  sgPlay.rafId=requestAnimationFrame(sgPlayFrame);
+}
+
+function sgPlayStop(){
+  sgPlay.isPlaying=false;
+  if(sgPlay.rafId){cancelAnimationFrame(sgPlay.rafId);sgPlay.rafId=null;}
+  var btn=document.getElementById('sg-play-btn');
+  if(btn)btn.textContent='\u25B6 Play';
+}
+
+/* Called when Play/Pause button is clicked */
+function sgPlayToggle(){
+  if(sgPlay.isPlaying){
+    sgPlayStop();
+    return;
+  }
+  /* If cache is already loaded, start immediately */
+  if(sgPlay.cache){
+    /* If we're at the last row, restart from the beginning */
+    if(meta&&sgSelectedRow>=meta.row_count-1){
+      sgSelectRow(0);
+      sgPlayRenderFromCache(0);
+    }
+    sgPlayStart();
+    return;
+  }
+  /* Need to load the cache first */
+  if(sgPlay.loading)return;
+  sgPlay.loading=true;
+  var btn=document.getElementById('sg-play-btn');
+  if(btn){btn.textContent='Loading\u2026';btn.disabled=true;}
+
+  fetch(sgAllRowsUrl())
+    .then(function(r){
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      return r.json();
+    })
+    .then(function(data){
+      sgPlay.cache=data;
+      sgPlay.loading=false;
+      if(btn){btn.disabled=false;}
+      /* If we're at the last row, restart from the beginning */
+      if(meta&&sgSelectedRow>=meta.row_count-1){
+        sgSelectRow(0);
+        sgPlayRenderFromCache(0);
+      }
+      sgPlayStart();
+    })
+    .catch(function(e){
+      sgPlay.loading=false;
+      if(btn){btn.textContent='\u25B6 Play';btn.disabled=false;}
+      console.warn('sgPlay: failed to load allrows:',e.message);
+    });
+}
+
+/* Set playback speed and update speed button highlight */
+function sgSetSpeed(mult){
+  sgPlay.speedMult=mult;
+  [1,2,4,8,16].forEach(function(s){
+    var el=document.getElementById('sg-spd-'+s);
+    if(el)el.classList.toggle('active',s===mult);
+  });
+}
+
+/* Invalidate the cache when the date/band/rolling selection changes so the
+   next Play click re-fetches the correct dataset. */
+function sgPlayInvalidateCache(){
+  sgPlayStop();
+  sgPlay.cache=null;
+  var btn=document.getElementById('sg-play-btn');
+  if(btn){btn.textContent='\u25B6 Play';btn.disabled=false;}
+}
+
+/* Hook into the existing date selector's onchange to invalidate cache */
+(function(){
+  var _origSelOnchange=null;
+  /* Wrap after init() has set sel.onchange (deferred one tick) */
+  setTimeout(function(){
+    var sel=document.getElementById('dsel');
+    if(!sel)return;
+    _origSelOnchange=sel.onchange;
+    sel.onchange=function(){
+      sgPlayInvalidateCache();
+      if(_origSelOnchange)_origSelOnchange.apply(this,arguments);
+    };
+  },0);
+})();
 </script>
 <script src="timetravel.js"></script>
 </body>

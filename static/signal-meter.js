@@ -189,9 +189,15 @@ class SignalMeter {
         let basebandPower, noiseDensity;
 
         if (dataSource === 'audio') {
-            // Use audio stream data from radiod
-            basebandPower = window.currentBasebandPower || -999;
-            noiseDensity = window.currentNoiseDensity || -999;
+            // Use audio stream data from radiod.
+            // Use explicit undefined checks — the values are negative dBFS numbers,
+            // so || -999 would incorrectly treat 0 as "no data". More importantly,
+            // window.currentNoiseDensity may arrive later than currentBasebandPower
+            // on some page loads, causing snr=null and the SNR needle to stay stuck.
+            basebandPower = (window.currentBasebandPower !== undefined && window.currentBasebandPower !== null)
+                ? window.currentBasebandPower : -999;
+            noiseDensity = (window.currentNoiseDensity !== undefined && window.currentNoiseDensity !== null)
+                ? window.currentNoiseDensity : -999;
         } else {
             // Use spectrum FFT data (original behavior)
             basebandPower = avgPeakDb;

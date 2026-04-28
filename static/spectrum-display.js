@@ -4729,10 +4729,12 @@ class SpectrumDisplay {
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
         const newBinBandwidth = this.binBandwidth / 2;
 
-        // Minimum practical limit - backend will adjust bin_count if needed
-        // This allows unlimited zoom depth via dynamic bin count reduction
-        if (newBinBandwidth < 1) {
-            console.log('Maximum zoom reached (1 Hz/bin minimum)');
+        // Minimum practical limit — clamp to the smallest binBandwidth the server
+        // has ever reported (tracked as minBinBandwidth).  Fall back to 1 Hz/bin
+        // only if we have never seen a server-reported minimum.
+        const minAllowed = this.minBinBandwidth || 1;
+        if (newBinBandwidth < minAllowed) {
+            console.log(`Maximum zoom reached (${minAllowed.toFixed(2)} Hz/bin minimum)`);
             return;
         }
 
@@ -4790,9 +4792,17 @@ class SpectrumDisplay {
         // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
         let newBinBandwidth = this.binBandwidth * 2;
 
-        // Clamp to initial bandwidth (don't zoom out past full view)
+        // Clamp to initial bandwidth (don't zoom out past full view) — send reset
         if (newBinBandwidth >= this.initialBinBandwidth) {
-            console.log('Already at full bandwidth, use Reset to return to default view');
+            console.log('Zoom out reached full bandwidth — sending reset');
+            this.resetZoom();
+            // Optimistically move slider to 0
+            if (typeof window.updateZoomSlider === 'function') {
+                const _prev = this.binBandwidth;
+                this.binBandwidth = this.initialBinBandwidth;
+                window.updateZoomSlider();
+                this.binBandwidth = _prev;
+            }
             return;
         }
 

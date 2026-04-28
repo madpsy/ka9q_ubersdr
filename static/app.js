@@ -8620,7 +8620,7 @@ function spectrumZoomSlider(position, sliderEl) {
     // Sending a direct binBandwidth has no effect — delegate to zoomIn()/zoomOut()
     // exactly as scroll does (one call per notch, server steps bin_count correctly).
     const minSafeBinBW = 50.0;
-    if (targetBinBandwidth < minSafeBinBW) {
+    if (targetBinBandwidth <= minSafeBinBW) {
         // Compute current step to determine direction
         const curBwSteps = (spectrumDisplay.binBandwidth && spectrumDisplay.binBandwidth < initial)
             ? Math.round(Math.log2(initial / spectrumDisplay.binBandwidth)) : 0;
@@ -8629,7 +8629,6 @@ function spectrumZoomSlider(position, sliderEl) {
             ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
         const currentStep = curBwSteps + curBinCountSteps;
 
-        console.log(`[vzoom] deep zone: position=${position}, currentStep=${currentStep}, binBW=${spectrumDisplay.binBandwidth}, binCount=${spectrumDisplay.binCount}, initialBW=${spectrumDisplay.initialBinBandwidth}`);
         if (position > currentStep) {
             spectrumDisplay.zoomIn();
         } else {

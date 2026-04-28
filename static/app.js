@@ -1061,31 +1061,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     await mediaElement.play();
                     console.log('[MediaSession] Audio bridge created and playing');
 
-                    // Safari on macOS resumes the <audio> element directly (bypassing the
-                    // 'play' action handler) when the user presses play in Control Centre
-                    // after a pause. Listen for the native 'play' event so we can sync the
-                    // mute state and playbackState regardless of which path Safari takes.
-                    //
-                    // _mediaSessionPauseIntent: set true while our pause handler is running
-                    // so the 'play' event listener ignores the re-fire that a live MediaStream
-                    // causes immediately after pause() is called on the element.
-                    let _mediaSessionPauseIntent = false;
-                    mediaElement.addEventListener('play', () => {
-                        if (_mediaSessionPauseIntent) {
-                            // Suppress: this 'play' event was triggered by the live stream
-                            // re-asserting itself right after our deliberate pause() call.
-                            console.log('[MediaSession] mediaElement play event suppressed (pause intent active)');
-                            return;
-                        }
-                        // User pressed play in Control Centre — Safari resumed the element
-                        // directly rather than calling the 'play' action handler.
-                        if (isMuted) toggleMute();
-                        if ('mediaSession' in navigator) {
-                            navigator.mediaSession.playbackState = 'playing';
-                        }
-                        console.log('[MediaSession] mediaElement play event — unmuted and set playing');
-                    });
-
                     // Set metadata first, then playbackState — Android Chrome requires
                     // metadata to be present before it will show the notification.
                     // Note: Metadata will be updated again when real audio flows, but
@@ -1104,25 +1079,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
 
                     // Map play/pause to mute/unmute (can't truly pause a live stream).
-                    // NOTE: On Safari macOS, setting playbackState = 'paused' also pauses
-                    // the underlying <audio> element. Safari then resumes it directly via
-                    // mediaElement.play() rather than calling this 'play' action handler.
-                    // The 'play' event listener above handles that Safari-specific path,
-                    // guarded by _mediaSessionPauseIntent to avoid the instant-unmute race.
+                    // We never call mediaElement.pause() — the srcObject is a live MediaStream
+                    // and pausing it causes the browser to immediately re-fire 'play', making
+                    // reliable state tracking impossible. Instead we only update playbackState
+                    // so the OS shows the correct button, and rely entirely on the action
+                    // handlers (which Safari fires correctly when the element stays playing).
                     navigator.mediaSession.setActionHandler('play', () => {
                         if (isMuted) toggleMute();
-                        mediaElement?.play().catch(() => {});
                         navigator.mediaSession.playbackState = 'playing';
+                        console.log('[MediaSession] play action — unmuted');
                     });
                     navigator.mediaSession.setActionHandler('pause', () => {
                         if (!isMuted) toggleMute();
-                        // Set intent flag BEFORE calling pause() so the 'play' event
-                        // listener (fired by the live MediaStream re-asserting itself)
-                        // does not immediately unmute. Clear it after a short delay.
-                        _mediaSessionPauseIntent = true;
-                        mediaElement?.pause();
-                        setTimeout(() => { _mediaSessionPauseIntent = false; }, 500);
                         navigator.mediaSession.playbackState = 'paused';
+                        console.log('[MediaSession] pause action — muted');
                     });
                     console.log('[MediaSession] Action handlers registered');
                 } catch (e) {

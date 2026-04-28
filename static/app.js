@@ -1079,18 +1079,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
 
                     // Map play/pause to mute/unmute (can't truly pause a live stream).
-                    // We never call mediaElement.pause() — the srcObject is a live MediaStream
-                    // and pausing it causes the browser to immediately re-fire 'play', making
-                    // reliable state tracking impossible. Instead we only update playbackState
-                    // so the OS shows the correct button, and rely entirely on the action
-                    // handlers (which Safari fires correctly when the element stays playing).
+                    //
+                    // Safari requires the <audio> element to be actually paused before it will
+                    // show a Play button and fire the 'play' action handler. Simply setting
+                    // playbackState = 'paused' without pausing the element is ignored by Safari.
+                    //
+                    // The live MediaStream re-fires the element 'play' event after pause(), but
+                    // that is an element event — NOT the MediaSession 'play' action handler.
+                    // The action handler is only fired by genuine user interaction, so we can
+                    // safely use it for unmute without any race condition.
                     navigator.mediaSession.setActionHandler('play', () => {
                         if (isMuted) toggleMute();
+                        mediaElement?.play().catch(() => {});
                         navigator.mediaSession.playbackState = 'playing';
                         console.log('[MediaSession] play action — unmuted');
                     });
                     navigator.mediaSession.setActionHandler('pause', () => {
                         if (!isMuted) toggleMute();
+                        // Pause the element so Safari shows the Play button.
+                        // The live MediaStream will re-fire the element 'play' event, but
+                        // that does NOT trigger the 'play' action handler — only user
+                        // interaction does. So the mute state is safe.
+                        mediaElement?.pause();
                         navigator.mediaSession.playbackState = 'paused';
                         console.log('[MediaSession] pause action — muted');
                     });
@@ -2789,8 +2799,9 @@ async function handleBinaryMessage(data) {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._mediaStreamDest = dest;
                     mediaElement.srcObject = dest.stream;
-                    // Ensure it's playing (may have been paused during context switch)
-                    mediaElement.play().catch(() => {});
+                    // Ensure it's playing (may have been paused during context switch),
+                    // but only if not intentionally muted via MediaSession pause.
+                    if (!isMuted) mediaElement.play().catch(() => {});
                     console.log('[MediaSession] Recreated MediaStreamDestination for new AudioContext');
                 } catch (e) {
                     console.warn('[MediaSession] Failed to recreate bridge:', e.message);
@@ -3217,8 +3228,9 @@ async function handlePCMAudio(msg) {
                 const dest = audioContext.createMediaStreamDestination();
                 audioContext._mediaStreamDest = dest;
                 mediaElement.srcObject = dest.stream;
-                // Ensure it's playing (may have been paused during context switch)
-                mediaElement.play().catch(() => {});
+                // Ensure it's playing (may have been paused during context switch),
+                // but only if not intentionally muted via MediaSession pause.
+                if (!isMuted) mediaElement.play().catch(() => {});
                 console.log('[MediaSession] Recreated MediaStreamDestination for new AudioContext');
             } catch (e) {
                 console.warn('[MediaSession] Failed to recreate bridge:', e.message);
@@ -3454,9 +3466,10 @@ function playAudioBuffer(buffer) {
     if (!_mediaSessionActivated && mediaElement && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateMediaSession();
-        navigator.mediaSession.playbackState = 'playing';
-        // Ensure the media element is playing (may have been paused by the OS)
-        mediaElement.play().catch(() => {});
+        navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        // Ensure the media element is playing (may have been paused by the OS),
+        // but only if not intentionally muted via MediaSession pause.
+        if (!isMuted) mediaElement.play().catch(() => {});
         console.log('[MediaSession] Activated with real audio flowing');
         // Show MediaSession indicator in the audio buffer display
         const mediaSessionIndicator = document.getElementById('media-session-indicator');
@@ -3795,8 +3808,10 @@ function playAudioBuffer(buffer) {
     if (audioSinkElement && audioSinkElement.paused) {
         audioSinkElement.play().catch(() => {});
     }
-    // MediaSession bridge: ensure element is still playing (OS may pause on interruption)
-    if (mediaElement && mediaElement.paused) {
+    // MediaSession bridge: ensure element is still playing (OS may pause on interruption).
+    // Do NOT resume if isMuted — the pause handler deliberately paused the element so
+    // Safari shows the Play button in Control Centre. Resuming here would undo that.
+    if (mediaElement && mediaElement.paused && !isMuted) {
         mediaElement.play().catch(() => {});
     }
 

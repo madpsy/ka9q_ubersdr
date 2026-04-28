@@ -88,7 +88,10 @@ const wsManager = new WebSocketManager({
         updateConnectionStatus('connected');
         startStatsUpdates();
 
-        // Initialize audio context if not already done
+        // Initialize audio context if not already done.
+        // NOTE: startAudio() (user-gesture handler) may have already created the AudioContext
+        // before onConnect fires. In that case we skip context creation but MUST still
+        // create the analysers and start the visualization loop — they are only created here.
         if (!audioContext) {
             // Start with browser's default sample rate - will be recreated when first audio arrives
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -99,7 +102,12 @@ const wsManager = new WebSocketManager({
             audioStartTime = audioContext.currentTime;
             applyAudioSink();
             log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz, will match incoming audio)`);
+        }
 
+        // Always (re)create analysers on the current AudioContext if they don't exist or
+        // belong to a different (closed) context. This handles the case where startAudio()
+        // created the AudioContext before onConnect fired, leaving analyser=null.
+        if (!analyser || analyser.context !== audioContext) {
             // Create analyser for spectrum/waterfall (pre-filter tap)
             analyser = audioContext.createAnalyser();
             analyser.fftSize = getOptimalFFTSize();
@@ -150,7 +158,10 @@ const wsManager = new WebSocketManager({
             waterfallLineCount = 0;
 
             updateOscilloscopeZoom();
-            startVisualization();
+            // Start the visualization rAF loop (only if not already running)
+            if (!animationFrameId) {
+                startVisualization();
+            }
 
             // Start waterfall auto-adjust (always enabled)
             console.log('Attempting to start waterfall auto-adjust interval...');
@@ -3795,10 +3806,10 @@ function playAudioBuffer(buffer) {
     if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
     } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
-        // DIAGNOSTIC TEST: connect to BOTH destinations to check if analysers work with double audio.
-        // If meters work now, the pull-graph theory is confirmed and gain(0) fix needs debugging.
+        // MediaSession path: connect ONLY to the media element bridge.
+        // The mediaElement plays the audio from _mediaStreamDest, so we don't need to
+        // also connect to destination (that would cause audio to play twice).
         outputNode.connect(audioContext._mediaStreamDest);
-        outputNode.connect(audioContext.destination); // intentional double audio for testing
     } else {
         outputNode.connect(audioContext.destination);
     }

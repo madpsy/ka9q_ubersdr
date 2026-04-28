@@ -8619,8 +8619,26 @@ function spectrumZoomSlider(position, sliderEl) {
     // In this zone the server controls zoom via bin_count reduction, not binBandwidth.
     // Sending a direct binBandwidth has no effect — delegate to zoomIn()/zoomOut()
     // exactly as scroll does (one call per notch, server steps bin_count correctly).
-    const minSafeBinBW = 50.0;
-    if (targetBinBandwidth <= minSafeBinBW) {
+    // Route to zoomIn()/zoomOut() when the target binBandwidth would be a no-op:
+    // - At or below the server's minimum safe binBW (50 Hz/bin), OR
+    // - Would round to the same safe value as the current binBandwidth
+    //   (e.g. position 9 → 57 Hz/bin rounds to 50, same as current max → no-op)
+    // Use the next safe step above current binBW as the threshold.
+    // Server safe steps: 50, 100, 200, 300, 500, 1000, 2000, 5000, ...
+    // Anything that rounds to <= current binBW is in the deep zoom zone.
+    function roundToSafeBinBW(bw) {
+        if (bw < 75)   return 50;
+        if (bw < 150)  return 100;
+        if (bw < 250)  return 200;
+        if (bw < 400)  return 300;
+        if (bw < 750)  return 500;
+        if (bw < 1500) return 1000;
+        if (bw < 3500) return 2000;
+        if (bw < 7500) return 5000;
+        return bw;
+    }
+    const currentSafeBW = spectrumDisplay.binBandwidth || 50;
+    if (roundToSafeBinBW(targetBinBandwidth) <= currentSafeBW) {
         // Compute current step to determine direction
         const curBwSteps = (spectrumDisplay.binBandwidth && spectrumDisplay.binBandwidth < initial)
             ? Math.round(Math.log2(initial / spectrumDisplay.binBandwidth)) : 0;

@@ -2025,6 +2025,46 @@ input[type="range"]::-moz-range-thumb {
     .top-visualizers {
         grid-template-columns: 1fr;
     }
+
+    /* Show browser zoom buttons on narrow screens */
+    #browser-zoom-group {
+        display: flex !important;
+    }
+}
+
+/* Browser zoom buttons — hidden by default (desktop), shown on narrow via media query above */
+#browser-zoom-group {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+}
+
+#browser-zoom-group button {
+    background-color: #495057;
+    color: #ecf0f1;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    touch-action: manipulation;
+}
+
+#browser-zoom-group button:hover {
+    background-color: #6c757d;
+}
+
+#browser-zoom-group button:active {
+    background-color: #343a40;
+}
+
+#browser-zoom-level {
+    font-size: 11px;
+    color: #adb5bd;
+    min-width: 36px;
+    text-align: center;
+    font-family: monospace;
 }
 
 /* Scrollbar styling */

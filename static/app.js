@@ -11637,3 +11637,39 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         wheel.style.cursor = 'grab';
     });
 })();
+
+// ── Browser zoom buttons (narrow/mobile view only) ────────────────────────────
+(function () {
+    const STEP = 0.05;
+    const MIN  = 0.5;
+    const MAX  = 2.0;
+    const KEY  = 'browserZoomLevel';
+
+    let level = parseFloat(localStorage.getItem(KEY)) || 1.0;
+
+    function applyZoom(newLevel) {
+        level = Math.round(Math.max(MIN, Math.min(MAX, newLevel)) * 100) / 100;
+
+        // Chrome/Edge/Safari support the non-standard `zoom` CSS property.
+        // Firefox does not, so fall back to transform: scale on <html>.
+        if (CSS.supports('zoom', '1')) {
+            document.body.style.zoom = level;
+            document.documentElement.style.transform = '';
+        } else {
+            document.body.style.zoom = '';
+            document.documentElement.style.transform = 'scale(' + level + ')';
+            document.documentElement.style.transformOrigin = 'top left';
+        }
+
+        const label = document.getElementById('browser-zoom-level');
+        if (label) label.textContent = Math.round(level * 100) + '%';
+
+        localStorage.setItem(KEY, level);
+    }
+
+    window.browserZoomIn  = function () { applyZoom(level + STEP); };
+    window.browserZoomOut = function () { applyZoom(level - STEP); };
+
+    // Restore saved zoom level on page load
+    document.addEventListener('DOMContentLoaded', function () { applyZoom(level); });
+})();

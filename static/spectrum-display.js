@@ -1652,6 +1652,11 @@ class SpectrumDisplay {
                 this.binBandwidth = msg.binBandwidth;
                 this.totalBandwidth = msg.totalBandwidth;
 
+                // Track the minimum binBandwidth seen from the server (= actual max zoom)
+                if (!this.minBinBandwidth || this.binBandwidth < this.minBinBandwidth) {
+                    this.minBinBandwidth = this.binBandwidth;
+                }
+
                 // Track server-confirmed center frequency for prediction sync
                 this.lastServerCenterFreq = msg.centerFreq;
 

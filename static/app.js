@@ -8537,12 +8537,16 @@ function spectrumMaxZoom() {
         return;
     }
 
-    // Send zoom request to maximum (1 Hz/bin) at current frequency
+    // Use the actual minimum binBandwidth seen from the server (= true max zoom).
+    // Fall back to 1.0 if we haven't observed a minimum yet (server will clamp anyway).
+    const maxZoomBinBandwidth = spectrumDisplay.minBinBandwidth || 1.0;
+
+    // Send zoom request to maximum at current frequency
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: frequency,
-            binBandwidth: 1.0  // Minimum bin bandwidth = maximum zoom
+            binBandwidth: maxZoomBinBandwidth
         }));
         log(`Zoomed to maximum at ${formatFrequency(frequency)}`);
     }
@@ -8556,7 +8560,7 @@ function spectrumMaxZoom() {
 
     // Notify radioAPI immediately with max zoom binBandwidth
     if (window.radioAPI) {
-        window.radioAPI.notifyZoomChange(1.0);
+        window.radioAPI.notifyZoomChange(maxZoomBinBandwidth);
     }
 }
 
@@ -8579,9 +8583,9 @@ function spectrumZoomSliderDragEnd() {
 
 /**
  * Called by the slider's oninput event.
- * position 0  → send { type:'reset' }  (same as Reset button / Q key)
- * position 14 → send { type:'zoom', binBandwidth:1.0 }  (same as Max button / E key)
- * positions 1-13 → send { type:'zoom', binBandwidth: initialBinBandwidth / 2^position }
+ * position 0        → send { type:'reset' }  (same as Reset button / Q key)
+ * position sliderMax → send { type:'zoom', binBandwidth: minBinBandwidth }  (same as Max button / E key)
+ * positions 1..sliderMax-1 → send { type:'zoom', binBandwidth: initialBinBandwidth / 2^position }
  */
 function spectrumZoomSlider(position) {
     position = parseInt(position, 10);
@@ -8597,22 +8601,28 @@ function spectrumZoomSlider(position) {
         updateURL();
         const _s0 = document.getElementById('spectrum-zoom-slider');
         if (_s0) _s0.value = 0;
-        if (window.radioAPI) window.radioAPI.notifyZoomChange(14648.4375);
+        if (window.radioAPI) window.radioAPI.notifyZoomChange(spectrumDisplay.initialBinBandwidth || 14648.4375);
         return;
     }
 
     if (!spectrumDisplay) return;
 
+    // Get the slider's current max (dynamically updated by updateZoomSlider)
+    const slider = document.getElementById('spectrum-zoom-slider');
+    const sliderMax = slider ? parseInt(slider.max) : ZOOM_SLIDER_MAX;
+
     // Determine the target binBandwidth
     let targetBinBandwidth;
-    if (position >= ZOOM_SLIDER_MAX) {
-        // Same as Max – absolute minimum bin bandwidth
-        targetBinBandwidth = 1.0;
+    if (position >= sliderMax) {
+        // Same as Max — use the actual minimum binBandwidth seen from the server
+        // Fall back to 1.0 if we haven't observed a minimum yet
+        targetBinBandwidth = spectrumDisplay.minBinBandwidth || 1.0;
     } else {
         const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
         targetBinBandwidth = initial / Math.pow(2, position);
-        // Clamp to 1 Hz/bin floor
-        targetBinBandwidth = Math.max(1.0, targetBinBandwidth);
+        // Clamp to the server's actual minimum (or 1.0 if unknown)
+        const minBw = spectrumDisplay.minBinBandwidth || 1.0;
+        targetBinBandwidth = Math.max(minBw, targetBinBandwidth);
     }
 
     // Get current frequency to keep the view centred
@@ -8642,6 +8652,8 @@ function spectrumZoomSlider(position) {
 /**
  * Called whenever the server sends a config message with a new binBandwidth.
  * Updates the slider thumb to reflect the current zoom level.
+ * Also dynamically updates slider.max based on the actual minimum binBandwidth
+ * observed from the server (so the slider always reaches its end at true max zoom).
  * Skipped while the user is actively dragging the slider.
  */
 function updateZoomSlider() {
@@ -8653,8 +8665,21 @@ function updateZoomSlider() {
 
     const initial = spectrumDisplay.initialBinBandwidth;
     const current = spectrumDisplay.binBandwidth;
+    const minSeen = spectrumDisplay.minBinBandwidth;
 
     if (!initial || !current) return;
+
+    // Dynamically update slider.max based on the actual zoom range the server supports.
+    // minSeen is the smallest binBandwidth we've ever received from the server.
+    // sliderMax = floor(log2(initial / minSeen)) = number of halvings to reach max zoom.
+    if (minSeen && minSeen < initial) {
+        const dynamicMax = Math.round(Math.log2(initial / minSeen));
+        if (dynamicMax > 0 && parseInt(slider.max) !== dynamicMax) {
+            slider.max = dynamicMax;
+        }
+    }
+
+    const sliderMax = parseInt(slider.max) || ZOOM_SLIDER_MAX;
 
     if (current >= initial) {
         // Fully zoomed out (at or beyond initial) → position 0
@@ -8664,7 +8689,7 @@ function updateZoomSlider() {
 
     // Calculate step: how many halvings from initial to current
     const step = Math.round(Math.log2(initial / current));
-    slider.value = Math.max(0, Math.min(ZOOM_SLIDER_MAX, step));
+    slider.value = Math.max(0, Math.min(sliderMax, step));
 }
 
 // Expose for use by spectrum-display.js onConfig callback

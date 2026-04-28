@@ -1900,7 +1900,7 @@ input[type="range"]::-moz-range-thumb {
         margin-top: 0;
         margin-bottom: 0;
         transform: none;
-        justify-content: flex-start;
+        justify-content: center;
         padding: 5px 10px;
     }
     .audio-controls > .control-group:not(#audio-buttons-group) {

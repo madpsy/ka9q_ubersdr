@@ -2037,40 +2037,32 @@ input[type="range"]::-moz-range-thumb {
     display: none;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 4px 0 6px;
+    gap: 4px;
+    padding: 2px 0 6px;
     background: var(--page-bg);
 }
 
 #browser-zoom-group button {
-    background-color: #20638f;
-    color: #ecf0f1;
-    border: none;
-    border-radius: 4px;
-    padding: 8px 14px;
-    cursor: pointer;
-    font-size: 15px;
+    background-color: #17a2b8;
+    color: white;
+    padding: 8px 12px;
     touch-action: manipulation;
-    min-width: 44px;
 }
 
 #browser-zoom-group button:hover {
-    background-color: #2980b9;
+    background-color: #138496;
 }
 
 #browser-zoom-group button:active {
-    background-color: #1a5276;
+    background-color: #0f6674;
 }
 
 #browser-zoom-level {
-    font-size: 12px;
-    color: #ecf0f1;
-    min-width: 40px;
+    font-size: 0.85em;
+    color: var(--text-light);
+    min-width: 38px;
     text-align: center;
-    font-family: monospace;
-    background: #34495e;
-    border-radius: 3px;
-    padding: 4px 6px;
+    font-weight: bold;
 }
 
 /* Scrollbar styling */

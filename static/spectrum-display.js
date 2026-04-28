@@ -4073,6 +4073,14 @@ class SpectrumDisplay {
                         frequency: Math.round(clampedCenterFreq),
                         binBandwidth: newBinBandwidth
                     }));
+
+                    // Optimistically update zoom slider immediately (corrected when config arrives)
+                    if (typeof window.updateZoomSlider === 'function') {
+                        const _prev = this.binBandwidth;
+                        this.binBandwidth = newBinBandwidth;
+                        window.updateZoomSlider();
+                        this.binBandwidth = _prev;
+                    }
                 }
             } else if (e.touches.length === 1 && isTouchPanning) {
                 // Single finger pan

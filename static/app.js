@@ -237,6 +237,7 @@ let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist 
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 let mediaElement = null;  // Hidden <audio> element for MediaSession and background audio (MediaStreamDestination bridge)
 let _mediaSessionActivated = false; // True once Media Session metadata has been set after real audio flows
+let mediaSessionEnabled = localStorage.getItem('mediaSessionEnabled') !== 'false'; // Default true; persisted to localStorage
 
 // Mobile device detection — used for UI display (device emoji)
 const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
@@ -1059,7 +1060,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 audioContextState: audioContext?.state
             });
 
-            if ('mediaSession' in navigator && !mediaElement && audioContext) {
+            if ('mediaSession' in navigator && !mediaElement && audioContext && mediaSessionEnabled) {
                 try {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._mediaStreamDest = dest;
@@ -9410,7 +9411,99 @@ function openBufferConfigModal() {
         // Populate output device list each time the modal opens
         populateOutputDevices();
 
+        // Sync MediaSession checkbox to current setting
+        const msCheckbox = document.getElementById('media-session-enabled');
+        if (msCheckbox) msCheckbox.checked = mediaSessionEnabled;
+
         modal.style.display = 'flex';
+    }
+}
+
+/**
+ * Enable or disable MediaSession integration and apply immediately.
+ *
+ * Enabling:  creates the MediaStreamDestination + hidden <audio> bridge if the
+ *            AudioContext already exists (requires this to be called from a user
+ *            gesture so mediaElement.play() is allowed).
+ * Disabling: tears down the bridge; the next audio buffer will route directly to
+ *            audioContext.destination and all visualisations will work normally.
+ */
+async function setMediaSessionEnabled(enabled) {
+    mediaSessionEnabled = enabled;
+    localStorage.setItem('mediaSessionEnabled', enabled ? 'true' : 'false');
+
+    if (!enabled) {
+        // ── Tear down the bridge ──────────────────────────────────────────────
+        if (mediaElement) {
+            mediaElement.pause();
+            mediaElement.srcObject = null;
+            if (mediaElement.parentNode) mediaElement.parentNode.removeChild(mediaElement);
+            mediaElement = null;
+        }
+        if (audioContext) {
+            audioContext._mediaStreamDest = null;
+        }
+        _mediaSessionActivated = false;
+        // Hide the MediaSession indicator
+        const indicator = document.getElementById('media-session-indicator');
+        if (indicator) indicator.style.display = 'none';
+        // Clear MediaSession metadata so the OS removes the notification
+        if ('mediaSession' in navigator) {
+            try { navigator.mediaSession.metadata = null; } catch (_) {}
+            try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
+        }
+        log('Media Session disabled — audio now routes directly to destination');
+    } else {
+        // ── Create the bridge (requires user gesture for .play()) ─────────────
+        if (!audioContext) {
+            log('Media Session enabled — will activate on next audio start');
+            return;
+        }
+        if (mediaElement) {
+            // Already active
+            log('Media Session already active');
+            return;
+        }
+        if (!('mediaSession' in navigator)) {
+            log('Media Session API not available in this browser');
+            return;
+        }
+        try {
+            const dest = audioContext.createMediaStreamDestination();
+            audioContext._mediaStreamDest = dest;
+            mediaElement = document.createElement('audio');
+            mediaElement.setAttribute('playsinline', '');
+            mediaElement.style.display = 'none';
+            mediaElement.srcObject = dest.stream;
+            document.body.appendChild(mediaElement);
+            await mediaElement.play();
+            updateMediaSession();
+            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+
+            // Re-register action handlers
+            const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
+            const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
+            navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
+            navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
+            try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
+            try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
+            navigator.mediaSession.setActionHandler('play', () => {
+                if (isMuted) toggleMute();
+                mediaElement?.play().catch(() => {});
+                navigator.mediaSession.playbackState = 'playing';
+            });
+            navigator.mediaSession.setActionHandler('pause', () => {
+                if (!isMuted) toggleMute();
+                mediaElement?.pause();
+                navigator.mediaSession.playbackState = 'paused';
+            });
+            log('Media Session enabled — lock-screen controls active');
+        } catch (e) {
+            console.error('[MediaSession] Failed to enable bridge:', e.message);
+            mediaElement = null;
+            if (audioContext) audioContext._mediaStreamDest = null;
+            log('Media Session could not be enabled: ' + e.message, 'error');
+        }
     }
 }
 
@@ -9875,6 +9968,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
+window.setMediaSessionEnabled = setMediaSessionEnabled;
 window.setSignalDataSource = setSignalDataSource;
 window.populateOutputDevices = populateOutputDevices;
 window.setOutputDevice = setOutputDevice;

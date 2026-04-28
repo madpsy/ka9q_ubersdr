@@ -1173,6 +1173,19 @@
                     <p id="audio-output-device-hint" style="font-size: 0.82em; color: #888; margin: 0;"></p>
                 </div>
 
+                <!-- MediaSession toggle -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: #ecf0f1;">
+                        <input type="checkbox" id="media-session-enabled" onchange="setMediaSessionEnabled(this.checked)"
+                            style="width: 16px; height: 16px; cursor: pointer;">
+                        <span style="font-weight: bold;">Enable Media Session (lock-screen controls)</span>
+                    </label>
+                    <p style="font-size: 0.82em; color: #888; margin: 6px 0 0 26px;">
+                        Shows playback controls on the lock screen and in the OS media tray.
+                        Disable if you experience issues with audio visualisations. Takes effect immediately.
+                    </p>
+                </div>
+
                 <div style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-radius: 4px;">
                         <div style="flex: 1; text-align: center;">

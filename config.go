@@ -498,6 +498,7 @@ type UIBoolSetting struct {
 type UIConfig struct {
 	SignalMeterMode         UISelectSetting   `yaml:"signal_meter_mode"          json:"signal_meter_mode"`
 	SMeterMode              UISelectSetting   `yaml:"smeter_mode"                json:"smeter_mode"`
+	SMeterChartsVisible     UIBoolSetting     `yaml:"smeter_charts_visible"      json:"smeter_charts_visible"`
 	Palette                 UISelectSetting   `yaml:"palette"                    json:"palette"`
 	Contrast                UIRangeSetting    `yaml:"contrast"                   json:"contrast"`
 	VUMeterStyle            UISelectSetting   `yaml:"vu_meter_style"             json:"vu_meter_style"`
@@ -1027,19 +1028,24 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.UI.VUMeterStyle.Default == "" {
 		config.UI.VUMeterStyle.Default = "bar"
 	}
-	// Boolean settings: GPU scroll, smoothing, peak hold, line graph.
+	// Boolean settings: GPU scroll, smoothing, peak hold, line graph, smeter_charts_visible.
 	// These use UIBoolSetting which only has a Default field.
-	// The YAML zero value for bool is false, so we only need to set peak_hold
-	// to true if it was never configured (we can't distinguish false-by-default
-	// from false-explicitly-set, so we document that peak_hold defaults to true
-	// and users who want false must explicitly set it in ui.yaml).
-	// For peak_hold: default is true (matches spectrumHoldEnabled !== 'false' logic)
-	// We detect "never configured" by checking if the YAML section was absent.
-	// Since UIBoolSetting.Default is a plain bool, we can't distinguish false-from-yaml
-	// vs false-from-zero-value. We document this: if peak_hold is absent from ui.yaml,
-	// the built-in default (true) is used. If explicitly set to false, that is respected.
-	// This is handled in ui-config.js via getUIDefault with fallback=true.
-	// No Go-side override needed — the YAML value is used as-is.
+	// The YAML zero value for bool is false. For settings whose built-in default is true
+	// (peak_hold, smeter_charts_visible) we cannot distinguish "absent from YAML" from
+	// "explicitly set to false in YAML" — both produce Default=false here.
+	//
+	// Resolution: the JS side (ui-config.js) uses getUIDefaultBool with fallback=true,
+	// which applies when the server key is absent. However, since we always include these
+	// keys in the GET response, the fallback never fires. Instead we rely on the admin UI
+	// always writing an explicit value on save, so after first save the YAML is correct.
+	//
+	// For fresh installs (no ui.yaml), peak_hold is handled by SpectrumDisplay reading
+	// spectrumHoldEnabled !== 'false' (treats absence as true). smeter_charts_visible is
+	// handled the same way in initSMeterChartsToggle (absence of localStorage key = visible).
+	// The GET response will send false for both on a fresh install, but since
+	// applyServerUIDefaults only writes to localStorage when the key is absent, and the
+	// toggle reads '1' = hidden (anything else = visible), sending false is harmless —
+	// it writes '0' to localStorage which the toggle reads as visible. Correct behaviour.
 
 	// Uppercase decoder callsigns
 	config.Decoder.ReceiverCallsign = strings.ToUpper(config.Decoder.ReceiverCallsign)

@@ -1621,11 +1621,21 @@
                                 Controls which mode the needle S-meter (canvas) starts in for new visitors.
                                 Users can click the S-meter canvas to cycle through modes.
                             </p>
-                            <div class="form-group" style="margin-bottom: 0;">
+                            <div class="form-group" style="margin-bottom: 12px;">
                                 <label for="ui-smeter-mode" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">S-Meter Mode</label>
                                 <select id="ui-smeter-mode" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
                                     <!-- Options populated dynamically from /admin/ui-config -->
                                 </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: #555; cursor: pointer;">
+                                    <input type="checkbox" id="ui-smeter-charts-visible" checked style="width: 16px; height: 16px; cursor: pointer;">
+                                    Show Signal History Graphs by default
+                                </label>
+                                <p style="margin: 6px 0 0 24px; color: #888; font-size: 12px;">
+                                    When enabled, the two mini dBFS/SNR history charts are shown to the right of the S-meter for new visitors.
+                                    Users can toggle them with the ◀ button on the S-meter.
+                                </p>
                             </div>
                         </div>
 
@@ -6992,6 +7002,14 @@
                 // Build smeter_mode select (values: smeter-classic, snr-classic, smeter-dynamic, snr-dynamic)
                 buildUISelect('ui-smeter-mode', ui.smeter_mode);
 
+                // Restore smeter_charts_visible checkbox (default: true when absent)
+                const smeterChartsVisibleEl = document.getElementById('ui-smeter-charts-visible');
+                if (smeterChartsVisibleEl) {
+                    const val = ui.smeter_charts_visible;
+                    // Default is true — only uncheck if explicitly false
+                    smeterChartsVisibleEl.checked = (val === undefined || val === null) ? true : Boolean(val && val.default !== undefined ? val.default : val);
+                }
+
                 // Build palette select (values: jet, turbo, viridis, plasma — extensible via ui.yaml)
                 buildUISelect('ui-palette', ui.palette);
 
@@ -7334,6 +7352,7 @@ function resetStationIdColor() {
         async function saveUIConfig() {
             const signalMeterMode = document.getElementById('ui-signal-meter-mode');
             const smeterMode = document.getElementById('ui-smeter-mode');
+            const smeterChartsVisible = document.getElementById('ui-smeter-charts-visible');
             const palette = document.getElementById('ui-palette');
             const contrast = document.getElementById('ui-contrast');
             const vuMeterStyle = document.getElementById('ui-vu-meter-style');
@@ -7360,6 +7379,7 @@ function resetStationIdColor() {
                         default: smeterMode.value,
                         available: Array.from(smeterMode.options).map(o => ({ value: o.value, label: o.textContent }))
                     },
+                    smeter_charts_visible: { default: smeterChartsVisible ? smeterChartsVisible.checked : true },
                     palette: {
                         default: palette.value,
                         available: Array.from(palette.options).map(o => ({ value: o.value, label: o.textContent }))

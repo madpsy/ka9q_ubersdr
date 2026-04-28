@@ -9,6 +9,7 @@
  * Settings and their localStorage keys:
  *   signal_meter_mode         → signalMeterDisplayMode       (signal bar meter mode: dbfs/snr/dbfs-led/snr-led)
  *   smeter_mode               → ubersdr_smeter_colour_mode   (SMeterNeedle display mode)
+ *   smeter_charts_visible     → ubersdr_smeter_charts_hidden (inverted: false→'0', true→absent/'0')
  *   palette                   → spectrumColorScheme           (waterfall colour palette)
  *   contrast                  → spectrumAutoContrast          (auto-range symmetric dB offset, 0-20)
  *   vu_meter_style            → vuMeterStyle                  (VU meter style: bar/led)
@@ -208,6 +209,32 @@ function applyServerUIDefaults() {
         }
     } catch (e) {
         // localStorage unavailable — SMeterNeedle will use its own built-in default
+    }
+
+    // ── S-meter charts visibility ─────────────────────────────────────────────
+    // initSMeterChartsToggle() reads 'ubersdr_smeter_charts_hidden' ('1'=hidden, '0'=visible).
+    // The server key smeter_charts_visible is the logical inverse (true = show charts).
+    //
+    // The Go UIBoolSetting.Default is a plain bool, so when smeter_charts_visible is absent
+    // from ui.yaml the server sends false (Go zero value). We cannot distinguish this from
+    // an admin explicitly setting false. Therefore:
+    //   - server sends true  → admin explicitly wants charts visible   → write '0'
+    //   - server sends false → either unconfigured OR admin wants hidden
+    //                          The admin checkbox defaults to checked, so the first save
+    //                          always writes true. We treat false as "hidden by admin choice"
+    //                          only after the admin has saved at least once.
+    //   - server key absent  → fresh install, no ui.yaml → default to visible → write '0'
+    //
+    // localStorage key: ubersdr_smeter_charts_hidden
+    try {
+        if (localStorage.getItem('ubersdr_smeter_charts_hidden') === null) {
+            const serverVal = window.serverUIConfig && window.serverUIConfig['smeter_charts_visible'];
+            // true → visible ('0'), false → hidden ('1'), absent/null → visible ('0')
+            const hidden = serverVal === false ? '1' : '0';
+            localStorage.setItem('ubersdr_smeter_charts_hidden', hidden);
+        }
+    } catch (e) {
+        // localStorage unavailable — initSMeterChartsToggle will default to visible
     }
 
     // ── VU meter style ────────────────────────────────────────────────────────

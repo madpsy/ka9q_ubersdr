@@ -2967,10 +2967,45 @@ input[type="range"]::-moz-range-thumb {
     gap: 8px;
 }
 
+/* When charts panel is hidden, centre the lone S-meter */
+.smeter-control-group.smeter-charts-hidden {
+    justify-content: center;
+}
+
 .smeter-left {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+}
+
+/* Position the toggle button absolutely inside .s-meter-container */
+.s-meter-container {
+    position: relative;
+}
+
+.smeter-charts-toggle-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 10;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 10px;
+    line-height: 1;
+    background: rgba(0, 0, 0, 0.45);
+    color: #ecf0f1;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+
+.smeter-charts-toggle-btn:hover {
+    background: rgba(52, 73, 94, 0.85);
 }
 
 .smeter-charts-panel {

@@ -539,4 +539,59 @@ let sMeterNeedle = null;
 // Initialize S-meter when DOM is ready
 function initSMeterNeedle() {
     sMeterNeedle = new SMeterNeedle('s-meter-canvas');
+    initSMeterChartsToggle();
+}
+
+// ── Mini-charts panel toggle ─────────────────────────────────────────────────
+// localStorage key: 'ubersdr_smeter_charts_hidden'  ('1' = hidden, '0' = visible)
+//
+// Priority order (highest → lowest):
+//   1. User's own toggle click (saved to localStorage immediately)
+//   2. Server default from /api/ui-config → smeter_charts_visible (bool, default true)
+//      Pre-populated into localStorage by applyServerUIDefaults() in ui-config.js
+//      before initSMeterNeedle() is called.
+//   3. Built-in fallback: visible (no localStorage entry → treated as '0')
+//
+// The toggle button (◀/▶) lives in the top-right corner of .s-meter-container.
+// When the charts panel is hidden, .smeter-charts-hidden is added to the parent
+// group which applies justify-content: center so the lone S-meter re-centres.
+
+function initSMeterChartsToggle() {
+    const btn   = document.getElementById('smeter-charts-toggle');
+    const panel = document.querySelector('.smeter-charts-panel');
+    const group = document.querySelector('.smeter-control-group');
+
+    if (!btn || !panel || !group) return;
+
+    // Apply a hidden/visible state without triggering the click handler
+    function applyState(hidden) {
+        if (hidden) {
+            panel.style.display = 'none';
+            group.classList.add('smeter-charts-hidden');
+            btn.textContent = '▶';
+            btn.title = 'Show history graphs';
+        } else {
+            panel.style.display = '';
+            group.classList.remove('smeter-charts-hidden');
+            btn.textContent = '◀';
+            btn.title = 'Hide history graphs';
+        }
+    }
+
+    // Restore saved preference (set by user toggle or pre-populated by applyServerUIDefaults)
+    let hidden = false;
+    try {
+        hidden = localStorage.getItem('ubersdr_smeter_charts_hidden') === '1';
+    } catch (e) { /* ignore */ }
+    applyState(hidden);
+
+    // Toggle on click — saves user preference immediately
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't bubble to the canvas click handler
+        hidden = !hidden;
+        applyState(hidden);
+        try {
+            localStorage.setItem('ubersdr_smeter_charts_hidden', hidden ? '1' : '0');
+        } catch (e) { /* ignore */ }
+    });
 }

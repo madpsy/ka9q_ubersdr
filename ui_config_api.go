@@ -112,6 +112,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"signal_meter_mode":         config.UI.SignalMeterMode.Default,
 		"smeter_mode":               config.UI.SMeterMode.Default,
+		"smeter_charts_visible":     config.UI.SMeterChartsVisible.Default,
 		"palette":                   config.UI.Palette.Default,
 		"contrast":                  config.UI.Contrast.Default,
 		"vu_meter_style":            config.UI.VUMeterStyle.Default,
@@ -260,8 +261,9 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
-		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.Contrast.Default,
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, smeter_charts_visible=%v, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, bg_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
+		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.SMeterChartsVisible.Default,
+		config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
 		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
 		config.UI.BandwidthIndicatorColor.Default, config.UI.SpectrumBgOpacity,

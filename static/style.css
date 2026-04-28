@@ -489,6 +489,19 @@ body {
     z-index: 2;
 }
 
+.media-session-indicator {
+    position: absolute;
+    top: 0;
+    right: 2px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    font-size: 8px;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 2;
+}
+
 .audio-buffer-text {
     position: absolute;
     top: 0;

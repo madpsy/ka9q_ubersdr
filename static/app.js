@@ -1065,7 +1065,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 'play' action handler) when the user presses play in Control Centre
                     // after a pause. Listen for the native 'play' event so we can sync the
                     // mute state and playbackState regardless of which path Safari takes.
+                    //
+                    // _mediaSessionPauseIntent: set true while our pause handler is running
+                    // so the 'play' event listener ignores the re-fire that a live MediaStream
+                    // causes immediately after pause() is called on the element.
+                    let _mediaSessionPauseIntent = false;
                     mediaElement.addEventListener('play', () => {
+                        if (_mediaSessionPauseIntent) {
+                            // Suppress: this 'play' event was triggered by the live stream
+                            // re-asserting itself right after our deliberate pause() call.
+                            console.log('[MediaSession] mediaElement play event suppressed (pause intent active)');
+                            return;
+                        }
+                        // User pressed play in Control Centre — Safari resumed the element
+                        // directly rather than calling the 'play' action handler.
                         if (isMuted) toggleMute();
                         if ('mediaSession' in navigator) {
                             navigator.mediaSession.playbackState = 'playing';
@@ -1094,7 +1107,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     // NOTE: On Safari macOS, setting playbackState = 'paused' also pauses
                     // the underlying <audio> element. Safari then resumes it directly via
                     // mediaElement.play() rather than calling this 'play' action handler.
-                    // The 'play' event listener above handles that Safari-specific path.
+                    // The 'play' event listener above handles that Safari-specific path,
+                    // guarded by _mediaSessionPauseIntent to avoid the instant-unmute race.
                     navigator.mediaSession.setActionHandler('play', () => {
                         if (isMuted) toggleMute();
                         mediaElement?.play().catch(() => {});
@@ -1102,10 +1116,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     navigator.mediaSession.setActionHandler('pause', () => {
                         if (!isMuted) toggleMute();
-                        // Explicitly pause the element so Safari's internal state matches
-                        // playbackState = 'paused'. Without this, Safari may not show the
-                        // play button correctly in Control Centre.
+                        // Set intent flag BEFORE calling pause() so the 'play' event
+                        // listener (fired by the live MediaStream re-asserting itself)
+                        // does not immediately unmute. Clear it after a short delay.
+                        _mediaSessionPauseIntent = true;
                         mediaElement?.pause();
+                        setTimeout(() => { _mediaSessionPauseIntent = false; }, 500);
                         navigator.mediaSession.playbackState = 'paused';
                     });
                     console.log('[MediaSession] Action handlers registered');

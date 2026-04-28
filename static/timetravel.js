@@ -882,8 +882,8 @@ function ttRedraw() {
   /* ── Perspective grid (behind mountains) ────────────────────────────── */
   if (doGrid) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(0,150,220,0.10)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1.5;
     /* Vertical grid lines: front edge at groundY, back edge at vanishY row width */
     var backHalfW = frontHalfW * TT_MIN_WFRAC;
     var backY2 = groundY - (groundY - vanishY) * 1.0; /* = vanishY */

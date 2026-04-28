@@ -8575,9 +8575,7 @@ function spectrumZoomSlider(position, sliderEl) {
     const hSlider = document.getElementById('spectrum-zoom-slider');
     const sliderRef = sliderEl || vSlider || hSlider;
     const sliderMax = sliderRef ? parseInt(sliderRef.max) : ZOOM_SLIDER_MAX;
-    console.log(`[vzoom] spectrumZoomSlider: position=${position}, sliderMax=${sliderMax}, sliderEl.max=${sliderEl ? sliderEl.max : 'n/a'}`);
-
-    // Boundary positions (min=0, max=sliderMax) always execute — never throttled.
+    // Boundary positions (min=0, max=sliderMax) bypass the throttle entirely.
     // Intermediate positions are throttled to avoid flooding the server.
     const isBoundary = (position === 0 || position >= sliderMax);
     if (!isBoundary) {
@@ -8585,7 +8583,9 @@ function spectrumZoomSlider(position, sliderEl) {
         if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
         lastZoomTime = now;
     } else {
-        lastZoomTime = Date.now();
+        // Reset throttle so boundary calls (reset/max) are never blocked by
+        // intermediate drag positions that fired moments before.
+        lastZoomTime = 0;
     }
 
     if (position === 0) {
@@ -8602,7 +8602,8 @@ function spectrumZoomSlider(position, sliderEl) {
     if (!spectrumDisplay) return;
 
     if (position >= sliderMax) {
-        // Max position: server now resolves bin_count to 256 in a single request.
+        // Max position: server resolves bin_count to 256 in a single request.
+        // Throttle was already reset above (boundary path).
         spectrumMaxZoom();
         return;
     }

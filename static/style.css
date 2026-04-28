@@ -2010,7 +2010,7 @@ input[type="range"]::-moz-range-thumb {
 
     /* Show vertical zoom slider on narrow screens */
     #spectrum-vzoom-slider {
-        display: block;
+        display: block !important;
     }
 
     input[type="range"]:not(#spectrum-vzoom-slider) {

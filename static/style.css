@@ -500,6 +500,7 @@ body {
     line-height: 1;
     pointer-events: none;
     z-index: 2;
+    padding-top: 2px;
 }
 
 .audio-buffer-text {

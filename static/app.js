@@ -987,7 +987,7 @@ document.addEventListener('DOMContentLoaded', () => {
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, bypassPassword || undefined);
 
         const startAudio = async () => {
-            console.log('[startAudio] VERSION 2026-04-28-v2 - MediaSession fix');
+            console.log('[startAudio] VERSION 2026-04-28-v3 - MediaSession recreate on context switch');
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 

@@ -2769,7 +2769,7 @@ input[type="range"]::-moz-range-thumb {
    The slider is 140px wide (= visual height after rotation).
    right + transform centres it on the right edge of the container. */
 #spectrum-vzoom-slider {
-    display: block; /* TODO: revert to none once positioning confirmed */
+    display: none;
     position: absolute;
     right: -60px;
     top: 50%;

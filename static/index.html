@@ -240,10 +240,17 @@
                                 <span class="vfo-label vfo-label-b">B</span>
                             </div>
                         </div>
-                        <button id="spectrum-btn-reset" onclick="spectrumResetZoom()" title="Reset Zoom (Q key)">Reset</button>
-                        <button id="spectrum-btn-zoom-out" onclick="spectrumZoomOut()" title="Zoom Out (S key)">−</button>
-                        <button id="spectrum-btn-zoom-in" onclick="spectrumZoomIn()" title="Zoom In (W key)">+</button>
-                        <button id="spectrum-btn-max-zoom" onclick="spectrumMaxZoom()" title="Maximum Zoom (E key)">Max</button>
+                        <div id="spectrum-zoom-slider-wrap" title="Zoom: drag left for full view (Q), right for maximum zoom (E). W/S keys step in/out.">
+                            <span class="spectrum-zoom-label">Reset</span>
+                            <input type="range" id="spectrum-zoom-slider"
+                                   min="0" max="14" step="1" value="0"
+                                   oninput="spectrumZoomSlider(this.value)"
+                                   onmousedown="spectrumZoomSliderDragStart()"
+                                   ontouchstart="spectrumZoomSliderDragStart()"
+                                   onmouseup="spectrumZoomSliderDragEnd()"
+                                   ontouchend="spectrumZoomSliderDragEnd()">
+                            <span class="spectrum-zoom-label">Max</span>
+                        </div>
                         <button id="spectrum-btn-center" onclick="spectrumCenterFrequency()" title="Center current frequency in waterfall/spectrum">◎</button>
                         <label id="spectrum-label-scroll" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Scroll wheel zooms in/out. Hold Ctrl/Shift to change frequency instead.">
                             <input type="checkbox" id="spectrum-zoom-scroll-enable" checked>

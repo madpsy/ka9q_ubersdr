@@ -8506,6 +8506,10 @@ function spectrumResetZoom() {
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL (will remove zoom params when at 1x)
 
+    // Optimistically snap slider to position 0 (full view)
+    const _rSlider = document.getElementById('spectrum-zoom-slider');
+    if (_rSlider) _rSlider.value = 0;
+
     // Notify radioAPI immediately with default binBandwidth
     if (window.radioAPI) {
         // Default binBandwidth when fully zoomed out (will be corrected when config arrives)
@@ -8542,11 +8546,123 @@ function spectrumMaxZoom() {
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
 
+    // Optimistically snap slider to maximum position
+    const _mSlider = document.getElementById('spectrum-zoom-slider');
+    if (_mSlider) _mSlider.value = _mSlider.max;
+
     // Notify radioAPI immediately with max zoom binBandwidth
     if (window.radioAPI) {
         window.radioAPI.notifyZoomChange(1.0);
     }
 }
+
+// ── Zoom slider ───────────────────────────────────────────────────────────────
+// The slider has positions 0 (= Reset / full view) … ZOOM_SLIDER_MAX (= Max / 1 Hz/bin).
+// Each step halves the binBandwidth, matching exactly what the +/− buttons did.
+const ZOOM_SLIDER_MAX = 14; // log2(29296.875) ≈ 14.8 → 14 full doublings
+
+// Track whether the user is actively dragging the slider so we don't fight them
+// with server-driven updates during the drag.
+let _zoomSliderDragging = false;
+
+function spectrumZoomSliderDragStart() {
+    _zoomSliderDragging = true;
+}
+
+function spectrumZoomSliderDragEnd() {
+    _zoomSliderDragging = false;
+}
+
+/**
+ * Called by the slider's oninput event.
+ * position 0  → send { type:'reset' }  (same as Reset button / Q key)
+ * position 14 → send { type:'zoom', binBandwidth:1.0 }  (same as Max button / E key)
+ * positions 1-13 → send { type:'zoom', binBandwidth: initialBinBandwidth / 2^position }
+ */
+function spectrumZoomSlider(position) {
+    position = parseInt(position, 10);
+
+    const now = Date.now();
+    if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
+    lastZoomTime = now;
+
+    if (position === 0) {
+        // Same as Reset
+        spectrumResetZoom();
+        return;
+    }
+
+    if (!spectrumDisplay) return;
+
+    // Determine the target binBandwidth
+    let targetBinBandwidth;
+    if (position >= ZOOM_SLIDER_MAX) {
+        // Same as Max – absolute minimum bin bandwidth
+        targetBinBandwidth = 1.0;
+    } else {
+        const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
+        targetBinBandwidth = initial / Math.pow(2, position);
+        // Clamp to 1 Hz/bin floor
+        targetBinBandwidth = Math.max(1.0, targetBinBandwidth);
+    }
+
+    // Get current frequency to keep the view centred
+    const freqInput = document.getElementById('frequency');
+    const frequency = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    if (isNaN(frequency)) {
+        log('Invalid frequency for zoom slider', 'error');
+        return;
+    }
+
+    if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+        spectrumDisplay.ws.send(JSON.stringify({
+            type: 'zoom',
+            frequency: frequency,
+            binBandwidth: targetBinBandwidth
+        }));
+        log(`Zoom slider: position ${position} → ${targetBinBandwidth.toFixed(2)} Hz/bin`);
+    }
+
+    updateURL();
+
+    if (window.radioAPI) {
+        window.radioAPI.notifyZoomChange(targetBinBandwidth);
+    }
+}
+
+/**
+ * Called whenever the server sends a config message with a new binBandwidth.
+ * Updates the slider thumb to reflect the current zoom level.
+ * Skipped while the user is actively dragging the slider.
+ */
+function updateZoomSlider() {
+    if (_zoomSliderDragging) return;
+    if (!spectrumDisplay) return;
+
+    const slider = document.getElementById('spectrum-zoom-slider');
+    if (!slider) return;
+
+    const initial = spectrumDisplay.initialBinBandwidth;
+    const current = spectrumDisplay.binBandwidth;
+
+    if (!initial || !current) return;
+
+    if (current >= initial) {
+        // Fully zoomed out (at or beyond initial) → position 0
+        slider.value = 0;
+        return;
+    }
+
+    // Calculate step: how many halvings from initial to current
+    const step = Math.round(Math.log2(initial / current));
+    slider.value = Math.max(0, Math.min(ZOOM_SLIDER_MAX, step));
+}
+
+// Expose for use by spectrum-display.js onConfig callback
+window.updateZoomSlider = updateZoomSlider;
+window.spectrumZoomSliderDragStart = spectrumZoomSliderDragStart;
+window.spectrumZoomSliderDragEnd = spectrumZoomSliderDragEnd;
+window.spectrumZoomSlider = spectrumZoomSlider;
 
 function spectrumCenterFrequency() {
     if (!spectrumDisplay) return;

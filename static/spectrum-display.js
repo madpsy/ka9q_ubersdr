@@ -1674,6 +1674,11 @@ class SpectrumDisplay {
                 // Update zoom level: how much we've zoomed from initial
                 this.zoomLevel = this.initialBinBandwidth / this.binBandwidth;
 
+                // Keep zoom slider in sync with server-reported zoom level
+                if (typeof window.updateZoomSlider === 'function') {
+                    window.updateZoomSlider();
+                }
+
                 // Only log config changes if they're significant (not from periodic sync)
                 // Log if this is the first config OR if values actually changed
                 if (!this.lastLoggedConfig ||

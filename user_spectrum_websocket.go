@@ -414,10 +414,14 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				safeBinBW = newBinBW
 			}
 
-			// If user is trying to zoom deeper than min safe bin_bw, reduce bin_count instead
+			// If user is trying to zoom deeper than min safe bin_bw, reduce bin_count instead.
+			// Loop (not if) so a single request can drive bin_count all the way to 256 —
+			// this makes "Max zoom" instant rather than requiring 3+ round-trips.
 			if newBinBW < minSafeBinBW && currentBinCount > 256 {
-				// Reduce bin_count by half, keep bin_bw at safe minimum
-				newBinCount = currentBinCount / 2
+				newBinCount = currentBinCount
+				for newBinCount > 256 {
+					newBinCount /= 2
+				}
 				if newBinCount < 256 {
 					newBinCount = 256 // Minimum bin count
 				}

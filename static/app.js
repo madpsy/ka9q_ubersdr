@@ -8528,42 +8528,34 @@ function spectrumMaxZoom() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
-    // Get current frequency from input
-    const freqInput = document.getElementById('frequency');
-    const frequency = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    // The server only reduces bin_count by one halving per zoom request when
+    // binBandwidth < 50 Hz/bin (minSafeBinBW).  A single request with 1.0 Hz/bin
+    // only triggers one bin_count halving, not the full chain to minimum.
+    // We must send multiple zoomIn() calls spaced apart, just like scroll does.
+    // Default bin_count is typically 2048; minimum is 256 → needs up to 3 halvings.
+    // We send enough steps to guarantee we reach the floor regardless of current state.
+    const STEPS = 6; // More than enough to reach 256 from any starting bin_count
+    const STEP_DELAY_MS = 60; // Slightly above the scroll throttle (25ms) to avoid drops
 
-    if (isNaN(frequency)) {
-        log('Invalid frequency for max zoom', 'error');
-        return;
+    for (let i = 0; i < STEPS; i++) {
+        setTimeout(() => {
+            if (spectrumDisplay && spectrumDisplay.connected) {
+                spectrumDisplay.zoomIn();
+            }
+        }, i * STEP_DELAY_MS);
     }
 
-    // Always send 1.0 Hz/bin for max zoom and let the server clamp to its own
-    // minimum.  Using minBinBandwidth here would stop 2 levels short of the
-    // server's true maximum because minBinBandwidth only reflects the first
-    // observed minimum, not the absolute floor the server enforces.
-    const maxZoomBinBandwidth = 1.0;
+    // Optimistically snap slider to maximum position after all steps complete
+    setTimeout(() => {
+        const _mSlider = document.getElementById('spectrum-zoom-slider');
+        if (_mSlider) _mSlider.value = _mSlider.max;
+        updateURL();
+        if (window.radioAPI && spectrumDisplay) {
+            window.radioAPI.notifyZoomChange(spectrumDisplay.minBinBandwidth || 1.0);
+        }
+    }, STEPS * STEP_DELAY_MS + 200);
 
-    // Send zoom request to maximum at current frequency
-    if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-        spectrumDisplay.ws.send(JSON.stringify({
-            type: 'zoom',
-            frequency: frequency,
-            binBandwidth: maxZoomBinBandwidth
-        }));
-        log(`Zoomed to maximum at ${formatFrequency(frequency)}`);
-    }
-
-    // Zoom display will be updated when config arrives from server
-    updateURL(); // Save zoom to URL
-
-    // Optimistically snap slider to maximum position
-    const _mSlider = document.getElementById('spectrum-zoom-slider');
-    if (_mSlider) _mSlider.value = _mSlider.max;
-
-    // Notify radioAPI immediately with max zoom binBandwidth
-    if (window.radioAPI) {
-        window.radioAPI.notifyZoomChange(maxZoomBinBandwidth);
-    }
+    log('Zooming to maximum (sending multiple steps to reach server floor)');
 }
 
 // ── Zoom slider ───────────────────────────────────────────────────────────────
@@ -8620,20 +8612,37 @@ function spectrumZoomSlider(position) {
 
     if (!spectrumDisplay) return;
 
-    // Determine the target binBandwidth
-    let targetBinBandwidth;
     if (position >= sliderMax) {
-        // Always send 1.0 Hz/bin for max zoom — let the server clamp to its own
-        // minimum.  Using minBinBandwidth would stop short of the server's true
-        // maximum zoom (minBinBandwidth only tracks the first observed minimum).
-        targetBinBandwidth = 1.0;
-    } else {
-        const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
-        targetBinBandwidth = initial / Math.pow(2, position);
-        // Clamp to the server's actual minimum (or 1.0 if unknown)
-        const minBw = spectrumDisplay.minBinBandwidth || 1.0;
-        targetBinBandwidth = Math.max(minBw, targetBinBandwidth);
+        // Max position: same multi-step approach as spectrumMaxZoom().
+        // The server only reduces bin_count by one halving per request when
+        // binBandwidth < 50 Hz/bin, so a single request never reaches the floor.
+        const STEPS = 6;
+        const STEP_DELAY_MS = 60;
+        for (let i = 0; i < STEPS; i++) {
+            setTimeout(() => {
+                if (spectrumDisplay && spectrumDisplay.connected) {
+                    spectrumDisplay.zoomIn();
+                }
+            }, i * STEP_DELAY_MS);
+        }
+        setTimeout(() => {
+            const _ms = document.getElementById('spectrum-zoom-slider');
+            if (_ms) _ms.value = _ms.max;
+            updateURL();
+            if (window.radioAPI && spectrumDisplay) {
+                window.radioAPI.notifyZoomChange(spectrumDisplay.minBinBandwidth || 1.0);
+            }
+        }, STEPS * STEP_DELAY_MS + 200);
+        log('Zoom slider: max position — sending multiple steps to reach server floor');
+        return;
     }
+
+    // Intermediate position: compute target binBandwidth from step number
+    const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
+    let targetBinBandwidth = initial / Math.pow(2, position);
+    // Clamp to the server's actual minimum (or 1.0 if unknown)
+    const minBw = spectrumDisplay.minBinBandwidth || 1.0;
+    targetBinBandwidth = Math.max(minBw, targetBinBandwidth);
 
     // Get current frequency to keep the view centred
     const freqInput = document.getElementById('frequency');

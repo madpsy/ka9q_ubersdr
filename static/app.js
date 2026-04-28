@@ -987,7 +987,7 @@ document.addEventListener('DOMContentLoaded', () => {
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, bypassPassword || undefined);
 
         const startAudio = async () => {
-            console.log('[startAudio] VERSION 2026-04-28-v3 - MediaSession recreate on context switch');
+            console.log('[startAudio] VERSION 2026-04-28-v4 - Fix audio doubling');
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 
@@ -3452,9 +3452,10 @@ function playAudioBuffer(buffer) {
         // Ensure the media element is playing (may have been paused by the OS)
         mediaElement.play().catch(() => {});
         console.log('[MediaSession] Activated with real audio flowing');
-        // Show toast on mobile devices to confirm MediaSession is active
-        if (_isMobile && typeof showNotification === 'function') {
-            showNotification('📱 Media Session Active - Lock screen controls enabled', 'success', 4000);
+        // Show MediaSession indicator in the audio buffer display
+        const mediaSessionIndicator = document.getElementById('media-session-indicator');
+        if (mediaSessionIndicator) {
+            mediaSessionIndicator.style.display = 'inline';
         }
     }
 

@@ -4203,24 +4203,18 @@ function adjustFrequency(deltaHz) {
     const freqInput = document.getElementById('frequency');
     // Get current frequency from data-hz-value attribute
     const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
-    const newFreq = currentFreq + deltaHz;
+    // Snap-then-step: round current freq to nearest multiple of the step size,
+    // then move exactly one step in the requested direction.
+    // This ensures e.g. 1234.23 kHz + 1 kHz step → 1235.00 kHz (not 1235.23 kHz).
+    const stepSize  = Math.abs(deltaHz);
+    const direction = Math.sign(deltaHz);
+    const snapped   = Math.round(currentFreq / stepSize) * stepSize;
+    const newFreq   = snapped + direction * stepSize;
 
     // Clamp to valid range: 10 kHz to 30 MHz
     const MIN_FREQ = 10000;    // 10 kHz
     const MAX_FREQ = 30000000; // 30 MHz
-    const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
-
-    // Apply rounding based on step size
-    // For ±100 Hz steps (buttons/arrows): round to nearest 100 Hz (matching scroll wheel)
-    // For ±10 Hz steps: round to nearest 10 Hz
-    let roundedFreq;
-    if (Math.abs(deltaHz) === 100) {
-        // Round to nearest 100 Hz for 100 Hz steps
-        roundedFreq = Math.round(clampedFreq / 100) * 100;
-    } else {
-        // Round to nearest 10 Hz for other steps (like 10 Hz buttons)
-        roundedFreq = Math.round(clampedFreq / 10) * 10;
-    }
+    const roundedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
 
     setFrequencyInputValue(roundedFreq);
     updateBandButtons(roundedFreq);

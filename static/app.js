@@ -2791,6 +2791,8 @@ async function handleBinaryMessage(data) {
             audioStartTime = audioContext.currentTime;
             // Clear the old _sinkGain so applyAudioSink() creates a fresh one
             audioContext._sinkGain = null;
+            // Clear the silent-dest node so it is recreated for the new context
+            audioContext._silentDest = null;
             // Recreate MediaSession bridge with new AudioContext.
             // The mediaElement was already started from a user gesture, so we can
             // just update its srcObject to point to the new MediaStreamDestination.
@@ -3220,6 +3222,8 @@ async function handlePCMAudio(msg) {
         audioStartTime = audioContext.currentTime;
         // Clear the old _sinkGain so applyAudioSink() creates a fresh one
         audioContext._sinkGain = null;
+        // Clear the silent-dest node so it is recreated for the new context
+        audioContext._silentDest = null;
         // Recreate MediaSession bridge with new AudioContext.
         // The mediaElement was already started from a user gesture, so we can
         // just update its srcObject to point to the new MediaStreamDestination.
@@ -3795,10 +3799,22 @@ function playAudioBuffer(buffer) {
     if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
     } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
-        // MediaSession path: connect ONLY to the media element bridge.
-        // The mediaElement plays the audio from _mediaStreamDest, so we don't need to
-        // also connect to destination (that would cause audio to play twice).
+        // MediaSession path: connect to the media element bridge for playback.
         outputNode.connect(audioContext._mediaStreamDest);
+        // ALSO connect via a silent gain (gain=0) to audioContext.destination.
+        // This keeps audioContext.destination as an active pull-graph root so that
+        // AnalyserNode side-branches (vuAnalyser, analyser, postFilterAnalyser) are
+        // processed every render quantum. Without this, those nodes are dead-ends not
+        // reachable from any pull root and the Web Audio engine skips them — causing
+        // the VU meter, oscilloscope, spectrum and waterfall to show silence.
+        // gain=0 means zero samples reach the hardware output, so no double-playback.
+        if (!audioContext._silentDest || audioContext._silentDest.context !== audioContext) {
+            const silentGain = audioContext.createGain();
+            silentGain.gain.value = 0;
+            silentGain.connect(audioContext.destination);
+            audioContext._silentDest = silentGain;
+        }
+        outputNode.connect(audioContext._silentDest);
     } else {
         outputNode.connect(audioContext.destination);
     }

@@ -230,6 +230,15 @@
             <div class="spectrum-display-container">
                 <canvas id="spectrum-line-graph-canvas" style="display: none;"></canvas>
                 <canvas id="spectrum-display-canvas"></canvas>
+                <!-- Vertical zoom slider — overlaid on right edge, centred vertically -->
+                <input type="range" id="spectrum-vzoom-slider"
+                       min="0" max="14" step="1" value="0"
+                       title="Zoom: drag up to zoom in, down to zoom out"
+                       oninput="spectrumZoomSlider(this.value)"
+                       onmousedown="spectrumZoomSliderDragStart()"
+                       ontouchstart="spectrumZoomSliderDragStart()"
+                       onmouseup="spectrumZoomSliderDragEnd()"
+                       ontouchend="spectrumZoomSliderDragEnd()">
                 <!-- All controls overlay on bottom of spectrum -->
                 <div class="spectrum-display-controls">
                     <div id="spectrum-control-group-main" class="spectrum-control-group">

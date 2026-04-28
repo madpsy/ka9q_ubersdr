@@ -2008,6 +2008,11 @@ input[type="range"]::-moz-range-thumb {
         font-size: 1.275em;
     }
 
+    /* Show vertical zoom slider on narrow screens */
+    #spectrum-vzoom-slider {
+        display: block;
+    }
+
     input[type="range"] {
         width: 100%;
     }
@@ -2755,6 +2760,60 @@ input[type="range"]::-moz-range-thumb {
     position: relative; /* For absolute positioning of controls overlay and line graph */
     z-index: 1; /* Base stacking context */
     height: 600px; /* Fixed height - controls always at same position */
+}
+
+/* ── Vertical zoom slider ─────────────────────────────────────────────────── */
+/* Hidden by default (desktop uses the Min/−/+/Max buttons); shown on narrow screens */
+#spectrum-vzoom-slider {
+    display: none;
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 20;
+    pointer-events: auto;
+
+    /* Vertical orientation: writing-mode flips the axis;
+       direction:rtl makes value=max at the top, value=0 at the bottom */
+    writing-mode: vertical-lr;
+    direction: rtl;
+
+    width: 4px;       /* track thickness */
+    height: 140px;    /* slider length */
+    cursor: pointer;
+    appearance: slider-vertical;
+    -webkit-appearance: slider-vertical;
+
+    /* Thin white track with evenly-spaced tick marks */
+    background: repeating-linear-gradient(
+        to bottom,
+        #fff 0px,
+        #fff 2px,
+        transparent 2px,
+        transparent calc((100% - 2px) / 14)
+    );
+    accent-color: #fff;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+}
+
+#spectrum-vzoom-slider:hover,
+#spectrum-vzoom-slider:active {
+    opacity: 1;
+}
+
+#spectrum-vzoom-slider::-webkit-slider-thumb {
+    background: #fff;
+    border-color: #fff;
+    width: 10px;
+    height: 10px;
+}
+
+#spectrum-vzoom-slider::-moz-range-thumb {
+    background: #fff;
+    border-color: #fff;
+    width: 10px;
+    height: 10px;
 }
 
 /* Spectrum frequency overlay - below audio start overlay */

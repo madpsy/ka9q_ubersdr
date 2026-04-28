@@ -8639,9 +8639,6 @@ function updateZoomSlider() {
     if (_zoomSliderDragging) return;
     if (!spectrumDisplay) return;
 
-    const slider = document.getElementById('spectrum-zoom-slider');
-    if (!slider) return;
-
     const initial = spectrumDisplay.initialBinBandwidth;
     const current = spectrumDisplay.binBandwidth;
     const currentBinCount = spectrumDisplay.binCount;
@@ -8666,7 +8663,7 @@ function updateZoomSlider() {
         : 0;
     const totalStep = bwSteps + binCountSteps;
 
-    // Dynamically update slider.max to include both bw halvings and bin_count halvings.
+    // Dynamically compute max steps.
     // Max bw steps = log2(initial / 50) since server clamps binBW to 50 Hz/bin minimum.
     // Max bin_count steps = log2(maxBinCount / 256) since server minimum bin_count = 256.
     const minSafeBinBW = 50.0;
@@ -8674,19 +8671,24 @@ function updateZoomSlider() {
     const maxBwSteps = (initial > minSafeBinBW) ? Math.round(Math.log2(initial / minSafeBinBW)) : 0;
     const maxBinCountSteps = (maxBinCount > minBinCount) ? Math.round(Math.log2(maxBinCount / minBinCount)) : 0;
     const dynamicMax = maxBwSteps + maxBinCountSteps;
-    if (dynamicMax > 0 && parseInt(slider.max) !== dynamicMax) {
-        slider.max = dynamicMax;
+
+    // Helper: apply computed step to a slider element (horizontal or vertical)
+    function applyToSlider(el) {
+        if (!el) return;
+        if (dynamicMax > 0 && parseInt(el.max) !== dynamicMax) {
+            el.max = dynamicMax;
+        }
+        const sliderMax = parseInt(el.max) || ZOOM_SLIDER_MAX;
+        if (current >= initial && binCountSteps === 0) {
+            el.value = 0;
+        } else {
+            el.value = Math.max(0, Math.min(sliderMax, totalStep));
+        }
     }
 
-    const sliderMax = parseInt(slider.max) || ZOOM_SLIDER_MAX;
-
-    if (current >= initial && binCountSteps === 0) {
-        // Fully zoomed out → position 0
-        slider.value = 0;
-        return;
-    }
-
-    slider.value = Math.max(0, Math.min(sliderMax, totalStep));
+    // Sync both the (legacy) horizontal slider and the new vertical slider
+    applyToSlider(document.getElementById('spectrum-zoom-slider'));
+    applyToSlider(document.getElementById('spectrum-vzoom-slider'));
 }
 
 // Expose for use by spectrum-display.js onConfig callback

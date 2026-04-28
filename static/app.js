@@ -2775,15 +2775,24 @@ async function handleBinaryMessage(data) {
             audioStartTime = audioContext.currentTime;
             // Clear the old _sinkGain so applyAudioSink() creates a fresh one
             audioContext._sinkGain = null;
-            // Tear down MediaSession bridge — it belongs to the old context.
-            // It cannot be rebuilt here (not a user gesture); the user must tap again.
-            if (mediaElement) {
-                mediaElement.pause();
-                mediaElement.srcObject = null;
-                if (mediaElement.parentNode) mediaElement.parentNode.removeChild(mediaElement);
-                mediaElement = null;
+            // Recreate MediaSession bridge with new AudioContext.
+            // The mediaElement was already started from a user gesture, so we can
+            // just update its srcObject to point to the new MediaStreamDestination.
+            if (mediaElement && 'mediaSession' in navigator) {
+                try {
+                    const dest = audioContext.createMediaStreamDestination();
+                    audioContext._mediaStreamDest = dest;
+                    mediaElement.srcObject = dest.stream;
+                    // Ensure it's playing (may have been paused during context switch)
+                    mediaElement.play().catch(() => {});
+                    console.log('[MediaSession] Recreated MediaStreamDestination for new AudioContext');
+                } catch (e) {
+                    console.warn('[MediaSession] Failed to recreate bridge:', e.message);
+                    audioContext._mediaStreamDest = null;
+                }
+            } else {
+                audioContext._mediaStreamDest = null;
             }
-            audioContext._mediaStreamDest = null;
             _mediaSessionActivated = false; // Reset so it re-activates on next audio buffer
             applyAudioSink();
 
@@ -3194,15 +3203,24 @@ async function handlePCMAudio(msg) {
         audioStartTime = audioContext.currentTime;
         // Clear the old _sinkGain so applyAudioSink() creates a fresh one
         audioContext._sinkGain = null;
-        // Tear down MediaSession bridge — it belongs to the old context.
-        // It cannot be rebuilt here (not a user gesture); the user must tap again.
-        if (mediaElement) {
-            mediaElement.pause();
-            mediaElement.srcObject = null;
-            if (mediaElement.parentNode) mediaElement.parentNode.removeChild(mediaElement);
-            mediaElement = null;
+        // Recreate MediaSession bridge with new AudioContext.
+        // The mediaElement was already started from a user gesture, so we can
+        // just update its srcObject to point to the new MediaStreamDestination.
+        if (mediaElement && 'mediaSession' in navigator) {
+            try {
+                const dest = audioContext.createMediaStreamDestination();
+                audioContext._mediaStreamDest = dest;
+                mediaElement.srcObject = dest.stream;
+                // Ensure it's playing (may have been paused during context switch)
+                mediaElement.play().catch(() => {});
+                console.log('[MediaSession] Recreated MediaStreamDestination for new AudioContext');
+            } catch (e) {
+                console.warn('[MediaSession] Failed to recreate bridge:', e.message);
+                audioContext._mediaStreamDest = null;
+            }
+        } else {
+            audioContext._mediaStreamDest = null;
         }
-        audioContext._mediaStreamDest = null;
         _mediaSessionActivated = false; // Reset so it re-activates on next audio buffer
         applyAudioSink();
 

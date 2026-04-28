@@ -11645,21 +11645,39 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     const MAX  = 2.0;
     const KEY  = 'browserZoomLevel';
 
+    // Elements to zoom — controls only; spectrum-display-panel is intentionally excluded
+    // so the waterfall/spectrum canvas always fills the full viewport width.
+    const ZOOM_SELECTORS = [
+        '.controls',
+        '.audio-controls',
+        '#browser-zoom-group',
+        '.band-status-bar',
+        '.digital-spots-badges-main',
+        '.cw-spots-badges-main',
+    ];
+
     let level = parseFloat(localStorage.getItem(KEY)) || 1.0;
 
     function applyZoom(newLevel) {
         level = Math.round(Math.max(MIN, Math.min(MAX, newLevel)) * 100) / 100;
+        const zoomVal = level === 1.0 ? '' : String(level);
 
-        // Chrome/Edge/Safari support the non-standard `zoom` CSS property.
-        // Firefox does not, so fall back to transform: scale on <html>.
-        if (CSS.supports('zoom', '1')) {
-            document.body.style.zoom = level;
-            document.documentElement.style.transform = '';
-        } else {
-            document.body.style.zoom = '';
-            document.documentElement.style.transform = 'scale(' + level + ')';
-            document.documentElement.style.transformOrigin = 'top left';
-        }
+        ZOOM_SELECTORS.forEach(function (sel) {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            if (CSS.supports('zoom', '1')) {
+                el.style.zoom = zoomVal;
+            } else {
+                // Firefox: use transform scale with adjusted transform-origin
+                if (zoomVal) {
+                    el.style.transform = 'scale(' + level + ')';
+                    el.style.transformOrigin = 'top center';
+                } else {
+                    el.style.transform = '';
+                    el.style.transformOrigin = '';
+                }
+            }
+        });
 
         const label = document.getElementById('browser-zoom-level');
         if (label) label.textContent = Math.round(level * 100) + '%';

@@ -2961,34 +2961,42 @@ var sgPlay={
 };
 
 /* Pre-compute a fixed dB range across all rows in the cache.
-   Uses the same logic as sgDrawRowSpectrumCanvas auto-range but applied
-   globally: dbMin = lowest (noise_floor - 5) snapped to 5 dB grid,
-             dbMax = highest peak + 5 snapped to 5 dB grid. */
+   dbMax = global peak + 5 dB, snapped to 5 dB grid.
+   dbMin = median noise floor across all rows - 5 dB, snapped to 5 dB grid.
+   Using the median noise floor (rather than the minimum bin value or the
+   lowest NF) gives a stable, representative bottom that keeps the noise
+   floor near the bottom of the chart without being dragged down by outliers. */
 function sgPlayComputeLockedRange(){
   var cache=sgPlay.cache;
   if(!cache||!cache.rows||cache.rows.length===0)return;
 
   var globalPeak=-Infinity;
-  var globalNfMin=Infinity;
+  var nfValues=[];
 
   for(var ri=0;ri<cache.rows.length;ri++){
     var r=cache.rows[ri];
-    /* Peak across all bins in this row */
+    /* Global peak across all bins */
     var bins=r.bins||[];
     for(var bi=0;bi<bins.length;bi++){
       var v=bins[bi];
       if(v!==null&&v!==undefined&&v>globalPeak)globalPeak=v;
     }
-    /* Lowest noise floor across all rows */
-    if(r.noise_floor&&r.noise_floor<globalNfMin)globalNfMin=r.noise_floor;
+    /* Collect noise floor values (skip rows with no NF) */
+    if(r.noise_floor&&isFinite(r.noise_floor))nfValues.push(r.noise_floor);
   }
 
   if(!isFinite(globalPeak))globalPeak=-60;
   var dbMax=Math.ceil((globalPeak+5)/5)*5;
 
   var dbMin;
-  if(isFinite(globalNfMin)){
-    dbMin=Math.floor((globalNfMin-5)/5)*5;
+  if(nfValues.length>0){
+    /* Median noise floor — robust against outlier rows */
+    nfValues.sort(function(a,b){return a-b;});
+    var mid=Math.floor(nfValues.length/2);
+    var medianNf=nfValues.length%2===0
+      ? (nfValues[mid-1]+nfValues[mid])/2
+      : nfValues[mid];
+    dbMin=Math.floor((medianNf-5)/5)*5;
   } else {
     dbMin=Math.floor((dbMax-40)/5)*5;
   }

@@ -1080,7 +1080,7 @@ function ttRedraw() {
     var frontRowW = frontXR - frontXL;
 
     ctx.save();
-    ctx.globalAlpha = 0.07;
+    ctx.globalAlpha = 0.20;
     for (var bi = 0; bi < BANDS.length; bi++) {
       var bf0 = (BANDS[bi][0] - startHz) / spanHz;
       var bf1 = (BANDS[bi][1] - startHz) / spanHz;
@@ -1109,14 +1109,14 @@ function ttRedraw() {
       ctx.fill();
 
       /* Also draw a thin vertical line at the band edges for definition */
-      ctx.globalAlpha = 0.18;
+      ctx.globalAlpha = 0.45;
       ctx.strokeStyle = bandColors[bi % bandColors.length];
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(bFrontX0, groundY); ctx.lineTo(bBackX0, backY);
       ctx.moveTo(bFrontX1, groundY); ctx.lineTo(bBackX1, backY);
       ctx.stroke();
-      ctx.globalAlpha = 0.07;
+      ctx.globalAlpha = 0.20;
     }
     ctx.restore();
   }

@@ -3774,12 +3774,11 @@ function playAudioBuffer(buffer) {
     //   3. Direct audioContext.destination (fallback)
     if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
-    } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext) {
-        // MediaSession path: connect to the media element bridge AND to destination.
-        // The bridge enables lock-screen controls on iOS/Android and keeps audio alive when backgrounded.
-        // Connecting to destination as well ensures audio outputs normally on all platforms.
+    } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
+        // MediaSession path: connect ONLY to the media element bridge.
+        // The mediaElement plays the audio from _mediaStreamDest, so we don't need to
+        // also connect to destination (that would cause audio to play twice).
         outputNode.connect(audioContext._mediaStreamDest);
-        outputNode.connect(audioContext.destination);
     } else {
         outputNode.connect(audioContext.destination);
     }

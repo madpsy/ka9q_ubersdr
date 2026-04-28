@@ -1995,13 +1995,10 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* Keep zoom slider visible on mobile but make it wider for touch */
-    #spectrum-zoom-slider-wrap {
-        margin-right: 4px;
-    }
-
-    #spectrum-zoom-slider {
-        width: 100px !important;
+    /* Keep − and + zoom buttons on mobile; hide Min/Max */
+    #spectrum-zoom-btn-min,
+    #spectrum-zoom-btn-max {
+        display: none !important;
     }
 
     input[type="range"] {
@@ -2853,45 +2850,12 @@ input[type="range"]::-moz-range-thumb {
     margin-right: 8px;
 }
 
-/* ── Zoom slider ─────────────────────────────────────────────────────────── */
+/* ── Zoom buttons ─────────────────────────────────────────────────────────── */
 #spectrum-zoom-slider-wrap {
     display: flex;
     align-items: center;
     gap: 4px;
     margin-right: 8px;
-}
-
-#spectrum-zoom-slider-wrap .spectrum-zoom-label {
-    font-size: 0.75em;
-    color: var(--text-light);
-    white-space: nowrap;
-    user-select: none;
-}
-
-#spectrum-zoom-slider {
-    /* Override the generic .spectrum-control-group input[type="range"] width */
-    width: 120px !important;
-    height: 4px;
-    cursor: pointer;
-    /* Tick marks via a repeating gradient – 15 positions (0-14) */
-    background: repeating-linear-gradient(
-        to right,
-        #fff 0px,
-        #fff 2px,
-        transparent 2px,
-        transparent calc((100% - 2px) / 14)
-    );
-    accent-color: #fff;
-}
-
-#spectrum-zoom-slider::-webkit-slider-thumb {
-    background: #fff;
-    border-color: #fff;
-}
-
-#spectrum-zoom-slider::-moz-range-thumb {
-    background: #fff;
-    border-color: #fff;
 }
 
 

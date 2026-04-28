@@ -8552,22 +8552,16 @@ function spectrumMaxZoom() {
     log('Zooming to maximum (sending multiple steps to reach server floor)');
 }
 
-// ── Zoom slider ───────────────────────────────────────────────────────────────
-// The slider has positions 0 (= Reset / full view) … ZOOM_SLIDER_MAX (= Max / 1 Hz/bin).
-// Each step halves the binBandwidth, matching exactly what the +/− buttons did.
-const ZOOM_SLIDER_MAX = 14; // log2(29296.875) ≈ 14.8 → 14 full doublings
+// ── Zoom buttons ──────────────────────────────────────────────────────────────
+// Zoom is controlled by Min / − / + / Max buttons (see index.html).
+// The slider element no longer exists; these stubs are kept for any external
+// callers that may reference them.
+const ZOOM_SLIDER_MAX = 14; // retained for updateZoomSlider() math
 
-// Track whether the user is actively dragging the slider so we don't fight them
-// with server-driven updates during the drag.
-let _zoomSliderDragging = false;
+let _zoomSliderDragging = false; // no-op; kept for safety
 
-function spectrumZoomSliderDragStart() {
-    _zoomSliderDragging = true;
-}
-
-function spectrumZoomSliderDragEnd() {
-    _zoomSliderDragging = false;
-}
+function spectrumZoomSliderDragStart() {}
+function spectrumZoomSliderDragEnd() {}
 
 /**
  * Called by the slider's oninput event.

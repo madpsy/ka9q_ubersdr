@@ -240,16 +240,11 @@
                                 <span class="vfo-label vfo-label-b">B</span>
                             </div>
                         </div>
-                        <div id="spectrum-zoom-slider-wrap" title="Zoom: drag left for full view (Q), right for maximum zoom (E). W/S keys step in/out.">
-                            <span class="spectrum-zoom-label">Reset</span>
-                            <input type="range" id="spectrum-zoom-slider"
-                                   min="0" max="14" step="1" value="0"
-                                   oninput="spectrumZoomSlider(this.value)"
-                                   onmousedown="spectrumZoomSliderDragStart()"
-                                   ontouchstart="spectrumZoomSliderDragStart()"
-                                   onmouseup="spectrumZoomSliderDragEnd()"
-                                   ontouchend="spectrumZoomSliderDragEnd()">
-                            <span class="spectrum-zoom-label">Max</span>
+                        <div id="spectrum-zoom-slider-wrap" title="Zoom: Q=reset, W=out, S=in, E=max">
+                            <button id="spectrum-zoom-btn-min" onclick="spectrumResetZoom()" title="Reset zoom [Q]">Min</button>
+                            <button id="spectrum-zoom-btn-out" onclick="spectrumZoomOut()"   title="Zoom out [W]">−</button>
+                            <button id="spectrum-zoom-btn-in"  onclick="spectrumZoomIn()"    title="Zoom in [S]">+</button>
+                            <button id="spectrum-zoom-btn-max" onclick="spectrumMaxZoom()"   title="Maximum zoom [E]">Max</button>
                         </div>
                         <button id="spectrum-btn-center" onclick="spectrumCenterFrequency()" title="Center current frequency in waterfall/spectrum">◎</button>
                         <label id="spectrum-label-scroll" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Scroll wheel zooms in/out. Hold Ctrl/Shift to change frequency instead.">

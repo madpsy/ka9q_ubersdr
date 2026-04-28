@@ -3795,10 +3795,10 @@ function playAudioBuffer(buffer) {
     if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
     } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
-        // MediaSession path: connect ONLY to the media element bridge.
-        // The mediaElement plays the audio from _mediaStreamDest, so we don't need to
-        // also connect to destination (that would cause audio to play twice).
+        // DIAGNOSTIC TEST: connect to BOTH destinations to check if analysers work with double audio.
+        // If meters work now, the pull-graph theory is confirmed and gain(0) fix needs debugging.
         outputNode.connect(audioContext._mediaStreamDest);
+        outputNode.connect(audioContext.destination); // intentional double audio for testing
     } else {
         outputNode.connect(audioContext.destination);
     }

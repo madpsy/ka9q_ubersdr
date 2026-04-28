@@ -2013,7 +2013,7 @@ input[type="range"]::-moz-range-thumb {
         display: block;
     }
 
-    input[type="range"] {
+    input[type="range"]:not(#spectrum-vzoom-slider) {
         width: 100%;
     }
     
@@ -2763,57 +2763,78 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ── Vertical zoom slider ─────────────────────────────────────────────────── */
-/* Hidden by default (desktop uses the Min/−/+/Max buttons); shown on narrow screens */
+/* Hidden by default (desktop uses the Min/−/+/Max buttons); shown on narrow screens.
+   A normal horizontal range input rotated -90deg — the most reliable cross-browser
+   approach (writing-mode/appearance:slider-vertical is broken on iOS/Android Chrome).
+   The slider is 140px wide (= visual height after rotation).
+   right + transform centres it on the right edge of the container. */
 #spectrum-vzoom-slider {
-    display: none;
+    display: block; /* TODO: revert to none once positioning confirmed */
     position: absolute;
-    right: 6px;
+    right: -60px;
     top: 50%;
-    transform: translateY(-50%);
+    transform: translateY(-50%) rotate(-90deg);
+    transform-origin: center center;
     z-index: 20;
     pointer-events: auto;
 
-    /* Vertical orientation: writing-mode flips the axis;
-       direction:rtl makes value=max at the top, value=0 at the bottom */
-    writing-mode: vertical-lr;
-    direction: rtl;
-
-    width: 4px;       /* track thickness */
-    height: 140px;    /* slider length */
+    width: 140px;          /* visual height after rotation */
+    height: 20px;          /* touch-target thickness */
     cursor: pointer;
-    appearance: slider-vertical;
-    -webkit-appearance: slider-vertical;
-
-    /* Thin white track with evenly-spaced tick marks */
-    background: repeating-linear-gradient(
-        to bottom,
-        #fff 0px,
-        #fff 2px,
-        transparent 2px,
-        transparent calc((100% - 2px) / 14)
-    );
-    accent-color: #fff;
-    opacity: 0.55;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    opacity: 0.65;
     transition: opacity 0.15s;
 }
 
-#spectrum-vzoom-slider:hover,
 #spectrum-vzoom-slider:active {
     opacity: 1;
 }
 
+/* Track — thin white line with tick marks */
+#spectrum-vzoom-slider::-webkit-slider-runnable-track {
+    height: 3px;
+    background: repeating-linear-gradient(
+        to right,
+        #fff 0px, #fff 2px,
+        rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
+    );
+    border-radius: 2px;
+}
+
+#spectrum-vzoom-slider::-moz-range-track {
+    height: 3px;
+    background: repeating-linear-gradient(
+        to right,
+        #fff 0px, #fff 2px,
+        rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
+    );
+    border-radius: 2px;
+}
+
+/* Thumb — small white circle */
 #spectrum-vzoom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
     background: #fff;
-    border-color: #fff;
-    width: 10px;
-    height: 10px;
+    border: none;
+    margin-top: -5px;
+    box-shadow: 0 0 5px rgba(0,0,0,0.7);
+    cursor: pointer;
 }
 
 #spectrum-vzoom-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
     background: #fff;
-    border-color: #fff;
-    width: 10px;
-    height: 10px;
+    border: none;
+    box-shadow: 0 0 5px rgba(0,0,0,0.7);
+    cursor: pointer;
 }
 
 /* Spectrum frequency overlay - below audio start overlay */

@@ -43,6 +43,16 @@ var ttCountdownVal = 0;
 var ttCountdownTs = 0;
 var ttHasStarted = false;  /* true after first playback — resume skips countdown */
 
+/* ── Frequency viewport (zoom/pan) ─────────────────────────────────────── */
+/* Fractions of the full data span: 0.0 = left edge, 1.0 = right edge.
+   Default = full range. */
+var ttFreqStart = 0.0;
+var ttFreqEnd   = 1.0;
+/* Drag-pan state */
+var ttFreqDragging = false;
+var ttFreqDragStartX = 0;      /* canvas X at mousedown */
+var ttFreqDragStartFrac = 0;   /* ttFreqStart at mousedown */
+
 /* Pre-computed sample cache: ttSampleCache[rowIdx] = Float32Array(ttSampleCount) */
 var ttSampleCache = null;
 /* Actual number of samples per row — set to imgW when cache is built */
@@ -271,6 +281,7 @@ function ttResizeCanvas() {
 /* ── Data loading ───────────────────────────────────────────────────────── */
 function ttOnDateChange() {
   ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null; ttHasStarted = false;
+  ttFreqStart = 0.0; ttFreqEnd = 1.0; /* reset freq zoom on date change */
   ttUpdateUrlParams();
   ttLoadData();
 }
@@ -279,6 +290,7 @@ function ttOnBandChange() {
   var bdst = document.getElementById('tt-bsel');
   ttBand = bdst ? bdst.value : 'wideband';
   ttBmp = null; ttMeta = null; ttSampleCache = null; ttRowGradCache = []; ttLutRGB = null; ttHasStarted = false;
+  ttFreqStart = 0.0; ttFreqEnd = 1.0; /* reset freq zoom on band change */
   ttUpdateUrlParams();
   ttLoadData();
 }
@@ -865,9 +877,14 @@ function ttRedraw() {
   var doBands = showBandsEl ? showBandsEl.checked : true;
   var doGrid = showGridEl ? showGridEl.checked : true;
 
-  var startHz = ttMeta.start_freq_hz || 0;
-  var spanHz = (ttMeta.end_freq_hz || 30e6) - startHz;
-  if (spanHz <= 0) spanHz = 30e6;
+  var _fullStartHz = ttMeta.start_freq_hz || 0;
+  var _fullSpanHz  = (ttMeta.end_freq_hz || 30e6) - _fullStartHz;
+  if (_fullSpanHz <= 0) _fullSpanHz = 30e6;
+
+  /* Apply frequency viewport — zoom/pan narrows the visible Hz range */
+  var startHz = _fullStartHz + ttFreqStart * _fullSpanHz;
+  var spanHz  = (ttFreqEnd - ttFreqStart) * _fullSpanHz;
+  if (spanHz <= 0) spanHz = _fullSpanHz;
 
   /* Ensure palette canvas is built */
   if (!ttPaletteCanvas) ttPaletteCanvas = ttBuildPaletteCanvas();
@@ -966,6 +983,10 @@ function ttRedraw() {
 
     if (samples2 && rowW2 >= 1) {
       var nSamples2 = samples2.length;
+      /* Viewport: only read samples within [ttFreqStart, ttFreqEnd] fraction */
+      var smpStart2 = ttFreqStart * (nSamples2 - 1);
+      var smpEnd2   = ttFreqEnd   * (nSamples2 - 1);
+      var smpSpan2  = smpEnd2 - smpStart2;
       /* Clamp path points to screen pixel width — no benefit drawing more points
          than there are pixels in the row. Distant (narrow) rows get far fewer points. */
       var nDraw2 = Math.min(nSamples2, Math.max(2, Math.ceil(rowW2)));
@@ -976,10 +997,10 @@ function ttRedraw() {
       }
       var px2 = ttSlotPX[di2];
       var py2 = ttSlotPY[di2];
-      var step2 = nDraw2 > 1 ? (nSamples2 - 1) / (nDraw2 - 1) : 0;
       for (var si2 = 0; si2 < nDraw2; si2++) {
-        var srcIdx2 = Math.min(nSamples2 - 1, Math.round(si2 * step2));
-        px2[si2] = xL2 + (si2 / (nDraw2 - 1)) * rowW2;
+        var siFrac2  = nDraw2 > 1 ? si2 / (nDraw2 - 1) : 0;
+        var srcIdx2  = Math.min(nSamples2 - 1, Math.round(smpStart2 + siFrac2 * smpSpan2));
+        px2[si2] = xL2 + siFrac2 * rowW2;
         py2[si2] = bY2 - samples2[srcIdx2] * peakH2;
       }
       allPtsX[di2] = px2;
@@ -1282,6 +1303,26 @@ function ttRedraw() {
     ctx.globalAlpha = 1;
   }
 
+  /* ── Zoom indicator bar (shown when zoomed in) ───────────────────────── */
+  /* A thin minimap bar above the freq strip showing the viewport position */
+  var isZoomed = (ttFreqEnd - ttFreqStart) < 0.999;
+  if (isZoomed) {
+    var zmH = 3; /* height of the minimap bar in px */
+    var zmTop = freqStripTop - zmH - 1;
+    var zmFrontXL = vanishX - frontHalfW;
+    var zmFrontW  = frontHalfW * 2;
+    /* Full-range background */
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    ctx.fillRect(zmFrontXL, zmTop, zmFrontW, zmH);
+    /* Viewport highlight */
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = 'rgba(0,220,255,1)';
+    ctx.fillRect(zmFrontXL + ttFreqStart * zmFrontW, zmTop,
+                 (ttFreqEnd - ttFreqStart) * zmFrontW, zmH);
+    ctx.globalAlpha = 1;
+  }
+
   /* ── Frequency tick labels ───────────────────────────────────────────── */
   ctx.fillStyle = 'rgba(0,220,255,0.65)';
   ctx.font = 'bold ' + freqFontSz + 'px monospace';
@@ -1547,6 +1588,37 @@ function ttSetupScrubber() {
   sw.addEventListener('touchend', function() { ttScrubDragging = false; });
 }
 
+/* ── Frequency viewport helpers ─────────────────────────────────────────── */
+function ttFreqReset() {
+  ttFreqStart = 0.0;
+  ttFreqEnd   = 1.0;
+  if (ttBmp && ttMeta) ttRedraw();
+}
+
+/* Clamp viewport fractions to [0,1] and enforce a minimum span */
+function ttFreqClamp(minSpan) {
+  minSpan = minSpan || 0.01; /* 1% of full span minimum */
+  var span = ttFreqEnd - ttFreqStart;
+  if (span < minSpan) {
+    var mid = (ttFreqStart + ttFreqEnd) / 2;
+    ttFreqStart = mid - minSpan / 2;
+    ttFreqEnd   = mid + minSpan / 2;
+  }
+  if (ttFreqStart < 0) { ttFreqEnd -= ttFreqStart; ttFreqStart = 0; }
+  if (ttFreqEnd   > 1) { ttFreqStart -= (ttFreqEnd - 1); ttFreqEnd = 1; }
+  ttFreqStart = Math.max(0, ttFreqStart);
+  ttFreqEnd   = Math.min(1, ttFreqEnd);
+}
+
+/* Convert a canvas X pixel to a frequency fraction [0,1] of the current viewport */
+function ttCanvasXToFreqFrac(canvasX, canvasW) {
+  var frontXL = canvasW * 0.5 - canvasW * 0.5; /* = 0 */
+  var frontW  = canvasW; /* frontHalfW * 2 = W */
+  var frac = canvasX / canvasW; /* fraction across front edge */
+  /* Map back to full-range fraction */
+  return ttFreqStart + frac * (ttFreqEnd - ttFreqStart);
+}
+
 /* ── Hover tooltip ──────────────────────────────────────────────────────── */
 function ttSetupHover() {
   var wrap = document.getElementById('tt-canvas-wrap');
@@ -1554,10 +1626,86 @@ function ttSetupHover() {
   var tt = document.getElementById('tt');
   if (!wrap || !c || !tt) return;
 
+  /* ── Scroll-wheel frequency zoom ──────────────────────────────────────── */
+  wrap.addEventListener('wheel', function(e) {
+    /* Only zoom when not over the scrubber */
+    var sw = document.getElementById('tt-scrubber-wrap');
+    if (sw && sw.contains(e.target)) return;
+    e.preventDefault();
+
+    var rect = c.getBoundingClientRect();
+    /* Cursor position as fraction [0,1] across the canvas front edge */
+    var cursorFrac = (e.clientX - rect.left) / rect.width;
+    /* Map cursor screen fraction to full-range fraction */
+    var cursorFullFrac = ttFreqStart + cursorFrac * (ttFreqEnd - ttFreqStart);
+
+    var factor = e.deltaY < 0 ? 0.75 : 1 / 0.75; /* zoom in / out */
+    var newSpan = (ttFreqEnd - ttFreqStart) * factor;
+    newSpan = Math.max(0.01, Math.min(1.0, newSpan));
+
+    /* Keep cursor frequency fixed */
+    ttFreqStart = cursorFullFrac - cursorFrac * newSpan;
+    ttFreqEnd   = ttFreqStart + newSpan;
+    ttFreqClamp(0.01);
+
+    if (ttBmp && ttMeta) ttRedraw();
+  }, { passive: false });
+
+  /* ── Click-drag pan ───────────────────────────────────────────────────── */
+  wrap.addEventListener('mousedown', function(e) {
+    var sw = document.getElementById('tt-scrubber-wrap');
+    if (sw && sw.contains(e.target)) return;
+    var fsBtn = document.getElementById('tt-fs-btn');
+    if (fsBtn && fsBtn.contains(e.target)) return;
+    /* Only start drag if zoomed in */
+    if ((ttFreqEnd - ttFreqStart) >= 0.999) return;
+    ttFreqDragging = true;
+    var rect = c.getBoundingClientRect();
+    ttFreqDragStartX    = (e.clientX - rect.left) / rect.width;
+    ttFreqDragStartFrac = ttFreqStart;
+    e.stopPropagation(); /* prevent play/pause toggle */
+  });
+
+  window.addEventListener('mousemove', function(e) {
+    if (!ttFreqDragging) return;
+    var rect = c.getBoundingClientRect();
+    var curX = (e.clientX - rect.left) / rect.width;
+    var dx = curX - ttFreqDragStartX; /* fraction moved */
+    var span = ttFreqEnd - ttFreqStart;
+    /* Moving right → pan left (lower frequencies) */
+    ttFreqStart = ttFreqDragStartFrac - dx * span;
+    ttFreqEnd   = ttFreqStart + span;
+    ttFreqClamp(0.01);
+    if (ttBmp && ttMeta) ttRedraw();
+  });
+
+  window.addEventListener('mouseup', function() {
+    ttFreqDragging = false;
+  });
+
+  /* ── Double-click to reset zoom ───────────────────────────────────────── */
+  wrap.addEventListener('dblclick', function(e) {
+    var sw = document.getElementById('tt-scrubber-wrap');
+    if (sw && sw.contains(e.target)) return;
+    if ((ttFreqEnd - ttFreqStart) < 0.999) {
+      ttFreqReset();
+      e.stopPropagation();
+    }
+  });
+
   wrap.addEventListener('mousemove', function(e) {
-    /* Use pointer cursor when the "Engage" overlay is showing, crosshair otherwise */
+    /* Use pointer cursor when the "Engage" overlay is showing, grab when dragging,
+       ew-resize when zoomed in (pan available), crosshair otherwise */
     var overlayActive = ttSampleCache && (!ttIsPlaying || ttCountingDown);
-    wrap.style.cursor = overlayActive ? 'pointer' : 'crosshair';
+    if (overlayActive) {
+      wrap.style.cursor = 'pointer';
+    } else if (ttFreqDragging) {
+      wrap.style.cursor = 'grabbing';
+    } else if ((ttFreqEnd - ttFreqStart) < 0.999) {
+      wrap.style.cursor = 'grab';
+    } else {
+      wrap.style.cursor = 'crosshair';
+    }
     /* Always hide the tooltip */
     if (tt) tt.style.display = 'none';
   });

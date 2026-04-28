@@ -8608,14 +8608,37 @@ function spectrumZoomSlider(position, sliderEl) {
         return;
     }
 
-    // Intermediate position: compute target binBandwidth from step number
+    // Intermediate position: compute target binBandwidth from step number.
     const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
     let targetBinBandwidth = initial / Math.pow(2, position);
     // Clamp to the server's actual minimum (or 1.0 if unknown)
     const minBw = spectrumDisplay.minBinBandwidth || 1.0;
     targetBinBandwidth = Math.max(minBw, targetBinBandwidth);
 
-    // Get current frequency to keep the view centred
+    // Deep zoom zone: targetBinBandwidth is below the server's safe minimum (50 Hz/bin).
+    // In this zone the server controls zoom via bin_count reduction, not binBandwidth.
+    // Sending a direct binBandwidth has no effect — use zoomIn()/zoomOut() instead,
+    // exactly like scroll does, so the server steps bin_count one halving at a time.
+    const minSafeBinBW = 50.0;
+    if (targetBinBandwidth < minSafeBinBW) {
+        // Determine direction by comparing to current zoom step
+        const currentBwSteps = (spectrumDisplay.binBandwidth < initial)
+            ? Math.round(Math.log2(initial / spectrumDisplay.binBandwidth)) : 0;
+        const currentBinCountSteps = (spectrumDisplay._maxSeenBinCount && spectrumDisplay.binCount < spectrumDisplay._maxSeenBinCount)
+            ? Math.round(Math.log2(spectrumDisplay._maxSeenBinCount / spectrumDisplay.binCount)) : 0;
+        const currentStep = currentBwSteps + currentBinCountSteps;
+
+        if (position > currentStep) {
+            spectrumDisplay.zoomIn();
+        } else if (position < currentStep) {
+            spectrumDisplay.zoomOut();
+        }
+        // If position === currentStep, already at target — no-op
+        updateURL();
+        return;
+    }
+
+    // Normal zoom zone: send target binBandwidth directly.
     const freqInput = document.getElementById('frequency');
     const frequency = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
     if (isNaN(frequency)) {

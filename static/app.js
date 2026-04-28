@@ -8538,8 +8538,12 @@ function spectrumMaxZoom() {
     }
 
     // Use the actual minimum binBandwidth seen from the server (= true max zoom).
-    // Fall back to 1.0 if we haven't observed a minimum yet (server will clamp anyway).
-    const maxZoomBinBandwidth = spectrumDisplay.minBinBandwidth || 1.0;
+    // Only use minBinBandwidth if it is genuinely less than initialBinBandwidth
+    // (i.e. we've actually observed a zoomed-in state). Otherwise send 1.0 and
+    // let the server clamp to its own minimum.
+    const _minSeen = spectrumDisplay.minBinBandwidth;
+    const _initial = spectrumDisplay.initialBinBandwidth;
+    const maxZoomBinBandwidth = (_minSeen && _initial && _minSeen < _initial) ? _minSeen : 1.0;
 
     // Send zoom request to maximum at current frequency
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
@@ -8590,9 +8594,20 @@ function spectrumZoomSliderDragEnd() {
 function spectrumZoomSlider(position) {
     position = parseInt(position, 10);
 
-    const now = Date.now();
-    if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
-    lastZoomTime = now;
+    // Get the slider's current max (dynamically updated by updateZoomSlider)
+    const slider = document.getElementById('spectrum-zoom-slider');
+    const sliderMax = slider ? parseInt(slider.max) : ZOOM_SLIDER_MAX;
+
+    // Boundary positions (min=0, max=sliderMax) always execute — never throttled.
+    // Intermediate positions are throttled to avoid flooding the server.
+    const isBoundary = (position === 0 || position >= sliderMax);
+    if (!isBoundary) {
+        const now = Date.now();
+        if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
+        lastZoomTime = now;
+    } else {
+        lastZoomTime = Date.now();
+    }
 
     if (position === 0) {
         // Same as Reset — call resetZoom() directly to avoid double-throttle
@@ -8607,16 +8622,17 @@ function spectrumZoomSlider(position) {
 
     if (!spectrumDisplay) return;
 
-    // Get the slider's current max (dynamically updated by updateZoomSlider)
-    const slider = document.getElementById('spectrum-zoom-slider');
-    const sliderMax = slider ? parseInt(slider.max) : ZOOM_SLIDER_MAX;
-
     // Determine the target binBandwidth
     let targetBinBandwidth;
     if (position >= sliderMax) {
-        // Same as Max — use the actual minimum binBandwidth seen from the server
-        // Fall back to 1.0 if we haven't observed a minimum yet
-        targetBinBandwidth = spectrumDisplay.minBinBandwidth || 1.0;
+        // Same as Max — use the actual minimum binBandwidth seen from the server.
+        // Only use minBinBandwidth if it is genuinely less than initialBinBandwidth
+        // (i.e. we've actually observed a zoomed-in state). Otherwise send 1.0 and
+        // let the server clamp to its own minimum.
+        const minSeen = spectrumDisplay.minBinBandwidth;
+        const initial = spectrumDisplay.initialBinBandwidth;
+        const hasSeenZoom = minSeen && initial && minSeen < initial;
+        targetBinBandwidth = hasSeenZoom ? minSeen : 1.0;
     } else {
         const initial = spectrumDisplay.initialBinBandwidth || 29296.875;
         targetBinBandwidth = initial / Math.pow(2, position);

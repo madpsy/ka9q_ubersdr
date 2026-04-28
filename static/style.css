@@ -2001,6 +2001,13 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Make − and + slightly larger for touch targets on narrow screens */
+    #spectrum-zoom-btn-out,
+    #spectrum-zoom-btn-in {
+        padding: 6px 12px;
+        font-size: 1.275em;
+    }
+
     input[type="range"] {
         width: 100%;
     }

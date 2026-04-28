@@ -2004,8 +2004,13 @@ input[type="range"]::-moz-range-thumb {
     /* Make − and + slightly larger for touch targets on narrow screens */
     #spectrum-zoom-btn-out,
     #spectrum-zoom-btn-in {
-        padding: 6px 12px;
-        font-size: 1.275em;
+        padding: 6px 14px;
+        font-size: 1.4em;
+    }
+
+    /* Increase gap between − and + buttons on narrow screens */
+    #spectrum-zoom-slider-wrap {
+        gap: 10px;
     }
 
     /* Show vertical zoom slider on narrow screens */

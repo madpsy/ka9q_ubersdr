@@ -8563,9 +8563,13 @@ function spectrumZoomSliderDragEnd() {}
 function spectrumZoomSlider(position) {
     position = parseInt(position, 10);
 
-    // Get the slider's current max (dynamically updated by updateZoomSlider)
-    const slider = document.getElementById('spectrum-zoom-slider');
-    const sliderMax = slider ? parseInt(slider.max) : ZOOM_SLIDER_MAX;
+    // Get the slider's current max (dynamically updated by updateZoomSlider).
+    // Prefer the vertical slider (the one actually in the DOM); fall back to
+    // the legacy horizontal slider id, then the hardcoded constant.
+    const vSlider = document.getElementById('spectrum-vzoom-slider');
+    const hSlider = document.getElementById('spectrum-zoom-slider');
+    const sliderRef = vSlider || hSlider;
+    const sliderMax = sliderRef ? parseInt(sliderRef.max) : ZOOM_SLIDER_MAX;
 
     // Boundary positions (min=0, max=sliderMax) always execute — never throttled.
     // Intermediate positions are throttled to avoid flooding the server.

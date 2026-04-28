@@ -492,7 +492,7 @@ body {
 .media-session-indicator {
     position: absolute;
     top: 0;
-    right: 2px;
+    left: 12px;
     height: 100%;
     display: flex;
     align-items: center;
@@ -511,7 +511,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding-left: 12px;
+    padding-left: 22px;
     box-sizing: border-box;
     color: white;
     font-size: 9px;

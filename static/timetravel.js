@@ -1226,12 +1226,68 @@ function ttRedraw() {
   /* ── Frequency labels ───────────────────────────────────────────────── */
   /* Auto-pick a step size that gives ~5-8 labels across the visible span */
   ctx.save();
-  ctx.fillStyle = 'rgba(0,220,255,0.65)';
-  var freqFontSz = W <= 400 ? 8 : W <= 600 ? 9 : 11;
-  ctx.font = 'bold ' + freqFontSz + 'px monospace';
-  ctx.textAlign = 'center';
 
   var endHz = startHz + spanHz;
+  var freqFontSz = W <= 400 ? 8 : W <= 600 ? 9 : 11;
+  var freqStripTop = groundY;
+  var freqStripBot = groundY + freqLabelH;
+
+  /* ── Band shading in the frequency strip ─────────────────────────────── */
+  /* Draw coloured rectangles for each amateur band in the freq label row,
+     using the same front-edge X mapping as the 3D band curtains above. */
+  if (doBands && typeof BANDS !== 'undefined') {
+    var fsBandColors = [
+      'rgba(255,200,0,1)', 'rgba(0,200,255,1)', 'rgba(0,255,120,1)',
+      'rgba(255,80,200,1)', 'rgba(255,140,0,1)', 'rgba(100,180,255,1)',
+      'rgba(180,255,80,1)', 'rgba(255,80,80,1)'
+    ];
+    var fsFrontXL = vanishX - frontHalfW;
+    var fsFrontW  = frontHalfW * 2;
+    var fsBandFontSz = Math.max(7, freqFontSz - 1);
+    ctx.font = 'bold ' + fsBandFontSz + 'px monospace';
+    ctx.textBaseline = 'middle';
+    var fsMidY = (freqStripTop + freqStripBot) / 2;
+
+    for (var fbi = 0; fbi < BANDS.length; fbi++) {
+      var fbf0 = (BANDS[fbi][0] - startHz) / spanHz;
+      var fbf1 = (BANDS[fbi][1] - startHz) / spanHz;
+      if (fbf1 < 0 || fbf0 > 1) continue;
+      fbf0 = Math.max(0, fbf0); fbf1 = Math.min(1, fbf1);
+      var fbX0 = fsFrontXL + fbf0 * fsFrontW;
+      var fbX1 = fsFrontXL + fbf1 * fsFrontW;
+      var fbW  = fbX1 - fbX0;
+
+      /* Filled shaded rectangle */
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = fsBandColors[fbi % fsBandColors.length];
+      ctx.fillRect(fbX0, freqStripTop, fbW, freqLabelH);
+
+      /* Left/right edge lines */
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = fsBandColors[fbi % fsBandColors.length];
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(fbX0, freqStripTop); ctx.lineTo(fbX0, freqStripBot);
+      ctx.moveTo(fbX1, freqStripTop); ctx.lineTo(fbX1, freqStripBot);
+      ctx.stroke();
+
+      /* Band name label — only if the strip is wide enough */
+      if (fbW >= fsBandFontSz * 2.5) {
+        ctx.globalAlpha = 0.90;
+        ctx.fillStyle = fsBandColors[fbi % fsBandColors.length];
+        ctx.textAlign = 'center';
+        ctx.fillText(BANDS[fbi][2], fbX0 + fbW / 2, fsMidY);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ── Frequency tick labels ───────────────────────────────────────────── */
+  ctx.fillStyle = 'rgba(0,220,255,0.65)';
+  ctx.font = 'bold ' + freqFontSz + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+
   /* Choose a nice round step that gives ~20 tick marks across the span.
      The candidate list covers 1 kHz (very narrow) up to 10 MHz (full HF). */
   var rawStep = spanHz / 20;

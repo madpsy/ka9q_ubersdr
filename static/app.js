@@ -8617,23 +8617,24 @@ function spectrumZoomSlider(position, sliderEl) {
 
     // Deep zoom zone: targetBinBandwidth is below the server's safe minimum (50 Hz/bin).
     // In this zone the server controls zoom via bin_count reduction, not binBandwidth.
-    // Sending a direct binBandwidth has no effect — use zoomIn()/zoomOut() instead,
-    // exactly like scroll does, so the server steps bin_count one halving at a time.
+    // Sending a direct binBandwidth has no effect — delegate to zoomIn()/zoomOut()
+    // exactly as scroll does (one call per notch, server steps bin_count correctly).
     const minSafeBinBW = 50.0;
     if (targetBinBandwidth < minSafeBinBW) {
-        // Determine direction by comparing to current zoom step
-        const currentBwSteps = (spectrumDisplay.binBandwidth < initial)
+        // Compute current step to determine direction
+        const curBwSteps = (spectrumDisplay.binBandwidth && spectrumDisplay.binBandwidth < initial)
             ? Math.round(Math.log2(initial / spectrumDisplay.binBandwidth)) : 0;
-        const currentBinCountSteps = (spectrumDisplay._maxSeenBinCount && spectrumDisplay.binCount < spectrumDisplay._maxSeenBinCount)
-            ? Math.round(Math.log2(spectrumDisplay._maxSeenBinCount / spectrumDisplay.binCount)) : 0;
-        const currentStep = currentBwSteps + currentBinCountSteps;
+        const maxSeen = spectrumDisplay._maxSeenBinCount || spectrumDisplay.binCount;
+        const curBinCountSteps = (spectrumDisplay.binCount < maxSeen)
+            ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
+        const currentStep = curBwSteps + curBinCountSteps;
 
+        console.log(`[vzoom] deep zone: position=${position}, currentStep=${currentStep}, binBW=${spectrumDisplay.binBandwidth}, binCount=${spectrumDisplay.binCount}, initialBW=${spectrumDisplay.initialBinBandwidth}`);
         if (position > currentStep) {
             spectrumDisplay.zoomIn();
-        } else if (position < currentStep) {
+        } else {
             spectrumDisplay.zoomOut();
         }
-        // If position === currentStep, already at target — no-op
         updateURL();
         return;
     }

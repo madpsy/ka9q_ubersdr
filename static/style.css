@@ -2038,7 +2038,7 @@ input[type="range"]::-moz-range-thumb {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    padding: 2px 0 6px;
+    padding: 10px 0 6px;
     background: var(--page-bg);
 }
 

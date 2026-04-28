@@ -1895,6 +1895,14 @@ input[type="range"]::-moz-range-thumb {
     }
 
     /* On mobile, hide most of audio-controls but keep NR/NB buttons visible */
+    /* Reset the negative margins that are designed for the full desktop layout */
+    .audio-controls {
+        margin-top: 0;
+        margin-bottom: 0;
+        transform: none;
+        justify-content: flex-start;
+        padding: 5px 10px;
+    }
     .audio-controls > .control-group:not(#audio-buttons-group) {
         display: none !important;
     }

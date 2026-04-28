@@ -987,7 +987,7 @@ document.addEventListener('DOMContentLoaded', () => {
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, bypassPassword || undefined);
 
         const startAudio = async () => {
-            console.log('[startAudio] VERSION 2026-04-28-v4 - Fix audio doubling');
+            console.log('[startAudio] VERSION 2026-04-28-v5 - MediaSession indicator');
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 

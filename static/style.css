@@ -2852,12 +2852,22 @@ input[type="range"]::-moz-range-thumb {
     /* Tick marks via a repeating gradient – 15 positions (0-14) */
     background: repeating-linear-gradient(
         to right,
-        var(--accent) 0px,
-        var(--accent) 2px,
+        #fff 0px,
+        #fff 2px,
         transparent 2px,
         transparent calc((100% - 2px) / 14)
     );
-    accent-color: var(--accent);
+    accent-color: #fff;
+}
+
+#spectrum-zoom-slider::-webkit-slider-thumb {
+    background: #fff;
+    border-color: #fff;
+}
+
+#spectrum-zoom-slider::-moz-range-thumb {
+    background: #fff;
+    border-color: #fff;
 }
 
 

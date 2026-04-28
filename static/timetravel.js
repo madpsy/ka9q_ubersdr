@@ -899,13 +899,18 @@ function ttRedraw() {
       ctx.lineTo(gxBack, backY2);
       ctx.stroke();
     }
+    /* Horizontal grid lines — one per hStep depth slots, scrolling with frac
+       so they stay locked to the terrain and never pop in/out. */
     var hStep = Math.max(1, Math.round(depthRows / 8));
-    for (var hi = 0; hi <= depthRows; hi += hStep) {
+    for (var hi = 0; hi < depthRows; hi += hStep) {
       var hd = (hi + frac) / depthRows;
       var hy = groundY - (groundY - vanishY) * hd;
       var hwFrac = 1 - hd * (1 - TT_MIN_WFRAC);
       var hxL = vanishX - frontHalfW * hwFrac;
       var hxR = vanishX + frontHalfW * hwFrac;
+      /* Fade lines as they approach the vanishing point */
+      var hAlpha = Math.min(0.18, hwFrac * 0.22);
+      ctx.strokeStyle = 'rgba(255,255,255,' + hAlpha.toFixed(3) + ')';
       ctx.beginPath();
       ctx.moveTo(hxL, hy); ctx.lineTo(hxR, hy);
       ctx.stroke();

@@ -1889,6 +1889,11 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Ensure bandwidth sliders have a usable width on mobile */
+    .bandwidth-controls {
+        min-width: 260px;
+    }
+
     /* On mobile, hide most of audio-controls but keep NR/NB buttons visible */
     .audio-controls > .control-group:not(#audio-buttons-group) {
         display: none !important;

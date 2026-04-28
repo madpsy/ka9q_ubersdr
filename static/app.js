@@ -8684,31 +8684,49 @@ function updateZoomSlider() {
 
     const initial = spectrumDisplay.initialBinBandwidth;
     const current = spectrumDisplay.binBandwidth;
-    const minSeen = spectrumDisplay.minBinBandwidth;
+    const currentBinCount = spectrumDisplay.binCount;
+    const defaultBinCount = spectrumDisplay.config && spectrumDisplay.config.defaultBinCount
+        ? spectrumDisplay.config.defaultBinCount
+        : currentBinCount; // fallback: track max seen bin count
 
     if (!initial || !current) return;
 
-    // Dynamically update slider.max based on the actual zoom range the server supports.
-    // minSeen is the smallest binBandwidth we've ever received from the server.
-    // sliderMax = floor(log2(initial / minSeen)) = number of halvings to reach max zoom.
-    if (minSeen && minSeen < initial) {
-        const dynamicMax = Math.round(Math.log2(initial / minSeen));
-        if (dynamicMax > 0 && parseInt(slider.max) !== dynamicMax) {
-            slider.max = dynamicMax;
-        }
+    // Track the maximum bin count seen (= default bin count before any deep zoom)
+    if (!spectrumDisplay._maxSeenBinCount || currentBinCount > spectrumDisplay._maxSeenBinCount) {
+        spectrumDisplay._maxSeenBinCount = currentBinCount;
+    }
+    const maxBinCount = spectrumDisplay._maxSeenBinCount || currentBinCount;
+
+    // Total zoom = binBandwidth halvings + bin_count halvings.
+    // binBandwidth halvings: log2(initial / current)  [stops at minSafeBinBW = 50 Hz/bin]
+    // bin_count halvings:    log2(maxBinCount / currentBinCount)  [each halving = 1 more step]
+    const bwSteps = (current < initial) ? Math.round(Math.log2(initial / current)) : 0;
+    const binCountSteps = (currentBinCount < maxBinCount)
+        ? Math.round(Math.log2(maxBinCount / currentBinCount))
+        : 0;
+    const totalStep = bwSteps + binCountSteps;
+
+    // Dynamically update slider.max to include both bw halvings and bin_count halvings.
+    // Max bw steps = log2(initial / 50) since server clamps binBW to 50 Hz/bin minimum.
+    // Max bin_count steps = log2(maxBinCount / 256) since server minimum bin_count = 256.
+    const minSafeBinBW = 50.0;
+    const minBinCount = 256;
+    const maxBwSteps = (initial > minSafeBinBW) ? Math.round(Math.log2(initial / minSafeBinBW)) : 0;
+    const maxBinCountSteps = (maxBinCount > minBinCount) ? Math.round(Math.log2(maxBinCount / minBinCount)) : 0;
+    const dynamicMax = maxBwSteps + maxBinCountSteps;
+    if (dynamicMax > 0 && parseInt(slider.max) !== dynamicMax) {
+        slider.max = dynamicMax;
     }
 
     const sliderMax = parseInt(slider.max) || ZOOM_SLIDER_MAX;
 
-    if (current >= initial) {
-        // Fully zoomed out (at or beyond initial) → position 0
+    if (current >= initial && binCountSteps === 0) {
+        // Fully zoomed out → position 0
         slider.value = 0;
         return;
     }
 
-    // Calculate step: how many halvings from initial to current
-    const step = Math.round(Math.log2(initial / current));
-    slider.value = Math.max(0, Math.min(sliderMax, step));
+    slider.value = Math.max(0, Math.min(sliderMax, totalStep));
 }
 
 // Expose for use by spectrum-display.js onConfig callback

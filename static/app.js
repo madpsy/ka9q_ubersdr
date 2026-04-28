@@ -3406,6 +3406,11 @@ function playAudioBuffer(buffer) {
         navigator.mediaSession.playbackState = 'playing';
         // Ensure the media element is playing (may have been paused by the OS)
         mediaElement.play().catch(() => {});
+        console.log('[MediaSession] Activated with real audio flowing');
+        // Show toast on mobile devices to confirm MediaSession is active
+        if (_isMobile && typeof showNotification === 'function') {
+            showNotification('📱 Media Session Active - Lock screen controls enabled', 'success', 4000);
+        }
     }
 
     // Safety check: ensure analysers belong to current context

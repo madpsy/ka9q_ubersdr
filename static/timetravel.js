@@ -1264,11 +1264,6 @@ function ttRedraw() {
     ];
     var fsFrontXL = vanishX - frontHalfW;
     var fsFrontW  = frontHalfW * 2;
-    var fsBandFontSz = Math.max(7, freqFontSz - 1);
-    ctx.font = 'bold ' + fsBandFontSz + 'px monospace';
-    ctx.textBaseline = 'middle';
-    var fsMidY = (freqStripTop + freqStripBot) / 2;
-
     for (var fbi = 0; fbi < BANDS.length; fbi++) {
       var fbf0 = (BANDS[fbi][0] - startHz) / spanHz;
       var fbf1 = (BANDS[fbi][1] - startHz) / spanHz;
@@ -1292,13 +1287,6 @@ function ttRedraw() {
       ctx.moveTo(fbX1, freqStripTop); ctx.lineTo(fbX1, freqStripBot);
       ctx.stroke();
 
-      /* Band name label — only if the strip is wide enough */
-      if (fbW >= fsBandFontSz * 2.5) {
-        ctx.globalAlpha = 0.90;
-        ctx.fillStyle = fsBandColors[fbi % fsBandColors.length];
-        ctx.textAlign = 'center';
-        ctx.fillText(BANDS[fbi][2], fbX0 + fbW / 2, fsMidY);
-      }
     }
     ctx.globalAlpha = 1;
   }
@@ -1347,7 +1335,7 @@ function ttRedraw() {
     if (lfrac < 0 || lfrac > 1) continue;
     var lx = vanishX - frontHalfW + lfrac * frontHalfW * 2;
     var labelStr = useKHz
-      ? (Math.round(lf / 1e3)) + ' kHz'
+      ? String(Math.round(lf / 1e3))
       : (Math.round(lf / 1e6 * 10) / 10) + ' MHz';
     ctx.fillText(labelStr, lx, groundY + Math.round(freqLabelH * 0.7));
   }

@@ -872,6 +872,13 @@ function ttRedraw() {
   /* Ensure palette canvas is built */
   if (!ttPaletteCanvas) ttPaletteCanvas = ttBuildPaletteCanvas();
 
+  /* ── Draw mountain rows back-to-front ───────────────────────────────── */
+  /* Use floor + fractional offset for smooth sub-row scrolling.
+     frac shifts all depth slots continuously so the terrain glides rather
+     than stepping one whole row at a time. */
+  var frontRow = Math.floor(ttCurrentRow);
+  var frac = ttCurrentRow - frontRow; /* 0.0–1.0 sub-row offset */
+
   /* ── Perspective grid (behind mountains) ────────────────────────────── */
   if (doGrid) {
     ctx.save();
@@ -906,12 +913,6 @@ function ttRedraw() {
     ctx.restore();
   }
 
-  /* ── Draw mountain rows back-to-front ───────────────────────────────── */
-  /* Use floor + fractional offset for smooth sub-row scrolling.
-     frac shifts all depth slots continuously so the terrain glides rather
-     than stepping one whole row at a time. */
-  var frontRow = Math.floor(ttCurrentRow);
-  var frac = ttCurrentRow - frontRow; /* 0.0–1.0 sub-row offset */
   var lut = (typeof V !== 'undefined') ? V : null;
 
   /* Use cached LUT colour strings — only rebuild if LUT changed */

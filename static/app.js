@@ -2125,11 +2125,13 @@ async function fetchSiteDescription() {
                     fetch(`https://instances.ubersdr.org/api/callsign/${encodeURIComponent(callsign)}`)
                         .then(response => {
                             if (response.ok) {
-                                // Instance is registered, show the download button
+                                // Instance is registered, show the download button (desktop only)
                                 const downloadClientBtn = document.getElementById('download-client-button');
-                                if (downloadClientBtn) {
+                                if (downloadClientBtn && !_isMobile) {
                                     downloadClientBtn.style.display = 'block';
                                     console.log('[Download Client] Button shown for registered instance:', callsign);
+                                } else if (downloadClientBtn && _isMobile) {
+                                    console.log('[Download Client] Mobile device detected - button hidden');
                                 }
                             } else {
                                 console.log('[Download Client] Instance not registered, button hidden');

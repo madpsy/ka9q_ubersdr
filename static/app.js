@@ -4883,6 +4883,11 @@ function toggleMute() {
     // Keep Media Session playback state in sync with mute
     if ('mediaSession' in navigator && _mediaSessionActivated) {
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        if (isMuted) {
+            mediaElement?.pause();
+        } else {
+            mediaElement?.play().catch(() => {});
+        }
     }
 }
 

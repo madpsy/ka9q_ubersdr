@@ -8543,16 +8543,22 @@ function spectrumMaxZoom() {
     log('Zooming to maximum (single request — server resolves bin_count in one pass)');
 }
 
-// ── Zoom buttons ──────────────────────────────────────────────────────────────
-// Zoom is controlled by Min / − / + / Max buttons (see index.html).
-// The slider element no longer exists; these stubs are kept for any external
-// callers that may reference them.
+// ── Zoom buttons + vertical slider ───────────────────────────────────────────
+// Zoom is controlled by Min / − / + / Max buttons on desktop and the vertical
+// #spectrum-vzoom-slider on narrow screens.
 const ZOOM_SLIDER_MAX = 14; // retained for updateZoomSlider() math
 
-let _zoomSliderDragging = false; // no-op; kept for safety
+// Drag guard: prevents updateZoomSlider() from snapping the slider back to the
+// server-reported position while the user is actively dragging.
+let _zoomSliderDragging = false;
 
-function spectrumZoomSliderDragStart() {}
-function spectrumZoomSliderDragEnd() {}
+function spectrumZoomSliderDragStart() {
+    _zoomSliderDragging = true;
+}
+
+function spectrumZoomSliderDragEnd() {
+    _zoomSliderDragging = false;
+}
 
 /**
  * Called by the slider's oninput event.

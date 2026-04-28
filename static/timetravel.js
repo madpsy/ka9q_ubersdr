@@ -899,11 +899,17 @@ function ttRedraw() {
       ctx.lineTo(gxBack, backY2);
       ctx.stroke();
     }
-    /* Horizontal grid lines — one per hStep depth slots, scrolling with frac
-       so they stay locked to the terrain and never pop in/out. */
+    /* Horizontal grid lines — anchored to absolute row multiples of hStep.
+       Use ttCurrentRow (continuous float) so lines scroll at exactly the same
+       rate as the terrain with no per-frame jumps. */
     var hStep = Math.max(1, Math.round(depthRows / 8));
-    for (var hi = 0; hi < depthRows; hi += hStep) {
-      var hd = (hi + frac) / depthRows;
+    /* Continuous offset: how far past the last hStep boundary we are */
+    var gridOffset = ttCurrentRow % hStep; /* 0.0 – hStep, advances smoothly */
+    /* First grid line is gridOffset rows behind the front */
+    for (var gn = 0; gn * hStep - gridOffset < depthRows; gn++) {
+      var hd = (gn * hStep - gridOffset) / depthRows;
+      if (hd < 0) continue;
+      if (hd > 1.0) break;
       var hy = groundY - (groundY - vanishY) * hd;
       var hwFrac = 1 - hd * (1 - TT_MIN_WFRAC);
       var hxL = vanishX - frontHalfW * hwFrac;

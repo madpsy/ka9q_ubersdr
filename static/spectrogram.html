@@ -65,6 +65,9 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 .sg-spd-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:5px;padding:3px 9px;font-size:.8em;cursor:pointer;transition:background .12s;white-space:nowrap}
 .sg-spd-btn.active{background:rgba(0,220,255,.3);border-color:rgba(0,220,255,.6);color:#0ff;font-weight:700}
 .sg-spd-btn:hover:not(.active){background:rgba(255,255,255,.22)}
+.sg-lock-btn{background:rgba(255,200,60,.15);border:1px solid rgba(255,200,60,.35);color:rgba(255,200,60,.85);border-radius:5px;padding:3px 9px;font-size:.85em;cursor:pointer;transition:background .12s,border-color .12s;white-space:nowrap}
+.sg-lock-btn.active{background:rgba(255,200,60,.3);border-color:rgba(255,200,60,.7);color:#fc3;font-weight:700}
+.sg-lock-btn:hover{background:rgba(255,200,60,.25)}
 /* Tooltip */
 #tt{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:8px 12px;font-size:.8em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.85;box-shadow:0 4px 18px rgba(0,0,0,.45);min-width:175px}
 .tt-freq{font-size:1.05em;font-weight:600;color:#7df}
@@ -308,6 +311,8 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <!-- Spectrogram playback controls -->
     <div class="sg-play-controls">
       <button class="sg-play-btn" id="sg-play-btn" onclick="sgPlayToggle()">&#x25B6; Play</button>
+      <button class="sg-lock-btn active" id="sg-lock-btn" onclick="sgToggleLock()"
+              title="Lock dB scale during playback: uses a fixed Y-axis range computed from all rows so noise floor and signals stay comparable across time">&#x1F512; Scale lock</button>
       <span style="font-size:.75em;opacity:.55;margin-right:2px">Speed:</span>
       <button class="sg-spd-btn active" id="sg-spd-1"  onclick="sgSetSpeed(1)">1&times;</button>
       <button class="sg-spd-btn"        id="sg-spd-2"  onclick="sgSetSpeed(2)">2&times;</button>
@@ -2450,8 +2455,10 @@ function sgRedrawRowSpectrum(){
   if(sgRowData)sgDrawRowSpectrumCanvas(sgRowData);
 }
 
-/* Core canvas drawing routine. */
-function sgDrawRowSpectrumCanvas(data){
+/* Core canvas drawing routine.
+   overrideRange (optional): {dbMin, dbMax} — when supplied, skips auto-range
+   and uses these fixed values instead (used during locked playback). */
+function sgDrawRowSpectrumCanvas(data, overrideRange){
   var canvas=document.getElementById('sg-rowspec-canvas');
   if(!canvas)return;
 
@@ -2505,23 +2512,30 @@ function sgDrawRowSpectrumCanvas(data){
   }
 
   /* ── dB range for y-axis ──────────────────────────────────────────────── */
-  /* Find the peak bin value */
-  var _peakDb=-Infinity;
-  for(var i=0;i<bins.length;i++){
-    if(bins[i]!==null&&bins[i]!==undefined&&bins[i]>_peakDb)_peakDb=bins[i];
+  var dbMin, dbMax;
+  if(overrideRange&&overrideRange.dbMin!==undefined&&overrideRange.dbMax!==undefined){
+    /* Locked playback: use the pre-computed global range */
+    dbMin=overrideRange.dbMin;
+    dbMax=overrideRange.dbMax;
+  } else {
+    /* Auto-range: compute from this row's data */
+    var _peakDb=-Infinity;
+    for(var i=0;i<bins.length;i++){
+      if(bins[i]!==null&&bins[i]!==undefined&&bins[i]>_peakDb)_peakDb=bins[i];
+    }
+    if(!isFinite(_peakDb))_peakDb=-60;
+
+    /* dbMax: 5 dB above the actual peak, snapped to 5 dB grid — never clips signals */
+    dbMax=Math.ceil((_peakDb+5)/5)*5;
+
+    /* dbMin: anchored to the noise floor (minus a small margin) so the NF line
+       sits near the bottom of the chart.  Falls back to peak-40 if no NF. */
+    var nfRef=data.noise_floor||null;
+    dbMin=nfRef!==null
+      ? Math.floor((nfRef-5)/5)*5    /* 5 dB below NF, snapped to 5 dB grid */
+      : Math.floor((dbMax-40)/5)*5;  /* fallback: 40 dB range */
+    if(dbMax-dbMin<10){dbMin=dbMax-10;}
   }
-  if(!isFinite(_peakDb))_peakDb=-60;
-
-  /* dbMax: 5 dB above the actual peak, snapped to 5 dB grid — never clips signals */
-  var dbMax=Math.ceil((_peakDb+5)/5)*5;
-
-  /* dbMin: anchored to the noise floor (minus a small margin) so the NF line
-     sits near the bottom of the chart.  Falls back to peak-40 if no NF. */
-  var nfRef=data.noise_floor||null;
-  var dbMin=nfRef!==null
-    ? Math.floor((nfRef-5)/5)*5    /* 5 dB below NF, snapped to 5 dB grid */
-    : Math.floor((dbMax-40)/5)*5;  /* fallback: 40 dB range */
-  if(dbMax-dbMin<10){dbMin=dbMax-10;}
 
   function dbToY(db){
     return PAD_TOP+plotH-(db-dbMin)/(dbMax-dbMin)*plotH;
@@ -2940,8 +2954,61 @@ var sgPlay={
   rafId:       null,
   cache:       null,     /* AllRowsResponse object once loaded */
   loading:     false,
-  rowAccum:    0         /* fractional row accumulator for sub-integer speeds */
+  rowAccum:    0,        /* fractional row accumulator for sub-integer speeds */
+  scaleLocked: true,     /* default: lock dB scale during playback */
+  lockedDbMin: null,     /* pre-computed global dbMin across all rows */
+  lockedDbMax: null      /* pre-computed global dbMax across all rows */
 };
+
+/* Pre-compute a fixed dB range across all rows in the cache.
+   Uses the same logic as sgDrawRowSpectrumCanvas auto-range but applied
+   globally: dbMin = lowest (noise_floor - 5) snapped to 5 dB grid,
+             dbMax = highest peak + 5 snapped to 5 dB grid. */
+function sgPlayComputeLockedRange(){
+  var cache=sgPlay.cache;
+  if(!cache||!cache.rows||cache.rows.length===0)return;
+
+  var globalPeak=-Infinity;
+  var globalNfMin=Infinity;
+
+  for(var ri=0;ri<cache.rows.length;ri++){
+    var r=cache.rows[ri];
+    /* Peak across all bins in this row */
+    var bins=r.bins||[];
+    for(var bi=0;bi<bins.length;bi++){
+      var v=bins[bi];
+      if(v!==null&&v!==undefined&&v>globalPeak)globalPeak=v;
+    }
+    /* Lowest noise floor across all rows */
+    if(r.noise_floor&&r.noise_floor<globalNfMin)globalNfMin=r.noise_floor;
+  }
+
+  if(!isFinite(globalPeak))globalPeak=-60;
+  var dbMax=Math.ceil((globalPeak+5)/5)*5;
+
+  var dbMin;
+  if(isFinite(globalNfMin)){
+    dbMin=Math.floor((globalNfMin-5)/5)*5;
+  } else {
+    dbMin=Math.floor((dbMax-40)/5)*5;
+  }
+  if(dbMax-dbMin<10){dbMin=dbMax-10;}
+
+  sgPlay.lockedDbMin=dbMin;
+  sgPlay.lockedDbMax=dbMax;
+}
+
+/* Toggle the scale lock button.
+   If the cache is already loaded and we're turning the lock ON,
+   re-compute the range immediately so it's ready for the next playback. */
+function sgToggleLock(){
+  sgPlay.scaleLocked=!sgPlay.scaleLocked;
+  var btn=document.getElementById('sg-lock-btn');
+  if(btn)btn.classList.toggle('active',sgPlay.scaleLocked);
+  if(sgPlay.scaleLocked&&sgPlay.cache){
+    sgPlayComputeLockedRange();
+  }
+}
 
 /* Build the allrows URL using the same params as sgFetchRowSpectrum */
 function sgAllRowsUrl(){
@@ -2959,7 +3026,9 @@ function sgAllRowsUrl(){
   return '/api/spectrogram/allrows'+params;
 }
 
-/* Render the spectrum chart from the in-memory cache row (no API call) */
+/* Render the spectrum chart from the in-memory cache row (no API call).
+   During playback with scale lock enabled, passes the pre-computed global
+   dB range so the Y-axis stays fixed across all rows. */
 function sgPlayRenderFromCache(rowIdx){
   if(!sgPlay.cache||rowIdx>=sgPlay.cache.rows.length)return;
   var r=sgPlay.cache.rows[rowIdx];
@@ -2978,7 +3047,29 @@ function sgPlayRenderFromCache(rowIdx){
   };
   /* Store as the current row data so hover tooltip works */
   sgRowData=data;
-  sgRenderRowSpectrum(data);
+
+  /* During playback with scale lock: pass the pre-computed global range.
+     When not playing (user clicked a row manually), always auto-range. */
+  var overrideRange=null;
+  if(sgPlay.isPlaying && sgPlay.scaleLocked &&
+     sgPlay.lockedDbMin!==null && sgPlay.lockedDbMax!==null){
+    overrideRange={dbMin:sgPlay.lockedDbMin, dbMax:sgPlay.lockedDbMax};
+  }
+
+  /* Update header (time label etc.) then draw canvas with optional override */
+  var wrap=document.getElementById('sg-rowspec-wrap');
+  var timeEl=document.getElementById('sg-rowspec-time');
+  var metaEl=document.getElementById('sg-rowspec-meta');
+  if(wrap){
+    if(timeEl)timeEl.textContent=(data.utc_time||'--:--')+' UTC';
+    if(metaEl){
+      var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
+      var nfStr=data.noise_floor?(' \u00b7 NF: '+data.noise_floor.toFixed(1)+' dBFS'):'';
+      metaEl.textContent=data.bin_count+' bins \u00b7 '+bwStr+nfStr;
+    }
+    wrap.style.display='block';
+    sgDrawRowSpectrumCanvas(data, overrideRange);
+  }
 }
 
 /* Auto-scroll the zoom viewport to keep the selected row centred vertically */
@@ -3084,6 +3175,8 @@ function sgPlayToggle(){
     })
     .then(function(data){
       sgPlay.cache=data;
+      /* Pre-compute the global dB range for scale-locked playback */
+      sgPlayComputeLockedRange();
       sgPlay.loading=false;
       if(btn){btn.disabled=false;}
       /* If we're at the last row, restart from the beginning */
@@ -3114,6 +3207,8 @@ function sgSetSpeed(mult){
 function sgPlayInvalidateCache(){
   sgPlayStop();
   sgPlay.cache=null;
+  sgPlay.lockedDbMin=null;
+  sgPlay.lockedDbMax=null;
   var btn=document.getElementById('sg-play-btn');
   if(btn){btn.textContent='\u25B6 Play';btn.disabled=false;}
 }

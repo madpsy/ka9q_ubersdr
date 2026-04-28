@@ -2792,15 +2792,23 @@ input[type="range"]::-moz-range-thumb {
     opacity: 1;
 }
 
-/* Track — thin white line with tick marks */
+/* Track — thin white line with tick marks, vertically centred in the 44px hit area */
 #spectrum-vzoom-slider::-webkit-slider-runnable-track {
-    height: 3px;
+    height: 44px;
     background: repeating-linear-gradient(
         to right,
         #fff 0px, #fff 2px,
         rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
     );
-    border-radius: 2px;
+    /* Mask to show only a 3px line in the vertical centre */
+    -webkit-mask: linear-gradient(to bottom,
+        transparent 0%, transparent calc(50% - 1.5px),
+        #fff calc(50% - 1.5px), #fff calc(50% + 1.5px),
+        transparent calc(50% + 1.5px), transparent 100%);
+    mask: linear-gradient(to bottom,
+        transparent 0%, transparent calc(50% - 1.5px),
+        #fff calc(50% - 1.5px), #fff calc(50% + 1.5px),
+        transparent calc(50% + 1.5px), transparent 100%);
 }
 
 #spectrum-vzoom-slider::-moz-range-track {
@@ -2810,10 +2818,9 @@ input[type="range"]::-moz-range-thumb {
         #fff 0px, #fff 2px,
         rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
     );
-    border-radius: 2px;
 }
 
-/* Thumb — small white circle */
+/* Thumb — small white circle, centred on the track */
 #spectrum-vzoom-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
@@ -2822,7 +2829,7 @@ input[type="range"]::-moz-range-thumb {
     border-radius: 50%;
     background: #fff;
     border: none;
-    margin-top: -20px;
+    margin-top: -15px;  /* centre 14px thumb in 44px track: -(44/2 - 14/2) = -15px */
     box-shadow: 0 0 5px rgba(0,0,0,0.7);
     cursor: pointer;
 }

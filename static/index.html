@@ -553,12 +553,6 @@
                 <button id="eq-quick-toggle" onclick="toggleEQQuick()" style="background-color: #6c757d; margin-left: 3px; padding: 8px 12px;" title="Toggle EQ Presets (V key)">EQ</button>
                 <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 5px; padding: 8px 12px;" title="Open Recorder (R key)">⏺ Rec</button>
             </div>
-            <!-- Browser zoom buttons — hidden on wide screens, shown on narrow via CSS -->
-            <div id="browser-zoom-group">
-                <button id="browser-zoom-out" onclick="browserZoomOut()" title="Zoom out 5%">🔍−</button>
-                <span id="browser-zoom-level">100%</span>
-                <button id="browser-zoom-in" onclick="browserZoomIn()" title="Zoom in 5%">🔍+</button>
-            </div>
             <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
                 <div class="vu-meter" id="vu-meter-bar-wrapper">
                     <div id="vu-meter-bar-compact" class="vu-meter-bar"></div>
@@ -574,6 +568,13 @@
                 </div>
                 <canvas id="vu-meter-leds-compact" class="vu-meter-leds-compact" style="display:none;"></canvas>
             </div>
+        </div>
+
+        <!-- Browser zoom buttons — hidden on wide screens, shown below audio-controls on narrow via CSS -->
+        <div id="browser-zoom-group">
+            <button id="browser-zoom-out" onclick="browserZoomOut()" title="Zoom out 5%">🔍−</button>
+            <span id="browser-zoom-level">100%</span>
+            <button id="browser-zoom-in" onclick="browserZoomIn()" title="Zoom in 5%">🔍+</button>
         </div>
 
         <!-- Generic Extension Panel (shared by all extensions) -->

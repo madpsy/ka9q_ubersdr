@@ -8468,11 +8468,13 @@ function spectrumZoomIn() {
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
 
-    // Notify radioAPI immediately (don't wait for config update)
-    if (window.radioAPI && spectrumDisplay.binBandwidth) {
-        // Estimate new binBandwidth (will be corrected when config arrives)
+    // Optimistically advance slider one step in (will be corrected when config arrives)
+    if (spectrumDisplay.binBandwidth && spectrumDisplay.initialBinBandwidth) {
         const estimatedBinBandwidth = spectrumDisplay.binBandwidth / 2;
-        window.radioAPI.notifyZoomChange(estimatedBinBandwidth);
+        const step = Math.round(Math.log2(spectrumDisplay.initialBinBandwidth / estimatedBinBandwidth));
+        const slider = document.getElementById('spectrum-zoom-slider');
+        if (slider) slider.value = Math.max(0, Math.min(parseInt(slider.max), step));
+        if (window.radioAPI) window.radioAPI.notifyZoomChange(estimatedBinBandwidth);
     }
 }
 
@@ -8487,11 +8489,13 @@ function spectrumZoomOut() {
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
 
-    // Notify radioAPI immediately (don't wait for config update)
-    if (window.radioAPI && spectrumDisplay.binBandwidth) {
-        // Estimate new binBandwidth (will be corrected when config arrives)
+    // Optimistically retreat slider one step out (will be corrected when config arrives)
+    if (spectrumDisplay.binBandwidth && spectrumDisplay.initialBinBandwidth) {
         const estimatedBinBandwidth = spectrumDisplay.binBandwidth * 2;
-        window.radioAPI.notifyZoomChange(estimatedBinBandwidth);
+        const step = Math.round(Math.log2(spectrumDisplay.initialBinBandwidth / estimatedBinBandwidth));
+        const slider = document.getElementById('spectrum-zoom-slider');
+        if (slider) slider.value = Math.max(0, Math.min(parseInt(slider.max), step));
+        if (window.radioAPI) window.radioAPI.notifyZoomChange(estimatedBinBandwidth);
     }
 }
 
@@ -8587,8 +8591,13 @@ function spectrumZoomSlider(position) {
     lastZoomTime = now;
 
     if (position === 0) {
-        // Same as Reset
-        spectrumResetZoom();
+        // Same as Reset — call resetZoom() directly to avoid double-throttle
+        if (!spectrumDisplay) return;
+        spectrumDisplay.resetZoom();
+        updateURL();
+        const _s0 = document.getElementById('spectrum-zoom-slider');
+        if (_s0) _s0.value = 0;
+        if (window.radioAPI) window.radioAPI.notifyZoomChange(14648.4375);
         return;
     }
 

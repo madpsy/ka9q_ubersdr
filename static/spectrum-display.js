@@ -4758,6 +4758,14 @@ class SpectrumDisplay {
             binBandwidth: newBinBandwidth
         }));
 
+        // Optimistically update zoom slider immediately (corrected when config arrives)
+        if (typeof window.updateZoomSlider === 'function') {
+            const _prev = this.binBandwidth;
+            this.binBandwidth = newBinBandwidth;
+            window.updateZoomSlider();
+            this.binBandwidth = _prev;
+        }
+
         // Notify radioAPI immediately
         if (window.radioAPI) {
             window.radioAPI.notifyZoomChange(newBinBandwidth);
@@ -4809,6 +4817,14 @@ class SpectrumDisplay {
             frequency: Math.round(newCenterFreq),
             binBandwidth: newBinBandwidth
         }));
+
+        // Optimistically update zoom slider immediately (corrected when config arrives)
+        if (typeof window.updateZoomSlider === 'function') {
+            const _prev = this.binBandwidth;
+            this.binBandwidth = newBinBandwidth;
+            window.updateZoomSlider();
+            this.binBandwidth = _prev;
+        }
 
         // Notify radioAPI immediately
         if (window.radioAPI) {

@@ -59,6 +59,7 @@ class WhisperExtension extends DecoderExtension {
     onInitialize() {
         console.log('Whisper: onInitialize called');
         this.waitForDOMAndSetupHandlers();
+        this.lockPanelHeight();
     }
 
     waitForDOMAndSetupHandlers() {
@@ -1045,14 +1046,14 @@ class WhisperExtension extends DecoderExtension {
     }
 
     scrollToBottom() {
-        // The scrollbar belongs to the generic extension panel content, not the whisper-transcription div
-        const extensionContent = document.getElementById('extension-panel-content');
-        if (!extensionContent) {
+        // Scroll the transcription div itself (not the outer panel content)
+        const transcriptionElement = document.getElementById('whisper-transcription');
+        if (!transcriptionElement) {
             return;
         }
 
         // Set scroll position to maximum
-        extensionContent.scrollTop = extensionContent.scrollHeight;
+        transcriptionElement.scrollTop = transcriptionElement.scrollHeight;
     }
 
     setupBinaryMessageHandler() {
@@ -1957,6 +1958,48 @@ class WhisperExtension extends DecoderExtension {
         }
     }
 
+    lockPanelHeight() {
+        // Override the outer panel's scroll so only #whisper-transcription scrolls.
+        // The resize handler sets max-height as an inline style; we mirror that as
+        // an explicit height so that height:100% on .whisper-container resolves correctly.
+        const panelContent = document.getElementById('extension-panel-content');
+        if (!panelContent) return;
+
+        let _applying = false;
+        const applyLock = () => {
+            if (_applying) return;
+            _applying = true;
+            // Prefer the inline max-height set by the resize handler; fall back to computed.
+            const inlineMaxHeight = panelContent.style.maxHeight;
+            if (inlineMaxHeight && inlineMaxHeight !== '') {
+                panelContent.style.height = inlineMaxHeight;
+            } else {
+                panelContent.style.height = getComputedStyle(panelContent).height;
+            }
+            panelContent.style.overflow = 'hidden';
+            _applying = false;
+        };
+
+        // Apply immediately (works if panel is already visible)
+        applyLock();
+
+        // Also re-apply after a short delay in case the panel wasn't laid out yet
+        setTimeout(applyLock, 50);
+        setTimeout(applyLock, 200);
+
+        // Keep height in sync when the user drags the resize handle.
+        // We observe inline style changes via MutationObserver.
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+        }
+        this._resizeObserver = new MutationObserver(() => {
+            if (panelContent.style.overflow === 'hidden') {
+                applyLock();
+            }
+        });
+        this._resizeObserver.observe(panelContent, { attributes: true, attributeFilter: ['style'] });
+    }
+
     onActivate() {
         console.log('Whisper: Extension activated');
         // Reset the flag so handlers can be re-attached to the new DOM
@@ -1965,12 +2008,24 @@ class WhisperExtension extends DecoderExtension {
         this.waitForDOMAndSetupHandlers();
         // Apply the current font size
         setTimeout(() => this.updateTranscriptionFontSize(), 100);
+        this.lockPanelHeight();
     }
 
     onDeactivate() {
         console.log('Whisper: Extension deactivated');
         if (this.isRunning) {
             this.stopDecoder();
+        }
+        // Restore outer panel scrolling for other extensions
+        const panelContent = document.getElementById('extension-panel-content');
+        if (panelContent) {
+            panelContent.style.overflow = '';
+            panelContent.style.height = '';
+        }
+        // Stop observing resize changes
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
         }
     }
 }

@@ -3171,8 +3171,9 @@ function sgPlayFrame(ts){
     sgPlayAutoScroll(newRow);
     /* Render spectrum from cache */
     sgPlayRenderFromCache(newRow);
-    /* Update scrub bar playhead */
+    /* Update scrub bar playhead and activity chart playhead */
     sgDrawScrubber();
+    if (window.sgDrawActivityChart) window.sgDrawActivityChart();
   }
 
   sgPlay.rafId=requestAnimationFrame(sgPlayFrame);

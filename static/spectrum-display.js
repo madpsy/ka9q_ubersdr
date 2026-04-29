@@ -4734,6 +4734,11 @@ class SpectrumDisplay {
         console.log('[SpectrumDisplay] zoomIn() called');
         if (!this.connected || !this.ws) return;
 
+        // Suppress edge detection during zoom transition to prevent
+        // unwanted retuning when tuned near 0 or 30 MHz edges
+        this.skipEdgeDetectionTemporary = true;
+        setTimeout(() => { this.skipEdgeDetectionTemporary = false; }, 1000);
+
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
         const newBinBandwidth = this.binBandwidth / 2;
 
@@ -4793,6 +4798,11 @@ class SpectrumDisplay {
     zoomOut() {
         console.log('[SpectrumDisplay] zoomOut() called');
         if (!this.connected || !this.ws) return;
+
+        // Suppress edge detection during zoom transition to prevent
+        // unwanted retuning when tuned near 0 or 30 MHz edges
+        this.skipEdgeDetectionTemporary = true;
+        setTimeout(() => { this.skipEdgeDetectionTemporary = false; }, 1000);
 
         // Don't zoom out past initial bandwidth
         if (!this.initialBinBandwidth) {

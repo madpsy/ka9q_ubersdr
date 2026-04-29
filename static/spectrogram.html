@@ -845,56 +845,103 @@ var meta=null,bmp=null,ictx=null,readCtx=null;
 var availableDates=[]; /* populated from /api/spectrogram/list, newest first */
 
 /* ── Hover data cache ───────────────────────────────────────────────────── */
-/* Holds the allrows JSON response so the tooltip can look up exact per-bin
-   dBFS values instead of reverse-mapping pixel colours from the PNG.
-   Shared with sgPlay.cache — if playback has already loaded the data we
-   reuse it; otherwise we fetch it in the background after the image loads. */
-var hoverCache=null;       /* AllRowsResponse object, or null if not yet loaded */
-var hoverCacheLoading=false;
+/* Per-row spectrum cache for tooltip lookups.  Instead of bulk-loading all
+   rows (which hits the strict allrows rate limit), we cache individual row
+   spectra as the user hovers.  If the playback engine has already loaded
+   sgPlay.cache (allrows), we use that directly — zero extra API calls.
 
-/* Look up the exact dBFS value for a given row index and frequency (Hz)
-   from the hover cache (or sgPlay.cache).  Returns null if unavailable. */
+   hoverRowCache is a sparse map: rowIndex → {bins[], bin_width_hz, start_freq_hz, ...}
+   hoverRowPending tracks in-flight fetches to avoid duplicate requests. */
+var hoverRowCache={};      /* rowIndex → rowspectrum API response */
+var hoverRowPending={};    /* rowIndex → true while fetch is in flight */
+
+/* Look up the exact dBFS value for a given row index and frequency (Hz).
+   Checks sgPlay.cache (allrows) first, then the per-row cache.
+   Returns null if the data isn't available yet. */
 function hoverLookupDb(row,hz){
-  var cache=hoverCache||((typeof sgPlay!=='undefined')&&sgPlay.cache)||null;
-  if(!cache||!cache.rows||row<0||row>=cache.rows.length)return null;
-  var r=cache.rows[row];
-  if(!r||!r.bins)return null;
-  var binIdx=Math.round((hz-cache.start_freq_hz)/cache.bin_width_hz - 0.5);
-  if(binIdx<0||binIdx>=r.bins.length)return null;
-  var v=r.bins[binIdx];
-  return (v===null||v===undefined)?null:v;
+  /* Prefer the full allrows cache if playback has loaded it */
+  var allCache=(typeof sgPlay!=='undefined')&&sgPlay.cache;
+  if(allCache&&allCache.rows&&row>=0&&row<allCache.rows.length){
+    var r=allCache.rows[row];
+    if(r&&r.bins){
+      var binIdx=Math.round((hz-allCache.start_freq_hz)/allCache.bin_width_hz - 0.5);
+      if(binIdx>=0&&binIdx<r.bins.length){
+        var v=r.bins[binIdx];
+        return (v===null||v===undefined)?null:v;
+      }
+    }
+  }
+  /* Fall back to per-row cache */
+  var cached=hoverRowCache[row];
+  if(cached&&cached.bins){
+    var bw=cached.bin_width_hz||1;
+    var sh=cached.start_freq_hz||0;
+    var bi=Math.round((hz-sh)/bw - 0.5);
+    if(bi>=0&&bi<cached.bins.length){
+      var val=cached.bins[bi];
+      return (val===null||val===undefined)?null:val;
+    }
+  }
+  return null;
 }
 
-/* Fetch allrows data in the background for tooltip use.
-   Reuses sgPlay.cache if already loaded; otherwise fetches independently.
-   Called after each successful load() to ensure the cache matches the
-   current date/band/rolling selection. */
-function hoverCacheLoad(){
-  /* If playback cache is already loaded, reuse it */
-  if(typeof sgPlay!=='undefined'&&sgPlay.cache){hoverCache=sgPlay.cache;return;}
-  if(hoverCacheLoading)return;
-  hoverCacheLoading=true;
-  fetch(sgAllRowsUrl())
+/* Look up the noise floor for a given row from the best available source. */
+function hoverLookupNF(row){
+  /* Prefer allrows cache */
+  var allCache=(typeof sgPlay!=='undefined')&&sgPlay.cache;
+  if(allCache&&allCache.rows&&row>=0&&row<allCache.rows.length){
+    var nf=allCache.rows[row].noise_floor;
+    if(nf&&nf!==0)return nf;
+  }
+  /* Per-row cache */
+  var cached=hoverRowCache[row];
+  if(cached&&cached.noise_floor&&cached.noise_floor!==0)return cached.noise_floor;
+  /* meta.rows */
+  if(meta&&meta.rows&&meta.rows[row]){
+    var nfv=meta.rows[row].noise_floor;
+    if(nfv!==0)return nfv;
+  }
+  return null;
+}
+
+/* Fetch a single row's spectrum in the background for tooltip use.
+   Uses /api/spectrogram/rowspectrum (2 req/sec rate limit — much more
+   generous than allrows).  Results are cached in hoverRowCache. */
+function hoverFetchRow(rowIdx){
+  if(hoverRowCache[rowIdx]||hoverRowPending[rowIdx])return;
+  /* Don't fetch if allrows cache already has this row */
+  var allCache=(typeof sgPlay!=='undefined')&&sgPlay.cache;
+  if(allCache&&allCache.rows&&rowIdx>=0&&rowIdx<allCache.rows.length)return;
+
+  hoverRowPending[rowIdx]=true;
+  var sel=document.getElementById('dsel');
+  var ds=sel?sel.value:'';
+  var params='?row='+rowIdx;
+  if(ds==='rolling-24h'){
+    params+='&rolling=1';
+  } else if(ds&&/^\d{4}-\d{2}-\d{2}$/.test(ds)){
+    params+='&date='+encodeURIComponent(ds);
+  }
+  if(urlBand&&urlBand!=='wideband'){
+    params+='&band='+encodeURIComponent(urlBand);
+  }
+  fetch('/api/spectrogram/rowspectrum'+params)
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(data){
-      hoverCache=data;
-      hoverCacheLoading=false;
-      /* Also populate sgPlay.cache so playback doesn't need to re-fetch */
-      if(typeof sgPlay!=='undefined'&&!sgPlay.cache){
-        sgPlay.cache=data;
-        sgPlayComputeLockedRange();
+      if(!data.error){
+        hoverRowCache[rowIdx]=data;
       }
+      delete hoverRowPending[rowIdx];
     })
-    .catch(function(e){
-      hoverCacheLoading=false;
-      console.warn('hoverCacheLoad failed:',e.message);
+    .catch(function(){
+      delete hoverRowPending[rowIdx];
     });
 }
 
 /* Invalidate the hover cache when date/band changes */
 function hoverCacheInvalidate(){
-  hoverCache=null;
-  hoverCacheLoading=false;
+  hoverRowCache={};
+  hoverRowPending={};
 }
 
 /* Zoom/pan state */
@@ -1238,9 +1285,6 @@ function load(){
       setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
       /* Show download button — downloadCanvas() captures the canvas directly */
       document.getElementById('dl-btn').style.display='inline';
-      /* Load allrows data in the background so the tooltip can show exact
-         per-bin dBFS values instead of reverse-mapping from pixel colours */
-      hoverCacheLoad();
     })
     .catch(function(e){
       document.getElementById('loading').style.display='none';
@@ -1607,27 +1651,25 @@ function setupHover(){
       tstr=String(Math.floor(row/60)).padStart(2,'0')+':'+String(row%60).padStart(2,'0')+' UTC';
     }
 
-    /* Signal level — prefer exact bin data from the allrows cache over
+    /* Signal level — prefer exact bin data from the row spectrum cache over
        reverse-mapping pixel colours from the PNG (which is lossy due to
-       256-level palette quantisation and potential dB range mismatches). */
+       256-level palette quantisation and potential dB range mismatches).
+       If the cache doesn't have this row yet, trigger a background fetch
+       so the next hover over the same row will show exact values. */
     var sig=null,nf=null,snr=null;
     if(!nodata){
-      /* Try exact lookup from allrows cache first */
+      /* Try exact lookup from cache (allrows or per-row) */
       sig=hoverLookupDb(row,hz);
       if(sig===null){
         /* Fallback: reverse-map from pixel colour (less accurate) */
         var ttMin=contrastUserChanged?contrastMin:meta.db_min;
         var ttMax=contrastUserChanged?contrastMax:meta.db_max;
         sig=pxToDb(readCtx,px,py,ttMin,ttMax);
+        /* Trigger background fetch so next hover shows exact value */
+        hoverFetchRow(row);
       }
-      /* Noise floor: prefer allrows cache (same source as signal), fall back to meta */
-      var _hc=hoverCache||((typeof sgPlay!=='undefined')&&sgPlay.cache)||null;
-      if(_hc&&_hc.rows&&row<_hc.rows.length&&_hc.rows[row].noise_floor){
-        nf=_hc.rows[row].noise_floor;
-      } else if(meta.rows&&meta.rows[row]){
-        var nfv=meta.rows[row].noise_floor;
-        if(nfv!==0)nf=nfv;
-      }
+      /* Noise floor from best available source */
+      nf=hoverLookupNF(row);
       if(sig!==null&&nf!==null)snr=sig-nf;
     }
 

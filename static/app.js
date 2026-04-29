@@ -11715,3 +11715,38 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // Restore saved zoom level on page load
     document.addEventListener('DOMContentLoaded', function () { applyZoom(level); });
 })();
+
+// ── Firefox browser suggestion toast ──────────────────────────────────────────
+// Show a non-intrusive suggestion on the audio-start overlay when Firefox is
+// detected, recommending Chrome or Safari for best performance.
+(function () {
+    const DISMISS_KEY = 'firefoxSuggestionDismissed';
+
+    function showFirefoxSuggestion() {
+        // Only show for Firefox
+        const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
+        if (!isFirefox) return;
+
+        // Don't show again if user previously dismissed it
+        if (localStorage.getItem(DISMISS_KEY)) return;
+
+        const toast = document.getElementById('firefox-suggestion-toast');
+        if (!toast) return;
+
+        toast.style.display = 'flex';
+
+        // Remember dismissal when close button is clicked
+        const closeBtn = toast.querySelector('.firefox-suggestion-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function () {
+                localStorage.setItem(DISMISS_KEY, '1');
+            });
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', showFirefoxSuggestion);
+    } else {
+        showFirefoxSuggestion();
+    }
+})();

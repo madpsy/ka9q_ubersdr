@@ -163,6 +163,15 @@
     
     <!-- Audio Start Overlay -->
     <div id="audio-start-overlay" class="audio-start-overlay">
+        <!-- Firefox browser suggestion toast (hidden by default, shown via JS) -->
+        <div id="firefox-suggestion-toast" class="firefox-suggestion-toast" style="display: none;">
+            <div class="firefox-suggestion-icon">🦊</div>
+            <div class="firefox-suggestion-text">
+                <strong>Browser Suggestion</strong>
+                <span>Chrome or Safari are recommended for the best performance and full feature support. Firefox will work but may be slower and some features might be unavailable.</span>
+            </div>
+            <button class="firefox-suggestion-close" onclick="document.getElementById('firefox-suggestion-toast').style.display='none'" title="Dismiss">&times;</button>
+        </div>
         <div class="audio-start-content">
             <div id="site-description" class="site-description"></div>
             <button id="audio-start-button" class="audio-start-button" title="Press Return to start">

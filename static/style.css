@@ -198,6 +198,74 @@
     display: none;
 }
 
+/* Firefox Browser Suggestion Toast */
+.firefox-suggestion-toast {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 520px;
+    width: calc(100% - 40px);
+    background: linear-gradient(135deg, #2a2a2a 0%, #1a1a2e 100%);
+    border: 1px solid rgba(255, 165, 0, 0.5);
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    z-index: 10002;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 165, 0, 0.15);
+    animation: firefoxToastSlideIn 0.4s ease-out;
+}
+
+.firefox-suggestion-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    line-height: 1;
+    margin-top: 2px;
+}
+
+.firefox-suggestion-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #e0e0e0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.firefox-suggestion-text strong {
+    color: #ffa500;
+    font-size: 14px;
+}
+
+.firefox-suggestion-close {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color 0.2s;
+}
+
+.firefox-suggestion-close:hover {
+    color: #fff;
+}
+
+@keyframes firefoxToastSlideIn {
+    from {
+        transform: translateX(-50%) translateY(-30px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
 .audio-start-content {
     display: flex;
     flex-direction: column;

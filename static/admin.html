@@ -1729,6 +1729,27 @@
                             </div>
                         </div>
 
+                        <!-- Mobile Settings -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📱 Mobile Settings</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Settings that apply to visitors on narrow/mobile screens (≤1024 px wide).
+                                Users can always override these with the controls on the page — the server default only applies when no preference has been saved.
+                            </p>
+
+                            <!-- Default frequency console -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-mobile-tuning-mode" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Default Frequency Console</label>
+                                <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;">
+                                    Controls whether new mobile visitors see the tuning <strong>Buttons</strong> or the drag <strong>Wheel</strong>
+                                    in the frequency console. Users can switch at any time using the Btns/Wheel radio toggle.
+                                </p>
+                                <select id="ui-mobile-tuning-mode" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
                         <!-- Bandwidth Indicator Colour -->
                         <!-- Theme Colours -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
@@ -7016,6 +7037,16 @@
                 // Build VU meter style select (values: bar, led)
                 buildUISelect('ui-vu-meter-style', ui.vu_meter_style);
 
+                // Build mobile tuning mode select (values: buttons, wheel)
+                // Provide a built-in fallback when mobile_tuning_mode is absent from ui.yaml
+                buildUISelect('ui-mobile-tuning-mode', ui.mobile_tuning_mode || {
+                    default: 'buttons',
+                    available: [
+                        { value: 'buttons', label: 'Buttons' },
+                        { value: 'wheel',   label: 'Wheel'   }
+                    ]
+                });
+
                 // Set auto-contrast slider (range 0-20, symmetric dB offset for auto-range)
                 const contrast = ui.contrast || {};
                 const contrastSlider = document.getElementById('ui-contrast');
@@ -7420,6 +7451,16 @@ function resetStationIdColor() {
                             {value:'cyan',label:'Cyan'},{value:'white',label:'White'},
                             {value:'yellow',label:'Yellow'},{value:'orange',label:'Orange'},
                             {value:'magenta',label:'Magenta'}
+                        ]};
+                    })(),
+                    mobile_tuning_mode: (() => {
+                        const sel = document.getElementById('ui-mobile-tuning-mode');
+                        return sel ? {
+                            default: sel.value,
+                            available: Array.from(sel.options).map(o => ({ value: o.value, label: o.textContent }))
+                        } : { default: 'buttons', available: [
+                            {value:'buttons',label:'Buttons'},
+                            {value:'wheel',label:'Wheel'}
                         ]};
                     })(),
                     theme: collectThemeColors()

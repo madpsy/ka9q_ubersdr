@@ -18,6 +18,7 @@
  *   peak_hold                 → spectrumHoldEnabled           (peak hold, default true)
  *   line_graph                → spectrumLineGraphEnabled      (line graph overlay)
  *   bandwidth_indicator_color → bandwidthIndicatorColor       (bandwidth bar colour: green/red/cyan/white/yellow/orange/magenta)
+ *   mobile_tuning_mode        → tuningMode                    (mobile frequency console default: buttons/wheel)
  *   spectrum_bg_image         → (no localStorage key)         URL of the spectrum background image,
  *                                                              or "" if none. Read directly from
  *                                                              window.serverUIConfig by SpectrumDisplay.
@@ -296,6 +297,18 @@ function applyServerUIDefaults() {
     try {
         if (localStorage.getItem('bandwidthIndicatorColor') === null) {
             localStorage.setItem('bandwidthIndicatorColor', bwColorDefault);
+        }
+    } catch (e) { /* ignore */ }
+
+    // Mobile tuning mode: tuningMode (default: 'buttons')
+    // initTuningControls() in app.js reads localStorage.getItem('tuningMode') with 'buttons' as
+    // its hardcoded fallback. Pre-populate here so the server default takes effect for new visitors
+    // on narrow/mobile screens before initTuningControls() runs.
+    // Valid values: buttons, wheel
+    const mobileTuningDefault = getUIDefault('tuningMode', 'mobile_tuning_mode', 'buttons');
+    try {
+        if (localStorage.getItem('tuningMode') === null) {
+            localStorage.setItem('tuningMode', mobileTuningDefault);
         }
     } catch (e) { /* ignore */ }
 

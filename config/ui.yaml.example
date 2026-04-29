@@ -157,3 +157,15 @@ ui:
   #   accent_end:   "#764ba2"  # End colour of accent gradients
   #   text_light:   "#ecf0f1"  # Text on dark panel backgrounds
   #   control_text: "#495057"  # Labels on light backgrounds (Volume, Left, Right, Low, High, Scroll…)
+
+  # Default mobile frequency console for new visitors on narrow/mobile screens (≤1024 px wide).
+  # Controls whether the tuning buttons or the drag wheel is shown by default.
+  # Users can switch at any time using the Btns/Wheel radio toggle in the frequency controls.
+  # localStorage key: tuningMode
+  mobile_tuning_mode:
+    default: "buttons"
+    available:
+      - value: "buttons"
+        label: "Buttons"
+      - value: "wheel"
+        label: "Wheel"

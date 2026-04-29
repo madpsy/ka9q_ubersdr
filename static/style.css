@@ -1945,7 +1945,8 @@ input[type="range"]::-moz-range-thumb {
         margin-bottom: -30px;
         padding: 10px 0;
         gap: 15px;
-        width: max-content;
+        width: auto;
+        max-width: 100%;
     }
     
     .info-grid {

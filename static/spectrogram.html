@@ -41,6 +41,10 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 /* No horizontal padding on the wrap — the canvas must be the same width as the
    spectrogram image above it.  Horizontal padding is applied only to the header. */
 .sg-rowspec-wrap{background:rgba(0,0,0,.35);border-radius:8px;padding:14px 0 10px;margin-top:10px;position:relative}
+/* Spectrogram scrub bar — sits below the spectrum chart */
+.sg-scrubber-wrap{position:relative;height:44px;background:rgba(0,0,0,.4);border-radius:0 0 8px 8px;overflow:hidden;cursor:pointer;margin-top:0}
+#sg-scrubber{display:block;width:100%;height:100%}
+#sg-scrubber-label{position:absolute;bottom:3px;left:8px;font-size:.7em;opacity:.5;pointer-events:none;color:#fff}
 .sg-rowspec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;padding:0 16px}
 .sg-rowspec-title{font-size:.85em;font-weight:600;color:rgba(0,220,255,.9)}
 .sg-rowspec-meta{font-size:.78em;opacity:.65}
@@ -301,6 +305,11 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
         </div>
         <div id="sg-rowspec-xaxis" style="position:relative;height:22px;overflow:visible"></div>
       </div>
+    </div>
+    <!-- Scrub bar — full width, below the spectrum chart -->
+    <div class="sg-scrubber-wrap" id="sg-scrubber-wrap">
+      <canvas id="sg-scrubber"></canvas>
+      <div id="sg-scrubber-label">drag to seek</div>
     </div>
   </div>
   <div class="legend">
@@ -3235,6 +3244,148 @@ function sgPlayInvalidateCache(){
     };
   },0);
 })();
+
+/* ── Spectrogram scrub bar ───────────────────────────────────────────────────
+   A horizontal strip below the spectrum chart that mirrors the Time Travel
+   scrubber.  The spectrogram PNG is drawn rotated 90° so that time runs
+   left→right and frequency runs top→bottom.  A cyan playhead marks the
+   currently selected row.  Click or drag to seek.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+var sgScrubDragging = false;
+
+/* Draw the scrub bar canvas.
+   Called whenever the selected row changes or the image/meta loads. */
+function sgDrawScrubber() {
+  var sc = document.getElementById('sg-scrubber');
+  var sw = document.getElementById('sg-scrubber-wrap');
+  if (!sc || !sw) return;
+
+  /* Size canvas to its CSS pixel dimensions */
+  var swRect = sw.getBoundingClientRect();
+  var W = Math.round(swRect.width) || sc.offsetWidth || 800;
+  var H = Math.round(swRect.height) || 44;
+  if (sc.width !== W)  sc.width  = W;
+  if (sc.height !== H) sc.height = H;
+
+  var ctx = sc.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  /* Dark background */
+  ctx.fillStyle = 'rgba(0,0,0,.65)';
+  ctx.fillRect(0, 0, W, H);
+
+  /* Draw the spectrogram image rotated: PNG Y (time) → scrubber X,
+     PNG X (freq) → scrubber Y — identical transform to Time Travel. */
+  if (bmp) {
+    ctx.save();
+    /* ctx.transform(a,b,c,d,e,f):
+         screen_x = a*px + c*py + e
+         screen_y = b*px + d*py + f
+       We want: screen_x = py * W/imgH,  screen_y = px * H/imgW */
+    ctx.transform(0, H / bmp.width, W / bmp.height, 0, 0, 0);
+    ctx.drawImage(bmp, 0, 0);
+    ctx.restore();
+    /* Dim overlay so the playhead stands out */
+    ctx.fillStyle = 'rgba(0,0,0,.38)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  /* Time labels along the scrubber */
+  if (meta && meta.rows && meta.rows.length > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    var scrubFontSz = W <= 400 ? 7 : W <= 600 ? 8 : 9;
+    ctx.font = scrubFontSz + 'px monospace';
+    ctx.textAlign = 'center';
+    for (var li = 0; li <= 8; li++) {
+      var lf = li / 8;
+      var lrow = Math.round(lf * (meta.row_count - 1));
+      var lx = lf * W;
+      var rowM = meta.rows[lrow];
+      if (rowM && rowM.unix) {
+        var ld = new Date(rowM.unix * 1000);
+        var lt = String(ld.getUTCHours()).padStart(2, '0') + ':' +
+                 String(ld.getUTCMinutes()).padStart(2, '0');
+        ctx.fillText(lt, lx, H - 3);
+      }
+    }
+  }
+
+  /* Playhead — vertical cyan line at the current row */
+  if (meta && meta.row_count > 0) {
+    var px = (sgSelectedRow / (meta.row_count - 1)) * W;
+    ctx.save();
+    ctx.shadowColor = '#0ff';
+    ctx.shadowBlur = 8;
+    ctx.strokeStyle = 'rgba(0,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, 0); ctx.lineTo(px, H);
+    ctx.stroke();
+    /* Small downward triangle at the top */
+    ctx.fillStyle = '#0ff';
+    ctx.beginPath();
+    ctx.moveTo(px - 5, 0); ctx.lineTo(px + 5, 0); ctx.lineTo(px, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* Seek to the row corresponding to a pointer X position on the scrubber */
+function sgScrubSeek(e) {
+  if (!meta || meta.row_count === 0) return;
+  var sc = document.getElementById('sg-scrubber');
+  if (!sc) return;
+  var rect = sc.getBoundingClientRect();
+  var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+  var frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  var row = Math.round(frac * (meta.row_count - 1));
+  sgSelectRow(row, true);
+  sgDrawScrubber();
+}
+
+/* Wire up mouse/touch events on the scrubber wrap */
+(function sgSetupScrubber() {
+  /* Defer until DOM is ready */
+  document.addEventListener('DOMContentLoaded', function() {
+    var sw = document.getElementById('sg-scrubber-wrap');
+    if (!sw) return;
+    sw.addEventListener('mousedown', function(e) {
+      sgScrubDragging = true;
+      sgScrubSeek(e);
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (sgScrubDragging) sgScrubSeek(e);
+    });
+    window.addEventListener('mouseup', function() { sgScrubDragging = false; });
+    sw.addEventListener('touchstart', function(e) {
+      sgScrubDragging = true;
+      sgScrubSeek(e);
+      e.preventDefault();
+    }, { passive: false });
+    sw.addEventListener('touchmove', function(e) {
+      if (sgScrubDragging) { sgScrubSeek(e); e.preventDefault(); }
+    }, { passive: false });
+    sw.addEventListener('touchend', function() { sgScrubDragging = false; });
+  });
+})();
+
+/* Redraw the scrubber whenever sgSelectRow is called.
+   Patch sgSelectRow to call sgDrawScrubber after updating the row. */
+var _origSgSelectRow = sgSelectRow;
+sgSelectRow = function(rowIdx, userInteraction) {
+  _origSgSelectRow(rowIdx, userInteraction);
+  sgDrawScrubber();
+};
+
+/* Also redraw when the spectrogram image loads (bmp changes) — hook render(). */
+var _origRender = render;
+render = function() {
+  _origRender();
+  sgDrawScrubber();
+};
 </script>
 <script src="timetravel.js"></script>
 </body>

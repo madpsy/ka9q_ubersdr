@@ -3453,21 +3453,18 @@ render = function() {
 
     if (wrap) wrap.style.display = '';
 
-    // Size the canvas to its CSS display size.
+    // Size the canvas to its CSS pixel dimensions — same pattern as sgDrawRowSpectrumCanvas.
     // Total height = chartH (signal area) + timeAxisH (time labels strip).
-    var dpr = window.devicePixelRatio || 1;
-    var cssW = canvas.offsetWidth || canvas.parentElement.offsetWidth || 800;
+    var rect = canvas.getBoundingClientRect();
+    var W = Math.round(rect.width) || canvas.offsetWidth || 800;
     var timeAxisH = 20; // px reserved at bottom for time labels
-    var chartH = 80;    // px for the signal chart area
-    var cssH = chartH + timeAxisH;
-    canvas.width  = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    canvas.style.height = cssH + 'px';
+    var H = 80;         // chart area height (matches CSS height minus timeAxisH)
+    var totalH = H + timeAxisH; // = 100, matches CSS height:100px
+    if (canvas.width  !== W)      canvas.width  = W;
+    if (canvas.height !== totalH) canvas.height = totalH;
 
     var ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
 
-    var W = cssW, H = chartH; // H = chart area height only
     var rows = meta.rows;
     var n = rows.length;
 
@@ -3544,7 +3541,7 @@ render = function() {
     }
 
     // Clear entire canvas (chart + time axis)
-    ctx.clearRect(0, 0, W, cssH);
+    ctx.clearRect(0, 0, W, totalH);
 
     // Draw faint vertical grid lines through the chart area at each notch
     ctx.save();

@@ -2598,18 +2598,22 @@ func (sm *SessionManager) KickUserBySessionID(userSessionID string) (int, error)
 	return len(sessionsToKick), nil
 }
 
-// KickUserByIP destroys all sessions from the given IP address
-func (sm *SessionManager) KickUserByIP(ip string) (int, error) {
-	if ip == "" {
+// KickUserByIP destroys all sessions from the given IP address or CIDR range.
+// The ipOrCIDR parameter may be a plain IP ("1.2.3.4") or a CIDR range ("10.0.0.0/24").
+func (sm *SessionManager) KickUserByIP(ipOrCIDR string) (int, error) {
+	if ipOrCIDR == "" {
 		return 0, fmt.Errorf("IP address cannot be empty")
 	}
+
+	// Pre-parse the ban target once so we don't repeat the work per session
+	matchFn := buildIPMatchFunc(ipOrCIDR)
 
 	sm.mu.RLock()
 	var sessionsToKick []string
 	for _, session := range sm.sessions {
 		session.mu.RLock()
 		// Check both client IP and source IP
-		if session.ClientIP == ip || session.SourceIP == ip {
+		if matchFn(session.ClientIP) || matchFn(session.SourceIP) {
 			sessionsToKick = append(sessionsToKick, session.ID)
 		}
 		session.mu.RUnlock()
@@ -2623,8 +2627,30 @@ func (sm *SessionManager) KickUserByIP(ip string) (int, error) {
 		}
 	}
 
-	log.Printf("Kicked user from IP %s (%d session(s) destroyed)", ip, len(sessionsToKick))
+	log.Printf("Kicked user from IP/CIDR %s (%d session(s) destroyed)", ipOrCIDR, len(sessionsToKick))
 	return len(sessionsToKick), nil
+}
+
+// buildIPMatchFunc returns a function that reports whether a given real IP address
+// matches the supplied ban target, which may be a plain IP or a CIDR range.
+func buildIPMatchFunc(ipOrCIDR string) func(string) bool {
+	// Try CIDR first
+	if _, network, err := net.ParseCIDR(ipOrCIDR); err == nil {
+		return func(ip string) bool {
+			if ip == "" {
+				return false
+			}
+			parsed := net.ParseIP(ip)
+			if parsed == nil {
+				return false
+			}
+			return network.Contains(parsed)
+		}
+	}
+	// Plain IP — exact match
+	return func(ip string) bool {
+		return ip != "" && ip == ipOrCIDR
+	}
 }
 
 // KickUsersByCountry destroys all sessions from the given country code

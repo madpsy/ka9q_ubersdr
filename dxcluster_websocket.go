@@ -133,7 +133,7 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 			mqttPublisher = prometheusMetrics.mqttPublisher
 		}
 
-		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher, adminConfig, chatConfig)
+		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher, adminConfig, chatConfig, ipBanManager)
 		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v, MQTT: %v",
 			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV, mqttPublisher != nil)
 	}
@@ -1225,20 +1225,22 @@ func (h *DXClusterWebSocketHandler) GetChatUserCount() int {
 	return h.chatManager.GetActiveUserCount()
 }
 
-// KickConnectionsByIP closes all active DX cluster WebSocket connections from the given IP address.
-// It looks up each connection's session ID and checks the bound IP via the session manager.
+// KickConnectionsByIP closes all active DX cluster WebSocket connections from the given IP address
+// or CIDR range. It looks up each connection's session ID and checks the bound IP via the session manager.
 // Returns the number of connections closed.
-func (h *DXClusterWebSocketHandler) KickConnectionsByIP(ip string) int {
-	if ip == "" {
+func (h *DXClusterWebSocketHandler) KickConnectionsByIP(ipOrCIDR string) int {
+	if ipOrCIDR == "" {
 		return 0
 	}
 
-	// Collect connections whose session is bound to this IP
+	matchFn := buildIPMatchFunc(ipOrCIDR)
+
+	// Collect connections whose session is bound to a matching IP
 	h.connToSessionIDMu.RLock()
 	var connsToClose []*websocket.Conn
 	for conn, sessionID := range h.connToSessionID {
 		boundIP := h.sessions.GetUUIDIP(sessionID)
-		if boundIP == ip {
+		if matchFn(boundIP) {
 			connsToClose = append(connsToClose, conn)
 		}
 	}
@@ -1250,7 +1252,7 @@ func (h *DXClusterWebSocketHandler) KickConnectionsByIP(ip string) int {
 	}
 
 	if len(connsToClose) > 0 {
-		log.Printf("DX Cluster WebSocket: Kicked %d connection(s) from banned IP %s", len(connsToClose), ip)
+		log.Printf("DX Cluster WebSocket: Kicked %d connection(s) from banned IP/CIDR %s", len(connsToClose), ipOrCIDR)
 	}
 	return len(connsToClose)
 }

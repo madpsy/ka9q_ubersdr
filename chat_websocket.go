@@ -81,7 +81,7 @@ type ChatManager struct {
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher, adminConfig *AdminConfig, chatConfig ChatConfig) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher, adminConfig *AdminConfig, chatConfig ChatConfig, ipBanManager *IPBanManager) *ChatManager {
 	cm := &ChatManager{
 		sessionUsernames:             make(map[string]string),
 		messageBuffer:                make([]ChatMessage, 0, maxMessages),
@@ -98,6 +98,16 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 		adminCallsign:                strings.ToUpper(adminConfig.Callsign),
 		ownerCallsignFromAdminIPOnly: chatConfig.OwnerCallsignFromAdminIPOnly,
 		adminConfig:                  adminConfig,
+	}
+
+	// Seed the message buffer from persistent logs on startup (up to 7 days back)
+	if chatLogger != nil {
+		seeded := chatLogger.LoadRecentMessages(maxMessages, 7, ipBanManager)
+		if len(seeded) > 0 {
+			cm.messageBufferMu.Lock()
+			cm.messageBuffer = append(cm.messageBuffer, seeded...)
+			cm.messageBufferMu.Unlock()
+		}
 	}
 
 	// Start cleanup goroutine for inactive users
@@ -560,23 +570,25 @@ func (cm *ChatManager) RemoveUserMessages(sessionID string) int {
 	return removedCount
 }
 
-// RemoveUserMessagesByIP removes all messages from users with a specific IP address
-// This is typically called when an IP is banned
-// Returns the number of messages removed
-func (cm *ChatManager) RemoveUserMessagesByIP(ip string) int {
-	// First, find all session IDs associated with this IP
+// RemoveUserMessagesByIP removes all messages from users with a specific IP address or CIDR range.
+// This is typically called when an IP is banned.
+// Returns the number of messages removed.
+func (cm *ChatManager) RemoveUserMessagesByIP(ipOrCIDR string) int {
+	matchFn := buildIPMatchFunc(ipOrCIDR)
+
+	// Find all session IDs whose bound IP matches the ban target
 	sessionIDs := make([]string, 0)
 
 	cm.sessionUsernamesMu.RLock()
 	for sessionID := range cm.sessionUsernames {
 		sessionIP := cm.GetSessionIP(sessionID)
-		if sessionIP == ip {
+		if matchFn(sessionIP) {
 			sessionIDs = append(sessionIDs, sessionID)
 		}
 	}
 	cm.sessionUsernamesMu.RUnlock()
 
-	// Now remove messages from all these sessions
+	// Remove messages from all matching sessions
 	totalRemoved := 0
 	for _, sessionID := range sessionIDs {
 		removed := cm.RemoveUserMessages(sessionID)
@@ -584,7 +596,7 @@ func (cm *ChatManager) RemoveUserMessagesByIP(ip string) int {
 	}
 
 	if totalRemoved > 0 {
-		log.Printf("Chat: Removed %d message(s) from IP %s from message buffer", totalRemoved, ip)
+		log.Printf("Chat: Removed %d message(s) from IP/CIDR %s from message buffer", totalRemoved, ipOrCIDR)
 	}
 
 	return totalRemoved

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -138,6 +139,155 @@ func (cl *ChatLogger) getOrCreateWriter(timestamp time.Time) (*csv.Writer, error
 	}
 
 	return cl.csvWriter, nil
+}
+
+// LoadRecentMessages reads up to maxMessages recent chat messages from disk,
+// walking back up to maxDays days. Messages from banned IPs are excluded.
+// banManager may be nil (no IP filtering applied). Never panics on corrupt data.
+func (cl *ChatLogger) LoadRecentMessages(maxMessages int, maxDays int, banManager *IPBanManager) []ChatMessage {
+	if !cl.enabled || maxMessages <= 0 || maxDays <= 0 {
+		return nil
+	}
+
+	// Collect day-slices in reverse chronological order, then assemble final list.
+	type dayMessages struct {
+		msgs []ChatMessage
+	}
+	days := make([]dayMessages, 0, maxDays)
+
+	now := time.Now().UTC()
+
+	for i := 0; i < maxDays; i++ {
+		day := now.AddDate(0, 0, -i)
+		filePath := filepath.Join(
+			cl.dataDir,
+			fmt.Sprintf("%04d", day.Year()),
+			fmt.Sprintf("%02d", day.Month()),
+			fmt.Sprintf("%02d", day.Day()),
+			"chat.csv",
+		)
+
+		msgs, err := cl.readDayFile(filePath, banManager)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("Chat: Skipping corrupt/unreadable log file %s: %v", filePath, err)
+			}
+			continue
+		}
+
+		if len(msgs) > 0 {
+			days = append(days, dayMessages{msgs: msgs})
+		}
+
+		// Early exit: if we already have more than enough messages across collected days,
+		// no need to go further back.
+		total := 0
+		for _, d := range days {
+			total += len(d.msgs)
+		}
+		if total >= maxMessages {
+			break
+		}
+	}
+
+	if len(days) == 0 {
+		return nil
+	}
+
+	// days[0] = today, days[1] = yesterday, etc.
+	// Rebuild in chronological order (oldest first) so we can take the tail.
+	var all []ChatMessage
+	for i := len(days) - 1; i >= 0; i-- {
+		all = append(all, days[i].msgs...)
+	}
+
+	// Take the last maxMessages entries (most recent).
+	if len(all) > maxMessages {
+		all = all[len(all)-maxMessages:]
+	}
+
+	log.Printf("Chat: Seeded message buffer with %d message(s) from disk (walked back %d day(s))", len(all), len(days))
+	return all
+}
+
+// readDayFile reads all valid chat messages from a single CSV day file.
+// Corrupt rows are skipped with a warning; the function never returns a partial error
+// that would cause the caller to skip the whole file unless the file cannot be opened at all.
+func (cl *ChatLogger) readDayFile(filePath string, banManager *IPBanManager) ([]ChatMessage, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1 // Allow variable columns for forward/backward compat
+	reader.LazyQuotes = true    // Be lenient with quoting to avoid getting stuck on bad data
+
+	// Read and validate header
+	header, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read header: %w", err)
+	}
+
+	// Accept 4-column (old) or 6-column (new) format
+	hasCountry := false
+	switch len(header) {
+	case 6:
+		hasCountry = true
+	case 4:
+		hasCountry = false
+	default:
+		return nil, fmt.Errorf("unexpected header column count: %d", len(header))
+	}
+
+	var msgs []ChatMessage
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			// Log and skip corrupt rows — never get stuck
+			log.Printf("Chat: Skipping malformed CSV row in %s: %v", filePath, err)
+			continue
+		}
+
+		expectedCols := 4
+		if hasCountry {
+			expectedCols = 6
+		}
+		if len(record) < expectedCols {
+			log.Printf("Chat: Skipping short CSV row (%d cols, want %d) in %s", len(record), expectedCols, filePath)
+			continue
+		}
+
+		// Parse timestamp — skip rows with unparseable timestamps
+		ts, err := time.Parse(time.RFC3339, record[0])
+		if err != nil {
+			log.Printf("Chat: Skipping row with invalid timestamp %q in %s: %v", record[0], filePath, err)
+			continue
+		}
+
+		sourceIP := record[1]
+		username := record[2]
+		message := record[3]
+
+		// Skip messages from banned IPs
+		if banManager != nil && sourceIP != "" && banManager.IsBanned(sourceIP) {
+			continue
+		}
+
+		msgs = append(msgs, ChatMessage{
+			Username:  username,
+			Message:   message,
+			Timestamp: ts.UTC(),
+			// SessionID intentionally left empty — not available from logs
+		})
+	}
+
+	return msgs, nil
 }
 
 // Close closes the open CSV file

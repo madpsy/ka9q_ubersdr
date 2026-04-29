@@ -1938,7 +1938,7 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .controls {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         transform: scale(0.9);
         transform-origin: top center;
         margin-top: -10px;

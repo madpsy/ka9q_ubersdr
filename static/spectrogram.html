@@ -3141,6 +3141,8 @@ function sgPlayFrame(ts){
     sgPlayAutoScroll(newRow);
     /* Render spectrum from cache */
     sgPlayRenderFromCache(newRow);
+    /* Update scrub bar playhead */
+    sgDrawScrubber();
   }
 
   sgPlay.rafId=requestAnimationFrame(sgPlayFrame);

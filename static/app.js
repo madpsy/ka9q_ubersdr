@@ -237,13 +237,13 @@ let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist 
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 let mediaElement = null;  // Hidden <audio> element for MediaSession and background audio (MediaStreamDestination bridge)
 let _mediaSessionActivated = false; // True once Media Session metadata has been set after real audio flows
-// Android detection — MediaSession causes audio stutter on Android due to the
-// MediaStreamDestination → <audio> element clock mismatch with AudioFlinger.
-// Default to disabled on Android; the user can still enable it via Audio Settings.
-const _isAndroid = /Android/i.test(navigator.userAgent);
-let mediaSessionEnabled = _isAndroid
-    ? localStorage.getItem('mediaSessionEnabled') === 'true'   // Android: default OFF (opt-in)
-    : localStorage.getItem('mediaSessionEnabled') !== 'false'; // Others:  default ON (opt-out)
+// Apple device detection — MediaSession works reliably on iOS/iPadOS/macOS.
+// On all other platforms (Android, Windows, Linux, etc.) it can cause audio
+// stutter or routing issues, so default to disabled there.
+const _isApple = /iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent);
+let mediaSessionEnabled = _isApple
+    ? localStorage.getItem('mediaSessionEnabled') !== 'false'  // Apple:  default ON  (opt-out)
+    : localStorage.getItem('mediaSessionEnabled') === 'true';  // Others: default OFF (opt-in)
 
 // Mobile device detection — used for UI display (device emoji)
 const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||

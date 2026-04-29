@@ -301,14 +301,21 @@ function applyServerUIDefaults() {
     } catch (e) { /* ignore */ }
 
     // Mobile tuning mode: tuningMode (default: 'buttons')
-    // initTuningControls() in app.js reads localStorage.getItem('tuningMode') with 'buttons' as
-    // its hardcoded fallback. Pre-populate here so the server default takes effect for new visitors
-    // on narrow/mobile screens before initTuningControls() runs.
+    // initTuningControls() in app.js is an IIFE that runs at parse time — before this async
+    // function runs — so it reads localStorage before the server default has been written.
+    // We write the server default here, then call window.applyTuningModeFromStorage() (exposed
+    // by initTuningControls) to re-sync the radio buttons and wheel/buttons visibility.
     // Valid values: buttons, wheel
     const mobileTuningDefault = getUIDefault('tuningMode', 'mobile_tuning_mode', 'buttons');
     try {
         if (localStorage.getItem('tuningMode') === null) {
             localStorage.setItem('tuningMode', mobileTuningDefault);
+            // Re-sync the radio toggle and wheel/buttons visibility now that the server
+            // default has been written. Safe to call even if not on mobile — applyMode()
+            // inside initTuningControls() is a no-op on desktop.
+            if (typeof window.applyTuningModeFromStorage === 'function') {
+                window.applyTuningModeFromStorage();
+            }
         }
     } catch (e) { /* ignore */ }
 

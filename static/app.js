@@ -11541,13 +11541,21 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     }
 
     // ── Restore saved preference (default: 'buttons') ────────────────────────
-    const saved = localStorage.getItem(STORAGE_KEY) || 'buttons';
-    if (saved === 'wheel') {
-        radioWheel.checked = true;
-    } else {
-        radioBtns.checked = true;
+    function applyTuningModeFromStorage() {
+        const mode = localStorage.getItem(STORAGE_KEY) || 'buttons';
+        if (mode === 'wheel') {
+            radioWheel.checked = true;
+        } else {
+            radioBtns.checked = true;
+        }
+        applyMode(mode);
     }
-    applyMode(saved);
+
+    // Expose so applyServerUIDefaults() can re-sync after writing the server default
+    // to localStorage (initTuningControls runs before the async server config fetch).
+    window.applyTuningModeFromStorage = applyTuningModeFromStorage;
+
+    applyTuningModeFromStorage();
 
     radioBtns.addEventListener('change', function () {
         applyMode('buttons');

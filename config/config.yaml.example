@@ -1202,8 +1202,8 @@ instance_reporting:
   # Directory server host (default: "sdr-list.xyz")
   # May include an explicit scheme for non-HTTPS servers:
   #   "www.shbrg.nl"             — HTTPS (default when no scheme given)
-  #   "https://www.shbrg.nl/"     — HTTPS (explicit)
-  register_sdrlist_host: "https://www.shbrg.nl/"
+  #   "https://www.shbrg.nl"     — HTTPS (explicit)
+  register_sdrlist_host: "https://www.shbrg.nl"
 
   # Create DNS subdomain for this instance (optional)
   # When enabled, the collector will create a DNS A record pointing

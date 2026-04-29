@@ -3451,7 +3451,14 @@ render = function() {
       return;
     }
 
-    if (wrap) wrap.style.display = '';
+    // If the wrap was hidden, show it first and defer one rAF so the browser
+    // lays it out before we read getBoundingClientRect() — otherwise width=0.
+    if (!wrap || wrap.style.display === 'none' || wrap.offsetWidth === 0) {
+      if (wrap) wrap.style.display = '';
+      requestAnimationFrame(function() { sgDrawActivityChart(); });
+      return;
+    }
+    wrap.style.display = '';
 
     // Size the canvas to its CSS pixel dimensions — same pattern as sgDrawRowSpectrumCanvas.
     // Total height = chartH (signal area) + timeAxisH (time labels strip).

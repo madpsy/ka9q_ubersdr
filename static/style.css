@@ -1948,6 +1948,12 @@ input[type="range"]::-moz-range-thumb {
         width: auto;
         max-width: 100%;
     }
+
+    /* Prevent <select> elements with long option text from expanding the controls */
+    .control-group select {
+        min-width: 0;
+        overflow: hidden;
+    }
     
     .info-grid {
         grid-template-columns: 1fr;

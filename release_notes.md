@@ -1,6 +1,19 @@
-# 20 April 2026
+# 30 April 2026
 
-## Version 0.1.46 - Latest Release
+## Version 0.1.47 - Latest Release
+
+### New Features
+- Added **Media Session Support** which means devices (Apple for now) support media controls when open in a browser
+- Added **Benchmarking** to see how many web users your instance can comfortably support (System tab in Admin)
+- Added **Better Mobile Support** for viewing on narrow screens including a tuning wheel for touch screens
+- Added **Websdr.org Emulation** emulates the original WebSDR - required docker compose changes - will update shortly
+- Added **Hide SNR/Noise graphs** in the web UI (optional)
+- Added **Chrome Extension** UberSDR Bridge in Chrome Store (Firefox already has one)
+
+### Bug Fixes
+- Various fixes related to mobile use
+
+## Version 0.1.46
 
 ### New Features
 - Added **Spectrogram** which stores one minute samples of wideband and per-band spectral data. Added as a button at the top of the Noise Floor page

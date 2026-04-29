@@ -765,6 +765,16 @@ class DecoderExtension {
         // Override in subclass
     }
     
+    onActivate() {
+        // Called when the extension panel DOM is (re)created and visible.
+        // Override in subclass to re-bind event handlers to fresh DOM elements.
+    }
+    
+    onDeactivate() {
+        // Called when the extension panel is about to be closed/hidden.
+        // Override in subclass to clean up timers, observers, etc.
+    }
+    
     onProcessAudio(dataArray) {
         throw new Error('onProcessAudio must be implemented by subclass');
     }

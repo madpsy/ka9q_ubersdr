@@ -1022,6 +1022,8 @@ class MorseExtension extends DecoderExtension {
 
     onActivate() {
         console.log('Morse: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
     }
 
     onDeactivate() {

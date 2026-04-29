@@ -776,6 +776,16 @@ class DXClusterExtension extends DecoderExtension {
         });
     }
 
+    onActivate() {
+        console.log('DX Cluster: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('DX Cluster: Extension deactivated');
+    }
+
     onEnable() {
         // Re-subscribe to DX spots when extension is enabled
         // This ensures we receive new spots after closing and reopening the extension

@@ -162,6 +162,11 @@
                                                     window.decoderManager.initialize(matchingExt.slug, window.audioContext, window.analyser, centerFreq);
                                                     window.decoderManager.enable(matchingExt.slug);
 
+                                                    // Notify extension that fresh DOM is ready for event binding
+                                                    if (typeof decoder.onActivate === 'function') {
+                                                        decoder.onActivate();
+                                                    }
+
                                                     console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
                                                 })
                                                 .catch(err => {

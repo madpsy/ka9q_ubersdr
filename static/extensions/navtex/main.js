@@ -621,6 +621,19 @@ class NAVTEXExtension extends DecoderExtension {
         });
     }
 
+    onActivate() {
+        console.log('NAVTEX: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('NAVTEX: Extension deactivated');
+        if (this.running) {
+            this.stopDecoder();
+        }
+    }
+
     onEnable() {
         console.log('NAVTEX: Extension enabled');
     }

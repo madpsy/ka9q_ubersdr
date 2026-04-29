@@ -936,6 +936,19 @@ class FSKExtension extends DecoderExtension {
         }
     }
 
+    onActivate() {
+        console.log('FSK: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('FSK: Extension deactivated');
+        if (this.running) {
+            this.stopDecoding();
+        }
+    }
+
     onEnable() {
         console.log('FSK: Extension enabled');
     }

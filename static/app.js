@@ -8983,9 +8983,13 @@ function toggleExtension(extensionName) {
         // Close extension panel when empty value selected
         if (panel && panel.style.display !== 'none') {
             panel.style.display = 'none';
-            // Disable all active decoders
+            // Notify and disable all active decoders
             if (window.decoderManager) {
                 window.decoderManager.getActiveDecoders().forEach(name => {
+                    const dec = window.decoderManager.getDecoder(name);
+                    if (dec && typeof dec.onDeactivate === 'function') {
+                        dec.onDeactivate();
+                    }
                     window.decoderManager.disable(name);
                     log(`${name} extension disabled`);
                 });
@@ -9017,7 +9021,10 @@ function toggleExtension(extensionName) {
     const isCurrentlyEnabled = isPanelVisible && isShowingThisExtension;
 
     if (isCurrentlyEnabled) {
-        // Hide panel and disable decoder
+        // Notify extension that panel is closing, then hide and disable
+        if (typeof decoder.onDeactivate === 'function') {
+            decoder.onDeactivate();
+        }
         panel.style.display = 'none';
         window.decoderManager.disable(extensionName);
         log(`${extensionName} extension disabled`);
@@ -9057,6 +9064,11 @@ function toggleExtension(extensionName) {
                 // Enable decoder
                 window.decoderManager.enable(extensionName);
 
+                // Notify extension that fresh DOM is ready for event binding
+                if (typeof decoder.onActivate === 'function') {
+                    decoder.onActivate();
+                }
+
                 log(`${extensionName} extension enabled`);
 
                 // Update URL with new extension state (after enabling)
@@ -9091,9 +9103,13 @@ function closeExtensionPanel() {
     const panel = document.getElementById('extension-panel');
     if (panel) {
         panel.style.display = 'none';
-        // Disable all active decoders
+        // Notify and disable all active decoders
         if (window.decoderManager) {
             window.decoderManager.getActiveDecoders().forEach(name => {
+                const dec = window.decoderManager.getDecoder(name);
+                if (dec && typeof dec.onDeactivate === 'function') {
+                    dec.onDeactivate();
+                }
                 window.decoderManager.disable(name);
                 log(`${name} extension disabled`);
             });

@@ -1171,6 +1171,16 @@ class DigitalSpotsExtension extends DecoderExtension {
         }
     }
 
+    onActivate() {
+        console.log('Digital Spots: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('Digital Spots: Extension deactivated');
+    }
+
     onEnable() {
         if (!this.unsubscribe) {
             this.subscribeToDigitalSpots();

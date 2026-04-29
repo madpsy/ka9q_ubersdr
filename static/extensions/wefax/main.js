@@ -877,6 +877,19 @@ class WEFAXExtension extends DecoderExtension {
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
+    onActivate() {
+        console.log('WEFAX: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('WEFAX: Extension deactivated');
+        if (this.running) {
+            this.stopDecoder();
+        }
+    }
+
     onEnable() {
         console.log('WEFAX: Extension enabled');
         // Extension is enabled but not automatically started

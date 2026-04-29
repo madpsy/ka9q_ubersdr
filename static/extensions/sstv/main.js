@@ -1116,6 +1116,19 @@ class SSTVExtension extends DecoderExtension {
         // Audio is sent to the backend when the decoder is attached via WebSocket
     }
 
+    onActivate() {
+        console.log('SSTV: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('SSTV: Extension deactivated');
+        if (this.running) {
+            this.stopDecoder();
+        }
+    }
+
     onEnable() {
         console.log('SSTV: Extension enabled');
         this.setupBinaryMessageHandler();

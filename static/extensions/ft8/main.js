@@ -1304,6 +1304,19 @@ class FT8Extension extends DecoderExtension {
         }
     }
 
+    onActivate() {
+        console.log('FT8: Extension activated');
+        // Re-setup event handlers when extension is reopened with fresh DOM
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('FT8: Extension deactivated');
+        if (this.running) {
+            this.stop();
+        }
+    }
+
     onEnable() {
         console.log('FT8: Extension enabled');
         this.setupBinaryMessageHandler();

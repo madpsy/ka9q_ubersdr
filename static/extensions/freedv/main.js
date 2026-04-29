@@ -688,6 +688,20 @@ class FreeDVExtension extends DecoderExtension {
         }
     }
 
+    onActivate() {
+        console.log('FreeDV: Extension activated');
+        // Reset the flag so handlers can be re-attached to the new DOM
+        this.handlersSetup = false;
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('FreeDV: Extension deactivated');
+        if (this.isRunning) {
+            this.stopDecoder();
+        }
+    }
+
     onEnable() {
         console.log('FreeDV: Extension enabled');
         this.setupBinaryMessageHandler();

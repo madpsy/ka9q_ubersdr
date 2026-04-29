@@ -21522,7 +21522,19 @@ Referer: ${log.referer}`;
 
                 if (!inProxies) continue;
 
+                // List item under allowed_ips MUST be checked before the new-entry
+                // check, because "  - "0.0.0.0/0"" also starts with "- " and would
+                // otherwise be mistaken for a new proxy sequence entry.
+                if (inAllowedIPs && current && /^-\s/.test(trimmed)) {
+                    const val = trimmed.replace(/^-\s*/, '').replace(/^["']|["']$/g, '');
+                    current.allowed_ips.push(val);
+                    continue;
+                }
+
                 // New sequence entry "  - name: ..." or "  -"
+                // A proxy entry dash is at the proxies-list indent level (not deeply
+                // indented like an allowed_ips item), but after the inAllowedIPs guard
+                // above we can safely treat any remaining "- " as a new proxy.
                 if (/^-\s/.test(trimmed) || trimmed === '-') {
                     if (current) proxies.push(current);
                     current = { allowed_ips: [] };
@@ -21539,21 +21551,14 @@ Referer: ${log.referer}`;
 
                 if (!current) continue;
 
-                // "allowed_ips:" block
+                // "allowed_ips:" block (with or without inline empty list)
                 if (trimmed === 'allowed_ips:' || trimmed === 'allowed_ips: []') {
                     inAllowedIPs = true;
                     current.allowed_ips = [];
                     continue;
                 }
 
-                // List item under allowed_ips: "  - "1.2.3.4""
-                if (inAllowedIPs && /^-\s/.test(trimmed)) {
-                    const val = trimmed.replace(/^-\s*/, '').replace(/^["']|["']$/g, '');
-                    current.allowed_ips.push(val);
-                    continue;
-                }
-
-                // Regular key: value line
+                // Regular key: value line — any non-list key exits the allowed_ips block
                 const m = trimmed.match(/^(\w+):\s*(.*)$/);
                 if (m) {
                     if (m[1] !== 'allowed_ips') inAllowedIPs = false;

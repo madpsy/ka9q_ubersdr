@@ -1928,7 +1928,12 @@ class ChatUI {
         div.className = isMention ? 'chat-message chat-message-mention' : 'chat-message';
         div.setAttribute('data-message-id', messageId);
 
-        const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const msgDate = new Date(timestamp);
+        const time = msgDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const timeTooltip = msgDate.toLocaleString([], {
+            weekday: 'short', year: 'numeric', month: 'short',
+            day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
 
         // Check if this message is from us
         const isOwnMessage = this.chat && this.chat.username === username;
@@ -1965,7 +1970,7 @@ class ChatUI {
         }
 
         div.innerHTML = `
-            <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
+            <span style="color:#666; font-size:10px; margin-right:4px; cursor:help;" title="${timeTooltip}">${time}</span>
             ${usernameHtml}
             <span>${messageHtml}</span>
         `;

@@ -1985,6 +1985,8 @@
                     <button class="btn" onclick="showAddProxyForm()">Add New Proxy</button>
                     <button class="btn btn-danger" onclick="saveProxyAndRestart()">Save &amp; Restart</button>
                     <button class="btn btn-secondary" onclick="loadAddonProxies()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportAddonConfig()">Export Config</button>
+                    <button class="btn btn-secondary" onclick="importAddonConfig()">Import Config</button>
                 </div>
                 <div class="button-group" id="monitorButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadMonitorHealth()">Refresh</button>
@@ -2012,6 +2014,7 @@
                 <input type="file" id="rotatorScheduleFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleRotatorScheduleImport(event)">
                 <input type="file" id="uiConfigZipFileInput" accept=".zip" style="display: none;" onchange="handleUIConfigImport(event)">
                 <input type="file" id="radiodConfigFileInput" accept=".conf,.yaml,.yml,.ini,.txt" style="display: none;" onchange="handleRadiodConfigImport(event)">
+                <input type="file" id="addonConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleAddonConfigImport(event)">
             </div>
         </div>
 
@@ -21336,6 +21339,245 @@ Referer: ${log.referer}`;
                 }
             } catch (e) {
                 showAlert('Error triggering restart: ' + e.message, 'error');
+            }
+        }
+
+        // ── Addon Config Export ───────────────────────────────────────────────────
+
+        async function exportAddonConfig() {
+            try {
+                const resp = await authenticatedFetch('/admin/addon-proxies');
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                const proxies = await resp.json();
+
+                // Build YAML manually — mirrors the addons.yaml format
+                let yaml = '# UberSDR Addon Proxies Configuration\n';
+                yaml += '# Exported from admin UI — copy to addons.yaml to restore\n\n';
+                yaml += 'proxies:\n';
+
+                if (!proxies || proxies.length === 0) {
+                    yaml += '  []\n';
+                } else {
+                    proxies.forEach(p => {
+                        yaml += '\n';
+                        yaml += '  - name: "' + p.name + '"\n';
+                        yaml += '    enabled: ' + (p.enabled ? 'true' : 'false') + '\n';
+                        yaml += '    host: "' + (p.host || '') + '"\n';
+                        yaml += '    port: ' + (p.port || 0) + '\n';
+                        yaml += '    strip_prefix: ' + (p.strip_prefix ? 'true' : 'false') + '\n';
+                        yaml += '    require_admin: ' + (p.require_admin ? 'true' : 'false') + '\n';
+                        yaml += '    rewrite_origin: ' + (p.rewrite_origin ? 'true' : 'false') + '\n';
+                        const ips = Array.isArray(p.allowed_ips) && p.allowed_ips.length > 0
+                            ? p.allowed_ips
+                            : [];
+                        if (ips.length === 0) {
+                            yaml += '    allowed_ips: []\n';
+                        } else {
+                            yaml += '    allowed_ips:\n';
+                            ips.forEach(ip => { yaml += '      - "' + ip + '"\n'; });
+                        }
+                        yaml += '    rate_limit: ' + (p.rate_limit || 0) + '\n';
+                    });
+                }
+
+                const blob = new Blob([yaml], { type: 'text/yaml' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'addons.yaml';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showAlert('Addon proxy configuration exported as addons.yaml', 'success');
+            } catch (e) {
+                showAlert('Error exporting addon configuration: ' + e.message, 'error');
+            }
+        }
+
+        // ── Addon Config Import ───────────────────────────────────────────────────
+
+        function importAddonConfig() {
+            const input = document.getElementById('addonConfigFileInput');
+            input.value = '';   // reset so the same file can be re-selected
+            input.click();
+        }
+
+        async function handleAddonConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+
+                // Parse the proxies list from YAML or JSON
+                let imported = [];
+                if (file.name.endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    imported = Array.isArray(data) ? data
+                             : Array.isArray(data.proxies) ? data.proxies
+                             : [];
+                } else {
+                    // Minimal YAML parser for the addons.yaml structure.
+                    // Each proxy is a YAML sequence entry under "proxies:".
+                    imported = parseAddonProxiesYAML(text);
+                }
+
+                if (!imported || imported.length === 0) {
+                    showAlert('No proxy entries found in the imported file.', 'error');
+                    return;
+                }
+
+                // Fetch the current list so we know which names already exist
+                const listResp = await authenticatedFetch('/admin/addon-proxies');
+                if (!listResp || !listResp.ok) {
+                    showAlert('Could not fetch current proxy list before import.', 'error');
+                    return;
+                }
+                const existing = await listResp.json();
+                const existingNames = new Set((existing || []).map(p => p.name));
+
+                let added = 0, updated = 0, errors = [];
+
+                for (const proxy of imported) {
+                    if (!proxy.name) { errors.push('Skipped entry with missing name'); continue; }
+
+                    // Strip the computed "path" field — the server ignores it but keep it clean
+                    const payload = {
+                        name:           proxy.name,
+                        enabled:        !!proxy.enabled,
+                        host:           proxy.host || '',
+                        port:           parseInt(proxy.port, 10) || 0,
+                        strip_prefix:   proxy.strip_prefix !== undefined ? !!proxy.strip_prefix : true,
+                        require_admin:  proxy.require_admin !== undefined ? !!proxy.require_admin : true,
+                        rewrite_origin: !!proxy.rewrite_origin,
+                        allowed_ips:    Array.isArray(proxy.allowed_ips) ? proxy.allowed_ips : [],
+                        rate_limit:     parseInt(proxy.rate_limit, 10) || 0,
+                    };
+
+                    try {
+                        let resp;
+                        if (existingNames.has(proxy.name)) {
+                            resp = await authenticatedFetch('/admin/addon-proxies?name=' + encodeURIComponent(proxy.name), {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload),
+                            });
+                            if (resp && resp.ok) updated++;
+                            else errors.push(proxy.name + ': ' + (resp ? await resp.text() : 'no response'));
+                        } else {
+                            resp = await authenticatedFetch('/admin/addon-proxies', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload),
+                            });
+                            if (resp && resp.ok) added++;
+                            else errors.push(proxy.name + ': ' + (resp ? await resp.text() : 'no response'));
+                        }
+                    } catch (err) {
+                        errors.push(proxy.name + ': ' + err.message);
+                    }
+                }
+
+                loadAddonProxies();
+
+                let msg = 'Import complete: ' + added + ' added, ' + updated + ' updated.';
+                if (errors.length > 0) msg += ' Errors: ' + errors.join('; ');
+                showAlert(msg, errors.length > 0 ? 'error' : 'success');
+
+            } catch (e) {
+                showAlert('Error importing addon configuration: ' + e.message, 'error');
+            }
+        }
+
+        /**
+         * Minimal parser for the addons.yaml "proxies:" list.
+         * Returns an array of plain objects with the same fields as addonProxyJSON.
+         */
+        function parseAddonProxiesYAML(text) {
+            const proxies = [];
+            const lines = text.split('\n');
+
+            let inProxies = false;
+            let current = null;
+            let inAllowedIPs = false;
+
+            const parseBool = v => v === 'true' || v === 'yes' || v === '1';
+
+            for (let i = 0; i < lines.length; i++) {
+                const raw = lines[i];
+                const trimmed = raw.trim();
+
+                // Skip comments and blank lines
+                if (!trimmed || trimmed.startsWith('#')) continue;
+
+                const indent = raw.search(/\S/);
+
+                // Top-level "proxies:" key
+                if (trimmed === 'proxies:') {
+                    inProxies = true;
+                    continue;
+                }
+
+                if (!inProxies) continue;
+
+                // New sequence entry "  - name: ..." or "  -"
+                if (/^-\s/.test(trimmed) || trimmed === '-') {
+                    if (current) proxies.push(current);
+                    current = { allowed_ips: [] };
+                    inAllowedIPs = false;
+
+                    // Inline first field: "- name: foo"
+                    const inline = trimmed.replace(/^-\s*/, '');
+                    if (inline) {
+                        const m = inline.match(/^(\w+):\s*(.*)$/);
+                        if (m) applyProxyYAMLField(current, m[1], m[2]);
+                    }
+                    continue;
+                }
+
+                if (!current) continue;
+
+                // "allowed_ips:" block
+                if (trimmed === 'allowed_ips:' || trimmed === 'allowed_ips: []') {
+                    inAllowedIPs = true;
+                    current.allowed_ips = [];
+                    continue;
+                }
+
+                // List item under allowed_ips: "  - "1.2.3.4""
+                if (inAllowedIPs && /^-\s/.test(trimmed)) {
+                    const val = trimmed.replace(/^-\s*/, '').replace(/^["']|["']$/g, '');
+                    current.allowed_ips.push(val);
+                    continue;
+                }
+
+                // Regular key: value line
+                const m = trimmed.match(/^(\w+):\s*(.*)$/);
+                if (m) {
+                    if (m[1] !== 'allowed_ips') inAllowedIPs = false;
+                    applyProxyYAMLField(current, m[1], m[2]);
+                }
+            }
+
+            if (current) proxies.push(current);
+            return proxies;
+        }
+
+        function applyProxyYAMLField(obj, key, rawVal) {
+            // Strip inline comments and surrounding quotes
+            const val = rawVal.split('#')[0].trim().replace(/^["']|["']$/g, '');
+            switch (key) {
+                case 'name':           obj.name = val; break;
+                case 'enabled':        obj.enabled = (val === 'true' || val === 'yes'); break;
+                case 'host':           obj.host = val; break;
+                case 'port':           obj.port = parseInt(val, 10) || 0; break;
+                case 'strip_prefix':   obj.strip_prefix = (val === 'true' || val === 'yes'); break;
+                case 'require_admin':  obj.require_admin = (val === 'true' || val === 'yes'); break;
+                case 'rewrite_origin': obj.rewrite_origin = (val === 'true' || val === 'yes'); break;
+                case 'rate_limit':     obj.rate_limit = parseInt(val, 10) || 0; break;
+                // allowed_ips handled separately
             }
         }
 

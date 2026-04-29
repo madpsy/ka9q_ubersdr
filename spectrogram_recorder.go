@@ -1202,6 +1202,26 @@ func rowP5(row []float32) float32 {
 	return valid[idx]
 }
 
+// rowP95 returns the 95th-percentile dBFS value of a spectrogram row,
+// skipping sentinel (no-data) values. Used as a per-minute signal peak estimate.
+func rowP95(row []float32) float32 {
+	valid := make([]float32, 0, len(row))
+	for _, v := range row {
+		if !math.IsInf(float64(v), -1) && !math.IsNaN(float64(v)) {
+			valid = append(valid, v)
+		}
+	}
+	if len(valid) == 0 {
+		return 0
+	}
+	sortFloat32Slice(valid)
+	idx := len(valid) * 95 / 100
+	if idx >= len(valid) {
+		idx = len(valid) - 1
+	}
+	return valid[idx]
+}
+
 // sortFloat32Slice sorts a []float32 in ascending order using stdlib sort.
 func sortFloat32Slice(s []float32) {
 	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
@@ -1352,6 +1372,7 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 		}
 	}
 	// Fill yesterday meta rows — use JSONL entry if available, else synthetic.
+	// Also compute P95 (PeakDB) from the assembled result rows.
 	for dstRow := 0; dstRow < tailLen; dstRow++ {
 		minuteOfDay := cutoff + dstRow
 		if m, ok := yesterdayJSONL[minuteOfDay]; ok {
@@ -1364,6 +1385,7 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 				Unix:    t.Unix(),
 			}
 		}
+		result.metaRows[dstRow].PeakDB = rowP95(result.rows[dstRow])
 	}
 
 	// ── Today's head (minutes 0..cutoff-1 → result rows tailLen..1439) ───────
@@ -1397,6 +1419,7 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 	sr.mu.Unlock()
 
 	// Fill today meta rows — use JSONL entry if available, else synthetic.
+	// Also compute P95 (PeakDB) from the assembled result rows.
 	for minuteOfDay := 0; minuteOfDay < cutoff; minuteOfDay++ {
 		dstRow := tailLen + minuteOfDay
 		if m, ok := todayJSONL[minuteOfDay]; ok {
@@ -1409,6 +1432,7 @@ func (sr *SpectrogramRecorder) getRolling24hRows() *rollingResult {
 				Unix:    t.Unix(),
 			}
 		}
+		result.metaRows[dstRow].PeakDB = rowP95(result.rows[dstRow])
 	}
 
 	// Trim trailing all-sentinel rows so the image height matches actual data.
@@ -1858,6 +1882,7 @@ type SpectrogramRowMeta struct {
 	UTCTime    string  `json:"utc_time"` // "HH:MM"
 	Unix       int64   `json:"unix"`
 	NoiseFloor float32 `json:"noise_floor"` // P5 percentile dBFS (noise floor estimate)
+	PeakDB     float32 `json:"peak_db"`     // P95 percentile dBFS (signal peak estimate)
 }
 
 // SpectrogramMeta is the JSON response for GET /api/spectrogram/meta.
@@ -2049,7 +2074,7 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 		rowCount = liveRowCount
 		complete = false
 
-		// Snapshot data rows for auto-range
+		// Snapshot data rows for auto-range and P95 computation
 		recorder.mu.Lock()
 		dataRows = make([][]float32, recorder.rowCount)
 		for i := 0; i < recorder.rowCount; i++ {
@@ -2058,6 +2083,13 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 			dataRows[i] = row
 		}
 		recorder.mu.Unlock()
+
+		// Populate PeakDB (P95) for each row from the snapshotted data
+		for i := range rows {
+			if i < len(dataRows) {
+				rows[i].PeakDB = rowP95(dataRows[i])
+			}
+		}
 	} else {
 		// Archived day — use JSONL row count; if JSONL missing, assume full day
 		if rows == nil {
@@ -2104,6 +2136,16 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 				Row:     i,
 				UTCTime: t.Format("15:04"),
 				Unix:    t.Unix(),
+			}
+		}
+	}
+
+	// Populate PeakDB (P95) for archived days from the loaded .bin data rows.
+	// (For today this was already done above, immediately after the ring buffer snapshot.)
+	if complete {
+		for i := range rows {
+			if i < len(dataRows) {
+				rows[i].PeakDB = rowP95(dataRows[i])
 			}
 		}
 	}

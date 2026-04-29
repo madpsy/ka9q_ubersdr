@@ -179,6 +179,17 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 .gallery-card .gc-band{font-size:.72em;opacity:.55;margin-top:1px}
 #gallery-loading{text-align:center;padding:30px;opacity:.6}
 #gallery-empty{text-align:center;padding:30px;opacity:.5;font-style:italic;display:none}
+/* Activity chart — noise floor / signal peak overview above the spectrogram */
+.sg-activity-wrap{background:rgba(0,0,0,.35);border-radius:8px 8px 0 0;padding:10px 0 0;margin-bottom:0;position:relative}
+.sg-activity-header{display:flex;align-items:center;justify-content:space-between;padding:0 16px 6px;flex-wrap:wrap;gap:6px}
+.sg-activity-title{font-size:.78em;font-weight:600;opacity:.75;letter-spacing:.02em}
+.sg-activity-legend{display:flex;align-items:center;gap:12px;font-size:.72em;opacity:.7}
+.sg-activity-legend span{display:flex;align-items:center;gap:5px}
+.sg-activity-legend i{display:inline-block;width:22px;height:3px;border-radius:2px;flex-shrink:0}
+.sg-activity-legend i.noise{background:#0ff}
+.sg-activity-legend i.peak{background:#f90}
+#sg-activity-canvas{display:block;width:100%;height:80px;cursor:crosshair}
+#sg-activity-tooltip{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:7px 11px;font-size:.76em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.8;box-shadow:0 4px 18px rgba(0,0,0,.45)}
 </style>
 </head>
 <body>
@@ -261,6 +272,19 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 <div id="loading" class="loading">Loading spectrogram&hellip;</div>
 
 <div id="view" style="display:none">
+  <!-- Activity chart — noise floor (P5) and signal peak (P95) over the full day -->
+  <div class="sg-activity-wrap" id="sg-activity-wrap" style="display:none">
+    <div class="sg-activity-header">
+      <span class="sg-activity-title">Band Activity</span>
+      <span class="sg-activity-legend">
+        <span><i class="noise"></i>Noise floor (P5)</span>
+        <span><i class="peak"></i>Signal peak (P95)</span>
+      </span>
+    </div>
+    <div style="padding-left:46px;padding-right:48px">
+      <canvas id="sg-activity-canvas"></canvas>
+    </div>
+  </div>
   <!-- freq-axis sits ABOVE the sg-wrap, offset by the time-axis width so it aligns with the canvas.
        It is NOT inside sg-right (which has overflow:hidden) so labels are never clipped.
        buildFreqAxis() positions labels in screen-space percentages of #freq-axis width. -->
@@ -539,6 +563,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 
 </div><!-- end .container -->
 <div id="tt"></div>
+<div id="sg-activity-tooltip"></div>
 
 <script src="chart.umd.min.js"></script>
 <script src="chartjs-plugin-zoom.min.js"></script>
@@ -3380,6 +3405,7 @@ var _origSgSelectRow = sgSelectRow;
 sgSelectRow = function(rowIdx, userInteraction) {
   _origSgSelectRow(rowIdx, userInteraction);
   sgDrawScrubber();
+  if (window.sgDrawActivityChart) window.sgDrawActivityChart();
 };
 
 /* Also redraw when the spectrogram image loads (bmp changes) — hook render(). */
@@ -3387,7 +3413,238 @@ var _origRender = render;
 render = function() {
   _origRender();
   sgDrawScrubber();
+  if (window.sgDrawActivityChart) window.sgDrawActivityChart();
 };
+
+/* ── Band Activity Chart ──────────────────────────────────────────────────────
+   Draws a full-day overview above the spectrogram showing:
+     • Cyan line  — noise floor (P5 percentile per row)
+     • Orange line — signal peak (P95 percentile per row)
+     • Shaded fill between them (dynamic range)
+     • Vertical playhead at the currently selected row
+   The X axis always spans the full day (all rows), independent of zoom.
+   A tooltip shows UTC time, noise floor, peak, and dynamic range on hover.
+*/
+(function() {
+  var actTip = document.getElementById('sg-activity-tooltip');
+
+  function sgDrawActivityChart() {
+    var wrap = document.getElementById('sg-activity-wrap');
+    var canvas = document.getElementById('sg-activity-canvas');
+    if (!meta || !meta.rows || meta.rows.length === 0) {
+      if (wrap) wrap.style.display = 'none';
+      return;
+    }
+
+    // Check that at least one row has a non-zero peak_db (data available)
+    var hasPeak = false;
+    for (var i = 0; i < meta.rows.length; i++) {
+      if (meta.rows[i].peak_db && meta.rows[i].peak_db !== 0) { hasPeak = true; break; }
+    }
+    if (!hasPeak) {
+      if (wrap) wrap.style.display = 'none';
+      return;
+    }
+
+    if (wrap) wrap.style.display = '';
+
+    // Size the canvas to its CSS display size
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = canvas.offsetWidth || canvas.parentElement.offsetWidth || 800;
+    var cssH = 80;
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.height = cssH + 'px';
+
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    var W = cssW, H = cssH;
+    var rows = meta.rows;
+    var n = rows.length;
+
+    // Compute Y range from the data (with a small margin)
+    var yMin = Infinity, yMax = -Infinity;
+    for (var i = 0; i < n; i++) {
+      var nf = rows[i].noise_floor || 0;
+      var pk = rows[i].peak_db    || 0;
+      if (nf !== 0) { if (nf < yMin) yMin = nf; if (nf > yMax) yMax = nf; }
+      if (pk !== 0) { if (pk < yMin) yMin = pk; if (pk > yMax) yMax = pk; }
+    }
+    if (!isFinite(yMin) || !isFinite(yMax) || yMax === yMin) {
+      yMin = -130; yMax = -60;
+    }
+    var margin = (yMax - yMin) * 0.08;
+    yMin -= margin; yMax += margin;
+
+    // Helper: map dB value → canvas Y pixel
+    function dbToY(db) {
+      return H - ((db - yMin) / (yMax - yMin)) * H;
+    }
+    // Helper: map row index → canvas X pixel (centre of that row's column)
+    function rowToX(idx) {
+      return (idx + 0.5) / n * W;
+    }
+
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw faint horizontal grid lines at round dB values
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 1;
+    var step = 10;
+    var gridStart = Math.ceil(yMin / step) * step;
+    for (var db = gridStart; db <= yMax; db += step) {
+      var gy = Math.round(dbToY(db)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Build path arrays
+    var noisePoints = [], peakPoints = [];
+    for (var i = 0; i < n; i++) {
+      var nf = rows[i].noise_floor || 0;
+      var pk = rows[i].peak_db    || 0;
+      noisePoints.push({ x: rowToX(i), y: nf !== 0 ? dbToY(nf) : null });
+      peakPoints.push({  x: rowToX(i), y: pk !== 0 ? dbToY(pk) : null });
+    }
+
+    // Draw shaded fill between noise floor and peak
+    ctx.save();
+    ctx.beginPath();
+    // Forward along peak line
+    var started = false;
+    for (var i = 0; i < n; i++) {
+      var p = peakPoints[i];
+      if (p.y === null) continue;
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; }
+      else           { ctx.lineTo(p.x, p.y); }
+    }
+    // Backward along noise floor line
+    for (var i = n - 1; i >= 0; i--) {
+      var p = noisePoints[i];
+      if (p.y === null) continue;
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    var fillGrad = ctx.createLinearGradient(0, 0, 0, H);
+    fillGrad.addColorStop(0,   'rgba(255,153,0,0.22)');
+    fillGrad.addColorStop(1,   'rgba(0,255,255,0.08)');
+    ctx.fillStyle = fillGrad;
+    ctx.fill();
+    ctx.restore();
+
+    // Draw noise floor line (cyan)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,220,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var started = false;
+    for (var i = 0; i < n; i++) {
+      var p = noisePoints[i];
+      if (p.y === null) { started = false; continue; }
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; }
+      else           { ctx.lineTo(p.x, p.y); }
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw peak line (orange)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,153,0,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var started = false;
+    for (var i = 0; i < n; i++) {
+      var p = peakPoints[i];
+      if (p.y === null) { started = false; continue; }
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; }
+      else           { ctx.lineTo(p.x, p.y); }
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw Y-axis labels (dB values) in the 46px left gutter
+    // We draw them directly on the canvas at x < 0 — instead use a sibling div.
+    // (Labels are drawn as canvas text in the left margin area of the padded wrapper.)
+    // Actually the canvas starts at padding-left:46px, so we draw labels on the canvas
+    // at the very left edge with a small offset.
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '10px -apple-system,BlinkMacSystemFont,sans-serif';
+    ctx.textAlign = 'left';
+    for (var db = gridStart; db <= yMax; db += step) {
+      var gy = dbToY(db);
+      if (gy < 10 || gy > H - 4) continue;
+      ctx.fillText(db + ' dB', 3, gy - 2);
+    }
+    ctx.restore();
+
+    // Draw playhead for selected row
+    if (typeof sgSelectedRow === 'number' && sgSelectedRow >= 0 && sgSelectedRow < n) {
+      var px = rowToX(sgSelectedRow);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,220,255,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, H);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // Expose globally so the patches above can call it
+  window.sgDrawActivityChart = sgDrawActivityChart;
+
+  // Mouse tooltip
+  var canvas = document.getElementById('sg-activity-canvas');
+  if (canvas) {
+    canvas.addEventListener('mousemove', function(e) {
+      if (!meta || !meta.rows || meta.rows.length === 0) return;
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var frac = x / rect.width;
+      var idx = Math.min(Math.max(Math.floor(frac * meta.rows.length), 0), meta.rows.length - 1);
+      var row = meta.rows[idx];
+      if (!row) return;
+      var nf = row.noise_floor || 0;
+      var pk = row.peak_db    || 0;
+      var dr = (nf !== 0 && pk !== 0) ? (pk - nf).toFixed(1) : '—';
+      actTip.innerHTML =
+        '<b style="color:#7df">' + (row.utc_time || '') + ' UTC</b><br>' +
+        '<span style="color:#0ff">Noise floor: ' + (nf !== 0 ? nf.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
+        '<span style="color:#f90">Signal peak: ' + (pk !== 0 ? pk.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
+        '<span style="opacity:.7">Dynamic range: ' + (dr !== '—' ? dr + ' dB' : '—') + '</span>';
+      actTip.style.display = 'block';
+      var tx = e.clientX + 14, ty = e.clientY - 10;
+      if (tx + 200 > window.innerWidth) tx = e.clientX - 210;
+      actTip.style.left = tx + 'px';
+      actTip.style.top  = ty + 'px';
+    });
+    canvas.addEventListener('mouseleave', function() {
+      actTip.style.display = 'none';
+    });
+    // Click on activity chart to select that row in the spectrogram
+    canvas.addEventListener('click', function(e) {
+      if (!meta || !meta.rows || meta.rows.length === 0) return;
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var frac = x / rect.width;
+      var idx = Math.min(Math.max(Math.floor(frac * meta.rows.length), 0), meta.rows.length - 1);
+      sgSelectRow(idx, true);
+    });
+  }
+
+  // Redraw on window resize (canvas width changes)
+  window.addEventListener('resize', function() {
+    if (window.sgDrawActivityChart) window.sgDrawActivityChart();
+  });
+})();
 </script>
 <script src="timetravel.js"></script>
 </body>

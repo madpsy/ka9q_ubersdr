@@ -279,8 +279,8 @@ func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
 			refillRate = 2.0 // 2 requests per second for row spectrum JSON (lightweight)
 			maxTokens = 2.0
 		case "spectrogram-allrows":
-			refillRate = 0.033 // ~1 request per 30 seconds — large payload, preload only
-			maxTokens = 1.0
+			refillRate = 0.5 // 1 request per 2 seconds — preloaded on page load for tooltip data
+			maxTokens = 2.0
 		default:
 			refillRate = 0.5 // 1 request per 2 seconds for FFT data
 			maxTokens = 1.0

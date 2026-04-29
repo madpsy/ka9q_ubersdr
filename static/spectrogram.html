@@ -844,6 +844,59 @@ function onBandChange(){
 var meta=null,bmp=null,ictx=null,readCtx=null;
 var availableDates=[]; /* populated from /api/spectrogram/list, newest first */
 
+/* ── Hover data cache ───────────────────────────────────────────────────── */
+/* Holds the allrows JSON response so the tooltip can look up exact per-bin
+   dBFS values instead of reverse-mapping pixel colours from the PNG.
+   Shared with sgPlay.cache — if playback has already loaded the data we
+   reuse it; otherwise we fetch it in the background after the image loads. */
+var hoverCache=null;       /* AllRowsResponse object, or null if not yet loaded */
+var hoverCacheLoading=false;
+
+/* Look up the exact dBFS value for a given row index and frequency (Hz)
+   from the hover cache (or sgPlay.cache).  Returns null if unavailable. */
+function hoverLookupDb(row,hz){
+  var cache=hoverCache||((typeof sgPlay!=='undefined')&&sgPlay.cache)||null;
+  if(!cache||!cache.rows||row<0||row>=cache.rows.length)return null;
+  var r=cache.rows[row];
+  if(!r||!r.bins)return null;
+  var binIdx=Math.round((hz-cache.start_freq_hz)/cache.bin_width_hz - 0.5);
+  if(binIdx<0||binIdx>=r.bins.length)return null;
+  var v=r.bins[binIdx];
+  return (v===null||v===undefined)?null:v;
+}
+
+/* Fetch allrows data in the background for tooltip use.
+   Reuses sgPlay.cache if already loaded; otherwise fetches independently.
+   Called after each successful load() to ensure the cache matches the
+   current date/band/rolling selection. */
+function hoverCacheLoad(){
+  /* If playback cache is already loaded, reuse it */
+  if(typeof sgPlay!=='undefined'&&sgPlay.cache){hoverCache=sgPlay.cache;return;}
+  if(hoverCacheLoading)return;
+  hoverCacheLoading=true;
+  fetch(sgAllRowsUrl())
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(data){
+      hoverCache=data;
+      hoverCacheLoading=false;
+      /* Also populate sgPlay.cache so playback doesn't need to re-fetch */
+      if(typeof sgPlay!=='undefined'&&!sgPlay.cache){
+        sgPlay.cache=data;
+        sgPlayComputeLockedRange();
+      }
+    })
+    .catch(function(e){
+      hoverCacheLoading=false;
+      console.warn('hoverCacheLoad failed:',e.message);
+    });
+}
+
+/* Invalidate the hover cache when date/band changes */
+function hoverCacheInvalidate(){
+  hoverCache=null;
+  hoverCacheLoading=false;
+}
+
 /* Zoom/pan state */
 var zoom={scale:1,tx:0,ty:0,dragging:false,dragStartX:0,dragStartY:0,dragStartTx:0,dragStartTy:0};
 var MIN_SCALE=1, MAX_SCALE=20;
@@ -1185,6 +1238,9 @@ function load(){
       setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
       /* Show download button — downloadCanvas() captures the canvas directly */
       document.getElementById('dl-btn').style.display='inline';
+      /* Load allrows data in the background so the tooltip can show exact
+         per-bin dBFS values instead of reverse-mapping from pixel colours */
+      hoverCacheLoad();
     })
     .catch(function(e){
       document.getElementById('loading').style.display='none';
@@ -1551,19 +1607,28 @@ function setupHover(){
       tstr=String(Math.floor(row/60)).padStart(2,'0')+':'+String(row%60).padStart(2,'0')+' UTC';
     }
 
-    /* Signal level from pixel — use the range that was actually used to render
-       the current PNG (slider values if user changed them, else meta auto-range) */
+    /* Signal level — prefer exact bin data from the allrows cache over
+       reverse-mapping pixel colours from the PNG (which is lossy due to
+       256-level palette quantisation and potential dB range mismatches). */
     var sig=null,nf=null,snr=null;
     if(!nodata){
-      var ttMin=contrastUserChanged?contrastMin:meta.db_min;
-      var ttMax=contrastUserChanged?contrastMax:meta.db_max;
-      /* Use readCtx (offscreen, clean pixels) — NOT ictx (on-screen canvas that
-         the browser may composite with the overlay canvas before readback) */
-      sig=pxToDb(readCtx,px,py,ttMin,ttMax);
-      if(meta.rows&&meta.rows[row]){
-        var nfv=meta.rows[row].noise_floor;
-        if(nfv!==0){nf=nfv;if(sig!==null)snr=sig-nf;}
+      /* Try exact lookup from allrows cache first */
+      sig=hoverLookupDb(row,hz);
+      if(sig===null){
+        /* Fallback: reverse-map from pixel colour (less accurate) */
+        var ttMin=contrastUserChanged?contrastMin:meta.db_min;
+        var ttMax=contrastUserChanged?contrastMax:meta.db_max;
+        sig=pxToDb(readCtx,px,py,ttMin,ttMax);
       }
+      /* Noise floor: prefer allrows cache (same source as signal), fall back to meta */
+      var _hc=hoverCache||((typeof sgPlay!=='undefined')&&sgPlay.cache)||null;
+      if(_hc&&_hc.rows&&row<_hc.rows.length&&_hc.rows[row].noise_floor){
+        nf=_hc.rows[row].noise_floor;
+      } else if(meta.rows&&meta.rows[row]){
+        var nfv=meta.rows[row].noise_floor;
+        if(nfv!==0)nf=nfv;
+      }
+      if(sig!==null&&nf!==null)snr=sig-nf;
     }
 
     /* Build tooltip */
@@ -3301,6 +3366,7 @@ function sgPlayInvalidateCache(){
   sgPlay.cache=null;
   sgPlay.lockedDbMin=null;
   sgPlay.lockedDbMax=null;
+  hoverCacheInvalidate();
   var btn=document.getElementById('sg-play-btn');
   if(btn){btn.textContent='\u25B6 Play';btn.disabled=false;}
 }

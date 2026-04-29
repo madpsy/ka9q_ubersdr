@@ -1835,7 +1835,8 @@
                             <!-- File picker + upload -->
                             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
                                 <input type="file" id="spectrumBgFile" accept="image/png"
-                                       style="flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; background: white;">
+                                       style="flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; background: white;"
+                                       onchange="uploadSpectrumBg()">
                                 <button class="btn" onclick="uploadSpectrumBg()" style="white-space: nowrap;">Upload Image</button>
                                 <button class="btn btn-danger" id="spectrumBgRemoveBtn" onclick="removeSpectrumBg()" style="white-space: nowrap; display: none;">Remove Image</button>
                             </div>

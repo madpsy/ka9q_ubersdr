@@ -52,8 +52,11 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 #sg-rowspec-canvas{display:block;width:100%;height:180px;cursor:crosshair}
 /* Frequency axis */
 #freq-axis{position:relative;height:32px;overflow:visible}
+#freq-axis-bottom{position:relative;height:32px;overflow:visible}
 .f-label{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;top:4px}
+.f-label-bottom{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;bottom:4px}
 .f-notch{position:absolute;bottom:0;width:1px;height:8px;background:rgba(255,255,255,.5);transform:translateX(-50%)}
+.f-notch-bottom{position:absolute;top:0;width:1px;height:8px;background:rgba(255,255,255,.5);transform:translateX(-50%)}
 /* Canvas area */
 .sg-canvas-wrap{position:relative;width:100%;cursor:crosshair;background:#000;border-radius:0 0 6px 6px}
 #img-canvas{display:block;width:100%;height:auto;image-rendering:pixelated}
@@ -313,6 +316,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
       <div id="row-indicator-arrow"></div>
       <div id="row-indicator-label"></div>
     </div>
+  </div>
+  <!-- freq-axis-bottom mirrors the top freq-axis, sits below the sg-wrap -->
+  <div style="padding-left:46px;padding-right:48px;position:relative">
+    <div id="freq-axis-bottom"></div>
   </div>
   <!-- Row spectrum chart — shown below the spectrogram after a row is selected -->
   <div id="sg-rowspec-wrap" class="sg-rowspec-wrap" style="display:none">
@@ -1259,7 +1266,9 @@ function updateInfoBanner(){
    Only ticks within [0%, 100%] of the container are visible. */
 function buildFreqAxis(){
   var ax=document.getElementById('freq-axis');
+  var axB=document.getElementById('freq-axis-bottom');
   ax.innerHTML='';
+  if(axB)axB.innerHTML='';
   if(!meta)return;
 
   /* For wideband: startHz=0, spanHz=30 MHz.
@@ -1342,6 +1351,14 @@ function buildFreqAxis(){
     notch.style.height='4px';
     notch.style.opacity='0.3';
     ax.appendChild(notch);
+    if(axB){
+      var notchB=document.createElement('div');
+      notchB.className='f-notch-bottom';
+      notchB.style.left=pct;
+      notchB.style.height='4px';
+      notchB.style.opacity='0.3';
+      axB.appendChild(notchB);
+    }
   }
 
   /* Render major notches + labels — only those in visible range */
@@ -1357,6 +1374,15 @@ function buildFreqAxis(){
     lbl.className='f-label'; lbl.style.left=pct;
     lbl.textContent=fmtHz(f);
     ax.appendChild(lbl);
+    if(axB){
+      var notchB2=document.createElement('div');
+      notchB2.className='f-notch-bottom'; notchB2.style.left=pct;
+      axB.appendChild(notchB2);
+      var lblB=document.createElement('span');
+      lblB.className='f-label-bottom'; lblB.style.left=pct;
+      lblB.textContent=fmtHz(f);
+      axB.appendChild(lblB);
+    }
   }
 }
 
@@ -1462,7 +1488,6 @@ function buildLegend(){
 function setupHover(){
   /* Attach hover to the sg-right container (covers freq-axis + canvas) */
   var sgRight=document.querySelector('.sg-right');
-  var cw=document.getElementById('cwrap');
   var tt=document.getElementById('tt');
   var oc=document.getElementById('overlay-canvas');
   var octx=oc.getContext('2d');
@@ -1470,16 +1495,33 @@ function setupHover(){
   sgRight.onmousemove=function(e){
     if(!meta||!ictx||!readCtx)return;
 
-    /* Cursor position relative to cwrap (the scaled canvas element).
-       getBoundingClientRect() on cwrap gives its screen rect after CSS transform. */
-    var cr=cw.getBoundingClientRect();
-    /* Is cursor over the canvas area? */
-    var overCanvas=(e.clientX>=cr.left&&e.clientX<=cr.right&&e.clientY>=cr.top&&e.clientY<=cr.bottom);
+    /* Compute canvas-local coordinates by reversing the zoom transform directly.
+       We use the unscaled sg-right container rect + the zoom state variables
+       (zoom.tx, zoom.ty, zoom.scale) rather than calling getBoundingClientRect()
+       on #cwrap (which is a child of the CSS-transformed #zoom-wrap).
+       getBoundingClientRect() on transformed children is unreliable in some
+       browsers and does not update correctly after zoom reset without a reload. */
+    var sgRect=sgRight.getBoundingClientRect();
 
-    /* Fraction across the canvas (0..1) — works correctly because getBoundingClientRect
-       returns the scaled rect, so dividing by width/height gives the correct fraction */
-    var xp=Math.max(0,Math.min(1,(e.clientX-cr.left)/cr.width));
-    var yp=Math.max(0,Math.min(1,(e.clientY-cr.top)/cr.height));
+    /* Cursor position relative to the top-left of sg-right (unscaled container) */
+    var localX=e.clientX-sgRect.left;
+    var localY=e.clientY-sgRect.top;
+
+    /* Reverse the CSS transform: translate(tx,ty) scale(s) with transform-origin:0 0
+       to get the cursor position in unscaled canvas CSS coordinates */
+    var canvasLocalX=(localX-zoom.tx)/zoom.scale;
+    var canvasLocalY=(localY-zoom.ty)/zoom.scale;
+
+    /* Unscaled CSS dimensions of the canvas (width=sg-right width, height=auto/proportional) */
+    var canvasCssW=sgRect.width;
+    var canvasCssH=(bmp&&bmp.width>0)?(sgRect.width*(bmp.height/bmp.width)):sgRect.height;
+
+    /* Is cursor over the actual canvas area (in unscaled canvas CSS space)? */
+    var overCanvas=(canvasLocalX>=0&&canvasLocalX<=canvasCssW&&canvasLocalY>=0&&canvasLocalY<=canvasCssH);
+
+    /* Fraction across the canvas (0..1) */
+    var xp=Math.max(0,Math.min(1,canvasLocalX/canvasCssW));
+    var yp=Math.max(0,Math.min(1,canvasLocalY/canvasCssH));
 
     /* Canvas pixel coordinates for pixel read — use readCtx dimensions (offscreen,
        same size as img-canvas native pixels, never composited with overlay) */

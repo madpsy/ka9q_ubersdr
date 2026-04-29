@@ -180,7 +180,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 #gallery-loading{text-align:center;padding:30px;opacity:.6}
 #gallery-empty{text-align:center;padding:30px;opacity:.5;font-style:italic;display:none}
 /* Activity chart — noise floor / signal peak overview above the spectrogram */
-.sg-activity-wrap{background:rgba(0,0,0,.35);border-radius:8px 8px 0 0;padding:10px 0 0;margin-bottom:0;position:relative}
+.sg-activity-wrap{background:rgba(0,0,0,.35);border-radius:8px;padding:10px 0 0;margin-bottom:10px;position:relative;overflow:hidden}
 .sg-activity-header{display:flex;align-items:center;justify-content:space-between;padding:0 16px 6px;flex-wrap:wrap;gap:6px}
 .sg-activity-title{font-size:.78em;font-weight:600;opacity:.75;letter-spacing:.02em}
 .sg-activity-legend{display:flex;align-items:center;gap:12px;font-size:.72em;opacity:.7}
@@ -188,7 +188,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 .sg-activity-legend i{display:inline-block;width:22px;height:3px;border-radius:2px;flex-shrink:0}
 .sg-activity-legend i.noise{background:#0ff}
 .sg-activity-legend i.peak{background:#f90}
-#sg-activity-canvas{display:block;width:100%;height:80px;cursor:crosshair}
+#sg-activity-canvas{display:block;width:100%;height:100px;cursor:crosshair;border-left:1px solid rgba(255,255,255,0.15)}
 #sg-activity-tooltip{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:7px 11px;font-size:.76em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.8;box-shadow:0 4px 18px rgba(0,0,0,.45)}
 </style>
 </head>
@@ -281,8 +281,13 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
         <span><i class="peak"></i>Signal peak (P95)</span>
       </span>
     </div>
-    <div style="padding-left:46px;padding-right:48px">
-      <canvas id="sg-activity-canvas"></canvas>
+    <!-- Mirrors the row-spectrum layout: 46px left gutter for Y-axis labels,
+         48px right gutter to align with the spectrogram image. -->
+    <div style="position:relative">
+      <div id="sg-activity-yaxis" style="position:absolute;left:0;top:0;width:46px;height:80px;pointer-events:none"></div>
+      <div style="padding-left:46px;padding-right:48px">
+        <canvas id="sg-activity-canvas"></canvas>
+      </div>
     </div>
   </div>
   <!-- freq-axis sits ABOVE the sg-wrap, offset by the time-axis width so it aligns with the canvas.
@@ -3448,10 +3453,13 @@ render = function() {
 
     if (wrap) wrap.style.display = '';
 
-    // Size the canvas to its CSS display size
+    // Size the canvas to its CSS display size.
+    // Total height = chartH (signal area) + timeAxisH (time labels strip).
     var dpr = window.devicePixelRatio || 1;
     var cssW = canvas.offsetWidth || canvas.parentElement.offsetWidth || 800;
-    var cssH = 80;
+    var timeAxisH = 20; // px reserved at bottom for time labels
+    var chartH = 80;    // px for the signal chart area
+    var cssH = chartH + timeAxisH;
     canvas.width  = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.height = cssH + 'px';
@@ -3459,7 +3467,7 @@ render = function() {
     var ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
-    var W = cssW, H = cssH;
+    var W = cssW, H = chartH; // H = chart area height only
     var rows = meta.rows;
     var n = rows.length;
 
@@ -3477,7 +3485,7 @@ render = function() {
     var margin = (yMax - yMin) * 0.08;
     yMin -= margin; yMax += margin;
 
-    // Helper: map dB value → canvas Y pixel
+    // Helper: map dB value → canvas Y pixel (within chart area)
     function dbToY(db) {
       return H - ((db - yMin) / (yMax - yMin)) * H;
     }
@@ -3486,8 +3494,67 @@ render = function() {
       return (idx + 0.5) / n * W;
     }
 
-    // Clear
-    ctx.clearRect(0, 0, W, H);
+    // ── Determine time axis notch interval ───────────────────────────────────
+    // Use the unix timestamps from the first and last rows to find the span.
+    // Pick the coarsest interval that gives at least ~4 notches and fits labels.
+    var firstUnix = rows[0].unix || 0;
+    var lastUnix  = rows[n - 1].unix || 0;
+    var spanMinutes = n; // each row = 1 minute
+    // Candidate hour intervals (in hours): prefer fewer, more readable labels
+    var hourIntervals = [1, 2, 3, 4, 6, 8, 12, 24];
+    var notchIntervalH = 1;
+    for (var hi = 0; hi < hourIntervals.length; hi++) {
+      var h = hourIntervals[hi];
+      var count = Math.floor(spanMinutes / 60 / h);
+      // Aim for 4–12 notches; stop at the first interval that gives ≥4
+      notchIntervalH = h;
+      if (count <= 12) break;
+    }
+    var notchIntervalMin = notchIntervalH * 60;
+
+    // Build list of notch positions: find the first minute-of-day that is a
+    // multiple of notchIntervalMin, then step forward.
+    // Use the unix timestamp of row 0 to find the starting minute-of-day.
+    var notches = []; // { rowIdx, label }
+    if (firstUnix > 0) {
+      // Minute-of-day for row 0
+      var mod0 = Math.floor(firstUnix / 60) % 1440; // minute of day for row 0
+      // First notch minute-of-day >= mod0 that is a multiple of notchIntervalMin
+      var firstNotchMod = Math.ceil(mod0 / notchIntervalMin) * notchIntervalMin;
+      for (var mod = firstNotchMod; mod < mod0 + spanMinutes; mod += notchIntervalMin) {
+        var rowIdx = mod - mod0; // row index relative to first row
+        if (rowIdx < 0 || rowIdx >= n) continue;
+        var hh = Math.floor(mod % 1440 / 60);
+        var mm = mod % 60;
+        var label = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+        notches.push({ rowIdx: rowIdx, label: label });
+      }
+    } else {
+      // Fallback: use utc_time strings from rows
+      for (var i = 0; i < n; i++) {
+        var t = rows[i].utc_time || '';
+        if (!t) continue;
+        var parts = t.split(':');
+        var hh = parseInt(parts[0], 10), mm = parseInt(parts[1], 10);
+        var mod = hh * 60 + mm;
+        if (mod % notchIntervalMin === 0) {
+          notches.push({ rowIdx: i, label: t });
+        }
+      }
+    }
+
+    // Clear entire canvas (chart + time axis)
+    ctx.clearRect(0, 0, W, cssH);
+
+    // Draw faint vertical grid lines through the chart area at each notch
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    for (var ni = 0; ni < notches.length; ni++) {
+      var gx = Math.round(rowToX(notches[ni].rowIdx)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+    }
+    ctx.restore();
 
     // Draw faint horizontal grid lines at round dB values
     ctx.save();
@@ -3567,23 +3634,54 @@ render = function() {
     ctx.stroke();
     ctx.restore();
 
-    // Draw Y-axis labels (dB values) in the 46px left gutter
-    // We draw them directly on the canvas at x < 0 — instead use a sibling div.
-    // (Labels are drawn as canvas text in the left margin area of the padded wrapper.)
-    // Actually the canvas starts at padding-left:46px, so we draw labels on the canvas
-    // at the very left edge with a small offset.
+    // Populate Y-axis label div (46px left gutter, outside the canvas)
+    var yaxisDiv = document.getElementById('sg-activity-yaxis');
+    if (yaxisDiv) {
+      yaxisDiv.style.height = H + 'px';
+      yaxisDiv.innerHTML = '';
+      for (var db = gridStart; db <= yMax; db += step) {
+        var gy = dbToY(db);
+        if (gy < 8 || gy > H - 4) continue;
+        var lbl = document.createElement('div');
+        lbl.style.cssText = 'position:absolute;right:5px;font-size:10px;opacity:.55;white-space:nowrap;transform:translateY(-50%);top:' + gy + 'px;font-family:-apple-system,BlinkMacSystemFont,sans-serif';
+        lbl.textContent = db + ' dB';
+        yaxisDiv.appendChild(lbl);
+      }
+    }
+
+    // ── Time axis strip (bottom timeAxisH px) ────────────────────────────────
+    // Separator line between chart and time axis
     ctx.save();
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, H + 0.5);
+    ctx.lineTo(W, H + 0.5);
+    ctx.stroke();
+    ctx.restore();
+
+    // Notch marks and labels
+    ctx.save();
+    ctx.fillStyle   = 'rgba(255,255,255,0.55)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth   = 1;
     ctx.font = '10px -apple-system,BlinkMacSystemFont,sans-serif';
-    ctx.textAlign = 'left';
-    for (var db = gridStart; db <= yMax; db += step) {
-      var gy = dbToY(db);
-      if (gy < 10 || gy > H - 4) continue;
-      ctx.fillText(db + ' dB', 3, gy - 2);
+    ctx.textAlign   = 'center';
+    ctx.textBaseline = 'top';
+    for (var ni = 0; ni < notches.length; ni++) {
+      var nx = rowToX(notches[ni].rowIdx);
+      // Tick mark
+      ctx.beginPath();
+      ctx.moveTo(Math.round(nx) + 0.5, H + 1);
+      ctx.lineTo(Math.round(nx) + 0.5, H + 5);
+      ctx.stroke();
+      // Label — clamp so it doesn't overflow left/right edges
+      var lx = Math.max(18, Math.min(W - 18, nx));
+      ctx.fillText(notches[ni].label, lx, H + 6);
     }
     ctx.restore();
 
-    // Draw playhead for selected row
+    // Draw playhead for selected row (full height including time axis)
     if (typeof sgSelectedRow === 'number' && sgSelectedRow >= 0 && sgSelectedRow < n) {
       var px = rowToX(sgSelectedRow);
       ctx.save();
@@ -3592,7 +3690,7 @@ render = function() {
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(px, 0);
-      ctx.lineTo(px, H);
+      ctx.lineTo(px, H); // only through chart area, not into time axis
       ctx.stroke();
       ctx.restore();
     }

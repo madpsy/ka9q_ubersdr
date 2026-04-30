@@ -1155,6 +1155,7 @@
                                 <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" maxlength="10" pattern="[A-Za-z0-9]*" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'').toUpperCase()" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
                                 <button class="btn" onclick="lookupRBNCallsign()" style="background: #3f51b5; color: white; font-size: 13px; padding: 5px 12px;">🔍 Look Up</button>
                                 <button class="btn" id="rbnRefreshBtn" onclick="refreshRBNData()" style="background: #5c6bc0; color: white; font-size: 13px; padding: 5px 12px;">🔄 Refresh</button>
+                                <button class="btn" onclick="openRBNStatsModal()" style="background: #283593; color: white; font-size: 13px; padding: 5px 12px;">📊 All Statistics</button>
                             </div>
                         </div>
                         <div id="rbnRateLimitError" style="display: none; margin-bottom: 10px; padding: 8px 12px; background: #fff3e0; border: 1px solid #ffb74d; border-radius: 4px; color: #e65100; font-size: 13px;"></div>
@@ -2358,6 +2359,25 @@
                             Yes, Install CW Skimmer
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RBN Statistics Modal -->
+        <div id="rbnStatsModal" class="modal">
+            <div class="modal-content" style="max-width: 780px; max-height: 85vh; display: flex; flex-direction: column;">
+                <div class="modal-header" style="flex-shrink: 0;">
+                    <h2>📊 RBN Statistics — All Skimmers</h2>
+                    <button class="modal-close" onclick="closeRBNStatsModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0;">
+                    <div id="rbnStatsModalMeta" style="padding: 12px 20px 0 20px; font-size: 12px; color: #888; flex-shrink: 0;"></div>
+                    <div id="rbnStatsModalContent" style="flex: 1; overflow-y: auto; padding: 12px 20px 20px 20px;">
+                        <p style="color: #666; font-size: 13px; margin: 0;">Loading…</p>
+                    </div>
+                </div>
+                <div style="padding: 12px 20px; border-top: 1px solid #e0e0e0; display: flex; justify-content: flex-end; flex-shrink: 0;">
+                    <button class="btn btn-secondary" onclick="closeRBNStatsModal()">Close</button>
                 </div>
             </div>
         </div>
@@ -9400,6 +9420,164 @@ function resetStationIdColor() {
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = '🔄 Refresh'; }
             }
+        }
+
+        /** Open the RBN Statistics modal and populate it with all statistics
+         *  entries sorted by spot_count descending.
+         *  If the configured callsign is found in the list, a "Your Ranking" card
+         *  is shown above the table. */
+        async function openRBNStatsModal() {
+            const modal = document.getElementById('rbnStatsModal');
+            const content = document.getElementById('rbnStatsModalContent');
+            const meta = document.getElementById('rbnStatsModalMeta');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            if (content) content.innerHTML = '<p style="color:#666; font-size:13px; margin:0;">Loading…</p>';
+            if (meta) meta.textContent = '';
+
+            try {
+                const resp = await authenticatedFetch('/admin/rbn-data');
+                if (!resp) return;
+                if (!resp.ok) {
+                    const txt = await resp.text();
+                    if (content) content.innerHTML = `<p style="color:#c62828; font-size:13px; margin:0;">Error: ${txt || resp.statusText}</p>`;
+                    return;
+                }
+                const data = await resp.json();
+
+                // Build metadata line
+                const parts = [];
+                if (data.statistics && data.statistics.updated_at) parts.push('Updated: ' + new Date(data.statistics.updated_at).toLocaleString());
+                if (data.statistics && data.statistics.source_note) parts.push(data.statistics.source_note);
+                if (meta) meta.textContent = parts.join(' · ');
+
+                const entries = (data.statistics && Array.isArray(data.statistics.entries)) ? data.statistics.entries : [];
+                if (entries.length === 0) {
+                    if (content) content.innerHTML = '<p style="color:#666; font-size:13px; margin:0;">No statistics data available.</p>';
+                    return;
+                }
+
+                // Sort by spot_count descending
+                entries.sort((a, b) => b.spot_count - a.spot_count);
+
+                // ── Top 3 + "Your Ranking" cards ─────────────────────────────
+                const localCallsign = (currentCWSkimmerConfig.callsign || '').trim().toUpperCase();
+                const hasLocal = localCallsign && localCallsign !== 'N0CALL';
+                const localRankIdx = hasLocal ? entries.findIndex(e => (e.callsign || '').toUpperCase() === localCallsign) : -1;
+
+                // Helper: build a podium mini-card for a given rank index
+                function podiumCard(idx, highlight) {
+                    if (idx >= entries.length) return '';
+                    const e = entries[idx];
+                    const rankNum = idx + 1;
+                    const medal = rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : '🥉';
+                    const bg = highlight
+                        ? 'linear-gradient(135deg,#e8eaf6,#c5cae9)'
+                        : (rankNum === 1 ? 'linear-gradient(135deg,#fffde7,#fff9c4)' : rankNum === 2 ? 'linear-gradient(135deg,#f5f5f5,#e0e0e0)' : 'linear-gradient(135deg,#fff3e0,#ffe0b2)');
+                    const border = highlight ? '2px solid #7986cb' : (rankNum === 1 ? '1px solid #f9a825' : rankNum === 2 ? '1px solid #bdbdbd' : '1px solid #ffb74d');
+                    const dateStr = e.epoch_date ? new Date(e.epoch_date * 86400 * 1000).toISOString().slice(0, 10) : '—';
+                    const youLabel = highlight ? ' <span style="font-size:11px; color:#283593; font-weight:normal;">(you)</span>' : '';
+                    return `
+                        <div style="flex:1; min-width:160px; padding:10px 14px; background:${bg}; border:${border}; border-radius:6px; text-align:center;">
+                            <div style="font-size:24px; line-height:1; margin-bottom:4px;">${medal}</div>
+                            <div style="font-size:13px; font-weight:bold; font-family:monospace; color:#1a237e;">${e.callsign || '—'}${youLabel}</div>
+                            <div style="font-size:18px; font-weight:bold; color:#283593; margin-top:4px;">${(e.spot_count || 0).toLocaleString()}</div>
+                            <div style="font-size:11px; color:#666;">spots · ${dateStr}</div>
+                        </div>`;
+                }
+
+                // Helper: build the "Your Ranking" detail card for a non-top-3 callsign
+                function yourRankCard(idx) {
+                    const e = entries[idx];
+                    const rankNum = idx + 1;
+                    const pct = entries.length > 1 ? (((entries.length - rankNum) / (entries.length - 1)) * 100).toFixed(0) : '100';
+                    const dateStr = e.epoch_date ? new Date(e.epoch_date * 86400 * 1000).toISOString().slice(0, 10) : '—';
+                    return `
+                        <div style="margin-top:10px; padding:10px 16px; background:linear-gradient(135deg,#e8eaf6,#c5cae9); border:2px solid #7986cb; border-radius:6px; display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+                            <div style="font-size:28px; line-height:1;">📡</div>
+                            <div style="flex:1; min-width:120px;">
+                                <div style="font-size:11px; color:#283593; text-transform:uppercase; letter-spacing:.6px; font-weight:600; margin-bottom:2px;">Your Ranking</div>
+                                <div style="font-size:20px; font-weight:bold; color:#1a237e; font-family:monospace;">${e.callsign || '—'}</div>
+                            </div>
+                            <div style="text-align:center; min-width:70px;">
+                                <div style="font-size:11px; color:#555; text-transform:uppercase; letter-spacing:.5px;">Rank</div>
+                                <div style="font-size:24px; font-weight:bold; color:#283593;">#${rankNum.toLocaleString()}</div>
+                                <div style="font-size:11px; color:#666;">of ${entries.length.toLocaleString()}</div>
+                            </div>
+                            <div style="text-align:center; min-width:90px;">
+                                <div style="font-size:11px; color:#555; text-transform:uppercase; letter-spacing:.5px;">Total Spots</div>
+                                <div style="font-size:20px; font-weight:bold; color:#1a237e;">${(e.spot_count || 0).toLocaleString()}</div>
+                                <div style="font-size:11px; color:#666;">Date: ${dateStr}</div>
+                            </div>
+                            <div style="text-align:center; min-width:70px;">
+                                <div style="font-size:11px; color:#555; text-transform:uppercase; letter-spacing:.5px;">Top</div>
+                                <div style="font-size:20px; font-weight:bold; color:#283593;">${pct}%</div>
+                                <div style="font-size:11px; color:#666;">of skimmers</div>
+                            </div>
+                        </div>`;
+                }
+
+                // Build the top-3 row (always shown)
+                let rankCardHtml = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px;">`;
+                for (let i = 0; i < Math.min(3, entries.length); i++) {
+                    const isLocalEntry = hasLocal && (entries[i].callsign || '').toUpperCase() === localCallsign;
+                    rankCardHtml += podiumCard(i, isLocalEntry);
+                }
+                rankCardHtml += `</div>`;
+
+                // If local callsign is outside top 3, add the detail card below
+                if (hasLocal) {
+                    if (localRankIdx === -1) {
+                        rankCardHtml += `
+                            <div style="margin-top:10px; margin-bottom:4px; padding:10px 14px; background:#fff8e1; border:1px solid #f9a825; border-radius:6px; font-size:13px; color:#6d4c00;">
+                                📡 <strong>${localCallsign}</strong> was not found in the statistics list.
+                            </div>`;
+                    } else if (localRankIdx >= 3) {
+                        rankCardHtml += yourRankCard(localRankIdx);
+                    }
+                }
+                rankCardHtml += `<div style="margin-bottom:10px;"></div>`;
+
+                // ── Table ────────────────────────────────────────────────────
+                let html = rankCardHtml + `
+                    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                        <thead>
+                            <tr style="background:#e8eaf6; position:sticky; top:0; z-index:1;">
+                                <th style="text-align:right; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593; width:50px;">#</th>
+                                <th style="text-align:left; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593;">Callsign</th>
+                                <th style="text-align:right; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593;">Total Spots</th>
+                                <th style="text-align:right; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593;">Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                entries.forEach((e, i) => {
+                    const dateStr = e.epoch_date ? new Date(e.epoch_date * 86400 * 1000).toISOString().slice(0, 10) : '—';
+                    const isLocal = localCallsign && (e.callsign || '').toUpperCase() === localCallsign;
+                    const rowBg = isLocal ? '#e8eaf6' : (i % 2 === 0 ? '#fff' : '#f5f5f5');
+                    const rowStyle = isLocal ? 'outline:2px solid #7986cb; outline-offset:-2px;' : '';
+                    const rankStyle = i === 0 ? 'font-weight:bold; color:#1a237e;' : (i < 3 ? 'font-weight:bold; color:#283593;' : 'color:#555;');
+                    html += `
+                            <tr style="background:${rowBg}; ${rowStyle}">
+                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; ${rankStyle}">${i + 1}</td>
+                                <td style="padding:6px 10px; border-bottom:1px solid #e8eaf6; font-family:monospace; font-size:13px; font-weight:${isLocal ? 'bold' : '500'};">${e.callsign || '—'}${isLocal ? ' ◀ you' : ''}</td>
+                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; font-weight:bold; color:#1a237e;">${(e.spot_count || 0).toLocaleString()}</td>
+                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; color:#666;">${dateStr}</td>
+                            </tr>`;
+                });
+
+                html += `</tbody></table>
+                    <div style="margin-top:10px; font-size:12px; color:#888;">${entries.length.toLocaleString()} skimmers listed</div>`;
+                if (content) content.innerHTML = html;
+
+            } catch (e) {
+                if (content) content.innerHTML = `<p style="color:#c62828; font-size:13px; margin:0;">Error: ${e.message}</p>`;
+            }
+        }
+
+        function closeRBNStatsModal() {
+            const modal = document.getElementById('rbnStatsModal');
+            if (modal) modal.style.display = 'none';
         }
 
         // ── End RBN Data ──────────────────────────────────────────────────────
@@ -18214,6 +18392,10 @@ const tooltipLine2 = timeStr;
             }
             if (event.target === cwInstallModal) {
                 closeInstallCWSkimmerWarningModal();
+            }
+            const rbnStatsModal = document.getElementById('rbnStatsModal');
+            if (event.target === rbnStatsModal) {
+                closeRBNStatsModal();
             }
         }
 

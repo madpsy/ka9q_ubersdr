@@ -9460,6 +9460,14 @@ function resetStationIdColor() {
                 // Sort by spot_count descending
                 entries.sort((a, b) => b.spot_count - a.spot_count);
 
+                // Build skew lookup map: callsign (uppercase) → skew entry
+                const skewMap = {};
+                if (data.skew && Array.isArray(data.skew.entries)) {
+                    data.skew.entries.forEach(s => {
+                        if (s.callsign) skewMap[s.callsign.toUpperCase()] = s;
+                    });
+                }
+
                 // ── Top 3 + "Your Ranking" cards ─────────────────────────────
                 const localCallsign = (currentCWSkimmerConfig.callsign || '').trim().toUpperCase();
                 const hasLocal = localCallsign && localCallsign !== 'N0CALL';
@@ -9490,7 +9498,7 @@ function resetStationIdColor() {
                 function yourRankCard(idx) {
                     const e = entries[idx];
                     const rankNum = idx + 1;
-                    const pct = entries.length > 1 ? (((entries.length - rankNum) / (entries.length - 1)) * 100).toFixed(0) : '100';
+                    const pct = ((rankNum / entries.length) * 100).toFixed(0);
                     const dateStr = e.epoch_date ? new Date(e.epoch_date * 86400 * 1000).toISOString().slice(0, 10) : '—';
                     return `
                         <div style="margin-top:10px; padding:10px 16px; background:linear-gradient(135deg,#e8eaf6,#c5cae9); border:2px solid #7986cb; border-radius:6px; display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
@@ -9538,37 +9546,112 @@ function resetStationIdColor() {
                 }
                 rankCardHtml += `<div style="margin-bottom:10px;"></div>`;
 
-                // ── Table ────────────────────────────────────────────────────
-                let html = rankCardHtml + `
+                // ── Sort + filter state ───────────────────────────────────────
+                // sortCol: 'spots' | 'callsign' | 'skew'   sortDir: 1=asc -1=desc
+                let sortCol = 'spots', sortDir = -1; // default: spots descending
+
+                // ── Render function (called on sort/filter change) ────────────
+                function renderRBNStatsTable() {
+                    const filterVal = (document.getElementById('rbnStatsFilter')?.value || '').trim().toUpperCase();
+                    const tbody = document.getElementById('rbnStatsTbody');
+                    const countEl = document.getElementById('rbnStatsCount');
+                    if (!tbody) return;
+
+                    // Filter
+                    let visible = filterVal
+                        ? entries.filter(e => (e.callsign || '').toUpperCase().includes(filterVal))
+                        : entries.slice();
+
+                    // Sort
+                    visible.sort((a, b) => {
+                        if (sortCol === 'callsign') {
+                            return sortDir * (a.callsign || '').localeCompare(b.callsign || '');
+                        } else if (sortCol === 'skew') {
+                            const sa = skewMap[(a.callsign || '').toUpperCase()];
+                            const sb = skewMap[(b.callsign || '').toUpperCase()];
+                            const va = sa !== undefined ? sa.skew : Infinity;
+                            const vb = sb !== undefined ? sb.skew : Infinity;
+                            return sortDir * (va - vb);
+                        } else { // spots
+                            return sortDir * ((a.spot_count || 0) - (b.spot_count || 0));
+                        }
+                    });
+
+                    // Rank in the original (spots-desc) sorted list for the # column
+                    const origRankMap = {};
+                    entries.forEach((e, i) => { origRankMap[(e.callsign || '').toUpperCase()] = i + 1; });
+
+                    let rows = '';
+                    visible.forEach((e, vi) => {
+                        const cs = (e.callsign || '').toUpperCase();
+                        const origRank = origRankMap[cs] || (vi + 1);
+                        const skewEntry = skewMap[cs];
+                        let skewCell;
+                        if (skewEntry !== undefined) {
+                            const skewHigh = Math.abs(skewEntry.skew) > 0.1;
+                            const skewColor = skewHigh ? '#c62828' : '#1a237e';
+                            skewCell = `<span style="color:${skewColor}; font-weight:${skewHigh ? 'bold' : 'normal'};">${skewEntry.skew.toFixed(3)}${skewHigh ? ' ⚠️' : ''}</span>`;
+                        } else {
+                            skewCell = `<span style="color:#bbb;">—</span>`;
+                        }
+                        const isLocal = localCallsign && cs === localCallsign;
+                        const rowBg = isLocal ? '#e8eaf6' : (vi % 2 === 0 ? '#fff' : '#f5f5f5');
+                        const rowOutline = isLocal ? 'outline:2px solid #7986cb; outline-offset:-2px;' : '';
+                        const rankColor = origRank === 1 ? 'font-weight:bold; color:#1a237e;' : (origRank <= 3 ? 'font-weight:bold; color:#283593;' : 'color:#555;');
+                        rows += `
+                            <tr style="background:${rowBg}; ${rowOutline}">
+                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; ${rankColor}">${origRank}</td>
+                                <td style="padding:6px 10px; border-bottom:1px solid #e8eaf6; font-family:monospace; font-size:13px; font-weight:${isLocal ? 'bold' : '500'};">${e.callsign || '—'}${isLocal ? ' ◀ you' : ''}</td>
+                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; font-weight:bold; color:#1a237e;">${(e.spot_count || 0).toLocaleString()}</td>
+                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6;">${skewCell}</td>
+                            </tr>`;
+                    });
+                    tbody.innerHTML = rows || `<tr><td colspan="4" style="padding:12px; text-align:center; color:#999;">No results</td></tr>`;
+                    if (countEl) countEl.textContent = filterVal
+                        ? `${visible.length.toLocaleString()} of ${entries.length.toLocaleString()} skimmers`
+                        : `${entries.length.toLocaleString()} skimmers listed`;
+
+                    // Update sort indicators in headers
+                    ['callsign','spots','skew'].forEach(col => {
+                        const th = document.getElementById('rbnTh_' + col);
+                        if (!th) return;
+                        const arrow = sortCol === col ? (sortDir === -1 ? ' ▼' : ' ▲') : '';
+                        th.dataset.arrow = arrow;
+                        th.querySelector('.rbn-sort-arrow').textContent = arrow;
+                    });
+                }
+
+                // ── Inject filter bar + table shell ──────────────────────────
+                const thStyle = 'padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593; cursor:pointer; user-select:none; white-space:nowrap;';
+                if (content) content.innerHTML = rankCardHtml + `
+                    <div style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+                        <input id="rbnStatsFilter" type="text" placeholder="Filter by callsign…"
+                            style="flex:1; padding:6px 10px; border:1px solid #9fa8da; border-radius:4px; font-size:13px; font-family:monospace; text-transform:uppercase;"
+                            oninput="this.value=this.value.toUpperCase(); (window._renderRBNStatsTable||function(){})()">
+                        <button class="btn btn-secondary" style="font-size:12px; padding:5px 10px;"
+                            onclick="document.getElementById('rbnStatsFilter').value=''; (window._renderRBNStatsTable||function(){})()">✕ Clear</button>
+                    </div>
                     <table style="width:100%; border-collapse:collapse; font-size:13px;">
                         <thead>
                             <tr style="background:#e8eaf6; position:sticky; top:0; z-index:1;">
-                                <th style="text-align:right; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593; width:50px;">#</th>
-                                <th style="text-align:left; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593;">Callsign</th>
-                                <th style="text-align:right; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593;">Total Spots</th>
-                                <th style="text-align:right; padding:7px 10px; border-bottom:2px solid #9fa8da; color:#283593;">Date</th>
+                                <th style="text-align:right; ${thStyle} cursor:default; width:50px;">#</th>
+                                <th id="rbnTh_callsign" style="text-align:left; ${thStyle}" onclick="window._rbnSortBy('callsign')">Callsign<span class="rbn-sort-arrow"></span></th>
+                                <th id="rbnTh_spots"    style="text-align:right; ${thStyle}" onclick="window._rbnSortBy('spots')">Total Spots<span class="rbn-sort-arrow"> ▼</span></th>
+                                <th id="rbnTh_skew"     style="text-align:right; ${thStyle}" onclick="window._rbnSortBy('skew')">Skew (ppm)<span class="rbn-sort-arrow"></span></th>
                             </tr>
                         </thead>
-                        <tbody>`;
+                        <tbody id="rbnStatsTbody"></tbody>
+                    </table>
+                    <div id="rbnStatsCount" style="margin-top:10px; font-size:12px; color:#888;"></div>`;
 
-                entries.forEach((e, i) => {
-                    const dateStr = e.epoch_date ? new Date(e.epoch_date * 86400 * 1000).toISOString().slice(0, 10) : '—';
-                    const isLocal = localCallsign && (e.callsign || '').toUpperCase() === localCallsign;
-                    const rowBg = isLocal ? '#e8eaf6' : (i % 2 === 0 ? '#fff' : '#f5f5f5');
-                    const rowStyle = isLocal ? 'outline:2px solid #7986cb; outline-offset:-2px;' : '';
-                    const rankStyle = i === 0 ? 'font-weight:bold; color:#1a237e;' : (i < 3 ? 'font-weight:bold; color:#283593;' : 'color:#555;');
-                    html += `
-                            <tr style="background:${rowBg}; ${rowStyle}">
-                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; ${rankStyle}">${i + 1}</td>
-                                <td style="padding:6px 10px; border-bottom:1px solid #e8eaf6; font-family:monospace; font-size:13px; font-weight:${isLocal ? 'bold' : '500'};">${e.callsign || '—'}${isLocal ? ' ◀ you' : ''}</td>
-                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; font-weight:bold; color:#1a237e;">${(e.spot_count || 0).toLocaleString()}</td>
-                                <td style="text-align:right; padding:6px 10px; border-bottom:1px solid #e8eaf6; color:#666;">${dateStr}</td>
-                            </tr>`;
-                });
+                // Expose helpers on window so inline onclick can reach them
+                window._renderRBNStatsTable = renderRBNStatsTable;
+                window._rbnSortBy = function(col) {
+                    if (sortCol === col) { sortDir *= -1; } else { sortCol = col; sortDir = col === 'callsign' ? 1 : -1; }
+                    renderRBNStatsTable();
+                };
 
-                html += `</tbody></table>
-                    <div style="margin-top:10px; font-size:12px; color:#888;">${entries.length.toLocaleString()} skimmers listed</div>`;
-                if (content) content.innerHTML = html;
+                renderRBNStatsTable();
 
             } catch (e) {
                 if (content) content.innerHTML = `<p style="color:#c62828; font-size:13px; margin:0;">Error: ${e.message}</p>`;

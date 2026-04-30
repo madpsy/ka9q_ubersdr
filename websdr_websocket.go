@@ -1322,109 +1322,200 @@ func sanitizeChatField(s string, maxLen int) string {
 // Config: field.  Initialised once from the Unix timestamp at startup.
 var orgStatusSerial = int(time.Now().Unix() & 0x7fffffff)
 
+// orgStatusConfigRe extracts the config= parameter from a raw HTTP request.
+var orgStatusConfigRe = regexp.MustCompile(`[?&]config=(-?\d+)`)
+
 func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) {
 	callerIP := getClientIP(r)
+
+	// Build the full orgstatus body.
+	fullBody := h.buildOrgStatusBody()
+	cookieVal := "ID=" + websdrOrgStatusID(h.config) + "; expires=Thu, 31-Dec-2099 00:00:00 GMT"
+
+	// Determine response for the first request.
 	users := h.sessions.GetNonBypassedUserCount()
+	usersLine := fmt.Sprintf("Users: %d\n", users)
 
-	// Build the entire response body into a buffer first so we can set an
-	// explicit Content-Length.  websdr.org's simple HTTP parser does not
-	// support Transfer-Encoding: chunked, which Go uses by default when
-	// Content-Length is absent.
-	var buf bytes.Buffer
-
-	// Cache optimisation: if caller already has our config serial, send only user count.
 	cacheHit := false
 	if reqCfg := r.URL.Query().Get("config"); reqCfg != "" {
 		if reqCfg == strconv.Itoa(orgStatusSerial) {
 			cacheHit = true
-			log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
-			fmt.Fprintf(&buf, "Users: %d\n", users)
 		}
 	}
 
-	if !cacheHit {
+	var respBody string
+	if cacheHit {
+		respBody = usersLine
+		log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
+	} else {
+		respBody = fullBody
 		log.Printf("WebSDR: /~~orgstatus callback from %s (full response, users=%d)", callerIP, users)
+	}
 
-		fmt.Fprintf(&buf, "Config: %d\n", orgStatusSerial)
+	// ── First response: proper HTTP with headers ────────────────────────
+	// Explicit Content-Length prevents chunked encoding.  Suppress Date
+	// header (real WebSDR doesn't send one).
+	respBodyBytes := []byte(respBody)
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(respBodyBytes)))
+	w.Header().Set("Set-Cookie", cookieVal)
+	w.Header()["Date"] = nil // suppress Go's automatic Date header
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBodyBytes)
 
-		// Emit the org_info block in the order expected by websdr.org:
-		// Qth, Description, Logo, Email.
+	// ── Hijack the connection for keep-alive follow-ups ─────────────────
+	// websdr.org reuses the same TCP connection for subsequent /~~orgstatus
+	// requests.  The real WebSDR binary responds to these with JUST the raw
+	// body text (no HTTP status line, no headers) — a custom protocol that
+	// Go's http.Server cannot produce.  We hijack the connection and handle
+	// subsequent requests manually.
+	//
+	// Only hijack for websdr.org callbacks — they arrive with no User-Agent
+	// header.  Regular clients (curl, browsers, monitoring) always send
+	// User-Agent, so we let Go handle their connection normally.
+	if r.Header.Get("User-Agent") != "" {
+		return
+	}
 
-		// Qth: Maidenhead grid locator derived from GPS coordinates
-		qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
-		fmt.Fprintln(&buf, "Qth: "+qth)
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		log.Printf("WebSDR: /~~orgstatus hijack not supported — keep-alive follow-ups will fail")
+		return
+	}
+	conn, brw, err := hj.Hijack()
+	if err != nil {
+		log.Printf("WebSDR: /~~orgstatus hijack error: %v", err)
+		return
+	}
+	defer conn.Close()
 
-		// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]"
-		descParts := []string{"0-30 MHz SDR"}
-		if h.config.Admin.Callsign != "" {
-			descParts = append(descParts, h.config.Admin.Callsign)
-		}
-		if h.config.Admin.Location != "" {
-			descParts = append(descParts, h.config.Admin.Location)
-		}
-		fmt.Fprintln(&buf, "Description: "+strings.Join(descParts, ", "))
+	// Flush any buffered response data from the first write.
+	if err := brw.Flush(); err != nil {
+		log.Printf("WebSDR: /~~orgstatus flush error after hijack: %v", err)
+		return
+	}
 
-		fmt.Fprintf(&buf, "Logo: logo.png\n")
+	// Loop: read subsequent HTTP requests, respond with raw body text.
+	for {
+		// Generous read timeout — websdr.org polls every ~60 s but may
+		// take longer.  If the connection is idle beyond this, clean up.
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 
-		// Email: websdr_email if set, otherwise fall back to admin.email
-		{
-			email := h.config.Server.WebSDREmail
-			if email == "" {
-				email = h.config.Admin.Email
+		// Read until we see the end of an HTTP request (\r\n\r\n).
+		var reqBuf []byte
+		tmp := make([]byte, 1024)
+		for {
+			n, err := brw.Read(tmp)
+			if n > 0 {
+				reqBuf = append(reqBuf, tmp[:n]...)
 			}
-			if email != "" {
-				// XOR-obfuscate the email address value (bytes > 0x1f XOR'd with 0x01).
-				addr := []byte(email)
-				for j := range addr {
-					if addr[j] > 31 {
-						addr[j] ^= 0x01
-					}
-				}
-				fmt.Fprintln(&buf, "Email: "+string(addr))
+			if err != nil {
+				// EOF or timeout — websdr.org closed the connection.
+				return
 			}
-		}
-
-		// Mobile page: emit only if a mobile HTML file exists in the static dirs.
-		// Candidates match VertexSDR's orgstatus_mobile_path() logic.
-		mobileCandidates := []string{"m.html", "mobile.html", "mobile/index.html"}
-		for _, candidate := range mobileCandidates {
-			if h.findStaticFile(candidate) != "" {
-				fmt.Fprintf(&buf, "Mobile: %s\n", candidate)
+			if bytes.Contains(reqBuf, []byte("\r\n\r\n")) {
 				break
 			}
 		}
 
-		// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
-		// Format: Band: <idx> <centerfreq_khz> <bandwidth_khz> <antenna_name>
-		antenna := h.config.Admin.Antenna
-		if antenna == "" {
-			antenna = "HF"
+		// Parse the request line to extract config= parameter.
+		reqStr := string(reqBuf)
+		firstLine := reqStr
+		if idx := strings.Index(reqStr, "\r\n"); idx >= 0 {
+			firstLine = reqStr[:idx]
 		}
-		fmt.Fprintf(&buf, "Bands: 1\n")
-		fmt.Fprintf(&buf, "Band: 0 15005.000000 29990.000000 %s\n", antenna)
 
-		fmt.Fprintf(&buf, "Users: %d\n", users)
+		reqCfg := ""
+		if m := orgStatusConfigRe.FindStringSubmatch(reqStr); m != nil {
+			reqCfg = m[1]
+		}
+
+		// Build the response body.
+		users = h.sessions.GetNonBypassedUserCount()
+		usersLine = fmt.Sprintf("Users: %d\n", users)
+
+		isCacheHit := reqCfg == strconv.Itoa(orgStatusSerial)
+		var rawResp string
+		if isCacheHit {
+			rawResp = usersLine
+			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (cache hit, users=%d)", callerIP, users)
+		} else {
+			rawResp = h.buildOrgStatusBody()
+			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (full, %s)", callerIP, firstLine)
+		}
+
+		// Write raw body text — NO HTTP status line, NO headers.
+		// This matches the real WebSDR binary's behavior.
+		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, err := conn.Write([]byte(rawResp)); err != nil {
+			log.Printf("WebSDR: /~~orgstatus keep-alive write error: %v", err)
+			return
+		}
+	}
+}
+
+// buildOrgStatusBody constructs the full /~~orgstatus response body text.
+func (h *WebSDRHandler) buildOrgStatusBody() string {
+	users := h.sessions.GetNonBypassedUserCount()
+	var buf bytes.Buffer
+
+	fmt.Fprintf(&buf, "Config: %d\n", orgStatusSerial)
+
+	// Qth: Maidenhead grid locator derived from GPS coordinates
+	qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
+	fmt.Fprintln(&buf, "Qth: "+qth)
+
+	// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]"
+	descParts := []string{"0-30 MHz SDR"}
+	if h.config.Admin.Callsign != "" {
+		descParts = append(descParts, h.config.Admin.Callsign)
+	}
+	if h.config.Admin.Location != "" {
+		descParts = append(descParts, h.config.Admin.Location)
+	}
+	fmt.Fprintln(&buf, "Description: "+strings.Join(descParts, ", "))
+
+	fmt.Fprintf(&buf, "Logo: logo.png\n")
+
+	// Email: websdr_email if set, otherwise fall back to admin.email
+	{
+		email := h.config.Server.WebSDREmail
+		if email == "" {
+			email = h.config.Admin.Email
+		}
+		if email != "" {
+			// XOR-obfuscate the email address value (bytes > 0x1f XOR'd with 0x01).
+			addr := []byte(email)
+			for j := range addr {
+				if addr[j] > 31 {
+					addr[j] ^= 0x01
+				}
+			}
+			fmt.Fprintln(&buf, "Email: "+string(addr))
+		}
 	}
 
-	// Set headers BEFORE writing the body.  Explicit Content-Length prevents
-	// Go from using chunked transfer encoding, which websdr.org's simple
-	// HTTP parser does not support.
-	//
-	// Suppress Go's automatic Date header (real WebSDR doesn't send one).
-	// Header order cannot be controlled via net/http, but the HTTP spec
-	// says order is not significant.
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-	w.Header()["Date"] = nil // suppress Go's automatic Date header
+	// Mobile page: emit only if a mobile HTML file exists in the static dirs.
+	mobileCandidates := []string{"m.html", "mobile.html", "mobile/index.html"}
+	for _, candidate := range mobileCandidates {
+		if h.findStaticFile(candidate) != "" {
+			fmt.Fprintf(&buf, "Mobile: %s\n", candidate)
+			break
+		}
+	}
 
-	// Set-Cookie: ID=<12-hex> — required by websdr.org to identify the receiver.
-	// The real WebSDR binary sends this on every /~~orgstatus response; without it
-	// websdr.org does not list the receiver in its directory.
-	w.Header().Set("Set-Cookie", "ID="+websdrOrgStatusID(h.config)+"; expires=Thu, 31-Dec-2099 00:00:00 GMT")
+	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
+	antenna := h.config.Admin.Antenna
+	if antenna == "" {
+		antenna = "HF"
+	}
+	fmt.Fprintf(&buf, "Bands: 1\n")
+	fmt.Fprintf(&buf, "Band: 0 15005.000000 29990.000000 %s\n", antenna)
 
-	w.WriteHeader(http.StatusOK)
-	w.Write(buf.Bytes())
+	fmt.Fprintf(&buf, "Users: %d\n", users)
+
+	return buf.String()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

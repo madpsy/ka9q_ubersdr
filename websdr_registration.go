@@ -33,12 +33,11 @@ import (
 
 const (
 	// websdrOrgRegistrationEnabled gates the built-in registration loop at
-	// compile time.  Set to false when running inside Docker (where the
-	// host-side Python bridge scripts/websdr-org-register.py is used instead)
-	// to avoid Docker NAT conntrack conflicts.  The config-level flag
-	// websdr_register_websdrorg is still checked at runtime; both must be
-	// true for the loop to start.
-	websdrOrgRegistrationEnabled = false
+	// compile time.  The config-level flag websdr_register_websdrorg is
+	// still checked at runtime; both must be true for the loop to start.
+	// The /~~orgstatus handler uses connection hijacking to implement the
+	// raw WebSDR keep-alive protocol, so no external proxy is needed.
+	websdrOrgRegistrationEnabled = true
 
 	websdrOrgRegInterval = 60 * time.Second
 	websdrOrgHost        = "websdr.ewi.utwente.nl"

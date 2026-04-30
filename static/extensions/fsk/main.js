@@ -42,12 +42,15 @@ class FSKExtension extends DecoderExtension {
         // Spectrum visualization
         this.spectrumCanvas = null;
         this.spectrumCtx = null;
+
+        // Guard flag to prevent duplicate event handler setup
+        this.handlersSetup = false;
     }
 
     onInitialize() {
         console.log('FSK: onInitialize called');
-        this.renderTemplate();
-        this.waitForDOMAndSetupHandlers();
+        // Don't setup DOM handlers here - DOM doesn't exist yet.
+        // onActivate() will be called after template is loaded into the panel.
         console.log('FSK: onInitialize complete');
     }
 
@@ -188,6 +191,11 @@ class FSKExtension extends DecoderExtension {
     }
 
     setupEventHandlers() {
+        if (this.handlersSetup) {
+            console.log('FSK: Event handlers already setup, skipping');
+            return;
+        }
+        this.handlersSetup = true;
         console.log('FSK: Setting up event handlers');
 
         // Start/Stop button
@@ -938,7 +946,9 @@ class FSKExtension extends DecoderExtension {
 
     onActivate() {
         console.log('FSK: Extension activated');
-        // Re-setup event handlers when extension is reopened with fresh DOM
+        // Reset handler guard so handlers bind to fresh DOM elements
+        this.handlersSetup = false;
+        this.renderTemplate();
         this.waitForDOMAndSetupHandlers();
     }
 

@@ -660,8 +660,9 @@ class RadioClient:
 
     def build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
-        # Check if this is an IQ mode (bandwidth should not be sent for IQ modes)
-        is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+        # Check if this is a wide fixed-bandwidth IQ mode (bandwidth should not be sent)
+        # Plain 'iq' mode accepts bandwidth; wide IQ modes have fixed bandwidth from sample rate
+        is_wide_iq_mode = self.mode in ('iq48', 'iq96', 'iq192', 'iq384')
 
         # If full URL provided, parse and merge parameters
         if self.url:
@@ -681,8 +682,8 @@ class RadioClient:
             params['mode'] = self.mode
             params['user_session_id'] = self.user_session_id
 
-            # Only include bandwidth for non-IQ modes
-            if not is_iq_mode:
+            # Only include bandwidth for non-wide-IQ modes (plain IQ accepts bandwidth)
+            if not is_wide_iq_mode:
                 if self.bandwidth_low is not None:
                     params['bandwidthLow'] = str(self.bandwidth_low)
                 if self.bandwidth_high is not None:
@@ -710,8 +711,8 @@ class RadioClient:
             url += f"&mode={self.mode}"
             url += f"&user_session_id={self.user_session_id}"
 
-            # Only include bandwidth for non-IQ modes
-            if not is_iq_mode:
+            # Only include bandwidth for non-wide-IQ modes (plain IQ accepts bandwidth)
+            if not is_wide_iq_mode:
                 if self.bandwidth_low is not None:
                     url += f"&bandwidthLow={self.bandwidth_low}"
                 if self.bandwidth_high is not None:

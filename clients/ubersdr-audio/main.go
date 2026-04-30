@@ -38,13 +38,19 @@ var (
 	audioDeviceMu   sync.RWMutex
 )
 
-var modeLabels = []string{"USB", "LSB", "AM", "SAM", "FM", "CWU", "CWL"}
+var modeLabels = []string{"USB", "LSB", "AM", "SAM", "FM", "CWU", "CWL", "IQ"}
+
+// wideIQLabels lists the ordered wide (preset-bandwidth) IQ mode labels.
+// These are added to modeSelect.Options only when the server permits them.
+var wideIQLabels = []string{"IQ48", "IQ96", "IQ192", "IQ384"}
 
 // bwSliderMax returns the maximum slider value (Hz) for a given mode.
 func bwSliderMax(mode string) float64 {
 	switch mode {
 	case "am", "sam", "fm":
 		return 6000
+	case "iq":
+		return 12000
 	default:
 		return 5000
 	}
@@ -61,6 +67,8 @@ func bwDefaultSlider(mode string) float64 {
 		return 4000
 	case "fm":
 		return 5000
+	case "iq":
+		return 12000 // full 12 kHz total BW (±6 kHz sent to server)
 	default:
 		return 2700
 	}
@@ -68,9 +76,13 @@ func bwDefaultSlider(mode string) float64 {
 
 // bwToLoHi converts a slider value to (lo, hi) bandwidth cuts for the server.
 //
-//	USB/CWU: lo=0,        hi=+val
-//	LSB/CWL: lo=-val,     hi=0
-//	AM/FM:   lo=-val,     hi=+val  (symmetric)
+//	USB/CWU: lo=0,          hi=+val
+//	LSB/CWL: lo=-val,       hi=0
+//	AM/FM:   lo=-val,       hi=+val   (symmetric)
+//	IQ:      lo=-(val/2),   hi=+(val/2)  (slider shows total BW; server gets ±half)
+//
+// For IQ the slider goes up to 10 kHz (total bandwidth) but the server expects
+// symmetric edges, so a 10 kHz slider value → lo=-5000, hi=+5000.
 func bwToLoHi(mode string, val float64) (lo, hi int) {
 	v := int(val)
 	switch mode {
@@ -78,6 +90,9 @@ func bwToLoHi(mode string, val float64) (lo, hi int) {
 		return 0, v
 	case "lsb", "cwl":
 		return -v, 0
+	case "iq":
+		half := v / 2
+		return -half, half
 	default: // am, sam, fm
 		return -v, v
 	}
@@ -180,6 +195,18 @@ func main() {
 	// OnStateChange(StateError) does NOT trigger the auto-reconnect countdown.
 	profileSwitching := false
 
+	// iqModeSwitching is set true while reconnecting due to an IQ mode change
+	// so that rebuildModeOptions does NOT reset the mode during the brief
+	// disconnect/error state.  Cleared when StateConnected fires.
+	iqModeSwitching := false
+
+	// lastAllowedIQModes caches the AllowedIQModes from the most recent
+	// successful /connection response.  Used by rebuildModeOptions on
+	// disconnect/error so the wide IQ mode options are preserved when the user
+	// disconnects from the same instance (rather than being cleared to nil).
+	// Cleared when the URL changes (connecting to a different instance).
+	var lastAllowedIQModes []string
+
 	// activeProfileName holds the name of the last profile loaded via applyProfile.
 	// Empty string means no profile is active (user started fresh or changed the URL
 	// manually).  Used to pre-fill the Save dialog so saving back to the same profile
@@ -220,6 +247,7 @@ func main() {
 		if !suppressProfileClear {
 			activeProfileName = ""
 			activeCallsign = ""
+			lastAllowedIQModes = nil // different instance — clear cached IQ modes
 		}
 	}
 
@@ -275,6 +303,10 @@ func main() {
 			return
 		}
 		lo, hi := bwToLoHi(currentMode, bwSlider.Value)
+		// Wide IQ modes use server-preset bandwidth; send 0,0 as placeholder.
+		if isWideIQMode(currentMode) {
+			lo, hi = 0, 0
+		}
 		client.Frequency = currentFreq
 		client.Mode = currentMode
 		client.BandwidthLow = lo
@@ -341,8 +373,21 @@ func main() {
 	}
 	// modeInitDone gates the BW reset: on the initial SetSelected call we want
 	// to restore the saved BW, not overwrite it with the mode default.
+	// applyIQConstraints is assigned after formatGroup is declared so the closure
+	// can reference it. It enforces format/BW UI state for the current mode.
+	var applyIQConstraints func()
+
+	// suppressFormatChange is declared here (before modeSelect) so the IQ-mode
+	// reconnect logic inside modeSelect.OnChanged can set it to prevent the
+	// formatGroup.SetSelected call inside applyIQConstraints from triggering its
+	// own reconnect.  The formatGroup var is declared later but Go closures
+	// capture by reference so this is safe.
+	var formatGroup *widget.RadioGroup
+	suppressFormatChange := false
+
 	modeInitDone := false
 	modeSelect := widget.NewSelect(modeLabels, func(selected string) {
+		prevMode := currentMode
 		currentMode = modeKey(selected)
 		prefs.SetString(prefKeyMode, currentMode)
 		newMax := bwSliderMax(currentMode)
@@ -355,15 +400,97 @@ func main() {
 		// else: initial SetSelected — keep the saved BW value already in bwSlider.Value
 		bwSlider.Refresh()
 		bwValueLabel.SetText(fmt.Sprintf("%.0f Hz", bwSlider.Value))
+		// Switching to or from any IQ mode (or between IQ modes) changes the
+		// sample rate; a full reconnect is required.  We check this BEFORE calling
+		// applyIQConstraints so that the formatGroup.SetSelected("Uncompressed") inside
+		// applyIQConstraints does not trigger its own reconnect (we suppress it via
+		// suppressFormatChange and handle the reconnect ourselves here).
+		// prevMode != currentMode guards against spurious reconnects when
+		// rebuildModeOptions calls SetSelected to sync the dropdown to an already-active
+		// wide IQ mode (e.g. after loading a profile and connecting).
+		needsReconnect := modeInitDone && prevMode != currentMode &&
+			client.State() == StateConnected &&
+			(isIQMode(currentMode) || isIQMode(prevMode))
+		if needsReconnect {
+			// Suppress the format-change reconnect that applyIQConstraints would
+			// otherwise trigger via formatGroup.SetSelected.
+			suppressFormatChange = true
+		}
+		if applyIQConstraints != nil {
+			applyIQConstraints()
+		}
+		if needsReconnect {
+			suppressFormatChange = false
+			iqModeSwitching = true
+			formatSwitching = true // suppress stationLabel clear during brief disconnect
+			// Update client fields so buildWSURL uses the new mode/bandwidth/frequency.
+			lo, hi := bwToLoHi(currentMode, bwSlider.Value)
+			if isWideIQMode(currentMode) {
+				lo, hi = 0, 0
+			}
+			client.Frequency = currentFreq
+			client.Mode = currentMode
+			client.BandwidthLow = lo
+			client.BandwidthHigh = hi
+			client.ReconnectWS()
+			return
+		}
 		sendTune()
 	})
 	modeSelect.SetSelected(savedModeLabel)
 	modeInitDone = true
 
-	// Declare formatGroup as var so the closure can reference it before assignment.
-	// suppressFormatChange prevents reconnect when reverting the selection programmatically.
-	var formatGroup *widget.RadioGroup
-	suppressFormatChange := false
+	// rebuildModeOptions rebuilds modeSelect.Options with the base modes plus any
+	// wide IQ modes permitted by the server (from the last /connection response).
+	// If the current mode is a wide IQ mode that is no longer in the list, it
+	// resets to "usb". Must be called from the Fyne goroutine or a goroutine-safe
+	// context (Fyne widget methods are goroutine-safe).
+	rebuildModeOptions := func(allowedWideIQ []string) {
+		// Build the permitted wide IQ label set.
+		permitted := make(map[string]bool, len(allowedWideIQ))
+		for _, m := range allowedWideIQ {
+			permitted[strings.ToUpper(m)] = true
+		}
+
+		opts := make([]string, len(modeLabels))
+		copy(opts, modeLabels)
+		for _, lbl := range wideIQLabels {
+			if permitted[lbl] {
+				opts = append(opts, lbl)
+			}
+		}
+		modeSelect.Options = opts
+		modeSelect.Refresh()
+
+		// Sync the dropdown selection to currentMode for any mode in the options list.
+		// This is needed when a profile sets currentMode to a wide IQ mode (e.g. "iq96")
+		// before the option exists in the list; once rebuildModeOptions adds it, we
+		// must call SetSelected so the dropdown reflects the actual mode.
+		// Also handles the reset-to-USB case when a wide IQ mode is no longer available.
+		if isWideIQMode(currentMode) && !iqModeSwitching {
+			stillAvailable := false
+			for _, lbl := range opts {
+				if modeKey(lbl) == currentMode {
+					stillAvailable = true
+					modeSelect.SetSelected(lbl) // sync dropdown to currentMode
+					break
+				}
+			}
+			if !stillAvailable {
+				currentMode = "usb"
+				prefs.SetString(prefKeyMode, currentMode)
+				modeSelect.SetSelected("USB")
+			}
+		}
+
+		// Apply IQ-specific UI constraints for the current mode.
+		// applyIQConstraints is assigned after formatGroup is created; it may be
+		// nil during the very first rebuildModeOptions call (startup), which is
+		// fine because the initial mode is never an IQ mode at that point.
+		if applyIQConstraints != nil {
+			applyIQConstraints()
+		}
+	}
 	savedFormat := prefs.StringWithFallback(prefKeyFormat, "Compressed")
 	if savedFormat == "Uncompressed" {
 		client.Format = FormatPCMZstd
@@ -538,6 +665,45 @@ func main() {
 	})
 	channelSelect.SetSelected(savedChannel)
 
+	// Signal quality bars — declared before applyIQConstraints so the closure
+	// can call SetNoData() when entering an IQ mode (which sends no signal data).
+	// Signal: -120 dBFS (noise floor) → -50 dBFS (strong signal)
+	// SNR:      25 dB (weak)          →  80 dB (excellent)
+	// Audio:   -60 dBFS (quiet)       →   0 dBFS (full scale)
+	signalBar := NewLevelBar("Signal", -120, -50, "dBFS")
+	snrBar := NewLevelBar("SNR", 25, 80, "dB")
+	audioBar := NewLevelBar("Audio", -60, 0, "dBFS")
+
+	// applyIQConstraints enforces format/BW/channel UI state for the current mode.
+	// Assigned here (after formatGroup, bwSlider, channelSelect, and signal bars are all created).
+	applyIQConstraints = func() {
+		if isIQMode(currentMode) {
+			// IQ modes require lossless PCM; disable the format selector.
+			suppressFormatChange = true
+			formatGroup.SetSelected("Uncompressed")
+			suppressFormatChange = false
+			client.Format = FormatPCMZstd
+			formatGroup.Disable()
+			// IQ always needs both channels (I and Q); lock the channel selector.
+			channelSelect.SetSelected("Left & Right")
+			client.SetChannelMode(ChannelModeBoth)
+			channelSelect.Disable()
+			// IQ modes do not send signal quality data; clear the bars immediately
+			// so they don't show stale values from the previous non-IQ mode.
+			signalBar.SetNoData()
+			snrBar.SetNoData()
+		} else {
+			formatGroup.Enable()
+			channelSelect.Enable()
+		}
+		// Wide IQ modes use server-preset bandwidth; disable the BW slider.
+		if isWideIQMode(currentMode) {
+			bwSlider.Disable()
+		} else {
+			bwSlider.Enable()
+		}
+	}
+
 	// Apply saved volume and channel mode to the client immediately so they
 	// take effect on the first connection without the user having to touch the controls.
 	client.SetVolume(savedVolume / 100.0)
@@ -549,14 +715,6 @@ func main() {
 	default:
 		client.SetChannelMode(ChannelModeBoth)
 	}
-
-	// Signal quality bars
-	// Signal: -120 dBFS (noise floor) → -50 dBFS (strong signal)
-	// SNR:      25 dB (weak)          →  80 dB (excellent)
-	// Audio:   -60 dBFS (quiet)       →   0 dBFS (full scale)
-	signalBar := NewLevelBar("Signal", -120, -50, "dBFS")
-	snrBar := NewLevelBar("SNR", 25, 80, "dB")
-	audioBar := NewLevelBar("Audio", -60, 0, "dBFS")
 
 	// ── applyInstance — fills URL field from a discovered instance ────────────
 	applyInstance := func(inst DiscoveredInstance) {
@@ -710,8 +868,10 @@ func main() {
 
 		// Mode — temporarily disable the BW-reset logic so we can restore the
 		// saved bandwidth value afterwards.
+		// Search modeSelect.Options (not just modeLabels) so that wide IQ modes
+		// like IQ96 that are only added after /connection are also found.
 		modeInitDone = false
-		for _, lbl := range modeLabels {
+		for _, lbl := range modeSelect.Options {
 			if modeKey(lbl) == p.Mode {
 				modeSelect.SetSelected(lbl)
 				break
@@ -1343,6 +1503,9 @@ func main() {
 	client.OnStateChange = func(state ConnectionState, msg string) {
 		switch state {
 		case StateConnected:
+			iqModeSwitching = false // IQ mode reconnect completed successfully
+			lastAllowedIQModes = client.AllowedIQModes()
+			rebuildModeOptions(lastAllowedIQModes)
 			updateWindowTitle()
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
@@ -1403,6 +1566,7 @@ func main() {
 			connectBtn.SetText("Cancel")
 			connectBtn.Importance = widget.MediumImportance
 		case StateError:
+			rebuildModeOptions(lastAllowedIQModes)
 			stopSessionTimer()
 			w.SetTitle("UberSDR - Disconnected")
 			statusDot.SetColor(dotColorRed)
@@ -1434,6 +1598,7 @@ func main() {
 				}()
 			}
 		default:
+			rebuildModeOptions(lastAllowedIQModes)
 			stopSessionTimer()
 			w.SetTitle("UberSDR - Disconnected")
 			statusDot.SetColor(dotColorRed)
@@ -1451,6 +1616,10 @@ func main() {
 	}
 
 	client.OnSignalQuality = func(basebandPower, noiseDensity float32) {
+		// IQ modes do not provide meaningful signal/SNR data; keep bars cleared.
+		if isIQMode(currentMode) {
+			return
+		}
 		const noData = float32(-999)
 		if basebandPower > noData {
 			signalBar.SetValue(float64(basebandPower))
@@ -1561,6 +1730,7 @@ func main() {
 	// Status dot + label for flrig connection state.
 	flrigDot := NewStatusDot(dotColorGrey)
 	flrigStatusLabel := widget.NewLabel("Disabled")
+	flrigStatusLabel.Wrapping = fyne.TextWrapWord
 
 	// PTT indicator label.
 	flrigPTTLabel := widget.NewLabel("RX")
@@ -1724,7 +1894,10 @@ func main() {
 
 	flrigApplyBtn := widget.NewButton("Apply", func() { applyFlrigConfig() })
 
-	flrigStatusRow := container.NewHBox(flrigDot, flrigStatusLabel, layout.NewSpacer(), widget.NewLabel("PTT:"), flrigPTTLabel)
+	flrigPTTRow := container.NewHBox(flrigDot, layout.NewSpacer(), widget.NewLabel("PTT:"), flrigPTTLabel)
+	flrigStatusRow := container.NewBorder(nil, nil, nil, nil,
+		container.NewVBox(flrigPTTRow, flrigStatusLabel),
+	)
 
 	flrigBox := container.NewVBox(
 		flrigEnabledCheck,

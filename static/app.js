@@ -9425,7 +9425,8 @@ function populateBookmarkSelector() {
                 group: bookmark.group,
                 comment: bookmark.comment
             });
-            option.textContent = bookmark.name;
+            const freqKHz = (bookmark.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
+            option.textContent = `${bookmark.name} [${freqKHz} kHz]`;
             optgroup.appendChild(option);
         });
 
@@ -9443,7 +9444,8 @@ function populateBookmarkSelector() {
                 extension: bookmark.extension,
                 comment: bookmark.comment
             });
-            option.textContent = bookmark.name;
+            const freqKHz = (bookmark.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
+            option.textContent = `${bookmark.name} [${freqKHz} kHz]`;
             selector.appendChild(option);
         });
     }
@@ -9574,7 +9576,8 @@ function populateLocalBookmarkSelector() {
                 group: bookmark.group,
                 comment: bookmark.comment
             });
-            option.textContent = bookmark.name;
+            const freqKHz = (bookmark.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
+            option.textContent = `${bookmark.name} [${freqKHz} kHz]`;
             optgroup.appendChild(option);
         });
 
@@ -9592,7 +9595,8 @@ function populateLocalBookmarkSelector() {
                 extension: bookmark.extension,
                 comment: bookmark.comment
             });
-            option.textContent = bookmark.name;
+            const freqKHz = (bookmark.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
+            option.textContent = `${bookmark.name} [${freqKHz} kHz]`;
             selector.appendChild(option);
         });
     }

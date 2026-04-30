@@ -779,21 +779,26 @@ class SpectrumDisplay:
         
         # Draw frequency scale
         self._draw_frequency_scale()
-        
+
         # Draw dB scale
         self._draw_db_scale()
-        
+
+        # Draw bandwidth filter fill BEFORE spectrum data so the spectrum
+        # line and polygon are rendered on top of the tinted background.
+        # The yellow edge lines are drawn AFTER (below) so they stay visible.
+        self._draw_bandwidth_filter_fill()
+
         # Draw spectrum line
         points = []
         for i, db in enumerate(self.spectrum_data):
             if not np.isfinite(db):
                 continue
-            
+
             x = self.margin_left + (i / len(self.spectrum_data)) * self.graph_width
             normalized = (db - self.min_db) / db_range
             y = self.margin_top + self.graph_height - (normalized * self.graph_height)
             points.extend([x, y])
-        
+
         if len(points) >= 4:
             # Draw filled area — no stipple (stipple is rendered in software and is
             # extremely slow, causing UI freezes especially on reconnect when
@@ -801,26 +806,27 @@ class SpectrumDisplay:
             fill_points = [self.margin_left, self.margin_top + self.graph_height] + points + \
                          [self.margin_left + self.graph_width, self.margin_top + self.graph_height]
             self.canvas.create_polygon(fill_points, fill='#1e90ff', outline='')
-            
+
             # Draw line
             self.canvas.create_line(points, fill='#00ff00', width=1)
-        
+
         # Draw band backgrounds (behind bookmarks)
         self._draw_band_backgrounds()
-        
+
         # Draw bookmark markers (above spectrum and band backgrounds)
         self._draw_bookmarks()
-        
-        # Draw bandwidth filter visualization
-        self._draw_bandwidth_filter()
-        
+
+        # Draw bandwidth filter edge lines on top of everything so they remain
+        # clearly visible over the spectrum polygon and band backgrounds.
+        self._draw_bandwidth_filter_edges()
+
         # Draw center frequency marker
         self._draw_center_marker()
-        
+
         # Redraw cursor line if visible
         if self.cursor_x >= 0:
             self._draw_cursor_line(self.cursor_x)
-        
+
         # Update and redraw tooltip with current spectrum data if mouse is over canvas
         if should_update_tooltip:
             self._update_tooltip_at_position(self.last_mouse_x, self.last_mouse_y)
@@ -1086,8 +1092,12 @@ class SpectrumDisplay:
             if self.bandwidth_callback:
                 self.bandwidth_callback(bandwidth_low, bandwidth_high)
 
-    def _draw_bandwidth_filter(self):
-        """Draw bandwidth filter visualization with yellow lines and fill.
+    def _get_filter_x_positions(self):
+        """Compute filter edge x-pixel positions for the current mode/bandwidth.
+
+        Returns (low_x, high_x, clipped) where clipped is True if the filter
+        edges were clipped to the visible range, or None if the filter is
+        completely outside the visible range or no data is available.
 
         For IQ modes, the bandwidth is determined by the sample rate:
         - iq48: ±24 kHz (48 kHz sample rate)
@@ -1096,70 +1106,94 @@ class SpectrumDisplay:
         - iq384: ±192 kHz (384 kHz sample rate)
         """
         if self.total_bandwidth == 0 or self.tuned_freq == 0:
-            return
+            return None
 
         start_freq = self.center_freq - self.total_bandwidth / 2
         end_freq = self.center_freq + self.total_bandwidth / 2
 
-        # Determine bandwidth based on mode
-        # For IQ modes, bandwidth is ±(sample_rate/2) from tuned frequency
-        if self.current_mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384'):
-            # Extract sample rate from mode name (e.g., 'iq96' -> 96 kHz)
-            if self.current_mode == 'iq' or self.current_mode == 'iq48':
-                sample_rate = 48000  # 48 kHz
+        # Determine bandwidth based on mode.
+        # Plain 'iq' mode has adjustable bandwidth (slider values).
+        # Wide IQ modes (iq48/96/192/384) have fixed bandwidth from sample rate.
+        if self.current_mode in ('iq48', 'iq96', 'iq192', 'iq384'):
+            if self.current_mode == 'iq48':
+                sample_rate = 48000
             elif self.current_mode == 'iq96':
-                sample_rate = 96000  # 96 kHz
+                sample_rate = 96000
             elif self.current_mode == 'iq192':
-                sample_rate = 192000  # 192 kHz
+                sample_rate = 192000
             elif self.current_mode == 'iq384':
-                sample_rate = 384000  # 384 kHz
+                sample_rate = 384000
             else:
-                sample_rate = 48000  # Default fallback
-
-            # IQ bandwidth is ±(sample_rate/2)
+                sample_rate = 48000
             half_bandwidth = sample_rate / 2
             filter_low_freq = self.tuned_freq - half_bandwidth
             filter_high_freq = self.tuned_freq + half_bandwidth
         else:
-            # Audio modes: use bandwidth_low and bandwidth_high
+            # Audio modes and plain 'iq': use bandwidth_low and bandwidth_high
             filter_low_freq = self.tuned_freq + self.bandwidth_low
             filter_high_freq = self.tuned_freq + self.bandwidth_high
-        
-        # Check if any part of the filter is visible in current view
-        # Don't return early - clip to visible range instead
+
+        # Filter completely outside visible range?
         if filter_high_freq < start_freq or filter_low_freq > end_freq:
-            return  # Filter is completely outside visible range
-        
-        # Clip filter edges to visible range
+            return None
+
+        # Remember original (unclipped) edges so callers can decide whether to
+        # draw the edge lines (only draw a line if the edge is within the view).
+        orig_low_freq = filter_low_freq
+        orig_high_freq = filter_high_freq
+
+        # Clip to visible range for pixel calculation
         filter_low_freq = max(filter_low_freq, start_freq)
         filter_high_freq = min(filter_high_freq, end_freq)
-        
-        # Calculate x positions for filter edges
+
         low_x = self.margin_left + ((filter_low_freq - start_freq) / self.total_bandwidth) * self.graph_width
         high_x = self.margin_left + ((filter_high_freq - start_freq) / self.total_bandwidth) * self.graph_width
-        
-        # Draw yellow fill for filter bandwidth — no stipple (stipple is very slow in Tkinter)
+
+        return (low_x, high_x, orig_low_freq, orig_high_freq, start_freq, end_freq)
+
+    def _draw_bandwidth_filter_fill(self):
+        """Draw the semi-transparent tinted fill for the filter bandwidth region.
+
+        Called BEFORE the spectrum polygon/line so the signal data is rendered
+        on top of the tint and remains visible.
+        """
+        result = self._get_filter_x_positions()
+        if result is None:
+            return
+        low_x, high_x = result[0], result[1]
+
+        # Dark olive tint — drawn behind the spectrum so signal data shows through.
         self.canvas.create_rectangle(
             low_x, self.margin_top,
             high_x, self.margin_top + self.graph_height,
             fill='#404000', outline=''
         )
-        
-        # Draw solid yellow lines at filter edges (only if they're within visible range)
-        # For IQ modes, the edges might extend beyond the visible spectrum
-        if low_x > self.margin_left:
+
+    def _draw_bandwidth_filter_edges(self):
+        """Draw the yellow edge lines for the filter bandwidth region.
+
+        Called AFTER the spectrum polygon/line so the lines are always visible
+        on top of the signal data.
+        """
+        result = self._get_filter_x_positions()
+        if result is None:
+            return
+        low_x, high_x, orig_low_freq, orig_high_freq, start_freq, end_freq = result
+
+        # Draw solid yellow lines at filter edges (only if within visible range)
+        if orig_low_freq >= start_freq:
             self.canvas.create_line(
                 low_x, self.margin_top,
                 low_x, self.margin_top + self.graph_height,
                 fill='yellow', width=2
             )
-        if high_x < self.margin_left + self.graph_width:
+        if orig_high_freq <= end_freq:
             self.canvas.create_line(
                 high_x, self.margin_top,
                 high_x, self.margin_top + self.graph_height,
                 fill='yellow', width=2
             )
-    
+
     def on_mouse_down(self, event):
         """Handle mouse button press - start drag operation.
 

@@ -172,8 +172,9 @@ type RadioClient struct {
 	pcmDecoder         *PCMBinaryDecoder
 	audioOut           *AudioOutput
 	cancelFn           context.CancelFunc
-	connMaxSessionTime int  // MaxSessionTime from last /connection response (0 = unlimited)
-	connBypassed       bool // Bypassed flag from last /connection response
+	connMaxSessionTime int      // MaxSessionTime from last /connection response (0 = unlimited)
+	connBypassed       bool     // Bypassed flag from last /connection response
+	connAllowedIQModes []string // AllowedIQModes from last /connection response
 
 	// Callbacks (called from the receive goroutine; Fyne Set* methods are goroutine-safe)
 	OnStateChange   func(ConnectionState, string)             // state, optional message
@@ -284,6 +285,25 @@ func (c *RadioClient) ConnBypassed() bool {
 	return c.connBypassed
 }
 
+// AllowedIQModes returns the list of wide IQ modes permitted by the server
+// from the last /connection response. Plain "iq" is always permitted.
+func (c *RadioClient) AllowedIQModes() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connAllowedIQModes
+}
+
+// isIQMode reports whether mode is any IQ variant (iq, iq48, iq96, iq192, iq384).
+func isIQMode(mode string) bool {
+	return mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" || mode == "iq384"
+}
+
+// isWideIQMode reports whether mode is a wide (preset-bandwidth) IQ variant.
+// Wide IQ modes do not accept bandwidth parameters from the client.
+func isWideIQMode(mode string) bool {
+	return mode == "iq48" || mode == "iq96" || mode == "iq192" || mode == "iq384"
+}
+
 // SetVolume adjusts playback volume (0.0–1.0). The value is remembered so
 // that any AudioOutput created later (on the first audio frame) starts at
 // the correct level rather than always defaulting to 1.0.
@@ -371,7 +391,7 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	}
 
 	format := "pcm-zstd"
-	if c.Format == FormatOpus {
+	if c.Format == FormatOpus && !isIQMode(c.Mode) {
 		format = "opus"
 	}
 
@@ -386,8 +406,10 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	q.Set("format", format)
 	q.Set("version", "2") // Request v2 headers with signal quality (basebandPower, noiseDensity)
 	q.Set("user_session_id", c.userSessionID)
-	q.Set("bandwidthLow", fmt.Sprintf("%d", c.BandwidthLow))
-	q.Set("bandwidthHigh", fmt.Sprintf("%d", c.BandwidthHigh))
+	if !isWideIQMode(c.Mode) {
+		q.Set("bandwidthLow", fmt.Sprintf("%d", c.BandwidthLow))
+		q.Set("bandwidthHigh", fmt.Sprintf("%d", c.BandwidthHigh))
+	}
 	if c.Password != "" {
 		q.Set("password", c.Password)
 	}
@@ -466,6 +488,32 @@ func (c *RadioClient) Connect() {
 	go c.runLoop(ctx, gen)
 }
 
+// ReconnectWS closes the current WebSocket and opens a new one with the
+// current client parameters, skipping the /connection check.  Use this when
+// only the stream parameters (mode, bandwidth, format) have changed and the
+// server has already authorised the session — e.g. when switching IQ modes.
+//
+// The userSessionID is intentionally preserved so the server recognises this
+// as the same user replacing their stream rather than a new session joining.
+// This prevents a brief "two sessions" window while the old WebSocket closes.
+func (c *RadioClient) ReconnectWS() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c.mu.Lock()
+	if c.cancelFn != nil {
+		c.cancelFn()
+	}
+	// Do NOT rotate userSessionID — keep the same one so the server treats
+	// this as a stream replacement for the existing session, not a new session.
+	c.generation++
+	gen := c.generation
+	c.cancelFn = cancel
+	c.state = StateDisconnected
+	c.mu.Unlock()
+
+	go c.runLoopWS(ctx, gen)
+}
+
 // ConnectForce starts a new connection unconditionally, cancelling any
 // in-progress connection first.  Use this when you have already called
 // Disconnect() and polled for the state to settle, but want to guarantee
@@ -530,6 +578,14 @@ func (c *RadioClient) Tune(frequency int, mode string, bwLow, bwHigh int) error 
 	return conn.WriteJSON(msg)
 }
 
+// runLoopWS is like runLoop but skips the /connection check.
+// Used by ReconnectWS when only the stream parameters have changed and the
+// server has already authorised the session.
+func (c *RadioClient) runLoopWS(ctx context.Context, gen uint64) {
+	c.setState(gen, StateConnecting, "")
+	c.connectAndStream(ctx, gen)
+}
+
 // runLoop is the main connection goroutine.
 // gen is the generation counter captured at Connect() time; setState calls with
 // a mismatched generation are silently dropped so stale goroutines cannot
@@ -551,8 +607,15 @@ func (c *RadioClient) runLoop(ctx context.Context, gen uint64) {
 	c.mu.Lock()
 	c.connMaxSessionTime = cr.MaxSessionTime
 	c.connBypassed = cr.Bypassed
+	c.connAllowedIQModes = cr.AllowedIQModes
 	c.mu.Unlock()
 
+	c.connectAndStream(ctx, gen)
+}
+
+// connectAndStream dials the WebSocket and runs the receive loop.
+// Called by both runLoop (after /connection check) and runLoopWS (skipping it).
+func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 	wsURL, err := c.buildWSURL()
 	if err != nil {
 		c.setState(gen, StateError, err.Error())

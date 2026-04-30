@@ -2562,6 +2562,34 @@ class RadioGUI:
             self.notify_chat_radio_changed()
         self.bandwidth_update_job = None
 
+    def _on_bw_low_changed(self, value):
+        """Handle low bandwidth slider change for IQ mode - mirrors high slider symmetrically."""
+        if not getattr(self, '_iq_bw_sync', False):
+            self._iq_bw_sync = True
+            try:
+                low = int(float(value))
+                low = max(-6000, min(-100, low))  # Enforce minimum of -100 Hz (never reach 0)
+                high = -low  # IQ mode is symmetric: high = -low
+                self.bw_high_var.set(high)
+                self.bw_high_label.config(text=f"{high} Hz")
+            finally:
+                self._iq_bw_sync = False
+        self.update_bandwidth_display(value)
+
+    def _on_bw_high_changed(self, value):
+        """Handle high bandwidth slider change for IQ mode - mirrors low slider symmetrically."""
+        if not getattr(self, '_iq_bw_sync', False):
+            self._iq_bw_sync = True
+            try:
+                high = int(float(value))
+                high = max(100, min(6000, high))  # Enforce minimum of 100 Hz (never reach 0)
+                low = -high  # IQ mode is symmetric: low = -high
+                self.bw_low_var.set(low)
+                self.bw_low_label.config(text=f"{low} Hz")
+            finally:
+                self._iq_bw_sync = False
+        self.update_bandwidth_display(value)
+
     def set_bandwidth(self, low: int, high: int):
         """Set bandwidth from preset button."""
         self.bw_low_var.set(low)
@@ -4042,6 +4070,13 @@ class RadioGUI:
                 self.audio_spectrum_window = None
                 self.audio_spectrum_display = None
                 self.log_status("Audio spectrum window closed (IQ mode)")
+
+            # Close SNR history window if open (SNR is not meaningful in IQ mode)
+            if self.snr_history_window and self.snr_history_window.winfo_exists():
+                self.snr_history_window.destroy()
+                self.snr_history_window = None
+                self.snr_history_display = None
+                self.log_status("SNR history window closed (IQ mode)")
 
             # Disable audio spectrum button
             if self.audio_spectrum_btn:
@@ -7273,7 +7308,7 @@ class RadioGUI:
             'cwl': (-200, 200),
             'fm': (-8000, 8000),
             'nfm': (-5000, 5000),
-            'iq': (-5000, 5000),
+            'iq': (-6000, 6000),
             'iq48': (-5000, 5000),
             'iq96': (-5000, 5000),
             'iq192': (-5000, 5000),
@@ -7338,23 +7373,36 @@ class RadioGUI:
             'cwl': (-100, -500, 100, 500),
         }
 
-        # Check if this is an IQ mode
-        is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
+        # Add plain IQ mode bounds (±6 kHz, symmetric)
+        mode_bounds['iq'] = (-6000, 0, 0, 6000)
 
-        if is_iq_mode:
-            # Disable sliders for IQ modes
-            self.bw_low_scale.config(state='disabled')
-            self.bw_high_scale.config(state='disabled')
+        # Check if this is a wide fixed-bandwidth IQ mode (bandwidth NOT adjustable)
+        is_wide_iq_mode = mode in ['iq48', 'iq96', 'iq192', 'iq384']
+
+        if is_wide_iq_mode:
+            # Disable sliders for wide IQ modes (fixed bandwidth)
+            self.bw_low_scale.config(state='disabled', command=self.update_bandwidth_display)
+            self.bw_high_scale.config(state='disabled', command=self.update_bandwidth_display)
             # Only log if status_text exists (after full initialization)
             if hasattr(self, 'status_text'):
-                self.log_status(f"Bandwidth sliders disabled for {mode.upper()} mode")
+                self.log_status(f"Bandwidth sliders disabled for {mode.upper()} mode (fixed bandwidth)")
         else:
-            # Enable sliders for non-IQ modes
+            # Enable sliders for all other modes (including plain IQ)
             self.bw_low_scale.config(state='normal')
             self.bw_high_scale.config(state='normal')
 
-            # Get bounds for current mode
-            if mode in mode_bounds:
+            if mode == 'iq':
+                # Plain IQ mode: use symmetric callbacks so sliders mirror each other
+                # Minimum of ±100 Hz enforced so bandwidth never reaches 0
+                self.bw_low_scale.config(from_=-6000, to=-100, command=self._on_bw_low_changed)
+                self.bw_high_scale.config(from_=100, to=6000, command=self._on_bw_high_changed)
+                if hasattr(self, 'status_text'):
+                    self.log_status("Bandwidth sliders enabled for IQ mode (symmetric, ±100 Hz to ±6 kHz)")
+            elif mode in mode_bounds:
+                # Restore standard callback for non-IQ modes
+                self.bw_low_scale.config(command=self.update_bandwidth_display)
+                self.bw_high_scale.config(command=self.update_bandwidth_display)
+
                 low_min, low_max, high_min, high_max = mode_bounds[mode]
 
                 # Update slider ranges
@@ -7365,7 +7413,9 @@ class RadioGUI:
                 if hasattr(self, 'status_text'):
                     self.log_status(f"Bandwidth bounds for {mode.upper()}: Low [{low_min} to {low_max}], High [{high_min} to {high_max}]")
             else:
-                # Unknown mode - use default wide range
+                # Unknown mode - restore standard callback and use default wide range
+                self.bw_low_scale.config(command=self.update_bandwidth_display)
+                self.bw_high_scale.config(command=self.update_bandwidth_display)
                 self.bw_low_scale.config(from_=-10000, to=10000)
                 self.bw_high_scale.config(from_=-10000, to=10000)
 
@@ -7443,8 +7493,8 @@ class RadioGUI:
 
         try:
             import json
-            # Check if this is an IQ mode (bandwidth should not be sent for IQ modes)
-            is_iq_mode = self.client.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            # Check if this is a wide fixed-bandwidth IQ mode (bandwidth should not be sent)
+            is_wide_iq_mode = self.client.mode in ('iq48', 'iq96', 'iq192', 'iq384')
 
             tune_msg = {
                 'type': 'tune',
@@ -7452,8 +7502,8 @@ class RadioGUI:
                 'mode': self.client.mode
             }
 
-            # Only include bandwidth for non-IQ modes
-            if not is_iq_mode:
+            # Only include bandwidth for non-wide-IQ modes (plain IQ accepts bandwidth)
+            if not is_wide_iq_mode:
                 tune_msg['bandwidthLow'] = self.client.bandwidth_low
                 tune_msg['bandwidthHigh'] = self.client.bandwidth_high
 

@@ -381,20 +381,27 @@ class WaterfallDisplay:
         pass
     
     def _draw_bandwidth_filter(self):
-        """Draw bandwidth filter visualization with yellow overlay."""
+        """Draw bandwidth filter edge lines on the waterfall.
+
+        The waterfall is a bitmap image drawn directly to the canvas — Tkinter
+        Canvas has no alpha/transparency support, so any filled rectangle drawn
+        on top of the image completely obscures the signal data underneath.
+        Instead we draw only the yellow edge lines, which clearly mark the
+        filter boundaries without hiding the waterfall content.
+        """
         if not self.spectrum_display or self.spectrum_display.total_bandwidth == 0 or self.tuned_freq == 0:
             return
-        
+
         center_freq = self.spectrum_display.center_freq
         total_bandwidth = self.spectrum_display.total_bandwidth
         start_freq = center_freq - total_bandwidth / 2
         end_freq = center_freq + total_bandwidth / 2
-        
-        # Check if this is an IQ mode - if so, use full IQ bandwidth instead of slider values
-        if hasattr(self, 'current_mode') and self.current_mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']:
-            # IQ mode: bandwidth is ±(sample_rate/2) from tuned frequency
-            # Extract sample rate from mode name
-            if self.current_mode == 'iq' or self.current_mode == 'iq48':
+
+        # Determine bandwidth based on mode.
+        # Plain 'iq' mode has adjustable bandwidth (slider values).
+        # Wide IQ modes (iq48/96/192/384) have fixed bandwidth from sample rate.
+        if hasattr(self, 'current_mode') and self.current_mode in ['iq48', 'iq96', 'iq192', 'iq384']:
+            if self.current_mode == 'iq48':
                 sample_rate = 48000
             elif self.current_mode == 'iq96':
                 sample_rate = 96000
@@ -404,45 +411,46 @@ class WaterfallDisplay:
                 sample_rate = 384000
             else:
                 sample_rate = 48000
-
-            # IQ bandwidth is ±(sample_rate/2)
             bw_low = -sample_rate // 2
             bw_high = sample_rate // 2
         else:
-            # Non-IQ mode: use slider values
+            # Audio modes and plain 'iq': use slider values
             bw_low = self.bandwidth_low
             bw_high = self.bandwidth_high
 
         # Calculate filter edge frequencies
         filter_low_freq = self.tuned_freq + bw_low
         filter_high_freq = self.tuned_freq + bw_high
-        
-        # Check if filter edges are visible
-        if filter_low_freq < start_freq or filter_high_freq > end_freq:
+
+        # Filter completely outside visible range?
+        if filter_high_freq < start_freq or filter_low_freq > end_freq:
             return
-        
-        # Calculate x positions
+
+        # Remember original edges before clipping so we only draw a line when
+        # the edge is actually within the visible range.
+        orig_low_freq = filter_low_freq
+        orig_high_freq = filter_high_freq
+
+        # Clip to visible range for pixel calculation
+        filter_low_freq = max(filter_low_freq, start_freq)
+        filter_high_freq = min(filter_high_freq, end_freq)
+
         low_x = self.margin_left + ((filter_low_freq - start_freq) / total_bandwidth) * self.waterfall_width
         high_x = self.margin_left + ((filter_high_freq - start_freq) / total_bandwidth) * self.waterfall_width
-        
-        # Draw yellow overlay — no stipple (stipple is very slow in Tkinter)
-        self.canvas.create_rectangle(
-            low_x, self.margin_top,
-            high_x, self.margin_top + self.waterfall_height,
-            fill='#404000', outline=''
-        )
-        
-        # Draw solid yellow lines at filter edges
-        self.canvas.create_line(
-            low_x, self.margin_top,
-            low_x, self.margin_top + self.waterfall_height,
-            fill='yellow', width=2
-        )
-        self.canvas.create_line(
-            high_x, self.margin_top,
-            high_x, self.margin_top + self.waterfall_height,
-            fill='yellow', width=2
-        )
+
+        # Draw solid yellow lines at filter edges (only when edge is in view)
+        if orig_low_freq >= start_freq:
+            self.canvas.create_line(
+                low_x, self.margin_top,
+                low_x, self.margin_top + self.waterfall_height,
+                fill='yellow', width=2
+            )
+        if orig_high_freq <= end_freq:
+            self.canvas.create_line(
+                high_x, self.margin_top,
+                high_x, self.margin_top + self.waterfall_height,
+                fill='yellow', width=2
+            )
     
     def on_mouse_down(self, event):
         """Handle mouse button press - start drag operation.

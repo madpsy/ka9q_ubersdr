@@ -96,8 +96,8 @@ func (r *SdrListRegistrar) loop() {
 	if sdrListHost == "" {
 		sdrListHost = "sdr-list.xyz"
 	}
-	// Strip scheme for display purposes.
-	displayName := sdrListHost
+	// Strip scheme and trailing slashes for display purposes.
+	displayName := strings.TrimRight(sdrListHost, "/")
 	if idx := strings.Index(displayName, "://"); idx >= 0 {
 		displayName = displayName[idx+3:]
 	}
@@ -216,6 +216,9 @@ func (r *SdrListRegistrar) update(host, displayName string) error {
 	case strings.HasPrefix(host, "https://"):
 		bareHost = strings.TrimPrefix(host, "https://")
 	}
+	// Strip any trailing slashes that a user may have included in the config
+	// (e.g. "https://www.shbrg.nl/" → bareHost "www.shbrg.nl").
+	bareHost = strings.TrimRight(bareHost, "/")
 
 	var transport *http.Transport
 	if scheme == "https" {

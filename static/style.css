@@ -1949,8 +1949,20 @@ input[type="range"]::-moz-range-thumb {
         max-width: 100%;
     }
 
-    /* Prevent <select> elements with long option text from expanding the controls */
+    /* Prevent <select> elements with long option text from expanding the controls.
+       <select> has an intrinsic min-width equal to its widest <option> text;
+       min-width:0 alone is not enough — we also need max-width to cap it,
+       and the flex-parent div must allow shrinking via overflow:hidden. */
     .control-group select {
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* The bookmark selects sit inside an inline-styled flex div;
+       ensure that div itself can shrink below its content size. */
+    .controls .control-group > div {
         min-width: 0;
         overflow: hidden;
     }

@@ -799,16 +799,28 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
-	// Handle AR (Audio Rate) command - client sends "SET in=12000 out=48000"
-	if inRate, hasIn := params["in"]; hasIn {
+	// Handle SET AR OK command (audio resampling confirmation from client).
+	// The real KiwiSDR client sends "SET AR OK in=<rate> out=<rate>" after
+	// successfully computing resampling parameters in audio_rate().
+	// The real server (rx_sound_cmd.cpp CMD_AR_OKAY) just records the info
+	// and sets the CMD_AR_OK bit — it does NOT send any response.
+	// We must intercept this BEFORE the generic in/out handler below,
+	// because the parser turns "AR OK in=12000 out=48000" into
+	// {AR:"", OK:"", in:"12000", out:"48000"} and the old in/out handler
+	// would fire and send a malformed audio_init that corrupts the client.
+	if _, hasAR := params["AR"]; hasAR {
+		if _, hasOK := params["OK"]; hasOK {
+			// Silently acknowledge — no response needed, matches real KiwiSDR behaviour
+			return
+		}
+	}
+
+	// Handle SET UAR command (unsupported audio rate error from client).
+	// The real KiwiSDR client sends "SET UAR in=<rate> out=<rate>" when it
+	// cannot find valid resampling parameters. The real server just logs it.
+	if _, hasIn := params["in"]; hasIn {
 		if _, hasOut := params["out"]; hasOut {
-			// Respond with audio_init message containing audio_rate and audio_rate_true
-			// Use the 'in' rate from the client
-			// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
-			kc.sendMsg("audio_init", fmt.Sprintf("audio_rate=%s audio_rate_true=%s.000", inRate, inRate))
-			kc.mu.Lock()
-			kc.audioInitSent = true
-			kc.mu.Unlock()
+			// Silently acknowledge — no response needed, matches real KiwiSDR behaviour
 			return
 		}
 	}
@@ -1316,7 +1328,7 @@ func (kc *kiwiConn) sendInitMessages() {
 	if kc.connType == "SND" {
 		// Audio connection - send audio-specific messages
 		sampleRate := kc.config.Audio.DefaultSampleRate
-		kc.sendMsg("sample_rate", fmt.Sprintf("%d", sampleRate))
+		kc.sendMsg("sample_rate", fmt.Sprintf("%.6f", float64(sampleRate)))
 		kc.sendMsg("client_public_ip", kc.clientIP)
 
 		// Send RX channel number (which slot this user is assigned to)

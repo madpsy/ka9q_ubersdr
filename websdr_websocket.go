@@ -819,6 +819,18 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	startOffsetHz := float64(c.wfStart) * bandBWHz / float64(maxZoomPixels)
 	visibleStartHz := bandStartHz + startOffsetHz
 	centerHz := visibleStartHz + visibleBWHz/2.0
+
+	// Clamp center frequency to valid HF range (10 kHz – 30 MHz).
+	// A malformed or out-of-range start value from the client can produce
+	// a calculated center outside the band.  Clamp rather than reject so
+	// the waterfall stays usable at the boundary.
+	if centerHz < bandStartHz {
+		centerHz = bandStartHz
+	}
+	if centerHz > bandEndHz {
+		centerHz = bandEndHz
+	}
+
 	binBandwidthHz := visibleBWHz / float64(binCount)
 
 	sessionID := ""

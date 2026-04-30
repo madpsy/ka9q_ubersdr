@@ -748,6 +748,20 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			xBin = 0
 		}
 
+		// Clamp center frequency to valid HF range (10 kHz – 30 MHz).
+		// The KiwiSDR hardware physically cannot tune outside 0-30 MHz, but
+		// a malformed or out-of-range x_bin / cf value from the client can
+		// produce a calculated frequency well beyond that.  Clamp rather than
+		// reject so the waterfall stays usable at the boundary.
+		const minSpectrumFreq = 10000    // 10 kHz
+		const maxSpectrumFreq = 30000000 // 30 MHz
+		if freq < minSpectrumFreq {
+			freq = minSpectrumFreq
+		}
+		if freq > maxSpectrumFreq {
+			freq = maxSpectrumFreq
+		}
+
 		// Always use 1024 bins (matching real KiwiSDR FPGA hardware behaviour).
 		//
 		// The KiwiSDR client uses the echoed x_bin and zoom from the W/F packet

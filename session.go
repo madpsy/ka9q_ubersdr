@@ -666,12 +666,13 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	binCount := sm.config.Spectrum.Default.BinCount
 	binBandwidth := sm.config.Spectrum.Default.BinBandwidth
 
-	// Validate frequency - must not be 0
+	// Validate frequency - must be within HF range (10 kHz – 30 MHz)
 	// If config has invalid frequency, use 15 MHz as fallback (covers 0-30 MHz HF range)
-	const minFrequency = 10000 // 10 kHz minimum
-	if frequency < minFrequency {
-		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be >= %d Hz), using fallback 15 MHz",
-			frequency, minFrequency)
+	const minFrequency = 10000    // 10 kHz minimum
+	const maxFrequency = 30000000 // 30 MHz maximum
+	if frequency < minFrequency || frequency > maxFrequency {
+		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be %d–%d Hz), using fallback 15 MHz",
+			frequency, minFrequency, maxFrequency)
 		frequency = 15000000 // 15 MHz fallback
 	}
 
@@ -838,10 +839,11 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		return fmt.Errorf("session %s is not a spectrum session", sessionID)
 	}
 
-	// Validate frequency if provided - must not be 0
-	const minFrequency = 10000 // 10 kHz minimum
-	if frequency > 0 && frequency < minFrequency {
-		return fmt.Errorf("invalid spectrum frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
+	// Validate frequency if provided - must be within HF range (10 kHz – 30 MHz)
+	const minFrequency = 10000    // 10 kHz minimum
+	const maxFrequency = 30000000 // 30 MHz maximum
+	if frequency > 0 && (frequency < minFrequency || frequency > maxFrequency) {
+		return fmt.Errorf("invalid spectrum frequency %d Hz (must be %d–%d Hz)", frequency, minFrequency, maxFrequency)
 	}
 
 	// Compute the effective new parameters (fall back to current values for zeros).

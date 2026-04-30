@@ -5,6 +5,18 @@ package main
 // Implements the legacy websdr.org registration protocol (plain HTTP, ~60 s interval).
 // Disabled by default; opt-in via config flag:
 //   websdr_register_websdrorg: true   — register with websdr.org
+//
+// Protocol (mirrors the working Python bridge and original WebSDR binary):
+//   1. Open a persistent TCP connection to websdr.ewi.utwente.nl:80.
+//   2. Every ~60 s, send:
+//        GET /~~websdrorg?host=<HOST>&port=<PORT> HTTP/1.1\r\n
+//        Host: websdr.ewi.utwente.nl\r\n
+//        \r\n
+//   3. Read the response immediately (5 s timeout).
+//   4. Keep the socket open for the next ping; reconnect only on error.
+//
+// websdr.org then connects back to <HOST>:<PORT> with GET /~~orgstatus,
+// which is handled by the WebSDR HTTP server's handleOrgStatus().
 
 import (
 	"fmt"
@@ -16,11 +28,22 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Constants (from spec §12.2)
+// Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 const (
+	// websdrOrgRegistrationEnabled gates the built-in registration loop at
+	// compile time.  Set to false when running inside Docker (where the
+	// host-side Python bridge scripts/websdr-org-register.py is used instead)
+	// to avoid Docker NAT conntrack conflicts.  The config-level flag
+	// websdr_register_websdrorg is still checked at runtime; both must be
+	// true for the loop to start.
+	websdrOrgRegistrationEnabled = false
+
 	websdrOrgRegInterval = 60 * time.Second
+	websdrOrgHost        = "websdr.ewi.utwente.nl"
+	websdrOrgReconnDelay = 30 * time.Second
+	websdrOrgTimeout     = 15 * time.Second
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,7 +65,13 @@ func NewWebSDRRegistrar(config *Config) *WebSDRRegistrar {
 }
 
 // Start launches the registration goroutine (non-blocking).
+// Both the compile-time constant websdrOrgRegistrationEnabled and the
+// runtime config flag websdr_register_websdrorg must be true.
 func (reg *WebSDRRegistrar) Start() {
+	if !websdrOrgRegistrationEnabled {
+		log.Printf("WebSDR: websdr.org registration disabled at compile time (websdrOrgRegistrationEnabled=false)")
+		return
+	}
 	if reg.config.Server.WebSDRRegisterWebSDROrg {
 		go reg.websdrOrgLoop()
 	}
@@ -54,92 +83,119 @@ func (reg *WebSDRRegistrar) Stop() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §12.2 — Legacy websdr.org registration
+// §12.2 — Persistent registration loop
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (reg *WebSDRRegistrar) websdrOrgLoop() {
-	// Wait 30 seconds before the first registration attempt so that the WebSDR
-	// HTTP server is fully warmed up and ready to respond to the /~~orgstatus
-	// callback that websdr.org makes immediately after receiving the registration.
+	// Wait a few seconds before the first registration attempt so that the
+	// WebSDR HTTP server is fully warmed up and ready to respond to the
+	// /~~orgstatus callback that websdr.org makes immediately after
+	// receiving the registration.
 	select {
 	case <-reg.stop:
 		return
-	case <-time.After(30 * time.Second):
+	case <-time.After(2 * time.Second):
 	}
 
-	addr := net.JoinHostPort("websdr.ewi.utwente.nl", "80")
+	addr := net.JoinHostPort(websdrOrgHost, "80")
+
+	listenPort := reg.publicPort()
+	hostname := reg.publicHostname()
+
+	// Build the registration request with Host header (required for HTTP/1.1).
+	var reqLine string
+	if hostname != "" {
+		reqLine = fmt.Sprintf("GET /~~websdrorg?host=%s&port=%d HTTP/1.1\r\nHost: %s\r\n\r\n",
+			hostname, listenPort, websdrOrgHost)
+	} else {
+		reqLine = fmt.Sprintf("GET /~~websdrorg?port=%d HTTP/1.1\r\nHost: %s\r\n\r\n",
+			listenPort, websdrOrgHost)
+	}
+
+	var conn net.Conn
+	attempt := 0
+	buf := make([]byte, 1024)
 
 	for {
 		select {
 		case <-reg.stop:
+			if conn != nil {
+				conn.Close()
+			}
 			return
 		default:
 		}
 
-		// Build registration request
-		listenPort := reg.publicPort()
-		hostname := reg.publicHostname()
-
-		var reqLine string
-		if hostname != "" {
-			reqLine = fmt.Sprintf("GET /~~websdrorg?host=%s&port=%d HTTP/1.1\r\n\r\n", hostname, listenPort)
-		} else {
-			reqLine = fmt.Sprintf("GET /~~websdrorg?port=%d HTTP/1.1\r\n\r\n", listenPort)
-		}
-
-		// Open a fresh TCP connection every cycle (mirrors VertexSDR orgserver.c).
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		conn, err := dialer.Dial("tcp", addr)
-		if err != nil {
-			log.Printf("WebSDR: websdr.org registration connect error: %v", err)
-			select {
-			case <-reg.stop:
-				return
-			case <-time.After(60 * time.Second):
+		// Connect / reconnect if needed.
+		if conn == nil {
+			dialer := &net.Dialer{Timeout: websdrOrgTimeout}
+			var err error
+			conn, err = dialer.Dial("tcp", addr)
+			if err != nil {
+				log.Printf("WebSDR: websdr.org registration connect error: %v", err)
+				select {
+				case <-reg.stop:
+					return
+				case <-time.After(websdrOrgReconnDelay):
+				}
+				continue
 			}
-			continue
+			log.Printf("WebSDR: connected to %s", addr)
 		}
 
-		// Set write deadline (10s).
+		// Send registration ping.
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-
-		_, err = fmt.Fprint(conn, reqLine)
+		_, err := fmt.Fprint(conn, reqLine)
 		if err != nil {
-			log.Printf("WebSDR: websdr.org registration write error: %v", err)
+			log.Printf("WebSDR: websdr.org registration write error: %v — reconnecting", err)
 			conn.Close()
+			conn = nil
 			select {
 			case <-reg.stop:
 				return
-			case <-time.After(60 * time.Second):
+			case <-time.After(websdrOrgReconnDelay):
 			}
 			continue
 		}
+		attempt++
 
-		// Mirror VertexSDR orgserver.c exactly:
-		//   1. Send the GET request.
-		//   2. Hold the connection open for ~10 seconds — websdr.org uses this
-		//      window to open its inbound callback connection to our SDR port
-		//      and send GET /~~orgstatus.  Closing too quickly (before the
-		//      callback completes) means websdr.org never lists the receiver.
-		//   3. Read the response (websdr.org sends its ACK quickly).
-		//   4. Close the connection.
-		select {
-		case <-reg.stop:
-			conn.Close()
-			return
-		case <-time.After(10 * time.Second):
+		// Read response immediately (5 s timeout) — mirrors Python bridge.
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		n, err := conn.Read(buf)
+		if err != nil {
+			if n > 0 {
+				respSnippet := sanitiseLogString(buf[:n], 120)
+				log.Printf("WebSDR: #%d ping sent (partial response: %q, err: %v)", attempt, respSnippet, err)
+			} else {
+				// Timeout with no response is normal — websdr.org may not
+				// reply immediately.  Log it but don't reconnect.
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					log.Printf("WebSDR: #%d ping sent (no immediate response — normal)", attempt)
+				} else {
+					// Real error (connection reset, etc.) — reconnect.
+					log.Printf("WebSDR: #%d read error: %v — reconnecting", attempt, err)
+					conn.Close()
+					conn = nil
+					select {
+					case <-reg.stop:
+						return
+					case <-time.After(websdrOrgReconnDelay):
+					}
+					continue
+				}
+			}
+		} else if n > 0 {
+			respSnippet := sanitiseLogString(buf[:n], 120)
+			log.Printf("WebSDR: #%d registered with websdr.org (host=%s, port=%d) response: %q",
+				attempt, hostname, listenPort, respSnippet)
 		}
 
-		buf := make([]byte, 1024)
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		n, _ := conn.Read(buf)
-		respSnippet := sanitiseLogString(buf[:n], 120)
-		log.Printf("WebSDR: registered with websdr.org (host=%s, port=%d) response: %q", hostname, listenPort, respSnippet)
-
-		conn.Close()
-
+		// Wait 60 s before next ping (keep connection open).
 		select {
 		case <-reg.stop:
+			if conn != nil {
+				conn.Close()
+			}
 			return
 		case <-time.After(websdrOrgRegInterval):
 		}

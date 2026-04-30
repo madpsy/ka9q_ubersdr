@@ -9569,8 +9569,8 @@ function resetStationIdColor() {
                         } else if (sortCol === 'skew') {
                             const sa = skewMap[(a.callsign || '').toUpperCase()];
                             const sb = skewMap[(b.callsign || '').toUpperCase()];
-                            const va = sa !== undefined ? sa.skew : Infinity;
-                            const vb = sb !== undefined ? sb.skew : Infinity;
+                            const va = sa !== undefined ? Math.abs(sa.skew) : Infinity;
+                            const vb = sb !== undefined ? Math.abs(sb.skew) : Infinity;
                             return sortDir * (va - vb);
                         } else { // spots
                             return sortDir * ((a.spot_count || 0) - (b.spot_count || 0));

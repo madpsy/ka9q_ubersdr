@@ -8528,10 +8528,9 @@ function spectrumMaxZoom() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
-    // The server now reduces bin_count all the way to 256 in a single request
-    // (loop instead of if in user_spectrum_websocket.go), so one zoomIn() is enough.
-    // Send binBandwidth=2 to land at a comfortable 2 Hz/bin "max useful zoom".
-    // Users can press + once more for 1 Hz/bin, or again for 0.5 Hz/bin (hard floor).
+    // Send binBandwidth=2 to land at 2 Hz/bin — the maximum zoom for normal UI operation.
+    // The server supports down to 0.5 Hz/bin but that is only reachable via explicit
+    // requests (URL params, chat sync) — not via the Max button or + button.
     const freqInput = document.getElementById('frequency');
     const frequency = parseInt(freqInput ? (freqInput.getAttribute('data-hz-value') || freqInput.value) : '15000000');
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
@@ -8544,9 +8543,9 @@ function spectrumMaxZoom() {
 
     updateURL();
     if (window.radioAPI && spectrumDisplay) {
-        window.radioAPI.notifyZoomChange(spectrumDisplay.minBinBandwidth || 1.0);
+        window.radioAPI.notifyZoomChange(2.0);
     }
-    log('Zooming to maximum (single request — server resolves bin_count in one pass)');
+    log('Zooming to maximum (2 Hz/bin)');
 }
 
 // ── Zoom buttons + vertical slider ───────────────────────────────────────────

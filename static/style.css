@@ -1939,10 +1939,10 @@ input[type="range"]::-moz-range-thumb {
 
     .controls {
         grid-template-columns: minmax(0, 1fr);
-        transform: none;
+        transform: scale(0.9);
         transform-origin: top center;
-        margin-top: 0;
-        margin-bottom: 0;
+        margin-top: -10px;
+        margin-bottom: -30px;
         padding: 10px 0;
         gap: 15px;
         width: auto;
@@ -1978,8 +1978,10 @@ input[type="range"]::-moz-range-thumb {
     }
 
     /* Ensure bandwidth sliders have a usable width on mobile */
+    /* Extra bottom padding prevents the range slider thumb from being clipped */
     .bandwidth-controls {
         min-width: 260px;
+        padding-bottom: 12px;
     }
 
     /* On mobile, hide most of audio-controls but keep NR/NB buttons visible */

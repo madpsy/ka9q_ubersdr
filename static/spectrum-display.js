@@ -4742,14 +4742,16 @@ class SpectrumDisplay {
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
         const newBinBandwidth = this.binBandwidth / 2;
 
-        // Minimum practical limit: 1 Hz/bin hard floor.
+        // Minimum practical limit: 0.5 Hz/bin hard floor.
         // The server enforces its own minimum and will clamp the value.
         // We do NOT use minBinBandwidth here — that value is only used by the
         // slider UI to set slider.max.  Blocking zoom-in here based on
         // minBinBandwidth would prevent reaching the server's true maximum zoom
         // if the server can go below the first observed minimum.
-        if (newBinBandwidth < 1) {
-            console.log('Maximum zoom reached (1 Hz/bin hard floor)');
+        // 0.5 Hz/bin is the lowest safe value radiod supports; the Max button
+        // lands at 2 Hz/bin so users can still step down to 1 and 0.5 via +.
+        if (newBinBandwidth < 0.5) {
+            console.log('Maximum zoom reached (0.5 Hz/bin hard floor)');
             return;
         }
 

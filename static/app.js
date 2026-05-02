@@ -8530,15 +8530,15 @@ function spectrumMaxZoom() {
 
     // The server now reduces bin_count all the way to 256 in a single request
     // (loop instead of if in user_spectrum_websocket.go), so one zoomIn() is enough.
-    // Send binBandwidth=1 to guarantee we're below the 50 Hz/bin threshold that
-    // triggers the bin_count reduction path.
+    // Send binBandwidth=2 to land at a comfortable 2 Hz/bin "max useful zoom".
+    // Users can press + once more for 1 Hz/bin, or again for 0.5 Hz/bin (hard floor).
     const freqInput = document.getElementById('frequency');
     const frequency = parseInt(freqInput ? (freqInput.getAttribute('data-hz-value') || freqInput.value) : '15000000');
     if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: isNaN(frequency) ? 15000000 : frequency,
-            binBandwidth: 1.0
+            binBandwidth: 2.0
         }));
     }
 

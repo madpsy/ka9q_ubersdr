@@ -389,16 +389,30 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			currentBinCount := session.BinCount
 			session.mu.RUnlock()
 
-			// Radiod has constraints on valid sample rates (must be compatible with block rate)
-			// Safe bin_bw values that work with radiod: 50, 100, 200, 500, 1000, 2000, 5000 Hz
-			// Below 50 Hz, we need to reduce bin_count instead
-			const minSafeBinBW = 50.0        // Minimum safe bin_bw before reducing bin_count
+			// Radiod has constraints on valid sample rates (must be compatible with block rate).
+			// The constraint is: fft_size × bin_bw must be a multiple of samprate_base (typically 50 Hz).
+			// Safe bin_bw values verified to work with radiod (fft_size × bin_bw divisible by 50):
+			//   0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 Hz
+			// 0.5 Hz/bin: fft_size=1500 (2²×3×5³, goodchoice ✓), samprate=750 Hz ✓
+			// 1 Hz/bin:   fft_size=1000 (2³×5³, goodchoice ✓), samprate=1000 Hz ✓
+			// 2 Hz/bin:   fft_size=1000 (2³×5³, goodchoice ✓), samprate=2000 Hz ✓
+			const minSafeBinBW = 0.5         // Minimum safe bin_bw (radiod supports down to 0.5 Hz/bin)
 			const maxBinBWForRestore = 200.0 // Above this, restore bin_count if reduced
 
 			// Round bin_bw to nearest safe value
 			safeBinBW := newBinBW
-			if newBinBW < 50 {
-				safeBinBW = 50
+			if newBinBW < 0.75 {
+				safeBinBW = 0.5
+			} else if newBinBW < 1.5 {
+				safeBinBW = 1
+			} else if newBinBW < 3 {
+				safeBinBW = 2
+			} else if newBinBW < 7 {
+				safeBinBW = 5
+			} else if newBinBW < 15 {
+				safeBinBW = 10
+			} else if newBinBW < 35 {
+				safeBinBW = 20
 			} else if newBinBW < 75 {
 				safeBinBW = 50
 			} else if newBinBW < 150 {

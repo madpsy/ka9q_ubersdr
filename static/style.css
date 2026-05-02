@@ -1939,10 +1939,10 @@ input[type="range"]::-moz-range-thumb {
 
     .controls {
         grid-template-columns: minmax(0, 1fr);
-        transform: scale(0.9);
+        transform: none;
         transform-origin: top center;
-        margin-top: -10px;
-        margin-bottom: -30px;
+        margin-top: 0;
+        margin-bottom: 0;
         padding: 10px 0;
         gap: 15px;
         width: auto;

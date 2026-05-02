@@ -1273,6 +1273,346 @@ func WebSDRServerHeaderMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSDR TCP router
+//
+// websdr.org sends HTTP/1.1 requests WITHOUT a Host: header, which Go's
+// http.Server rejects with "400 Bad Request" before the request ever reaches
+// our handler.  To work around this, we run a raw TCP accept loop that peeks
+// at each connection's first request line:
+//
+//   • /~~orgstatus  → handled directly with raw socket I/O (the websdr.org
+//                     keep-alive protocol requires raw text responses for
+//                     follow-up requests — no HTTP framing)
+//   • everything else → forwarded to Go's http.Server via a channelListener
+//                       (a virtual net.Listener backed by a Go channel)
+//
+// This is the Go equivalent of the Python proxy's handle_client() function.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// channelListener is a net.Listener backed by a Go channel.  Connections are
+// fed into it via the Enqueue method and consumed by http.Server.Serve().
+type channelListener struct {
+	ch     chan net.Conn
+	addr   net.Addr
+	closed chan struct{}
+}
+
+func newChannelListener(addr net.Addr) *channelListener {
+	return &channelListener{
+		ch:     make(chan net.Conn, 64),
+		addr:   addr,
+		closed: make(chan struct{}),
+	}
+}
+
+func (cl *channelListener) Accept() (net.Conn, error) {
+	select {
+	case conn, ok := <-cl.ch:
+		if !ok {
+			return nil, fmt.Errorf("listener closed")
+		}
+		return conn, nil
+	case <-cl.closed:
+		return nil, fmt.Errorf("listener closed")
+	}
+}
+
+func (cl *channelListener) Close() error {
+	select {
+	case <-cl.closed:
+	default:
+		close(cl.closed)
+	}
+	return nil
+}
+
+func (cl *channelListener) Addr() net.Addr { return cl.addr }
+
+// Enqueue sends a connection to the http.Server for processing.
+func (cl *channelListener) Enqueue(conn net.Conn) {
+	select {
+	case cl.ch <- conn:
+	case <-cl.closed:
+		conn.Close()
+	}
+}
+
+// prefixConn wraps a net.Conn with some already-read bytes prepended.
+// The first Read calls drain the prefix buffer; subsequent reads go to
+// the underlying connection.
+type prefixConn struct {
+	net.Conn
+	reader io.Reader
+}
+
+func newPrefixConn(conn net.Conn, prefix []byte) net.Conn {
+	return &prefixConn{
+		Conn:   conn,
+		reader: io.MultiReader(bytes.NewReader(prefix), conn),
+	}
+}
+
+func (pc *prefixConn) Read(b []byte) (int, error) {
+	return pc.reader.Read(b)
+}
+
+// websdrTCPRouter accepts raw TCP connections and routes them:
+//   - /~~orgstatus requests are handled directly (raw socket I/O)
+//   - everything else is forwarded to the http.Server via channelListener
+func websdrTCPRouter(ln net.Listener, cl *channelListener, handler *WebSDRHandler) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			select {
+			case <-cl.closed:
+				return // shutting down
+			default:
+			}
+			log.Printf("WebSDR: TCP accept error: %v", err)
+			continue
+		}
+		remoteAddr := conn.RemoteAddr().String()
+		log.Printf("WebSDR: new TCP connection from %s", remoteAddr)
+		go websdrRouteConn(conn, cl, handler)
+	}
+}
+
+// websdrRouteConn reads the first HTTP request from a connection and routes it.
+func websdrRouteConn(conn net.Conn, cl *channelListener, handler *WebSDRHandler) {
+	remoteAddr := conn.RemoteAddr().String()
+
+	// Read until we see \r\n\r\n (end of HTTP headers).
+	// Set a deadline so we don't block forever on silent connections.
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	var buf []byte
+	tmp := make([]byte, 4096)
+	for {
+		n, err := conn.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			log.Printf("WebSDR: TCP route read %d bytes from %s: %q", n, remoteAddr, sanitiseLogString(tmp[:n], 200))
+		}
+		if bytes.Contains(buf, []byte("\r\n\r\n")) {
+			break
+		}
+		if err != nil || len(buf) > 65536 {
+			log.Printf("WebSDR: TCP route read failed for %s: read %d bytes, err=%v",
+				remoteAddr, len(buf), err)
+			if len(buf) > 0 {
+				snippet := string(buf)
+				if len(snippet) > 200 {
+					snippet = snippet[:200]
+				}
+				log.Printf("WebSDR: TCP route partial data from %s: %q", remoteAddr, snippet)
+			}
+			conn.Close()
+			return
+		}
+	}
+	conn.SetReadDeadline(time.Time{}) // clear deadline
+
+	// Extract the first request line.
+	firstLine := ""
+	if idx := bytes.Index(buf, []byte("\r\n")); idx >= 0 {
+		firstLine = string(buf[:idx])
+	} else {
+		firstLine = string(buf)
+	}
+
+	log.Printf("WebSDR: TCP route %s → %q", remoteAddr, firstLine)
+
+	// Route based on the request path.
+	if strings.Contains(firstLine, "/~~orgstatus") {
+		log.Printf("WebSDR: routing %s to raw /~~orgstatus handler", remoteAddr)
+		// Handle directly with raw socket I/O.
+		websdrHandleOrgStatusRaw(conn, buf, handler)
+	} else {
+		// Forward to Go's http.Server.  If the request lacks a Host:
+		// header (websdr.org omits it), inject one so Go's HTTP parser
+		// doesn't reject it with 400.
+		if !hasHostHeader(buf) && bytes.Contains(buf, []byte("HTTP/1.1")) {
+			log.Printf("WebSDR: injecting Host header for %s (missing from request)", remoteAddr)
+			buf = injectHostHeader(buf)
+		}
+		cl.Enqueue(newPrefixConn(conn, buf))
+	}
+}
+
+// hasHostHeader checks if the raw HTTP request bytes contain a Host: header.
+func hasHostHeader(raw []byte) bool {
+	idx := bytes.Index(raw, []byte("\r\n\r\n"))
+	if idx < 0 {
+		idx = len(raw)
+	}
+	headers := raw[:idx]
+	// Skip the request line.
+	if lineEnd := bytes.Index(headers, []byte("\r\n")); lineEnd >= 0 {
+		headers = headers[lineEnd+2:]
+	}
+	for len(headers) > 0 {
+		lineEnd := bytes.Index(headers, []byte("\r\n"))
+		var line []byte
+		if lineEnd >= 0 {
+			line = headers[:lineEnd]
+			headers = headers[lineEnd+2:]
+		} else {
+			line = headers
+			headers = nil
+		}
+		if len(line) >= 5 && bytes.EqualFold(line[:5], []byte("host:")) {
+			return true
+		}
+	}
+	return false
+}
+
+// injectHostHeader inserts "Host: localhost\r\n" after the request line.
+func injectHostHeader(raw []byte) []byte {
+	idx := bytes.Index(raw, []byte("\r\n"))
+	if idx < 0 {
+		return raw
+	}
+	var out bytes.Buffer
+	out.Write(raw[:idx])
+	out.WriteString("\r\nHost: localhost")
+	out.Write(raw[idx:])
+	return out.Bytes()
+}
+
+// websdrHandleOrgStatusRaw handles /~~orgstatus requests using raw socket I/O,
+// exactly like the Python proxy script.  Supports the websdr.org keep-alive
+// protocol: first request gets a proper HTTP response, subsequent requests on
+// the same connection get just the raw body text (no HTTP headers).
+func websdrHandleOrgStatusRaw(conn net.Conn, firstReqRaw []byte, handler *WebSDRHandler) {
+	defer conn.Close()
+
+	remoteAddr := conn.RemoteAddr().String()
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
+	}
+
+	// Parse config= from the first request.
+	reqCfg := ""
+	if m := orgStatusConfigRe.FindSubmatch(firstReqRaw); m != nil {
+		reqCfg = string(m[1])
+	}
+
+	// Build the response.
+	fullBody := handler.buildOrgStatusBody()
+	cookieVal := "ID=" + websdrOrgStatusID(handler.config) + "; expires=Thu, 31-Dec-2099 00:00:00 GMT"
+	users := handler.sessions.GetNonBypassedUserCount()
+	usersLine := fmt.Sprintf("Users: %d\n", users)
+
+	cacheHit := reqCfg != "" && reqCfg == strconv.Itoa(orgStatusSerial)
+	var respBody string
+	if cacheHit {
+		respBody = usersLine
+	} else {
+		respBody = fullBody
+	}
+
+	// ── First response: proper HTTP with headers ────────────────────────
+	respBodyBytes := []byte(respBody)
+	var hdr bytes.Buffer
+	fmt.Fprintf(&hdr, "HTTP/1.1 200 OK\r\n")
+	fmt.Fprintf(&hdr, "Server: %s\r\n", websdrServerVersion)
+	fmt.Fprintf(&hdr, "Content-Length: %d\r\n", len(respBodyBytes))
+	fmt.Fprintf(&hdr, "Content-Type: text/plain\r\n")
+	fmt.Fprintf(&hdr, "Cache-control: no-cache\r\n")
+	fmt.Fprintf(&hdr, "Set-Cookie: %s\r\n", cookieVal)
+	fmt.Fprintf(&hdr, "\r\n")
+
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write(hdr.Bytes()); err != nil {
+		log.Printf("WebSDR: /~~orgstatus raw write error: %v", err)
+		return
+	}
+	if _, err := conn.Write(respBodyBytes); err != nil {
+		log.Printf("WebSDR: /~~orgstatus raw write error: %v", err)
+		return
+	}
+
+	if cacheHit {
+		log.Printf("WebSDR: /~~orgstatus from %s (HTTP, cache hit, %d bytes)", remoteAddr, len(respBodyBytes))
+	} else {
+		log.Printf("WebSDR: /~~orgstatus from %s (HTTP, full, %d bytes)", remoteAddr, len(respBodyBytes))
+	}
+
+	// ── Subsequent requests: raw body text, no HTTP framing ─────────────
+	// websdr.org sends follow-up GET requests on the same TCP connection.
+	// We respond with just the body text — no HTTP status line, no headers.
+	// This matches the real WebSDR binary's behavior (confirmed via pcap).
+	//
+	// leftover holds any bytes read past the \r\n\r\n of the previous
+	// request (pipelining).
+	idx := bytes.Index(firstReqRaw, []byte("\r\n\r\n"))
+	var leftover []byte
+	if idx >= 0 && idx+4 < len(firstReqRaw) {
+		leftover = firstReqRaw[idx+4:]
+	}
+
+	for {
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+
+		data := leftover
+		leftover = nil
+		for {
+			if bytes.Contains(data, []byte("\r\n\r\n")) {
+				break
+			}
+			tmp := make([]byte, 4096)
+			n, err := conn.Read(tmp)
+			if n > 0 {
+				data = append(data, tmp[:n]...)
+			}
+			if err != nil {
+				// EOF or timeout — connection closed.
+				return
+			}
+		}
+
+		// Split at the first \r\n\r\n.
+		parts := bytes.SplitN(data, []byte("\r\n\r\n"), 2)
+		reqRaw := string(parts[0])
+		if len(parts) > 1 {
+			leftover = parts[1]
+		}
+
+		firstLine := reqRaw
+		if idx := strings.Index(reqRaw, "\r\n"); idx >= 0 {
+			firstLine = reqRaw[:idx]
+		}
+
+		// Parse config= parameter.
+		reqCfg = ""
+		if m := orgStatusConfigRe.FindStringSubmatch(reqRaw); m != nil {
+			reqCfg = m[1]
+		}
+
+		// Build the response body.
+		users = handler.sessions.GetNonBypassedUserCount()
+		usersLine = fmt.Sprintf("Users: %d\n", users)
+
+		isCacheHit := reqCfg != "" && reqCfg == strconv.Itoa(orgStatusSerial)
+		var rawResp string
+		if isCacheHit {
+			rawResp = usersLine
+			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (raw, cache hit, %d bytes)", remoteAddr, len(rawResp))
+		} else {
+			rawResp = handler.buildOrgStatusBody()
+			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (raw, full, %s)", remoteAddr, firstLine)
+		}
+
+		// Write raw body text — NO HTTP status line, NO headers.
+		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, err := conn.Write([]byte(rawResp)); err != nil {
+			log.Printf("WebSDR: /~~orgstatus keep-alive write error: %v", err)
+			return
+		}
+	}
+}
+
 func noCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
@@ -1346,41 +1686,36 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 	var respBody string
 	if cacheHit {
 		respBody = usersLine
-		log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
 	} else {
 		respBody = fullBody
-		log.Printf("WebSDR: /~~orgstatus callback from %s (full response, users=%d)", callerIP, users)
 	}
 
-	// ── First response: proper HTTP with headers ────────────────────────
-	// Explicit Content-Length prevents chunked encoding.  Suppress Date
-	// header (real WebSDR doesn't send one).
-	respBodyBytes := []byte(respBody)
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Content-Length", strconv.Itoa(len(respBodyBytes)))
-	w.Header().Set("Set-Cookie", cookieVal)
-	w.Header()["Date"] = nil // suppress Go's automatic Date header
-	w.WriteHeader(http.StatusOK)
-	w.Write(respBodyBytes)
-
-	// ── Hijack the connection for keep-alive follow-ups ─────────────────
+	// ── Hijack FIRST, write everything as raw bytes ─────────────────────
 	// websdr.org reuses the same TCP connection for subsequent /~~orgstatus
-	// requests.  The real WebSDR binary responds to these with JUST the raw
-	// body text (no HTTP status line, no headers) — a custom protocol that
-	// Go's http.Server cannot produce.  We hijack the connection and handle
-	// subsequent requests manually.
+	// requests.  The real WebSDR binary responds to follow-up requests with
+	// JUST the raw body text (no HTTP status line, no headers) — a custom
+	// protocol that Go's http.Server cannot produce.
 	//
-	// Only hijack for websdr.org callbacks — they arrive with no User-Agent
-	// header.  Regular clients (curl, browsers, monitoring) always send
-	// User-Agent, so we let Go handle their connection normally.
-	if r.Header.Get("User-Agent") != "" {
-		return
-	}
-
+	// We hijack BEFORE any ResponseWriter writes, because Go buffers the
+	// response internally and Hijack() after Write() does not guarantee the
+	// data reaches the wire.  Once hijacked, we write the first HTTP
+	// response as raw bytes ourselves, then loop for keep-alive requests.
+	//
+	// We hijack for ALL callers (not just websdr.org) because Docker NAT
+	// hides the real source IP.  For normal clients (curl, browsers) the
+	// keep-alive loop simply gets an EOF and returns cleanly.
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		log.Printf("WebSDR: /~~orgstatus hijack not supported — keep-alive follow-ups will fail")
+		log.Printf("WebSDR: /~~orgstatus hijack not supported — falling back to ResponseWriter")
+		// Fallback: use ResponseWriter (won't support keep-alive protocol).
+		respBodyBytes := []byte(respBody)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Length", strconv.Itoa(len(respBodyBytes)))
+		w.Header().Set("Set-Cookie", cookieVal)
+		w.Header()["Date"] = nil
+		w.WriteHeader(http.StatusOK)
+		w.Write(respBodyBytes)
 		return
 	}
 	conn, brw, err := hj.Hijack()
@@ -1390,44 +1725,83 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	defer conn.Close()
 
-	// Flush any buffered response data from the first write.
+	// ── First response: write raw HTTP bytes on the hijacked conn ────
+	respBodyBytes := []byte(respBody)
+	var hdr bytes.Buffer
+	fmt.Fprintf(&hdr, "HTTP/1.1 200 OK\r\n")
+	fmt.Fprintf(&hdr, "Server: %s\r\n", websdrServerVersion)
+	fmt.Fprintf(&hdr, "Content-Length: %d\r\n", len(respBodyBytes))
+	fmt.Fprintf(&hdr, "Content-Type: text/plain\r\n")
+	fmt.Fprintf(&hdr, "Cache-control: no-cache\r\n")
+	fmt.Fprintf(&hdr, "Set-Cookie: %s\r\n", cookieVal)
+	fmt.Fprintf(&hdr, "\r\n")
+
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if _, err := brw.Write(hdr.Bytes()); err != nil {
+		log.Printf("WebSDR: /~~orgstatus first write (header) error: %v", err)
+		return
+	}
+	if _, err := brw.Write(respBodyBytes); err != nil {
+		log.Printf("WebSDR: /~~orgstatus first write (body) error: %v", err)
+		return
+	}
 	if err := brw.Flush(); err != nil {
-		log.Printf("WebSDR: /~~orgstatus flush error after hijack: %v", err)
+		log.Printf("WebSDR: /~~orgstatus first flush error: %v", err)
 		return
 	}
 
-	// Loop: read subsequent HTTP requests, respond with raw body text.
+	if cacheHit {
+		log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
+	} else {
+		log.Printf("WebSDR: /~~orgstatus callback from %s (full response, users=%d)", callerIP, users)
+	}
+
+	// ── Subsequent requests: raw body text, no HTTP framing ─────────
+	// websdr.org sends follow-up GET requests on the same TCP
+	// connection.  We read each request, then respond with just the
+	// body text — exactly like the real WebSDR binary (confirmed via
+	// pcap).  For normal clients (curl, browsers) this loop gets an
+	// EOF immediately and returns.
+	var leftover []byte
 	for {
-		// Generous read timeout — websdr.org polls every ~60 s but may
-		// take longer.  If the connection is idle beyond this, clean up.
 		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 
 		// Read until we see the end of an HTTP request (\r\n\r\n).
-		var reqBuf []byte
-		tmp := make([]byte, 1024)
+		// leftover may contain data from a previous read that
+		// arrived after the \r\n\r\n delimiter.
+		data := leftover
+		leftover = nil
 		for {
-			n, err := brw.Read(tmp)
-			if n > 0 {
-				reqBuf = append(reqBuf, tmp[:n]...)
-			}
-			if err != nil {
-				// EOF or timeout — websdr.org closed the connection.
-				return
-			}
-			if bytes.Contains(reqBuf, []byte("\r\n\r\n")) {
+			if bytes.Contains(data, []byte("\r\n\r\n")) {
 				break
 			}
+			tmp := make([]byte, 4096)
+			n, err := brw.Read(tmp)
+			if n > 0 {
+				data = append(data, tmp[:n]...)
+			}
+			if err != nil {
+				// EOF or timeout — connection closed.
+				return
+			}
 		}
 
-		// Parse the request line to extract config= parameter.
-		reqStr := string(reqBuf)
-		firstLine := reqStr
-		if idx := strings.Index(reqStr, "\r\n"); idx >= 0 {
-			firstLine = reqStr[:idx]
+		// Split at the first \r\n\r\n — anything after is leftover
+		// for the next request.
+		parts := bytes.SplitN(data, []byte("\r\n\r\n"), 2)
+		reqRaw := string(parts[0])
+		if len(parts) > 1 {
+			leftover = parts[1]
 		}
 
+		firstLine := reqRaw
+		if idx := strings.Index(reqRaw, "\r\n"); idx >= 0 {
+			firstLine = reqRaw[:idx]
+		}
+
+		// Parse config= parameter from the request.
 		reqCfg := ""
-		if m := orgStatusConfigRe.FindStringSubmatch(reqStr); m != nil {
+		if m := orgStatusConfigRe.FindStringSubmatch(reqRaw); m != nil {
 			reqCfg = m[1]
 		}
 
@@ -1446,10 +1820,13 @@ func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) 
 		}
 
 		// Write raw body text — NO HTTP status line, NO headers.
-		// This matches the real WebSDR binary's behavior.
 		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if _, err := conn.Write([]byte(rawResp)); err != nil {
+		if _, err := brw.Write([]byte(rawResp)); err != nil {
 			log.Printf("WebSDR: /~~orgstatus keep-alive write error: %v", err)
+			return
+		}
+		if err := brw.Flush(); err != nil {
+			log.Printf("WebSDR: /~~orgstatus keep-alive flush error: %v", err)
 			return
 		}
 	}

@@ -1193,18 +1193,6 @@ instance_reporting:
   # this instance starts up, before the first regular reporting interval
   notify_instance_startup: false
 
-  # Register with sdr-list directory (default: true)
-  # Sends a JSON POST every 60 s to advertise this instance in the sdr-list.xyz directory.
-  # Connection details (host/port) are taken from instance.host / instance.port above.
-  # Requires instance.host to be set.
-  register_sdrlist: true
-
-  # Directory server host (default: "sdr-list.xyz")
-  # May include an explicit scheme for non-HTTPS servers:
-  #   "www.shbrg.nl"             — HTTPS (default when no scheme given)
-  #   "https://www.shbrg.nl"     — HTTPS (explicit)
-  register_sdrlist_host: "https://www.shbrg.nl"
-
   # Create DNS subdomain for this instance (optional)
   # When enabled, the collector will create a DNS A record pointing
   # <callsign>.instance.ubersdr.org to your public IP address

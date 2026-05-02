@@ -2423,21 +2423,40 @@ func main() {
 	const websdrListenAddr = ":8901"
 	var websdrServer *http.Server
 	if config.Server.EnableWebSDR {
+		// Listen on the WebSDR port.  A raw TCP router intercepts
+		// /~~orgstatus requests (websdr.org sends HTTP/1.1 without a
+		// Host header, which Go's http.Server rejects).  All other
+		// connections are forwarded to the http.Server via a channel-
+		// based virtual listener.
+		ln, err := net.Listen("tcp", websdrListenAddr)
+		if err != nil {
+			log.Fatalf("WebSDR: failed to listen on %s: %v", websdrListenAddr, err)
+		}
+		chListener := newChannelListener(ln.Addr())
+
 		websdrServer = &http.Server{
-			Addr:    websdrListenAddr,
 			Handler: WebSDRServerHeaderMiddleware(websdrHandler),
 		}
 
+		// Start the http.Server on the channel listener (non-orgstatus traffic).
 		go func() {
-			log.Printf("WebSDR protocol server listening on %s", websdrListenAddr)
-			log.Printf("WebSDR clients can connect to this port (e.g., http://host%s)", websdrListenAddr)
-			if err := websdrServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := websdrServer.Serve(chListener); err != nil && err != http.ErrServerClosed {
 				log.Printf("WebSDR server error: %v", err)
 			}
 		}()
 
-		// Start websdr.org directory registration if configured
+		// Start the raw TCP router (accept loop).
+		go func() {
+			log.Printf("WebSDR protocol server listening on %s", websdrListenAddr)
+			log.Printf("WebSDR clients can connect to this port (e.g., http://host%s)", websdrListenAddr)
+			websdrTCPRouter(ln, chListener, websdrHandler)
+		}()
+
+		// Start websdr.org directory registration if configured.
+		// SetHandler wires up the WebSDR handler so that /~~orgstatus requests
+		// sent by websdr.org on the registration socket are handled correctly.
 		websdrRegistrar := NewWebSDRRegistrar(config)
+		websdrRegistrar.SetHandler(websdrHandler)
 		websdrRegistrar.Start()
 
 		defer func() {
@@ -2463,13 +2482,6 @@ func main() {
 		} else {
 			defer instanceReporter.Stop()
 		}
-	}
-
-	// Start sdr-list.xyz registration if configured (independent of WebSDR protocol)
-	if config.InstanceReporting.Enabled && config.InstanceReporting.RegisterSdrList {
-		sdrListRegistrar := NewSdrListRegistrar(config, sessions, instanceReporter)
-		sdrListRegistrar.Start()
-		defer sdrListRegistrar.Stop()
 	}
 
 	// Start rx.kiwisdr.com public directory registration if configured.

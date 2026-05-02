@@ -175,29 +175,23 @@ func (e *AddonProxyEntry) parseAllowedIPs() error {
 }
 
 // IsIPAllowed checks if an IP address is permitted to access this addon proxy.
-// If AllowedIPs is empty or contains only 0.0.0.0/0, falls back to admin.allowed_ips.
+// If AllowedIPs is empty, falls back to admin.allowed_ips.
+// An explicit 0.0.0.0/0 entry allows all IPs without consulting admin.allowed_ips.
 func (e *AddonProxyEntry) IsIPAllowed(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return false
 	}
 
-	// Check if allowed_ips is effectively "allow all" (0.0.0.0/0)
-	isAllowAll := false
-	for _, network := range e.allowedNets {
-		ones, _ := network.Mask.Size()
-		if ones == 0 {
-			isAllowAll = true
-			break
+	// If no IPs configured at all, fall back to admin config
+	if len(e.allowedNets) == 0 {
+		if e.adminConfig != nil {
+			return e.adminConfig.IsIPAllowed(ipStr)
 		}
+		return false
 	}
 
-	// Fall back to admin config if no specific IPs set or allow-all
-	if (len(e.allowedNets) == 0 || isAllowAll) && e.adminConfig != nil {
-		return e.adminConfig.IsIPAllowed(ipStr)
-	}
-
-	// Check against the configured list
+	// Check against the configured list — 0.0.0.0/0 will naturally match every IP
 	for _, network := range e.allowedNets {
 		if network.Contains(ip) {
 			return true

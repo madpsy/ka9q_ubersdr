@@ -321,8 +321,6 @@ type InstanceReportingConfig struct {
 	BetaFrontend               bool                   `yaml:"beta_frontend"`                // Enable beta frontend features (default: false)
 	NotifyInstanceDisconnected bool                   `yaml:"notify_instance_disconnected"` // Notify when instance disconnects (default: true)
 	NotifyInstanceStartup      bool                   `yaml:"notify_instance_startup"`      // Notify on instance startup (default: false)
-	RegisterSdrList            bool                   `yaml:"register_sdrlist"`             // Register with sdr-list.xyz directory (default: false)
-	SdrListHost                string                 `yaml:"register_sdrlist_host"`        // Directory server host (default: "sdr-list.xyz"); may include http:// or https:// scheme
 	tunnelServerIPs            []string               // Resolved IPs of tunnel server (internal use)
 	instanceReporterIPs        []string               // Resolved IPs of instance reporter (internal use)
 }
@@ -637,9 +635,6 @@ func LoadConfig(filename string) (*Config, error) {
 	// WebSDR compatibility defaults
 	if config.Server.EnableWebSDR && config.Server.WebSDRWaterfallCalibration == 0 {
 		config.Server.WebSDRWaterfallCalibration = -13.0
-	}
-	if config.InstanceReporting.SdrListHost == "" {
-		config.InstanceReporting.SdrListHost = "sdr-list.xyz"
 	}
 	if config.Audio.BufferSize == 0 {
 		config.Audio.BufferSize = 4096

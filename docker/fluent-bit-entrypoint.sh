@@ -88,8 +88,11 @@ get_uuid() {
 # Function to extract hostname
 get_hostname() {
     if [ -f "$CONFIG_FILE" ]; then
-        # Match both quoted and unquoted hostnames
-        HOSTNAME=$(grep "hostname:" "$CONFIG_FILE" | grep -v "tunnel_server_host" | head -1 | sed 's/.*hostname: *//; s/"//g; s/ *$//')
+        # Scope to instance_reporting block to avoid picking up the station's own hostname
+        HOSTNAME=$(grep -A 10 "instance_reporting:" "$CONFIG_FILE" | \
+                   grep "hostname:" | \
+                   head -1 | \
+                   sed 's/.*hostname: *//; s/"//g; s/ *$//')
         echo "$HOSTNAME"
     fi
 }

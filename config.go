@@ -155,12 +155,9 @@ type ServerConfig struct {
 	KiwiSDRSmeterOffset           float32              `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
 	EnableWebSDR                  bool                 `yaml:"enable_websdr"`                     // Enable WebSDR protocol compatibility server (default: false)
 	WebSDRWaterfallCalibration    float32              `yaml:"websdr_waterfall_calibration"`      // Waterfall dBFS→pixel calibration offset (default: -13.0)
-	WebSDREmail                   string               `yaml:"websdr_email"`                      // Operator contact email for WebSDR UI/directory (XOR-obfuscated before transmission; defaults to admin.email)
-	WebSDRRegisterWebSDROrg       bool                 `yaml:"websdr_register_websdrorg"`         // Register with websdr.org directory (default: false)
+	WebSDREmail                   string               `yaml:"websdr_email"`                      // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
 	KiwiSDRRegisterKiwiSDRCom     bool                 `yaml:"kiwisdr_register_kiwisdrcom"`       // Register with rx.kiwisdr.com public directory (default: false)
 	KiwiSDRHost                   string               `yaml:"kiwisdr_host"`                      // Public hostname advertised to rx.kiwisdr.com (required for registration)
-	WebSDRHostname                string               `yaml:"websdr_hostname"`                   // Public hostname for directory registration (empty = use admin.public_url host)
-	WebSDRTCPPort                 int                  `yaml:"websdr_tcp_port"`                   // Public TCP port for directory registration (0 = parse from websdr_listen)
 	LogFileEnabled                bool                 `yaml:"logfile_enabled"`                   // Enable HTTP request logging (default: false)
 	LogFile                       string               `yaml:"logfile"`                           // HTTP request log file path
 	SessionActivityLogEnabled     bool                 `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk

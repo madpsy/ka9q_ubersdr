@@ -19,6 +19,32 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// snrMeasRecord is one in-memory SNR measurement snapshot stored by the handler.
+// It mirrors the JSON shape served by /snr so serialisation is trivial.
+type snrMeasRecord struct {
+	Ts   string       `json:"ts"`
+	Seq  uint32       `json:"seq"`
+	UTC  int          `json:"utc"`
+	IMin int          `json:"imin"`
+	Ant  int          `json:"ant"`
+	SNR  []snrBandRec `json:"snr"`
+}
+
+// snrBandRec holds per-frequency-range statistics for one SNR measurement.
+type snrBandRec struct {
+	Lo  float64 `json:"lo"`
+	Hi  float64 `json:"hi"`
+	Min int     `json:"min"`
+	Max int     `json:"max"`
+	P50 int     `json:"p50"`
+	P95 int     `json:"p95"`
+	SNR int     `json:"snr"`
+}
+
+// snrHistoryMax is the number of SNR measurements kept in memory.
+// The real KiwiSDR uses SNR_MEAS_MAX = 24 (one per hour for 24 hours).
+const snrHistoryMax = 24
+
 // KiwiWebSocketHandler handles KiwiSDR-compatible WebSocket connections
 type KiwiWebSocketHandler struct {
 	sessions           *SessionManager
@@ -41,6 +67,11 @@ type KiwiWebSocketHandler struct {
 	// Keyed by userSessionID; value is the kiwiConn that owns the SND stream.
 	activeSNDConns map[string]*kiwiConn
 	connsMu        sync.RWMutex // Protects activeSNDConns
+
+	// In-memory SNR measurement history (ring buffer, newest last).
+	snrHistory   []snrMeasRecord
+	snrSeq       uint32
+	snrHistoryMu sync.RWMutex
 }
 
 // NewKiwiWebSocketHandler creates a new KiwiSDR WebSocket handler
@@ -60,6 +91,90 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		kiwiGeolocations:   make(map[string]string),
 		nextRXSlot:         0,
 		activeSNDConns:     make(map[string]*kiwiConn),
+		snrHistory:         make([]snrMeasRecord, 0, snrHistoryMax),
+	}
+}
+
+// RecordSNRMeasurement samples the current wideband FFT, computes per-band SNR
+// statistics, and appends the result to the in-memory history ring buffer.
+// It is intended to be called periodically (e.g. every 10 minutes) by the
+// caller that drives the noise-floor monitor.
+func (kwsh *KiwiWebSocketHandler) RecordSNRMeasurement() {
+	if kwsh.noiseFloorMonitor == nil {
+		return
+	}
+	widebandFFT := kwsh.noiseFloorMonitor.GetWideBandFFT()
+	if widebandFFT == nil || len(widebandFFT.Data) == 0 {
+		return
+	}
+
+	type bandRange struct{ loKHz, hiKHz float64 }
+	bands := []bandRange{
+		{0, 30000},     // ALL
+		{1800, 30000},  // HF
+		{0, 2000},      // 0–2 MHz
+		{2000, 10000},  // 2–10 MHz
+		{10000, 20000}, // 10–20 MHz
+		{20000, 30000}, // 20–30 MHz
+	}
+
+	bandStats := make([]snrBandRec, 0, len(bands))
+	for _, b := range bands {
+		loHz := b.loKHz * 1000.0
+		hiHz := b.hiKHz * 1000.0
+		startBin := int(loHz / widebandFFT.BinWidth)
+		endBin := int(hiHz / widebandFFT.BinWidth)
+		if startBin < 0 {
+			startBin = 0
+		}
+		if endBin > len(widebandFFT.Data) {
+			endBin = len(widebandFFT.Data)
+		}
+		if startBin >= endBin {
+			bandStats = append(bandStats, snrBandRec{Lo: b.loKHz, Hi: b.hiKHz})
+			continue
+		}
+
+		slice := widebandFFT.Data[startBin:endBin]
+		sorted := make([]float32, len(slice))
+		copy(sorted, slice)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+		n := len(sorted)
+		p5DB := sorted[n*5/100]
+		p95DB := sorted[n*95/100]
+		snrDB := p95DB - p5DB
+
+		bandStats = append(bandStats, snrBandRec{
+			Lo:  b.loKHz,
+			Hi:  b.hiKHz,
+			Min: int(sorted[0]),
+			Max: int(sorted[n-1]),
+			P50: int(sorted[n*50/100]),
+			P95: int(p95DB),
+			SNR: int(snrDB),
+		})
+	}
+
+	kwsh.snrHistoryMu.Lock()
+	defer kwsh.snrHistoryMu.Unlock()
+
+	kwsh.snrSeq++
+	rec := snrMeasRecord{
+		Ts:   time.Now().UTC().Format("Mon Jan _2 15:04:05 2006"),
+		Seq:  kwsh.snrSeq,
+		UTC:  1,
+		IMin: 10,
+		Ant:  0,
+		SNR:  bandStats,
+	}
+
+	if len(kwsh.snrHistory) >= snrHistoryMax {
+		// Drop oldest entry (shift left).
+		copy(kwsh.snrHistory, kwsh.snrHistory[1:])
+		kwsh.snrHistory[len(kwsh.snrHistory)-1] = rec
+	} else {
+		kwsh.snrHistory = append(kwsh.snrHistory, rec)
 	}
 }
 
@@ -153,6 +268,224 @@ func (kwsh *KiwiWebSocketHandler) getGeolocation(userSessionID string) string {
 		return geoloc
 	}
 	return ""
+}
+
+// HandleKiwiSNR handles the KiwiSDR /snr HTTP endpoint.
+//
+// Returns a JSON array of up to snrHistoryMax SNR measurement records
+// (oldest first, newest last), matching the format produced by the real
+// KiwiSDR's AJAX_SNR handler.  Each record covers the standard KiwiSDR
+// frequency sub-ranges (ALL, HF, 0-2, 2-10, 10-20, 20-30 MHz).
+//
+// Measurements are accumulated by RecordSNRMeasurement(), which should be
+// called periodically (e.g. every 10 minutes) by the noise-floor scheduler.
+//
+// The endpoint is public (no local-IP restriction) — the real KiwiSDR also
+// allows anyone to read SNR data.
+func (kwsh *KiwiWebSocketHandler) HandleKiwiSNR(w http.ResponseWriter, r *http.Request) {
+	kwsh.snrHistoryMu.RLock()
+	// Return a copy so we can release the lock before marshalling.
+	result := make([]snrMeasRecord, len(kwsh.snrHistory))
+	copy(result, kwsh.snrHistory)
+	kwsh.snrHistoryMu.RUnlock()
+
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonData)
+	w.Write([]byte("\n"))
+}
+
+// HandleKiwiSMeter handles the KiwiSDR /s-meter HTTP endpoint.
+//
+// The real KiwiSDR accepts a query string of the form "?7020cwn" (frequency in
+// kHz followed by an optional mode suffix) and returns a plain-text line:
+//
+//	/s-meter: 7020.00 kHz -87 dBm
+//
+// We implement this by creating a short-lived internal radiod channel (empty
+// clientIP so it is exempt from user-slot limits), waiting up to 500 ms for
+// the first BasebandPower reading to arrive, then tearing the channel down.
+// The dBFS value from radiod is converted to approximate dBm using the
+// KiwiSDRSmeterOffset calibration constant (default 30.0).
+func (kwsh *KiwiWebSocketHandler) HandleKiwiSMeter(w http.ResponseWriter, r *http.Request) {
+	// ── 1. Parse the query string ──────────────────────────────────────────
+	// The real KiwiSDR uses the raw query string as the parameter, e.g.
+	// GET /s-meter?7020cwn  →  query = "7020cwn"
+	raw := r.URL.RawQuery
+	if raw == "" {
+		http.Error(w, "missing frequency", http.StatusBadRequest)
+		return
+	}
+
+	// Split numeric prefix (frequency kHz) from optional mode suffix.
+	freqEnd := 0
+	for freqEnd < len(raw) && (raw[freqEnd] >= '0' && raw[freqEnd] <= '9' || raw[freqEnd] == '.') {
+		freqEnd++
+	}
+	if freqEnd == 0 {
+		http.Error(w, "invalid frequency", http.StatusBadRequest)
+		return
+	}
+	freqKHz, err := strconv.ParseFloat(raw[:freqEnd], 64)
+	if err != nil || freqKHz <= 0 || freqKHz > 30000 {
+		http.Error(w, "frequency out of range (0–30000 kHz)", http.StatusBadRequest)
+		return
+	}
+	mode := "cwn"
+	if freqEnd < len(raw) {
+		mode = raw[freqEnd:]
+	}
+	freqHz := uint64(freqKHz * 1000)
+
+	// ── 2. Create an internal session (empty clientIP = exempt from limits) ─
+	// Use a unique userSessionID so DestroySession can find it cleanly.
+	internalID := fmt.Sprintf("s-meter-%d", time.Now().UnixNano())
+	session, err := kwsh.sessions.CreateSessionWithBandwidthAndPassword(
+		freqHz, mode, 3000,
+		"", "", // sourceIP, clientIP — empty = internal, no user-slot consumed
+		internalID, // userSessionID
+		"",         // password
+	)
+	if err != nil {
+		log.Printf("HandleKiwiSMeter: failed to create session: %v", err)
+		http.Error(w, "could not create measurement channel", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() {
+		if destroyErr := kwsh.sessions.DestroySession(session.ID); destroyErr != nil {
+			log.Printf("HandleKiwiSMeter: DestroySession error: %v", destroyErr)
+		}
+	}()
+
+	// ── 3. Poll for BasebandPower (up to 500 ms) ───────────────────────────
+	// radiod sends channel-status packets asynchronously; we wait until we
+	// receive a valid reading (> -200 dBFS) or time out.
+	const (
+		smeterPollInterval = 25 * time.Millisecond
+		smeterTimeout      = 500 * time.Millisecond
+	)
+	deadline := time.Now().Add(smeterTimeout)
+	var basebandPower float32 = -999
+	for time.Now().Before(deadline) {
+		if cs := kwsh.radiod.GetChannelStatus(session.SSRC); cs != nil && cs.BasebandPower > -200 {
+			basebandPower = cs.BasebandPower
+			break
+		}
+		time.Sleep(smeterPollInterval)
+	}
+
+	// ── 4. Convert dBFS → dBm and format response ─────────────────────────
+	var dbm float32
+	if basebandPower > -200 {
+		dbm = basebandPower + kwsh.config.Server.KiwiSDRSmeterOffset
+	} else {
+		// No reading arrived in time; return a safe default (-127 dBm).
+		dbm = -127
+	}
+	// Clamp to the range the real KiwiSDR uses.
+	if dbm < -127 {
+		dbm = -127
+	}
+	if dbm > 0 {
+		dbm = 0
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "/s-meter: %.2f kHz %d dBm\n", freqKHz, int(dbm))
+}
+
+// HandleKiwiUsers handles the KiwiSDR /users HTTP endpoint.
+//
+// The real KiwiSDR serves this endpoint (restricted to local IPs) and returns
+// the same JSON array that is pushed over the WebSocket as MSG user_cb=…
+// Format: JSON array where each element is either:
+//   - A full user object: {"i":slot,"n":"name","g":"geo","f":freqHz,"m":"mode","z":zoom,...}
+//   - An empty slot:      {"i":slot}
+//
+// We return the same data to any caller (no local-IP restriction) since this
+// is a read-only, non-sensitive endpoint that only exposes what the KiwiSDR
+// frontend already shows publicly.
+func (kwsh *KiwiWebSocketHandler) HandleKiwiUsers(w http.ResponseWriter, r *http.Request) {
+	allUsers := kwsh.sessions.GetNonBypassedAudioUsers()
+	maxSlots := kwsh.config.Server.MaxSessions
+
+	// Build a slot→KiwiUserInfo map for active users.
+	// We use slot index as key so we can fill the full slot array below.
+	slotMap := make(map[int]*KiwiUserInfo, len(allUsers))
+	seenUUIDs := make(map[string]bool, len(allUsers))
+	for _, u := range allUsers {
+		if seenUUIDs[u.UserSessionID] {
+			continue
+		}
+		seenUUIDs[u.UserSessionID] = true
+		if u.FrequencyHz == 0 {
+			continue
+		}
+		rxSlot := kwsh.getOrAssignRXSlot(u.UserSessionID)
+		geoloc := ""
+		if u.Protocol == "kiwi" {
+			geoloc = kwsh.getGeolocation(u.UserSessionID)
+		}
+		tc := int(time.Since(u.CreatedAt).Seconds())
+		tSec := tc % 60
+		tc /= 60
+		tMin := tc % 60
+		tc /= 60
+		tHr := tc
+		connTime := fmt.Sprintf("%d:%02d:%02d", tHr, tMin, tSec)
+
+		slotMap[rxSlot] = &KiwiUserInfo{
+			Occupied:        true,
+			Index:           rxSlot,
+			Name:            kiwiEncodeString(u.DisplayName),
+			Location:        kiwiEncodeString(geoloc),
+			Frequency:       int(u.FrequencyHz),
+			Mode:            u.Mode,
+			Zoom:            0,
+			Waterfall:       0,
+			FreqChange:      0,
+			Time:            connTime,
+			InactivityTimer: 0,
+			RecordNum:       0,
+			AckTime:         "0:00:00",
+			Extension:       "",
+			Antenna:         u.ClientIP,
+			Compression:     0.0,
+			FreqOffset:      0.0,
+			ColorAnt:        0,
+			NoiseCancel:     0,
+			NoiseSubtract:   0,
+		}
+	}
+
+	// Always emit all maxSlots entries (0 … maxSlots-1), matching the real
+	// KiwiSDR which returns [{"i":0},{"i":1},…] even when no one is connected.
+	users := make([]KiwiUserInfo, maxSlots)
+	for i := 0; i < maxSlots; i++ {
+		if entry, ok := slotMap[i]; ok {
+			users[i] = *entry
+		} else {
+			users[i] = KiwiUserInfo{Index: i}
+		}
+	}
+
+	jsonData, err := json.Marshal(users)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonData)
+	w.Write([]byte("\n"))
 }
 
 // HandleKiwiStatus handles KiwiSDR /status HTTP endpoint
@@ -1619,26 +1952,51 @@ func (kc *kiwiConn) buildDXConfig() string {
 // "(no identity) 0.00 KHz" and never cleared — producing a permanent build-up
 // of ghost users.  Omitting "n" entirely makes obj.n undefined, isDefined
 // returns false, and the slot is properly cleared.
+//
+// Serialisation note: the real KiwiSDR emits {"i":N} for empty slots and a
+// full object (all fields, even zeros) for occupied slots.  We achieve this
+// with a custom MarshalJSON rather than omitempty tags.
 type KiwiUserInfo struct {
-	Index           int     `json:"i"`
-	Name            string  `json:"n,omitempty"`
-	Location        string  `json:"g,omitempty"`
-	Frequency       int     `json:"f,omitempty"`
-	Mode            string  `json:"m,omitempty"`
-	Zoom            int     `json:"z,omitempty"`
-	Waterfall       int     `json:"wf,omitempty"`
-	FreqChange      int     `json:"fc,omitempty"`
-	Time            string  `json:"t,omitempty"`
-	InactivityTimer int     `json:"rt,omitempty"`
-	RecordNum       int     `json:"rn,omitempty"`
-	AckTime         string  `json:"rs,omitempty"`
-	Extension       string  `json:"e,omitempty"`
-	Antenna         string  `json:"a,omitempty"`
-	Compression     float64 `json:"c,omitempty"`
-	FreqOffset      float64 `json:"fo,omitempty"`
-	ColorAnt        int     `json:"ca,omitempty"`
-	NoiseCancel     int     `json:"nc,omitempty"`
-	NoiseSubtract   int     `json:"ns,omitempty"`
+	// Occupied distinguishes an active user entry from an empty-slot entry.
+	// It is never serialised (json:"-").
+	Occupied bool `json:"-"`
+
+	Index      int    `json:"i"`
+	Name       string `json:"n"`
+	Location   string `json:"g"`
+	Frequency  int    `json:"f"`
+	Mode       string `json:"m"`
+	Zoom       int    `json:"z"`
+	Waterfall  int    `json:"wf"`
+	FreqChange int    `json:"fc"`
+	// Time is the connected duration formatted as "H:MM:SS" (e.g. "0:00:23").
+	Time string `json:"t"`
+	// InactivityTimer: 0=no limit, 1=inactivity limit, 2=24-hr IP limit.
+	InactivityTimer int `json:"rt"`
+	// RecordNum: seconds remaining on the active time limit (0 if none).
+	RecordNum int `json:"rn"`
+	// AckTime: time-limit remaining formatted as "H:MM:SS".
+	AckTime string `json:"rs"`
+	// Extension: name of the active KiwiSDR extension (empty string if none).
+	Extension string `json:"e"`
+	// Antenna: client IP address (shown to admin; empty for public view).
+	Antenna       string  `json:"a"`
+	Compression   float64 `json:"c"`
+	FreqOffset    float64 `json:"fo"`
+	ColorAnt      int     `json:"ca"`
+	NoiseCancel   int     `json:"nc"`
+	NoiseSubtract int     `json:"ns"`
+}
+
+// MarshalJSON implements json.Marshaler for KiwiUserInfo.
+// Empty slots serialise as {"i":N}; occupied slots serialise with all fields.
+func (u KiwiUserInfo) MarshalJSON() ([]byte, error) {
+	if !u.Occupied {
+		return []byte(fmt.Sprintf(`{"i":%d}`, u.Index)), nil
+	}
+	// Use an alias to avoid infinite recursion.
+	type plain KiwiUserInfo
+	return json.Marshal(plain(u))
 }
 
 // sendUserList sends the list of active users in KiwiSDR format.
@@ -1671,7 +2029,17 @@ func (kc *kiwiConn) sendUserList() {
 
 		timeConnected := int(time.Since(u.CreatedAt).Seconds())
 
+		// Format connected time as "H:MM:SS" matching the real KiwiSDR.
+		tc := timeConnected
+		tSec := tc % 60
+		tc /= 60
+		tMin := tc % 60
+		tc /= 60
+		tHr := tc
+		connTime := fmt.Sprintf("%d:%02d:%02d", tHr, tMin, tSec)
+
 		entry := &KiwiUserInfo{
+			Occupied:        true,
 			Index:           rxSlot,
 			Name:            kiwiEncodeString(u.DisplayName),
 			Location:        kiwiEncodeString(geoloc),
@@ -1680,12 +2048,12 @@ func (kc *kiwiConn) sendUserList() {
 			Zoom:            0,
 			Waterfall:       0,
 			FreqChange:      0,
-			Time:            fmt.Sprintf("%ds", timeConnected),
+			Time:            connTime,
 			InactivityTimer: 0,
 			RecordNum:       0,
-			AckTime:         "",
-			Extension:       u.Protocol, // show protocol as extension label
-			Antenna:         "",
+			AckTime:         "0:00:00",
+			Extension:       "", // KiwiSDR extension name; empty if none active
+			Antenna:         u.ClientIP,
 			Compression:     0.0,
 			FreqOffset:      0.0,
 			ColorAnt:        0,

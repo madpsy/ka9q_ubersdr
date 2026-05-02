@@ -1735,6 +1735,23 @@ func main() {
 	kiwiHandler := NewKiwiWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics, noiseFloorMonitor) // KiwiSDR compatibility
 	websdrHandler := NewWebSDRHandler(sessions, audioReceiver, config, ipBanManager, noiseFloorMonitor)                                                              // WebSDR compatibility
 
+	// Periodically record SNR measurements into the KiwiSDR /snr history ring buffer.
+	// The real KiwiSDR measures every snr_meas_interval_min minutes (default 10).
+	// We use the same interval so the history fills at the same rate.
+	if noiseFloorMonitor != nil && config.Server.EnableKiwiSDR {
+		go func() {
+			const snrMeasInterval = 10 * time.Minute
+			// Take an initial reading shortly after startup so /snr is not empty.
+			time.Sleep(30 * time.Second)
+			kiwiHandler.RecordSNRMeasurement()
+			ticker := time.NewTicker(snrMeasInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				kiwiHandler.RecordSNRMeasurement()
+			}
+		}()
+	}
+
 	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
 	// This must be called after sessions is initialized but before HTTP server starts
 	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor, addonsConfig)
@@ -2311,7 +2328,10 @@ func main() {
 		kiwiFS := http.FileServer(http.Dir(kiwiDir))
 
 		// Register specific endpoints first (they take precedence over the file server)
-		kiwiMux.HandleFunc("/status", kiwiHandler.HandleKiwiStatus) // KiwiSDR status endpoint
+		kiwiMux.HandleFunc("/status", kiwiHandler.HandleKiwiStatus)  // KiwiSDR status endpoint
+		kiwiMux.HandleFunc("/users", kiwiHandler.HandleKiwiUsers)    // KiwiSDR users endpoint
+		kiwiMux.HandleFunc("/snr", kiwiHandler.HandleKiwiSNR)        // KiwiSDR SNR endpoint
+		kiwiMux.HandleFunc("/s-meter", kiwiHandler.HandleKiwiSMeter) // KiwiSDR S-meter endpoint
 
 		// KiwiSDR WebSocket endpoint with /ws/ prefix
 		kiwiMux.HandleFunc("/ws/", kiwiHandler.HandleKiwiWebSocket)
@@ -2452,15 +2472,7 @@ func main() {
 			websdrTCPRouter(ln, chListener, websdrHandler)
 		}()
 
-		// Start websdr.org directory registration if configured.
-		// SetHandler wires up the WebSDR handler so that /~~orgstatus requests
-		// sent by websdr.org on the registration socket are handled correctly.
-		websdrRegistrar := NewWebSDRRegistrar(config)
-		websdrRegistrar.SetHandler(websdrHandler)
-		websdrRegistrar.Start()
-
 		defer func() {
-			websdrRegistrar.Stop()
 			if websdrServer != nil {
 				if err := websdrServer.Close(); err != nil {
 					log.Printf("Error closing WebSDR server: %v", err)

@@ -338,35 +338,15 @@ server:
   # TCP port.  This allows the original WebSDR browser frontend and any
   # WebSDR-compatible tools to connect directly.
   #
-  #
   # enable_websdr: Enable/disable WebSDR compatibility server (default: false)
   # websdr_waterfall_calibration: dBFS→pixel calibration offset (default: -13.0)
   #   Adjust this if the waterfall appears too bright or too dark.
-  #
-  # WebSDR Org Info — returned to the websdr.org directory server on its
-  # /~~orgstatus callback and shown in the WebSDR UI.
-  #   Description: auto-built as "<callsign> - <admin.name>"
-  #   Qth:         auto-derived from admin.gps lat/lon as a Maidenhead grid locator
-  #   websdr_email: operator contact address (required for websdr.org listing;
-  #                 XOR-obfuscated before transmission; defaults to admin.email)
-  #   Max users and idle timeout use server.max_sessions and server.session_timeout.
-  #
-  # Directory registration (both disabled by default):
-  #
-  # websdr_register_websdrorg: Register with the legacy websdr.org directory
-  #   (plain HTTP, ~60 s interval).  Requires websdr_hostname to be set.
-  #   Registration server is hardcoded to "websdr.ewi.utwente.nl 80".
-  #
-  # websdr_hostname: Public hostname sent to directory servers.
-  #   If empty, falls back to admin.public_url host.
-  # websdr_tcp_port: Public TCP port sent to directory servers (default: 8901).
+  # websdr_email: Operator contact email shown in the WebSDR UI /~~orgstatus response.
+  #   XOR-obfuscated before transmission. Defaults to admin.email if not set.
   #
   enable_websdr: true
   websdr_waterfall_calibration: 20.0
   websdr_email: "operator@example.com"
-  websdr_register_websdrorg: false
-  websdr_hostname: "websdr.mydomain.com"
-  websdr_tcp_port: 8901
 
   # HTTP request logging (Apache combined log format)
   # Enable/disable HTTP request logging to disk (default: false)

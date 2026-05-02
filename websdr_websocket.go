@@ -1613,6 +1613,34 @@ func websdrHandleOrgStatusRaw(conn net.Conn, firstReqRaw []byte, handler *WebSDR
 	}
 }
 
+// sanitiseLogString converts raw bytes to a printable string safe for logging.
+// Non-printable characters (< 0x20, except tab) and DEL (0x7f) are replaced
+// with '?'. The result is trimmed of leading/trailing whitespace and capped at
+// maxLen runes.
+func sanitiseLogString(b []byte, maxLen int) string {
+	var sb strings.Builder
+	for _, c := range b {
+		if c == 0 {
+			break // stop at first NUL (end of unread buffer)
+		}
+		if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') || c == 0x7f {
+			sb.WriteByte('?')
+		} else {
+			sb.WriteByte(c)
+		}
+	}
+	s := strings.TrimSpace(sb.String())
+	// Collapse embedded newlines to spaces for single-line log output
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		runes = runes[:maxLen]
+	}
+	return string(runes)
+}
+
 func noCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")

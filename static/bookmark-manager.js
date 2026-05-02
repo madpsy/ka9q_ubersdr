@@ -515,12 +515,12 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
 
     // Only zoom/center spectrum if Shift or Ctrl key was held
     if (shouldZoom && spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
-        // Send zoom request to center and zoom to 2 Hz/bin — the maximum zoom for normal UI.
+        // Send zoom request to center and zoom to 10 Hz/bin — the maximum zoom for normal UI.
         // The server supports down to 0.5 Hz/bin but that is only reachable via explicit requests.
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: frequency,
-            binBandwidth: 2.0  // 2 Hz/bin = maximum zoom for normal UI operation
+            binBandwidth: 10.0  // 10 Hz/bin = maximum zoom for normal UI operation
         }));
         if (log && formatFrequency) {
             log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (centered and zoomed)`);

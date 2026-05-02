@@ -8528,7 +8528,7 @@ function spectrumMaxZoom() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
-    // Send binBandwidth=2 to land at 2 Hz/bin — the maximum zoom for normal UI operation.
+    // Send binBandwidth=10 to land at 10 Hz/bin — the maximum zoom for normal UI operation.
     // The server supports down to 0.5 Hz/bin but that is only reachable via explicit
     // requests (URL params, chat sync) — not via the Max button or + button.
     const freqInput = document.getElementById('frequency');
@@ -8537,15 +8537,15 @@ function spectrumMaxZoom() {
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: isNaN(frequency) ? 15000000 : frequency,
-            binBandwidth: 2.0
+            binBandwidth: 10.0
         }));
     }
 
     updateURL();
     if (window.radioAPI && spectrumDisplay) {
-        window.radioAPI.notifyZoomChange(2.0);
+        window.radioAPI.notifyZoomChange(10.0);
     }
-    log('Zooming to maximum (2 Hz/bin)');
+    log('Zooming to maximum (10 Hz/bin)');
 }
 
 // ── Zoom buttons + vertical slider ───────────────────────────────────────────

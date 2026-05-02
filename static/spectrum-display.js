@@ -4044,8 +4044,8 @@ class SpectrumDisplay {
                 // Calculate new bin bandwidth (inverse of scale for zoom)
                 let newBinBandwidth = touchStartBinBandwidth / scale;
 
-                // Clamp to reasonable limits — 2 Hz/bin minimum matches the Max button floor
-                newBinBandwidth = Math.max(2, Math.min(this.initialBinBandwidth || 1000, newBinBandwidth));
+                // Clamp to reasonable limits — 10 Hz/bin minimum matches the Max button floor
+                newBinBandwidth = Math.max(10, Math.min(this.initialBinBandwidth || 1000, newBinBandwidth));
 
                 // Get touch center position
                 const center = getTouchCenter(e.touches[0], e.touches[1]);
@@ -4742,13 +4742,13 @@ class SpectrumDisplay {
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
         const newBinBandwidth = this.binBandwidth / 2;
 
-        // Minimum practical limit: 2 Hz/bin hard floor for normal UI operation.
+        // Minimum practical limit: 10 Hz/bin hard floor for normal UI operation.
         // The server supports down to 0.5 Hz/bin but that level is only reachable
         // via explicit requests (URL params, chat sync) — not via the +/scroll/Max
-        // button path.  The Max button sends binBandwidth=2 directly; the + button
+        // button path.  The Max button sends binBandwidth=10 directly; the + button
         // halves the current value and stops here.
-        if (newBinBandwidth < 2) {
-            console.log('Maximum zoom reached (2 Hz/bin hard floor)');
+        if (newBinBandwidth < 10) {
+            console.log('Maximum zoom reached (10 Hz/bin hard floor)');
             return;
         }
 

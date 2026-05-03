@@ -2981,6 +2981,10 @@ func handleTestSpectrum(w http.ResponseWriter, r *http.Request, sessions *Sessio
 
 // handleBookmarks serves the bookmarks configuration, augmented with any
 // currently-active EiBi shortwave broadcast entries when EiBi is enabled.
+//
+// Query parameters:
+//
+//	eibi=0  – exclude EiBi entries (default: include them when EiBi is loaded)
 func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eibi *EiBiSchedule) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -3001,8 +3005,11 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 		}
 	}
 
+	// ?eibi=0 lets callers opt out of EiBi augmentation.
+	includeEiBi := r.URL.Query().Get("eibi") != "0"
+
 	// Augment with currently-active EiBi broadcasts (0–30 MHz) if available.
-	if eibi != nil && eibi.IsLoaded() {
+	if includeEiBi && eibi != nil && eibi.IsLoaded() {
 		now := time.Now().UTC()
 		activeEntries := eibi.GetActiveEntries(now)
 

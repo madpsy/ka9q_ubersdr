@@ -53,6 +53,7 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 /* Frequency axis */
 #freq-axis{position:relative;height:32px;overflow:visible}
 #freq-axis-bottom{position:relative;height:32px;overflow:visible}
+#sg-bands-canvas{display:block;width:100%;cursor:default}
 .f-label{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;top:4px}
 .f-label-bottom{position:absolute;font-size:.68em;opacity:.75;transform:translateX(-50%);white-space:nowrap;bottom:4px}
 .f-notch{position:absolute;bottom:0;width:1px;height:8px;background:rgba(255,255,255,.5);transform:translateX(-50%)}
@@ -257,6 +258,8 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="buildBandsBar()"> Bands</label>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="buildBandsBar()"> Bookmarks</label>
   <span style="font-size:.75em;opacity:.55">Scroll to zoom &middot; drag to pan &middot; double-click to reset</span>
   <span class="status" id="status">Loading&hellip;</span>
 </div>
@@ -298,6 +301,10 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
        buildFreqAxis() positions labels in screen-space percentages of #freq-axis width. -->
   <div style="padding-left:46px;padding-right:48px;position:relative">
     <div id="freq-axis"></div>
+  </div>
+  <!-- Bands + bookmarks bar — aligns with the spectrogram image via the same 46px/48px padding -->
+  <div style="padding-left:46px;padding-right:48px;position:relative">
+    <canvas id="sg-bands-canvas"></canvas>
   </div>
   <div class="sg-wrap">
     <div id="time-axis"></div>
@@ -706,6 +713,314 @@ function pxToDb(ctx,px,py,dmin,dmax){
 
   return dmin+(idx/(V.length-1))*(dmax-dmin);
 }
+
+/* ── Bands & Bookmarks bar ──────────────────────────────────────────────────
+   Fetches /api/bands and /api/bookmarks?eibi=0 once after the first render,
+   then draws a zoom-aware overlay canvas between the freq-axis and the
+   spectrogram image.
+
+   Layout (36px tall canvas):
+     y 0–15  : band bars  |─── name ───|
+     y 16–35 : bookmark flag stems + labels
+   ─────────────────────────────────────────────────────────────────────────── */
+
+var sgBands = [];
+var sgBookmarks = [];
+var sgBandsFetched = false;
+
+var SG_BAND_COLORS = [
+  'rgba(100,180,255,0.40)',
+  'rgba(100,255,160,0.40)',
+  'rgba(255,200,80,0.40)',
+  'rgba(255,120,120,0.40)',
+  'rgba(200,120,255,0.40)',
+  'rgba(80,220,220,0.40)'
+];
+
+function fetchBandsAndBookmarks() {
+  Promise.all([
+    fetch('/api/bands').then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; }),
+    fetch('/api/bookmarks?eibi=0').then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; })
+  ]).then(function(results) {
+    sgBands     = Array.isArray(results[0]) ? results[0] : [];
+    sgBookmarks = Array.isArray(results[1]) ? results[1] : [];
+    buildBandsBar();
+  });
+}
+
+function buildBandsBar() {
+  var canvas = document.getElementById('sg-bands-canvas');
+  var wrap   = canvas ? canvas.parentElement : null;
+  if (!canvas || !meta) return;
+
+  var showBands     = document.getElementById('show-bands-cb');
+  var showBookmarks = document.getElementById('show-bookmarks-cb');
+  var wantBands     = !showBands     || showBands.checked;
+  var wantBookmarks = !showBookmarks || showBookmarks.checked;
+
+  /* Hide the entire wrapper when nothing is shown — no gap left behind */
+  if (!wantBands && !wantBookmarks) {
+    if (wrap) wrap.style.display = 'none';
+    canvas.height = 0;
+    return;
+  }
+  if (wrap) wrap.style.display = '';
+
+  /* Dynamic height:
+       bands only     → 16px  (1px margin + 13px bar + 2px gap)
+       bookmarks only → 20px  (label 10px + stem 10px)
+       both           → 36px  (16 + 20) */
+  var BANDS_H     = 16;
+  var BOOKMARKS_H = 20;
+  var H = (wantBands ? BANDS_H : 0) + (wantBookmarks ? BOOKMARKS_H : 0);
+
+  /* Offsets within the canvas for each layer */
+  var BAND_ZONE_Y = 0;                              /* bands start at top */
+  var BM_ZONE_Y   = wantBands ? BANDS_H : 0;       /* bookmarks start after bands */
+
+  /* Size canvas to its CSS pixel dimensions */
+  var rect = canvas.getBoundingClientRect();
+  var W = Math.round(rect.width) || canvas.offsetWidth || 800;
+  if (canvas.width  !== W) canvas.width  = W;
+  if (canvas.height !== H) canvas.height = H;
+
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  /* ── Frequency mapping — identical to buildFreqAxis() ─────────────────── */
+  var startHz = meta.start_freq_hz || 0;
+  var spanHz  = (meta.end_freq_hz || 30e6) - startHz;
+  if (spanHz <= 0) spanHz = 30e6;
+
+  var container = document.querySelector('.sg-right');
+  var cw = container ? container.getBoundingClientRect().width : (W + 94);
+  if (cw === 0) cw = W + 94;
+
+  function canvasToScreen(frac) {
+    return frac * zoom.scale + zoom.tx / cw;
+  }
+  function hzToX(hz) {
+    return canvasToScreen((hz - startHz) / spanHz) * W;
+  }
+
+  /* ── Band bars ─────────────────────────────────────────────────────────── */
+  if (wantBands && sgBands.length > 0) {
+    var BAND_H = 13;
+    var BAND_Y = BAND_ZONE_Y + 1;  /* 1px top margin within the band zone */
+    ctx.save();
+    ctx.font = 'bold 9px -apple-system,BlinkMacSystemFont,sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+
+    for (var bi = 0; bi < sgBands.length; bi++) {
+      var band = sgBands[bi];
+      var lowHz  = band.start || 0;
+      var highHz = band.end   || 0;
+      if (!lowHz || !highHz || highHz <= lowHz) continue;
+
+      var x1 = hzToX(lowHz);
+      var x2 = hzToX(highHz);
+
+      /* Skip if entirely off-screen */
+      if (x2 < 0 || x1 > W) continue;
+
+      /* Clamp to canvas */
+      var cx1 = Math.max(0, x1);
+      var cx2 = Math.min(W, x2);
+      var bandW = cx2 - cx1;
+      if (bandW < 1) continue;
+
+      var color = SG_BAND_COLORS[bi % SG_BAND_COLORS.length];
+
+      /* Filled rect */
+      ctx.fillStyle = color;
+      ctx.fillRect(cx1, BAND_Y, bandW, BAND_H);
+
+      /* Left tick — only if x1 is on-screen */
+      ctx.fillStyle = color.replace(/[\d.]+\)$/, '0.85)');
+      if (x1 >= 0 && x1 <= W) {
+        ctx.fillRect(Math.round(x1), BAND_Y, 1, BAND_H);
+      }
+      /* Right tick — only if x2 is on-screen */
+      if (x2 >= 0 && x2 <= W) {
+        ctx.fillRect(Math.round(x2) - 1, BAND_Y, 1, BAND_H);
+      }
+
+      /* Band name label — only if wide enough */
+      var name = band.label || '';
+      if (name && bandW >= 28) {
+        var labelX = Math.max(cx1, Math.min(cx2, (cx1 + cx2) / 2));
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        /* Clip text to band rect */
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(cx1 + 1, BAND_Y, bandW - 2, BAND_H);
+        ctx.clip();
+        ctx.fillText(name, labelX, BAND_Y + BAND_H / 2);
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
+  /* ── Bookmark flags ────────────────────────────────────────────────────── */
+  if (wantBookmarks && sgBookmarks.length > 0) {
+    var FLAG_TOP    = BM_ZONE_Y;           /* top of the bookmark zone */
+    var LABEL_H     = 10;
+    var LABEL_PAD   = 3;
+    var STEM_TOP    = FLAG_TOP + LABEL_H;  /* stem starts just below the label */
+    var STEM_BOTTOM = BM_ZONE_Y + BOOKMARKS_H - 1;
+
+    ctx.save();
+    ctx.font = '9px -apple-system,BlinkMacSystemFont,sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';  /* we position text manually using labelX + PAD */
+
+    /* Sort by frequency so collision detection works left-to-right */
+    var sorted = sgBookmarks.slice().sort(function(a, b) {
+      return (a.frequency || 0) - (b.frequency || 0);
+    });
+
+    /* Two-pass approach:
+       Pass 1 — compute ideal label positions (centred on stem x).
+       Pass 2 — draw only those that don't overlap the previous drawn label.
+       Labels are clamped to [0, W] so they never overflow the canvas edge. */
+    var drawn = []; /* { x1, x2, xp } of each drawn label */
+
+    for (var ki = 0; ki < sorted.length; ki++) {
+      var bm = sorted[ki];
+      var freq = bm.frequency || 0;
+      if (!freq) continue;
+
+      var xp = hzToX(freq);
+      /* Skip stems that are entirely off-screen */
+      if (xp < -1 || xp > W + 1) continue;
+
+      var bmName = bm.name || '';
+      var textW  = bmName ? ctx.measureText(bmName).width : 0;
+      var labelW = textW + LABEL_PAD * 2;
+
+      /* Ideal label left edge: centred on the stem */
+      var idealX = xp - labelW / 2;
+      /* Clamp so label stays within canvas */
+      var labelX = Math.max(0, Math.min(W - labelW, idealX));
+      var labelR = labelX + labelW;
+
+      /* Collision check against all previously drawn labels */
+      var overlaps = false;
+      for (var di = 0; di < drawn.length; di++) {
+        if (labelX < drawn[di].x2 + 2 && labelR > drawn[di].x1 - 2) {
+          overlaps = true;
+          break;
+        }
+      }
+      if (overlaps) continue;
+
+      drawn.push({ x1: labelX, x2: labelR, xp: xp });
+
+      /* Stem — always drawn at the true frequency position */
+      var stemX = Math.max(0, Math.min(W - 1, Math.round(xp)));
+      ctx.strokeStyle = 'rgba(255,200,60,0.75)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(stemX + 0.5, STEM_TOP);
+      ctx.lineTo(stemX + 0.5, STEM_BOTTOM);
+      ctx.stroke();
+
+      /* Label background */
+      if (bmName) {
+        ctx.fillStyle = 'rgba(255,180,30,0.88)';
+        ctx.fillRect(labelX, FLAG_TOP, labelW, LABEL_H);
+        /* Label text — drawn left-aligned from labelX + LABEL_PAD */
+        ctx.fillStyle = 'rgba(0,0,0,0.92)';
+        ctx.fillText(bmName, labelX + LABEL_PAD, FLAG_TOP + LABEL_H / 2);
+      }
+    }
+    ctx.restore();
+  }
+}
+
+/* ── Bands-bar hover tooltip ────────────────────────────────────────────────
+   Attached once to #sg-bands-canvas.  On mousemove, finds the nearest
+   bookmark within HIT_RADIUS pixels and shows the shared #tt tooltip with
+   frequency, mode, and comment.  Hides on mouseleave. */
+(function sgBandsBarTooltip() {
+  /* Defer until DOM is ready */
+  document.addEventListener('DOMContentLoaded', function() {
+    var canvas = document.getElementById('sg-bands-canvas');
+    if (!canvas) return;
+    var tt = document.getElementById('tt');
+    if (!tt) return;
+
+    var HIT_RADIUS = 8; /* px — how close the cursor must be to a stem */
+
+    canvas.addEventListener('mousemove', function(e) {
+      if (!meta || !sgBookmarks.length) { tt.style.display = 'none'; return; }
+
+      var showBookmarks = document.getElementById('show-bookmarks-cb');
+      if (showBookmarks && !showBookmarks.checked) { tt.style.display = 'none'; return; }
+
+      /* Recompute frequency mapping at event time (zoom may have changed) */
+      var startHz = meta.start_freq_hz || 0;
+      var spanHz  = (meta.end_freq_hz || 30e6) - startHz;
+      if (spanHz <= 0) spanHz = 30e6;
+
+      var container = document.querySelector('.sg-right');
+      var rect = canvas.getBoundingClientRect();
+      var cw = container ? container.getBoundingClientRect().width : rect.width + 94;
+      if (cw === 0) cw = rect.width + 94;
+
+      var mx = e.clientX - rect.left;
+
+      function hzToXLocal(hz) {
+        var frac = (hz - startHz) / spanHz;
+        return (frac * zoom.scale + zoom.tx / cw) * rect.width;
+      }
+
+      /* Find the nearest bookmark stem within HIT_RADIUS */
+      var best = null, bestDist = HIT_RADIUS + 1;
+      for (var i = 0; i < sgBookmarks.length; i++) {
+        var bm = sgBookmarks[i];
+        var freq = bm.frequency || 0;
+        if (!freq) continue;
+        var xp = hzToXLocal(freq);
+        var dist = Math.abs(mx - xp);
+        if (dist < bestDist) { bestDist = dist; best = bm; }
+      }
+
+      if (!best) { tt.style.display = 'none'; return; }
+
+      /* Build tooltip HTML */
+      var freqMHz = ((best.frequency || 0) / 1e6).toFixed(4);
+      var h = '<div class="tt-freq">' + escHtml(best.name || freqMHz + ' MHz') + '</div>';
+      h += '<div class="tt-sep"></div>';
+      h += '<div class="tt-row"><span class="tt-lbl">Frequency</span><span class="tt-val">' + freqMHz + ' MHz</span></div>';
+      if (best.mode) {
+        h += '<div class="tt-row"><span class="tt-lbl">Mode</span><span class="tt-val">' + escHtml(best.mode.toUpperCase()) + '</span></div>';
+      }
+      if (best.group) {
+        h += '<div class="tt-row"><span class="tt-lbl">Group</span><span class="tt-val">' + escHtml(best.group) + '</span></div>';
+      }
+      if (best.comment) {
+        h += '<div class="tt-row" style="max-width:220px;white-space:normal"><span class="tt-lbl">Note</span><span class="tt-val" style="opacity:.85">' + escHtml(best.comment) + '</span></div>';
+      }
+      tt.innerHTML = h;
+      tt.style.display = 'block';
+
+      var tw = 190, th = 120;
+      var ttx = e.clientX + 16, tty = e.clientY - 10;
+      if (ttx + tw > window.innerWidth)  ttx = e.clientX - tw - 8;
+      if (tty + th > window.innerHeight) tty = e.clientY - th - 8;
+      tt.style.left = ttx + 'px';
+      tt.style.top  = tty + 'px';
+    });
+
+    canvas.addEventListener('mouseleave', function() {
+      var tt = document.getElementById('tt');
+      if (tt) tt.style.display = 'none';
+    });
+  });
+})();
 
 /* Amateur radio bands */
 var BANDS=[
@@ -1313,6 +1628,9 @@ function render(){
     updateInfoBanner();
     /* Initialise row indicator (first render only) and default to row 0 */
     initRowIndicator();
+    /* Fetch bands + bookmarks once and draw the overlay bar */
+    if(!sgBandsFetched){sgBandsFetched=true;fetchBandsAndBookmarks();}
+    else{buildBandsBar();}
   } else {
     /* On refresh, only update axes that depend on row count */
     buildTimeAxis(); buildLegend();
@@ -2792,6 +3110,47 @@ function sgDrawRowSpectrumCanvas(data, overrideRange){
   ctx.rect(0,PAD_TOP,W,plotH);
   ctx.clip();
 
+  /* ── Band background spans ────────────────────────────────────────────── */
+  var _showBandsCb=document.getElementById('show-bands-cb');
+  if((!_showBandsCb||_showBandsCb.checked)&&sgBands.length>0){
+    ctx.save();
+    ctx.font='bold 9px -apple-system,BlinkMacSystemFont,sans-serif';
+    ctx.textBaseline='alphabetic';
+    ctx.textAlign='left';
+    for(var _bi=0;_bi<sgBands.length;_bi++){
+      var _band=sgBands[_bi];
+      var _bx1=hzToX(_band.start||0);
+      var _bx2=hzToX(_band.end||0);
+      if(_bx2<0||_bx1>plotW)continue;
+      var _bcx1=Math.max(0,_bx1);
+      var _bcx2=Math.min(plotW,_bx2);
+      if(_bcx2<=_bcx1)continue;
+      /* Use a lighter fill so the signal line remains readable */
+      ctx.fillStyle=SG_BAND_COLORS[_bi%SG_BAND_COLORS.length].replace(/[\d.]+\)$/,'0.13)');
+      ctx.fillRect(_bcx1,PAD_TOP,_bcx2-_bcx1,plotH);
+      /* Left/right edge ticks */
+      ctx.fillStyle=SG_BAND_COLORS[_bi%SG_BAND_COLORS.length].replace(/[\d.]+\)$/,'0.35)');
+      if(_bx1>=0&&_bx1<=plotW)ctx.fillRect(Math.round(_bx1),PAD_TOP,1,plotH);
+      if(_bx2>=0&&_bx2<=plotW)ctx.fillRect(Math.round(_bx2)-1,PAD_TOP,1,plotH);
+      /* Band name label near the bottom of the plot */
+      var _bLabel=_band.label||'';
+      if(_bLabel){
+        var _blW=ctx.measureText(_bLabel).width;
+        var _blAvail=_bcx2-_bcx1-4;
+        if(_blW<=_blAvail){
+          /* Centre the label within the visible portion of the band */
+          var _blX=_bcx1+(_blAvail-_blW)/2+2;
+          var _blY=PAD_TOP+plotH-5;
+          ctx.fillStyle='rgba(0,0,0,0.55)';
+          ctx.fillText(_bLabel,_blX+1,_blY+1);
+          ctx.fillStyle=SG_BAND_COLORS[_bi%SG_BAND_COLORS.length].replace(/[\d.]+\)$/,'0.95)');
+          ctx.fillText(_bLabel,_blX,_blY);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
   /* ── Noise floor dashed reference line ────────────────────────────────── */
   if(data.noise_floor){
     var nfy=dbToY(data.noise_floor);
@@ -2859,6 +3218,62 @@ function sgDrawRowSpectrumCanvas(data, overrideRange){
     ctx.lineWidth=1.5;
     ctx.setLineDash([]);
     ctx.stroke();
+  }
+
+  /* ── Bookmark vertical lines + labels ────────────────────────────────── */
+  var _showBmCb=document.getElementById('show-bookmarks-cb');
+  if((!_showBmCb||_showBmCb.checked)&&sgBookmarks.length>0){
+    ctx.save();
+    ctx.font='9px -apple-system,BlinkMacSystemFont,sans-serif';
+    ctx.textBaseline='middle';
+    ctx.textAlign='left';
+
+    /* Sort by frequency for collision detection */
+    var _bmSorted=sgBookmarks.slice().sort(function(a,b){return(a.frequency||0)-(b.frequency||0);});
+    var _bmDrawn=[]; /* {x1,x2} of each drawn label */
+    var _LPAD=3,_LH=10;
+
+    for(var _ki=0;_ki<_bmSorted.length;_ki++){
+      var _bm=_bmSorted[_ki];
+      var _freq=_bm.frequency||0;
+      if(!_freq)continue;
+      var _xp=hzToX(_freq);
+      if(_xp<-1||_xp>plotW+1)continue;
+
+      /* Label at top of plot — only draw line if label is drawn */
+      var _bmName=_bm.name||'';
+      if(_bmName){
+        var _tw=ctx.measureText(_bmName).width;
+        var _lw=_tw+_LPAD*2;
+        var _idealX=_xp+2; /* just right of the line */
+        var _lx=Math.max(0,Math.min(plotW-_lw,_idealX));
+        var _lr=_lx+_lw;
+
+        /* Collision check */
+        var _ov=false;
+        for(var _di=0;_di<_bmDrawn.length;_di++){
+          if(_lx<_bmDrawn[_di].x2+2&&_lr>_bmDrawn[_di].x1-2){_ov=true;break;}
+        }
+        if(!_ov){
+          _bmDrawn.push({x1:_lx,x2:_lr});
+          /* Vertical dashed line — only when label is shown */
+          ctx.strokeStyle='rgba(255,200,60,0.45)';
+          ctx.lineWidth=1;
+          ctx.setLineDash([3,3]);
+          ctx.beginPath();
+          ctx.moveTo(Math.round(_xp)+0.5,PAD_TOP);
+          ctx.lineTo(Math.round(_xp)+0.5,PAD_TOP+plotH);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          /* Amber label box */
+          ctx.fillStyle='rgba(255,180,30,0.82)';
+          ctx.fillRect(_lx,PAD_TOP+2,_lw,_LH);
+          ctx.fillStyle='rgba(0,0,0,0.9)';
+          ctx.fillText(_bmName,_lx+_LPAD,PAD_TOP+2+_LH/2);
+        }
+      }
+    }
+    ctx.restore();
   }
 
   ctx.restore(); /* remove clip */
@@ -3093,7 +3508,12 @@ applyZoom=function(){
   }
   /* Redraw spectrum canvas with updated zoom — only if data is loaded */
   sgRedrawRowSpectrum();
+  /* Redraw bands/bookmarks bar with updated zoom */
+  buildBandsBar();
 };
+
+/* Redraw bands bar on window resize (canvas width changes) */
+window.addEventListener('resize', function(){ buildBandsBar(); });
 
 /* ── Spectrogram Playback Engine ─────────────────────────────────────────────
    Preloads all rows via /api/spectrogram/allrows, then animates the row

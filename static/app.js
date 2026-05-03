@@ -269,6 +269,15 @@ let lastBufferDisplayUpdate = 0;
 let nextPlayTime = 0;
 let audioStartTime = 0;
 
+// Adaptive jitter buffer state
+// Tracks inter-packet arrival variance and derives a soft target buffer depth.
+// The soft target is always <= maxBufferMs (the user's hard ceiling).
+let _jitterLastArrivalMs = 0;      // performance.now() of last packet arrival
+let _jitterEmaMs = 0;              // exponential moving average of jitter (ms)
+let _jitterPacketCount = 0;        // packets seen since last reset (warm-up guard)
+let _jitterSoftTargetMs = 80;      // current adaptive soft target (ms)
+let _jitterUnderrunCooldown = 0;   // packets to skip soft-drop after an underrun reset
+
 // Signal quality metrics from audio packets (version 2 protocol)
 let currentBasebandPower = -999.0; // dBFS
 let currentNoiseDensity = -999.0; // dBFS
@@ -2434,6 +2443,11 @@ function disconnect() {
     audioQueue = [];
     nextPlayTime = 0;
     audioStartTime = 0;
+    _jitterLastArrivalMs = 0;
+    _jitterEmaMs = 0;
+    _jitterPacketCount = 0;
+    _jitterSoftTargetMs = 80;
+    _jitterUnderrunCooldown = 0;
     waterfallStartTime = null;
     waterfallLineCount = 0;
     vuPeakHold = 0;
@@ -3835,21 +3849,67 @@ function playAudioBuffer(buffer) {
         mediaElement.play().catch(() => {});
     }
 
-    // Buffer management using configurable threshold
+    // -------------------------------------------------------------------------
+    // Adaptive jitter buffer
+    // -------------------------------------------------------------------------
+    // Step 1: Measure inter-packet arrival jitter using an EMA.
+    //   We use performance.now() (wall-clock ms) for arrival timing, independent
+    //   of the AudioContext clock.  The expected inter-arrival is the packet's
+    //   audio duration in ms.
+    const _nowMs = performance.now();
+    if (_jitterLastArrivalMs > 0) {
+        const _interArrivalMs  = _nowMs - _jitterLastArrivalMs;
+        const _expectedMs      = buffer.duration * 1000;
+        const _deviationMs     = Math.abs(_interArrivalMs - _expectedMs);
+        // RFC 3550 one-pole IIR: fast rise (α=0.25), slow decay (α=0.0625)
+        // Rise quickly on a burst, decay slowly so we don't drain too eagerly.
+        const _alpha = _deviationMs > _jitterEmaMs ? 0.25 : 0.0625;
+        _jitterEmaMs = _alpha * _deviationMs + (1 - _alpha) * _jitterEmaMs;
+    }
+    _jitterLastArrivalMs = _nowMs;
+    _jitterPacketCount++;
+
+    // Step 2: Derive soft target.
+    //   Target = 4× jitter EMA, clamped between a 60 ms floor and the user's
+    //   hard ceiling.  60 ms floor gives comfortable headroom above the 40 ms
+    //   Chrome minimum and avoids thrashing on perfectly stable networks.
+    //   We only update the target every 10 packets to avoid chasing noise.
+    if (_jitterPacketCount % 10 === 0) {
+        const _rawTarget = _jitterEmaMs * 4;
+        _jitterSoftTargetMs = Math.max(60, Math.min(_rawTarget, maxBufferMs));
+    }
+
+    // Step 3: Schedule or drop.
     const MAX_BUFFER_SEC = maxBufferMs / 1000;
     const MIN_BUFFER_SEC = MIN_BUFFER_MS / 1000;
-    const currentTime = audioContext.currentTime;
+    const currentTime    = audioContext.currentTime;
+    const _bufferAheadMs = (nextPlayTime - currentTime) * 1000;
 
-    // If we're falling behind (underrun), reset the schedule
     if (nextPlayTime < currentTime) {
-        nextPlayTime = currentTime + MIN_BUFFER_SEC; // Add minimum buffer for Chrome
+        // UNDERRUN: audio clock has overtaken the schedule — reset and add a
+        // small safety cushion.  Set a cooldown so we don't immediately
+        // soft-drop the packets that refill the buffer after the reset.
+        nextPlayTime = currentTime + MIN_BUFFER_SEC;
         window.nextPlayTime = nextPlayTime;
+        _jitterUnderrunCooldown = 15; // skip soft-drop for next 15 packets
+    } else if (_bufferAheadMs > maxBufferMs) {
+        // HARD DROP: buffer has grown beyond the user's absolute ceiling.
+        // This should be rare with the soft-drop below doing its job.
+        console.log(`[JitterBuf] Hard drop: buffer=${_bufferAheadMs.toFixed(0)}ms > ceiling=${maxBufferMs}ms`);
+        return;
+    } else if (
+        _jitterPacketCount > 20 &&          // warm-up: let EMA stabilise first
+        _jitterUnderrunCooldown <= 0 &&     // not recovering from an underrun
+        _bufferAheadMs > _jitterSoftTargetMs + 20  // hysteresis: >20ms above target
+    ) {
+        // SOFT DROP: buffer is above the adaptive target.  Discard this packet
+        // to gently drain latency back toward the target.  The +20 ms hysteresis
+        // prevents thrashing when the buffer is hovering right at the target.
+        return;
     }
-    // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
-    else if ((nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
-        console.log(`Dropping audio packet: buffer at ${((nextPlayTime - currentTime) * 1000).toFixed(0)}ms (max ${maxBufferMs}ms)`);
-        return; // Exit without scheduling this buffer
-    }
+
+    // Decrement underrun cooldown (no-op when already 0)
+    if (_jitterUnderrunCooldown > 0) _jitterUnderrunCooldown--;
 
     // Schedule this buffer to play at the next available time
     source.start(nextPlayTime);
@@ -3871,7 +3931,8 @@ function playAudioBuffer(buffer) {
         const bufferText = document.getElementById('audio-buffer-text');
         if (bufferDisplay && bufferBar && bufferText) {
             const bufferMs = bufferAhead * 1000;
-            const tooltipText = `Buffer: ${bufferMs.toFixed(0)}ms`;
+            // Show both current buffer and the adaptive soft target in the tooltip
+            const tooltipText = `Buffer: ${bufferMs.toFixed(0)}ms | Target: ${_jitterSoftTargetMs.toFixed(0)}ms | Ceiling: ${maxBufferMs}ms`;
             bufferDisplay.title = tooltipText;
 
             // Update text display
@@ -3882,17 +3943,19 @@ function playAudioBuffer(buffer) {
             const widthPercent = Math.min((bufferMs / displayMax) * 100, 100);
             bufferBar.style.width = `${widthPercent}%`;
 
-            // Calculate color based on buffer value (dynamic thresholds)
-            // Green: 0-62.5% of max, Orange: 62.5-87.5% of max, Red: 87.5-100%+ of max
-            const greenThreshold = maxBufferMs * 0.625;
-            const orangeThreshold = maxBufferMs * 0.875;
+            // Calculate color relative to the adaptive soft target (not fixed fractions of max).
+            // Green  = at or below soft target (healthy, low latency)
+            // Orange = between soft target and hard ceiling (elevated but acceptable)
+            // Red    = at or above hard ceiling (hard drops occurring)
+            const greenThreshold  = _jitterSoftTargetMs;
+            const orangeThreshold = maxBufferMs * 0.9;
 
             let color;
             if (bufferMs <= greenThreshold) {
-                // Green zone
+                // Green zone — within adaptive target
                 color = '#28a745';
             } else if (bufferMs <= orangeThreshold) {
-                // Orange zone - gradient from green to orange
+                // Orange zone — draining toward target
                 const ratio = (bufferMs - greenThreshold) / (orangeThreshold - greenThreshold);
                 const r = Math.round(40 + (255 - 40) * ratio);
                 const g = Math.round(167 + (193 - 167) * ratio);

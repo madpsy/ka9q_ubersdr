@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -2984,7 +2985,13 @@ func handleTestSpectrum(w http.ResponseWriter, r *http.Request, sessions *Sessio
 //
 // Query parameters:
 //
-//	eibi=0  – exclude EiBi entries (default: include them when EiBi is loaded)
+//	eibi=0         – exclude EiBi entries (default: include them when EiBi is loaded)
+//	center=<Hz>    – centre frequency in Hz (0–30 000 000); when combined with width,
+//	                 only bookmarks within [center-width, center+width] are returned
+//	width=<Hz>     – half-span in Hz (0–30 000 000) around center (requires center)
+//	limit=<N>      – maximum number of bookmarks to return; when set, bookmarks are
+//	                 sampled uniformly across the frequency span so results are spread
+//	                 evenly rather than bunched at the low end
 func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eibi *EiBiSchedule) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -3032,6 +3039,112 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 				Comment:   EiBiBookmarkComment(e),
 			})
 			existingFreqs[freqHz] = true // deduplicate within EiBi results too
+		}
+	}
+
+	// Optional frequency-span filter: ?center=<Hz>&width=<Hz>
+	// Both parameters must be present and valid for the filter to apply.
+	// Valid range for this system is 0–30 MHz (0–30,000,000 Hz).
+	const maxFreqHz = 30_000_000.0
+	q := r.URL.Query()
+	centerStr := q.Get("center")
+	widthStr := q.Get("width")
+	if centerStr != "" && widthStr != "" {
+		centerHz, errC := strconv.ParseFloat(centerStr, 64)
+		widthHz, errW := strconv.ParseFloat(widthStr, 64)
+		if errC != nil {
+			http.Error(w, fmt.Sprintf("invalid center parameter: %v", errC), http.StatusBadRequest)
+			return
+		}
+		if errW != nil {
+			http.Error(w, fmt.Sprintf("invalid width parameter: %v", errW), http.StatusBadRequest)
+			return
+		}
+		if centerHz < 0 || centerHz > maxFreqHz {
+			http.Error(w, fmt.Sprintf("center must be between 0 and %.0f Hz", maxFreqHz), http.StatusBadRequest)
+			return
+		}
+		if widthHz < 0 || widthHz > maxFreqHz {
+			http.Error(w, fmt.Sprintf("width must be between 0 and %.0f Hz", maxFreqHz), http.StatusBadRequest)
+			return
+		}
+		loHz := centerHz - widthHz
+		hiHz := centerHz + widthHz
+		// Clamp span to the valid system range.
+		if loHz < 0 {
+			loHz = 0
+		}
+		if hiHz > maxFreqHz {
+			hiHz = maxFreqHz
+		}
+		// Reject if the span doesn't overlap the system range at all.
+		if loHz > maxFreqHz || hiHz < 0 {
+			http.Error(w, "center/width span is outside the 0–30 MHz system range", http.StatusBadRequest)
+			return
+		}
+		spanFiltered := filteredBookmarks[:0]
+		for _, b := range filteredBookmarks {
+			f := float64(b.Frequency)
+			if f >= loHz && f <= hiHz {
+				spanFiltered = append(spanFiltered, b)
+			}
+		}
+		filteredBookmarks = spanFiltered
+	}
+
+	// Optional limit with uniform frequency-span sampling: ?limit=<N>
+	// When limit < len(filteredBookmarks) we sort by frequency, divide the span
+	// into N equal-width buckets, and pick the bookmark closest to each bucket
+	// centre.  This ensures the returned set is spread evenly across the span
+	// rather than being bunched at the low-frequency end.
+	limitStr := q.Get("limit")
+	if limitStr != "" {
+		limitN, errL := strconv.Atoi(limitStr)
+		if errL != nil || limitN <= 0 {
+			http.Error(w, fmt.Sprintf("invalid limit parameter: %v", limitStr), http.StatusBadRequest)
+			return
+		}
+		if limitN < len(filteredBookmarks) {
+			// Sort by frequency for the sampling pass.
+			sort.Slice(filteredBookmarks, func(i, j int) bool {
+				return filteredBookmarks[i].Frequency < filteredBookmarks[j].Frequency
+			})
+
+			loF := float64(filteredBookmarks[0].Frequency)
+			hiF := float64(filteredBookmarks[len(filteredBookmarks)-1].Frequency)
+			span := hiF - loF
+
+			sampled := make([]Bookmark, 0, limitN)
+			used := make(map[int]bool, limitN)
+
+			for bucket := 0; bucket < limitN; bucket++ {
+				// Target frequency at the centre of this bucket.
+				var target float64
+				if span == 0 || limitN == 1 {
+					target = loF
+				} else {
+					target = loF + span*(float64(bucket)+0.5)/float64(limitN)
+				}
+
+				// Find the bookmark closest to target that hasn't been picked yet.
+				bestIdx := -1
+				bestDist := math.MaxFloat64
+				for i, b := range filteredBookmarks {
+					if used[i] {
+						continue
+					}
+					d := math.Abs(float64(b.Frequency) - target)
+					if d < bestDist {
+						bestDist = d
+						bestIdx = i
+					}
+				}
+				if bestIdx >= 0 {
+					sampled = append(sampled, filteredBookmarks[bestIdx])
+					used[bestIdx] = true
+				}
+			}
+			filteredBookmarks = sampled
 		}
 	}
 

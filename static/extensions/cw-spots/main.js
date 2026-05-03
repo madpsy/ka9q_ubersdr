@@ -2618,10 +2618,6 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         // Row 0 at y=32, Row 1 at y=17 (32 - 15) - matches bookmark positioning
         const labelY = 32 - (row * rowSpacing);
 
-        if (shouldLog) {
-            console.log(`Drawing ${spot.dx_call} at x=${x.toFixed(0)}, y=${labelY}, row=${row}`);
-        }
-
         // Draw spot label
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';

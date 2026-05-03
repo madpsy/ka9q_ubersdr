@@ -309,7 +309,6 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   </div>
   <div class="sg-wrap">
     <div id="time-axis" style="position:relative">
-      <div id="sg-daynight-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:hidden"></div>
     </div>
     <div class="sg-right">
       <!-- zoom-wrap receives the CSS transform (canvas only) -->
@@ -1566,6 +1565,8 @@ function load(){
       render();
       document.getElementById('loading').style.display='none';
       document.getElementById('view').style.display='block';
+      /* Now that #view is visible, #time-axis has a real layout height — draw overlay */
+      buildDayNightOverlay();
       /* Compute UTC time and staleness from the last row's real unix timestamp.
          meta.rows[last].unix is the actual time the row was recorded — immune to
          service restarts, gaps, or the service not starting at midnight. */
@@ -1880,29 +1881,29 @@ function buildTimeAxis(){
    (loaded from /suncalc.js) and the receiver lat/lon from /api/description.
    Falls back silently if SunCalc is unavailable or coordinates are unknown. */
 function buildDayNightOverlay(){
-  var overlay=document.getElementById('sg-daynight-overlay');
-  if(!overlay)return;
+  var ax=document.getElementById('time-axis');
+  if(!ax)return;
   /* If SunCalc not loaded or no coordinates yet, bail silently.
      fetchDescription will call us again once coordinates arrive. */
   if(typeof SunCalc==='undefined'||sgReceiverLat===null||sgReceiverLon===null)return;
   if(!meta||meta.row_count===0)return;
 
-  /* Use percentage-based positioning so we never need to read pixel heights.
-     The overlay div is position:absolute;top:0;left:0;width:100%;height:100%
-     inside #time-axis which is a flex item that stretches to .sg-right height.
-     top/height as percentages of the overlay's own 100% height = correct. */
+  /* Get the rendered pixel height of #time-axis.
+     getBoundingClientRect() forces a layout reflow so we always get the real value. */
+  var ch=Math.round(ax.getBoundingClientRect().height);
+  if(ch===0){
+    /* Layout not ready yet — retry after next paint */
+    requestAnimationFrame(buildDayNightOverlay);
+    return;
+  }
 
   var canvasRows=meta.row_count;
+  /* Use the actual row interval from the API — not a hardcoded 60s assumption */
+  var rowSec=(meta.row_interval_seconds||60);
 
-  /* Reuse the same row→screen fraction mapping as buildTimeAxis() */
-  function rowFracToScreenPct(rowFrac){
-    /* canvasRowToScreen(frac) = frac*zoom.scale + zoom.ty/ch
-       We don't know ch here, but we can use the same formula with ch=1
-       since we're computing percentages: the ch cancels out.
-       Actually zoom.ty is in pixels, so we need ch.
-       Use the overlay's own offsetHeight as ch (it's 100% of #time-axis). */
-    var ch=overlay.offsetHeight||600;
-    return (rowFrac*zoom.scale + zoom.ty/ch)*100;
+  /* Same row→screen mapping as buildTimeAxis(): result in screen pixels */
+  function rowFracToScreenPx(rowFrac){
+    return (rowFrac*zoom.scale + zoom.ty/ch)*ch;
   }
 
   /* Determine the UTC timestamp of row 0 */
@@ -1917,7 +1918,7 @@ function buildDayNightOverlay(){
   var lat=sgReceiverLat, lon=sgReceiverLon;
   var dayMs=86400*1000;
   var startMs=(row0Unix-86400)*1000;
-  var endMs=(row0Unix+canvasRows*60+86400)*1000;
+  var endMs=(row0Unix+canvasRows*rowSec+86400)*1000;
 
   for(var t=startMs;t<=endMs;t+=dayMs){
     var date=new Date(t);
@@ -1933,29 +1934,35 @@ function buildDayNightOverlay(){
 
   /* Convert unix-ms → row fraction */
   function msToRowFrac(ms){
-    return ((ms/1000)-row0Unix)/(canvasRows*60);
+    return ((ms/1000)-row0Unix)/(canvasRows*rowSec);
   }
 
-  /* Rebuild overlay children */
-  overlay.innerHTML='';
+  /* Remove any previously injected night-shade divs */
+  var old=ax.querySelectorAll('.sg-night-shade');
+  for(var oi=0;oi<old.length;oi++)old[oi].parentNode.removeChild(old[oi]);
+
+  /* Inject new night-shade divs using pixel positions — avoids any ambiguity
+     about what top:X% is relative to when the parent has no explicit height. */
   for(var ni=0;ni<nightIntervals.length;ni++){
     var iv=nightIntervals[ni];
-    var pct1=rowFracToScreenPct(msToRowFrac(iv.start));
-    var pct2=rowFracToScreenPct(msToRowFrac(iv.end));
-    var topPct=Math.max(0,Math.min(100,pct1));
-    var botPct=Math.max(0,Math.min(100,pct2));
-    if(botPct<=topPct)continue;
+    var px1=rowFracToScreenPx(msToRowFrac(iv.start));
+    var px2=rowFracToScreenPx(msToRowFrac(iv.end));
+    var topPx=Math.max(0,Math.min(ch,px1));
+    var botPx=Math.max(0,Math.min(ch,px2));
+    if(botPx<=topPx)continue;
     var d=document.createElement('div');
-    d.style.cssText='position:absolute;left:0;right:0;top:'+topPct+'%;height:'+(botPct-topPct)+'%;background:rgba(0,0,30,0.38);pointer-events:none';
-    overlay.appendChild(d);
-    /* Sunrise tick */
+    d.className='sg-night-shade';
+    d.style.cssText='position:absolute;left:0;right:0;top:'+topPx+'px;height:'+(botPx-topPx)+'px;background:rgba(0,0,30,0.38);pointer-events:none;z-index:0';
+    ax.appendChild(d);
+    /* Sunrise/sunset tick marks on the right edge */
     var tick1=document.createElement('div');
-    tick1.style.cssText='position:absolute;right:0;left:auto;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+topPct+'%;pointer-events:none';
-    overlay.appendChild(tick1);
-    /* Sunset tick */
+    tick1.className='sg-night-shade';
+    tick1.style.cssText='position:absolute;right:0;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+topPx+'px;pointer-events:none;z-index:0';
+    ax.appendChild(tick1);
     var tick2=document.createElement('div');
-    tick2.style.cssText='position:absolute;right:0;left:auto;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+botPct+'%;pointer-events:none';
-    overlay.appendChild(tick2);
+    tick2.className='sg-night-shade';
+    tick2.style.cssText='position:absolute;right:0;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+botPx+'px;pointer-events:none;z-index:0';
+    ax.appendChild(tick2);
   }
 }
 

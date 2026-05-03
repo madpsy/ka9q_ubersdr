@@ -261,8 +261,8 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
   <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="savePrefs();buildBandsBar();sgRedrawRowSpectrum()"> Bands</label>
   <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="savePrefs();buildBandsBar();sgRedrawRowSpectrum()"> Bookmarks</label>
-  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="squish-height-cb" onchange="onSquishHeightChange()"> Fixed height</label>
-  <select id="squish-height-sel" onchange="onSquishHeightChange()" style="display:none">
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="squish-height-cb" checked onchange="onSquishHeightChange()"> Fixed height</label>
+  <select id="squish-height-sel" onchange="onSquishHeightChange()">
     <option value="300">300px</option>
     <option value="400">400px</option>
     <option value="500">500px</option>
@@ -1413,12 +1413,17 @@ function clampZoom(rect){
     var bmCb=document.getElementById('show-bookmarks-cb');
     if(bmCb)bmCb.checked=false;
   }
-  if(prefs.squishHeight===true){
-    var squishCb=document.getElementById('squish-height-cb');
-    var squishSel=document.getElementById('squish-height-sel');
-    if(squishSel&&prefs.squishHeightPx)squishSel.value=prefs.squishHeightPx;
-    if(squishCb){squishCb.checked=true;onSquishHeightChange();}
+  /* Apply saved fixed-height state; if no saved pref the checkbox is checked
+     by default (HTML attribute), so always call onSquishHeightChange() to
+     apply the initial height and show/hide the dropdown correctly. */
+  var squishCb=document.getElementById('squish-height-cb');
+  var squishSel=document.getElementById('squish-height-sel');
+  if(prefs.squishHeight===false){
+    if(squishCb)squishCb.checked=false;
+  } else if(prefs.squishHeightPx&&squishSel){
+    squishSel.value=prefs.squishHeightPx;
   }
+  onSquishHeightChange();
 
   /* Pre-select the band from the URL before the list loads */
   var bsel=document.getElementById('bsel');

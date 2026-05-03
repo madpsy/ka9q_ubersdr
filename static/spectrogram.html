@@ -3522,6 +3522,17 @@ function sgSelectRow(rowIdx, userInteraction){
     sgPlayStop();
   }
 
+  /* If the selected row is outside the current zoomed viewport, scroll to it.
+     This handles seeks from the scrub bar, activity chart clicks, and strip
+     clicks when the image is zoomed in to a different time window. */
+  if(userInteraction && zoom.scale > 1){
+    var screenFracCheck = sgRowToScreenFrac(rowIdx + 0.5);
+    if(screenFracCheck < 0 || screenFracCheck > 1){
+      /* Row is outside the visible area — scroll to centre it */
+      sgPlayAutoScroll(rowIdx);
+    }
+  }
+
   /* Position the arrow indicator with time label */
   var screenFrac=sgRowToScreenFrac(rowIdx+0.5); /* centre of the row */
   sgRowIndicatorSetFrac(screenFrac,sgRowTimeStr(rowIdx));

@@ -259,8 +259,8 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
-  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="buildBandsBar();sgRedrawRowSpectrum()"> Bands</label>
-  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="buildBandsBar();sgRedrawRowSpectrum()"> Bookmarks</label>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="savePrefs();buildBandsBar();sgRedrawRowSpectrum()"> Bands</label>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="savePrefs();buildBandsBar();sgRedrawRowSpectrum()"> Bookmarks</label>
   <span style="font-size:.75em;opacity:.55">Scroll to zoom &middot; drag to pan &middot; double-click to reset</span>
   <span class="status" id="status">Loading&hellip;</span>
 </div>
@@ -1102,10 +1102,14 @@ var PREFS_KEY='ubersdr_sg_prefs';
 
 function savePrefs(){
   try{
+    var bandsCb=(document.getElementById('show-bands-cb')||{});
+    var bmCb=(document.getElementById('show-bookmarks-cb')||{});
     var prefs={
       band:urlBand,
       palette:(document.getElementById('psel')||{}).value||'jet',
-      window:(document.getElementById('tsel')||{}).value||'0'
+      window:(document.getElementById('tsel')||{}).value||'0',
+      showBands:bandsCb.checked!==false,
+      showBookmarks:bmCb.checked!==false
     };
     localStorage.setItem(PREFS_KEY,JSON.stringify(prefs));
   }catch(e){}
@@ -1376,6 +1380,16 @@ function clampZoom(rect){
   if(prefs.window){
     var tsel=document.getElementById('tsel');
     if(tsel)tsel.value=prefs.window;
+  }
+
+  /* Apply saved bands/bookmarks checkbox states */
+  if(prefs.showBands===false){
+    var bandsCb=document.getElementById('show-bands-cb');
+    if(bandsCb)bandsCb.checked=false;
+  }
+  if(prefs.showBookmarks===false){
+    var bmCb=document.getElementById('show-bookmarks-cb');
+    if(bmCb)bmCb.checked=false;
   }
 
   /* Pre-select the band from the URL before the list loads */

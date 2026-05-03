@@ -1882,28 +1882,23 @@ function buildTimeAxis(){
 function buildDayNightOverlay(){
   var canvas=document.getElementById('sg-daynight-canvas');
   if(!canvas)return;
-  if(typeof SunCalc==='undefined'||sgReceiverLat===null||sgReceiverLon===null){
-    /* No SunCalc or no coordinates — clear and bail */
-    var ctx0=canvas.getContext('2d');
-    ctx0.clearRect(0,0,canvas.width,canvas.height);
-    return;
-  }
+  /* If SunCalc not loaded or no coordinates yet, bail silently.
+     fetchDescription will call us again once coordinates arrive. */
+  if(typeof SunCalc==='undefined'||sgReceiverLat===null||sgReceiverLon===null)return;
   if(!meta||meta.row_count===0)return;
 
-  /* Size canvas to its CSS pixel dimensions.
-     Use #time-axis height; fall back to .sg-right (same flex sibling height). */
-  var ax=document.getElementById('time-axis');
-  var H=ax?Math.round(ax.getBoundingClientRect().height):0;
+  /* #time-axis is 46px wide and stretches to .sg-right height via flex.
+     Read height from .sg-right (most reliable — it has content that sizes it).
+     After display:none→block the browser needs one rAF to lay out, so retry
+     until we get a non-zero height. */
+  var sgRight=document.querySelector('.sg-right');
+  var H=sgRight?Math.round(sgRight.getBoundingClientRect().height):0;
   if(H===0){
-    var sgRight=document.querySelector('.sg-right');
-    H=sgRight?Math.round(sgRight.getBoundingClientRect().height):0;
-  }
-  if(H===0){
-    /* Layout not ready yet — defer */
+    /* Layout not ready yet — defer and retry */
     requestAnimationFrame(buildDayNightOverlay);
     return;
   }
-  var W=Math.round(canvas.getBoundingClientRect().width)||46;
+  var W=46;
   canvas.width=W;
   canvas.height=H;
 

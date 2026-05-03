@@ -2540,7 +2540,21 @@ function tsReloadAll(){
   var promises=tsSlices.map(function(s){
     var url='/api/spectrogram/timeslice?freq_hz='+(s.freqMHz*1e6)+'&bandwidth_hz='+(s.bwKHz*1e3)+dateP;
     return fetch(url)
-      .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+      .then(function(r){
+        /* Always parse the JSON body — non-200 responses may carry an
+           {"error":"..."} payload that is more informative than the HTTP status. */
+        return r.json().then(function(data){
+          if(!r.ok){
+            /* Prefer the backend's error message over a generic HTTP status string */
+            throw new Error(data.error||('HTTP '+r.status));
+          }
+          return data;
+        }).catch(function(jsonErr){
+          /* JSON parse failed on a non-200 response — fall back to HTTP status */
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          throw jsonErr;
+        });
+      })
       .then(function(data){return{slice:s,data:data};})
       .catch(function(e){return{slice:s,error:e.message};});
   });

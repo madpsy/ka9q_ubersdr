@@ -270,13 +270,17 @@ let nextPlayTime = 0;
 let audioStartTime = 0;
 
 // Adaptive jitter buffer state
-// Tracks inter-packet arrival variance and derives a soft target buffer depth.
-// The soft target is always <= maxBufferMs (the user's hard ceiling).
-let _jitterLastArrivalMs = 0;      // performance.now() of last packet arrival
-let _jitterEmaMs = 0;              // exponential moving average of jitter (ms)
+// Derives a soft drop target from the AudioContext clock (not wall-clock arrival
+// times, which are unreliable due to JS event-loop jitter and tab throttling).
+// The soft target tracks the minimum observed buffer depth over a sliding window,
+// then adds a safety margin.  It is always <= maxBufferMs (the user's ceiling).
 let _jitterPacketCount = 0;        // packets seen since last reset (warm-up guard)
 let _jitterSoftTargetMs = 80;      // current adaptive soft target (ms)
 let _jitterUnderrunCooldown = 0;   // packets to skip soft-drop after an underrun reset
+let _jitterMinObservedMs = 9999;   // rolling minimum buffer depth seen (ms)
+let _jitterMinResetCounter = 0;    // counts packets between min-window resets
+const _JITTER_WINDOW_PACKETS = 200; // reset the min window every ~N packets (~4s at 20ms/pkt)
+const _JITTER_MARGIN_MS = 30;      // safety margin added above the observed minimum
 
 // Signal quality metrics from audio packets (version 2 protocol)
 let currentBasebandPower = -999.0; // dBFS
@@ -2443,11 +2447,11 @@ function disconnect() {
     audioQueue = [];
     nextPlayTime = 0;
     audioStartTime = 0;
-    _jitterLastArrivalMs = 0;
-    _jitterEmaMs = 0;
     _jitterPacketCount = 0;
     _jitterSoftTargetMs = 80;
     _jitterUnderrunCooldown = 0;
+    _jitterMinObservedMs = 9999;
+    _jitterMinResetCounter = 0;
     waterfallStartTime = null;
     waterfallLineCount = 0;
     vuPeakHold = 0;
@@ -3852,59 +3856,76 @@ function playAudioBuffer(buffer) {
     // -------------------------------------------------------------------------
     // Adaptive jitter buffer
     // -------------------------------------------------------------------------
-    // Step 1: Measure inter-packet arrival jitter using an EMA.
-    //   We use performance.now() (wall-clock ms) for arrival timing, independent
-    //   of the AudioContext clock.  The expected inter-arrival is the packet's
-    //   audio duration in ms.
-    const _nowMs = performance.now();
-    if (_jitterLastArrivalMs > 0) {
-        const _interArrivalMs  = _nowMs - _jitterLastArrivalMs;
-        const _expectedMs      = buffer.duration * 1000;
-        const _deviationMs     = Math.abs(_interArrivalMs - _expectedMs);
-        // RFC 3550 one-pole IIR: fast rise (α=0.25), slow decay (α=0.0625)
-        // Rise quickly on a burst, decay slowly so we don't drain too eagerly.
-        const _alpha = _deviationMs > _jitterEmaMs ? 0.25 : 0.0625;
-        _jitterEmaMs = _alpha * _deviationMs + (1 - _alpha) * _jitterEmaMs;
-    }
-    _jitterLastArrivalMs = _nowMs;
-    _jitterPacketCount++;
+    // We use the AudioContext clock (not wall-clock arrival times) because
+    // performance.now() inter-arrival measurements are polluted by JS event-loop
+    // scheduling, GC pauses, and browser tab throttling — making them useless
+    // as a jitter estimator.
+    //
+    // Instead we track the *minimum buffer depth* observed over a sliding window
+    // of packets.  The soft drop target = observed minimum + a fixed safety margin.
+    // This means:
+    //   - On a stable LAN the minimum stays low → target stays low → latency is low.
+    //   - On a jittery link the minimum rises (underruns push it up via the reset
+    //     path) → target rises → fewer soft drops → more stability.
+    //
+    // The user's maxBufferMs remains the absolute hard ceiling, unchanged.
 
-    // Step 2: Derive soft target.
-    //   Target = 4× jitter EMA, clamped between a 60 ms floor and the user's
-    //   hard ceiling.  60 ms floor gives comfortable headroom above the 40 ms
-    //   Chrome minimum and avoids thrashing on perfectly stable networks.
-    //   We only update the target every 10 packets to avoid chasing noise.
-    if (_jitterPacketCount % 10 === 0) {
-        const _rawTarget = _jitterEmaMs * 4;
-        _jitterSoftTargetMs = Math.max(60, Math.min(_rawTarget, maxBufferMs));
-    }
-
-    // Step 3: Schedule or drop.
     const MAX_BUFFER_SEC = maxBufferMs / 1000;
     const MIN_BUFFER_SEC = MIN_BUFFER_MS / 1000;
     const currentTime    = audioContext.currentTime;
     const _bufferAheadMs = (nextPlayTime - currentTime) * 1000;
 
+    // Step 1: Track rolling minimum buffer depth (only while buffer is healthy,
+    //   i.e. not in underrun or cooldown, so we don't record artificially low
+    //   values right after a reset).
+    _jitterPacketCount++;
+    if (_jitterUnderrunCooldown <= 0 && _bufferAheadMs > 0) {
+        if (_bufferAheadMs < _jitterMinObservedMs) {
+            _jitterMinObservedMs = _bufferAheadMs;
+        }
+        // Periodically reset the window so the minimum can rise if the network
+        // gets worse, or fall if it improves.
+        _jitterMinResetCounter++;
+        if (_jitterMinResetCounter >= _JITTER_WINDOW_PACKETS) {
+            _jitterMinResetCounter = 0;
+            // Carry forward the current observed min as the new starting point
+            // (don't reset to 9999 — that would cause a burst of drops while
+            // the new window fills up).
+            _jitterMinObservedMs = _bufferAheadMs;
+        }
+    }
+
+    // Step 2: Update soft target every 50 packets (not every packet, to avoid
+    //   reacting to momentary spikes).
+    if (_jitterPacketCount % 50 === 0) {
+        const _rawTarget = _jitterMinObservedMs + _JITTER_MARGIN_MS;
+        // Clamp: floor = 80ms (well above Chrome's 40ms minimum, avoids underruns
+        // on any realistic network); ceiling = user's hard limit.
+        _jitterSoftTargetMs = Math.max(80, Math.min(_rawTarget, maxBufferMs));
+    }
+
+    // Step 3: Schedule or drop.
     if (nextPlayTime < currentTime) {
-        // UNDERRUN: audio clock has overtaken the schedule — reset and add a
-        // small safety cushion.  Set a cooldown so we don't immediately
-        // soft-drop the packets that refill the buffer after the reset.
+        // UNDERRUN: audio clock has overtaken the schedule.
+        // Reset to a small cushion and suppress soft-drops while refilling.
         nextPlayTime = currentTime + MIN_BUFFER_SEC;
         window.nextPlayTime = nextPlayTime;
-        _jitterUnderrunCooldown = 15; // skip soft-drop for next 15 packets
+        _jitterUnderrunCooldown = 30; // ~0.6s at 20ms/packet — enough to refill
+        _jitterMinObservedMs = 9999;  // reset min so it re-learns after the gap
+        _jitterMinResetCounter = 0;
     } else if (_bufferAheadMs > maxBufferMs) {
-        // HARD DROP: buffer has grown beyond the user's absolute ceiling.
-        // This should be rare with the soft-drop below doing its job.
+        // HARD DROP: beyond the user's absolute ceiling.
+        // Should be rare — the soft drop below handles normal overruns.
         console.log(`[JitterBuf] Hard drop: buffer=${_bufferAheadMs.toFixed(0)}ms > ceiling=${maxBufferMs}ms`);
         return;
     } else if (
-        _jitterPacketCount > 20 &&          // warm-up: let EMA stabilise first
-        _jitterUnderrunCooldown <= 0 &&     // not recovering from an underrun
-        _bufferAheadMs > _jitterSoftTargetMs + 20  // hysteresis: >20ms above target
+        _jitterPacketCount > 50 &&              // warm-up: let min window fill first
+        _jitterUnderrunCooldown <= 0 &&         // not recovering from an underrun
+        _bufferAheadMs > _jitterSoftTargetMs    // buffer exceeds adaptive target
     ) {
-        // SOFT DROP: buffer is above the adaptive target.  Discard this packet
-        // to gently drain latency back toward the target.  The +20 ms hysteresis
-        // prevents thrashing when the buffer is hovering right at the target.
+        // SOFT DROP: gently drain latency back toward the target.
+        // No extra hysteresis constant needed — the 80ms floor on the target
+        // and the slow update cadence (every 50 packets) already prevent thrashing.
         return;
     }
 

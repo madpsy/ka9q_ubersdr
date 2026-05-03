@@ -367,14 +367,27 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Fix 3 — Density cap: when the visible window contains more bookmarks than can
     // be meaningfully rendered (e.g. zoomed all the way out with 1500 bookmarks), cap
     // the draw list to avoid thousands of canvas API calls per frame.
-    // Local (user-added) bookmarks are always kept; server bookmarks are trimmed first.
+    // Local (user-added) bookmarks are always kept; server bookmarks are evenly sampled
+    // across the full visible frequency range so labels are spread across the whole canvas.
     const MAX_RENDERABLE = 300; // two rows × ~150 labels across a typical 1920px canvas
     let cappedBookmarks;
     if (visibleBookmarks.length > MAX_RENDERABLE) {
         const localItems  = visibleBookmarks.filter(item => item.bookmark.source === 'local');
         const serverItems = visibleBookmarks.filter(item => item.bookmark.source !== 'local');
         const serverSlot  = Math.max(0, MAX_RENDERABLE - localItems.length);
-        cappedBookmarks = localItems.concat(serverItems.slice(0, serverSlot));
+        // Evenly sample server bookmarks across the sorted (by x) array so the result
+        // is spread across the full visible width rather than bunched at one end.
+        let sampledServer;
+        if (serverItems.length <= serverSlot) {
+            sampledServer = serverItems;
+        } else {
+            sampledServer = [];
+            const step = serverItems.length / serverSlot;
+            for (let i = 0; i < serverSlot; i++) {
+                sampledServer.push(serverItems[Math.round(i * step)]);
+            }
+        }
+        cappedBookmarks = localItems.concat(sampledServer);
     } else {
         cappedBookmarks = visibleBookmarks;
     }

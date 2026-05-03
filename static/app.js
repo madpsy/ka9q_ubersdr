@@ -266,6 +266,7 @@ let currentVolume = (() => {
     return 1.0; // default 100%
 })();
 let lastBufferDisplayUpdate = 0;
+let lastDroppedFrameTime = 0; // Timestamp (performance.now) of last dropped audio frame
 let nextPlayTime = 0;
 let audioStartTime = 0;
 
@@ -3848,6 +3849,7 @@ function playAudioBuffer(buffer) {
     // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
     else if ((nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
         console.log(`Dropping audio packet: buffer at ${((nextPlayTime - currentTime) * 1000).toFixed(0)}ms (max ${maxBufferMs}ms)`);
+        lastDroppedFrameTime = performance.now(); // Record drop time for buffer indicator
         return; // Exit without scheduling this buffer
     }
 
@@ -3871,7 +3873,10 @@ function playAudioBuffer(buffer) {
         const bufferText = document.getElementById('audio-buffer-text');
         if (bufferDisplay && bufferBar && bufferText) {
             const bufferMs = bufferAhead * 1000;
-            const tooltipText = `Buffer: ${bufferMs.toFixed(0)}ms`;
+            const recentlyDropped = (now - lastDroppedFrameTime) < 2000;
+            const tooltipText = recentlyDropped
+                ? `Buffer: ${bufferMs.toFixed(0)}ms — dropping frames!`
+                : `Buffer: ${bufferMs.toFixed(0)}ms`;
             bufferDisplay.title = tooltipText;
 
             // Update text display
@@ -3882,27 +3887,9 @@ function playAudioBuffer(buffer) {
             const widthPercent = Math.min((bufferMs / displayMax) * 100, 100);
             bufferBar.style.width = `${widthPercent}%`;
 
-            // Calculate color based on buffer value (dynamic thresholds)
-            // Green: 0-62.5% of max, Orange: 62.5-87.5% of max, Red: 87.5-100%+ of max
-            const greenThreshold = maxBufferMs * 0.625;
-            const orangeThreshold = maxBufferMs * 0.875;
-
-            let color;
-            if (bufferMs <= greenThreshold) {
-                // Green zone
-                color = '#28a745';
-            } else if (bufferMs <= orangeThreshold) {
-                // Orange zone - gradient from green to orange
-                const ratio = (bufferMs - greenThreshold) / (orangeThreshold - greenThreshold);
-                const r = Math.round(40 + (255 - 40) * ratio);
-                const g = Math.round(167 + (193 - 167) * ratio);
-                const b = Math.round(69 + (193 - 69) * ratio);
-                color = `rgb(${r}, ${g}, ${b})`;
-            } else {
-                // Red zone
-                color = '#dc3545';
-            }
-            bufferBar.style.backgroundColor = color;
+            // Color: red if frames were dropped recently (within 2s), green otherwise.
+            // Being at the buffer limit is normal/expected — only actual drops indicate a problem.
+            bufferBar.style.backgroundColor = recentlyDropped ? '#dc3545' : '#28a745';
         }
 
         lastBufferDisplayUpdate = now;

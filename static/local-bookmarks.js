@@ -114,6 +114,10 @@ class LocalBookmarkManager {
             const req   = store.getAll();
             req.onsuccess = () => {
                 this.bookmarks = req.result || [];
+                // Pre-cache label widths so the hot draw path never calls measureText()
+                if (window._stampLabelWidth) {
+                    this.bookmarks.forEach(window._stampLabelWidth);
+                }
                 resolve(this.bookmarks);
             };
             req.onerror = () => reject(req.error);
@@ -125,6 +129,8 @@ class LocalBookmarkManager {
      * Also updates the in-memory cache entry.
      */
     _put(bookmark) {
+        // Stamp label width before writing so the in-memory copy is always ready
+        if (window._stampLabelWidth) window._stampLabelWidth(bookmark);
         return new Promise((resolve, reject) => {
             const tx    = this._db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
@@ -148,6 +154,9 @@ class LocalBookmarkManager {
             tx.oncomplete = () => {
                 // Refresh in-memory cache from the written data
                 this.bookmarks = [...bookmarks];
+                if (window._stampLabelWidth) {
+                    this.bookmarks.forEach(window._stampLabelWidth);
+                }
                 resolve();
             };
             tx.onerror = () => reject(tx.error);
@@ -168,6 +177,9 @@ class LocalBookmarkManager {
             }
             tx.oncomplete = () => {
                 this.bookmarks = [...bookmarks];
+                if (window._stampLabelWidth) {
+                    this.bookmarks.forEach(window._stampLabelWidth);
+                }
                 resolve();
             };
             tx.onerror = () => reject(tx.error);

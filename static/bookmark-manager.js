@@ -195,6 +195,26 @@ async function loadBands() {
 }
 
 // Load bookmarks from server
+// Shared offscreen canvas context used to pre-measure label widths once at load time.
+// Re-used by _stampLabelWidth() so we never call measureText() inside the hot draw path.
+let _measureCtx = null;
+function _getMeasureCtx() {
+    if (!_measureCtx) {
+        _measureCtx = document.createElement('canvas').getContext('2d');
+        _measureCtx.font = 'bold 10px monospace';
+    }
+    return _measureCtx;
+}
+
+/** Stamp b._labelWidth in-place if not already set. */
+function _stampLabelWidth(b) {
+    if (!b._labelWidth) {
+        b._labelWidth = _getMeasureCtx().measureText(b.name).width + 8;
+    }
+}
+// Expose on window so local-bookmarks.js write paths can call it without a module import
+window._stampLabelWidth = _stampLabelWidth;
+
 async function loadBookmarks() {
     try {
         console.log('[bookmark-manager.js] loadBookmarks() called');
@@ -202,6 +222,8 @@ async function loadBookmarks() {
         console.log('[bookmark-manager.js] Fetch response status:', response.status);
         if (response.ok) {
             bookmarks = await response.json();
+            // Pre-cache label widths once so the hot draw path never calls measureText()
+            bookmarks.forEach(_stampLabelWidth);
             window.bookmarks = bookmarks; // Update window reference
             console.log(`[bookmark-manager.js] Loaded ${bookmarks.length} bookmarks`);
             console.log('[bookmark-manager.js] First bookmark:', bookmarks[0]);
@@ -257,20 +279,37 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Clear bookmark positions array
     bookmarkPositions = [];
 
+    // Sort allBookmarks by frequency so binary search works.
+    // The server array is already sorted; local bookmarks may not be — sort the merged array.
+    allBookmarks.sort((a, b) => a.frequency - b.frequency);
+
+    // Binary search: find first index where frequency >= target
+    function lowerBound(arr, target) {
+        let lo = 0, hi = arr.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (arr[mid].frequency < target) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // Slice to only the visible frequency window — O(log n) instead of O(n)
+    const iStart = lowerBound(allBookmarks, startFreq);
+    const iEnd   = lowerBound(allBookmarks, endFreq);
+    const windowBookmarks = allBookmarks.slice(iStart, iEnd + 1).filter(
+        b => b.frequency >= startFreq && b.frequency <= endFreq
+    );
+
     // First pass: calculate positions for visible bookmarks
     const visibleBookmarks = [];
-    allBookmarks.forEach(bookmark => {
-        // Only process if tuned frequency is within range
-        if (bookmark.frequency < startFreq || bookmark.frequency > endFreq) {
-            return;
-        }
-
+    windowBookmarks.forEach(bookmark => {
         // Calculate x position
         const x = ((bookmark.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
 
-        // Measure label width
-        ctx.font = 'bold 10px monospace';
-        const labelWidth = ctx.measureText(bookmark.name).width + 8;
+        // Use pre-cached label width; fall back to measureText() only if missing
+        // (e.g. a local bookmark added before _stampLabelWidth ran)
+        const labelWidth = bookmark._labelWidth || (ctx.measureText(bookmark.name).width + 8);
 
         visibleBookmarks.push({
             bookmark: bookmark,
@@ -325,6 +364,21 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         }
     });
 
+    // Fix 3 — Density cap: when the visible window contains more bookmarks than can
+    // be meaningfully rendered (e.g. zoomed all the way out with 1500 bookmarks), cap
+    // the draw list to avoid thousands of canvas API calls per frame.
+    // Local (user-added) bookmarks are always kept; server bookmarks are trimmed first.
+    const MAX_RENDERABLE = 300; // two rows × ~150 labels across a typical 1920px canvas
+    let cappedBookmarks;
+    if (visibleBookmarks.length > MAX_RENDERABLE) {
+        const localItems  = visibleBookmarks.filter(item => item.bookmark.source === 'local');
+        const serverItems = visibleBookmarks.filter(item => item.bookmark.source !== 'local');
+        const serverSlot  = Math.max(0, MAX_RENDERABLE - localItems.length);
+        cappedBookmarks = localItems.concat(serverItems.slice(0, serverSlot));
+    } else {
+        cappedBookmarks = visibleBookmarks;
+    }
+
     // Draw bookmarks with row assignments
     const labelHeight = 12;
     const arrowLength = 6;
@@ -332,7 +386,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
     // Sort bookmarks: server first (bottom layer), then local (top layer)
     // Within each group, draw row 1 first, then row 0
-    const sortedBookmarks = [...visibleBookmarks].sort((a, b) => {
+    const sortedBookmarks = [...cappedBookmarks].sort((a, b) => {
         // First sort by source (server=0, local=1)
         const sourceA = a.bookmark.source === 'local' ? 1 : 0;
         const sourceB = b.bookmark.source === 'local' ? 1 : 0;
@@ -340,6 +394,11 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         // Then by row (1 before 0)
         return b.row - a.row;
     });
+
+    // Set font once outside the loop — avoids repeated style recalculation
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
 
     sortedBookmarks.forEach(item => {
         const { bookmark, x, labelWidth, row } = item;
@@ -351,12 +410,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         const bgColor = isLocal ? 'rgba(52, 152, 219, 0.95)' : 'rgba(255, 215, 0, 0.95)'; // Blue for local, gold for server
         const textColor = isLocal ? '#ffffff' : '#000000'; // White text on blue, black on gold
 
-        // Draw bookmark label
-        ctx.font = 'bold 10px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-
-        // Background for label
+        // Background for label (ctx.font/textAlign/textBaseline set once above the loop)
         ctx.fillStyle = bgColor;
         ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 

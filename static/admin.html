@@ -4090,7 +4090,10 @@
             return convertObject(config);
         }
 
-        function showAlert(message, type, scrollToAlert = false) {
+        // alertDismissTimer tracks the current auto-dismiss timeout so we can cancel it
+        let alertDismissTimer = null;
+
+        function showAlert(message, type, scrollToAlert = false, persistent = false) {
             const alertBox = document.getElementById('alertBox');
             alertBox.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
 
@@ -4099,9 +4102,18 @@
                 alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
 
-            setTimeout(() => {
-                alertBox.innerHTML = '';
-            }, 5000);
+            // Cancel any existing dismiss timer
+            if (alertDismissTimer) {
+                clearTimeout(alertDismissTimer);
+                alertDismissTimer = null;
+            }
+
+            if (!persistent) {
+                alertDismissTimer = setTimeout(() => {
+                    alertBox.innerHTML = '';
+                    alertDismissTimer = null;
+                }, 5000);
+            }
         }
 
         // Bookmarks management
@@ -4758,34 +4770,42 @@
          * - merge:   update existing by name, append new
          * - skip:    only append bookmarks whose name doesn't already exist
          *
+         * Runs inside a setTimeout(0) so the browser can repaint a "Processing…"
+         * indicator before the (potentially large) synchronous loop runs.
+         *
          * @param {Array} existing - Current bookmark array
          * @param {Array} incoming - Imported bookmark array
          * @param {string} mode - 'replace' | 'merge' | 'skip'
-         * @returns {Array} The resulting merged bookmark array
+         * @returns {Promise<Array>} Resolves with the resulting merged bookmark array
          */
         function applyBookmarkImportMode(existing, incoming, mode) {
-            if (mode === 'replace') {
-                return incoming;
-            }
-
-            // Build a name→index map for fast lookup
-            const nameIndex = new Map();
-            const result = existing.map((b, i) => { nameIndex.set(b.name, i); return { ...b }; });
-
-            for (const bm of incoming) {
-                if (nameIndex.has(bm.name)) {
-                    if (mode === 'merge') {
-                        // Overwrite existing entry
-                        result[nameIndex.get(bm.name)] = bm;
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    if (mode === 'replace') {
+                        resolve(incoming);
+                        return;
                     }
-                    // mode === 'skip': do nothing
-                } else {
-                    nameIndex.set(bm.name, result.length);
-                    result.push(bm);
-                }
-            }
 
-            return result;
+                    // Build a name→index map for fast lookup
+                    const nameIndex = new Map();
+                    const result = existing.map((b, i) => { nameIndex.set(b.name, i); return { ...b }; });
+
+                    for (const bm of incoming) {
+                        if (nameIndex.has(bm.name)) {
+                            if (mode === 'merge') {
+                                // Overwrite existing entry
+                                result[nameIndex.get(bm.name)] = bm;
+                            }
+                            // mode === 'skip': do nothing
+                        } else {
+                            nameIndex.set(bm.name, result.length);
+                            result.push(bm);
+                        }
+                    }
+
+                    resolve(result);
+                }, 0);
+            });
         }
 
         async function handleKiwiSDRBookmarksImport(event) {
@@ -4818,9 +4838,11 @@
                     return; // User cancelled
                 }
 
-                currentBookmarks = applyBookmarkImportMode(currentBookmarks, importedBookmarks, importMode);
+                showAlert(`Processing ${importedBookmarks.length} KiwiSDR bookmark(s)…`, 'info', false, true);
+                currentBookmarks = await applyBookmarkImportMode(currentBookmarks, importedBookmarks, importMode);
 
                 // Save to server
+                showAlert('Saving to server…', 'info', false, true);
                 const response = await fetch('/admin/bookmarks', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -4902,9 +4924,11 @@
                     return; // User cancelled
                 }
 
-                currentBookmarks = applyBookmarkImportMode(currentBookmarks, importedBookmarks, importMode);
+                showAlert(`Processing ${importedBookmarks.length} bookmark(s)…`, 'info', false, true);
+                currentBookmarks = await applyBookmarkImportMode(currentBookmarks, importedBookmarks, importMode);
 
                 // Save to server
+                showAlert('Saving to server…', 'info', false, true);
                 const response = await fetch('/admin/bookmarks', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },

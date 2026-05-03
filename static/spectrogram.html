@@ -1890,10 +1890,20 @@ function buildDayNightOverlay(){
   }
   if(!meta||meta.row_count===0)return;
 
-  /* Size canvas to its CSS pixel dimensions */
-  var rect=canvas.getBoundingClientRect();
-  var W=Math.round(rect.width)||46;
-  var H=Math.round(rect.height)||600;
+  /* Size canvas to its CSS pixel dimensions.
+     Use #time-axis height; fall back to .sg-right (same flex sibling height). */
+  var ax=document.getElementById('time-axis');
+  var H=ax?Math.round(ax.getBoundingClientRect().height):0;
+  if(H===0){
+    var sgRight=document.querySelector('.sg-right');
+    H=sgRight?Math.round(sgRight.getBoundingClientRect().height):0;
+  }
+  if(H===0){
+    /* Layout not ready yet — defer */
+    requestAnimationFrame(buildDayNightOverlay);
+    return;
+  }
+  var W=Math.round(canvas.getBoundingClientRect().width)||46;
   canvas.width=W;
   canvas.height=H;
 
@@ -2068,7 +2078,11 @@ function setupHover(){
     var rowMeta=meta.rows&&meta.rows[row];
     if(rowMeta&&rowMeta.unix){
       var d=new Date(rowMeta.unix*1000);
-      tstr=String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+' UTC';
+      var _ttDnEmoji='';
+      if(typeof SunCalc!=='undefined'&&sgReceiverLat!==null&&sgReceiverLon!==null){
+        _ttDnEmoji=SunCalc.getPosition(d,sgReceiverLat,sgReceiverLon).altitude>0?' \u2600\ufe0f':' \uD83C\uDF19';
+      }
+      tstr=String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+' UTC'+_ttDnEmoji;
     } else {
       tstr=String(Math.floor(row/60)).padStart(2,'0')+':'+String(row%60).padStart(2,'0')+' UTC';
     }
@@ -4439,8 +4453,12 @@ render = function() {
       var nf = row.noise_floor || 0;
       var pk = row.peak_db    || 0;
       var dr = (nf !== 0 && pk !== 0) ? (pk - nf).toFixed(1) : '—';
+      var _actDnEmoji = '';
+      if (typeof SunCalc !== 'undefined' && sgReceiverLat !== null && sgReceiverLon !== null && row.unix) {
+        _actDnEmoji = SunCalc.getPosition(new Date(row.unix * 1000), sgReceiverLat, sgReceiverLon).altitude > 0 ? ' \u2600\ufe0f' : ' \uD83C\uDF19';
+      }
       actTip.innerHTML =
-        '<b style="color:#7df">' + (row.utc_time || '') + ' UTC</b><br>' +
+        '<b style="color:#7df">' + (row.utc_time || '') + ' UTC' + _actDnEmoji + '</b><br>' +
         '<span style="color:#0ff">Noise floor: ' + (nf !== 0 ? nf.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
         '<span style="color:#f90">Signal peak: ' + (pk !== 0 ? pk.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
         '<span style="opacity:.7">Dynamic range: ' + (dr !== '—' ? dr + ' dB' : '—') + '</span>';

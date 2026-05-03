@@ -195,6 +195,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
 #sg-activity-canvas{display:block;width:100%;height:100px;cursor:crosshair;border-left:1px solid rgba(255,255,255,0.15)}
 #sg-activity-tooltip{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:7px 11px;font-size:.76em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.8;box-shadow:0 4px 18px rgba(0,0,0,.45)}
 </style>
+<script src="/suncalc.js"></script>
 </head>
 <body>
 <div class="container">
@@ -307,7 +308,9 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <canvas id="sg-bands-canvas"></canvas>
   </div>
   <div class="sg-wrap">
-    <div id="time-axis"></div>
+    <div id="time-axis" style="position:relative">
+      <canvas id="sg-daynight-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1"></canvas>
+    </div>
     <div class="sg-right">
       <!-- zoom-wrap receives the CSS transform (canvas only) -->
       <div id="zoom-wrap" style="transform-origin:0 0">
@@ -1866,6 +1869,126 @@ function buildTimeAxis(){
     lbl.textContent=timeStr;
     ax.appendChild(lbl);
   }
+
+  /* Redraw day/night shading whenever the time axis is rebuilt */
+  buildDayNightOverlay();
+}
+
+/* ── Day / Night shading on the time axis ────────────────────────────────────
+   Draws a semi-transparent dark overlay on #sg-daynight-canvas for every
+   night period visible in the current zoom window.  Uses SunCalc.getTimes()
+   (loaded from /suncalc.js) and the receiver lat/lon from /api/description.
+   Falls back silently if SunCalc is unavailable or coordinates are unknown. */
+function buildDayNightOverlay(){
+  var canvas=document.getElementById('sg-daynight-canvas');
+  if(!canvas)return;
+  if(typeof SunCalc==='undefined'||sgReceiverLat===null||sgReceiverLon===null){
+    /* No SunCalc or no coordinates — clear and bail */
+    var ctx0=canvas.getContext('2d');
+    ctx0.clearRect(0,0,canvas.width,canvas.height);
+    return;
+  }
+  if(!meta||meta.row_count===0)return;
+
+  /* Size canvas to its CSS pixel dimensions */
+  var rect=canvas.getBoundingClientRect();
+  var W=Math.round(rect.width)||46;
+  var H=Math.round(rect.height)||600;
+  canvas.width=W;
+  canvas.height=H;
+
+  var ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  /* Reuse the same row→screen mapping as buildTimeAxis() */
+  var ch=H;
+  var canvasRows=meta.row_count;
+  function rowToScreenY(rowFrac){
+    return (rowFrac*zoom.scale + zoom.ty/ch)*H;
+  }
+
+  /* Determine the UTC Date of row 0 */
+  var row0Unix=0;
+  if(meta.rows&&meta.rows[0]&&meta.rows[0].unix){
+    row0Unix=meta.rows[0].unix;
+  }
+  /* Each row = 1 minute */
+  var rowDurationMs=60*1000;
+
+  /* We need to cover every calendar day that appears in the visible rows.
+     Compute the unix timestamps of the first and last visible rows. */
+  var visTop=Math.max(0,-zoom.ty/(ch*zoom.scale));
+  var visBottom=Math.min(1,(-zoom.ty+ch)/(ch*zoom.scale));
+  var firstVisRow=Math.floor(visTop*canvasRows);
+  var lastVisRow=Math.ceil(visBottom*canvasRows);
+
+  /* Collect all day boundaries we need to query SunCalc for.
+     We query one day before and after the visible range to handle
+     night periods that straddle midnight. */
+  var firstDayMs=(row0Unix+firstVisRow*60-86400)*1000;
+  var lastDayMs=(row0Unix+lastVisRow*60+86400)*1000;
+
+  /* Build a list of {nightStart, nightEnd} intervals (as unix ms) covering
+     the visible range.  For each calendar day we get sunrise/sunset and
+     treat [sunset → next sunrise] as night. */
+  var nightIntervals=[];
+  var lat=sgReceiverLat, lon=sgReceiverLon;
+
+  /* Iterate day by day from firstDay-1 to lastDay+1 */
+  var dayMs=86400*1000;
+  for(var t=firstDayMs;t<=lastDayMs+dayMs;t+=dayMs){
+    var date=new Date(t);
+    var times=SunCalc.getTimes(date,lat,lon);
+    var nextDate=new Date(t+dayMs);
+    var nextTimes=SunCalc.getTimes(nextDate,lat,lon);
+
+    var sunsetMs=times.sunset instanceof Date&&!isNaN(times.sunset)?times.sunset.getTime():null;
+    var nextSunriseMs=nextTimes.sunrise instanceof Date&&!isNaN(nextTimes.sunrise)?nextTimes.sunrise.getTime():null;
+
+    if(sunsetMs!==null&&nextSunriseMs!==null){
+      nightIntervals.push({start:sunsetMs,end:nextSunriseMs});
+    }
+  }
+
+  /* Convert a unix-ms timestamp to a canvas row fraction */
+  function msToRowFrac(ms){
+    return ((ms/1000)-row0Unix)/(canvasRows*60);
+  }
+
+  /* Draw each night interval */
+  ctx.fillStyle='rgba(0,0,30,0.38)';
+  for(var ni=0;ni<nightIntervals.length;ni++){
+    var iv=nightIntervals[ni];
+    var y1=rowToScreenY(msToRowFrac(iv.start));
+    var y2=rowToScreenY(msToRowFrac(iv.end));
+    /* Clamp to canvas */
+    var top=Math.max(0,Math.min(H,y1));
+    var bot=Math.max(0,Math.min(H,y2));
+    if(bot>top)ctx.fillRect(0,top,W,bot-top);
+  }
+
+  /* Draw subtle sunrise/sunset tick marks on the right edge */
+  ctx.strokeStyle='rgba(255,180,60,0.55)';
+  ctx.lineWidth=1;
+  for(var ni2=0;ni2<nightIntervals.length;ni2++){
+    var iv2=nightIntervals[ni2];
+    /* sunset line */
+    var sy=rowToScreenY(msToRowFrac(iv2.start));
+    if(sy>=0&&sy<=H){
+      ctx.beginPath();
+      ctx.moveTo(W-8,Math.round(sy)+0.5);
+      ctx.lineTo(W,Math.round(sy)+0.5);
+      ctx.stroke();
+    }
+    /* sunrise line */
+    var ry=rowToScreenY(msToRowFrac(iv2.end));
+    if(ry>=0&&ry<=H){
+      ctx.beginPath();
+      ctx.moveTo(W-8,Math.round(ry)+0.5);
+      ctx.lineTo(W,Math.round(ry)+0.5);
+      ctx.stroke();
+    }
+  }
 }
 
 /* Legend — uses current slider values for labels */
@@ -2649,6 +2772,8 @@ function tsResetZoom(){
 
 /* Instance callsign + receiver name — fetched once on page load from /api/description */
 var tsCallsign='';
+var sgReceiverLat=null;
+var sgReceiverLon=null;
 (function fetchDescription(){
   fetch('/api/description')
     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
@@ -2659,6 +2784,13 @@ var tsCallsign='';
       if(sub){
         if(d&&d.receiver&&d.receiver.name)sub.textContent=d.receiver.name;
         else if(d&&d.callsign)sub.textContent=d.callsign;
+      }
+      /* Store lat/lon for day/night overlay */
+      if(d&&d.receiver&&d.receiver.gps){
+        if(typeof d.receiver.gps.lat==='number')sgReceiverLat=d.receiver.gps.lat;
+        if(typeof d.receiver.gps.lon==='number')sgReceiverLon=d.receiver.gps.lon;
+        /* Redraw overlay now that we have coordinates (buildTimeAxis may have run first) */
+        buildDayNightOverlay();
       }
     })
     .catch(function(){});
@@ -2919,7 +3051,16 @@ function sgRenderRowSpectrum(data){
   if(!wrap)return;
 
   /* Update header */
-  if(timeEl)timeEl.textContent=(data.utc_time||'--:--')+' UTC';
+  if(timeEl){
+    var _dnEmoji='';
+    if(typeof SunCalc!=='undefined'&&sgReceiverLat!==null&&sgReceiverLon!==null&&data.unix){
+      var _dnDate=new Date(data.unix*1000);
+      var _dnTimes=SunCalc.getTimes(_dnDate,sgReceiverLat,sgReceiverLon);
+      var _dnPos=SunCalc.getPosition(_dnDate,sgReceiverLat,sgReceiverLon);
+      _dnEmoji=_dnPos.altitude>0?' \u2600\ufe0f':' \uD83C\uDF19';
+    }
+    timeEl.textContent=(data.utc_time||'--:--')+' UTC'+_dnEmoji;
+  }
   if(metaEl){
     var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
     var nfStr=data.noise_floor?(' \u00b7 NF: '+data.noise_floor.toFixed(1)+' dBFS'):'';
@@ -3652,7 +3793,15 @@ function sgPlayRenderFromCache(rowIdx){
   var timeEl=document.getElementById('sg-rowspec-time');
   var metaEl=document.getElementById('sg-rowspec-meta');
   if(wrap){
-    if(timeEl)timeEl.textContent=(data.utc_time||'--:--')+' UTC';
+    if(timeEl){
+      var _dnEmoji2='';
+      if(typeof SunCalc!=='undefined'&&sgReceiverLat!==null&&sgReceiverLon!==null&&data.unix){
+        var _dnDate2=new Date(data.unix*1000);
+        var _dnPos2=SunCalc.getPosition(_dnDate2,sgReceiverLat,sgReceiverLon);
+        _dnEmoji2=_dnPos2.altitude>0?' \u2600\ufe0f':' \uD83C\uDF19';
+      }
+      timeEl.textContent=(data.utc_time||'--:--')+' UTC'+_dnEmoji2;
+    }
     if(metaEl){
       var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
       var nfStr=data.noise_floor?(' \u00b7 NF: '+data.noise_floor.toFixed(1)+' dBFS'):'';
@@ -4095,6 +4244,33 @@ render = function() {
 
     // Clear entire canvas (chart + time axis)
     ctx.clearRect(0, 0, W, totalH);
+
+    // ── Day/night shading ─────────────────────────────────────────────────────
+    if (typeof SunCalc !== 'undefined' && sgReceiverLat !== null && sgReceiverLon !== null && firstUnix > 0) {
+      ctx.save();
+      var _lat = sgReceiverLat, _lon = sgReceiverLon;
+      var _dayMs = 86400 * 1000;
+      // Iterate day-by-day across the data range (±1 day buffer)
+      for (var _t = (firstUnix - 86400) * 1000; _t <= (lastUnix + 86400) * 1000; _t += _dayMs) {
+        var _date = new Date(_t);
+        var _nextDate = new Date(_t + _dayMs);
+        var _times = SunCalc.getTimes(_date, _lat, _lon);
+        var _nextTimes = SunCalc.getTimes(_nextDate, _lat, _lon);
+        var _sunsetMs = (_times.sunset instanceof Date && !isNaN(_times.sunset)) ? _times.sunset.getTime() : null;
+        var _nextSunriseMs = (_nextTimes.sunrise instanceof Date && !isNaN(_nextTimes.sunrise)) ? _nextTimes.sunrise.getTime() : null;
+        if (_sunsetMs === null || _nextSunriseMs === null) continue;
+        // Convert unix-ms → row index → canvas X
+        var _x1 = (_sunsetMs / 1000 - firstUnix) / 60 / n * W;
+        var _x2 = (_nextSunriseMs / 1000 - firstUnix) / 60 / n * W;
+        var _cx1 = Math.max(0, Math.min(W, _x1));
+        var _cx2 = Math.max(0, Math.min(W, _x2));
+        if (_cx2 > _cx1) {
+          ctx.fillStyle = 'rgba(0,0,30,0.32)';
+          ctx.fillRect(_cx1, 0, _cx2 - _cx1, H);
+        }
+      }
+      ctx.restore();
+    }
 
     // Draw faint vertical grid lines through the chart area at each notch
     ctx.save();

@@ -309,7 +309,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   </div>
   <div class="sg-wrap">
     <div id="time-axis" style="position:relative">
-      <canvas id="sg-daynight-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1"></canvas>
+      <div id="sg-daynight-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:hidden"></div>
     </div>
     <div class="sg-right">
       <!-- zoom-wrap receives the CSS transform (canvas only) -->
@@ -1880,119 +1880,82 @@ function buildTimeAxis(){
    (loaded from /suncalc.js) and the receiver lat/lon from /api/description.
    Falls back silently if SunCalc is unavailable or coordinates are unknown. */
 function buildDayNightOverlay(){
-  var canvas=document.getElementById('sg-daynight-canvas');
-  if(!canvas)return;
+  var overlay=document.getElementById('sg-daynight-overlay');
+  if(!overlay)return;
   /* If SunCalc not loaded or no coordinates yet, bail silently.
      fetchDescription will call us again once coordinates arrive. */
   if(typeof SunCalc==='undefined'||sgReceiverLat===null||sgReceiverLon===null)return;
   if(!meta||meta.row_count===0)return;
 
-  /* #time-axis is 46px wide and stretches to .sg-right height via flex.
-     Read height from .sg-right (most reliable — it has content that sizes it).
-     After display:none→block the browser needs one rAF to lay out, so retry
-     until we get a non-zero height. */
-  var sgRight=document.querySelector('.sg-right');
-  var H=sgRight?Math.round(sgRight.getBoundingClientRect().height):0;
-  if(H===0){
-    /* Layout not ready yet — defer and retry */
-    requestAnimationFrame(buildDayNightOverlay);
-    return;
-  }
-  var W=46;
-  canvas.width=W;
-  canvas.height=H;
+  /* Use percentage-based positioning so we never need to read pixel heights.
+     The overlay div is position:absolute;top:0;left:0;width:100%;height:100%
+     inside #time-axis which is a flex item that stretches to .sg-right height.
+     top/height as percentages of the overlay's own 100% height = correct. */
 
-  var ctx=canvas.getContext('2d');
-  ctx.clearRect(0,0,W,H);
-
-  /* Reuse the same row→screen mapping as buildTimeAxis() */
-  var ch=H;
   var canvasRows=meta.row_count;
-  function rowToScreenY(rowFrac){
-    return (rowFrac*zoom.scale + zoom.ty/ch)*H;
+
+  /* Reuse the same row→screen fraction mapping as buildTimeAxis() */
+  function rowFracToScreenPct(rowFrac){
+    /* canvasRowToScreen(frac) = frac*zoom.scale + zoom.ty/ch
+       We don't know ch here, but we can use the same formula with ch=1
+       since we're computing percentages: the ch cancels out.
+       Actually zoom.ty is in pixels, so we need ch.
+       Use the overlay's own offsetHeight as ch (it's 100% of #time-axis). */
+    var ch=overlay.offsetHeight||600;
+    return (rowFrac*zoom.scale + zoom.ty/ch)*100;
   }
 
-  /* Determine the UTC Date of row 0 */
+  /* Determine the UTC timestamp of row 0 */
   var row0Unix=0;
   if(meta.rows&&meta.rows[0]&&meta.rows[0].unix){
     row0Unix=meta.rows[0].unix;
   }
-  /* Each row = 1 minute */
-  var rowDurationMs=60*1000;
+  if(!row0Unix)return;
 
-  /* We need to cover every calendar day that appears in the visible rows.
-     Compute the unix timestamps of the first and last visible rows. */
-  var visTop=Math.max(0,-zoom.ty/(ch*zoom.scale));
-  var visBottom=Math.min(1,(-zoom.ty+ch)/(ch*zoom.scale));
-  var firstVisRow=Math.floor(visTop*canvasRows);
-  var lastVisRow=Math.ceil(visBottom*canvasRows);
-
-  /* Collect all day boundaries we need to query SunCalc for.
-     We query one day before and after the visible range to handle
-     night periods that straddle midnight. */
-  var firstDayMs=(row0Unix+firstVisRow*60-86400)*1000;
-  var lastDayMs=(row0Unix+lastVisRow*60+86400)*1000;
-
-  /* Build a list of {nightStart, nightEnd} intervals (as unix ms) covering
-     the visible range.  For each calendar day we get sunrise/sunset and
-     treat [sunset → next sunrise] as night. */
+  /* Build night intervals covering the full data range ±1 day */
   var nightIntervals=[];
   var lat=sgReceiverLat, lon=sgReceiverLon;
-
-  /* Iterate day by day from firstDay-1 to lastDay+1 */
   var dayMs=86400*1000;
-  for(var t=firstDayMs;t<=lastDayMs+dayMs;t+=dayMs){
-    var date=new Date(t);
-    var times=SunCalc.getTimes(date,lat,lon);
-    var nextDate=new Date(t+dayMs);
-    var nextTimes=SunCalc.getTimes(nextDate,lat,lon);
+  var startMs=(row0Unix-86400)*1000;
+  var endMs=(row0Unix+canvasRows*60+86400)*1000;
 
+  for(var t=startMs;t<=endMs;t+=dayMs){
+    var date=new Date(t);
+    var nextDate=new Date(t+dayMs);
+    var times=SunCalc.getTimes(date,lat,lon);
+    var nextTimes=SunCalc.getTimes(nextDate,lat,lon);
     var sunsetMs=times.sunset instanceof Date&&!isNaN(times.sunset)?times.sunset.getTime():null;
     var nextSunriseMs=nextTimes.sunrise instanceof Date&&!isNaN(nextTimes.sunrise)?nextTimes.sunrise.getTime():null;
-
     if(sunsetMs!==null&&nextSunriseMs!==null){
       nightIntervals.push({start:sunsetMs,end:nextSunriseMs});
     }
   }
 
-  /* Convert a unix-ms timestamp to a canvas row fraction */
+  /* Convert unix-ms → row fraction */
   function msToRowFrac(ms){
     return ((ms/1000)-row0Unix)/(canvasRows*60);
   }
 
-  /* Draw each night interval */
-  ctx.fillStyle='rgba(0,0,30,0.38)';
+  /* Rebuild overlay children */
+  overlay.innerHTML='';
   for(var ni=0;ni<nightIntervals.length;ni++){
     var iv=nightIntervals[ni];
-    var y1=rowToScreenY(msToRowFrac(iv.start));
-    var y2=rowToScreenY(msToRowFrac(iv.end));
-    /* Clamp to canvas */
-    var top=Math.max(0,Math.min(H,y1));
-    var bot=Math.max(0,Math.min(H,y2));
-    if(bot>top)ctx.fillRect(0,top,W,bot-top);
-  }
-
-  /* Draw subtle sunrise/sunset tick marks on the right edge */
-  ctx.strokeStyle='rgba(255,180,60,0.55)';
-  ctx.lineWidth=1;
-  for(var ni2=0;ni2<nightIntervals.length;ni2++){
-    var iv2=nightIntervals[ni2];
-    /* sunset line */
-    var sy=rowToScreenY(msToRowFrac(iv2.start));
-    if(sy>=0&&sy<=H){
-      ctx.beginPath();
-      ctx.moveTo(W-8,Math.round(sy)+0.5);
-      ctx.lineTo(W,Math.round(sy)+0.5);
-      ctx.stroke();
-    }
-    /* sunrise line */
-    var ry=rowToScreenY(msToRowFrac(iv2.end));
-    if(ry>=0&&ry<=H){
-      ctx.beginPath();
-      ctx.moveTo(W-8,Math.round(ry)+0.5);
-      ctx.lineTo(W,Math.round(ry)+0.5);
-      ctx.stroke();
-    }
+    var pct1=rowFracToScreenPct(msToRowFrac(iv.start));
+    var pct2=rowFracToScreenPct(msToRowFrac(iv.end));
+    var topPct=Math.max(0,Math.min(100,pct1));
+    var botPct=Math.max(0,Math.min(100,pct2));
+    if(botPct<=topPct)continue;
+    var d=document.createElement('div');
+    d.style.cssText='position:absolute;left:0;right:0;top:'+topPct+'%;height:'+(botPct-topPct)+'%;background:rgba(0,0,30,0.38);pointer-events:none';
+    overlay.appendChild(d);
+    /* Sunrise tick */
+    var tick1=document.createElement('div');
+    tick1.style.cssText='position:absolute;right:0;left:auto;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+topPct+'%;pointer-events:none';
+    overlay.appendChild(tick1);
+    /* Sunset tick */
+    var tick2=document.createElement('div');
+    tick2.style.cssText='position:absolute;right:0;left:auto;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+botPct+'%;pointer-events:none';
+    overlay.appendChild(tick2);
   }
 }
 

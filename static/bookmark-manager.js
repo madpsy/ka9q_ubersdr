@@ -369,7 +369,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // the draw list to avoid thousands of canvas API calls per frame.
     // Local (user-added) bookmarks are always kept; server bookmarks are evenly sampled
     // across the full visible frequency range so labels are spread across the whole canvas.
-    const MAX_RENDERABLE = 300; // two rows × ~150 labels across a typical 1920px canvas
+    const MAX_RENDERABLE = 100; // two rows × ~50 labels across a typical 1920px canvas
     let cappedBookmarks;
     if (visibleBookmarks.length > MAX_RENDERABLE) {
         const localItems  = visibleBookmarks.filter(item => item.bookmark.source === 'local');

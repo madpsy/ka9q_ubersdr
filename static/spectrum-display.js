@@ -2921,6 +2921,10 @@ class SpectrumDisplay {
             this.lastMarkerCenterFreq = effectiveCenterFreq;
             this.lastMarkerTotalBandwidth = this.totalBandwidth;
             this.lastMarkerDisplayMode = this.displayMode;
+
+            // Cursor content depends on view (x-position changes with pan/zoom), so
+            // invalidate the cursor cache whenever the marker cache is rebuilt.
+            this.cursorCache = null;
         }
 
         // Clear overlay canvas
@@ -2931,9 +2935,51 @@ class SpectrumDisplay {
             this.overlayCtx.drawImage(this.markerCache, 0, 0);
         }
 
-        // Draw tuned frequency cursor on top (this changes frequently with tuning)
+        // Draw tuned frequency cursor on top.
+        // The cursor only changes when the tuned frequency, bandwidth edges, or the
+        // effective center frequency (drag prediction) changes.  Cache it to an
+        // offscreen canvas so that on steady-state frames we do a single drawImage
+        // instead of re-running all the canvas draw calls.
         if (this.currentTunedFreq && this.totalBandwidth) {
-            this.drawTunedFrequencyCursorOnly();
+            const cursorChanged =
+                !this.cursorCache ||
+                this.lastCursorTunedFreq      !== this.currentTunedFreq      ||
+                this.lastCursorBandwidthLow   !== this.currentBandwidthLow   ||
+                this.lastCursorBandwidthHigh  !== this.currentBandwidthHigh  ||
+                this.lastCursorCenterFreq     !== effectiveCenterFreq        ||
+                this.lastCursorTotalBandwidth !== this.totalBandwidth;
+
+            if (cursorChanged) {
+                // Lazily create / resize the cursor cache canvas
+                if (!this.cursorCache) {
+                    this.cursorCache = document.createElement('canvas');
+                    this.cursorCacheCtx = this.cursorCache.getContext('2d', { alpha: true });
+                }
+                if (this.cursorCache.width  !== this.overlayCanvas.width ||
+                    this.cursorCache.height !== this.overlayCanvas.height) {
+                    this.cursorCache.width  = this.overlayCanvas.width;
+                    this.cursorCache.height = this.overlayCanvas.height;
+                }
+                this.cursorCacheCtx.clearRect(0, 0, this.cursorCache.width, this.cursorCache.height);
+
+                // Render cursor into the offscreen cache
+                const savedCtx = this.overlayCtx;
+                this.overlayCtx = this.cursorCacheCtx;
+                this.drawTunedFrequencyCursorOnly();
+                this.overlayCtx = savedCtx;
+
+                // Record what we cached
+                this.lastCursorTunedFreq      = this.currentTunedFreq;
+                this.lastCursorBandwidthLow   = this.currentBandwidthLow;
+                this.lastCursorBandwidthHigh  = this.currentBandwidthHigh;
+                this.lastCursorCenterFreq     = effectiveCenterFreq;
+                this.lastCursorTotalBandwidth = this.totalBandwidth;
+            }
+
+            // Blit cursor cache onto overlay (always cheap)
+            if (this.cursorCache) {
+                this.overlayCtx.drawImage(this.cursorCache, 0, 0);
+            }
         }
     }
 
@@ -3351,6 +3397,8 @@ class SpectrumDisplay {
         this.lastMarkerCenterFreq = null;
         this.lastMarkerTotalBandwidth = null;
         this.lastMarkerDisplayMode = null;
+        // Also invalidate cursor cache — it depends on the same view parameters
+        this.cursorCache = null;
     }
 
     // Guard helper: only assign ctx.font when the value actually changes.

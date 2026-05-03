@@ -1954,15 +1954,6 @@ function buildDayNightOverlay(){
     d.className='sg-night-shade';
     d.style.cssText='position:absolute;left:0;right:0;top:'+topPx+'px;height:'+(botPx-topPx)+'px;background:rgba(0,0,30,0.38);pointer-events:none;z-index:0';
     ax.appendChild(d);
-    /* Sunrise/sunset tick marks on the right edge */
-    var tick1=document.createElement('div');
-    tick1.className='sg-night-shade';
-    tick1.style.cssText='position:absolute;right:0;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+topPx+'px;pointer-events:none;z-index:0';
-    ax.appendChild(tick1);
-    var tick2=document.createElement('div');
-    tick2.className='sg-night-shade';
-    tick2.style.cssText='position:absolute;right:0;width:8px;height:1px;background:rgba(255,180,60,0.7);top:'+botPx+'px;pointer-events:none;z-index:0';
-    ax.appendChild(tick2);
   }
 }
 

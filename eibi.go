@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/encoding/charmap"
 )
 
 const (
@@ -227,7 +229,14 @@ func (s *EiBiSchedule) fetchAndParse(url string) ([]EiBiEntry, error) {
 // The first line (header) is skipped because its first field starts with a letter.
 // Lines with fewer than 9 fields or a non-numeric first field are also skipped.
 func parseEiBiCSV(data []byte) ([]EiBiEntry, error) {
-	r := csv.NewReader(strings.NewReader(string(data)))
+	// EiBi CSV files are encoded in Windows-1252 (Latin-1 superset).
+	// Decode to UTF-8 before parsing so accented characters (e.g. ñ in "Coruña")
+	// are preserved correctly instead of being replaced with U+FFFD.
+	utf8data, err := charmap.Windows1252.NewDecoder().Bytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("EiBi: Windows-1252 decode failed: %w", err)
+	}
+	r := csv.NewReader(strings.NewReader(string(utf8data)))
 	r.Comma = ';'
 	r.FieldsPerRecord = -1 // variable number of fields per record
 	r.LazyQuotes = true

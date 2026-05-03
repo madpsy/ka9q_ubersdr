@@ -4849,7 +4849,9 @@
 
                 if (file.name.endsWith('.json')) {
                     const data = JSON.parse(text);
-                    importedBookmarks = data.bookmarks || [];
+                    // Accept both a bare array (from /api/bookmarks) and a
+                    // wrapped object { bookmarks: [...] } (from Export Bookmarks)
+                    importedBookmarks = Array.isArray(data) ? data : (data.bookmarks || []);
                 } else {
                     // Simple YAML parsing for bookmarks
                     // This is a basic implementation - in production use a proper YAML parser

@@ -258,8 +258,8 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button onclick="load()">&#x21BB; Refresh</button>
   <button onclick="resetZoom()" title="Reset zoom (or double-click image)">&#x2B1C; Reset zoom</button>
   <button id="dl-btn" type="button" onclick="downloadCanvas()" style="display:none">&#x2B07; Download PNG</button>
-  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="buildBandsBar()"> Bands</label>
-  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="buildBandsBar()"> Bookmarks</label>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bands-cb" checked onchange="buildBandsBar();sgRedrawRowSpectrum()"> Bands</label>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.85em;cursor:pointer"><input type="checkbox" id="show-bookmarks-cb" checked onchange="buildBandsBar();sgRedrawRowSpectrum()"> Bookmarks</label>
   <span style="font-size:.75em;opacity:.55">Scroll to zoom &middot; drag to pan &middot; double-click to reset</span>
   <span class="status" id="status">Loading&hellip;</span>
 </div>

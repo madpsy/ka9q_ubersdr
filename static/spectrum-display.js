@@ -152,6 +152,8 @@ class SpectrumDisplay {
 
                     // Invalidate marker cache to force redraw at new width
                     this.invalidateMarkerCache();
+                    // Invalidate overlay rect cache — canvas position changes on resize
+                    this._overlayRectCache = null;
 
                     // Force immediate redraw of overlay (bookmarks and frequency scale)
                     if (this.totalBandwidth && this.centerFreq) {
@@ -2824,25 +2826,23 @@ class SpectrumDisplay {
         }
     }
 
-    // Update overlay div position to match canvas position
+    // Update overlay div position to match canvas position.
+    // The overlay is position:fixed so its coordinates only change on window resize
+    // or when the line-graph visibility toggles.  Calling getBoundingClientRect()
+    // every animation frame (60 fps) forces a synchronous layout reflow and was
+    // measured at ~344 ms per profiling window (12.5 % of total CPU).
+    // We cache the result in _overlayRectCache and only recompute when the cache
+    // is explicitly invalidated (resize handler, toggleLineGraphVisibility).
     updateOverlayPosition() {
-        // In split mode, overlay should be at the top of the container, not the waterfall canvas
-        const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
-        
-        if (lineGraphVisible) {
-            // Use line graph canvas position (at top of container)
-            const rect = this.lineGraphCanvas.getBoundingClientRect();
-            this.overlayDiv.style.top = rect.top + 'px';
-            this.overlayDiv.style.left = rect.left + 'px';
-            this.overlayDiv.style.width = rect.width + 'px';
-        } else {
-            // Use waterfall canvas position
-            const rect = this.canvas.getBoundingClientRect();
-            this.overlayDiv.style.top = rect.top + 'px';
-            this.overlayDiv.style.left = rect.left + 'px';
-            this.overlayDiv.style.width = rect.width + 'px';
+        if (!this._overlayRectCache) {
+            const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+            const sourceCanvas = lineGraphVisible ? this.lineGraphCanvas : this.canvas;
+            this._overlayRectCache = sourceCanvas.getBoundingClientRect();
         }
-        
+        const r = this._overlayRectCache;
+        this.overlayDiv.style.top    = r.top    + 'px';
+        this.overlayDiv.style.left   = r.left   + 'px';
+        this.overlayDiv.style.width  = r.width  + 'px';
         this.overlayDiv.style.height = '75px'; // 45px bookmarks + 30px frequency scale
     }
 
@@ -5462,6 +5462,13 @@ class SpectrumDisplay {
 
             console.log('Line graph (spectrum) disabled - waterfall canvas resized to 600px');
         }
+
+        // Invalidate overlay rect cache — the source canvas switches between
+        // lineGraphCanvas and waterfall canvas when toggling visibility.
+        this._overlayRectCache = null;
+        // Immediately recompute so the overlay snaps to the correct canvas
+        // before the next animation frame (fixes pre-existing misposition bug).
+        this.updateOverlayPosition();
 
         // Force redraw to update display
         if (this.spectrumData && this.spectrumData.length > 0) {

@@ -103,6 +103,7 @@ show_addon_info() {
     local addon
     addon=$(jq -r --arg name "$name" '.addons[] | select(.name == $name)' "$ADDONS_FILE")
     printf "  %-22s %s\n" "name:"               "$(echo "$addon" | jq -r '.name')"
+    printf "  %-22s %s\n" "status:"             "$(echo "$addon" | jq -r '.status // ""')"
     printf "  %-22s %s\n" "description:"        "$(echo "$addon" | jq -r '.description // ""')"
     printf "  %-22s %s\n" "host:"               "$(echo "$addon" | jq -r '.host')"
     printf "  %-22s %s\n" "port:"               "$(echo "$addon" | jq -r '.port')"
@@ -119,14 +120,15 @@ show_addon_info() {
 # List all addons in a summary table
 list_addons() {
     echo ""
-    printf "  %-4s  %-20s %-6s %-10s\n" "No." "NAME" "PORT" "INSTALLED"
-    printf "  %-4s  %-20s %-6s %-10s\n" "---" "----" "----" "---------"
+    printf "  %-4s  %-20s %-6s %-22s %-10s\n" "No." "NAME" "PORT" "STATUS" "INSTALLED"
+    printf "  %-4s  %-20s %-6s %-22s %-10s\n" "---" "----" "----" "------" "---------"
     local i=1
     while IFS= read -r name; do
-        local port installed_flag
+        local port status installed_flag
         port=$(get_field "$name" "port")
+        status=$(get_field "$name" "status")
         if is_addon_installed "$name"; then installed_flag="yes"; else installed_flag="no"; fi
-        printf "  %-4s  %-20s %-6s %-10s\n" "$i." "$name" "$port" "$installed_flag"
+        printf "  %-4s  %-20s %-6s %-22s %-10s\n" "$i." "$name" "$port" "$status" "$installed_flag"
         (( i++ )) || true
     done < <(get_addon_names)
     echo ""

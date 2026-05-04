@@ -1,6 +1,22 @@
-# 30 April 2026
+# 4 May 2026
 
-## Version 0.1.47 - Latest Release
+## Version 0.1.48 - Latest Release
+
+### New Features
+- Added **Add-on Manager** in the Admin Addon tab to make it easier to install/manage add-ons
+- Added **RBN Statistics** for users who run CW Skimmer and report to RBN
+- Added **Default Audio Buffer** in UI config in case the default 200ms needs changed (users can override)
+- Improved **Spectrogram** to include bands/bookmarks (can toggle) and day/night markers
+
+### Bug Fixes
+- Unnecessary canvas drawing on the spectrum/waterfall causing high CPU usage
+- Bad EiBi character encoding caused ? to show in accented lettering
+
+### Other Announcements
+- All public UberSDR instances are registered on https://sdr-list.xyz/
+- Benchmarked an AMD Ryzen 9 3900X at 450 simultaneous users
+
+## Version 0.1.47
 
 ### New Features
 - Added **Media Session Support** which means devices (Apple for now) support media controls when open in a browser

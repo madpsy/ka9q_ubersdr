@@ -329,6 +329,13 @@ function applyServerUIDefaults() {
     try {
         if (localStorage.getItem('audioBufferThreshold') === null) {
             localStorage.setItem('audioBufferThreshold', defaultBufferDefault);
+            // Re-sync maxBufferMs now that the server default has been written to localStorage.
+            // loadBufferThreshold() ran at DOMContentLoaded before this async fetch completed,
+            // so maxBufferMs is still the hardcoded 200ms default. Call it again to apply the
+            // server-configured value. This mirrors the applyTuningModeFromStorage() pattern.
+            if (typeof loadBufferThreshold === 'function') {
+                loadBufferThreshold();
+            }
         }
     } catch (e) { /* ignore */ }
 

@@ -55,6 +55,7 @@ func isValidHexColor(s string) bool {
 //	  "line_graph":                 false,                     // spectrumLineGraphEnabled
 //	  "bandwidth_indicator_color":  "green",                   // bandwidthIndicatorColor
 //	  "mobile_tuning_mode":         "buttons",                 // tuningMode
+//	  "default_buffer":             "200",                     // audioBufferThreshold (ms)
 //	  "spectrum_bg_image":          "/api/spectrum-bg-image",  // URL or "" if not set
 //	  "spectrum_bg_opacity":        0.3                        // 0.0–1.0
 //	}
@@ -97,6 +98,11 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		mobileTuningMode = "buttons" // built-in fallback
 	}
 
+	defaultBuffer := config.UI.DefaultBuffer.Default
+	if defaultBuffer == "" {
+		defaultBuffer = "200" // built-in fallback (200 ms)
+	}
+
 	stationIdColor := config.UI.StationIdColor
 	if stationIdColor == "" || !isValidHexColor(stationIdColor) {
 		stationIdColor = "#ffffff" // built-in fallback
@@ -128,6 +134,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"line_graph":                config.UI.LineGraph.Default,
 		"bandwidth_indicator_color": bwColor,
 		"mobile_tuning_mode":        mobileTuningMode,
+		"default_buffer":            defaultBuffer,
 		"spectrum_bg_image":         bgImageURL,
 		"spectrum_bg_opacity":       opacity,
 		"band_color_intensity":      bandColorIntensity,
@@ -231,6 +238,10 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := validateUISelectSetting("default_buffer", parsed.UI.DefaultBuffer); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// Validate contrast range (0-20 to match the UI slider)
 	if parsed.UI.Contrast.Default < parsed.UI.Contrast.Min || parsed.UI.Contrast.Default > parsed.UI.Contrast.Max {
@@ -272,13 +283,13 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, smeter_charts_visible=%v, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, mobile_tuning=%s, bg_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, smeter_charts_visible=%v, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, mobile_tuning=%s, default_buffer=%s, bg_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
 		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.SMeterChartsVisible.Default,
 		config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
 		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
-		config.UI.BandwidthIndicatorColor.Default, config.UI.MobileTuningMode.Default, config.UI.SpectrumBgOpacity,
-		config.UI.BandColorIntensity,
+		config.UI.BandwidthIndicatorColor.Default, config.UI.MobileTuningMode.Default, config.UI.DefaultBuffer.Default,
+		config.UI.SpectrumBgOpacity, config.UI.BandColorIntensity,
 		config.UI.StationIdOverlay, config.UI.StationIdColor, config.UI.Theme)
 
 	w.Header().Set("Content-Type", "application/json")

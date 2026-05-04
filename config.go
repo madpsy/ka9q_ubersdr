@@ -487,6 +487,7 @@ type UIBoolSetting struct {
 //	SpectrumBgEnabled:        spectrumBgEnabled           — whether a background image is set (read-only, set by upload)
 //	SpectrumBgOpacity:        spectrumBgOpacity           — background image opacity (0.0–1.0, default 0.3)
 //	MobileTuningMode:         tuningMode                  — mobile frequency console default (buttons/wheel)
+//	DefaultBuffer:            audioBufferThreshold        — default audio buffer threshold in ms (50/100/150/200/300/500)
 //	Theme:                    (no localStorage key)       — CSS custom property overrides; map of token→hex colour.
 //	                                                        Applied as CSS variables on :root. Defaults reproduce the
 //	                                                        original hardcoded palette exactly when absent/empty.
@@ -504,6 +505,7 @@ type UIConfig struct {
 	LineGraph               UIBoolSetting     `yaml:"line_graph"                 json:"line_graph"`
 	BandwidthIndicatorColor UISelectSetting   `yaml:"bandwidth_indicator_color"  json:"bandwidth_indicator_color"`
 	MobileTuningMode        UISelectSetting   `yaml:"mobile_tuning_mode"         json:"mobile_tuning_mode"`
+	DefaultBuffer           UISelectSetting   `yaml:"default_buffer"             json:"default_buffer"`
 	SpectrumBgOpacity       float64           `yaml:"spectrum_bg_opacity"        json:"spectrum_bg_opacity"`
 	BandColorIntensity      float64           `yaml:"band_color_intensity"       json:"band_color_intensity"`
 	StationIdOverlay        bool              `yaml:"station_id_overlay"         json:"station_id_overlay"`

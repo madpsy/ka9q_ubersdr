@@ -169,3 +169,23 @@ ui:
         label: "Buttons"
       - value: "wheel"
         label: "Wheel"
+
+  # Default audio buffer threshold for new visitors.
+  # Sets the maximum audio buffer size before frames are dropped.
+  # Users can change this at any time via the Audio Settings modal (click the buffer indicator).
+  # localStorage key: audioBufferThreshold
+  default_buffer:
+    default: "200"
+    available:
+      - value: "50"
+        label: "50ms (Lowest latency)"
+      - value: "100"
+        label: "100ms"
+      - value: "150"
+        label: "150ms"
+      - value: "200"
+        label: "200ms (Default)"
+      - value: "300"
+        label: "300ms"
+      - value: "500"
+        label: "500ms (Most stable)"

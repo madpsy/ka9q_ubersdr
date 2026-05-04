@@ -19,6 +19,7 @@
  *   line_graph                → spectrumLineGraphEnabled      (line graph overlay)
  *   bandwidth_indicator_color → bandwidthIndicatorColor       (bandwidth bar colour: green/red/cyan/white/yellow/orange/magenta)
  *   mobile_tuning_mode        → tuningMode                    (mobile frequency console default: buttons/wheel)
+ *   default_buffer            → audioBufferThreshold          (default audio buffer threshold in ms: 50/100/150/200/300/500)
  *   spectrum_bg_image         → (no localStorage key)         URL of the spectrum background image,
  *                                                              or "" if none. Read directly from
  *                                                              window.serverUIConfig by SpectrumDisplay.
@@ -316,6 +317,18 @@ function applyServerUIDefaults() {
             if (typeof window.applyTuningModeFromStorage === 'function') {
                 window.applyTuningModeFromStorage();
             }
+        }
+    } catch (e) { /* ignore */ }
+
+    // ── Default audio buffer ──────────────────────────────────────────────────
+    // app.js reads audioBufferThreshold from localStorage in loadBufferThreshold().
+    // Pre-populate localStorage with the server default if no user preference exists.
+    // The server sends the value as a string (e.g. "200"). Valid values: 50/100/150/200/300/500.
+    // localStorage key: audioBufferThreshold
+    const defaultBufferDefault = getUIDefault('audioBufferThreshold', 'default_buffer', '200');
+    try {
+        if (localStorage.getItem('audioBufferThreshold') === null) {
+            localStorage.setItem('audioBufferThreshold', defaultBufferDefault);
         }
     } catch (e) { /* ignore */ }
 

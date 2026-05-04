@@ -1764,6 +1764,22 @@
                             </div>
                         </div>
 
+                        <!-- Default Audio Buffer -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔊 Default Audio Buffer</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Sets the default maximum audio buffer size for new visitors before frames are dropped.
+                                Lower values reduce latency but may cause stuttering on slower connections.
+                                Users can change this at any time via the Audio Settings modal (click the buffer indicator).
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-default-buffer" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Default Buffer</label>
+                                <select id="ui-default-buffer" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
                         <!-- Bandwidth Indicator Colour -->
                         <!-- Theme Colours -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
@@ -7126,6 +7142,20 @@
                     ]
                 });
 
+                // Build default audio buffer select (values: 50, 100, 150, 200, 300, 500 ms)
+                // Provide a built-in fallback when default_buffer is absent from ui.yaml
+                buildUISelect('ui-default-buffer', ui.default_buffer || {
+                    default: '200',
+                    available: [
+                        { value: '50',  label: '50ms (Lowest latency)' },
+                        { value: '100', label: '100ms' },
+                        { value: '150', label: '150ms' },
+                        { value: '200', label: '200ms (Default)' },
+                        { value: '300', label: '300ms' },
+                        { value: '500', label: '500ms (Most stable)' }
+                    ]
+                });
+
                 // Set auto-contrast slider (range 0-20, symmetric dB offset for auto-range)
                 const contrast = ui.contrast || {};
                 const contrastSlider = document.getElementById('ui-contrast');
@@ -7540,6 +7570,20 @@ function resetStationIdColor() {
                         } : { default: 'buttons', available: [
                             {value:'buttons',label:'Buttons'},
                             {value:'wheel',label:'Wheel'}
+                        ]};
+                    })(),
+                    default_buffer: (() => {
+                        const sel = document.getElementById('ui-default-buffer');
+                        return sel ? {
+                            default: sel.value,
+                            available: Array.from(sel.options).map(o => ({ value: o.value, label: o.textContent }))
+                        } : { default: '200', available: [
+                            {value:'50',  label:'50ms (Lowest latency)'},
+                            {value:'100', label:'100ms'},
+                            {value:'150', label:'150ms'},
+                            {value:'200', label:'200ms (Default)'},
+                            {value:'300', label:'300ms'},
+                            {value:'500', label:'500ms (Most stable)'}
                         ]};
                     })(),
                     theme: collectThemeColors()

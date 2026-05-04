@@ -15,7 +15,7 @@
 - KiwiSDR emulation was missing the /users endpoint
 
 ### Other Announcements
-- All public UberSDR instances are registered on ['sdr-list.xyz'](https://sdr-list.xyz/)
+- All public UberSDR instances are registered on [sdr-list.xyz](https://sdr-list.xyz/)
 
 ## Version 0.1.47
 

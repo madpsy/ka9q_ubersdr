@@ -850,7 +850,13 @@ main_menu() {
             2)
                 SELECTED_ADDON=""
                 if pick_addon "Select addon to install"; then
-                    install_addon "$SELECTED_ADDON"
+                    echo ""
+                    read -rp "Are you sure you want to install/update '$SELECTED_ADDON'? [y/N]: " confirm
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        install_addon "$SELECTED_ADDON"
+                    else
+                        echo "Cancelled."
+                    fi
                 fi
                 ;;
             3)

@@ -871,4 +871,21 @@ main_menu() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Startup banner
+# ---------------------------------------------------------------------------
+echo ""
+echo "================================================================================"
+echo "                          UberSDR Addon Manager"
+echo "================================================================================"
+echo "  For more information see the Addons section at:"
+echo "    https://ubersdr.org"
+echo "--------------------------------------------------------------------------------"
+echo "  WARNING: Addons increase server load. Some require significantly more CPU"
+echo "  than others. For example, HFDL by default requests IQ data for every known"
+echo "  HFDL frequency simultaneously, which can be very demanding on your server."
+echo "  Review each addon's documentation before installing."
+echo "================================================================================"
+echo ""
+
 main_menu

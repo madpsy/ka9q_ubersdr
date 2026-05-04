@@ -10,12 +10,12 @@
 
 ### Bug Fixes
 - Unnecessary canvas drawing on the spectrum/waterfall causing high CPU usage
-- Bad EiBi character encoding caused ? to show in accented lettering
+- Limited the number of bookmarks rendered in a span to 100
+- Bad EiBi encoding caused ? to show for some character sets
 - KiwiSDR emulation was missing the /users endpoint
 
 ### Other Announcements
 - All public UberSDR instances are registered on https://sdr-list.xyz/
-- Benchmarked an AMD Ryzen 9 3900X at 450 simultaneous users
 
 ## Version 0.1.47
 

@@ -558,28 +558,26 @@ test_addon_connectivity() {
         return 0
     fi
 
-    # Build a names array — all registered proxies (test doesn't require local install)
+    # Build a names array — known and installed registered proxies only
     ADDON_NAMES=()
     while IFS= read -r name; do
-        if is_known_addon "$name"; then
+        if is_known_addon "$name" && is_addon_installed "$name"; then
             ADDON_NAMES+=("$name")
         fi
     done < <(echo "$live_response" | jq -r '.[].name')
 
     if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
-        echo "No known addon proxies are currently registered in UberSDR."
+        echo "No known installed addon proxies are currently registered in UberSDR."
         echo ""
         return 0
     fi
 
     echo ""
-    printf "  %-4s  %-20s %-10s\n" "No." "NAME" "INSTALLED"
-    printf "  %-4s  %-20s %-10s\n" "---" "----" "---------"
+    printf "  %-4s  %-20s\n" "No." "NAME"
+    printf "  %-4s  %-20s\n" "---" "----"
     local i=1
     for name in "${ADDON_NAMES[@]}"; do
-        local installed_flag
-        if is_addon_installed "$name"; then installed_flag="yes"; else installed_flag="no"; fi
-        printf "  %-4s  %-20s %-10s\n" "$i." "$name" "$installed_flag"
+        printf "  %-4s  %-20s\n" "$i." "$name"
         (( i++ )) || true
     done
     printf "  %-4s  %-20s\n" "0." "Back"

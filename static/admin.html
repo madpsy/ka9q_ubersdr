@@ -692,6 +692,19 @@
                         Each enabled addon is accessible at <code>/addon/&lt;name&gt;/</code>.
                     </div>
 
+                    <!-- Manage Addons Card -->
+                    <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                            <div style="flex: 1; color: #1b5e20;">
+                                <strong>🧩 Manage Addons</strong>
+                                <p style="margin: 5px 0 0 0; font-size: 13px;">Install, update, or remove addon containers. Opens a terminal window to run the addon manager.</p>
+                            </div>
+                            <button class="btn" onclick="openManageAddons()" style="background: #4caf50; color: white; font-weight: bold; white-space: nowrap;">
+                                🧩 Manage Addons
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Warning banner (shown when require_admin is false) -->
                     <div id="proxyPublicWarning" style="display: none; margin-bottom: 15px; padding: 12px 15px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 5px; color: #856404;">
                         ⚠️ <strong>Public access warning:</strong> One or more addon proxies have <em>Require Admin</em> disabled.
@@ -3378,6 +3391,20 @@
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'cpu_info_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open Manage Addons script in popup terminal window
+        function openManageAddons() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/manage_addons.sh';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'manage_addons_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 

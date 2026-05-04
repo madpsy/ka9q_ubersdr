@@ -561,7 +561,7 @@
                 <div class="header-content">
                     <h1>Configuration Editor</h1>
                     <p id="configEditorSubtitle">Edit UberSDR configuration. Changes require server restart to take effect.</p>
-                    <p id="configCallsignName" style="margin-top: 8px; font-size: 14px; color: #000; font-weight: bold;"></p>
+                    <p id="configCallsignName" style="margin-top: 8px; font-size: 14px; font-weight: bold;"></p>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
@@ -3389,14 +3389,17 @@
             const callsign = currentConfig?.admin?.callsign || '';
             const name = currentConfig?.admin?.name || '';
 
+            const makeLink = (text) =>
+                `<a href="/" target="_blank" style="color: #000; text-decoration: underline;">${text}</a>`;
+
             if (callsign && name) {
-                callsignNameEl.textContent = `${callsign} - ${name}`;
+                callsignNameEl.innerHTML = makeLink(`${callsign} - ${name}`);
             } else if (callsign) {
-                callsignNameEl.textContent = callsign;
+                callsignNameEl.innerHTML = makeLink(callsign);
             } else if (name) {
-                callsignNameEl.textContent = name;
+                callsignNameEl.innerHTML = makeLink(name);
             } else {
-                callsignNameEl.textContent = '';
+                callsignNameEl.innerHTML = '';
             }
         }
 

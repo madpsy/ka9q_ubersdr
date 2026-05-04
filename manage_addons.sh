@@ -757,6 +757,25 @@ delete_addon_menu() {
     echo ""
 }
 
+# Show disk usage for all installed addons
+show_disk_space() {
+    echo ""
+    local found=0
+    while IFS= read -r name; do
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            local addon_dir="$HOME/ubersdr/${name}"
+            echo "--- $name ($addon_dir) ---"
+            du -h --max-depth=1 "$addon_dir" 2>/dev/null || echo "  (could not read directory)"
+            echo ""
+            found=1
+        fi
+    done < <(get_addon_names)
+    if [[ "$found" -eq 0 ]]; then
+        echo "No known installed addons found."
+        echo ""
+    fi
+}
+
 # Show the last 25 docker log lines for an installed addon
 show_logs_menu() {
     ADDON_NAMES=()
@@ -817,10 +836,11 @@ main_menu() {
         echo "  7) Control an addon"
         echo "  8) Show UI password"
         echo "  9) Show addon logs"
-        echo " 10) Delete and destroy an addon"
-        echo " 11) Exit"
+        echo " 10) Show addon disk space"
+        echo " 11) Delete and destroy an addon"
+        echo " 12) Exit"
         echo ""
-        read -rp "Select an option [1-11]: " opt
+        read -rp "Select an option [1-12]: " opt
         echo ""
 
         case "$opt" in
@@ -858,14 +878,17 @@ main_menu() {
                 show_logs_menu
                 ;;
             10)
-                delete_addon_menu
+                show_disk_space
                 ;;
             11)
+                delete_addon_menu
+                ;;
+            12)
                 echo "Goodbye."
                 exit 0
                 ;;
             *)
-                echo "Invalid option. Please choose 1-11."
+                echo "Invalid option. Please choose 1-12."
                 ;;
         esac
     done
@@ -880,6 +903,11 @@ echo "                          UberSDR Addon Manager"
 echo "================================================================================"
 echo "  For more information see the Addons section at:"
 echo "    https://ubersdr.org"
+echo "--------------------------------------------------------------------------------"
+echo "  Addons run in their own Docker containers and connect to UberSDR as standard"
+echo "  clients — they receive audio and IQ data just like any other listener."
+echo "  Any persistent data (recordings, images, logs, config) is stored within the"
+echo "  addon's installation directory at ~/ubersdr/<name>/."
 echo "--------------------------------------------------------------------------------"
 echo "  WARNING: Addons increase server load. Some require significantly more CPU"
 echo "  than others. For example, HFDL by default requests IQ data for every known"

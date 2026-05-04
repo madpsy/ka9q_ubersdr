@@ -119,16 +119,14 @@ show_addon_info() {
 # List all addons in a summary table
 list_addons() {
     echo ""
-    printf "  %-4s  %-20s %-12s %-6s %-10s %-13s\n" "No." "NAME" "HOST" "PORT" "ENABLED" "REQUIRE_ADMIN"
-    printf "  %-4s  %-20s %-12s %-6s %-10s %-13s\n" "---" "----" "----" "----" "-------" "-------------"
+    printf "  %-4s  %-20s %-6s %-10s\n" "No." "NAME" "PORT" "INSTALLED"
+    printf "  %-4s  %-20s %-6s %-10s\n" "---" "----" "----" "---------"
     local i=1
     while IFS= read -r name; do
-        local host port enabled require_admin
-        host=$(get_field "$name" "host")
+        local port installed_flag
         port=$(get_field "$name" "port")
-        enabled=$(get_field "$name" "enabled")
-        require_admin=$(get_field "$name" "require_admin")
-        printf "  %-4s  %-20s %-12s %-6s %-10s %-13s\n" "$i." "$name" "$host" "$port" "$enabled" "$require_admin"
+        if is_addon_installed "$name"; then installed_flag="yes"; else installed_flag="no"; fi
+        printf "  %-4s  %-20s %-6s %-10s\n" "$i." "$name" "$port" "$installed_flag"
         (( i++ )) || true
     done < <(get_addon_names)
     echo ""
@@ -757,6 +755,50 @@ delete_addon_menu() {
     echo ""
 }
 
+# Show the last 25 docker log lines for an installed addon
+show_logs_menu() {
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
+    done < <(get_addon_names)
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo ""
+        echo "No known installed addons found."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    printf "  %-4s  %-20s\n" "No." "NAME"
+    printf "  %-4s  %-20s\n" "---" "----"
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        printf "  %-4s  %-20s\n" "$i." "$name"
+        (( i++ )) || true
+    done
+    printf "  %-4s  %-20s\n" "0." "Back"
+    echo ""
+
+    while true; do
+        read -rp "Select addon to show logs [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
+            break
+        fi
+        echo "Invalid selection."
+    done
+
+    echo ""
+    echo "--- Last 25 log lines for '$SELECTED_ADDON' ---"
+    echo ""
+    docker logs -n 25 "$SELECTED_ADDON" 2>&1 || echo "Error: could not retrieve logs for container '$SELECTED_ADDON'." >&2
+    echo ""
+}
+
 # Main menu
 main_menu() {
     while true; do
@@ -772,10 +814,11 @@ main_menu() {
         echo "  6) Enable/disable an addon"
         echo "  7) Control an addon"
         echo "  8) Show UI password"
-        echo "  9) Delete and destroy an addon"
-        echo " 10) Exit"
+        echo "  9) Show addon logs"
+        echo " 10) Delete and destroy an addon"
+        echo " 11) Exit"
         echo ""
-        read -rp "Select an option [1-10]: " opt
+        read -rp "Select an option [1-11]: " opt
         echo ""
 
         case "$opt" in
@@ -810,14 +853,17 @@ main_menu() {
                 show_ui_password_menu
                 ;;
             9)
-                delete_addon_menu
+                show_logs_menu
                 ;;
             10)
+                delete_addon_menu
+                ;;
+            11)
                 echo "Goodbye."
                 exit 0
                 ;;
             *)
-                echo "Invalid option. Please choose 1-10."
+                echo "Invalid option. Please choose 1-11."
                 ;;
         esac
     done

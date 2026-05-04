@@ -60,13 +60,39 @@ install_addon() {
         api_add_addon_proxy "$name"
     fi
 
-    echo ""
-    read -rp "Restart UberSDR now to apply proxy changes? [y/N]: " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        api_restart_ubersdr
+    # Test backend connectivity immediately (no restart required)
+    echo "Testing backend connectivity for '$name'..."
+    local test_response
+    test_response=$(_api_curl GET "/admin/addon-proxies/test?name=$(jq -rn --arg n "$name" '$n | @uri')")
+    local test_success status_code test_error
+    test_success=$(echo "$test_response" | jq -r '.success')
+    status_code=$(echo "$test_response" | jq -r '.status_code')
+    test_error=$(echo "$test_response" | jq -r '.error')
+    if [[ "$test_success" == "true" ]]; then
+        echo "  ✓ Backend reachable (HTTP $status_code)"
     else
-        echo "Skipping restart. Remember to restart UberSDR manually to activate the addon proxy."
+        echo "  ✗ Backend not reachable: $test_error" >&2
+        echo "  Ensure the addon container is running and try again." >&2
     fi
+
+    # Show the addon URL and UI password (if one was set during install)
+    local addon_url="http://ubersdr.local/addon/${name}/"
+    local pass_file="$HOME/ubersdr/${name}/.config_pass"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  ADDON: $name"
+    echo ""
+    echo "  URL:  ${addon_url}"
+    if [[ -f "$pass_file" ]]; then
+        local pass
+        pass="$(cat "$pass_file")"
+        echo ""
+        echo "  UI PASSWORD:  ${pass}"
+        echo "  (protects write actions in the web UI)"
+        echo "  Stored at: ${pass_file}"
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
 }
 
 # Show full info for one addon
@@ -127,35 +153,123 @@ pick_addon() {
     fi
 
     list_addons
+    echo "  0.    Back"
+    echo ""
 
     while true; do
-        read -rp "$prompt [1-${#ADDON_NAMES[@]}]: " choice
+        read -rp "$prompt [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 1
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
             SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
             return 0
         fi
-        echo "Invalid selection. Please enter a number between 1 and ${#ADDON_NAMES[@]}."
+        echo "Invalid selection. Please enter a number between 0 and ${#ADDON_NAMES[@]}."
     done
 }
 
-# Install all enabled addons
-install_all_enabled() {
-    local installed=0
-    local skipped=0
+# Check if an addon name is known in addons.json
+# Usage: is_known_addon <name>  → returns 0 if known, 1 if not
+is_known_addon() {
+    local name="$1"
+    local result
+    result=$(jq -r --arg name "$name" '.addons[] | select(.name == $name) | .name' "$ADDONS_FILE")
+    [[ -n "$result" && "$result" != "null" ]]
+}
+
+# Check if an addon is installed by looking for its docker-compose.yml
+# Usage: is_addon_installed <name>  → returns 0 if installed, 1 if not
+is_addon_installed() {
+    local name="$1"
+    [[ -f "$HOME/ubersdr/${name}/docker-compose.yml" ]]
+}
+
+# Control a specific addon: start / stop / restart via its ~/ubersdr/<name>/{start,stop,restart}.sh
+control_addon_menu() {
     echo ""
+    echo "Fetching live addon proxies from UberSDR..."
+    local live_response
+    live_response=$(_api_curl GET "/admin/addon-proxies") || {
+        echo "Error: Could not reach UberSDR API." >&2
+        return 1
+    }
+
+    local count
+    count=$(echo "$live_response" | jq 'length')
+    if [[ "$count" -eq 0 ]]; then
+        echo "No addon proxies are currently registered in UberSDR."
+        echo ""
+        return 0
+    fi
+
+    # Only show addons that are actually installed (have docker-compose.yml)
+    ADDON_NAMES=()
     while IFS= read -r name; do
-        local enabled
-        enabled=$(get_field "$name" "enabled")
-        if [[ "$enabled" == "true" ]]; then
-            install_addon "$name"
-            (( installed++ )) || true
-        else
-            echo "  Skipping '$name' (enabled: false)"
-            (( skipped++ )) || true
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
         fi
-    done < <(get_addon_names)
+    done < <(echo "$live_response" | jq -r '.[].name')
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo "No known installed addons found."
+        echo ""
+        return 0
+    fi
+
     echo ""
-    echo "Done. Installed: $installed, Skipped (disabled): $skipped"
+    printf "  %-4s  %-20s\n" "No." "NAME"
+    printf "  %-4s  %-20s\n" "---" "----"
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        printf "  %-4s  %-20s\n" "$i." "$name"
+        (( i++ )) || true
+    done
+    printf "  %-4s  %-20s\n" "0." "Back"
+    echo ""
+
+    while true; do
+        read -rp "Select addon to control [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
+            break
+        fi
+        echo "Invalid selection."
+    done
+
+    local addon_dir="$HOME/ubersdr/${SELECTED_ADDON}"
+
+    echo ""
+    echo "--- Control addon: $SELECTED_ADDON ---"
+    echo "  1) Start"
+    echo "  2) Stop"
+    echo "  3) Restart"
+    echo "  0) Back"
+    echo ""
+
+    local action_script
+    while true; do
+        read -rp "Select action [0-3]: " action
+        case "$action" in
+            1) action_script="start.sh";   break ;;
+            2) action_script="stop.sh";    break ;;
+            3) action_script="restart.sh"; break ;;
+            0) return 0 ;;
+            *) echo "Invalid selection." ;;
+        esac
+    done
+
+    local script_path="$addon_dir/$action_script"
+    if [[ ! -f "$script_path" ]]; then
+        echo "Error: $action_script not found at $script_path" >&2
+        echo ""
+        return 1
+    fi
+
+    echo ""
+    echo "Running $action_script for '$SELECTED_ADDON'..."
+    bash "$script_path"
+    echo "Done."
+    echo ""
 }
 
 # ---------------------------------------------------------------------------
@@ -273,15 +387,106 @@ api_test_addon_proxy() {
     _api_curl GET "/admin/addon-proxies/test?name=$(jq -rn --arg n "$name" '$n | @uri')" | jq .
 }
 
-# Restart the UberSDR server to apply addon proxy changes.
-api_restart_ubersdr() {
-    echo "Restarting UberSDR server..."
+# Toggle a live addon proxy enabled/disabled via PUT.
+# Usage: api_toggle_addon_proxy <name> <true|false>
+api_toggle_addon_proxy() {
+    local name="$1"
+    local new_state="$2"  # "true" or "false"
+    local live_response
+    live_response=$(_api_curl GET "/admin/addon-proxies") || return 1
+    local current
+    current=$(echo "$live_response" | jq --arg name "$name" '.[] | select(.name == $name)')
+    if [[ -z "$current" || "$current" == "null" ]]; then
+        echo "Error: addon proxy '$name' not found in UberSDR." >&2
+        return 1
+    fi
+    local payload
+    payload=$(echo "$current" | jq --argjson state "$new_state" 'del(.path) | .enabled = $state')
     local response
-    response=$(_api_curl POST "/admin/addon-proxies/restart")
+    response=$(_api_curl PUT "/admin/addon-proxies?name=$(jq -rn --arg n "$name" '$n | @uri')" -d "$payload")
     local status msg
     status=$(echo "$response" | jq -r '.status // "error"')
     msg=$(echo "$response" | jq -r '.message // .error // "Unknown error"')
     echo "  [$status] $msg"
+}
+
+# Interactive: pick a live addon and toggle its enabled state
+toggle_addon_menu() {
+    echo ""
+    echo "Fetching live addon proxies from UberSDR..."
+    local live_response
+    live_response=$(_api_curl GET "/admin/addon-proxies") || {
+        echo "Error: Could not reach UberSDR API." >&2
+        return 1
+    }
+
+    local count
+    count=$(echo "$live_response" | jq 'length')
+    if [[ "$count" -eq 0 ]]; then
+        echo "No addon proxies are currently registered in UberSDR."
+        echo ""
+        return 0
+    fi
+
+    # Only show installed addons
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
+    done < <(echo "$live_response" | jq -r '.[].name')
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo "No known installed addons found."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    printf "  %-4s  %-20s %-10s\n" "No." "NAME" "ENABLED"
+    printf "  %-4s  %-20s %-10s\n" "---" "----" "-------"
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        local enabled
+        enabled=$(echo "$live_response" | jq -r --arg n "$name" '.[] | select(.name == $n) | .enabled | tostring')
+        printf "  %-4s  %-20s %-10s\n" "$i." "$name" "$enabled"
+        (( i++ )) || true
+    done
+    printf "  %-4s  %-20s\n" "0." "Back"
+    echo ""
+
+    while true; do
+        read -rp "Select addon to enable/disable [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
+            break
+        fi
+        echo "Invalid selection."
+    done
+
+    local current_state
+    current_state=$(echo "$live_response" | jq -r --arg n "$SELECTED_ADDON" '.[] | select(.name == $n) | .enabled | tostring')
+
+    echo ""
+    if [[ "$current_state" == "true" ]]; then
+        read -rp "Addon '$SELECTED_ADDON' is currently ENABLED. Disable it? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Disabling '$SELECTED_ADDON'..."
+            api_toggle_addon_proxy "$SELECTED_ADDON" false
+        else
+            echo "Cancelled."
+        fi
+    else
+        read -rp "Addon '$SELECTED_ADDON' is currently DISABLED. Enable it? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Enabling '$SELECTED_ADDON'..."
+            api_toggle_addon_proxy "$SELECTED_ADDON" true
+        else
+            echo "Cancelled."
+        fi
+    fi
+    echo ""
 }
 
 # ---------------------------------------------------------------------------
@@ -318,11 +523,19 @@ show_live_addons() {
     fi
 
     echo ""
-    printf "  %-20s %-12s %-6s %-10s %-10s %-6s\n" "NAME" "HOST" "PORT" "ENABLED" "REQ_ADMIN" "PATH"
-    printf "  %-20s %-12s %-6s %-10s %-10s %-6s\n" "----" "----" "----" "-------" "---------" "----"
+    printf "  %-20s %-12s %-6s %-10s %-10s %-10s %-6s\n" "NAME" "HOST" "PORT" "ENABLED" "REQ_ADMIN" "INSTALLED" "PATH"
+    printf "  %-20s %-12s %-6s %-10s %-10s %-10s %-6s\n" "----" "----" "----" "-------" "---------" "---------" "----"
     echo "$response" | jq -r '.[] | [.name, .host, (.port|tostring), (.enabled|tostring), (.require_admin|tostring), .path] | @tsv' \
         | while IFS=$'\t' read -r name host port enabled req_admin path; do
-            printf "  %-20s %-12s %-6s %-10s %-10s %-6s\n" "$name" "$host" "$port" "$enabled" "$req_admin" "$path"
+            # Skip proxies not known in addons.json
+            is_known_addon "$name" || continue
+            local installed_flag
+            if is_addon_installed "$name"; then
+                installed_flag="yes"
+            else
+                installed_flag="no"
+            fi
+            printf "  %-20s %-12s %-6s %-10s %-10s %-10s %-6s\n" "$name" "$host" "$port" "$enabled" "$req_admin" "$installed_flag" "$path"
         done
     echo ""
 }
@@ -345,24 +558,36 @@ test_addon_connectivity() {
         return 0
     fi
 
-    # Build a names array from the live list
+    # Build a names array — all registered proxies (test doesn't require local install)
     ADDON_NAMES=()
     while IFS= read -r name; do
-        ADDON_NAMES+=("$name")
+        if is_known_addon "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
     done < <(echo "$live_response" | jq -r '.[].name')
 
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo "No known addon proxies are currently registered in UberSDR."
+        echo ""
+        return 0
+    fi
+
     echo ""
-    printf "  %-4s  %-20s\n" "No." "NAME"
-    printf "  %-4s  %-20s\n" "---" "----"
+    printf "  %-4s  %-20s %-10s\n" "No." "NAME" "INSTALLED"
+    printf "  %-4s  %-20s %-10s\n" "---" "----" "---------"
     local i=1
     for name in "${ADDON_NAMES[@]}"; do
-        printf "  %-4s  %-20s\n" "$i." "$name"
+        local installed_flag
+        if is_addon_installed "$name"; then installed_flag="yes"; else installed_flag="no"; fi
+        printf "  %-4s  %-20s %-10s\n" "$i." "$name" "$installed_flag"
         (( i++ )) || true
     done
+    printf "  %-4s  %-20s\n" "0." "Back"
     echo ""
 
     while true; do
-        read -rp "Select addon to test [1-${#ADDON_NAMES[@]}]: " choice
+        read -rp "Select addon to test [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
             SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
             break
@@ -390,6 +615,150 @@ test_addon_connectivity() {
     echo ""
 }
 
+# Show the UI password for an installed addon (reads ~/ubersdr/<name>/.config_pass)
+show_ui_password_menu() {
+    # Build list of installed known addons
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
+    done < <(get_addon_names)
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo ""
+        echo "No known installed addons found."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    printf "  %-4s  %-20s\n" "No." "NAME"
+    printf "  %-4s  %-20s\n" "---" "----"
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        printf "  %-4s  %-20s\n" "$i." "$name"
+        (( i++ )) || true
+    done
+    printf "  %-4s  %-20s\n" "0." "Back"
+    echo ""
+
+    while true; do
+        read -rp "Select addon to show UI password [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
+            break
+        fi
+        echo "Invalid selection."
+    done
+
+    local pass_file="$HOME/ubersdr/${SELECTED_ADDON}/.config_pass"
+    if [[ ! -f "$pass_file" ]]; then
+        echo ""
+        echo "Error: password file not found at $pass_file" >&2
+        echo "       Has install.sh been run yet?" >&2
+        echo ""
+        return 1
+    fi
+
+    local pass
+    pass="$(cat "$pass_file")"
+    local addon_url="http://ubersdr.local/addon/${SELECTED_ADDON}/"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  ADDON: $SELECTED_ADDON"
+    echo ""
+    echo "  URL:  ${addon_url}"
+    echo ""
+    echo "  UI PASSWORD:  ${pass}"
+    echo "  (protects write actions in the web UI)"
+    echo "  Stored at: ${pass_file}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+}
+
+# Delete and destroy an addon: stop it, then remove its directory entirely.
+delete_addon_menu() {
+    echo ""
+    echo "Fetching live addon proxies from UberSDR..."
+    local live_response
+    live_response=$(_api_curl GET "/admin/addon-proxies") || {
+        echo "Error: Could not reach UberSDR API." >&2
+        return 1
+    }
+
+    # Only show addons that are actually installed (have docker-compose.yml)
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
+    done < <(echo "$live_response" | jq -r '.[].name')
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo "No known installed addons found."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    printf "  %-4s  %-20s\n" "No." "NAME"
+    printf "  %-4s  %-20s\n" "---" "----"
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        printf "  %-4s  %-20s\n" "$i." "$name"
+        (( i++ )) || true
+    done
+    printf "  %-4s  %-20s\n" "0." "Back"
+    echo ""
+
+    while true; do
+        read -rp "Select addon to delete [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
+            break
+        fi
+        echo "Invalid selection."
+    done
+
+    local addon_dir="$HOME/ubersdr/${SELECTED_ADDON}"
+
+    # Stop the addon first (best-effort — don't abort if stop.sh is missing)
+    local stop_script="$addon_dir/stop.sh"
+    if [[ -f "$stop_script" ]]; then
+        echo ""
+        echo "Stopping addon '$SELECTED_ADDON'..."
+        bash "$stop_script" || true
+    else
+        echo "Warning: stop.sh not found at $stop_script — skipping stop step." >&2
+    fi
+
+    # Confirm before deleting
+    echo ""
+    echo "WARNING: This will permanently delete the following directory:"
+    echo "  $addon_dir"
+    echo ""
+    read -rp "Are you sure you want to delete '$SELECTED_ADDON'? Type 'yes' to confirm: " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo "Cancelled — directory was NOT deleted."
+        echo ""
+        return 0
+    fi
+
+    echo "Deleting $addon_dir ..."
+    rm -rf "$addon_dir"
+    echo "  Directory removed."
+
+    # Remove the addon proxy from UberSDR
+    echo "Removing addon proxy '$SELECTED_ADDON' from UberSDR..."
+    api_delete_addon_proxy "$SELECTED_ADDON"
+
+    echo "Done. '$SELECTED_ADDON' has been fully removed."
+    echo ""
+}
+
 # Main menu
 main_menu() {
     while true; do
@@ -398,14 +767,17 @@ main_menu() {
         echo "   UberSDR Addon Manager"
         echo "==============================="
         echo "  1) List available addons"
-        echo "  2) Install a specific addon"
-        echo "  3) Install all enabled addons"
-        echo "  4) Show addon details"
-        echo "  5) Show live registered addons"
-        echo "  6) Test addon connectivity"
-        echo "  7) Exit"
+        echo "  2) Install/update a specific addon"
+        echo "  3) Show addon details"
+        echo "  4) Show live registered addons"
+        echo "  5) Test addon connectivity"
+        echo "  6) Enable/disable an addon"
+        echo "  7) Control an addon"
+        echo "  8) Show UI password"
+        echo "  9) Delete and destroy an addon"
+        echo " 10) Exit"
         echo ""
-        read -rp "Select an option [1-7]: " opt
+        read -rp "Select an option [1-10]: " opt
         echo ""
 
         case "$opt" in
@@ -414,30 +786,40 @@ main_menu() {
                 ;;
             2)
                 SELECTED_ADDON=""
-                pick_addon "Select addon to install"
-                install_addon "$SELECTED_ADDON"
+                if pick_addon "Select addon to install"; then
+                    install_addon "$SELECTED_ADDON"
+                fi
                 ;;
             3)
-                echo "Installing all enabled addons..."
-                install_all_enabled
+                SELECTED_ADDON=""
+                if pick_addon "Select addon to view details"; then
+                    show_addon_info "$SELECTED_ADDON"
+                fi
                 ;;
             4)
-                SELECTED_ADDON=""
-                pick_addon "Select addon to view details"
-                show_addon_info "$SELECTED_ADDON"
-                ;;
-            5)
                 show_live_addons
                 ;;
-            6)
+            5)
                 test_addon_connectivity
                 ;;
+            6)
+                toggle_addon_menu
+                ;;
             7)
+                control_addon_menu
+                ;;
+            8)
+                show_ui_password_menu
+                ;;
+            9)
+                delete_addon_menu
+                ;;
+            10)
                 echo "Goodbye."
                 exit 0
                 ;;
             *)
-                echo "Invalid option. Please choose 1-7."
+                echo "Invalid option. Please choose 1-10."
                 ;;
         esac
     done

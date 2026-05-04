@@ -2,13 +2,14 @@
   "addons": [
     {
       "name": "doppler",
+      "description": "Monitors doppler shift caused by ionospheric condition changes using WWV stations",
       "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_doppler/main/install.sh",
       "host": "doppler",
       "port": 6096,
       "enabled": true,
       "require_admin": false,
       "strip_prefix": true,
-      "rewrite_ws_prefix": false,
+      "rewrite_origin": false,
       "rate_limit": 100,
       "allowed_ips": ["0.0.0.0/0"]
     }

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ADDONS_FILE="$(dirname "$(realpath "$0")")/addons.yaml"
+ADDONS_FILE="$(dirname "$(realpath "$0")")/addons.json"
 
 # Dependency check
-for cmd in curl yq; do
+for cmd in curl jq; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "Error: '$cmd' is required but not installed." >&2
         exit 1
@@ -13,14 +13,15 @@ done
 
 # Get all addon names
 get_addon_names() {
-    yq e '.addons[].name' "$ADDONS_FILE"
+    jq -r '.addons[].name' "$ADDONS_FILE"
 }
 
-# Get a field value for a named addon
+# Get a scalar field value for a named addon
 get_field() {
     local name="$1"
     local field="$2"
-    yq e ".addons[] | select(.name == \"$name\") | .$field" "$ADDONS_FILE"
+    jq -r --arg name "$name" --arg field "$field" \
+        '.addons[] | select(.name == $name) | .[$field]' "$ADDONS_FILE"
 }
 
 # Install a single addon by name
@@ -52,19 +53,20 @@ show_addon_info() {
         val=$(get_field "$name" "$field")
         printf "  %-22s %s\n" "$field:" "$val"
     done
-    # allowed_ips is a list
     echo "  allowed_ips:"
-    yq e ".addons[] | select(.name == \"$name\") | .allowed_ips[]" "$ADDONS_FILE" | while IFS= read -r ip; do
-        echo "    - $ip"
-    done
+    jq -r --arg name "$name" \
+        '.addons[] | select(.name == $name) | .allowed_ips[]' "$ADDONS_FILE" \
+        | while IFS= read -r ip; do
+            echo "    - $ip"
+        done
     echo ""
 }
 
 # List all addons in a summary table
 list_addons() {
     echo ""
-    printf "  %-4s  %-20s %-12s %-6s %-10s %-10s\n" "No." "NAME" "HOST" "PORT" "ENABLED" "REQUIRE_ADMIN"
-    printf "  %-4s  %-20s %-12s %-6s %-10s %-10s\n" "---" "----" "----" "----" "-------" "-------------"
+    printf "  %-4s  %-20s %-12s %-6s %-10s %-13s\n" "No." "NAME" "HOST" "PORT" "ENABLED" "REQUIRE_ADMIN"
+    printf "  %-4s  %-20s %-12s %-6s %-10s %-13s\n" "---" "----" "----" "----" "-------" "-------------"
     local i=1
     while IFS= read -r name; do
         local host port enabled require_admin
@@ -72,21 +74,26 @@ list_addons() {
         port=$(get_field "$name" "port")
         enabled=$(get_field "$name" "enabled")
         require_admin=$(get_field "$name" "require_admin")
-        printf "  %-4s  %-20s %-12s %-6s %-10s %-10s\n" "$i." "$name" "$host" "$port" "$enabled" "$require_admin"
+        printf "  %-4s  %-20s %-12s %-6s %-10s %-13s\n" "$i." "$name" "$host" "$port" "$enabled" "$require_admin"
         (( i++ )) || true
     done < <(get_addon_names)
     echo ""
 }
 
-# Prompt user to pick an addon by number
+# Build addon names array into a global variable
+load_addon_names() {
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        ADDON_NAMES+=("$name")
+    done < <(get_addon_names)
+    [[ ${#ADDON_NAMES[@]} -gt 0 ]]
+}
+
+# Prompt user to pick an addon by number; sets SELECTED_ADDON
 pick_addon() {
     local prompt="$1"
-    local names=()
-    while IFS= read -r name; do
-        names+=("$name")
-    done < <(get_addon_names)
 
-    if [[ ${#names[@]} -eq 0 ]]; then
+    if ! load_addon_names; then
         echo "No addons found in $ADDONS_FILE" >&2
         return 1
     fi
@@ -94,12 +101,12 @@ pick_addon() {
     list_addons
 
     while true; do
-        read -rp "$prompt [1-${#names[@]}]: " choice
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#names[@]} )); then
-            echo "${names[$((choice - 1))]}"
+        read -rp "$prompt [1-${#ADDON_NAMES[@]}]: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
             return 0
         fi
-        echo "Invalid selection. Please enter a number between 1 and ${#names[@]}."
+        echo "Invalid selection. Please enter a number between 1 and ${#ADDON_NAMES[@]}."
     done
 }
 
@@ -144,16 +151,18 @@ main_menu() {
                 list_addons
                 ;;
             2)
-                selected=$(pick_addon "Select addon to install")
-                install_addon "$selected"
+                SELECTED_ADDON=""
+                pick_addon "Select addon to install"
+                install_addon "$SELECTED_ADDON"
                 ;;
             3)
                 echo "Installing all enabled addons..."
                 install_all_enabled
                 ;;
             4)
-                selected=$(pick_addon "Select addon to view details")
-                show_addon_info "$selected"
+                SELECTED_ADDON=""
+                pick_addon "Select addon to view details"
+                show_addon_info "$SELECTED_ADDON"
                 ;;
             5)
                 echo "Goodbye."

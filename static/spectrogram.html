@@ -2047,9 +2047,15 @@ function setupHover(){
     var canvasLocalX=(localX-zoom.tx)/zoom.scale;
     var canvasLocalY=(localY-zoom.ty)/zoom.scale;
 
-    /* Unscaled CSS dimensions of the canvas (width=sg-right width, height=auto/proportional) */
+    /* Unscaled CSS dimensions of the canvas.
+       When "Fixed height" is active, #img-canvas has an explicit CSS height that
+       differs from the natural aspect-ratio height.  offsetHeight gives the CSS
+       layout height of the element in its own coordinate space, unaffected by any
+       CSS transform applied to an ancestor (#zoom-wrap), so it correctly reflects
+       the fixed height when that mode is active and the natural height otherwise. */
     var canvasCssW=sgRect.width;
-    var canvasCssH=(bmp&&bmp.width>0)?(sgRect.width*(bmp.height/bmp.width)):sgRect.height;
+    var ic=document.getElementById('img-canvas');
+    var canvasCssH=ic?ic.offsetHeight:((bmp&&bmp.width>0)?(sgRect.width*(bmp.height/bmp.width)):sgRect.height);
 
     /* Is cursor over the actual canvas area (in unscaled canvas CSS space)? */
     var overCanvas=(canvasLocalX>=0&&canvasLocalX<=canvasCssW&&canvasLocalY>=0&&canvasLocalY<=canvasCssH);

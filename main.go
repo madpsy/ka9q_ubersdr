@@ -1848,7 +1848,19 @@ func main() {
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()
 
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, rbnStore, rbnFetcher)
+	// Create the dynamic addon proxy router before NewAdminHandler so we can pass
+	// it in. SetAdminHandler is called immediately after so that AuthMiddleware
+	// wrapping is available when we seed the initial routes below.
+	addonRouter := NewAddonProxyRouter()
+
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher)
+
+	// Wire the admin handler into the router now that it exists, then seed the
+	// initial routes from the already-built addonProxies slice.
+	addonRouter.SetAdminHandler(adminHandler)
+	for _, ap := range addonProxies {
+		addonRouter.Register(ap)
+	}
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -2219,21 +2231,11 @@ func main() {
 			config.SSHProxy.Host, config.SSHProxy.Port)
 	}
 
-	// Register addon proxy routes
-	for _, ap := range addonProxies {
-		// Capture loop variable for the closure
-		proxy := ap
-		pattern := "/addon/" + proxy.entry.Name + "/"
-		if proxy.entry.RequireAdmin {
-			http.HandleFunc(pattern, adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
-				proxy.ServeHTTP(w, r)
-			}))
-		} else {
-			http.HandleFunc(pattern, proxy.ServeHTTP)
-		}
-		log.Printf("Addon proxy %q registered at %s (require_admin=%v)",
-			proxy.entry.Name, pattern, proxy.entry.RequireAdmin)
-	}
+	// Register the dynamic addon proxy router as a single catch-all for /addon/.
+	// Individual routes are managed at runtime by addonRouter.Register/Update/Deregister
+	// so that add/edit/delete operations in the admin UI take effect immediately
+	// without requiring a server restart.
+	http.Handle("/addon/", addonRouter)
 
 	// Open log file for HTTP request logging (if enabled)
 	var logFile *os.File

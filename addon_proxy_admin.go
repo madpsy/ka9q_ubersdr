@@ -241,12 +241,22 @@ func (ah *AdminHandler) handleAddAddonProxy(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Apply the new proxy to the live routing table immediately (no restart needed).
+	if newEntry.Enabled && ah.addonRouter != nil {
+		newEntry.adminConfig = &ah.config.Admin
+		if ap, err := NewAddonProxy(&newEntry); err == nil {
+			ah.addonRouter.Register(ap)
+		} else {
+			log.Printf("Admin: warning — could not initialise live route for addon proxy %q: %v", newEntry.Name, err)
+		}
+	}
+
 	log.Printf("Admin: added addon proxy %q (enabled=%v, require_admin=%v)", newEntry.Name, newEntry.Enabled, newEntry.RequireAdmin)
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
-		"message": fmt.Sprintf("Addon proxy %q added. Restart server to apply changes.", newEntry.Name),
+		"message": fmt.Sprintf("Addon proxy %q added and applied immediately.", newEntry.Name),
 		"proxy":   entryToJSON(newEntry),
 	})
 }
@@ -313,12 +323,31 @@ func (ah *AdminHandler) handleUpdateAddonProxy(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Apply the updated proxy to the live routing table immediately.
+	// If the entry is now disabled, deregister it; otherwise update/register it.
+	if ah.addonRouter != nil {
+		if updated.Enabled {
+			updated.adminConfig = &ah.config.Admin
+			if ap, err := NewAddonProxy(&updated); err == nil {
+				ah.addonRouter.Update(name, ap)
+			} else {
+				log.Printf("Admin: warning — could not initialise live route for addon proxy %q: %v", updated.Name, err)
+			}
+		} else {
+			// Proxy was disabled — remove both old and new name routes
+			ah.addonRouter.Deregister(name)
+			if updated.Name != name {
+				ah.addonRouter.Deregister(updated.Name)
+			}
+		}
+	}
+
 	log.Printf("Admin: updated addon proxy %q (enabled=%v, require_admin=%v)", updated.Name, updated.Enabled, updated.RequireAdmin)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
-		"message": fmt.Sprintf("Addon proxy %q updated. Restart server to apply changes.", updated.Name),
+		"message": fmt.Sprintf("Addon proxy %q updated and applied immediately.", updated.Name),
 		"proxy":   entryToJSON(updated),
 	})
 }
@@ -358,12 +387,17 @@ func (ah *AdminHandler) handleDeleteAddonProxy(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Remove the proxy from the live routing table immediately.
+	if ah.addonRouter != nil {
+		ah.addonRouter.Deregister(name)
+	}
+
 	log.Printf("Admin: deleted addon proxy %q", name)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
-		"message": fmt.Sprintf("Addon proxy %q deleted. Restart server to apply changes.", name),
+		"message": fmt.Sprintf("Addon proxy %q deleted and removed immediately.", name),
 	})
 }
 

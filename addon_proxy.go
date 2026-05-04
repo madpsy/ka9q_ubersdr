@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // AddonProxy handles proxying requests to a Docker addon container
@@ -154,4 +155,121 @@ func (ap *AddonProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Forward the request (handles both plain HTTP and WebSocket upgrades)
 	ap.proxy.ServeHTTP(w, r)
+}
+
+// ── AddonProxyRouter ──────────────────────────────────────────────────────────
+//
+// AddonProxyRouter is a dynamic HTTP handler that dispatches /addon/<name>/
+// requests to the appropriate AddonProxy at runtime, without requiring a server
+// restart when proxies are added, updated, or removed.
+//
+// It is registered once as http.Handle("/addon/", router) at startup.
+// The AdminHandler calls Register/Deregister/Update after persisting changes to
+// addons.yaml so that the new configuration is live immediately.
+
+// AddonProxyRouter holds a mutable map of /addon/<name>/ → http.Handler.
+// All map access is protected by mu so concurrent requests are safe.
+type AddonProxyRouter struct {
+	mu           sync.RWMutex
+	routes       map[string]http.Handler // key: "/addon/<name>/"
+	adminHandler *AdminHandler           // needed to wrap handlers with AuthMiddleware
+}
+
+// NewAddonProxyRouter creates an empty router. Call SetAdminHandler before
+// calling Register/Update so that AuthMiddleware wrapping works correctly.
+func NewAddonProxyRouter() *AddonProxyRouter {
+	return &AddonProxyRouter{
+		routes: make(map[string]http.Handler),
+	}
+}
+
+// SetAdminHandler wires the AdminHandler into the router so that Register and
+// Update can wrap handlers with AuthMiddleware. Must be called before any
+// Register/Update calls that involve require_admin=true entries.
+func (r *AddonProxyRouter) SetAdminHandler(ah *AdminHandler) {
+	r.mu.Lock()
+	r.adminHandler = ah
+	r.mu.Unlock()
+}
+
+// ServeHTTP dispatches the request to the matching addon proxy handler.
+// It matches on the /addon/<name>/ prefix (longest-prefix wins among exact
+// pattern keys). Returns 404 if no addon matches.
+func (r *AddonProxyRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// Find the longest matching prefix in the route map.
+	// In practice every key is exactly "/addon/<name>/" so the first match wins,
+	// but we do a proper longest-prefix search for correctness.
+	r.mu.RLock()
+	var (
+		bestHandler http.Handler
+		bestLen     int
+	)
+	for pattern, h := range r.routes {
+		if strings.HasPrefix(req.URL.Path, pattern) && len(pattern) > bestLen {
+			bestHandler = h
+			bestLen = len(pattern)
+		}
+	}
+	r.mu.RUnlock()
+
+	if bestHandler == nil {
+		http.NotFound(w, req)
+		return
+	}
+	bestHandler.ServeHTTP(w, req)
+}
+
+// buildHandler wraps ap in AuthMiddleware when require_admin is set.
+// Called with the write lock already held (or before the router is published).
+func (r *AddonProxyRouter) buildHandler(ap *AddonProxy) http.Handler {
+	if ap.entry.RequireAdmin {
+		return r.adminHandler.AuthMiddleware(ap.ServeHTTP)
+	}
+	return ap
+}
+
+// Register adds a new addon proxy to the live routing table.
+// If a route for the same name already exists it is replaced atomically.
+func (r *AddonProxyRouter) Register(ap *AddonProxy) {
+	pattern := "/addon/" + ap.entry.Name + "/"
+	handler := r.buildHandler(ap)
+
+	r.mu.Lock()
+	r.routes[pattern] = handler
+	r.mu.Unlock()
+
+	log.Printf("AddonProxyRouter: registered %s (require_admin=%v)", pattern, ap.entry.RequireAdmin)
+}
+
+// Deregister removes the named addon proxy from the live routing table.
+// Requests to /addon/<name>/ will return 404 immediately after this returns.
+// Any in-flight requests that already matched the old handler complete normally.
+func (r *AddonProxyRouter) Deregister(name string) {
+	pattern := "/addon/" + name + "/"
+
+	r.mu.Lock()
+	delete(r.routes, pattern)
+	r.mu.Unlock()
+
+	log.Printf("AddonProxyRouter: deregistered %s", pattern)
+}
+
+// Update atomically replaces the handler for an existing addon proxy.
+// It handles name changes (old name → new name) correctly.
+func (r *AddonProxyRouter) Update(oldName string, ap *AddonProxy) {
+	oldPattern := "/addon/" + oldName + "/"
+	newPattern := "/addon/" + ap.entry.Name + "/"
+	handler := r.buildHandler(ap)
+
+	r.mu.Lock()
+	// Remove the old route (may be the same key if name didn't change)
+	delete(r.routes, oldPattern)
+	r.routes[newPattern] = handler
+	r.mu.Unlock()
+
+	if oldPattern == newPattern {
+		log.Printf("AddonProxyRouter: updated %s (require_admin=%v)", newPattern, ap.entry.RequireAdmin)
+	} else {
+		log.Printf("AddonProxyRouter: renamed %s → %s (require_admin=%v)", oldPattern, newPattern, ap.entry.RequireAdmin)
+	}
 }

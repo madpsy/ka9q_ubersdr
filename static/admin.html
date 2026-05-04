@@ -1998,7 +1998,6 @@
                 </div>
                 <div class="button-group" id="proxyButtons" style="display: none;">
                     <button class="btn" onclick="showAddProxyForm()">Add New Proxy</button>
-                    <button class="btn btn-danger" onclick="saveProxyAndRestart()">Save &amp; Restart</button>
                     <button class="btn btn-secondary" onclick="loadAddonProxies()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportAddonConfig()">Export Config</button>
                     <button class="btn btn-secondary" onclick="importAddonConfig()">Import Config</button>
@@ -21612,7 +21611,7 @@ Referer: ${log.referer}`;
                     showAlert('Error saving proxy: ' + text, 'error');
                     return;
                 }
-                showAlert('Proxy saved. Restart server to apply changes.', 'success');
+                showAlert('Proxy saved and applied immediately.', 'success');
                 cancelProxyForm();
                 loadAddonProxies();
             } catch (e) {
@@ -21632,15 +21631,19 @@ Referer: ${log.referer}`;
                     showAlert('Error deleting proxy: ' + text, 'error');
                     return;
                 }
-                showAlert('Proxy "' + name + '" deleted. Restart server to apply changes.', 'success');
+                showAlert('Proxy "' + name + '" deleted and removed immediately.', 'success');
                 loadAddonProxies();
             } catch (e) {
                 showAlert('Error deleting proxy: ' + e.message, 'error');
             }
         }
 
+        // saveProxyAndRestart is retained for operator-initiated full restarts via
+        // the /admin/addon-proxies/restart endpoint. It is no longer exposed as a
+        // button in the addon proxy tab because add/edit/delete now take effect
+        // immediately without requiring a server restart.
         async function saveProxyAndRestart() {
-            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to restart the server to apply addon proxy changes?')) {
+            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to restart the server?')) {
                 return;
             }
             try {

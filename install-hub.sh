@@ -272,7 +272,7 @@ fi
 echo "Installing dependencies..."
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y sudo cron ntpsec libfftw3-bin libwebsockets19t64 ssh tmux btop htop
+sudo apt install -y sudo cron ntpsec libfftw3-bin libwebsockets19t64 ssh tmux btop htop yq
 
 # Disable IPv6 to prevent Docker NAT issues with client IP detection
 # When IPv6 clients connect to IPv4-only Docker containers, the kernel performs
@@ -578,6 +578,13 @@ chmod +x "$ACTUAL_HOME/ubersdr/check_time.sh"
 echo "Fetching install_cwskimmer.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/refs/heads/main/install-hub.sh -o "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
+
+echo "Fetching manage_addons.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/manage_addons.sh -o "$ACTUAL_HOME/ubersdr/manage_addons.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/manage_addons.sh"
+
+echo "Fetching addons.yaml..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/addons.yaml -o "$ACTUAL_HOME/ubersdr/addons.yaml"
 
 echo "Fetching benchmark binary..."
 if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/benchmark -o "$ACTUAL_HOME/ubersdr/benchmark" 2>/dev/null; then

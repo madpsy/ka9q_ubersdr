@@ -11,6 +11,7 @@
 ### Bug Fixes
 - Unnecessary canvas drawing on the spectrum/waterfall causing high CPU usage
 - Bad EiBi character encoding caused ? to show in accented lettering
+- KiwiSDR emulation was missing the /users endpoint
 
 ### Other Announcements
 - All public UberSDR instances are registered on https://sdr-list.xyz/

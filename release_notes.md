@@ -6,6 +6,7 @@
 - Added **Add-on Manager** in the Admin Addon tab to make it easier to install/manage add-ons
 - Added **RBN Statistics** for those who run CW Skimmer and report to RBN
 - Added **Default Audio Buffer** in UI config in case the default 200ms needs changed (users can override)
+- Added **Remote Support** which allows optional and temporary access to an instance to diagnose issues (top right of Admin)
 - Improved **Spectrogram** to include bands/bookmarks (can toggle) and day/night markers
 
 ### Bug Fixes

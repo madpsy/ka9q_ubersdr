@@ -763,13 +763,17 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				validHosts[strings.ToLower(globalConfig.InstanceReporting.Instance.Host)] = true
 			}
 
-			// Always include the support tunnel hostname: support-<UUID>.<TunnelServerHost>
+			// Always include the support tunnel hostname: support-<short-ID>.<TunnelServerHost>
+			// The short ID is the last segment of the instance UUID (e.g. for UUID
+			// "dfcfaf11-d442-4dec-bd7e-1b7652857267" the short ID is "1b7652857267").
 			// This allows the support tunnel (which uses a dynamically-assigned subdomain)
 			// to access admin endpoints without being blocked by CSRF protection.
 			if globalConfig != nil &&
 				globalConfig.InstanceReporting.InstanceUUID != "" &&
 				globalConfig.InstanceReporting.TunnelServerHost != "" {
-				supportHost := "support-" + globalConfig.InstanceReporting.InstanceUUID + "." + globalConfig.InstanceReporting.TunnelServerHost
+				uuidParts := strings.Split(globalConfig.InstanceReporting.InstanceUUID, "-")
+				shortID := uuidParts[len(uuidParts)-1]
+				supportHost := "support-" + shortID + "." + globalConfig.InstanceReporting.TunnelServerHost
 				validHosts[strings.ToLower(supportHost)] = true
 			}
 

@@ -11,9 +11,8 @@
 #   ./start-support.sh
 #
 # To stop the session:
-#   docker stop tunnel-support-client
-#
-# The container is removed automatically when it stops (--rm).
+#   Press Ctrl-C inside the tmux session, or reattach via
+#   Admin → Terminal → Support Session and press Ctrl-C there.
 
 set -euo pipefail
 
@@ -35,9 +34,11 @@ echo "║    • The admin panel (full administrative control)                  
 echo "║    • A terminal / shell on this machine                              ║"
 echo "║    • All data visible within the UberSDR stack                       ║"
 echo "║                                                                      ║"
-echo "║  THE TUNNEL IS ACTIVE ONLY WHILE THIS SCRIPT IS RUNNING.             ║"
-echo "║  Closing this terminal window or pressing Ctrl-C will                ║"
-echo "║  IMMEDIATELY terminate the tunnel and revoke all remote access.      ║"
+echo "║  THE TUNNEL RUNS IN A TMUX SESSION NAMED 'Support Session'.          ║"
+echo "║  Press Ctrl-C inside the session to stop the tunnel.                 ║"
+echo "║  Closing this window DETACHES but does NOT stop the tunnel.          ║"
+echo "║  To stop it later: reattach via Admin → Terminal → Support Session   ║"
+echo "║  and press Ctrl-C there.                                             ║"
 echo "║                                                                      ║"
 echo "║  Only proceed if you have requested support and trust the            ║"
 echo "║  recipient of the tunnel credentials.                                ║"
@@ -50,7 +51,7 @@ echo ""
 
 case "$CONFIRM" in
     [yY][eE][sS]|[yY])
-        echo "  ✅ Proceeding — remember to close this window when support is complete."
+        echo "  ✅ Proceeding — press Ctrl-C inside the session when support is complete."
         echo ""
         ;;
     *)
@@ -64,6 +65,7 @@ IMAGE="madpsy/tunnel-support-client:latest"
 CONTAINER_NAME="tunnel-support-client"
 CONFIG_VOLUME="ubersdr_ubersdr-config"
 NETWORK="ubersdr_sdr-network"
+SESSION_NAME="Support Session"
 
 # ---------------------------------------------------------------------------
 # Sanity checks
@@ -71,6 +73,12 @@ NETWORK="ubersdr_sdr-network"
 
 if ! command -v docker &>/dev/null; then
     echo "❌ Docker is not installed or not in PATH." >&2
+    exit 1
+fi
+
+if ! command -v tmux &>/dev/null; then
+    echo "❌ tmux is not installed. Please install it first:" >&2
+    echo "   sudo apt install -y tmux" >&2
     exit 1
 fi
 
@@ -87,7 +95,18 @@ if ! docker network inspect "$NETWORK" &>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stop any existing support session
+# Guard against a duplicate tmux session
+# ---------------------------------------------------------------------------
+
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    echo "⚠️  A 'Support Session' tmux session is already running."
+    echo "   Attach to it with: tmux attach -t 'Support Session'"
+    echo "   Or kill it first:  tmux kill-session -t 'Support Session'"
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Stop any existing support container
 # ---------------------------------------------------------------------------
 
 if docker inspect "$CONTAINER_NAME" &>/dev/null; then
@@ -104,11 +123,11 @@ echo "🔄 Pulling latest support client image..."
 docker pull "$IMAGE"
 
 # ---------------------------------------------------------------------------
-# Start support session
+# Start support session inside tmux
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "🚀 Starting support session..."
+echo "🚀 Starting support session in tmux session 'Support Session'..."
 echo "   Image   : $IMAGE"
 echo "   Network : $NETWORK"
 echo "   Config  : volume $CONFIG_VOLUME → /app/config (read-only)"
@@ -116,16 +135,32 @@ echo ""
 echo "   The support client will read your callsign and instance UUID"
 echo "   from /app/config/config.yaml and connect automatically."
 echo ""
-echo "   To stop the session:  docker stop $CONTAINER_NAME"
+echo "   Press Ctrl-C inside the session to stop the tunnel."
+echo "   Closing this window detaches but does NOT stop the tunnel."
+echo "   To stop it later: reattach via Admin → Terminal → Support Session"
+echo "   and press Ctrl-C there."
 echo ""
 
-docker run \
-    --rm \
-    --name "$CONTAINER_NAME" \
-    --network "$NETWORK" \
-    --volume "${CONFIG_VOLUME}:/app/config:ro" \
-    --env "TZ=${TZ:-UTC}" \
-    --log-driver json-file \
-    --log-opt max-size=10m \
-    --log-opt max-file=3 \
-    "$IMAGE"
+tmux new-session -d -s "$SESSION_NAME" -n 'Support Session' \
+    "docker run \
+        --rm \
+        --name '$CONTAINER_NAME' \
+        --network '$NETWORK' \
+        --volume '${CONFIG_VOLUME}:/app/config:ro' \
+        --env 'TZ=${TZ:-UTC}' \
+        --log-driver json-file \
+        --log-opt max-size=10m \
+        --log-opt max-file=3 \
+        '$IMAGE'; \
+     echo; \
+     echo; \
+     echo '=== Support tunnel has ended ==='; \
+     echo; \
+     echo 'Press Enter to close this session...'; \
+     read"
+
+echo "✅ Tmux session 'Support Session' created and tunnel started!"
+echo ""
+echo "Attaching to session now..."
+sleep 1
+tmux attach -t "$SESSION_NAME"

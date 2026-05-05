@@ -746,7 +746,7 @@ delete_addon_menu() {
     fi
 
     echo "Deleting $addon_dir ..."
-    rm -rf "$addon_dir"
+    sudo rm -rf "$addon_dir"
     echo "  Directory removed."
 
     # Remove the addon proxy from UberSDR

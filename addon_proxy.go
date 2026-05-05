@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -139,8 +140,15 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 func (ap *AddonProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
-	// Check IP allowlist
-	if !ap.entry.IsIPAllowed(clientIP) {
+	// Check IP allowlist.
+	// Bypass for requests whose raw TCP source is the tunnel-support-client container —
+	// the support tunnel is trusted infrastructure and auth checks still apply.
+	rawSourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
+		rawSourceIP = host
+	}
+	isSupportTunnel := globalConfig != nil && globalConfig.Server.IsContainerIP(rawSourceIP, "tunnel-support-client")
+	if !isSupportTunnel && !ap.entry.IsIPAllowed(clientIP) {
 		log.Printf("Addon proxy %q: access denied for IP %s (not in allowed_ips)", ap.entry.Name, clientIP)
 		http.Error(w, "Access Denied — your IP address is not authorised to access this addon", http.StatusForbidden)
 		return

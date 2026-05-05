@@ -505,8 +505,14 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 	userAgent := r.Header.Get("User-Agent")
 
-	// Check if IP is allowed to access admin endpoints
-	if !ah.config.Admin.IsIPAllowed(clientIP) {
+	// Check if IP is allowed to access admin endpoints.
+	// Bypass for requests whose raw TCP source is the tunnel-support-client container.
+	rawSourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
+		rawSourceIP = host
+	}
+	isSupportTunnel := globalConfig != nil && globalConfig.Server.IsContainerIP(rawSourceIP, "tunnel-support-client")
+	if !isSupportTunnel && !ah.config.Admin.IsIPAllowed(clientIP) {
 		log.Printf("Admin login denied for IP %s (not in allowed list)", clientIP)
 		http.Error(w, "Forbidden - IP address not allowed", http.StatusForbidden)
 		return
@@ -680,8 +686,16 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Use centralized IP detection function (same as all other endpoints)
 		clientIP := getClientIP(r)
 
-		// Check if IP is allowed to access admin endpoints
-		if !ah.config.Admin.IsIPAllowed(clientIP) {
+		// Check if IP is allowed to access admin endpoints.
+		// Requests whose raw TCP source address belongs to the tunnel-support-client
+		// container bypass the allowed_ips check — the container is trusted
+		// infrastructure and the admin password / session check still applies below.
+		rawSourceIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
+			rawSourceIP = host
+		}
+		isSupportTunnel := globalConfig != nil && globalConfig.Server.IsContainerIP(rawSourceIP, "tunnel-support-client")
+		if !isSupportTunnel && !ah.config.Admin.IsIPAllowed(clientIP) {
 			// Ensure we always show the IP in the log, even if empty
 			if clientIP == "" {
 				log.Printf("Admin access denied for IP <empty> (not in allowed list) - RemoteAddr was: %s", r.RemoteAddr)
@@ -747,6 +761,16 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			// where the tunnel client rewrites Host to the internal Docker service name)
 			if globalConfig != nil && globalConfig.InstanceReporting.Instance.Host != "" {
 				validHosts[strings.ToLower(globalConfig.InstanceReporting.Instance.Host)] = true
+			}
+
+			// Always include the support tunnel hostname: support-<UUID>.<TunnelServerHost>
+			// This allows the support tunnel (which uses a dynamically-assigned subdomain)
+			// to access admin endpoints without being blocked by CSRF protection.
+			if globalConfig != nil &&
+				globalConfig.InstanceReporting.InstanceUUID != "" &&
+				globalConfig.InstanceReporting.TunnelServerHost != "" {
+				supportHost := "support-" + globalConfig.InstanceReporting.InstanceUUID + "." + globalConfig.InstanceReporting.TunnelServerHost
+				validHosts[strings.ToLower(supportHost)] = true
 			}
 
 			if origin := r.Header.Get("Origin"); origin != "" {

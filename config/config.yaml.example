@@ -210,6 +210,7 @@ server:
   # by 'ping <container-name>'. Silent on success; warns only on failure.
   # Defaults (used when this key is absent): tunnel-client, caddy
   trusted_containers:
+    - "tunnel-support-client"
     - "tunnel-client"
     - "caddy"
 

@@ -1207,15 +1207,37 @@ func (sc *ServerConfig) IsTrustedProxy(ipStr string) bool {
 	return false
 }
 
+// IsContainerIP checks if an IP address belongs to a specific named trusted container.
+// Uses the containerNameByIP map populated by the DNS refresh loop.
+func (sc *ServerConfig) IsContainerIP(ipStr, containerName string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	sc.containerProxyMu.RLock()
+	defer sc.containerProxyMu.RUnlock()
+	return sc.containerNameByIP[ip.String()] == containerName
+}
+
 // resolveContainerIPs performs a DNS lookup for each name in TrustedContainers,
 // updates containerProxyIPs under the write lock, and logs whenever the resolved
 // set changes (including the initial resolution from empty).
-// Defaults of "tunnel-client" and "caddy" are used when TrustedContainers is empty.
+// The containers "tunnel-support-client", "tunnel-client", and "caddy" are always
+// trusted regardless of what is in TrustedContainers; any user-configured names
+// are merged in (duplicates are deduplicated).
 // Logs a warning on resolution failure.
 func (sc *ServerConfig) resolveContainerIPs() {
-	names := sc.TrustedContainers
-	if len(names) == 0 {
-		names = []string{"tunnel-client", "caddy"}
+	// Always-trusted built-in container names.
+	builtIn := []string{"tunnel-support-client", "tunnel-client", "caddy"}
+
+	// Merge built-ins with user-configured names, deduplicating.
+	seen := make(map[string]bool, len(builtIn)+len(sc.TrustedContainers))
+	names := make([]string, 0, len(builtIn)+len(sc.TrustedContainers))
+	for _, n := range append(builtIn, sc.TrustedContainers...) {
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
 	}
 
 	// Snapshot the current name→IP mapping so we can fall back on failure.

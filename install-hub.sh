@@ -583,6 +583,10 @@ echo "Fetching manage_addons.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/manage_addons.sh -o "$ACTUAL_HOME/ubersdr/manage_addons.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/manage_addons.sh"
 
+echo "Fetching start-support.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/start-support.sh -o "$ACTUAL_HOME/ubersdr/start-support.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/start-support.sh"
+
 echo "Fetching addons.json..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/addons.json -o "$ACTUAL_HOME/ubersdr/addons.json"
 

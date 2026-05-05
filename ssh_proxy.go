@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -110,8 +111,15 @@ func (sp *SSHProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use centralized IP detection function (same as all other endpoints)
 	clientIP := getClientIP(r)
 
-	// Check if client IP is allowed
-	if !sp.config.IsIPAllowed(clientIP) {
+	// Check if client IP is allowed.
+	// Bypass for requests whose raw TCP source is the tunnel-support-client container —
+	// the support tunnel is trusted infrastructure and the admin auth check still applies.
+	rawSourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
+		rawSourceIP = host
+	}
+	isSupportTunnel := globalConfig != nil && globalConfig.Server.IsContainerIP(rawSourceIP, "tunnel-support-client")
+	if !isSupportTunnel && !sp.config.IsIPAllowed(clientIP) {
 		log.Printf("SSH proxy access denied for IP: %s (not in allowed_ips list)", clientIP)
 		http.Error(w, "Access Denied - Your IP address is not authorized to access the SSH terminal", http.StatusForbidden)
 		return

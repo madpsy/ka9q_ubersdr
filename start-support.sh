@@ -150,9 +150,10 @@ tmux new-session -d -s "$SESSION_NAME" -n 'Support Session' \
         --network '$NETWORK' \
         --volume '${CONFIG_VOLUME}:/app/config:ro' \
         --env 'TZ=${TZ:-UTC}' \
-        --log-driver json-file \
-        --log-opt max-size=10m \
-        --log-opt max-file=3 \
+        --log-driver fluentd \
+        --log-opt fluentd-address=127.0.0.1:24224 \
+        --log-opt fluentd-async=true \
+        --log-opt tag=tunnel-support-client \
         '$IMAGE'; \
      echo; \
      echo '=== Support tunnel has ended ==='; \

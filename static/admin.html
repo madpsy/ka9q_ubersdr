@@ -567,6 +567,7 @@
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
                         🔓 Enable Public Access
                     </button>
+                    <button id="supportSessionBtn" class="btn" onclick="openStartSupport()" style="display: none; background: #dc3545; color: white; font-weight: bold;" title="Start a remote support session">🆘 Support</button>
                     <div id="terminalButtonGroup" style="display: none; position: relative; align-items: stretch;">
                         <button class="btn" id="terminalButton" onclick="openTerminal()" style="border-radius: 5px 0 0 5px; border-right: none; margin: 0;">🖥️ Terminal</button>
                         <button class="btn" id="terminalDropdownBtn" onclick="toggleTerminalDropdown()" style="border-radius: 0 5px 5px 0; padding: 8px 10px; min-width: auto; margin: 0; height: auto;">▼</button>
@@ -3062,12 +3063,11 @@
         // Update terminal button visibility based on SSH proxy config
         function updateTerminalButtonVisibility() {
             const terminalButtonGroup = document.getElementById('terminalButtonGroup');
-            if (terminalButtonGroup && currentConfig.ssh_proxy) {
-                if (currentConfig.ssh_proxy.enabled === true) {
-                    terminalButtonGroup.style.display = 'flex';
-                } else {
-                    terminalButtonGroup.style.display = 'none';
-                }
+            const supportSessionBtn = document.getElementById('supportSessionBtn');
+            if (currentConfig.ssh_proxy) {
+                const enabled = currentConfig.ssh_proxy.enabled === true;
+                if (terminalButtonGroup) terminalButtonGroup.style.display = enabled ? 'flex' : 'none';
+                if (supportSessionBtn) supportSessionBtn.style.display = enabled ? 'inline-block' : 'none';
             }
         }
 
@@ -3420,6 +3420,20 @@
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'manage_addons_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open Start Support script in popup terminal window
+        function openStartSupport() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/start-support.sh';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'start_support_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 

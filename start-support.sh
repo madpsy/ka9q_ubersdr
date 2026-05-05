@@ -100,9 +100,11 @@ fi
 
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "⚠️  A 'Support Session' tmux session is already running."
-    echo "   Attach to it with: tmux attach -t 'Support Session'"
-    echo "   Or kill it first:  tmux kill-session -t 'Support Session'"
-    exit 1
+    echo "   Reattaching now..."
+    echo ""
+    sleep 1
+    tmux attach -t "$SESSION_NAME"
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -153,11 +155,8 @@ tmux new-session -d -s "$SESSION_NAME" -n 'Support Session' \
         --log-opt max-file=3 \
         '$IMAGE'; \
      echo; \
-     echo; \
      echo '=== Support tunnel has ended ==='; \
-     echo; \
-     echo 'Press Enter to close this session...'; \
-     read"
+     echo"
 
 echo "✅ Tmux session 'Support Session' created and tunnel started!"
 echo ""

@@ -1732,8 +1732,8 @@ func main() {
 	flrigStatusLabel := widget.NewLabel("Disabled")
 	flrigStatusLabel.Wrapping = fyne.TextWrapWord
 
-	// PTT indicator label.
-	flrigPTTLabel := widget.NewLabel("RX")
+	// PTT indicator badge — green "RX" / red "TX".
+	flrigPTTBadge := NewPTTBadge()
 
 	// Restore saved flrig preferences.
 	flrigEnabledSaved := prefs.BoolWithFallback(prefKeyFlrigEnabled, false)
@@ -1802,14 +1802,14 @@ func main() {
 
 	flrigSync.OnPTT = func(active bool) {
 		if active {
-			flrigPTTLabel.SetText("TX")
+			flrigPTTBadge.SetTX(true)
 			// Mute the SDR during TX if PTT-mute is enabled.
 			if flrigPTTMuteCheck.Checked {
 				volumeBeforePTT = volumeSlider.Value
 				client.SetVolume(0)
 			}
 		} else {
-			flrigPTTLabel.SetText("RX")
+			flrigPTTBadge.SetTX(false)
 			// Restore volume when returning to RX.
 			if flrigPTTMuteCheck.Checked {
 				client.SetVolume(volumeBeforePTT / 100.0)
@@ -1894,9 +1894,10 @@ func main() {
 
 	flrigApplyBtn := widget.NewButton("Apply", func() { applyFlrigConfig() })
 
-	flrigPTTRow := container.NewHBox(flrigDot, layout.NewSpacer(), widget.NewLabel("PTT:"), flrigPTTLabel)
-	flrigStatusRow := container.NewBorder(nil, nil, nil, nil,
-		container.NewVBox(flrigPTTRow, flrigStatusLabel),
+	flrigStatusRow := container.NewBorder(nil, nil,
+		flrigDot,
+		container.NewHBox(widget.NewLabel("PTT:"), flrigPTTBadge),
+		flrigStatusLabel,
 	)
 
 	flrigBox := container.NewVBox(

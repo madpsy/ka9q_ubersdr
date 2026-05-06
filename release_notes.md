@@ -1,13 +1,13 @@
-# Next Release
+# Current Stable - 0.1.48
+
+## Next Release
 
 ## Version 0.1.49 - In Progress
 
 ### New Features
 - Added **Session Log Retention** to clean up old session logs. Default 30 days, set in Admin -> Server
 
-# 5 May 2026
-
-## Version 0.1.48 - Latest Release
+## Version 0.1.48 - Latest Stable
 
 ### New Features
 - Added **Add-on Manager** in the Admin Addon tab to make it easier to install/manage add-ons

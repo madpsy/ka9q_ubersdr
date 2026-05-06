@@ -1,6 +1,6 @@
 # Current Stable - 0.1.48
 
-## Version 0.1.49 - Next Release
+## Version 0.1.49 - Upcoming Release
 
 ### New Features
 - Added **Session Log Retention** to clean up old session logs. Default 30 days, set in Admin -> Server

@@ -1,4 +1,4 @@
-# Current Stable - 0.1.48 - 5th May 2026
+# Latest Stable - 0.1.48 - 5th May 2026
 
 ## Version 0.1.49 - Upcoming Release
 

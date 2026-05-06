@@ -1240,7 +1240,8 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 
 }
 
-// GetVoiceActivityForBand is a helper function to get voice activity programmatically
+// GetVoiceActivityForBand is a helper function to get voice activity programmatically.
+// Uses the same cache-backed path as handleVoiceActivity so results are consistent.
 func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params DetectionParams) ([]VoiceActivity, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not available")
@@ -1260,12 +1261,28 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 	}
 
 	// Use multi-frame analysis for proper temporal detection
-	activities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
+	newActivities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
 
-	// Filter by SSB start frequency for applicable bands
+	// Filter by SSB start frequency and exclusion ranges before merging into cache
+	newActivities = filterActivitiesBySSBStart(newActivities, band)
+	newActivities = filterActivitiesByExclusionRange(newActivities, band)
+
+	// Merge with cache for stability (same as single-band handler)
+	activities := voiceActivityCache.mergeWithCache(band, newActivities)
+
+	// Apply filters to cached results as well
 	activities = filterActivitiesBySSBStart(activities, band)
+	activities = filterActivitiesByExclusionRange(activities, band)
 
-	return activities, nil
+	// Apply minimum confidence filter
+	filtered := []VoiceActivity{}
+	for _, activity := range activities {
+		if activity.Confidence >= params.MinConfidence {
+			filtered = append(filtered, activity)
+		}
+	}
+
+	return filtered, nil
 }
 
 // GetAllBandsVoiceActivity gets voice activity for all configured bands

@@ -133,44 +133,45 @@ type RadiodConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen                        string               `yaml:"listen"`
-	MaxSessions                   int                  `yaml:"max_sessions"`
-	MaxSessionsIP                 int                  `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout                int                  `yaml:"session_timeout"`
-	MaxSessionTime                int                  `yaml:"max_session_time"`         // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime                   int                  `yaml:"max_idle_time"`            // Maximum time a user can be idle in seconds (0 = unlimited)
-	CmdRateLimit                  int                  `yaml:"cmd_rate_limit"`           // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit                 int                  `yaml:"conn_rate_limit"`          // WebSocket connections per second per IP (0 = unlimited)
-	SessionsPerMinute             int                  `yaml:"sessions_per_minute"`      // /connection endpoint requests per minute per IP (0 = unlimited)
-	EnforceSessionIPMatch         bool                 `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
-	TimeoutBypassIPs              []string             `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
-	TrustedProxyIPs               []string             `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
-	TrustedContainers             []string             `yaml:"trusted_containers"`       // Docker container names to resolve and trust as proxies
-	BypassPassword                string               `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
-	PublicIQModes                 map[string]bool      `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
-	EnableCORS                    bool                 `yaml:"enable_cors"`
-	EnableKiwiSDR                 bool                 `yaml:"enable_kiwisdr"`                    // Enable KiwiSDR protocol compatibility server (default: false)
-	KiwiSDRPort                   int                  `yaml:"kiwisdr_port"`                      // Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
-	KiwiSDRPublicEmail            string               `yaml:"kiwisdr_public_email"`              // Public email for KiwiSDR status endpoint (default: "admin@example.com")
-	KiwiSDRSmeterOffset           float32              `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
-	EnableWebSDR                  bool                 `yaml:"enable_websdr"`                     // Enable WebSDR protocol compatibility server (default: false)
-	WebSDRWaterfallCalibration    float32              `yaml:"websdr_waterfall_calibration"`      // Waterfall dBFS→pixel calibration offset (default: -13.0)
-	WebSDREmail                   string               `yaml:"websdr_email"`                      // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
-	KiwiSDRRegisterKiwiSDRCom     bool                 `yaml:"kiwisdr_register_kiwisdrcom"`       // Register with rx.kiwisdr.com public directory (default: false)
-	KiwiSDRHost                   string               `yaml:"kiwisdr_host"`                      // Public hostname advertised to rx.kiwisdr.com (required for registration)
-	LogFileEnabled                bool                 `yaml:"logfile_enabled"`                   // Enable HTTP request logging (default: false)
-	LogFile                       string               `yaml:"logfile"`                           // HTTP request log file path
-	SessionActivityLogEnabled     bool                 `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk
-	SessionActivityLogDir         string               `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)
-	SessionActivityLogIntervalSec int                  `yaml:"session_activity_log_interval_sec"` // Interval for periodic snapshots in seconds (default: 300)
-	CustomHeadHTML                string               `yaml:"custom_head_html"`                  // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
-	CustomAdsTxt                  string               `yaml:"custom_ads_txt"`                    // Custom content for /ads.txt endpoint (for Google AdSense verification)
-	timeoutBypassNets             []*net.IPNet         // Parsed CIDR networks (internal use)
-	trustedProxyNets              []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
-	containerProxyIPs             []string             // Dynamically resolved container IPs (internal use)
-	containerNameByIP             map[string]string    // Reverse map: IP -> container name (internal use)
-	containerProxyMu              sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
-	containerResolveErrLastLog    map[string]time.Time // Rate-limit resolve error logging per container name
+	Listen                          string               `yaml:"listen"`
+	MaxSessions                     int                  `yaml:"max_sessions"`
+	MaxSessionsIP                   int                  `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout                  int                  `yaml:"session_timeout"`
+	MaxSessionTime                  int                  `yaml:"max_session_time"`         // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime                     int                  `yaml:"max_idle_time"`            // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit                    int                  `yaml:"cmd_rate_limit"`           // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit                   int                  `yaml:"conn_rate_limit"`          // WebSocket connections per second per IP (0 = unlimited)
+	SessionsPerMinute               int                  `yaml:"sessions_per_minute"`      // /connection endpoint requests per minute per IP (0 = unlimited)
+	EnforceSessionIPMatch           bool                 `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
+	TimeoutBypassIPs                []string             `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
+	TrustedProxyIPs                 []string             `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
+	TrustedContainers               []string             `yaml:"trusted_containers"`       // Docker container names to resolve and trust as proxies
+	BypassPassword                  string               `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
+	PublicIQModes                   map[string]bool      `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
+	EnableCORS                      bool                 `yaml:"enable_cors"`
+	EnableKiwiSDR                   bool                 `yaml:"enable_kiwisdr"`                      // Enable KiwiSDR protocol compatibility server (default: false)
+	KiwiSDRPort                     int                  `yaml:"kiwisdr_port"`                        // Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
+	KiwiSDRPublicEmail              string               `yaml:"kiwisdr_public_email"`                // Public email for KiwiSDR status endpoint (default: "admin@example.com")
+	KiwiSDRSmeterOffset             float32              `yaml:"kiwisdr_smeter_offset"`               // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	EnableWebSDR                    bool                 `yaml:"enable_websdr"`                       // Enable WebSDR protocol compatibility server (default: false)
+	WebSDRWaterfallCalibration      float32              `yaml:"websdr_waterfall_calibration"`        // Waterfall dBFS→pixel calibration offset (default: -13.0)
+	WebSDREmail                     string               `yaml:"websdr_email"`                        // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
+	KiwiSDRRegisterKiwiSDRCom       bool                 `yaml:"kiwisdr_register_kiwisdrcom"`         // Register with rx.kiwisdr.com public directory (default: false)
+	KiwiSDRHost                     string               `yaml:"kiwisdr_host"`                        // Public hostname advertised to rx.kiwisdr.com (required for registration)
+	LogFileEnabled                  bool                 `yaml:"logfile_enabled"`                     // Enable HTTP request logging (default: false)
+	LogFile                         string               `yaml:"logfile"`                             // HTTP request log file path
+	SessionActivityLogEnabled       bool                 `yaml:"session_activity_log_enabled"`        // Enable session activity logging to disk
+	SessionActivityLogDir           string               `yaml:"session_activity_log_dir"`            // Directory for session activity logs (default: data/session_activity)
+	SessionActivityLogIntervalSec   int                  `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
+	SessionActivityLogRetentionDays int                  `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
+	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
+	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
+	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
+	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
+	containerProxyIPs               []string             // Dynamically resolved container IPs (internal use)
+	containerNameByIP               map[string]string    // Reverse map: IP -> container name (internal use)
+	containerProxyMu                sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
+	containerResolveErrLastLog      map[string]time.Time // Rate-limit resolve error logging per container name
 }
 
 // AudioConfig contains audio processing settings
@@ -620,6 +621,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Server.SessionActivityLogIntervalSec == 0 {
 		config.Server.SessionActivityLogIntervalSec = 300 // Default 5 minutes
+	}
+	if config.Server.SessionActivityLogRetentionDays == 0 {
+		config.Server.SessionActivityLogRetentionDays = 30 // Default 30 days
 	}
 	// KiwiSDR compatibility defaults
 	if config.Server.KiwiSDRPort == 0 {

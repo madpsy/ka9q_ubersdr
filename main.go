@@ -584,6 +584,7 @@ func main() {
 		config.Server.SessionActivityLogEnabled,
 		config.Server.SessionActivityLogDir,
 		config.Server.SessionActivityLogIntervalSec,
+		config.Server.SessionActivityLogRetentionDays,
 		sessions,
 	)
 	sessions.SetActivityLogger(sessionActivityLogger)

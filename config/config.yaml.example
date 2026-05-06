@@ -399,6 +399,12 @@ server:
   # Recommended: 300 (5 minutes) for good time resolution
   session_activity_log_interval_sec: 300
 
+  # Number of days to retain session activity log files (default: 30)
+  # Log files older than this many days are automatically deleted at startup
+  # and once per day at midnight UTC.
+  # Set to 0 to keep logs forever (no automatic cleanup).
+  session_activity_log_retention_days: 30
+
   # Custom HTML injection for analytics, ads, and meta tags
   # This HTML will be inserted into the <head> section of index.html
   # Supports Google Analytics, Google Ads, meta tags, and other tracking scripts

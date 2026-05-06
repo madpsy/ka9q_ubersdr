@@ -67,20 +67,21 @@ type logEvent struct {
 }
 
 type SessionActivityLogger struct {
-	enabled     bool
-	dataDir     string
-	logInterval time.Duration
-	sessionMgr  *SessionManager
-	mu          sync.Mutex
-	currentFile *os.File
-	currentDate string
-	stopChan    chan struct{}
-	logChan     chan logEvent // Channel for async logging
-	wg          sync.WaitGroup
+	enabled       bool
+	dataDir       string
+	logInterval   time.Duration
+	retentionDays int // Number of days to retain log files (0 = keep forever)
+	sessionMgr    *SessionManager
+	mu            sync.Mutex
+	currentFile   *os.File
+	currentDate   string
+	stopChan      chan struct{}
+	logChan       chan logEvent // Channel for async logging
+	wg            sync.WaitGroup
 }
 
 // NewSessionActivityLogger creates a new session activity logger
-func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int, sessionMgr *SessionManager) *SessionActivityLogger {
+func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int, retentionDays int, sessionMgr *SessionManager) *SessionActivityLogger {
 	if !enabled {
 		return &SessionActivityLogger{enabled: false}
 	}
@@ -94,12 +95,13 @@ func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int,
 	}
 
 	logger := &SessionActivityLogger{
-		enabled:     true,
-		dataDir:     dataDir,
-		logInterval: time.Duration(logIntervalSecs) * time.Second,
-		sessionMgr:  sessionMgr,
-		stopChan:    make(chan struct{}),
-		logChan:     make(chan logEvent, 100), // Buffered channel for async logging
+		enabled:       true,
+		dataDir:       dataDir,
+		logInterval:   time.Duration(logIntervalSecs) * time.Second,
+		retentionDays: retentionDays,
+		sessionMgr:    sessionMgr,
+		stopChan:      make(chan struct{}),
+		logChan:       make(chan logEvent, 100), // Buffered channel for async logging
 	}
 
 	// Start async logging goroutine
@@ -110,7 +112,15 @@ func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int,
 	logger.wg.Add(1)
 	go logger.periodicSnapshotLoop()
 
-	log.Printf("Session activity logger started: dir=%s, interval=%v", dataDir, logger.logInterval)
+	// Start daily cleanup goroutine (runs at startup then once per day at midnight UTC)
+	logger.wg.Add(1)
+	go logger.cleanupLoop()
+
+	retentionDesc := "forever"
+	if retentionDays > 0 {
+		retentionDesc = fmt.Sprintf("%d days", retentionDays)
+	}
+	log.Printf("Session activity logger started: dir=%s, interval=%v, retention=%s", dataDir, logger.logInterval, retentionDesc)
 
 	return logger
 }
@@ -503,6 +513,124 @@ func (sal *SessionActivityLogger) getOrCreateFile() (*os.File, error) {
 	sal.currentDate = dateStr
 
 	return file, nil
+}
+
+// cleanupLoop runs cleanupOldFiles once at startup, then once per day at midnight UTC.
+func (sal *SessionActivityLogger) cleanupLoop() {
+	defer sal.wg.Done()
+
+	// Run immediately at startup so files aged out while the process was down are removed.
+	if err := sal.cleanupOldFiles(); err != nil {
+		log.Printf("Session activity log cleanup error: %v", err)
+	}
+
+	for {
+		// Sleep until next midnight UTC.
+		now := time.Now().UTC()
+		next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+		timer := time.NewTimer(time.Until(next))
+
+		select {
+		case <-timer.C:
+			if err := sal.cleanupOldFiles(); err != nil {
+				log.Printf("Session activity log cleanup error: %v", err)
+			}
+		case <-sal.stopChan:
+			timer.Stop()
+			return
+		}
+	}
+}
+
+// cleanupOldFiles removes YYYY/MM/DD directories older than retentionDays.
+// Empty parent MM/ and YYYY/ directories are pruned afterwards.
+func (sal *SessionActivityLogger) cleanupOldFiles() error {
+	if sal.retentionDays <= 0 {
+		return nil // 0 = keep forever
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -sal.retentionDays)
+
+	// Walk the top-level directory looking for YYYY sub-directories.
+	yearEntries, err := os.ReadDir(sal.dataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Nothing to clean up yet
+		}
+		return fmt.Errorf("cleanupOldFiles: reading dataDir %s: %w", sal.dataDir, err)
+	}
+
+	removedDirs := 0
+
+	for _, yearEntry := range yearEntries {
+		if !yearEntry.IsDir() {
+			continue
+		}
+		yearPath := filepath.Join(sal.dataDir, yearEntry.Name())
+
+		monthEntries, err := os.ReadDir(yearPath)
+		if err != nil {
+			log.Printf("Session activity log cleanup: cannot read year dir %s: %v", yearPath, err)
+			continue
+		}
+
+		for _, monthEntry := range monthEntries {
+			if !monthEntry.IsDir() {
+				continue
+			}
+			monthPath := filepath.Join(yearPath, monthEntry.Name())
+
+			dayEntries, err := os.ReadDir(monthPath)
+			if err != nil {
+				log.Printf("Session activity log cleanup: cannot read month dir %s: %v", monthPath, err)
+				continue
+			}
+
+			for _, dayEntry := range dayEntries {
+				if !dayEntry.IsDir() {
+					continue
+				}
+				// Parse the date from YYYY/MM/DD path components.
+				dateStr := fmt.Sprintf("%s-%s-%s", yearEntry.Name(), monthEntry.Name(), dayEntry.Name())
+				t, err := time.Parse("2006-01-02", dateStr)
+				if err != nil {
+					// Not a date directory — skip.
+					continue
+				}
+
+				if t.Before(cutoff) {
+					dayPath := filepath.Join(monthPath, dayEntry.Name())
+					if err := os.RemoveAll(dayPath); err != nil {
+						log.Printf("Session activity log cleanup: failed to remove %s: %v", dayPath, err)
+					} else {
+						removedDirs++
+					}
+				}
+			}
+
+			// Remove the month directory if it is now empty.
+			remaining, _ := os.ReadDir(monthPath)
+			if len(remaining) == 0 {
+				if err := os.Remove(monthPath); err != nil && !os.IsNotExist(err) {
+					log.Printf("Session activity log cleanup: failed to remove empty month dir %s: %v", monthPath, err)
+				}
+			}
+		}
+
+		// Remove the year directory if it is now empty.
+		remaining, _ := os.ReadDir(yearPath)
+		if len(remaining) == 0 {
+			if err := os.Remove(yearPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("Session activity log cleanup: failed to remove empty year dir %s: %v", yearPath, err)
+			}
+		}
+	}
+
+	if removedDirs > 0 {
+		log.Printf("Session activity log cleanup: removed %d old day director(ies) (retention: %d days)", removedDirs, sal.retentionDays)
+	}
+
+	return nil
 }
 
 // Stop stops the session activity logger

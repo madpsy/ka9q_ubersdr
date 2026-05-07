@@ -5,6 +5,9 @@
 ### New Features
 - Added **Session Log Retention** to clean up old session logs. Default 30 days, set in Admin -> Server
 
+### Bug Fixes
+- Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints
+
 ## Version 0.1.48 - Latest Stable
 
 ### New Features

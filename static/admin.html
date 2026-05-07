@@ -9410,6 +9410,16 @@ function resetStationIdColor() {
                             <div style="font-size:12px; color:#555; margin-top:4px;">Total spots</div>
                             <div style="font-size:12px; color:#555;">Date: ${statsDate}</div>
                         </div>`;
+                    if (data.stats_rank && data.stats_total_skimmers) {
+                        const pct = ((data.stats_rank / data.stats_total_skimmers) * 100).toFixed(0);
+                        html += `
+                        <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:160px;">
+                            <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Rank</div>
+                            <div style="font-size:20px; font-weight:bold; color:#283593;">#${data.stats_rank.toLocaleString()}</div>
+                            <div style="font-size:12px; color:#555; margin-top:4px;">of ${data.stats_total_skimmers.toLocaleString()} skimmers</div>
+                            <div style="font-size:12px; color:#555;">Top ${pct}%</div>
+                        </div>`;
+                    }
                 } else {
                     html += `<div style="background:#fff; border:1px solid #e0e0e0; border-radius:4px; padding:10px 14px; color:#999; font-size:13px;">No statistics data</div>`;
                 }

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -516,6 +517,10 @@ type RBNCallsignResponse struct {
 	// Statistics data (nil if not present)
 	Statistics *RBNStatisticsEntry `json:"statistics,omitempty"`
 
+	// Rank of this callsign among all skimmers (1-based, 0 = not ranked)
+	StatsRank          int `json:"stats_rank,omitempty"`
+	StatsTotalSkimmers int `json:"stats_total_skimmers,omitempty"`
+
 	// Metadata
 	SkewUpdatedAt   *time.Time `json:"skew_updated_at,omitempty"`
 	StatsUpdatedAt  *time.Time `json:"stats_updated_at,omitempty"`
@@ -593,6 +598,32 @@ func (ah *AdminHandler) HandleRBNData(w http.ResponseWriter, r *http.Request) {
 		if entry, ok := ah.rbnStore.statsData[callsign]; ok {
 			e := entry
 			resp.Statistics = &e
+		}
+
+		// Compute rank: sort all stats entries by spot_count descending, find position
+		if len(ah.rbnStore.statsData) > 0 {
+			type rankEntry struct {
+				callsign  string
+				spotCount int
+			}
+			all := make([]rankEntry, 0, len(ah.rbnStore.statsData))
+			for cs, e := range ah.rbnStore.statsData {
+				all = append(all, rankEntry{cs, e.SpotCount})
+			}
+			// Sort descending by spot count, then ascending by callsign for stable ordering
+			sort.Slice(all, func(i, j int) bool {
+				if all[i].spotCount != all[j].spotCount {
+					return all[i].spotCount > all[j].spotCount
+				}
+				return all[i].callsign < all[j].callsign
+			})
+			resp.StatsTotalSkimmers = len(all)
+			for idx, re := range all {
+				if re.callsign == callsign {
+					resp.StatsRank = idx + 1
+					break
+				}
+			}
 		}
 
 		if err := json.NewEncoder(w).Encode(resp); err != nil {

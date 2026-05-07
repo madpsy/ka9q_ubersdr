@@ -20282,6 +20282,15 @@ const tooltipLine2 = timeStr;
                     html += `</div>`;
                 }
                 
+                // ASN / ISP Information
+                if (data.isp || data.asn) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Network / ISP:</strong><br>`;
+                    if (data.isp) html += `<span style="margin-left: 20px;">ISP / Org: ${data.isp}</span><br>`;
+                    if (data.asn) html += `<span style="margin-left: 20px;">ASN: AS${data.asn}</span><br>`;
+                    html += `</div>`;
+                }
+
                 // Traits
                 if (data.is_anonymous_proxy || data.is_satellite_provider) {
                     html += `<div style="margin-bottom: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;">`;

@@ -557,7 +557,7 @@ func main() {
 	var geoIPService *GeoIPService
 	if config.GeoIP.Enabled {
 		var err error
-		geoIPService, err = NewGeoIPService(config.GeoIP.DatabasePath)
+		geoIPService, err = NewGeoIPService(config.GeoIP.DatabasePath, config.GeoIP.ASNDatabasePath)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize GeoIP service: %v", err)
 			log.Printf("GeoIP features will be disabled. To enable, configure geoip.database_path in config.yaml")

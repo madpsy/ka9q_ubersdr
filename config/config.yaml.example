@@ -1486,11 +1486,19 @@ geoip:
   #   macOS:   /usr/local/var/ubersdr/GeoLite2-Country.mmdb
   database_path: "/app/geoip/GeoLite2-Country.mmdb"
 
+  # Path to MaxMind GeoLite2 ASN database file (.mmdb format) - optional
+  # Provides ISP/organisation name and Autonomous System Number (ASN) for each IP.
+  # Download GeoLite2-ASN.mmdb from the same MaxMind account as the country database.
+  # Place it alongside the country database and name it GeoLite2-ASN.mmdb.
+  # If omitted or file not found, ASN/ISP fields are simply absent from lookup results.
+  asn_database_path: "/app/geoip/GeoLite2-ASN.mmdb"
+
   # Admin API Endpoints (require admin authentication):
   #   POST /admin/geoip/lookup
   #     - Lookup country for specific IP address
   #     - Request: {"ip": "8.8.8.8"}
-  #     - Response: {"ip":"8.8.8.8","country":"United States","country_code":"US"}
+  #     - Response: {"ip":"8.8.8.8","country":"United States","country_code":"US",
+  #                  "asn":15169,"isp":"GOOGLE"}
   #
   #   GET /admin/sessions/countries
   #     - Get active sessions with country information
@@ -1498,7 +1506,7 @@ geoip:
   #
   #   GET /admin/geoip-health
   #     - Check GeoIP service health status
-  #     - Response: {"enabled":true,"status":"healthy"}
+  #     - Response: {"enabled":true,"status":"healthy","asn_enabled":true}
   #
   # Privacy & Security:
   #   - No external API calls (all lookups are local)

@@ -6767,13 +6767,14 @@ func (ah *AdminHandler) HandleGeoIPHealth(w http.ResponseWriter, r *http.Request
 	}
 
 	health := map[string]interface{}{
-		"enabled": false,
-		"status":  "disabled",
+		"enabled":     false,
+		"status":      "disabled",
+		"asn_enabled": false,
 	}
 
 	if ah.geoIPService != nil && ah.geoIPService.IsEnabled() {
 		// Test with a known IP (Google DNS)
-		_, err := ah.geoIPService.Lookup("8.8.8.8", false)
+		result, err := ah.geoIPService.Lookup("8.8.8.8", false)
 		if err != nil {
 			health["enabled"] = true
 			health["status"] = "error"
@@ -6781,6 +6782,13 @@ func (ah *AdminHandler) HandleGeoIPHealth(w http.ResponseWriter, r *http.Request
 		} else {
 			health["enabled"] = true
 			health["status"] = "healthy"
+			health["asn_enabled"] = ah.geoIPService.IsASNEnabled()
+			if result != nil && result.ISP != "" {
+				health["asn_sample_isp"] = result.ISP
+			}
+			if result != nil && result.ASN != nil {
+				health["asn_sample_asn"] = *result.ASN
+			}
 		}
 	}
 

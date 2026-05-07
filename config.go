@@ -403,8 +403,9 @@ type MQTTTLSConfig struct {
 // GeoIPConfig contains IP geolocation settings
 // This service is for internal use only and admin API access
 type GeoIPConfig struct {
-	Enabled      bool   `yaml:"enabled"`       // Enable/disable GeoIP service
-	DatabasePath string `yaml:"database_path"` // Path to MaxMind GeoLite2 database file (.mmdb)
+	Enabled         bool   `yaml:"enabled"`           // Enable/disable GeoIP service
+	DatabasePath    string `yaml:"database_path"`     // Path to MaxMind GeoLite2 Country/City database file (.mmdb)
+	ASNDatabasePath string `yaml:"asn_database_path"` // Path to MaxMind GeoLite2 ASN database file (.mmdb)
 }
 
 // SSHProxyConfig contains SSH terminal proxy settings

@@ -15,6 +15,7 @@ import (
 // This service is for internal use only and admin API access
 type GeoIPService struct {
 	db      *geoip2.Reader
+	asnDB   *geoip2.Reader
 	mu      sync.RWMutex
 	enabled bool
 }
@@ -58,11 +59,16 @@ type GeoIPResult struct {
 	// Traits
 	IsAnonymousProxy    bool `json:"is_anonymous_proxy,omitempty"`
 	IsSatelliteProvider bool `json:"is_satellite_provider,omitempty"`
+
+	// ASN / ISP information (only available when ASN database is loaded)
+	ASN *uint  `json:"asn,omitempty"` // Autonomous System Number
+	ISP string `json:"isp,omitempty"` // Organisation name from ASN database
 }
 
 // NewGeoIPService creates a new GeoIP service instance
-// If dbPath is empty or the database cannot be loaded, returns a disabled service
-func NewGeoIPService(dbPath string) (*GeoIPService, error) {
+// If dbPath is empty or the database cannot be loaded, returns a disabled service.
+// asnDBPath is optional; if provided and valid the ASN database is loaded for ISP lookups.
+func NewGeoIPService(dbPath string, asnDBPath string) (*GeoIPService, error) {
 	if dbPath == "" {
 		log.Println("GeoIP: Database path not configured, service disabled")
 		return &GeoIPService{enabled: false}, nil
@@ -73,11 +79,28 @@ func NewGeoIPService(dbPath string) (*GeoIPService, error) {
 		return nil, fmt.Errorf("failed to open GeoIP database at %s: %w", dbPath, err)
 	}
 
-	log.Printf("GeoIP: Service initialized successfully (database: %s)", dbPath)
-	return &GeoIPService{
+	svc := &GeoIPService{
 		db:      db,
 		enabled: true,
-	}, nil
+	}
+
+	if asnDBPath != "" {
+		asnDB, err := geoip2.Open(asnDBPath)
+		if err != nil {
+			log.Printf("GeoIP: Warning - failed to open ASN database at %s: %v (ISP info will be unavailable)", asnDBPath, err)
+		} else {
+			svc.asnDB = asnDB
+			log.Printf("GeoIP: ASN database loaded successfully (database: %s)", asnDBPath)
+		}
+	}
+
+	log.Printf("GeoIP: Service initialized successfully (database: %s)", dbPath)
+	return svc, nil
+}
+
+// IsASNEnabled returns whether the ASN database is loaded
+func (g *GeoIPService) IsASNEnabled() bool {
+	return g.asnDB != nil
 }
 
 // IsEnabled returns whether the GeoIP service is enabled
@@ -170,6 +193,9 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 			result.Hostname = hostname
 		}
 	}
+
+	// Enrich with ASN/ISP data if available
+	g.lookupASN(ip, result)
 
 	if cityErr == nil {
 		// City database available - populate all fields
@@ -306,6 +332,25 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 	return result, nil
 }
 
+// lookupASN enriches result with ASN/ISP data if the ASN database is available.
+// Must be called with g.mu read-locked.
+func (g *GeoIPService) lookupASN(ip net.IP, result *GeoIPResult) {
+	if g.asnDB == nil {
+		return
+	}
+	asnRecord, err := g.asnDB.ASN(ip)
+	if err != nil {
+		return
+	}
+	if asnRecord.AutonomousSystemNumber != 0 {
+		asn := uint(asnRecord.AutonomousSystemNumber)
+		result.ASN = &asn
+	}
+	if asnRecord.AutonomousSystemOrganization != "" {
+		result.ISP = asnRecord.AutonomousSystemOrganization
+	}
+}
+
 // LookupSafe performs a lookup and returns empty strings on error
 // Useful for non-critical enrichment where failures should be silent
 func (g *GeoIPService) LookupSafe(ipStr string) (country, countryCode string) {
@@ -321,8 +366,13 @@ func (g *GeoIPService) LookupSafe(ipStr string) (country, countryCode string) {
 	return result.Country, result.CountryCode
 }
 
-// Close closes the GeoIP database
+// Close closes the GeoIP database(s)
 func (g *GeoIPService) Close() error {
+	if g.asnDB != nil {
+		if err := g.asnDB.Close(); err != nil {
+			log.Printf("GeoIP: Error closing ASN database: %v", err)
+		}
+	}
 	if g.db != nil {
 		log.Println("GeoIP: Closing database")
 		return g.db.Close()

@@ -708,11 +708,10 @@
                         <div id="addASNBanForm" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
                             <h3 style="margin-bottom: 15px;">Ban an ASN</h3>
                             <p style="font-size: 13px; color: #666; margin-bottom: 12px;">Use the <strong>IP Lookup</strong> card at the top of this page to look up an IP and ban its ASN with one click, or enter an ASN number manually below.</p>
-                            <div style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; align-items: end;">
+                            <div style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; align-items: start;">
                                 <div class="config-field" style="margin: 0;">
                                     <label>ASN Number</label>
                                     <input type="number" id="newBanASN" placeholder="e.g. 62044" min="1" style="width: 100%;">
-                                    <div id="newBanASNOrgDisplay" style="font-size: 12px; color: #667eea; margin-top: 4px; min-height: 16px;"></div>
                                 </div>
                                 <div class="config-field" style="margin: 0;">
                                     <label>Reason</label>
@@ -722,6 +721,8 @@
                                     <button class="btn btn-danger" onclick="addASNBan()">Ban ASN</button>
                                 </div>
                             </div>
+                            <!-- Org name display shown below the grid when pre-filled from lookup -->
+                            <div id="newBanASNOrgDisplay" style="font-size: 12px; color: #667eea; margin-top: 6px; min-height: 0;"></div>
                             <!-- Hidden field to carry org name from lookup -->
                             <input type="hidden" id="newBanASNOrg" value="">
                         </div>
@@ -7170,7 +7171,7 @@
 
                 // Build action buttons
                 let buttonsHtml = '';
-                buttonsHtml += `<button class="btn btn-danger" onclick="quickBanIP('${data.ip || ip}')" style="font-size:13px; padding:5px 12px;">🚫 Ban IP</button>`;
+                buttonsHtml += `<button class="btn btn-danger" onclick="quickBanIP('${data.ip || ip}')" style="font-size:13px; padding:5px 12px;">✖ Ban IP</button>`;
                 if (data.country_code) {
                     buttonsHtml += `<button class="btn btn-danger" onclick="quickBanCountry('${data.country_code}', '${(data.country || '').replace(/'/g, "\\'")}')" style="font-size:13px; padding:5px 12px;">🌍 Ban Country</button>`;
                 }
@@ -20532,7 +20533,7 @@ const tooltipLine2 = timeStr;
                 // Action buttons at the top
                 html += `<div style="margin-bottom: 18px; padding: 12px 14px; background: #fff3f3; border: 1px solid #f5c6cb; border-radius: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">`;
                 html += `<span style="font-size: 12px; color: #721c24; font-weight: 600; margin-right: 4px;">Quick Actions:</span>`;
-                html += `<button onclick="quickBanIP('${data.ip || ip}'); closeGeoIPModal();" style="padding: 5px 12px; font-size: 13px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🚫 Ban IP</button>`;
+                html += `<button onclick="quickBanIP('${data.ip || ip}'); closeGeoIPModal();" style="padding: 5px 12px; font-size: 13px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">✖ Ban IP</button>`;
                 if (data.country_code) {
                     const safeCountry = (data.country || '').replace(/'/g, "\\'");
                     html += `<button onclick="quickBanCountry('${data.country_code}', '${safeCountry}'); closeGeoIPModal();" style="padding: 5px 12px; font-size: 13px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🌍 Ban Country</button>`;

@@ -676,6 +676,42 @@
                             <p>Loading countries...</p>
                         </div>
                     </div>
+
+                    <!-- Banned ASNs Section -->
+                    <div id="bannedASNsSection" style="margin-top: 40px;">
+                        <h2 style="color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🏢 ASN / ISP Bans</h2>
+                        <div class="alert alert-info" style="margin-bottom: 20px;">
+                            ℹ️ <strong>Note:</strong> ASN bans block all connections from a specific Autonomous System (ISP / hosting provider / VPN). Requires the GeoLite2-ASN database to be configured. You can also ban an ASN directly from the GeoIP lookup modal.
+                        </div>
+
+                        <!-- Add ASN ban form -->
+                        <div id="addASNBanForm" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                            <h3 style="margin-bottom: 15px;">Ban an ASN</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 10px; align-items: end;">
+                                <div class="config-field" style="margin: 0;">
+                                    <label>ASN Number</label>
+                                    <input type="number" id="newBanASN" placeholder="e.g. 62044" min="1" style="width: 100%;">
+                                </div>
+                                <div class="config-field" style="margin: 0;">
+                                    <label>ISP / Org Name</label>
+                                    <input type="text" id="newBanASNOrg" placeholder="e.g. Zscaler Switzerland GmbH" style="width: 100%;">
+                                </div>
+                                <div class="config-field" style="margin: 0;">
+                                    <label>Reason</label>
+                                    <input type="text" id="newBanASNReason" placeholder="e.g. VPN provider, abuse" style="width: 100%;">
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="btn btn-danger" onclick="addASNBan()">Ban ASN</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Banned ASNs list -->
+                        <div id="bannedASNsList" class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading banned ASNs...</p>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Visual Editor Tab -->
@@ -6339,6 +6375,7 @@
 
         // Banned IPs management
         let currentBannedIPs = [];
+        let currentBannedASNs = [];
         let adminIPData = null; // Store admin's IP data for validation
 
         async function loadBannedIPs() {
@@ -6354,8 +6391,9 @@
                 currentBannedIPs = data.banned_ips || [];
                 renderBannedIPs();
                 
-                // Also load banned countries when loading banned IPs
+                // Also load banned countries and ASNs when loading banned IPs
                 await loadBannedCountries();
+                await loadBannedASNs();
             } catch (error) {
                 showAlert('Error loading banned IPs: ' + error.message, 'error');
             }
@@ -6917,6 +6955,145 @@
             } catch (error) {
                 showAlert('Error unbanning country: ' + error.message, 'error');
             }
+        }
+
+        // Banned ASNs management
+        async function loadBannedASNs() {
+            try {
+                const response = await authenticatedFetch('/admin/banned-asns');
+                if (!response) return;
+                if (!response.ok) throw new Error('Failed to load banned ASNs');
+
+                const data = await response.json();
+                currentBannedASNs = data.banned_asns || [];
+                renderBannedASNs();
+            } catch (error) {
+                showAlert('Error loading banned ASNs: ' + error.message, 'error');
+            }
+        }
+
+        function renderBannedASNs() {
+            const container = document.getElementById('bannedASNsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (currentBannedASNs.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;"><em>No ASNs banned</em></p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">ASN</th>
+                        <th style="padding: 12px; text-align: left;">ISP / Org</th>
+                        <th style="padding: 12px; text-align: left;">Reason</th>
+                        <th style="padding: 12px; text-align: left;">Banned At</th>
+                        <th style="padding: 12px; text-align: left;">Banned By</th>
+                        <th style="padding: 12px; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bannedASNsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('bannedASNsTableBody');
+            currentBannedASNs.forEach(ban => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                const bannedDate = new Date(ban.banned_at).toLocaleString();
+                row.innerHTML = `
+                    <td style="padding: 12px; font-family: monospace; font-weight: bold;">AS${ban.asn}</td>
+                    <td style="padding: 12px;">${ban.org_name || '-'}</td>
+                    <td style="padding: 12px;">${ban.reason || 'No reason provided'}</td>
+                    <td style="padding: 12px; font-size: 13px;">${bannedDate}</td>
+                    <td style="padding: 12px;">${ban.banned_by || 'Unknown'}</td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px;" onclick="unbanASN(${ban.asn}, '${(ban.org_name || '').replace(/'/g, "\\'")}')">Unban</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function addASNBan() {
+            const asnInput = document.getElementById('newBanASN').value.trim();
+            const orgName = document.getElementById('newBanASNOrg').value.trim();
+            const reason = document.getElementById('newBanASNReason').value.trim() || 'Banned by admin';
+
+            const asn = parseInt(asnInput, 10);
+            if (!asn || asn <= 0) {
+                showAlert('Please enter a valid ASN number (positive integer)', 'error');
+                return;
+            }
+
+            if (!confirm(`Ban AS${asn}${orgName ? ' (' + orgName + ')' : ''}?\n\nThis will block all connections from this ASN and kick any active sessions.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/ban-asn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ asn: asn, org_name: orgName, reason: reason })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to ban ASN');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || `AS${asn} has been banned`, 'success');
+                document.getElementById('newBanASN').value = '';
+                document.getElementById('newBanASNOrg').value = '';
+                document.getElementById('newBanASNReason').value = '';
+                await loadBannedASNs();
+            } catch (error) {
+                showAlert('Error banning ASN: ' + error.message, 'error');
+            }
+        }
+
+        async function unbanASN(asn, orgName) {
+            if (!confirm(`Unban AS${asn}${orgName ? ' (' + orgName + ')' : ''}?\n\nThis will allow connections from this ASN again.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/unban-asn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ asn: asn })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to unban ASN');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || `AS${asn} has been unbanned`, 'success');
+                await loadBannedASNs();
+            } catch (error) {
+                showAlert('Error unbanning ASN: ' + error.message, 'error');
+            }
+        }
+
+        // Pre-fill the ASN ban form from the GeoIP modal and switch to the banned tab
+        function banASNFromModal(asn, orgName) {
+            closeGeoIPModal();
+            // Switch to the banned tab
+            switchTab('banned');
+            // Pre-fill the form
+            document.getElementById('newBanASN').value = asn;
+            document.getElementById('newBanASNOrg').value = orgName || '';
+            document.getElementById('newBanASNReason').value = '';
+            // Scroll to the ASN section
+            document.getElementById('bannedASNsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            document.getElementById('newBanASN').focus();
         }
 
         // Extensions management
@@ -20284,8 +20461,14 @@ const tooltipLine2 = timeStr;
                 
                 // ASN / ISP Information
                 if (data.isp || data.asn) {
-                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
-                    html += `<strong style="color: #667eea;">Network / ISP:</strong><br>`;
+                    const asnVal = data.asn || 0;
+                    const ispVal = (data.isp || '').replace(/'/g, "\\'");
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; position: relative;">`;
+                    html += `<strong style="color: #667eea;">Network / ISP:</strong>`;
+                    if (asnVal) {
+                        html += `<button onclick="banASNFromModal(${asnVal}, '${ispVal}')" style="position: absolute; right: 10px; top: 10px; padding: 4px 10px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" title="Ban this ASN">🚫 Ban ASN</button>`;
+                    }
+                    html += `<br>`;
                     if (data.isp) html += `<span style="margin-left: 20px;">ISP / Org: ${data.isp}</span><br>`;
                     if (data.asn) html += `<span style="margin-left: 20px;">ASN: AS${data.asn}</span><br>`;
                     html += `</div>`;

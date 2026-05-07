@@ -2790,6 +2790,47 @@ func (sm *SessionManager) KickUsersByCountry(countryCode string, geoIPService *G
 	return len(sessionsToKick), nil
 }
 
+// KickUsersByASN destroys all sessions whose client IP belongs to the given ASN
+func (sm *SessionManager) KickUsersByASN(asn uint, geoIPService *GeoIPService) (int, error) {
+	if asn == 0 {
+		return 0, fmt.Errorf("ASN cannot be zero")
+	}
+
+	if geoIPService == nil || !geoIPService.IsEnabled() || !geoIPService.IsASNEnabled() {
+		return 0, fmt.Errorf("ASN GeoIP service not available")
+	}
+
+	sm.mu.RLock()
+	var sessionsToKick []string
+	for _, session := range sm.sessions {
+		session.mu.RLock()
+		clientIP := session.ClientIP
+		session.mu.RUnlock()
+
+		if clientIP == "" {
+			continue
+		}
+
+		sessionASN, _, err := geoIPService.GetASN(clientIP)
+		if err != nil {
+			continue
+		}
+		if sessionASN == asn {
+			sessionsToKick = append(sessionsToKick, session.ID)
+		}
+	}
+	sm.mu.RUnlock()
+
+	for _, sessionID := range sessionsToKick {
+		if err := sm.DestroySession(sessionID); err != nil {
+			log.Printf("Error kicking session %s: %v", sessionID, err)
+		}
+	}
+
+	log.Printf("Kicked users from AS%d (%d session(s) destroyed)", asn, len(sessionsToKick))
+	return len(sessionsToKick), nil
+}
+
 // GetSampleRate returns the session's sample rate
 func (s *Session) GetSampleRate() int {
 	s.mu.RLock()

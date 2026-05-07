@@ -365,6 +365,7 @@ type AdminHandler struct {
 	adminSessions       *AdminSessionStore
 	ipBanManager        *IPBanManager
 	countryBanManager   *CountryBanManager
+	asnBanManager       *ASNBanManager
 	audioReceiver       *AudioReceiver
 	userSpectrumManager *UserSpectrumManager
 	noiseFloorMonitor   *NoiseFloorMonitor
@@ -450,7 +451,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -460,6 +461,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		adminSessions:       NewAdminSessionStore(history),
 		ipBanManager:        ipBanManager,
 		countryBanManager:   countryBanManager,
+		asnBanManager:       asnBanManager,
 		audioReceiver:       audioReceiver,
 		userSpectrumManager: userSpectrumManager,
 		noiseFloorMonitor:   noiseFloorMonitor,
@@ -6920,6 +6922,117 @@ func (ah *AdminHandler) HandleBannedCountries(w http.ResponseWriter, r *http.Req
 		"count":            len(bannedCountries),
 	}); err != nil {
 		log.Printf("Error encoding banned countries: %v", err)
+	}
+}
+
+// HandleBanASN bans an ASN by its number
+func (ah *AdminHandler) HandleBanASN(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ASN       uint   `json:"asn"`
+		OrgName   string `json:"org_name"`
+		Reason    string `json:"reason"`
+		Temporary bool   `json:"temporary"`
+		Duration  int    `json:"duration"` // seconds
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ASN == 0 {
+		http.Error(w, "ASN is required and must be non-zero", http.StatusBadRequest)
+		return
+	}
+
+	if req.Reason == "" {
+		req.Reason = "Banned by admin"
+	}
+
+	var err error
+	if req.Temporary && req.Duration > 0 {
+		duration := time.Duration(req.Duration) * time.Second
+		err = ah.asnBanManager.BanASNWithDuration(req.ASN, req.OrgName, req.Reason, "admin", duration)
+	} else {
+		err = ah.asnBanManager.BanASN(req.ASN, req.OrgName, req.Reason, "admin")
+	}
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to ban ASN: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Kick all sessions from this ASN
+	count, err := ah.sessions.KickUsersByASN(req.ASN, ah.geoIPService)
+	if err != nil {
+		log.Printf("Error kicking sessions for banned AS%d: %v", req.ASN, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":           "success",
+		"message":          fmt.Sprintf("Banned AS%d and kicked %d session(s)", req.ASN, count),
+		"sessions_removed": count,
+	}); err != nil {
+		log.Printf("Error encoding ban ASN response: %v", err)
+	}
+}
+
+// HandleUnbanASN unbans an ASN by its number
+func (ah *AdminHandler) HandleUnbanASN(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ASN uint `json:"asn"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ASN == 0 {
+		http.Error(w, "ASN is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := ah.asnBanManager.UnbanASN(req.ASN); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unban ASN: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Unbanned AS%d", req.ASN),
+	}); err != nil {
+		log.Printf("Error encoding unban ASN response: %v", err)
+	}
+}
+
+// HandleBannedASNs returns the list of banned ASNs
+func (ah *AdminHandler) HandleBannedASNs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	bannedASNs := ah.asnBanManager.GetBannedASNs()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"banned_asns": bannedASNs,
+		"count":       len(bannedASNs),
+	}); err != nil {
+		log.Printf("Error encoding banned ASNs: %v", err)
 	}
 }
 

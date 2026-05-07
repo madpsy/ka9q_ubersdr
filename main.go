@@ -278,19 +278,22 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// banMiddleware checks if requests come from banned IPs or banned countries and blocks them
+// banMiddleware checks if requests come from banned IPs, banned countries, or banned ASNs and blocks them
 // This runs early in the request pipeline to block banned traffic before any processing
-func banMiddleware(ipBanManager *IPBanManager, countryBanManager *CountryBanManager, next http.Handler) http.Handler {
+func banMiddleware(ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if the client's IP is banned (direct IP ban)
 		if checkIPBan(w, r, ipBanManager) {
-			// Request was blocked, don't call next handler
 			return
 		}
 
 		// Check if the client's country is banned
 		if checkCountryBan(w, r, countryBanManager) {
-			// Request was blocked, don't call next handler
+			return
+		}
+
+		// Check if the client's ASN is banned
+		if checkASNBan(w, r, asnBanManager) {
 			return
 		}
 
@@ -611,6 +614,13 @@ func main() {
 		bannedCountriesPath = *configDir + "/banned_countries.yaml"
 	}
 	countryBanManager := NewCountryBanManager(bannedCountriesPath, geoIPService)
+
+	// Initialize ASN ban manager
+	bannedASNsPath := "banned_asns.yaml"
+	if *configDir != "." {
+		bannedASNsPath = *configDir + "/banned_asns.yaml"
+	}
+	asnBanManager := NewASNBanManager(bannedASNsPath, geoIPService)
 
 	// Initialize audio receiver
 	audioReceiver, err := NewAudioReceiver(
@@ -1854,7 +1864,7 @@ func main() {
 	// wrapping is available when we seed the initial routes below.
 	addonRouter := NewAddonProxyRouter()
 
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher)
 
 	// Wire the admin handler into the router now that it exists, then seed the
 	// initial routes from the already-built addonProxies slice.
@@ -2213,6 +2223,9 @@ func main() {
 	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
+	http.HandleFunc("/admin/ban-asn", adminHandler.AuthMiddleware(adminHandler.HandleBanASN))
+	http.HandleFunc("/admin/unban-asn", adminHandler.AuthMiddleware(adminHandler.HandleUnbanASN))
+	http.HandleFunc("/admin/banned-asns", adminHandler.AuthMiddleware(adminHandler.HandleBannedASNs))
 	http.HandleFunc("/admin/addon-proxies", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxies))
 	http.HandleFunc("/admin/addon-proxies/test", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxyTest))
 	http.HandleFunc("/admin/addon-proxies/restart", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxiesRestart))
@@ -2287,8 +2300,8 @@ func main() {
 	handler = corsMiddleware(config, handler)
 	// Always wrap with httpLogger (it handles both file and in-memory logging)
 	handler = httpLogger(logFile, geoIPService, handler)
-	// Ban middleware runs first (before logging) to block banned IPs and countries early
-	handler = banMiddleware(ipBanManager, countryBanManager, handler)
+	// Ban middleware runs first (before logging) to block banned IPs, countries, and ASNs early
+	handler = banMiddleware(ipBanManager, countryBanManager, asnBanManager, handler)
 
 	// Start HTTP server
 	server := &http.Server{
@@ -3682,6 +3695,57 @@ func checkCountryBan(w http.ResponseWriter, r *http.Request, countryBanManager *
 </body>
 </html>`))
 		log.Printf("Blocked request from banned country (IP: %s) to %s", clientIP, r.URL.Path)
+		return true
+	}
+	return false
+}
+
+// checkASNBan checks if the client IP's ASN is banned and returns appropriate error if so
+func checkASNBan(w http.ResponseWriter, r *http.Request, asnBanManager *ASNBanManager) bool {
+	clientIP := getClientIP(r)
+	if asnBanManager.IsBannedByIP(clientIP) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`<!DOCTYPE html>
+<html lang="en">
+<head>
+	 <meta charset="UTF-8">
+	 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	 <title>Access Denied</title>
+	 <style>
+	     * { margin: 0; padding: 0; box-sizing: border-box; }
+	     body {
+	         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+	         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	         min-height: 100vh;
+	         display: flex;
+	         align-items: center;
+	         justify-content: center;
+	         padding: 20px;
+	     }
+	     .container {
+	         background: white;
+	         border-radius: 12px;
+	         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+	         padding: 60px 40px;
+	         text-align: center;
+	         max-width: 500px;
+	         width: 100%;
+	     }
+	     .icon { font-size: 64px; margin-bottom: 20px; }
+	     h1 { color: #333; font-size: 28px; margin-bottom: 15px; }
+	     p { color: #666; font-size: 16px; line-height: 1.6; }
+	 </style>
+</head>
+<body>
+	 <div class="container">
+	     <div class="icon">🚫</div>
+	     <h1>Sorry - Access is currently denied</h1>
+	     <p>This service is not available from your network at this time.</p>
+	 </div>
+</body>
+</html>`))
+		log.Printf("Blocked request from banned ASN (IP: %s) to %s", clientIP, r.URL.Path)
 		return true
 	}
 	return false

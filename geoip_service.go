@@ -332,6 +332,33 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 	return result, nil
 }
 
+// GetASN returns the ASN number and organisation name for an IP address.
+// Returns (0, "", error) if the ASN database is not loaded or lookup fails.
+func (g *GeoIPService) GetASN(ipStr string) (uint, string, error) {
+	if !g.enabled {
+		return 0, "", fmt.Errorf("GeoIP service not enabled")
+	}
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if g.asnDB == nil {
+		return 0, "", fmt.Errorf("ASN database not loaded")
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return 0, "", fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+
+	record, err := g.asnDB.ASN(ip)
+	if err != nil {
+		return 0, "", fmt.Errorf("ASN lookup failed for %s: %w", ipStr, err)
+	}
+
+	return uint(record.AutonomousSystemNumber), record.AutonomousSystemOrganization, nil
+}
+
 // lookupASN enriches result with ASN/ISP data if the ASN database is available.
 // Must be called with g.mu read-locked.
 func (g *GeoIPService) lookupASN(ip net.IP, result *GeoIPResult) {

@@ -308,7 +308,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 
 		// Check rolling 24-hour per-IP time budget
 		if sm.config.Server.MaxDailyTimePerIP > 0 && sm.dailyTracker.IsLimitExceeded(clientIP, sm.config.Server.MaxDailyTimePerIP) {
-			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d seconds per 24 hours)", sm.config.Server.MaxDailyTimePerIP)
+			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d minutes per 24 hours)", sm.config.Server.MaxDailyTimePerIP/60)
 		}
 	}
 
@@ -604,7 +604,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 
 		// Check rolling 24-hour per-IP time budget
 		if sm.config.Server.MaxDailyTimePerIP > 0 && sm.dailyTracker.IsLimitExceeded(clientIP, sm.config.Server.MaxDailyTimePerIP) {
-			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d seconds per 24 hours)", sm.config.Server.MaxDailyTimePerIP)
+			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d minutes per 24 hours)", sm.config.Server.MaxDailyTimePerIP/60)
 		}
 	}
 

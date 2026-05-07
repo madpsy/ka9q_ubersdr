@@ -2713,7 +2713,7 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	if !isBypassed && sessions.config.Server.MaxDailyTimePerIP > 0 {
 		if sessions.dailyTracker.IsLimitExceeded(clientIP, sessions.config.Server.MaxDailyTimePerIP) {
 			response.Allowed = false
-			response.Reason = fmt.Sprintf("Daily time limit reached (%d seconds per 24 hours). Please try again later.", sessions.config.Server.MaxDailyTimePerIP)
+			response.Reason = fmt.Sprintf("Daily time limit reached (%d minutes per 24 hours). Please try again later.", sessions.config.Server.MaxDailyTimePerIP/60)
 			w.WriteHeader(http.StatusTooManyRequests)
 			json.NewEncoder(w).Encode(response)
 			return

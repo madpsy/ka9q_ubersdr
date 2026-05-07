@@ -701,7 +701,7 @@
                     <div id="bannedASNsSection" style="margin-top: 40px;">
                         <h2 style="color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🏢 ASN / ISP Bans</h2>
                         <div class="alert alert-info" style="margin-bottom: 20px;">
-                            ℹ️ <strong>Note:</strong> ASN bans block all connections from a specific Autonomous System (ISP / hosting provider / VPN). Requires the GeoLite2-ASN database to be configured. You can also ban an ASN directly from the GeoIP lookup modal.
+                            ℹ️ <strong>Note:</strong> ASN bans block all connections from a specific Autonomous System (ISP / hosting provider / VPN). You can also ban an ASN directly from the GeoIP lookup modal.
                         </div>
 
                         <!-- Add ASN ban form -->
@@ -711,7 +711,8 @@
                             <div style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; align-items: start;">
                                 <div class="config-field" style="margin: 0;">
                                     <label>ASN Number</label>
-                                    <input type="number" id="newBanASN" placeholder="e.g. 62044" min="1" style="width: 100%;">
+                                    <input type="number" id="newBanASN" placeholder="e.g. 62044" min="1" style="width: 100%;"
+                                           oninput="document.getElementById('newBanASNOrg').value=''; document.getElementById('newBanASNOrgDisplay').textContent='';">
                                 </div>
                                 <div class="config-field" style="margin: 0;">
                                     <label>Reason</label>

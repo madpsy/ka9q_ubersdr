@@ -549,23 +549,17 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
                 setMode(bookmarkMode);
             }
         } else {
-            // For non-CW modes: if the bookmark carries custom bandwidth, pre-load it
-            // into the globals and sliders BEFORE calling setMode(), then call setMode
-            // with preserveBandwidth=true so its internal autoTune() sends the correct
-            // bandwidth in a single tune command.
-            // (Mirrors the CW path above which does setBandwidth → setMode(preserve=true))
-            if (bandwidthLow !== undefined && bandwidthLow !== null &&
+            // For non-CW modes: if the bookmark carries custom bandwidth, apply it
+            // using the same pattern as the CW path above:
+            //   1. radioAPI.setBandwidth() — sets sliders, window globals, AND the
+            //      module-local currentBandwidthLow/High in app.js (via updateBandwidth())
+            //   2. setMode(mode, preserveBandwidth=true) — reads those pre-loaded values
+            //      and fires a single autoTune() with the correct bandwidth.
+            // Without step 1, setMode(preserve=true) would read the old local variable
+            // value and send the wrong bandwidth.
+            if (radioAPI && bandwidthLow !== undefined && bandwidthLow !== null &&
                 bandwidthHigh !== undefined && bandwidthHigh !== null) {
-                // Write bookmark bandwidth into globals and DOM sliders so that
-                // setMode(preserveBandwidth=true) reads the correct values.
-                window.currentBandwidthLow  = bandwidthLow;
-                window.currentBandwidthHigh = bandwidthHigh;
-                const bwLowSlider  = document.getElementById('bandwidth-low');
-                const bwHighSlider = document.getElementById('bandwidth-high');
-                if (bwLowSlider)  bwLowSlider.value  = bandwidthLow;
-                if (bwHighSlider) bwHighSlider.value = bandwidthHigh;
-                // Now set mode — preserveBandwidth=true means it reads the values we
-                // just wrote and fires a single autoTune() with the correct bandwidth.
+                radioAPI.setBandwidth(bandwidthLow, bandwidthHigh);
                 setMode(bookmarkMode, true);
             } else {
                 // No custom bandwidth — let setMode reset to mode defaults as normal.

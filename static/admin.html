@@ -638,6 +638,26 @@
 
                 <!-- Banned IPs Tab -->
                 <div id="bannedTab" class="tab-content">
+
+                    <!-- IP Lookup Card -->
+                    <div style="margin-bottom: 30px; padding: 20px; background: #e8f5e9; border: 1px solid #4caf50; border-radius: 8px;">
+                        <h3 style="margin: 0 0 15px 0; color: #1b5e20;">🔍 IP Lookup &amp; Quick Ban</h3>
+                        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display: block; font-weight: 600; margin-bottom: 4px; color: #1b5e20;">IP Address</label>
+                                <input type="text" id="quickLookupIP" placeholder="e.g. 194.9.110.206"
+                                       style="width: 100%; padding: 8px 10px; border: 1px solid #a5d6a7; border-radius: 5px; font-size: 14px;"
+                                       onkeydown="if(event.key==='Enter') quickLookupIPAddress()">
+                            </div>
+                            <button class="btn" onclick="quickLookupIPAddress()" style="background: #4caf50; color: white; white-space: nowrap;">Lookup</button>
+                        </div>
+                        <div id="quickLookupResult" style="display: none; margin-top: 15px; padding: 15px; background: white; border-radius: 6px; border: 1px solid #c8e6c9;">
+                            <div id="quickLookupInfo" style="margin-bottom: 12px; font-size: 14px; line-height: 1.8;"></div>
+                            <div id="quickLookupActions" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+                        </div>
+                        <div id="quickLookupError" style="display: none; margin-top: 10px; color: #dc3545; font-size: 13px;"></div>
+                    </div>
+
                     <h2 style="color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🚫 Banned IP Addresses</h2>
                     <div id="bannedIPsList" class="loading">
                         <div class="spinner"></div>
@@ -687,23 +707,23 @@
                         <!-- Add ASN ban form -->
                         <div id="addASNBanForm" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
                             <h3 style="margin-bottom: 15px;">Ban an ASN</h3>
-                            <div style="display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 10px; align-items: end;">
+                            <p style="font-size: 13px; color: #666; margin-bottom: 12px;">Use the <strong>IP Lookup</strong> card at the top of this page to look up an IP and ban its ASN with one click, or enter an ASN number manually below.</p>
+                            <div style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; align-items: end;">
                                 <div class="config-field" style="margin: 0;">
                                     <label>ASN Number</label>
                                     <input type="number" id="newBanASN" placeholder="e.g. 62044" min="1" style="width: 100%;">
-                                </div>
-                                <div class="config-field" style="margin: 0;">
-                                    <label>ISP / Org Name</label>
-                                    <input type="text" id="newBanASNOrg" placeholder="e.g. Zscaler Switzerland GmbH" style="width: 100%;">
+                                    <div id="newBanASNOrgDisplay" style="font-size: 12px; color: #667eea; margin-top: 4px; min-height: 16px;"></div>
                                 </div>
                                 <div class="config-field" style="margin: 0;">
                                     <label>Reason</label>
                                     <input type="text" id="newBanASNReason" placeholder="e.g. VPN provider, abuse" style="width: 100%;">
                                 </div>
-                                <div style="display: flex; gap: 8px;">
+                                <div style="display: flex; gap: 8px; align-items: flex-start; padding-top: 22px;">
                                     <button class="btn btn-danger" onclick="addASNBan()">Ban ASN</button>
                                 </div>
                             </div>
+                            <!-- Hidden field to carry org name from lookup -->
+                            <input type="hidden" id="newBanASNOrg" value="">
                         </div>
 
                         <!-- Banned ASNs list -->
@@ -7050,6 +7070,7 @@
                 showAlert(result.message || `AS${asn} has been banned`, 'success');
                 document.getElementById('newBanASN').value = '';
                 document.getElementById('newBanASNOrg').value = '';
+                document.getElementById('newBanASNOrgDisplay').textContent = '';
                 document.getElementById('newBanASNReason').value = '';
                 await loadBannedASNs();
             } catch (error) {
@@ -7082,18 +7103,130 @@
             }
         }
 
-        // Pre-fill the ASN ban form from the GeoIP modal and switch to the banned tab
+        // Pre-fill the ASN ban form from the IP lookup card or GeoIP modal
         function banASNFromModal(asn, orgName) {
+            // Close GeoIP modal if open
             closeGeoIPModal();
             // Switch to the banned tab
             switchTab('banned');
             // Pre-fill the form
             document.getElementById('newBanASN').value = asn;
             document.getElementById('newBanASNOrg').value = orgName || '';
+            document.getElementById('newBanASNOrgDisplay').textContent = orgName ? `Organization: ${orgName}` : '';
             document.getElementById('newBanASNReason').value = '';
             // Scroll to the ASN section
             document.getElementById('bannedASNsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
             document.getElementById('newBanASN').focus();
+        }
+
+        // IP Lookup card in bannedTab
+        async function quickLookupIPAddress() {
+            const ip = document.getElementById('quickLookupIP').value.trim();
+            if (!ip) {
+                showAlert('Please enter an IP address to look up', 'error');
+                return;
+            }
+
+            const resultDiv = document.getElementById('quickLookupResult');
+            const infoDiv = document.getElementById('quickLookupInfo');
+            const actionsDiv = document.getElementById('quickLookupActions');
+            const errorDiv = document.getElementById('quickLookupError');
+
+            // Reset state
+            resultDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            infoDiv.innerHTML = '<em style="color:#888;">Looking up...</em>';
+            actionsDiv.innerHTML = '';
+            resultDiv.style.display = 'block';
+
+            try {
+                const response = await authenticatedFetch('/admin/geoip/lookup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip })
+                });
+                if (!response) return;
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Lookup failed');
+                }
+
+                const data = await response.json();
+
+                // Build info display
+                let infoHtml = '';
+                infoHtml += `<strong>IP:</strong> ${data.ip || ip}`;
+                if (data.country) {
+                    const flag = data.country_code ? String.fromCodePoint(...[...data.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
+                    infoHtml += `&nbsp;&nbsp;<strong>Country:</strong> ${flag} ${data.country}${data.country_code ? ' (' + data.country_code + ')' : ''}`;
+                }
+                if (data.isp || data.asn) {
+                    infoHtml += `<br><strong>ISP / ASN:</strong> `;
+                    if (data.isp) infoHtml += `${data.isp}`;
+                    if (data.asn) infoHtml += `${data.isp ? ' &mdash; ' : ''}AS${data.asn}`;
+                }
+                infoDiv.innerHTML = infoHtml;
+
+                // Build action buttons
+                let buttonsHtml = '';
+                buttonsHtml += `<button class="btn btn-danger" onclick="quickBanIP('${data.ip || ip}')" style="font-size:13px; padding:5px 12px;">🚫 Ban IP</button>`;
+                if (data.country_code) {
+                    buttonsHtml += `<button class="btn btn-danger" onclick="quickBanCountry('${data.country_code}', '${(data.country || '').replace(/'/g, "\\'")}')" style="font-size:13px; padding:5px 12px;">🌍 Ban Country</button>`;
+                }
+                if (data.asn) {
+                    const safeOrg = (data.isp || '').replace(/'/g, "\\'");
+                    buttonsHtml += `<button class="btn btn-danger" onclick="banASNFromModal(${data.asn}, '${safeOrg}')" style="font-size:13px; padding:5px 12px;">🏢 Ban ASN</button>`;
+                }
+                actionsDiv.innerHTML = buttonsHtml;
+
+            } catch (error) {
+                resultDiv.style.display = 'none';
+                errorDiv.textContent = 'Error: ' + error.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        // Quick ban helpers called from the IP lookup card
+        async function quickBanIP(ip) {
+            const reason = prompt(`Ban IP: ${ip}\n\nEnter a reason (or leave blank):`, 'Banned via quick lookup');
+            if (reason === null) return; // cancelled
+            try {
+                const response = await fetch('/admin/ban', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip, reason: reason || 'Banned via quick lookup' })
+                });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Failed to ban IP');
+                }
+                const result = await response.json();
+                showAlert(result.message || `${ip} has been banned`, 'success');
+                await loadBannedIPs();
+            } catch (error) {
+                showAlert('Error banning IP: ' + error.message, 'error');
+            }
+        }
+
+        async function quickBanCountry(countryCode, countryName) {
+            if (!confirm(`Ban all connections from ${countryName} (${countryCode})?\n\nThis will block all users from this country.`)) return;
+            try {
+                const response = await fetch('/admin/ban-country', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ country_code: countryCode, reason: `Banned via quick lookup` })
+                });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || 'Failed to ban country');
+                }
+                const result = await response.json();
+                showAlert(result.message || `${countryName} has been banned`, 'success');
+                await loadBannedCountries();
+            } catch (error) {
+                showAlert('Error banning country: ' + error.message, 'error');
+            }
         }
 
         // Extensions management
@@ -20395,7 +20528,21 @@ const tooltipLine2 = timeStr;
             .then(data => {
                 // Format and display the GeoIP data
                 let html = '<div style="font-family: monospace; font-size: 14px; line-height: 1.8;">';
-                
+
+                // Action buttons at the top
+                html += `<div style="margin-bottom: 18px; padding: 12px 14px; background: #fff3f3; border: 1px solid #f5c6cb; border-radius: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">`;
+                html += `<span style="font-size: 12px; color: #721c24; font-weight: 600; margin-right: 4px;">Quick Actions:</span>`;
+                html += `<button onclick="quickBanIP('${data.ip || ip}'); closeGeoIPModal();" style="padding: 5px 12px; font-size: 13px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🚫 Ban IP</button>`;
+                if (data.country_code) {
+                    const safeCountry = (data.country || '').replace(/'/g, "\\'");
+                    html += `<button onclick="quickBanCountry('${data.country_code}', '${safeCountry}'); closeGeoIPModal();" style="padding: 5px 12px; font-size: 13px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🌍 Ban Country</button>`;
+                }
+                if (data.asn) {
+                    const safeOrg = (data.isp || '').replace(/'/g, "\\'");
+                    html += `<button onclick="banASNFromModal(${data.asn}, '${safeOrg}')" style="padding: 5px 12px; font-size: 13px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🏢 Ban ASN</button>`;
+                }
+                html += `</div>`;
+
                 // IP Address (always present)
                 html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
                 html += `<strong style="color: #667eea;">IP Address:</strong> ${data.ip || 'N/A'}`;
@@ -20461,14 +20608,8 @@ const tooltipLine2 = timeStr;
                 
                 // ASN / ISP Information
                 if (data.isp || data.asn) {
-                    const asnVal = data.asn || 0;
-                    const ispVal = (data.isp || '').replace(/'/g, "\\'");
-                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; position: relative;">`;
-                    html += `<strong style="color: #667eea;">Network / ISP:</strong>`;
-                    if (asnVal) {
-                        html += `<button onclick="banASNFromModal(${asnVal}, '${ispVal}')" style="position: absolute; right: 10px; top: 10px; padding: 4px 10px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" title="Ban this ASN">🚫 Ban ASN</button>`;
-                    }
-                    html += `<br>`;
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Network / ISP:</strong><br>`;
                     if (data.isp) html += `<span style="margin-left: 20px;">ISP / Org: ${data.isp}</span><br>`;
                     if (data.asn) html += `<span style="margin-left: 20px;">ASN: AS${data.asn}</span><br>`;
                     html += `</div>`;

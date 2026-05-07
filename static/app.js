@@ -9560,7 +9560,9 @@ function populateLocalBookmarkSelector() {
                 mode: bookmark.mode,
                 extension: bookmark.extension,
                 group: bookmark.group,
-                comment: bookmark.comment
+                comment: bookmark.comment,
+                bandwidth_low:  bookmark.bandwidth_low  ?? null,
+                bandwidth_high: bookmark.bandwidth_high ?? null
             });
             const freqKHz = (bookmark.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
             option.textContent = `${bookmark.name} [${freqKHz} kHz]`;
@@ -9579,7 +9581,9 @@ function populateLocalBookmarkSelector() {
                 frequency: bookmark.frequency,
                 mode: bookmark.mode,
                 extension: bookmark.extension,
-                comment: bookmark.comment
+                comment: bookmark.comment,
+                bandwidth_low:  bookmark.bandwidth_low  ?? null,
+                bandwidth_high: bookmark.bandwidth_high ?? null
             });
             const freqKHz = (bookmark.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
             option.textContent = `${bookmark.name} [${freqKHz} kHz]`;

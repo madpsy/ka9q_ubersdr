@@ -123,6 +123,20 @@ class LocalBookmarksUI {
                         <input type="text" id="local-bookmarks-edit-extension" placeholder="e.g., ft8, sstv">
                         <small>Decoder extension to open automatically</small>
                     </div>
+                    <div class="local-bookmarks-form-group">
+                        <label>Passband (Hz)</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <div style="flex: 1;">
+                                <input type="number" id="local-bookmarks-edit-bw-low" placeholder="Low (e.g. -3000)" step="1" style="width: 100%;">
+                                <small>Lower edge offset from carrier</small>
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" id="local-bookmarks-edit-bw-high" placeholder="High (e.g. 3000)" step="1" style="width: 100%;">
+                                <small>Upper edge offset from carrier</small>
+                            </div>
+                        </div>
+                        <small>Leave blank to use the mode default bandwidth</small>
+                    </div>
                     <div class="local-bookmarks-form-actions">
                         <button type="button" class="local-bookmarks-btn secondary" id="local-bookmarks-edit-cancel">Cancel</button>
                         <button type="submit" class="local-bookmarks-btn success">Save</button>
@@ -181,6 +195,18 @@ class LocalBookmarksUI {
         document.getElementById('local-bookmarks-edit-cancel')?.addEventListener('click', () => {
             document.getElementById('local-bookmarks-edit-modal').classList.remove('active');
         });
+
+        // Bandwidth fields: if either is filled the other becomes required
+        const bwLowEl  = document.getElementById('local-bookmarks-edit-bw-low');
+        const bwHighEl = document.getElementById('local-bookmarks-edit-bw-high');
+        const syncBwRequired = () => {
+            const lowFilled  = bwLowEl.value.trim()  !== '';
+            const highFilled = bwHighEl.value.trim() !== '';
+            bwLowEl.required  = highFilled;
+            bwHighEl.required = lowFilled;
+        };
+        bwLowEl?.addEventListener('input',  syncBwRequired);
+        bwHighEl?.addEventListener('input', syncBwRequired);
     }
 
     // Show management modal
@@ -291,6 +317,7 @@ class LocalBookmarksUI {
                     </div>
                     <div class="local-bookmarks-item-details">
                         ${this.formatFrequency(bookmark.frequency)} • ${bookmark.mode.toUpperCase()}
+                        ${(typeof bookmark.bandwidth_low === 'number' && typeof bookmark.bandwidth_high === 'number') ? ` • BW: ${bookmark.bandwidth_low}/${bookmark.bandwidth_high} Hz` : ''}
                         ${bookmark.comment ? ` • ${this.escapeHtml(bookmark.comment)}` : ''}
                         ${bookmark.extension ? ` • 🔌 ${this.escapeHtml(bookmark.extension)}` : ''}
                     </div>
@@ -346,6 +373,8 @@ class LocalBookmarksUI {
         this.currentEditingBookmark = null;
         document.getElementById('local-bookmarks-edit-title').textContent = 'Add Bookmark';
         document.getElementById('local-bookmarks-edit-form').reset();
+        document.getElementById('local-bookmarks-edit-bw-low').value = '';
+        document.getElementById('local-bookmarks-edit-bw-high').value = '';
         document.getElementById('local-bookmarks-edit-alert-container').innerHTML = '';
         document.getElementById('local-bookmarks-edit-modal').classList.add('active');
     }
@@ -374,19 +403,16 @@ class LocalBookmarksUI {
             return;
         }
 
-        // Store bandwidth in a temporary property so handleSaveBookmark can access it
-        this.tempBandwidthLow = bandwidthLow;
-        this.tempBandwidthHigh = bandwidthHigh;
-        console.log('[LocalBookmarksUI] Stored temp bandwidth - Low:', this.tempBandwidthLow, 'High:', this.tempBandwidthHigh);
-
         this.currentEditingBookmark = null;
         document.getElementById('local-bookmarks-edit-title').textContent = 'Add Current Frequency';
         document.getElementById('local-bookmarks-edit-name').value = `${this.formatFrequency(frequency)}`;
         document.getElementById('local-bookmarks-edit-frequency').value = frequency / 1000; // Convert Hz to kHz
         document.getElementById('local-bookmarks-edit-mode').value = mode.toLowerCase();
         document.getElementById('local-bookmarks-edit-group').value = '';
-        document.getElementById('local-bookmarks-edit-comment').value = bandwidthLow && bandwidthHigh ? `BW: ${bandwidthLow} to ${bandwidthHigh} Hz` : '';
+        document.getElementById('local-bookmarks-edit-comment').value = '';
         document.getElementById('local-bookmarks-edit-extension').value = '';
+        document.getElementById('local-bookmarks-edit-bw-low').value  = typeof bandwidthLow  === 'number' ? bandwidthLow  : '';
+        document.getElementById('local-bookmarks-edit-bw-high').value = typeof bandwidthHigh === 'number' ? bandwidthHigh : '';
         document.getElementById('local-bookmarks-edit-alert-container').innerHTML = '';
         document.getElementById('local-bookmarks-edit-modal').classList.add('active');
     }
@@ -407,6 +433,8 @@ class LocalBookmarksUI {
         document.getElementById('local-bookmarks-edit-group').value = bookmark.group || '';
         document.getElementById('local-bookmarks-edit-comment').value = bookmark.comment || '';
         document.getElementById('local-bookmarks-edit-extension').value = bookmark.extension || '';
+        document.getElementById('local-bookmarks-edit-bw-low').value  = typeof bookmark.bandwidth_low  === 'number' ? bookmark.bandwidth_low  : '';
+        document.getElementById('local-bookmarks-edit-bw-high').value = typeof bookmark.bandwidth_high === 'number' ? bookmark.bandwidth_high : '';
         document.getElementById('local-bookmarks-edit-alert-container').innerHTML = '';
         document.getElementById('local-bookmarks-edit-modal').classList.add('active');
     }
@@ -507,6 +535,17 @@ class LocalBookmarksUI {
         e.preventDefault();
 
         const frequencyKHz = parseFloat(document.getElementById('local-bookmarks-edit-frequency').value);
+        const bwLowRaw  = document.getElementById('local-bookmarks-edit-bw-low').value.trim();
+        const bwHighRaw = document.getElementById('local-bookmarks-edit-bw-high').value.trim();
+
+        // Enforce that bandwidth fields are either both set or both empty
+        const bwLowFilled  = bwLowRaw  !== '';
+        const bwHighFilled = bwHighRaw !== '';
+        if (bwLowFilled !== bwHighFilled) {
+            this.showAlert('edit', 'error', 'Both passband fields (low and high) must be filled in together, or both left blank.');
+            return;
+        }
+
         const bookmark = {
             name: document.getElementById('local-bookmarks-edit-name').value.trim(),
             frequency: Math.round(frequencyKHz * 1000), // Convert kHz to Hz
@@ -514,16 +553,11 @@ class LocalBookmarksUI {
             group: document.getElementById('local-bookmarks-edit-group').value.trim() || null,
             comment: document.getElementById('local-bookmarks-edit-comment').value.trim() || null,
             extension: document.getElementById('local-bookmarks-edit-extension').value.trim() || null,
-            bandwidth_low: typeof this.tempBandwidthLow === 'number' ? this.tempBandwidthLow : null,
-            bandwidth_high: typeof this.tempBandwidthHigh === 'number' ? this.tempBandwidthHigh : null
+            bandwidth_low:  bwLowFilled  ? parseFloat(bwLowRaw)  : null,
+            bandwidth_high: bwHighFilled ? parseFloat(bwHighRaw) : null
         };
 
         console.log('[LocalBookmarksUI] Saving bookmark:', bookmark);
-        console.log('[LocalBookmarksUI] Temp bandwidth before clear - Low:', this.tempBandwidthLow, 'High:', this.tempBandwidthHigh);
-
-        // Clear temporary bandwidth values
-        this.tempBandwidthLow = null;
-        this.tempBandwidthHigh = null;
 
         try {
             if (this.currentEditingBookmark) {

@@ -651,11 +651,12 @@ class LocalBookmarkManager {
 
         // Modes recognised by UberSDR — anything else falls back to 'usb'
         const VALID_MODES = new Set([
-            'am', 'sam', 'usb', 'lsb', 'cw', 'cwu', 'cwl', 'fm', 'nfm',
+            'am', 'sam', 'usb', 'lsb', 'cwu', 'cwl', 'fm', 'nfm',
             'iq', 'iq48', 'iq96', 'iq192', 'iq384', 'drm'
         ]);
         // Aliases that should be silently normalised rather than rejected
-        const MODE_ALIASES = { 'nbfm': 'nfm' };
+        // 'cw' is not a real UberSDR mode — map it to 'cwu' (upper CW)
+        const MODE_ALIASES = { 'nbfm': 'nfm', 'cw': 'cwu' };
 
         for (const [index, bookmark] of bookmarks.entries()) {
             try {
@@ -749,12 +750,14 @@ class LocalBookmarkManager {
     // -------------------------------------------------------------------------
 
     modeToKiwiMode(mode) {
-        const modeMap = { am: 0, amn: 1, usb: 2, lsb: 3, cw: 4, cwn: 5, nbfm: 6, iq: 7, drm: 8 };
-        return modeMap[mode.toLowerCase()] || 0;
+        // cwu/cwl both export as KiwiSDR CW (index 4); sam exports as AM (index 0)
+        const modeMap = { am: 0, sam: 0, amn: 1, usb: 2, lsb: 3, cwu: 4, cwl: 4, nfm: 6, nbfm: 6, iq: 7, drm: 8 };
+        return modeMap[mode.toLowerCase()] ?? 0;
     }
 
     kiwiModeToMode(modeIndex) {
-        const modes = ['am', 'amn', 'usb', 'lsb', 'cw', 'cwn', 'nbfm', 'iq', 'drm'];
+        // 'cw' and 'cwn' are KiwiSDR names — map to UberSDR's 'cwu'
+        const modes = ['am', 'amn', 'usb', 'lsb', 'cwu', 'cwu', 'nfm', 'iq', 'drm'];
         return modes[modeIndex] || 'am';
     }
 

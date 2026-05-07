@@ -2533,13 +2533,15 @@ type ConnectionCheckRequest struct {
 
 // ConnectionCheckResponse represents the response for connection check
 type ConnectionCheckResponse struct {
-	ClientIP       string   `json:"client_ip"`
-	Allowed        bool     `json:"allowed"`
-	Reason         string   `json:"reason,omitempty"`
-	SessionTimeout int      `json:"session_timeout"`  // Session inactivity timeout in seconds (0 = no timeout)
-	MaxSessionTime int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	Bypassed       bool     `json:"bypassed"`         // Whether the IP is in the timeout bypass list
-	AllowedIQModes []string `json:"allowed_iq_modes"` // List of IQ modes the user can access
+	ClientIP               string   `json:"client_ip"`
+	Allowed                bool     `json:"allowed"`
+	Reason                 string   `json:"reason,omitempty"`
+	SessionTimeout         int      `json:"session_timeout"`           // Session inactivity timeout in seconds (0 = no timeout)
+	MaxSessionTime         int      `json:"max_session_time"`          // Maximum session time in seconds (0 = unlimited)
+	Bypassed               bool     `json:"bypassed"`                  // Whether the IP is in the timeout bypass list
+	AllowedIQModes         []string `json:"allowed_iq_modes"`          // List of IQ modes the user can access
+	DailyTimeUsedSecs      int64    `json:"daily_time_used_secs"`      // Seconds used in the rolling 24-hour window (0 if no limit)
+	DailyTimeRemainingSecs int64    `json:"daily_time_remaining_secs"` // Seconds remaining today (-1 = unlimited)
 }
 
 // handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
@@ -2629,13 +2631,27 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		}
 	}
 
+	// Compute daily time usage for the response (always populated; -1 = unlimited for bypassed)
+	var dailyTimeUsed int64
+	var dailyTimeRemaining int64 = -1 // -1 = unlimited
+	if !isBypassed && sessions.config.Server.MaxDailyTimePerIP > 0 {
+		dailyTimeUsed = sessions.dailyTracker.GetUsedSeconds(clientIP)
+		remaining := int64(sessions.config.Server.MaxDailyTimePerIP) - dailyTimeUsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		dailyTimeRemaining = remaining
+	}
+
 	response := ConnectionCheckResponse{
-		ClientIP:       clientIP,
-		Allowed:        true,
-		SessionTimeout: sessionTimeout,
-		MaxSessionTime: maxSessionTime,
-		Bypassed:       isBypassed,
-		AllowedIQModes: allowedIQModes,
+		ClientIP:               clientIP,
+		Allowed:                true,
+		SessionTimeout:         sessionTimeout,
+		MaxSessionTime:         maxSessionTime,
+		Bypassed:               isBypassed,
+		AllowedIQModes:         allowedIQModes,
+		DailyTimeUsedSecs:      dailyTimeUsed,
+		DailyTimeRemainingSecs: dailyTimeRemaining,
 	}
 
 	// Check if IP is banned
@@ -2687,6 +2703,18 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 			response.Allowed = false
 			response.Reason = fmt.Sprintf("Maximum unique users per IP reached (%d)", maxSessionsIP)
 			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+	}
+
+	// Check rolling 24-hour per-IP time budget
+	// Skip this check if the IP is in the bypass list or valid password provided
+	if !isBypassed && sessions.config.Server.MaxDailyTimePerIP > 0 {
+		if sessions.dailyTracker.IsLimitExceeded(clientIP, sessions.config.Server.MaxDailyTimePerIP) {
+			response.Allowed = false
+			response.Reason = fmt.Sprintf("Daily time limit reached (%d seconds per 24 hours). Please try again later.", sessions.config.Server.MaxDailyTimePerIP)
+			w.WriteHeader(http.StatusTooManyRequests)
 			json.NewEncoder(w).Encode(response)
 			return
 		}

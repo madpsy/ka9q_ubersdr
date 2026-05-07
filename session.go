@@ -155,6 +155,7 @@ type SessionManager struct {
 	activityLogger     *SessionActivityLogger // Session activity logger for disk logging
 	geoIPService       *GeoIPService          // GeoIP service for country lookups (optional)
 	dxClusterWsHandler interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
+	dailyTracker       *IPDailyTimeTracker    // Rolling 24-hour per-IP time budget tracker
 }
 
 // NewSessionManager creates a new session manager
@@ -184,6 +185,7 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 		kickedUUIDTTL:        1 * time.Hour, // Remember kicked UUIDs for 1 hour
 		prometheusMetrics:    nil,           // Will be set later if Prometheus is enabled
 		geoIPService:         geoIPService,  // GeoIP service for country lookups
+		dailyTracker:         NewIPDailyTimeTracker(),
 	}
 
 	// Start cleanup goroutine
@@ -192,6 +194,11 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 	// Start max session time enforcement goroutine if configured
 	if sm.maxSessionTime > 0 {
 		go sm.maxSessionTimeLoop()
+	}
+
+	// Start daily time limit enforcement goroutine if configured
+	if config.Server.MaxDailyTimePerIP > 0 {
+		go sm.dailyTimeLoop()
 	}
 
 	// Start orphaned channel cleanup goroutine
@@ -297,6 +304,11 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
 			// Existing user can create additional sessions (audio + spectrum)
+		}
+
+		// Check rolling 24-hour per-IP time budget
+		if sm.config.Server.MaxDailyTimePerIP > 0 && sm.dailyTracker.IsLimitExceeded(clientIP, sm.config.Server.MaxDailyTimePerIP) {
+			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d seconds per 24 hours)", sm.config.Server.MaxDailyTimePerIP)
 		}
 	}
 
@@ -462,6 +474,11 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
 
+	// Record session start for rolling 24-hour per-IP time tracking
+	if clientIP != "" {
+		sm.dailyTracker.RecordSessionStart(clientIP)
+	}
+
 	// Track if this is a new UUID (for activity logging)
 	isNewUUID := false
 	hadAudioBefore := false
@@ -582,6 +599,11 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
 			// Existing user can create additional sessions (audio + spectrum)
+		}
+
+		// Check rolling 24-hour per-IP time budget
+		if sm.config.Server.MaxDailyTimePerIP > 0 && sm.dailyTracker.IsLimitExceeded(clientIP, sm.config.Server.MaxDailyTimePerIP) {
+			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d seconds per 24 hours)", sm.config.Server.MaxDailyTimePerIP)
 		}
 	}
 
@@ -754,6 +776,11 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 			sm.ipToUUIDs[clientIP] = make(map[string]bool)
 		}
 		sm.ipToUUIDs[clientIP][userSessionID] = true
+	}
+
+	// Record session start for rolling 24-hour per-IP time tracking
+	if clientIP != "" {
+		sm.dailyTracker.RecordSessionStart(clientIP)
 	}
 
 	// Log session activity if this is a NEW UUID OR if adding spectrum to existing audio-only session
@@ -1364,6 +1391,13 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
+	// Record session end for rolling 24-hour per-IP time tracking.
+	// Called here (before any cleanup) so the elapsed time is always committed
+	// regardless of how the session ends (timeout, kick, normal disconnect).
+	if session.ClientIP != "" {
+		sm.dailyTracker.RecordSessionEnd(session.ClientIP)
+	}
+
 	// Track if this UUID is being completely removed (for activity logging)
 	// Check this BEFORE removing the session from the map
 	uuidCompletelyGone := false
@@ -1636,6 +1670,60 @@ func (sm *SessionManager) enforceMaxSessionTime() {
 		sm.mu.Lock()
 		delete(sm.userSessionFirst, userSessionID)
 		sm.mu.Unlock()
+	}
+}
+
+// dailyTimeLoop checks every 30 seconds for IPs that have exceeded their rolling
+// 24-hour time budget and kicks all active sessions from those IPs.
+func (sm *SessionManager) dailyTimeLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		sm.enforceDailyTimeLimit()
+	}
+}
+
+// enforceDailyTimeLimit kicks all sessions from IPs that have exceeded the
+// configured max_daily_time_per_ip rolling 24-hour budget.
+// Bypassed IPs (timeout_bypass_ips or bypass_password) are always skipped.
+func (sm *SessionManager) enforceDailyTimeLimit() {
+	limit := sm.config.Server.MaxDailyTimePerIP
+	if limit <= 0 {
+		return
+	}
+
+	// Get all IPs that have any tracked activity (completed or live).
+	candidates := sm.dailyTracker.AllIPs()
+
+	for _, ip := range candidates {
+		// Skip bypassed IPs — they are exempt from all time limits.
+		if sm.config.Server.IsIPTimeoutBypassed(ip) {
+			continue
+		}
+
+		if !sm.dailyTracker.IsLimitExceeded(ip, limit) {
+			continue
+		}
+
+		// Collect all UUIDs currently active from this IP.
+		sm.mu.RLock()
+		var uuidsToKick []string
+		seen := make(map[string]bool)
+		for _, session := range sm.sessions {
+			if session.ClientIP == ip && session.UserSessionID != "" && !seen[session.UserSessionID] {
+				seen[session.UserSessionID] = true
+				uuidsToKick = append(uuidsToKick, session.UserSessionID)
+			}
+		}
+		sm.mu.RUnlock()
+
+		for _, userSessionID := range uuidsToKick {
+			log.Printf("Daily time limit exceeded for IP %s (limit: %ds per 24h) - kicking user %s",
+				ip, limit, userSessionID)
+			if _, err := sm.KickUserBySessionID(userSessionID); err != nil {
+				log.Printf("Error kicking user %s for daily time limit: %v", userSessionID, err)
+			}
+		}
 	}
 }
 

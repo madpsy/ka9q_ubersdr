@@ -158,6 +158,15 @@ server:
   # Useful for ensuring fair access and preventing long-term monopolisation
   # Set to 0 to disable time-based limiting
   max_session_time: 3600
+  # Maximum total connected time per IP address per rolling 24-hour window in seconds (0 = unlimited)
+  # Tracks cumulative connected time across all sessions from the same IP within any 24-hour period.
+  # Uses a rolling window (not a fixed midnight reset), so a user cannot exploit a reset boundary.
+  # Example: if set to 3600, an IP can connect for up to 1 hour in any 24-hour period.
+  # When the limit is reached, new connections from that IP are rejected until enough time has elapsed.
+  # Active sessions that push the IP over the limit are kicked by the background enforcement loop.
+  # IPs in timeout_bypass_ips and users with a valid bypass_password are automatically exempt.
+  # Set to 0 to disable (default).
+  max_daily_time_per_ip: 0
   # Command rate limit per UUID (commands per second per channel)
   # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
   # Applies separately to audio and spectrum channels (e.g., 20 means 20 audio commands/sec + 20 spectrum commands/sec)

@@ -5706,6 +5706,7 @@
                         <th style="padding: 12px; text-align: center; width: 80px;">Spectrum (kbps)</th>
                         <th style="padding: 12px; text-align: center; width: 80px;">DX (kbps)</th>
                         <th style="padding: 12px; text-align: center; width: 70px;" title="Normalised CPU% across all this user's radiod channels (audio + spectrum)">CPU%</th>
+                        <th style="padding: 12px; text-align: center; width: 80px;" title="Total connected time from this IP in the rolling 24-hour window">24h Time</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
@@ -5882,6 +5883,12 @@
                         }
                     }
 
+                    // Format daily time used (rolling 24h window) from the first available session
+                    const dailyTimeSecs = (audioSession?.daily_time_used_secs ?? spectrumSession?.daily_time_used_secs) || 0;
+                    const dailyTimeDisplay = dailyTimeSecs > 0
+                        ? formatDuration(dailyTimeSecs * 1000)
+                        : '<em style="color: #ccc;">—</em>';
+
                     // Format chat username with LastSeen time
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
@@ -5893,6 +5900,7 @@
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${spectrumThroughput}</td>
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${dxClusterThroughput}</td>
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${cpuNormDisplay}</td>
+                        <td style="padding: 12px; font-size: 12px; text-align: center; white-space: nowrap;">${dailyTimeDisplay}</td>
                         <td style="padding: 12px; font-size: 12px;">${details}</td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
                     `;

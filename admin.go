@@ -2351,6 +2351,18 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Enrich each session with rolling 24-hour per-IP time usage (in seconds).
+	// Two sessions from the same IP will show the same value because the tracker
+	// is keyed by IP, not by session or UUID.
+	// The field is always present; value is 0 when no time has been tracked for that IP.
+	for i := range sessions {
+		if clientIP, ok := sessions[i]["client_ip"].(string); ok && clientIP != "" {
+			sessions[i]["daily_time_used_secs"] = ah.sessions.dailyTracker.GetUsedSeconds(clientIP)
+		} else {
+			sessions[i]["daily_time_used_secs"] = int64(0)
+		}
+	}
+
 	response := map[string]interface{}{
 		"sessions": sessions,
 		"count":    len(sessions),

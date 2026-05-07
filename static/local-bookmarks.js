@@ -651,9 +651,11 @@ class LocalBookmarkManager {
 
         // Modes recognised by UberSDR — anything else falls back to 'usb'
         const VALID_MODES = new Set([
-            'am', 'sam', 'usb', 'lsb', 'cw', 'cwu', 'cwl', 'fm', 'nfm', 'nbfm',
+            'am', 'sam', 'usb', 'lsb', 'cw', 'cwu', 'cwl', 'fm', 'nfm',
             'iq', 'iq48', 'iq96', 'iq192', 'iq384', 'drm'
         ]);
+        // Aliases that should be silently normalised rather than rejected
+        const MODE_ALIASES = { 'nbfm': 'nfm' };
 
         for (const [index, bookmark] of bookmarks.entries()) {
             try {
@@ -663,9 +665,10 @@ class LocalBookmarkManager {
                 }
 
                 const rawMode = bookmark.mode.toString().toLowerCase();
-                const resolvedMode = VALID_MODES.has(rawMode) ? rawMode : 'usb';
+                const aliased = MODE_ALIASES[rawMode] || rawMode;
+                const resolvedMode = VALID_MODES.has(aliased) ? aliased : 'usb';
                 if (resolvedMode !== rawMode) {
-                    console.warn(`[LocalBookmarks] Unknown mode "${rawMode}" for "${bookmark.name}" — falling back to usb`);
+                    console.warn(`[LocalBookmarks] Unknown mode "${rawMode}" for "${bookmark.name}" — falling back to ${resolvedMode}`);
                 }
 
                 const normalised = {

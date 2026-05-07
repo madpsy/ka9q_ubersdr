@@ -101,12 +101,14 @@ class LocalBookmarksUI {
                         <label for="local-bookmarks-edit-mode">Mode *</label>
                         <select id="local-bookmarks-edit-mode" required>
                             <option value="am">AM</option>
+                            <option value="sam">SAM</option>
                             <option value="usb">USB</option>
                             <option value="lsb">LSB</option>
                             <option value="cw">CW</option>
                             <option value="cwu">CWU</option>
                             <option value="cwl">CWL</option>
-                            <option value="nbfm">NBFM</option>
+                            <option value="fm">FM</option>
+                            <option value="nfm">NFM</option>
                         </select>
                     </div>
                     <div class="local-bookmarks-form-group">

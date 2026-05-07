@@ -549,13 +549,27 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
                 setMode(bookmarkMode);
             }
         } else {
-            // For non-CW modes, set mode first then bandwidth
-            setMode(bookmarkMode);
-            
-            // Apply bookmark bandwidth if available
-            if (radioAPI && bandwidthLow !== undefined && bandwidthLow !== null &&
+            // For non-CW modes: if the bookmark carries custom bandwidth, pre-load it
+            // into the globals and sliders BEFORE calling setMode(), then call setMode
+            // with preserveBandwidth=true so its internal autoTune() sends the correct
+            // bandwidth in a single tune command.
+            // (Mirrors the CW path above which does setBandwidth → setMode(preserve=true))
+            if (bandwidthLow !== undefined && bandwidthLow !== null &&
                 bandwidthHigh !== undefined && bandwidthHigh !== null) {
-                radioAPI.setBandwidth(bandwidthLow, bandwidthHigh);
+                // Write bookmark bandwidth into globals and DOM sliders so that
+                // setMode(preserveBandwidth=true) reads the correct values.
+                window.currentBandwidthLow  = bandwidthLow;
+                window.currentBandwidthHigh = bandwidthHigh;
+                const bwLowSlider  = document.getElementById('bandwidth-low');
+                const bwHighSlider = document.getElementById('bandwidth-high');
+                if (bwLowSlider)  bwLowSlider.value  = bandwidthLow;
+                if (bwHighSlider) bwHighSlider.value = bandwidthHigh;
+                // Now set mode — preserveBandwidth=true means it reads the values we
+                // just wrote and fires a single autoTune() with the correct bandwidth.
+                setMode(bookmarkMode, true);
+            } else {
+                // No custom bandwidth — let setMode reset to mode defaults as normal.
+                setMode(bookmarkMode);
             }
         }
     }

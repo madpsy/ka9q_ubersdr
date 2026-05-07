@@ -9,6 +9,8 @@
 
 ### Bug Fixes
 - Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints
+- SAM mode missing from bookmarks
+- Local bookmarks now store and load bandwidth high/low values
 
 ## Version 0.1.48 - Latest Stable
 
@@ -17,7 +19,7 @@
 - Added **RBN Statistics** for those who run CW Skimmer and report to RBN
 - Added **Default Audio Buffer** in UI config in case the default 200ms needs changed (users can override)
 - Added **Remote Support** which allows optional and temporary access to an instance to diagnose issues (top right of Admin)
-- Improved **Spectrogram** to include bands/bookmarks (can toggle) and day/night markers
+- Improved **Spectrogram** to include bands/bookmarks (can togle) and day/night markers
 
 ### Bug Fixes
 - Unnecessary canvas drawing on the spectrum/waterfall causing high CPU usage

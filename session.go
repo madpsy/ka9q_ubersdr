@@ -474,9 +474,10 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
 
-	// Record session start for rolling 24-hour per-IP time tracking
-	if clientIP != "" {
-		sm.dailyTracker.RecordSessionStart(clientIP)
+	// Record session start for rolling 24-hour per-IP time tracking.
+	// Keyed by (ip, uuid) so audio+spectrum under the same UUID share one clock.
+	if clientIP != "" && userSessionID != "" {
+		sm.dailyTracker.RecordSessionStart(clientIP, userSessionID)
 	}
 
 	// Track if this is a new UUID (for activity logging)
@@ -778,9 +779,10 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		sm.ipToUUIDs[clientIP][userSessionID] = true
 	}
 
-	// Record session start for rolling 24-hour per-IP time tracking
-	if clientIP != "" {
-		sm.dailyTracker.RecordSessionStart(clientIP)
+	// Record session start for rolling 24-hour per-IP time tracking.
+	// Keyed by (ip, uuid) so audio+spectrum under the same UUID share one clock.
+	if clientIP != "" && userSessionID != "" {
+		sm.dailyTracker.RecordSessionStart(clientIP, userSessionID)
 	}
 
 	// Log session activity if this is a NEW UUID OR if adding spectrum to existing audio-only session
@@ -1394,8 +1396,9 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	// Record session end for rolling 24-hour per-IP time tracking.
 	// Called here (before any cleanup) so the elapsed time is always committed
 	// regardless of how the session ends (timeout, kick, normal disconnect).
-	if session.ClientIP != "" {
-		sm.dailyTracker.RecordSessionEnd(session.ClientIP)
+	// Keyed by (ip, uuid): the UUID clock stops only when its last connection closes.
+	if session.ClientIP != "" && session.UserSessionID != "" {
+		sm.dailyTracker.RecordSessionEnd(session.ClientIP, session.UserSessionID)
 	}
 
 	// Track if this UUID is being completely removed (for activity logging)

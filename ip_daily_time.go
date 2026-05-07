@@ -5,114 +5,128 @@ import (
 	"time"
 )
 
-// sessionRecord holds the end time and duration of a completed session block for one IP.
-// A "session block" is the wall-clock window from when the first session from an IP
-// started to when the last concurrent session from that IP ended.
+// sessionRecord holds the end time and duration of a completed UUID session block.
+// A "session block" is the wall-clock window from when a UUID first connected to
+// when it fully disconnected (all its WebSocket connections closed).
 type sessionRecord struct {
 	endedAt      time.Time
 	durationSecs int64
 }
 
-// ipActivity tracks currently-active sessions for a single IP address.
-// sessionCount is a reference count: incremented on each new session, decremented on
-// each session end. When it drops to zero the elapsed time is committed to history.
-type ipActivity struct {
-	startedAt    time.Time // when the first (or only) session from this IP began
-	sessionCount int       // number of currently active sessions from this IP
-}
-
 // IPDailyTimeTracker tracks cumulative connected time per IP address over a rolling
-// 24-hour window. It is safe for concurrent use from multiple goroutines.
+// 24-hour window. Time is counted per unique UUID (logical user session): audio,
+// spectrum, and DX connections that share the same UUID count as one session and
+// tick the clock at 1×. Two different UUIDs from the same IP each tick at 1×,
+// so the IP's total ticks at 2×.
 //
 // Design:
-//   - history[ip] holds completed session blocks (endedAt + durationSecs).
+//   - activeSessions[ip][uuid] = time when that UUID first connected from this IP.
+//     The clock for a UUID starts on its first WebSocket connection and stops when
+//     all its connections are gone (tracked via a per-UUID reference count).
+//   - uuidRefCount[ip][uuid] = number of active WebSocket connections for this UUID
+//     from this IP. When it drops to zero the elapsed time is committed to history.
+//   - history[ip] holds completed UUID session blocks (endedAt + durationSecs).
 //     Records older than 24 hours are pruned lazily on each access.
-//   - activeSessions[ip] holds the reference-counted start time for IPs that
-//     currently have at least one active session.
-//   - GetUsedSeconds sums completed history + live elapsed time for the IP.
+//   - GetUsedSeconds sums completed history + live elapsed for all active UUIDs.
 //   - The rolling window is always "now - 24h", so no midnight reset is needed.
 type IPDailyTimeTracker struct {
 	mu             sync.Mutex
-	history        map[string][]sessionRecord // IP → completed session blocks
-	activeSessions map[string]*ipActivity     // IP → current activity (nil when idle)
+	activeSessions map[string]map[string]time.Time // ip → uuid → startedAt
+	uuidRefCount   map[string]map[string]int       // ip → uuid → active connection count
+	history        map[string][]sessionRecord      // ip → completed session blocks
 }
 
 // NewIPDailyTimeTracker creates and returns a ready-to-use IPDailyTimeTracker.
 func NewIPDailyTimeTracker() *IPDailyTimeTracker {
 	return &IPDailyTimeTracker{
+		activeSessions: make(map[string]map[string]time.Time),
+		uuidRefCount:   make(map[string]map[string]int),
 		history:        make(map[string][]sessionRecord),
-		activeSessions: make(map[string]*ipActivity),
 	}
 }
 
-// RecordSessionStart notes that a new session has started from ip.
-// If this is the first concurrent session from ip, the clock starts now.
-// If ip already has active sessions the reference count is incremented but
-// the start time is not changed (the clock is already running).
-// ip == "" is a no-op (internal/background sessions have no client IP).
-func (t *IPDailyTimeTracker) RecordSessionStart(ip string) {
-	if ip == "" {
+// RecordSessionStart notes that a new WebSocket connection has been established
+// for the given (ip, uuid) pair. If this is the first connection for this UUID
+// from this IP, the UUID's clock starts now. Subsequent connections (e.g. audio
+// after spectrum) increment the reference count without restarting the clock.
+// ip == "" or uuid == "" is a no-op (internal/background sessions).
+func (t *IPDailyTimeTracker) RecordSessionStart(ip, uuid string) {
+	if ip == "" || uuid == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if act, ok := t.activeSessions[ip]; ok {
-		// Already tracking this IP — just bump the reference count.
-		act.sessionCount++
-	} else {
-		// First session from this IP.
-		t.activeSessions[ip] = &ipActivity{
-			startedAt:    time.Now(),
-			sessionCount: 1,
-		}
+	// Ensure per-IP maps exist.
+	if t.activeSessions[ip] == nil {
+		t.activeSessions[ip] = make(map[string]time.Time)
 	}
+	if t.uuidRefCount[ip] == nil {
+		t.uuidRefCount[ip] = make(map[string]int)
+	}
+
+	// Start the clock on the first connection for this UUID from this IP.
+	if _, exists := t.activeSessions[ip][uuid]; !exists {
+		t.activeSessions[ip][uuid] = time.Now()
+	}
+	t.uuidRefCount[ip][uuid]++
 }
 
-// RecordSessionEnd notes that a session from ip has ended.
-// When the reference count drops to zero the elapsed wall-clock time since the
-// first session started is appended to history.
-// ip == "" is a no-op.
-func (t *IPDailyTimeTracker) RecordSessionEnd(ip string) {
-	if ip == "" {
+// RecordSessionEnd notes that a WebSocket connection for (ip, uuid) has closed.
+// When the reference count for this UUID drops to zero (all connections gone),
+// the elapsed time since the UUID first connected is committed to history.
+// ip == "" or uuid == "" is a no-op.
+func (t *IPDailyTimeTracker) RecordSessionEnd(ip, uuid string) {
+	if ip == "" || uuid == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	act, ok := t.activeSessions[ip]
-	if !ok {
-		// No active session tracked for this IP — nothing to do.
-		// This can happen if the tracker was created after the session started
-		// (e.g. on server restart) or if ip was empty at creation time.
+	if t.uuidRefCount[ip] == nil {
 		return
 	}
 
-	act.sessionCount--
-	if act.sessionCount > 0 {
-		// Other sessions from this IP are still active; keep the clock running.
+	t.uuidRefCount[ip][uuid]--
+	if t.uuidRefCount[ip][uuid] > 0 {
+		// Other connections for this UUID are still active.
 		return
 	}
 
-	// Last session from this IP ended — commit the elapsed time to history.
+	// Last connection for this UUID closed — commit elapsed time to history.
+	delete(t.uuidRefCount[ip], uuid)
+	if len(t.uuidRefCount[ip]) == 0 {
+		delete(t.uuidRefCount, ip)
+	}
+
+	startedAt, exists := t.activeSessions[ip][uuid]
+	if !exists {
+		return
+	}
+	delete(t.activeSessions[ip], uuid)
+	if len(t.activeSessions[ip]) == 0 {
+		delete(t.activeSessions, ip)
+	}
+
 	now := time.Now()
-	elapsed := int64(now.Sub(act.startedAt).Seconds())
+	elapsed := int64(now.Sub(startedAt).Seconds())
 	if elapsed < 0 {
 		elapsed = 0
 	}
 
+	if t.history[ip] == nil {
+		t.history[ip] = make([]sessionRecord, 0, 4)
+	}
 	t.history[ip] = append(t.history[ip], sessionRecord{
 		endedAt:      now,
 		durationSecs: elapsed,
 	})
-
-	delete(t.activeSessions, ip)
 }
 
 // GetUsedSeconds returns the total connected seconds for ip within the last 24 hours.
 // It sums:
-//  1. Completed session blocks whose endedAt is within the last 24 hours.
-//  2. The live elapsed time if ip currently has active sessions.
+//  1. Completed UUID session blocks whose endedAt is within the last 24 hours.
+//  2. The live elapsed time for each UUID currently active from this IP.
 //
 // Stale records (older than 24 hours) are pruned from history as a side effect.
 // ip == "" always returns 0.
@@ -128,18 +142,18 @@ func (t *IPDailyTimeTracker) GetUsedSeconds(ip string) int64 {
 
 // getUsedSecondsLocked is the internal implementation; caller must hold t.mu.
 func (t *IPDailyTimeTracker) getUsedSecondsLocked(ip string) int64 {
-	cutoff := time.Now().Add(-24 * time.Hour)
+	now := time.Now()
+	cutoff := now.Add(-24 * time.Hour)
 
 	// Prune and sum completed history.
 	var total int64
 	if records, ok := t.history[ip]; ok {
-		kept := records[:0] // reuse backing array
+		kept := records[:0]
 		for _, r := range records {
 			if r.endedAt.After(cutoff) {
 				total += r.durationSecs
 				kept = append(kept, r)
 			}
-			// Records at or before cutoff are dropped (pruned).
 		}
 		if len(kept) == 0 {
 			delete(t.history, ip)
@@ -148,11 +162,13 @@ func (t *IPDailyTimeTracker) getUsedSecondsLocked(ip string) int64 {
 		}
 	}
 
-	// Add live elapsed time if the IP currently has active sessions.
-	if act, ok := t.activeSessions[ip]; ok {
-		live := int64(time.Since(act.startedAt).Seconds())
-		if live > 0 {
-			total += live
+	// Add live elapsed time for each active UUID from this IP.
+	if uuids, ok := t.activeSessions[ip]; ok {
+		for _, startedAt := range uuids {
+			live := int64(now.Sub(startedAt).Seconds())
+			if live > 0 {
+				total += live
+			}
 		}
 	}
 

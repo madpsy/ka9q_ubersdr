@@ -48,12 +48,13 @@ echo ""
 read -p "Press any key to continue..." -n1 -s
 echo ""
 
-# Auto-fetch GeoIP City database (unless --no-geoip flag is set)
+# Auto-fetch GeoIP City and ASN databases (unless --no-geoip flag is set)
 if [ "$SKIP_GEOIP" = true ]; then
     echo "Skipping GeoIP database download (--no-geoip flag set)"
 else
     GEOIP_DIR="geoip"
     GEOIP_FILE="$GEOIP_DIR/GeoLite2-Country.mmdb"  # Keep filename for compatibility
+    GEOIP_ASN_FILE="$GEOIP_DIR/GeoLite2-ASN.mmdb"
     GEOIP_LICENSE_FILE="$GEOIP_DIR/licence.txt"
 
     # Check if license file exists
@@ -66,10 +67,14 @@ else
         echo "  3. Save the license key to $GEOIP_LICENSE_FILE"
         echo ""
 
-        # Check if database file exists
+        # Check if database files exist
         if [ ! -f "$GEOIP_FILE" ]; then
             echo "ERROR: $GEOIP_FILE not found and cannot auto-download without license key!"
             exit 1
+        fi
+
+        if [ ! -f "$GEOIP_ASN_FILE" ]; then
+            echo "WARNING: $GEOIP_ASN_FILE not found and cannot auto-download without license key"
         fi
 
         echo "Using existing GeoIP database: $GEOIP_FILE"
@@ -87,13 +92,13 @@ else
 
             echo "Using existing GeoIP database: $GEOIP_FILE"
         else
-            echo "Downloading latest GeoLite2-City database..."
             mkdir -p "$GEOIP_DIR"
 
             # Download and extract City database (saved as Country.mmdb for compatibility)
+            echo "Downloading latest GeoLite2-City database..."
             if ! wget -q -O /tmp/GeoLite2-City.tar.gz \
                 "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${GEOIP_LICENSE_KEY}&suffix=tar.gz"; then
-                echo "WARNING: Failed to download GeoIP database. Check your license key in $GEOIP_LICENSE_FILE"
+                echo "WARNING: Failed to download GeoIP City database. Check your license key in $GEOIP_LICENSE_FILE"
 
                 if [ ! -f "$GEOIP_FILE" ]; then
                     echo "ERROR: $GEOIP_FILE not found and download failed!"
@@ -104,9 +109,28 @@ else
             else
                 tar -xzf /tmp/GeoLite2-City.tar.gz -C /tmp/
                 find /tmp/GeoLite2-City_* -name "*.mmdb" -exec cp {} "$GEOIP_FILE" \;
-                rm -rf /tmp/GeoLite2-City* /tmp/GeoLite2-City.tar.gz
+                rm -rf /tmp/GeoLite2-City_* /tmp/GeoLite2-City.tar.gz
 
                 echo "GeoIP City database downloaded successfully to $GEOIP_FILE"
+            fi
+
+            # Download and extract ASN database
+            echo "Downloading latest GeoLite2-ASN database..."
+            if ! wget -q -O /tmp/GeoLite2-ASN.tar.gz \
+                "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-ASN&license_key=${GEOIP_LICENSE_KEY}&suffix=tar.gz"; then
+                echo "WARNING: Failed to download GeoIP ASN database. Check your license key in $GEOIP_LICENSE_FILE"
+
+                if [ ! -f "$GEOIP_ASN_FILE" ]; then
+                    echo "WARNING: $GEOIP_ASN_FILE not found and download failed - ASN lookups will be unavailable"
+                else
+                    echo "Using existing GeoIP ASN database: $GEOIP_ASN_FILE"
+                fi
+            else
+                tar -xzf /tmp/GeoLite2-ASN.tar.gz -C /tmp/
+                find /tmp/GeoLite2-ASN_* -name "*.mmdb" -exec cp {} "$GEOIP_ASN_FILE" \;
+                rm -rf /tmp/GeoLite2-ASN_* /tmp/GeoLite2-ASN.tar.gz
+
+                echo "GeoIP ASN database downloaded successfully to $GEOIP_ASN_FILE"
             fi
         fi
     fi

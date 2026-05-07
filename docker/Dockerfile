@@ -95,7 +95,7 @@ COPY --from=builder /build/config/ui.yaml.example /etc/ka9q_ubersdr/ui.yaml.exam
 # Copy CTY directory with cty.dat file
 COPY --from=builder /build/cty /etc/ka9q_ubersdr/cty
 
-# Copy GeoIP database
+# Copy GeoIP databases (licence.txt is excluded via .dockerignore)
 COPY --from=builder /build/geoip ./geoip
 
 # Copy entrypoint script

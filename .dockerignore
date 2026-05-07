@@ -1,0 +1,72 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+ka9q_ubersdr
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.test
+*.out
+
+# Go build cache
+.cache/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+*.md
+!docker/README.md
+LICENSE.TXT
+
+# Test files
+*_test.go
+test/
+tests/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker files (avoid recursion) - but keep scripts needed by the build
+docker/
+!docker/entrypoint.sh
+!docker/caddy-entrypoint.sh
+!docker/fluent-bit-entrypoint.sh
+!docker/fluent-bit.conf
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Trunk
+.trunk/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Configuration files that should be mounted
+config.yaml
+bands.yaml
+bookmarks.yaml
+
+# GeoIP licence key - must never be baked into the image
+geoip/licence.txt
+
+# Build directories
+bin/
+build/
+dist/

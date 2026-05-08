@@ -107,12 +107,14 @@ type GPSConfig struct {
 
 // Bookmark represents a frequency bookmark
 type Bookmark struct {
-	Name      string `yaml:"name" json:"name"`
-	Frequency uint64 `yaml:"frequency" json:"frequency"`
-	Mode      string `yaml:"mode" json:"mode"`
-	Extension string `yaml:"extension,omitempty" json:"extension,omitempty"`
-	Group     string `yaml:"group,omitempty" json:"group,omitempty"`
-	Comment   string `yaml:"comment,omitempty" json:"comment,omitempty"`
+	Name          string `yaml:"name" json:"name"`
+	Frequency     uint64 `yaml:"frequency" json:"frequency"`
+	Mode          string `yaml:"mode" json:"mode"`
+	Extension     string `yaml:"extension,omitempty" json:"extension,omitempty"`
+	Group         string `yaml:"group,omitempty" json:"group,omitempty"`
+	Comment       string `yaml:"comment,omitempty" json:"comment,omitempty"`
+	BandwidthLow  *int   `yaml:"bandwidth_low,omitempty" json:"bandwidth_low,omitempty"`
+	BandwidthHigh *int   `yaml:"bandwidth_high,omitempty" json:"bandwidth_high,omitempty"`
 }
 
 // Band represents an amateur radio band

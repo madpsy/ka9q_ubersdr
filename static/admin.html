@@ -1085,6 +1085,16 @@
                             </select>
                             <small>Decoder extension to open automatically when bookmark is clicked</small>
                         </div>
+                        <div class="config-field">
+                            <label>Bandwidth Low (Optional)</label>
+                            <input type="number" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" oninput="sanitizeNumberInput(this)">
+                            <small>Lower passband edge in Hz relative to carrier (e.g. −2800 for USB). Leave blank to use mode default.</small>
+                        </div>
+                        <div class="config-field">
+                            <label>Bandwidth High (Optional)</label>
+                            <input type="number" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" oninput="sanitizeNumberInput(this)">
+                            <small>Upper passband edge in Hz relative to carrier (e.g. 2800 for USB). Leave blank to use mode default.</small>
+                        </div>
                         <button class="btn" id="saveBookmarkBtn" onclick="saveBookmark()">Save Bookmark</button>
                         <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
                     </div>
@@ -4351,6 +4361,7 @@
                         <th style="padding: 12px; text-align: left;">Group</th>
                         <th style="padding: 12px; text-align: left;">Comment</th>
                         <th style="padding: 12px; text-align: left;">Extension</th>
+                        <th style="padding: 12px; text-align: left;">Bandwidth</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
                 </thead>
@@ -4387,6 +4398,12 @@
                     `<span style="color: #666; font-style: italic;">${bookmark.comment}</span>` :
                     '<em style="color: #999;">—</em>';
 
+                // Get display for bandwidth
+                const hasBw = bookmark.bandwidth_low != null || bookmark.bandwidth_high != null;
+                const bwDisplay = hasBw
+                    ? `<span style="color: #555; font-family: monospace; font-size: 12px;">${bookmark.bandwidth_low ?? '?'} / ${bookmark.bandwidth_high ?? '?'}</span>`
+                    : '<em style="color: #999;">—</em>';
+
                 // Escape name for use in onclick attribute
                 const escapedName = bookmark.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
@@ -4397,6 +4414,7 @@
                     <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px; max-width: 300px;">${commentDisplay}</td>
                     <td style="padding: 12px;">${extensionDisplay}</td>
+                    <td style="padding: 12px; white-space: nowrap;">${bwDisplay}</td>
                     <td style="padding: 12px; text-align: center; white-space: nowrap;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark('${escapedName}', ${bookmark.frequency})">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBookmark('${escapedName}', ${bookmark.frequency})">Delete</button>
@@ -4418,6 +4436,8 @@
             document.getElementById('newBookmarkGroup').value = '';
             document.getElementById('newBookmarkComment').value = '';
             document.getElementById('newBookmarkExtension').value = '';
+            document.getElementById('newBookmarkBandwidthLow').value = '';
+            document.getElementById('newBookmarkBandwidthHigh').value = '';
             validateBookmarkForm(); // Initial validation
         }
 
@@ -4439,6 +4459,8 @@
             document.getElementById('newBookmarkGroup').value = bookmark.group || '';
             document.getElementById('newBookmarkComment').value = bookmark.comment || '';
             document.getElementById('newBookmarkExtension').value = bookmark.extension || '';
+            document.getElementById('newBookmarkBandwidthLow').value = bookmark.bandwidth_low != null ? bookmark.bandwidth_low : '';
+            document.getElementById('newBookmarkBandwidthHigh').value = bookmark.bandwidth_high != null ? bookmark.bandwidth_high : '';
             validateBookmarkForm(); // Initial validation
 
             // Scroll the form into view
@@ -4449,6 +4471,8 @@
             document.getElementById('addBookmarkForm').style.display = 'none';
             document.getElementById('editBookmarkIndex').value = '';
             document.getElementById('editBookmarkFreq').value = '';
+            document.getElementById('newBookmarkBandwidthLow').value = '';
+            document.getElementById('newBookmarkBandwidthHigh').value = '';
             // Clear validation errors
             document.getElementById('bookmarkNameError').style.display = 'none';
             document.getElementById('bookmarkFreqError').style.display = 'none';
@@ -4515,6 +4539,8 @@
             const group = document.getElementById('newBookmarkGroup').value.trim();
             const comment = document.getElementById('newBookmarkComment').value.trim();
             const extension = document.getElementById('newBookmarkExtension').value.trim();
+            const bwLowRaw = document.getElementById('newBookmarkBandwidthLow').value.trim();
+            const bwHighRaw = document.getElementById('newBookmarkBandwidthHigh').value.trim();
             const originalName = document.getElementById('editBookmarkIndex').value;
             const originalFreq = document.getElementById('editBookmarkFreq').value;
 
@@ -4533,6 +4559,12 @@
             }
             if (extension) {
                 bookmarkData.extension = extension;
+            }
+            if (bwLowRaw !== '') {
+                bookmarkData.bandwidth_low = parseInt(bwLowRaw);
+            }
+            if (bwHighRaw !== '') {
+                bookmarkData.bandwidth_high = parseInt(bwHighRaw);
             }
 
             try {
@@ -4697,6 +4729,12 @@
                 }
                 if (bookmark.extension) {
                     yamlContent += `    extension: ${bookmark.extension}\n`;
+                }
+                if (bookmark.bandwidth_low != null) {
+                    yamlContent += `    bandwidth_low: ${bookmark.bandwidth_low}\n`;
+                }
+                if (bookmark.bandwidth_high != null) {
+                    yamlContent += `    bandwidth_high: ${bookmark.bandwidth_high}\n`;
                 }
             });
 

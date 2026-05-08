@@ -4,6 +4,9 @@
 # Optional: group - organize bookmarks into groups (displayed in dropdown)
 # Optional: comment - description shown when hovering over bookmark on spectrum
 # Optional: extension - name of decoder extension to open (e.g., "stats")
+# Optional: bandwidth_low  - lower passband edge in Hz relative to carrier (e.g., -2800 for USB)
+# Optional: bandwidth_high - upper passband edge in Hz relative to carrier (e.g.,  2800 for USB)
+#           When omitted the mode's default passband is used.
 
 bookmarks:
   # Time Standard Stations
@@ -77,16 +80,22 @@ bookmarks:
     frequency: 7030000
     mode: "cwu"
     group: "CW"
+    bandwidth_low: -200    # narrow CW passband: 200 Hz either side of carrier
+    bandwidth_high: 200
 
   - name: "CW 20m"
     frequency: 14050000
     mode: "cwu"
     group: "CW"
+    bandwidth_low: -200
+    bandwidth_high: 200
 
   - name: "CW 15m"
     frequency: 21050000
     mode: "cwu"
     group: "CW"
+    bandwidth_low: -200
+    bandwidth_high: 200
 
   # SSB Voice Frequencies
   - name: "SSB 80m"

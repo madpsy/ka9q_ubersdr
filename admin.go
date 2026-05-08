@@ -1433,7 +1433,7 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		"frequency": newBookmark.Frequency,
 		"mode":      newBookmark.Mode,
 	}
-	// Only add optional fields if they are not empty
+	// Only add optional fields if they are not empty/nil
 	if newBookmark.Group != "" {
 		bookmarkMap["group"] = newBookmark.Group
 	}
@@ -1442,6 +1442,12 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	}
 	if newBookmark.Comment != "" {
 		bookmarkMap["comment"] = newBookmark.Comment
+	}
+	if newBookmark.BandwidthLow != nil {
+		bookmarkMap["bandwidth_low"] = *newBookmark.BandwidthLow
+	}
+	if newBookmark.BandwidthHigh != nil {
+		bookmarkMap["bandwidth_high"] = *newBookmark.BandwidthHigh
 	}
 	bookmarks = append(bookmarks, bookmarkMap)
 	bookmarksConfig["bookmarks"] = bookmarks
@@ -1590,7 +1596,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		"frequency": updatedBookmark.Frequency,
 		"mode":      updatedBookmark.Mode,
 	}
-	// Only add optional fields if they are not empty
+	// Only add optional fields if they are not empty/nil
 	if updatedBookmark.Group != "" {
 		bookmarkMap["group"] = updatedBookmark.Group
 	}
@@ -1599,6 +1605,12 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	}
 	if updatedBookmark.Comment != "" {
 		bookmarkMap["comment"] = updatedBookmark.Comment
+	}
+	if updatedBookmark.BandwidthLow != nil {
+		bookmarkMap["bandwidth_low"] = *updatedBookmark.BandwidthLow
+	}
+	if updatedBookmark.BandwidthHigh != nil {
+		bookmarkMap["bandwidth_high"] = *updatedBookmark.BandwidthHigh
 	}
 	bookmarks[bookmarkIndex] = bookmarkMap
 	bookmarksConfig["bookmarks"] = bookmarks

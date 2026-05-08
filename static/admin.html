@@ -4919,6 +4919,10 @@
                             bookmark.extension = extMatch[1];
                         }
                     }
+
+                    // Extract passband offsets (Hz) → bandwidth_low / bandwidth_high
+                    if (typeof options.lo === 'number') bookmark.bandwidth_low  = options.lo;
+                    if (typeof options.hi === 'number') bookmark.bandwidth_high = options.hi;
                 }
 
                 // Add comment if present and decode URL-encoded characters
@@ -5156,6 +5160,10 @@
                                 currentBookmark.comment = trimmed.substring(8).trim().replace(/^["']|["']$/g, '');
                             } else if (trimmed.startsWith('extension:')) {
                                 currentBookmark.extension = trimmed.substring(10).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('bandwidth_low:')) {
+                                currentBookmark.bandwidth_low = parseInt(trimmed.substring(14).trim());
+                            } else if (trimmed.startsWith('bandwidth_high:')) {
+                                currentBookmark.bandwidth_high = parseInt(trimmed.substring(15).trim());
                             }
                         }
                     }

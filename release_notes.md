@@ -10,7 +10,7 @@
 ### Bug Fixes
 - Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints
 - SAM mode missing from bookmarks
-- Local bookmarks now store and load bandwidth high/low values
+- Local and server bookmarks now store and load bandwidth high/low values
 
 ## Version 0.1.48 - Latest Stable
 

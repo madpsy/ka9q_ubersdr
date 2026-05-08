@@ -209,10 +209,11 @@ class LocalBookmarksUI {
         bwLowEl?.addEventListener('input',  syncBwRequired);
         bwHighEl?.addEventListener('input', syncBwRequired);
 
-        // Mode dropdown: pre-fill bandwidth defaults when both fields are blank
+        // Mode dropdown: always update bandwidth to the new mode's defaults on change.
+        // The user can still edit the fields manually after selecting a mode.
         const modeEl = document.getElementById('local-bookmarks-edit-mode');
         modeEl?.addEventListener('change', () => {
-            if (bwLowEl && bwHighEl && bwLowEl.value === '' && bwHighEl.value === '') {
+            if (bwLowEl && bwHighEl) {
                 const defaults = LocalBookmarksUI.BW_DEFAULTS[modeEl.value];
                 if (defaults) {
                     bwLowEl.value  = defaults[0];
@@ -382,19 +383,17 @@ class LocalBookmarksUI {
         this.renderBookmarkList();
     }
 
-    // Pre-fill bandwidth fields from mode defaults when both are currently blank.
-    // Called on form open and on mode change.
+    // Pre-fill bandwidth fields from mode defaults.
+    // Called on form open (always sets defaults) and as fallback in addCurrentFrequency.
     _prefillBandwidthFromMode() {
         const modeEl  = document.getElementById('local-bookmarks-edit-mode');
         const lowEl   = document.getElementById('local-bookmarks-edit-bw-low');
         const highEl  = document.getElementById('local-bookmarks-edit-bw-high');
         if (!modeEl || !lowEl || !highEl) return;
-        if (lowEl.value === '' && highEl.value === '') {
-            const defaults = LocalBookmarksUI.BW_DEFAULTS[modeEl.value];
-            if (defaults) {
-                lowEl.value  = defaults[0];
-                highEl.value = defaults[1];
-            }
+        const defaults = LocalBookmarksUI.BW_DEFAULTS[modeEl.value];
+        if (defaults) {
+            lowEl.value  = defaults[0];
+            highEl.value = defaults[1];
         }
     }
 

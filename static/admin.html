@@ -4495,19 +4495,17 @@
             nfm: [-5000, 5000],
         };
 
-        // Called when the mode dropdown changes — pre-fills bandwidth only when both fields are blank
+        // Called when the mode dropdown changes — always updates bandwidth to the new mode's defaults.
+        // The user can still edit the fields manually after selecting a mode.
         function bookmarkModeChanged() {
             const mode = document.getElementById('newBookmarkMode').value;
             const lowEl  = document.getElementById('newBookmarkBandwidthLow');
             const highEl = document.getElementById('newBookmarkBandwidthHigh');
-            // Only pre-fill when both fields are currently empty (don't overwrite user edits)
-            if (lowEl.value === '' && highEl.value === '') {
-                const defaults = BOOKMARK_BW_DEFAULTS[mode];
-                if (defaults) {
-                    lowEl.value  = defaults[0];
-                    highEl.value = defaults[1];
-                    validateBookmarkForm();
-                }
+            const defaults = BOOKMARK_BW_DEFAULTS[mode];
+            if (defaults) {
+                lowEl.value  = defaults[0];
+                highEl.value = defaults[1];
+                validateBookmarkForm();
             }
         }
 

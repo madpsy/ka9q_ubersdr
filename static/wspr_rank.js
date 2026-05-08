@@ -217,11 +217,12 @@
             ? sorted.filter(r => r.reporter.toUpperCase().includes(_searchFilter))
             : sorted;
 
-        // Compute per-band maximum across visible rows (only cells > 0 qualify).
+        // Compute per-band maximum across ALL rows (not just filtered visible ones),
+        // so the green highlight always means "best in the full leaderboard".
         const bandMax = {};
         bands.forEach(b => {
             let max = 0;
-            visible.forEach(r => { const v = (r.band_uniques || {})[b] || 0; if (v > max) max = v; });
+            sorted.forEach(r => { const v = (r.band_uniques || {})[b] || 0; if (v > max) max = v; });
             bandMax[b] = max;
         });
 

@@ -58,7 +58,7 @@
         _searchFilter = '';
 
         modal.style.display = 'flex';
-        _loadWindow(_currentWindow);
+        switchWindow(_currentWindow); // also syncs button highlight styles
     }
 
     function closeWSPRRankModal() {
@@ -71,10 +71,19 @@
         if (!WINDOW_LABELS[w]) return;
         _currentWindow = w;
 
-        // Update button active states
+        // Update button active states via inline style (overrides initial inline style).
         WINDOW_ORDER.forEach(key => {
             const btn = document.getElementById('wsprRankBtn_' + key);
-            if (btn) btn.classList.toggle('wspr-rank-btn-active', key === w);
+            if (!btn) return;
+            if (key === w) {
+                btn.style.background = '#3f51b5';
+                btn.style.color      = 'white';
+                btn.style.fontWeight = '600';
+            } else {
+                btn.style.background = '#e8eaf6';
+                btn.style.color      = '#283593';
+                btn.style.fontWeight = '';
+            }
         });
 
         _loadWindow(w);

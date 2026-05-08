@@ -208,6 +208,14 @@
             ? sorted.filter(r => r.reporter.toUpperCase().includes(_searchFilter))
             : sorted;
 
+        // Compute per-band maximum across visible rows (only cells > 0 qualify).
+        const bandMax = {};
+        bands.forEach(b => {
+            let max = 0;
+            visible.forEach(r => { const v = (r.band_uniques || {})[b] || 0; if (v > max) max = v; });
+            bandMax[b] = max;
+        });
+
         // Totals row (only over visible rows when filtering)
         const totals = data.totals || {};
         const totalRaw    = (data.total_raw    || 0).toLocaleString();
@@ -244,7 +252,11 @@
                 <td style="padding:5px 8px;text-align:right;font-weight:600;color:#283593;">${(row.unique || 0).toLocaleString()}</td>
                 ${bands.map(b => {
                     const v = bu[b] || 0;
-                    return `<td style="padding:5px 8px;text-align:right;${v > 0 ? '' : 'color:#ccc;'}">${v > 0 ? v.toLocaleString() : '—'}</td>`;
+                    const isBest = v > 0 && v === bandMax[b];
+                    const cellStyle = isBest
+                        ? 'padding:5px 8px;text-align:right;outline:2px solid #2e7d32;outline-offset:-2px;font-weight:700;color:#1b5e20;'
+                        : (v > 0 ? 'padding:5px 8px;text-align:right;' : 'padding:5px 8px;text-align:right;color:#ccc;');
+                    return `<td style="${cellStyle}">${v > 0 ? v.toLocaleString() : '—'}</td>`;
                 }).join('')}
             </tr>`;
         }).join('');

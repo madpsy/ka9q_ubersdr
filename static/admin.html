@@ -1087,13 +1087,15 @@
                         </div>
                         <div class="config-field">
                             <label>Bandwidth Low (Optional)</label>
-                            <input type="number" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" oninput="sanitizeNumberInput(this)">
-                            <small>Lower passband edge in Hz relative to carrier (e.g. −2800 for USB). Leave blank to use mode default.</small>
+                            <input type="number" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" min="-6000" max="6000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
+                            <small id="bookmarkBwLowError" style="color: #dc3545; display: none;"></small>
+                            <small>Lower passband edge in Hz relative to carrier (e.g. −2800 for USB). Range −6000 to 6000. Leave blank to use mode default.</small>
                         </div>
                         <div class="config-field">
                             <label>Bandwidth High (Optional)</label>
-                            <input type="number" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" oninput="sanitizeNumberInput(this)">
-                            <small>Upper passband edge in Hz relative to carrier (e.g. 2800 for USB). Leave blank to use mode default.</small>
+                            <input type="number" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" min="-6000" max="6000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
+                            <small id="bookmarkBwHighError" style="color: #dc3545; display: none;"></small>
+                            <small>Upper passband edge in Hz relative to carrier (e.g. 2800 for USB). Range −6000 to 6000. Leave blank to use mode default.</small>
                         </div>
                         <button class="btn" id="saveBookmarkBtn" onclick="saveBookmark()">Save Bookmark</button>
                         <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
@@ -4476,6 +4478,8 @@
             // Clear validation errors
             document.getElementById('bookmarkNameError').style.display = 'none';
             document.getElementById('bookmarkFreqError').style.display = 'none';
+            document.getElementById('bookmarkBwLowError').style.display = 'none';
+            document.getElementById('bookmarkBwHighError').style.display = 'none';
         }
 
         function validateBookmarkForm() {
@@ -4524,6 +4528,50 @@
                 }
             }
 
+            // Validate bandwidth fields
+            const bwLowRaw  = document.getElementById('newBookmarkBandwidthLow').value.trim();
+            const bwHighRaw = document.getElementById('newBookmarkBandwidthHigh').value.trim();
+            const bwLowFilled  = bwLowRaw  !== '';
+            const bwHighFilled = bwHighRaw !== '';
+            const bwLowError  = document.getElementById('bookmarkBwLowError');
+            const bwHighError = document.getElementById('bookmarkBwHighError');
+
+            // Both or neither
+            if (bwLowFilled !== bwHighFilled) {
+                const msg = 'Both passband fields must be filled in together, or both left blank.';
+                bwLowError.textContent  = bwLowFilled  ? '' : msg;
+                bwHighError.textContent = bwHighFilled ? '' : msg;
+                if (!bwLowFilled)  { bwLowError.style.display  = 'block'; }
+                if (!bwHighFilled) { bwHighError.style.display = 'block'; }
+                isValid = false;
+            } else {
+                // Range check: -6000 to 6000
+                if (bwLowFilled) {
+                    const bwLow = parseInt(bwLowRaw);
+                    if (isNaN(bwLow) || bwLow < -6000 || bwLow > 6000) {
+                        bwLowError.textContent = 'Bandwidth Low must be between −6000 and 6000 Hz.';
+                        bwLowError.style.display = 'block';
+                        isValid = false;
+                    } else {
+                        bwLowError.style.display = 'none';
+                    }
+                } else {
+                    bwLowError.style.display = 'none';
+                }
+                if (bwHighFilled) {
+                    const bwHigh = parseInt(bwHighRaw);
+                    if (isNaN(bwHigh) || bwHigh < -6000 || bwHigh > 6000) {
+                        bwHighError.textContent = 'Bandwidth High must be between −6000 and 6000 Hz.';
+                        bwHighError.style.display = 'block';
+                        isValid = false;
+                    } else {
+                        bwHighError.style.display = 'none';
+                    }
+                } else {
+                    bwHighError.style.display = 'none';
+                }
+            }
+
             // Enable/disable save button based on validation
             if (saveBtn) {
                 saveBtn.disabled = !isValid;
@@ -4549,6 +4597,26 @@
                 return;
             }
 
+            // Bandwidth validation: both or neither, range -6000..6000
+            const bwLowFilled  = bwLowRaw  !== '';
+            const bwHighFilled = bwHighRaw !== '';
+            if (bwLowFilled !== bwHighFilled) {
+                showAlert('Both passband fields (low and high) must be filled in together, or both left blank.', 'error');
+                return;
+            }
+            if (bwLowFilled) {
+                const bwLow  = parseInt(bwLowRaw);
+                const bwHigh = parseInt(bwHighRaw);
+                if (isNaN(bwLow) || bwLow < -6000 || bwLow > 6000) {
+                    showAlert('Bandwidth Low must be between −6000 and 6000 Hz.', 'error');
+                    return;
+                }
+                if (isNaN(bwHigh) || bwHigh < -6000 || bwHigh > 6000) {
+                    showAlert('Bandwidth High must be between −6000 and 6000 Hz.', 'error');
+                    return;
+                }
+            }
+
             // Build bookmark object
             const bookmarkData = { name, frequency, mode };
             if (group) {
@@ -4560,10 +4628,8 @@
             if (extension) {
                 bookmarkData.extension = extension;
             }
-            if (bwLowRaw !== '') {
-                bookmarkData.bandwidth_low = parseInt(bwLowRaw);
-            }
-            if (bwHighRaw !== '') {
+            if (bwLowFilled) {
+                bookmarkData.bandwidth_low  = parseInt(bwLowRaw);
                 bookmarkData.bandwidth_high = parseInt(bwHighRaw);
             }
 

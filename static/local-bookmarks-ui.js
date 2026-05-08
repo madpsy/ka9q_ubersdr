@@ -128,12 +128,12 @@ class LocalBookmarksUI {
                         <label>Passband (Hz)</label>
                         <div style="display: flex; gap: 10px; align-items: center;">
                             <div style="flex: 1;">
-                                <input type="number" id="local-bookmarks-edit-bw-low" placeholder="Low (e.g. -3000)" step="1" style="width: 100%;">
-                                <small>Lower edge offset from carrier</small>
+                                <input type="number" id="local-bookmarks-edit-bw-low" placeholder="Low (e.g. -2800)" step="1" min="-6000" max="6000" style="width: 100%;">
+                                <small>Lower edge offset from carrier (−6000 to 6000)</small>
                             </div>
                             <div style="flex: 1;">
-                                <input type="number" id="local-bookmarks-edit-bw-high" placeholder="High (e.g. 3000)" step="1" style="width: 100%;">
-                                <small>Upper edge offset from carrier</small>
+                                <input type="number" id="local-bookmarks-edit-bw-high" placeholder="High (e.g. 2800)" step="1" min="-6000" max="6000" style="width: 100%;">
+                                <small>Upper edge offset from carrier (−6000 to 6000)</small>
                             </div>
                         </div>
                         <small>Leave blank to use the mode default bandwidth</small>
@@ -545,6 +545,20 @@ class LocalBookmarksUI {
         if (bwLowFilled !== bwHighFilled) {
             this.showAlert('edit', 'error', 'Both passband fields (low and high) must be filled in together, or both left blank.');
             return;
+        }
+
+        // Range check: -6000 to 6000
+        if (bwLowFilled) {
+            const bwLow  = parseInt(bwLowRaw);
+            const bwHigh = parseInt(bwHighRaw);
+            if (isNaN(bwLow) || bwLow < -6000 || bwLow > 6000) {
+                this.showAlert('edit', 'error', 'Bandwidth Low must be between −6000 and 6000 Hz.');
+                return;
+            }
+            if (isNaN(bwHigh) || bwHigh < -6000 || bwHigh > 6000) {
+                this.showAlert('edit', 'error', 'Bandwidth High must be between −6000 and 6000 Hz.');
+                return;
+            }
         }
 
         const bookmark = {

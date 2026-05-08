@@ -1057,7 +1057,7 @@
                         </div>
                         <div class="config-field">
                             <label>Mode</label>
-                            <select id="newBookmarkMode">
+                            <select id="newBookmarkMode" onchange="bookmarkModeChanged()">
                                 <option value="usb">USB</option>
                                 <option value="lsb">LSB</option>
                                 <option value="cwu">CW Upper</option>
@@ -1087,15 +1087,15 @@
                         </div>
                         <div class="config-field">
                             <label>Bandwidth Low (Optional)</label>
-                            <input type="number" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" min="-6000" max="6000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
+                            <input type="number" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" min="-8000" max="8000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
                             <small id="bookmarkBwLowError" style="color: #dc3545; display: none;"></small>
-                            <small>Lower passband edge in Hz relative to carrier (e.g. −2800 for USB). Range −6000 to 6000. Leave blank to use mode default.</small>
+                            <small>Lower passband edge in Hz relative to carrier. Leave blank to use mode default (pre-filled on mode change).</small>
                         </div>
                         <div class="config-field">
                             <label>Bandwidth High (Optional)</label>
-                            <input type="number" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" min="-6000" max="6000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
+                            <input type="number" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" min="-8000" max="8000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
                             <small id="bookmarkBwHighError" style="color: #dc3545; display: none;"></small>
-                            <small>Upper passband edge in Hz relative to carrier (e.g. 2800 for USB). Range −6000 to 6000. Leave blank to use mode default.</small>
+                            <small>Upper passband edge in Hz relative to carrier. Leave blank to use mode default (pre-filled on mode change).</small>
                         </div>
                         <button class="btn" id="saveBookmarkBtn" onclick="saveBookmark()">Save Bookmark</button>
                         <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
@@ -4440,6 +4440,7 @@
             document.getElementById('newBookmarkExtension').value = '';
             document.getElementById('newBookmarkBandwidthLow').value = '';
             document.getElementById('newBookmarkBandwidthHigh').value = '';
+            bookmarkModeChanged(); // Pre-fill bandwidth defaults for the selected mode
             validateBookmarkForm(); // Initial validation
         }
 
@@ -4480,6 +4481,34 @@
             document.getElementById('bookmarkFreqError').style.display = 'none';
             document.getElementById('bookmarkBwLowError').style.display = 'none';
             document.getElementById('bookmarkBwHighError').style.display = 'none';
+        }
+
+        // Mode defaults for bandwidth fields (low, high)
+        const BOOKMARK_BW_DEFAULTS = {
+            usb: [50,    2700],
+            lsb: [-2700, -50],
+            cwu: [-200,  200],
+            cwl: [-200,  200],
+            am:  [-5000, 5000],
+            sam: [-5000, 5000],
+            fm:  [-8000, 8000],
+            nfm: [-5000, 5000],
+        };
+
+        // Called when the mode dropdown changes — pre-fills bandwidth only when both fields are blank
+        function bookmarkModeChanged() {
+            const mode = document.getElementById('newBookmarkMode').value;
+            const lowEl  = document.getElementById('newBookmarkBandwidthLow');
+            const highEl = document.getElementById('newBookmarkBandwidthHigh');
+            // Only pre-fill when both fields are currently empty (don't overwrite user edits)
+            if (lowEl.value === '' && highEl.value === '') {
+                const defaults = BOOKMARK_BW_DEFAULTS[mode];
+                if (defaults) {
+                    lowEl.value  = defaults[0];
+                    highEl.value = defaults[1];
+                    validateBookmarkForm();
+                }
+            }
         }
 
         function validateBookmarkForm() {
@@ -4545,11 +4574,13 @@
                 if (!bwHighFilled) { bwHighError.style.display = 'block'; }
                 isValid = false;
             } else {
-                // Range check: -6000 to 6000
+                // Range check: FM allows ±8000, all other modes ±6000
+                const bwMode = document.getElementById('newBookmarkMode').value;
+                const bwLimit = (bwMode === 'fm') ? 8000 : 6000;
                 if (bwLowFilled) {
                     const bwLow = parseInt(bwLowRaw);
-                    if (isNaN(bwLow) || bwLow < -6000 || bwLow > 6000) {
-                        bwLowError.textContent = 'Bandwidth Low must be between −6000 and 6000 Hz.';
+                    if (isNaN(bwLow) || bwLow < -bwLimit || bwLow > bwLimit) {
+                        bwLowError.textContent = `Bandwidth Low must be between −${bwLimit} and ${bwLimit} Hz for ${bwMode.toUpperCase()}.`;
                         bwLowError.style.display = 'block';
                         isValid = false;
                     } else {
@@ -4560,8 +4591,8 @@
                 }
                 if (bwHighFilled) {
                     const bwHigh = parseInt(bwHighRaw);
-                    if (isNaN(bwHigh) || bwHigh < -6000 || bwHigh > 6000) {
-                        bwHighError.textContent = 'Bandwidth High must be between −6000 and 6000 Hz.';
+                    if (isNaN(bwHigh) || bwHigh < -bwLimit || bwHigh > bwLimit) {
+                        bwHighError.textContent = `Bandwidth High must be between −${bwLimit} and ${bwLimit} Hz for ${bwMode.toUpperCase()}.`;
                         bwHighError.style.display = 'block';
                         isValid = false;
                     } else {
@@ -4597,7 +4628,7 @@
                 return;
             }
 
-            // Bandwidth validation: both or neither, range -6000..6000
+            // Bandwidth validation: both or neither, mode-aware range
             const bwLowFilled  = bwLowRaw  !== '';
             const bwHighFilled = bwHighRaw !== '';
             if (bwLowFilled !== bwHighFilled) {
@@ -4605,14 +4636,15 @@
                 return;
             }
             if (bwLowFilled) {
-                const bwLow  = parseInt(bwLowRaw);
-                const bwHigh = parseInt(bwHighRaw);
-                if (isNaN(bwLow) || bwLow < -6000 || bwLow > 6000) {
-                    showAlert('Bandwidth Low must be between −6000 and 6000 Hz.', 'error');
+                const bwLow   = parseInt(bwLowRaw);
+                const bwHigh  = parseInt(bwHighRaw);
+                const bwLimit = (mode === 'fm') ? 8000 : 6000;
+                if (isNaN(bwLow) || bwLow < -bwLimit || bwLow > bwLimit) {
+                    showAlert(`Bandwidth Low must be between −${bwLimit} and ${bwLimit} Hz for ${mode.toUpperCase()}.`, 'error');
                     return;
                 }
-                if (isNaN(bwHigh) || bwHigh < -6000 || bwHigh > 6000) {
-                    showAlert('Bandwidth High must be between −6000 and 6000 Hz.', 'error');
+                if (isNaN(bwHigh) || bwHigh < -bwLimit || bwHigh > bwLimit) {
+                    showAlert(`Bandwidth High must be between −${bwLimit} and ${bwLimit} Hz for ${mode.toUpperCase()}.`, 'error');
                     return;
                 }
             }

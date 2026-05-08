@@ -208,6 +208,19 @@ class LocalBookmarksUI {
         };
         bwLowEl?.addEventListener('input',  syncBwRequired);
         bwHighEl?.addEventListener('input', syncBwRequired);
+
+        // Mode dropdown: pre-fill bandwidth defaults when both fields are blank
+        const modeEl = document.getElementById('local-bookmarks-edit-mode');
+        modeEl?.addEventListener('change', () => {
+            if (bwLowEl && bwHighEl && bwLowEl.value === '' && bwHighEl.value === '') {
+                const defaults = LocalBookmarksUI.BW_DEFAULTS[modeEl.value];
+                if (defaults) {
+                    bwLowEl.value  = defaults[0];
+                    bwHighEl.value = defaults[1];
+                    syncBwRequired();
+                }
+            }
+        });
     }
 
     // Show management modal
@@ -369,6 +382,22 @@ class LocalBookmarksUI {
         this.renderBookmarkList();
     }
 
+    // Pre-fill bandwidth fields from mode defaults when both are currently blank.
+    // Called on form open and on mode change.
+    _prefillBandwidthFromMode() {
+        const modeEl  = document.getElementById('local-bookmarks-edit-mode');
+        const lowEl   = document.getElementById('local-bookmarks-edit-bw-low');
+        const highEl  = document.getElementById('local-bookmarks-edit-bw-high');
+        if (!modeEl || !lowEl || !highEl) return;
+        if (lowEl.value === '' && highEl.value === '') {
+            const defaults = LocalBookmarksUI.BW_DEFAULTS[modeEl.value];
+            if (defaults) {
+                lowEl.value  = defaults[0];
+                highEl.value = defaults[1];
+            }
+        }
+    }
+
     // Show add modal
     showAddModal() {
         this.currentEditingBookmark = null;
@@ -377,6 +406,7 @@ class LocalBookmarksUI {
         document.getElementById('local-bookmarks-edit-bw-low').value = '';
         document.getElementById('local-bookmarks-edit-bw-high').value = '';
         document.getElementById('local-bookmarks-edit-alert-container').innerHTML = '';
+        this._prefillBandwidthFromMode(); // Pre-fill defaults for the selected mode
         document.getElementById('local-bookmarks-edit-modal').classList.add('active');
     }
 
@@ -414,6 +444,10 @@ class LocalBookmarksUI {
         document.getElementById('local-bookmarks-edit-extension').value = '';
         document.getElementById('local-bookmarks-edit-bw-low').value  = typeof bandwidthLow  === 'number' ? bandwidthLow  : '';
         document.getElementById('local-bookmarks-edit-bw-high').value = typeof bandwidthHigh === 'number' ? bandwidthHigh : '';
+        // If no live bandwidth available, fall back to mode defaults
+        if (typeof bandwidthLow !== 'number' && typeof bandwidthHigh !== 'number') {
+            this._prefillBandwidthFromMode();
+        }
         document.getElementById('local-bookmarks-edit-alert-container').innerHTML = '';
         document.getElementById('local-bookmarks-edit-modal').classList.add('active');
     }
@@ -547,16 +581,18 @@ class LocalBookmarksUI {
             return;
         }
 
-        // Range check: -6000 to 6000
+        // Range check: FM allows ±8000, all other modes ±6000
         if (bwLowFilled) {
-            const bwLow  = parseInt(bwLowRaw);
-            const bwHigh = parseInt(bwHighRaw);
-            if (isNaN(bwLow) || bwLow < -6000 || bwLow > 6000) {
-                this.showAlert('edit', 'error', 'Bandwidth Low must be between −6000 and 6000 Hz.');
+            const bwLow   = parseInt(bwLowRaw);
+            const bwHigh  = parseInt(bwHighRaw);
+            const bwMode  = document.getElementById('local-bookmarks-edit-mode').value;
+            const bwLimit = (bwMode === 'fm') ? 8000 : 6000;
+            if (isNaN(bwLow) || bwLow < -bwLimit || bwLow > bwLimit) {
+                this.showAlert('edit', 'error', `Bandwidth Low must be between −${bwLimit} and ${bwLimit} Hz for ${bwMode.toUpperCase()}.`);
                 return;
             }
-            if (isNaN(bwHigh) || bwHigh < -6000 || bwHigh > 6000) {
-                this.showAlert('edit', 'error', 'Bandwidth High must be between −6000 and 6000 Hz.');
+            if (isNaN(bwHigh) || bwHigh < -bwLimit || bwHigh > bwLimit) {
+                this.showAlert('edit', 'error', `Bandwidth High must be between −${bwLimit} and ${bwLimit} Hz for ${bwMode.toUpperCase()}.`);
                 return;
             }
         }
@@ -784,6 +820,19 @@ class LocalBookmarksUI {
         }
     }
 }
+
+// Mode bandwidth defaults [low, high] in Hz relative to carrier.
+// FM is the only mode that exceeds the ±6000 Hz limit (uses ±8000).
+LocalBookmarksUI.BW_DEFAULTS = {
+    usb: [50,    2700],
+    lsb: [-2700, -50],
+    cwu: [-200,  200],
+    cwl: [-200,  200],
+    am:  [-5000, 5000],
+    sam: [-5000, 5000],
+    fm:  [-8000, 8000],
+    nfm: [-5000, 5000],
+};
 
 // Export for use as ES6 module
 export default LocalBookmarksUI;

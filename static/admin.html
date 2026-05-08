@@ -1180,7 +1180,14 @@
                             <a href="decoder_spots_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🔍 Spot Analysis</a>
                             <a href="pskreporter_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 PSK Stats</a>
                             <a id="wspr-phone-prediction-btn" href="wspr_phone_prediction.html" target="_blank" style="display: none; padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📻 SSB Predictions</a>
+                            <button id="wspr-rank-btn" onclick="openWSPRRankModal()" style="display: none; padding: 6px 12px; background: #1a237e; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#283593'" onmouseout="this.style.background='#1a237e'">🏆 WSPR Rank</button>
                             <a href="decoder_feed.html" target="_blank" onclick="return openFeedPopout('decoder_feed.html')" style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#218838'" onmouseout="this.style.background='#28a745'">⚡ Real-time Feed</a>
+                        </div>
+                    </div>
+                    <!-- WSPR Rank cards — shown when WSPRNet is enabled with at least one WSPR band -->
+                    <div id="wsprRankCards" style="display: none; margin-bottom: 20px;">
+                        <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="wsprRankCardsInner">
+                            <!-- populated by updateWSPRRankCards() -->
                         </div>
                     </div>
                     <div id="decoderConfig" class="loading">
@@ -2460,6 +2467,43 @@
                             Yes, Install CW Skimmer
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WSPR Rank Modal -->
+        <div id="wsprRankModal" class="modal">
+            <div class="modal-content" style="max-width: 95vw; width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
+                <div class="modal-header" style="flex-shrink: 0; background: #1a237e; color: white;">
+                    <h2 style="color: white;">🏆 WSPR Live Receiver Ranking</h2>
+                    <button class="modal-close" onclick="closeWSPRRankModal()" style="color: white;">&times;</button>
+                </div>
+                <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0;">
+                    <!-- Window selector + refresh -->
+                    <div style="padding: 12px 16px; background: #e8eaf6; border-bottom: 1px solid #9fa8da; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0;">
+                        <span style="font-size: 12px; color: #555; font-weight: 600; margin-right: 4px;">Window:</span>
+                        <button id="wsprRankBtn_yesterday"   onclick="switchWSPRRankWindow('yesterday')"   class="wspr-rank-btn wspr-rank-btn-active" style="padding:5px 12px;border:1px solid #7986cb;border-radius:4px;font-size:12px;cursor:pointer;background:#3f51b5;color:white;">📅 Yesterday (UTC)</button>
+                        <button id="wsprRankBtn_rolling_24h" onclick="switchWSPRRankWindow('rolling_24h')" class="wspr-rank-btn"                    style="padding:5px 12px;border:1px solid #7986cb;border-radius:4px;font-size:12px;cursor:pointer;background:#e8eaf6;color:#283593;">🕐 Rolling 24h</button>
+                        <button id="wsprRankBtn_today"       onclick="switchWSPRRankWindow('today')"       class="wspr-rank-btn"                    style="padding:5px 12px;border:1px solid #7986cb;border-radius:4px;font-size:12px;cursor:pointer;background:#e8eaf6;color:#283593;">☀️ Today (UTC)</button>
+                        <div style="flex:1;"></div>
+                        <button id="wsprRankRefreshBtn" onclick="refreshWSPRRank()" style="padding:5px 12px;border:1px solid #7986cb;border-radius:4px;font-size:12px;cursor:pointer;background:#5c6bc0;color:white;">🔄 Refresh</button>
+                        <a href="https://wspr.live" target="_blank" rel="noopener" style="font-size:11px;color:#3f51b5;text-decoration:none;" title="Data from wspr.live">wspr.live ↗</a>
+                    </div>
+                    <!-- Status bar -->
+                    <div id="wsprRankStatus" style="padding: 6px 16px; font-size: 11px; color: #666; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; flex-shrink: 0;">Loading…</div>
+                    <!-- Scrollable table -->
+                    <div style="flex: 1; overflow: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                            <thead id="wsprRankThead"></thead>
+                            <tbody id="wsprRankTbody">
+                                <tr><td colspan="99" style="text-align:center;padding:20px;color:#888;">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="padding: 10px 16px; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; background: #fafafa;">
+                    <span style="font-size: 11px; color: #888;">Top 200 receivers by unique spots · excludes Q/0/1 prefix test transmitters</span>
+                    <button class="btn btn-secondary" onclick="closeWSPRRankModal()">Close</button>
                 </div>
             </div>
         </div>
@@ -7558,7 +7602,7 @@
                 const isEnabled = currentDecoderConfig.enabled === true;
                 linksSection.style.display = isEnabled ? 'block' : 'none';
             }
-            // Show/hide Phone Predictions button based on description
+            // Show/hide Phone Predictions button based on site description
             const phonePredBtn = document.getElementById('wspr-phone-prediction-btn');
             if (phonePredBtn) {
                 const wsprEnabled = siteDescription &&
@@ -7566,6 +7610,81 @@
                     Array.isArray(siteDescription.digital_modes) &&
                     siteDescription.digital_modes.includes('WSPR');
                 phonePredBtn.style.display = wsprEnabled ? '' : 'none';
+            }
+            // Show/hide WSPR Rank button only when WSPRNet is enabled AND at least one WSPR band is enabled
+            const wsprRankBtn = document.getElementById('wspr-rank-btn');
+            const wsprRankCards = document.getElementById('wsprRankCards');
+            {
+                const bands = currentDecoderConfig.bands || [];
+                const hasEnabledWspr = currentDecoderConfig.wsprnet_enabled === true &&
+                    bands.some(b => b.mode === 'WSPR' && b.enabled !== false);
+                if (wsprRankBtn)   wsprRankBtn.style.display   = hasEnabledWspr ? '' : 'none';
+                if (wsprRankCards) wsprRankCards.style.display = hasEnabledWspr ? '' : 'none';
+                if (hasEnabledWspr) updateWSPRRankCards();
+            }
+        }
+
+        // Fetch and render the three WSPR rank cards for the configured callsign.
+        async function updateWSPRRankCards() {
+            const inner = document.getElementById('wsprRankCardsInner');
+            if (!inner) return;
+
+            // Determine callsign: prefer wsprnet_callsign if explicitly set, else receiver_callsign.
+            const callsign = (currentDecoderConfig.wsprnet_callsign || '').trim() ||
+                             (currentDecoderConfig.receiver_callsign || '').trim();
+            if (!callsign || callsign === 'N0CALL') {
+                inner.innerHTML = '<span style="color:#888;font-size:13px;">No callsign configured.</span>';
+                return;
+            }
+
+            inner.innerHTML = '<span style="color:#888;font-size:13px;">Loading WSPR rank…</span>';
+
+            try {
+                const resp = await authenticatedFetch(
+                    '/admin/wspr-rank?format=table&window=all&callsign=' + encodeURIComponent(callsign)
+                );
+                if (!resp || resp.status === 202) {
+                    inner.innerHTML = '<span style="color:#888;font-size:13px;">⏳ WSPR rank data not yet available.</span>';
+                    return;
+                }
+                if (!resp.ok) {
+                    inner.innerHTML = '<span style="color:#c00;font-size:13px;">⚠️ Could not load WSPR rank.</span>';
+                    return;
+                }
+                const data = await resp.json();
+
+                const windows = [
+                    { key: 'yesterday',   label: '📅 Yesterday',   obj: data.yesterday   },
+                    { key: 'rolling_24h', label: '🕐 Rolling 24h', obj: data.rolling_24h },
+                    { key: 'today',       label: '☀️ Today',       obj: data.today       },
+                ];
+
+                inner.innerHTML = windows.map(({ label, obj }) => {
+                    if (!obj || obj.error) {
+                        return `<div style="padding:12px 16px;background:#fff;border:1px solid #dee2e6;border-radius:6px;min-width:160px;">
+                            <div style="font-size:11px;color:#888;margin-bottom:4px;">${label}</div>
+                            <div style="font-size:13px;color:#c00;">${obj && obj.error ? obj.error : 'No data'}</div>
+                        </div>`;
+                    }
+                    const row = obj.rows && obj.rows[0];
+                    if (!row) {
+                        return `<div style="padding:12px 16px;background:#fff;border:1px solid #dee2e6;border-radius:6px;min-width:160px;">
+                            <div style="font-size:11px;color:#888;margin-bottom:4px;">${label}</div>
+                            <div style="font-size:22px;font-weight:700;color:#bbb;">—</div>
+                            <div style="font-size:11px;color:#aaa;">Not ranked</div>
+                        </div>`;
+                    }
+                    return `<div style="padding:12px 16px;background:#fff;border:1px solid #9fa8da;border-radius:6px;min-width:160px;cursor:pointer;"
+                                onclick="openWSPRRankModal()" title="Open WSPR Rank leaderboard">
+                        <div style="font-size:11px;color:#3f51b5;font-weight:600;margin-bottom:4px;">${label}</div>
+                        <div style="font-size:26px;font-weight:700;color:#1a237e;">#${row.rank}</div>
+                        <div style="font-size:11px;color:#555;">${(row.unique||0).toLocaleString()} unique · ${(row.raw||0).toLocaleString()} raw</div>
+                        <div style="font-size:10px;color:#888;margin-top:2px;">${callsign}</div>
+                    </div>`;
+                }).join('');
+
+            } catch (e) {
+                inner.innerHTML = '<span style="color:#c00;font-size:13px;">⚠️ ' + e.message + '</span>';
             }
         }
 
@@ -22669,5 +22788,6 @@ Referer: ${log.referer}`;
         }
     }
     </script>
+    <script src="wspr_rank.js"></script>
 </body>
 </html>

@@ -26,19 +26,56 @@
     let _currentTable  = 'reports';   // 'reports' | 'countries'
     let _currentBand   = 'all';       // band name or 'all'
     let _lastData      = null;        // last full /admin/psk-rank response
-    let _sortCol       = 'day';
+    let _sortCol       = 'totalDay';
     let _sortDir       = 'desc';
     let _refreshTimer  = null;
     let _ownCallsign   = '';
     let _searchFilter  = '';
 
-    // ── Preferred HF band order for the band selector ────────────────────────
-    // Matches the order PSKReporter uses on its own page.
+    // ── Band order: lowest frequency (longest wavelength) → highest frequency.
+    // Exact band key strings as returned by PSKReporter's reportResult/countryResult.
+    // Sorted by actual centre frequency, ~136 kHz (4000m) → 76 GHz.
+    // Junk keys ('All', 'dummy', 'invalid', 'uhf', 'vlf') are excluded here and
+    // filtered out in _populateBandSelector / _renderTable.
     const BAND_ORDER = [
-        '160m','80m','60m','40m','30m','20m','17m','15m','12m','10m',
-        '6m','4m','2m','70cm','23cm',
-        '8m','5m','3.4Ghz','33cm','76Ghz',
+        // VLF / LF / MF
+        '4000m',            // ~75 kHz
+        '2200m',            // 136 kHz
+        '600m',             // 500 kHz
+        // HF
+        '160m',             // 1.8 MHz
+        '80m',              // 3.5 MHz
+        '60m',              // 5.3 MHz
+        '40m',              // 7 MHz
+        '30m',              // 10.1 MHz
+        '20m',              // 14 MHz
+        '17m',              // 18.1 MHz
+        '15m',              // 21 MHz
+        '12m',              // 24.9 MHz
+        '11m',              // 27 MHz (CB / beacons)
+        '10m',              // 28 MHz
+        // VHF
+        '8m',               // ~40 MHz
+        '6m',               // 50 MHz
+        '5m',               // ~60 MHz
+        '4m',               // 70 MHz
+        '2m',               // 144 MHz
+        '1.25m',            // 222 MHz
+        // UHF
+        '70cm',             // 432 MHz
+        '33cm',             // ~900 MHz
+        '23cm',             // 1296 MHz
+        // Microwave (GHz names)
+        '2.4Ghz',           // 2400 MHz
+        '3.4Ghz',           // 3400 MHz
+        '5.8Ghz',           // 5760 MHz
+        '10Ghz',            // 10 GHz
+        '24Ghz',            // 24 GHz
+        '76Ghz',            // 76 GHz
     ];
+
+    // Band keys from PSKReporter that are not real amateur radio bands.
+    const BAND_JUNK = new Set(['All', 'dummy', 'invalid', 'uhf', 'vlf']);
 
     // ── Modal open/close ─────────────────────────────────────────────────────
     function openPSKRankModal() {
@@ -155,14 +192,14 @@
         const sel = document.getElementById('pskRankBandSelect');
         if (!sel) return;
 
-        // Collect all bands present in either table
+        // Collect all real bands present in either table (skip junk keys)
         const bandSet = new Set();
         const rr = data.report_result  || {};
         const cr = data.country_result || {};
-        Object.keys(rr).forEach(b => bandSet.add(b));
-        Object.keys(cr).forEach(b => bandSet.add(b));
+        Object.keys(rr).forEach(b => { if (!BAND_JUNK.has(b)) bandSet.add(b); });
+        Object.keys(cr).forEach(b => { if (!BAND_JUNK.has(b)) bandSet.add(b); });
 
-        // Sort by canonical order, then alphabetically for unknowns
+        // Sort by canonical order, then alphabetically for any unknown bands
         const ordered = BAND_ORDER.filter(b => bandSet.has(b));
         bandSet.forEach(b => { if (!ordered.includes(b)) ordered.push(b); });
 
@@ -217,15 +254,15 @@
             ? (data.country_result || {})
             : (data.report_result  || {});
 
-        // Determine which bands to show
+        // Determine which bands to show (always exclude junk keys)
         let bandsToShow;
         if (_currentBand === 'all') {
-            // All bands present in this table, in canonical order
-            const bandSet = new Set(Object.keys(src));
+            // All real bands present in this table, in canonical order
+            const bandSet = new Set(Object.keys(src).filter(b => !BAND_JUNK.has(b)));
             bandsToShow = BAND_ORDER.filter(b => bandSet.has(b));
             bandSet.forEach(b => { if (!bandsToShow.includes(b)) bandsToShow.push(b); });
         } else {
-            bandsToShow = src[_currentBand] ? [_currentBand] : [];
+            bandsToShow = (src[_currentBand] && !BAND_JUNK.has(_currentBand)) ? [_currentBand] : [];
         }
 
         // Flatten into rows: one row per callsign, columns = bands
@@ -336,10 +373,15 @@
         if (!thead) return;
 
         const isCountries = _currentTable === 'countries';
-        const dayLabel  = isCountries ? '#Countries 24h' : '#Reports 24h';
-        const weekLabel = isCountries ? '#Countries 7d'  : '#Reports 7d';
-        const dayTitle  = isCountries ? 'Distinct countries reported in last 24h' : 'Reception reports in last 24h';
-        const weekTitle = isCountries ? 'Distinct countries reported in last 7 days' : 'Reception reports in last 7 days';
+        const allDayLabel  = isCountries ? 'All Countries 24h' : 'All Reports 24h';
+        const allWeekLabel = isCountries ? 'All Countries 7d'  : 'All Reports 7d';
+        const bandDayLabel = isCountries ? '24h countries'     : '24h reports';
+        const allDayTitle  = isCountries
+            ? 'Total distinct countries reported across all bands in last 24h'
+            : 'Total reception reports across all bands in last 24h';
+        const allWeekTitle = isCountries
+            ? 'Total distinct countries reported across all bands in last 7 days'
+            : 'Total reception reports across all bands in last 7 days';
 
         const makeTh = (col, label, title) => {
             const active = _sortCol === col;
@@ -349,11 +391,11 @@
         };
 
         thead.innerHTML = `<tr>
-            ${makeTh('rank',      '#',         'Rank by 24h count')}
-            ${makeTh('callsign',  'Reporter',  'Receiver callsign')}
-            ${makeTh('totalDay',  dayLabel,    dayTitle)}
-            ${makeTh('totalWeek', weekLabel,   weekTitle)}
-            ${bands.map(b => makeTh(b, b, b + ' — 24h count (hover for 7-day)')).join('')}
+            ${makeTh('rank',      '#',           'Rank by 24h total')}
+            ${makeTh('callsign',  'Reporter',    'Receiver callsign')}
+            ${makeTh('totalDay',  allDayLabel,   allDayTitle)}
+            ${makeTh('totalWeek', allWeekLabel,  allWeekTitle)}
+            ${bands.map(b => makeTh(b, b, b + ' — ' + bandDayLabel + ' (hover for 7-day)')).join('')}
         </tr>`;
 
         thead.querySelectorAll('th[data-col]').forEach(th => {

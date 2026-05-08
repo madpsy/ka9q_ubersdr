@@ -7692,7 +7692,8 @@
             const pskRankBtn   = document.getElementById('psk-rank-btn');
             const pskRankCards = document.getElementById('pskRankCards');
             {
-                const hasPsk = currentDecoderConfig.pskreporter_enabled === true;
+                const hasPsk = currentDecoderConfig.pskreporter_enabled === true &&
+                    (currentDecoderConfig.bands || []).some(b => b.enabled !== false);
                 if (pskRankBtn)   pskRankBtn.style.display   = hasPsk ? '' : 'none';
                 if (pskRankCards) pskRankCards.style.display = hasPsk ? '' : 'none';
                 if (hasPsk) updatePSKRankCards();

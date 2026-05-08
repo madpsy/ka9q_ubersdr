@@ -12,6 +12,25 @@ import (
 	"time"
 )
 
+// pskMonitorsByBandRaw is used during JSON unmarshalling to tolerate
+// PSKReporter's non-standard entries like "dummy":0 where the value is
+// an integer rather than an array.  After unmarshalling we convert to
+// PSKMonitorsByBand, silently dropping any key whose value is not an array.
+type pskMonitorsByBandRaw map[string]json.RawMessage
+
+func parsePSKMonitorsByBand(raw pskMonitorsByBandRaw) PSKMonitorsByBand {
+	out := make(PSKMonitorsByBand, len(raw))
+	for band, msg := range raw {
+		var entries []PSKMonitorEntry
+		if err := json.Unmarshal(msg, &entries); err != nil {
+			// Not an array (e.g. "dummy":0) — skip silently
+			continue
+		}
+		out[band] = entries
+	}
+	return out
+}
+
 // psk_rank.go — PSKReporter top-monitor ranking API
 //
 // Scrapes https://www.pskreporter.info/cgi-bin/pskstats.pl and extracts the
@@ -207,22 +226,28 @@ func (f *PSKRankFetcher) fetch() *PSKRankData {
 }
 
 // parsePSKStats extracts reportResult and countryResult from the HTML page body.
+// It tolerates non-array values in the JSON objects (e.g. "dummy":0) by
+// unmarshalling into a raw map first and skipping non-array entries.
 func parsePSKStats(html []byte, d *PSKRankData) error {
 	m := reReportResult.FindSubmatch(html)
 	if m == nil {
 		return fmt.Errorf("reportResult variable not found in page")
 	}
-	if err := json.Unmarshal(m[1], &d.ReportResult); err != nil {
+	var rawReport pskMonitorsByBandRaw
+	if err := json.Unmarshal(m[1], &rawReport); err != nil {
 		return fmt.Errorf("parse reportResult JSON: %w", err)
 	}
+	d.ReportResult = parsePSKMonitorsByBand(rawReport)
 
 	m2 := reCountryResult.FindSubmatch(html)
 	if m2 == nil {
 		return fmt.Errorf("countryResult variable not found in page")
 	}
-	if err := json.Unmarshal(m2[1], &d.CountryResult); err != nil {
+	var rawCountry pskMonitorsByBandRaw
+	if err := json.Unmarshal(m2[1], &rawCountry); err != nil {
 		return fmt.Errorf("parse countryResult JSON: %w", err)
 	}
+	d.CountryResult = parsePSKMonitorsByBand(rawCountry)
 
 	return nil
 }

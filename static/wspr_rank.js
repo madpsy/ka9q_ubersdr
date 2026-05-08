@@ -2,15 +2,18 @@
  * wspr_rank.js
  * WSPR Live Receiver Ranking — admin modal
  *
- * Exposes one public function: openWSPRRankModal()
- * Called from the Decoder tab in admin.html.
+ * Exposes public functions: openWSPRRankModal(), closeWSPRRankModal(),
+ * switchWSPRRankWindow(), refreshWSPRRank(), wsprRankSearchChanged()
  *
  * Fetches GET /admin/wspr-rank?format=table&window=<w> and renders a
- * sortable leaderboard table inside a modal.  Three window buttons let the
- * user switch between:
+ * sortable, filterable leaderboard table inside a modal.  Three window
+ * buttons let the user switch between:
  *   yesterday   — midnight-to-midnight UTC yesterday  (default)
  *   rolling_24h — last 24 hours to now
  *   today       — midnight UTC today to now
+ *
+ * Own-callsign rows are highlighted in gold.
+ * The search box filters rows client-side (no re-fetch).
  */
 
 'use strict';
@@ -23,6 +26,8 @@
     let _sortCol       = 'unique';
     let _sortDir       = 'desc';
     let _refreshTimer  = null;        // rate-limit cooldown timer
+    let _ownCallsign   = '';          // set when modal opens; used for row highlight
+    let _searchFilter  = '';          // current search box value (uppercased)
 
     // ── Constants ────────────────────────────────────────────────────────────
     const WINDOW_LABELS = {
@@ -37,6 +42,21 @@
     function openWSPRRankModal() {
         const modal = document.getElementById('wsprRankModal');
         if (!modal) return;
+
+        // Resolve own callsign from decoder config (if available in page scope).
+        try {
+            const cfg = (typeof currentDecoderConfig !== 'undefined') ? currentDecoderConfig : {};
+            _ownCallsign = ((cfg.wsprnet_callsign || '').trim() ||
+                            (cfg.receiver_callsign || '').trim()).toUpperCase();
+        } catch (_) {
+            _ownCallsign = '';
+        }
+
+        // Reset search box
+        const searchEl = document.getElementById('wsprRankSearch');
+        if (searchEl) searchEl.value = '';
+        _searchFilter = '';
+
         modal.style.display = 'flex';
         _loadWindow(_currentWindow);
     }
@@ -58,6 +78,13 @@
         });
 
         _loadWindow(w);
+    }
+
+    // ── Search box handler ───────────────────────────────────────────────────
+    function wsprRankSearchChanged() {
+        const el = document.getElementById('wsprRankSearch');
+        _searchFilter = el ? el.value.trim().toUpperCase() : '';
+        if (_lastData) _renderTable(_lastData);
     }
 
     // ── Data fetch ───────────────────────────────────────────────────────────
@@ -176,13 +203,18 @@
             return _sortDir === 'asc' ? va - vb : vb - va;
         });
 
-        // Totals row
+        // Apply search filter (client-side)
+        const visible = _searchFilter
+            ? sorted.filter(r => r.reporter.toUpperCase().includes(_searchFilter))
+            : sorted;
+
+        // Totals row (only over visible rows when filtering)
         const totals = data.totals || {};
         const totalRaw    = (data.total_raw    || 0).toLocaleString();
         const totalDupes  = (data.total_dupes  || 0).toLocaleString();
         const totalUnique = (data.total_unique || 0).toLocaleString();
 
-        const totalsRow = `<tr style="background:#f0f4ff;font-weight:bold;border-bottom:2px solid #9fa8da;">
+        const totalsRow = _searchFilter ? '' : `<tr style="background:#f0f4ff;font-weight:bold;border-bottom:2px solid #9fa8da;">
             <td style="padding:6px 8px;text-align:right;color:#555;">Totals</td>
             <td style="padding:6px 8px;"></td>
             <td style="padding:6px 8px;text-align:right;">${totalRaw}</td>
@@ -191,12 +223,20 @@
             ${bands.map(b => `<td style="padding:6px 8px;text-align:right;">${((totals[b] || 0)).toLocaleString()}</td>`).join('')}
         </tr>`;
 
-        const dataRows = sorted.map(row => {
+        const dataRows = visible.map(row => {
             const bu = row.band_uniques || {};
-            return `<tr>
-                <td style="padding:5px 8px;text-align:right;color:#888;font-size:12px;">${row.rank}</td>
+            const isOwn = _ownCallsign && row.reporter.toUpperCase() === _ownCallsign;
+            const rowBg = isOwn
+                ? 'background:#fff8e1;outline:2px solid #f9a825;outline-offset:-2px;'
+                : '';
+            const rankStyle = isOwn
+                ? 'padding:5px 8px;text-align:right;font-weight:700;color:#e65100;font-size:12px;'
+                : 'padding:5px 8px;text-align:right;color:#888;font-size:12px;';
+            const reporterExtra = isOwn ? ' ⭐' : '';
+            return `<tr style="${rowBg}">
+                <td style="${rankStyle}">${row.rank}</td>
                 <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">
-                    ${_esc(row.reporter)}
+                    ${_esc(row.reporter)}${reporterExtra}
                     <span style="color:#888;font-size:11px;margin-left:4px;">${_esc(row.locator)}</span>
                 </td>
                 <td style="padding:5px 8px;text-align:right;">${(row.raw || 0).toLocaleString()}</td>
@@ -209,8 +249,12 @@
             </tr>`;
         }).join('');
 
+        const noMatch = visible.length === 0
+            ? '<tr><td colspan="99" style="text-align:center;padding:20px;color:#888;">No matching receivers.</td></tr>'
+            : '';
+
         _renderHeaders(bands);
-        _setTableContent(totalsRow + dataRows);
+        _setTableContent(totalsRow + dataRows + noMatch);
     }
 
     function _renderHeaders(bands) {
@@ -278,9 +322,10 @@
     });
 
     // ── Public API ───────────────────────────────────────────────────────────
-    window.openWSPRRankModal  = openWSPRRankModal;
-    window.closeWSPRRankModal = closeWSPRRankModal;
-    window.switchWSPRRankWindow = switchWindow;
-    window.refreshWSPRRank    = refreshWSPRRank;
+    window.openWSPRRankModal     = openWSPRRankModal;
+    window.closeWSPRRankModal    = closeWSPRRankModal;
+    window.switchWSPRRankWindow  = switchWindow;
+    window.refreshWSPRRank       = refreshWSPRRank;
+    window.wsprRankSearchChanged = wsprRankSearchChanged;
 
 })();

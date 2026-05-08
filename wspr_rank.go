@@ -51,15 +51,16 @@ const (
 // bands is Array(Int16) — integer metres (e.g. 20, 40, 80).
 // raw/dupe/unique and the per-band arrays are UInt64.
 type WSPRRankRow struct {
-	RxSign  string   `json:"rx_sign"`
-	RxLoc   string   `json:"rx_loc"`
-	Raw     uint64   `json:"raw"`
-	Dupe    uint64   `json:"dupe"`
-	Unique  uint64   `json:"unique"`
-	Bands   []int16  `json:"bands"`
-	Uniques []uint64 `json:"uniques"`
-	Gross   []uint64 `json:"gross"`
-	Dupes   []uint64 `json:"dupes"`
+	RxSign       string   `json:"rx_sign"`
+	RxLoc        string   `json:"rx_loc"`
+	Raw          uint64   `json:"raw"`
+	Dupe         uint64   `json:"dupe"`
+	Unique       uint64   `json:"unique"`
+	Bands        []int16  `json:"bands"`
+	Uniques      []uint64 `json:"uniques"`
+	Gross        []uint64 `json:"gross"`
+	Dupes        []uint64 `json:"dupes"`
+	OriginalRank int      `json:"original_rank,omitempty"` // set when row is extracted from a filtered subset; 0 = use position
 }
 
 // wsprBandOrder defines the canonical column order for the formatted table,
@@ -161,8 +162,12 @@ func formatWSPRRankWindow(w WSPRRankWindow) WSPRRankTable {
 	}
 
 	for rank, raw := range w.Data {
+		effectiveRank := rank + 1
+		if raw.OriginalRank > 0 {
+			effectiveRank = raw.OriginalRank
+		}
 		tableRow := WSPRRankTableRow{
-			Rank:        rank + 1,
+			Rank:        effectiveRank,
 			Reporter:    raw.RxSign,
 			Locator:     raw.RxLoc,
 			Raw:         raw.Raw,
@@ -194,9 +199,10 @@ func formatWSPRRankWindow(w WSPRRankWindow) WSPRRankTable {
 }
 
 // filterWSPRRankWindowByCallsign returns a copy of w containing only the row
-// whose RxSign matches callsign (case-insensitive).  The matching row retains
-// its original rank position from the full dataset.  If no match is found the
-// returned window has an empty Data slice (but preserves fetch metadata).
+// whose RxSign matches callsign (case-insensitive).  The matching row has its
+// OriginalRank set to its 1-based position in the full dataset so that
+// formatWSPRRankWindow can display the correct rank rather than always "1".
+// If no match is found the returned window has an empty Data slice.
 func filterWSPRRankWindowByCallsign(w WSPRRankWindow, callsign string) WSPRRankWindow {
 	out := WSPRRankWindow{
 		FetchedAt: w.FetchedAt,
@@ -204,8 +210,9 @@ func filterWSPRRankWindowByCallsign(w WSPRRankWindow, callsign string) WSPRRankW
 		Error:     w.Error,
 	}
 	upper := strings.ToUpper(strings.TrimSpace(callsign))
-	for _, row := range w.Data {
+	for i, row := range w.Data {
 		if strings.ToUpper(row.RxSign) == upper {
+			row.OriginalRank = i + 1 // 1-based rank in the full dataset
 			out.Data = []WSPRRankRow{row}
 			out.Rows = 1
 			return out

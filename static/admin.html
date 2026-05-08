@@ -1181,6 +1181,7 @@
                             <a href="pskreporter_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 PSK Stats</a>
                             <a id="wspr-phone-prediction-btn" href="wspr_phone_prediction.html" target="_blank" style="display: none; padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📻 SSB Predictions</a>
                             <button id="wspr-rank-btn" onclick="openWSPRRankModal()" style="display: none; padding: 6px 12px; background: #1a237e; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#283593'" onmouseout="this.style.background='#1a237e'">🏆 WSPR Rank</button>
+                            <button id="psk-rank-btn" onclick="openPSKRankModal()" style="display: none; padding: 6px 12px; background: #1b5e20; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#2e7d32'" onmouseout="this.style.background='#1b5e20'">📡 PSK Rank</button>
                             <a href="decoder_feed.html" target="_blank" onclick="return openFeedPopout('decoder_feed.html')" style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#218838'" onmouseout="this.style.background='#28a745'">⚡ Real-time Feed</a>
                         </div>
                     </div>
@@ -1189,6 +1190,13 @@
                         <strong style="color: #333; margin-bottom: 10px; display: block;">🏆 WSPR Rank:</strong>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="wsprRankCardsInner">
                             <!-- populated by updateWSPRRankCards() -->
+                        </div>
+                    </div>
+                    <!-- PSK Rank cards — shown when PSKReporter is enabled -->
+                    <div id="pskRankCards" style="display: none; margin-bottom: 20px; padding: 15px; background: #f1f8e9; border-radius: 5px; border: 1px solid #aed581;">
+                        <strong style="color: #33691e; margin-bottom: 10px; display: block;">📡 PSK Reporter Rank:</strong>
+                        <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="pskRankCardsInner">
+                            <!-- populated by updatePSKRankCards() -->
                         </div>
                     </div>
                     <div id="decoderConfig" class="loading">
@@ -2468,6 +2476,55 @@
                             Yes, Install CW Skimmer
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PSK Rank Modal -->
+        <div id="pskRankModal" class="modal">
+            <div class="modal-content" style="max-width: 95vw; width: 1200px; max-height: 90vh; display: flex; flex-direction: column;">
+                <div class="modal-header" style="flex-shrink: 0; background: #1b5e20; color: white;">
+                    <h2 style="color: white;">📡 PSKReporter Top Monitor Ranking</h2>
+                    <button class="modal-close" onclick="closePSKRankModal()" style="color: white;">&times;</button>
+                </div>
+                <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0;">
+                    <!-- Table tab + band selector + refresh -->
+                    <div style="padding: 12px 16px; background: #e8f5e9; border-bottom: 1px solid #a5d6a7; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0;">
+                        <span style="font-size: 12px; color: #33691e; font-weight: 600; margin-right: 4px;">Table:</span>
+                        <button id="pskRankTabReports"   onclick="switchPSKRankTable('reports')"   style="padding:5px 12px;border:1px solid #81c784;border-radius:4px;font-size:12px;cursor:pointer;background:#1b5e20;color:white;font-weight:600;">📊 By Reports</button>
+                        <button id="pskRankTabCountries" onclick="switchPSKRankTable('countries')" style="padding:5px 12px;border:1px solid #81c784;border-radius:4px;font-size:12px;cursor:pointer;background:#e8f5e9;color:#2e7d32;">🌍 By Countries</button>
+                        <span style="font-size: 12px; color: #33691e; font-weight: 600; margin-left: 8px; margin-right: 4px;">Band:</span>
+                        <select id="pskRankBandSelect" onchange="switchPSKRankBand(this.value)"
+                            style="padding:4px 8px;border:1px solid #81c784;border-radius:4px;font-size:12px;background:#fff;color:#1b5e20;cursor:pointer;">
+                            <option value="all">All Bands</option>
+                        </select>
+                        <div style="flex:1;"></div>
+                        <button id="pskRankRefreshBtn" onclick="refreshPSKRank()" style="padding:5px 12px;border:1px solid #81c784;border-radius:4px;font-size:12px;cursor:pointer;background:#388e3c;color:white;">🔄 Refresh</button>
+                        <a href="https://www.pskreporter.info/pskstats.html" target="_blank" rel="noopener" style="font-size:11px;color:#2e7d32;text-decoration:none;" title="PSKReporter leaderboard">pskreporter.info ↗</a>
+                    </div>
+                    <!-- Status bar -->
+                    <div id="pskRankStatus" style="padding: 6px 16px; font-size: 11px; color: #666; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; flex-shrink: 0;">Loading…</div>
+                    <!-- Callsign search -->
+                    <div style="padding: 6px 16px; background: #fff; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 12px; color: #555; white-space: nowrap;">🔍 Filter:</label>
+                        <input id="pskRankSearch" type="text" placeholder="callsign…" oninput="pskRankSearchChanged()"
+                            style="padding: 4px 8px; border: 1px solid #a5d6a7; border-radius: 4px; font-size: 12px; width: 160px; outline: none;">
+                        <button onclick="document.getElementById('pskRankSearch').value='';pskRankSearchChanged();"
+                            style="padding:3px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px;cursor:pointer;background:#f5f5f5;color:#555;">✕ Clear</button>
+                    </div>
+                    <!-- Scrollable table -->
+                    <div style="flex: 1; overflow: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                            <thead id="pskRankThead"></thead>
+                            <tbody id="pskRankTbody">
+                                <tr><td colspan="99" style="text-align:center;padding:20px;color:#888;">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="padding: 10px 16px; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; background: #fafafa;">
+                    <span style="font-size: 11px; color: #888;">Source: pskreporter.info · 24h counts · hover band cells for 7-day count · green outline = best in column</span>
+                    <button class="btn btn-secondary" onclick="closePSKRankModal()">Close</button>
                 </div>
             </div>
         </div>
@@ -7630,6 +7687,91 @@
                 if (wsprRankBtn)   wsprRankBtn.style.display   = hasEnabledWspr ? '' : 'none';
                 if (wsprRankCards) wsprRankCards.style.display = hasEnabledWspr ? '' : 'none';
                 if (hasEnabledWspr) updateWSPRRankCards();
+            }
+            // Show/hide PSK Rank button when PSKReporter uploading is enabled
+            const pskRankBtn   = document.getElementById('psk-rank-btn');
+            const pskRankCards = document.getElementById('pskRankCards');
+            {
+                const hasPsk = currentDecoderConfig.pskreporter_enabled === true;
+                if (pskRankBtn)   pskRankBtn.style.display   = hasPsk ? '' : 'none';
+                if (pskRankCards) pskRankCards.style.display = hasPsk ? '' : 'none';
+                if (hasPsk) updatePSKRankCards();
+            }
+        }
+
+        // Fetch and render PSK rank summary cards for the configured callsign.
+        async function updatePSKRankCards() {
+            const inner = document.getElementById('pskRankCardsInner');
+            if (!inner) return;
+
+            const callsign = (currentDecoderConfig.pskreporter_callsign || '').trim() ||
+                             (currentDecoderConfig.receiver_callsign     || '').trim();
+            if (!callsign || callsign === 'N0CALL') {
+                inner.innerHTML = '<span style="color:#888;font-size:13px;">No callsign configured.</span>';
+                return;
+            }
+
+            inner.innerHTML = '<span style="color:#888;font-size:13px;">Loading PSK rank…</span>';
+
+            try {
+                const resp = await authenticatedFetch(
+                    '/admin/psk-rank?table=reports&callsign=' + encodeURIComponent(callsign)
+                );
+                if (!resp || resp.status === 202) {
+                    inner.innerHTML = '<span style="color:#888;font-size:13px;">⏳ PSK rank data not yet available.</span>';
+                    return;
+                }
+                if (!resp.ok) {
+                    inner.innerHTML = '<span style="color:#c00;font-size:13px;">⚠️ Could not load PSK rank.</span>';
+                    return;
+                }
+                const data = await resp.json();
+                const rr = data.report_result || {};
+
+                // Collect all bands where this callsign appears, sorted by day desc
+                const bandEntries = [];
+                Object.entries(rr).forEach(([band, entries]) => {
+                    entries.forEach(e => {
+                        if (e.callsign.toUpperCase() === callsign.toUpperCase()) {
+                            bandEntries.push({ band, day: e.day, week: e.week });
+                        }
+                    });
+                });
+                bandEntries.sort((a, b) => b.day - a.day);
+
+                if (bandEntries.length === 0) {
+                    inner.innerHTML = '<span style="color:#888;font-size:13px;">Not ranked in top monitors.</span>';
+                    return;
+                }
+
+                // Show top 3 bands as cards, plus a total card
+                const totalDay  = bandEntries.reduce((s, e) => s + e.day,  0);
+                const totalWeek = bandEntries.reduce((s, e) => s + e.week, 0);
+
+                const cards = [];
+                // Total card
+                cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:160px;cursor:pointer;"
+                            onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
+                    <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">📊 All Bands (24h)</div>
+                    <div style="font-size:26px;font-weight:700;color:#1b5e20;">${totalDay.toLocaleString()}</div>
+                    <div style="font-size:11px;color:#555;">${totalWeek.toLocaleString()} reports this week</div>
+                    <div style="font-size:10px;color:#888;margin-top:2px;">${callsign}</div>
+                </div>`);
+
+                // Top 3 per-band cards
+                bandEntries.slice(0, 3).forEach(({ band, day, week }) => {
+                    cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:140px;cursor:pointer;"
+                                onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
+                        <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">${band}</div>
+                        <div style="font-size:22px;font-weight:700;color:#1b5e20;">${day.toLocaleString()}</div>
+                        <div style="font-size:11px;color:#555;">${week.toLocaleString()} this week</div>
+                    </div>`);
+                });
+
+                inner.innerHTML = cards.join('');
+
+            } catch (e) {
+                inner.innerHTML = '<span style="color:#c00;font-size:13px;">⚠️ ' + e.message + '</span>';
             }
         }
 
@@ -22798,5 +22940,6 @@ Referer: ${log.referer}`;
     }
     </script>
     <script src="wspr_rank.js"></script>
+    <script src="psk_rank.js"></script>
 </body>
 </html>

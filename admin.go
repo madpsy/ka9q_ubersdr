@@ -391,6 +391,7 @@ type AdminHandler struct {
 	rbnStore            *RBNDataStore       // RBN skew and statistics data store
 	rbnFetcher          *RBNDataFetcher     // RBN fetcher (for manual refresh)
 	wsprRank            *WSPRRankFetcher    // WSPR Live receiver ranking fetcher
+	pskRank             *PSKRankFetcher     // PSKReporter top-monitor ranking fetcher
 }
 
 // restartServer triggers a server restart after a short delay
@@ -452,7 +453,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -487,6 +488,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		rbnStore:            rbnStore,
 		rbnFetcher:          rbnFetcher,
 		wsprRank:            wsprRank,
+		pskRank:             pskRank,
 	}
 }
 

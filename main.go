@@ -1867,7 +1867,10 @@ func main() {
 	wsprRankFetcher := NewWSPRRankFetcher()
 	wsprRankFetcher.Start()
 	defer wsprRankFetcher.Stop()
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher)
+	pskRankFetcher := NewPSKRankFetcher()
+	pskRankFetcher.Start()
+	defer pskRankFetcher.Stop()
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher)
 
 	// Wire the admin handler into the router now that it exists, then seed the
 	// initial routes from the already-built addonProxies slice.
@@ -2235,6 +2238,7 @@ func main() {
 	http.HandleFunc("/admin/rbn-data", adminHandler.AuthMiddleware(adminHandler.HandleRBNData))
 	http.HandleFunc("/admin/rbn-data/refresh", adminHandler.AuthMiddleware(adminHandler.HandleRBNRefresh))
 	http.HandleFunc("/admin/wspr-rank", adminHandler.AuthMiddleware(adminHandler.HandleWSPRRank))
+	http.HandleFunc("/admin/psk-rank", adminHandler.AuthMiddleware(adminHandler.HandlePSKRank))
 
 	// Real-time SSE feeds (admin only)
 	http.HandleFunc("/admin/decoder/stream", adminHandler.AuthMiddleware(HandleDecoderStream(decoderSSEHub)))

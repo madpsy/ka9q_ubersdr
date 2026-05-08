@@ -1,4 +1,4 @@
- aservices:
+ services:
   # ka9q-radio backend (radiod) - SDR receiver daemon
   ka9q-radio:
     build:

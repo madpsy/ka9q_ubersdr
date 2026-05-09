@@ -1536,6 +1536,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     } catch (e) { /* localStorage unavailable */ }
 
+    // Auto-switch to combined slider on narrow screens (if no explicit user preference)
+    applyNarrowScreenBandwidthMode();
+
+    // Re-apply on resize (debounced) — only acts when no explicit user preference
+    let _bwResizeTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(_bwResizeTimer);
+        _bwResizeTimer = setTimeout(applyNarrowScreenBandwidthMode, 150);
+    });
+
     // Expose bandwidth control functions globally
     window.adjustBandwidth = adjustBandwidth;
     window.updateBandwidthTooltips = updateBandwidthTooltips;
@@ -4868,6 +4878,71 @@ function syncCombinedSliderToMode() {
  * Toggle between individual Low/High sliders and the single combined slider.
  * The dot button turns red when combined mode is active.
  */
+/**
+ * Activate combined (single) bandwidth slider mode without recording a user preference.
+ * Used internally by the auto-narrow logic.
+ */
+function _activateCombinedBandwidthSlider() {
+    const pill          = document.getElementById('bandwidth-dot-toggle');
+    const combinedGroup = document.getElementById('bandwidth-combined-group');
+    const lowGroup      = document.getElementById('bandwidth-low-group');
+    const highGroup     = document.getElementById('bandwidth-high-group');
+    if (!pill || !combinedGroup || !lowGroup || !highGroup) return;
+    if (pill.classList.contains('active')) return; // already active
+
+    pill.classList.add('active');
+    lowGroup.style.display      = 'none';
+    highGroup.style.display     = 'none';
+    combinedGroup.style.display = '';
+    pill.textContent = '1';
+    pill.title = 'Click to switch back to two individual sliders';
+    syncCombinedSliderToMode();
+}
+
+/**
+ * Deactivate combined bandwidth slider mode without recording a user preference.
+ * Used internally by the auto-narrow logic.
+ */
+function _deactivateCombinedBandwidthSlider() {
+    const pill          = document.getElementById('bandwidth-dot-toggle');
+    const combinedGroup = document.getElementById('bandwidth-combined-group');
+    const lowGroup      = document.getElementById('bandwidth-low-group');
+    const highGroup     = document.getElementById('bandwidth-high-group');
+    if (!pill || !combinedGroup || !lowGroup || !highGroup) return;
+    if (!pill.classList.contains('active')) return; // already inactive
+
+    pill.classList.remove('active');
+    lowGroup.style.display      = '';
+    highGroup.style.display     = '';
+    combinedGroup.style.display = 'none';
+    pill.textContent = '2';
+    pill.title = 'Click to switch to a single combined bandwidth slider';
+}
+
+/**
+ * Auto-apply combined/individual mode based on screen width.
+ * Only acts when the user has not made an explicit choice (no localStorage entry).
+ * Narrow threshold matches the existing 1024px responsive breakpoint.
+ */
+function applyNarrowScreenBandwidthMode() {
+    let explicitChoice = null;
+    try { explicitChoice = localStorage.getItem('bandwidthSliderMode'); } catch (e) {}
+
+    // If the user has explicitly chosen, respect it — don't override
+    if (explicitChoice === 'combined' || explicitChoice === 'individual') return;
+
+    const isNarrow = window.innerWidth <= 1024;
+    if (isNarrow) {
+        _activateCombinedBandwidthSlider();
+    } else {
+        _deactivateCombinedBandwidthSlider();
+    }
+}
+
+/**
+ * Toggle between individual and combined bandwidth sliders (user-initiated).
+ * Records an explicit preference to localStorage so auto-narrow won't override it.
+ */
 function toggleCombinedBandwidthSlider() {
     const pill         = document.getElementById('bandwidth-dot-toggle');
     const combinedGroup = document.getElementById('bandwidth-combined-group');
@@ -4894,7 +4969,7 @@ function toggleCombinedBandwidthSlider() {
         pill.title = 'Click to switch to a single combined bandwidth slider';
     }
 
-    // Persist the user's choice
+    // Persist the explicit user choice so auto-narrow won't override it
     try {
         localStorage.setItem('bandwidthSliderMode', isActive ? 'combined' : 'individual');
     } catch (e) { /* localStorage unavailable */ }
@@ -9031,6 +9106,7 @@ window.setMode = setMode;
 window.updateBandwidthDisplay = updateBandwidthDisplay;
 window.updateBandwidth = updateBandwidth;
 window.toggleCombinedBandwidthSlider = toggleCombinedBandwidthSlider;
+window.applyNarrowScreenBandwidthMode = applyNarrowScreenBandwidthMode;
 window.syncCombinedSliderToMode = syncCombinedSliderToMode;
 window.updateCombinedBandwidthDisplay = updateCombinedBandwidthDisplay;
 window.updateCombinedBandwidth = updateCombinedBandwidth;

@@ -122,6 +122,23 @@ export function adjustBandwidth(direction) {
     if (highValueEl) {
         highValueEl.textContent = newHigh;
     }
+
+    // If the combined (single) slider is currently visible, keep it in sync
+    const combinedGroup = document.getElementById('bandwidth-combined-group');
+    if (combinedGroup && combinedGroup.style.display !== 'none') {
+        const combinedSlider = document.getElementById('bandwidth-combined');
+        const combinedValueEl = document.getElementById('bandwidth-combined-value');
+        if (combinedSlider) {
+            // Combined slider value is always the positive half-bandwidth
+            const combinedVal = currentMode === 'lsb'
+                ? Math.abs(newLow)
+                : Math.abs(newHigh);
+            combinedSlider.value = combinedVal;
+            if (combinedValueEl) {
+                combinedValueEl.textContent = combinedVal;
+            }
+        }
+    }
     
     // Don't call updateBandwidth() as it re-reads the globals which may have been overwritten
     // Instead, do the side effects directly with our known-good values
@@ -247,6 +264,12 @@ export function updateBandwidthTooltips() {
     
     lowSlider.title = lowTooltip;
     highSlider.title = highTooltip;
+
+    // Also update the combined slider tooltip
+    const combinedSlider = document.getElementById('bandwidth-combined');
+    if (combinedSlider) {
+        combinedSlider.title = 'Bandwidth - Press Z to decrease, X to increase';
+    }
 }
 
 /**

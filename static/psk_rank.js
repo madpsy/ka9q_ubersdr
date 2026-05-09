@@ -34,10 +34,12 @@
 
     // ── Band order: lowest frequency (longest wavelength) → highest frequency.
     // Exact band key strings as returned by PSKReporter's reportResult/countryResult.
-    // Sorted by actual centre frequency, ~136 kHz (4000m) → 76 GHz.
-    // Junk keys ('All', 'dummy', 'invalid', 'uhf', 'vlf') are excluded here and
-    // filtered out in _populateBandSelector / _renderTable.
+    // Sorted by actual centre frequency, VLF → 76 GHz.
+    // 'vlf' and 'invalid' are real PSKReporter band keys shown as columns (vlf first, invalid last).
+    // Only 'All' and 'dummy' are excluded (not real bands).
     const BAND_ORDER = [
+        // VLF catch-all (PSKReporter key 'vlf')
+        'vlf',
         // VLF / LF / MF
         '4000m',            // ~75 kHz
         '2200m',            // 136 kHz
@@ -72,10 +74,15 @@
         '10Ghz',            // 10 GHz
         '24Ghz',            // 24 GHz
         '76Ghz',            // 76 GHz
+        // Unknown / unclassified (PSKReporter key 'invalid') — shown last
+        'invalid',
     ];
 
-    // Band keys from PSKReporter that are not real amateur radio bands.
-    const BAND_JUNK = new Set(['All', 'dummy', 'invalid', 'uhf', 'vlf']);
+    // Band keys from PSKReporter that are NOT shown as columns.
+    // 'All' is the pre-computed cross-band total used for the Unique columns.
+    // 'dummy' is a placeholder integer value (not an array), skipped during parse.
+    // 'uhf' is a generic catch-all already covered by the cm/GHz bands above.
+    const BAND_JUNK = new Set(['All', 'dummy', 'uhf']);
 
     // ── Modal open/close ─────────────────────────────────────────────────────
     function openPSKRankModal() {
@@ -265,6 +272,15 @@
             bandsToShow = (src[_currentBand] && !BAND_JUNK.has(_currentBand)) ? [_currentBand] : [];
         }
 
+        // Build a lookup from the pre-computed "All" band entry (server-side unique totals).
+        // This is NOT a sum of per-band values — PSKReporter deduplicates server-side.
+        // For reports: "All".day = unique reports across all bands
+        // For countries: "All".day = unique countries across all bands (not a sum, avoids double-counting)
+        const allBandMap = {};
+        (src['All'] || []).forEach(e => {
+            allBandMap[e.callsign] = { day: e.day, week: e.week };
+        });
+
         // Flatten into rows: one row per callsign, columns = bands
         // Each cell = {day, week} for that band (or null)
         const callsignMap = {}; // callsign → {band → {day, week}}
@@ -274,14 +290,16 @@
                 callsignMap[entry.callsign][band] = { day: entry.day, week: entry.week };
             });
         });
+        // Also include any callsigns that appear in "All" but not in any specific band
+        // (shouldn't happen, but ensures the total column is always populated)
+        (src['All'] || []).forEach(entry => {
+            if (!callsignMap[entry.callsign]) callsignMap[entry.callsign] = {};
+        });
 
-        // Build flat rows with totals
+        // Build flat rows with totals — use the pre-computed "All" band for totalDay/totalWeek
         let rows = Object.entries(callsignMap).map(([callsign, bands]) => {
-            let totalDay = 0, totalWeek = 0;
-            bandsToShow.forEach(b => {
-                if (bands[b]) { totalDay += bands[b].day; totalWeek += bands[b].week; }
-            });
-            return { callsign, bands, totalDay, totalWeek };
+            const allEntry = allBandMap[callsign] || { day: 0, week: 0 };
+            return { callsign, bands, totalDay: allEntry.day, totalWeek: allEntry.week };
         });
 
         // Sort
@@ -373,15 +391,15 @@
         if (!thead) return;
 
         const isCountries = _currentTable === 'countries';
-        const allDayLabel  = isCountries ? 'All Countries 24h' : 'All Reports 24h';
-        const allWeekLabel = isCountries ? 'All Countries 7d'  : 'All Reports 7d';
+        const allDayLabel  = 'Unique 24h';
+        const allWeekLabel = 'Unique 7d';
         const bandDayLabel = isCountries ? '24h countries'     : '24h reports';
         const allDayTitle  = isCountries
-            ? 'Total distinct countries reported across all bands in last 24h'
-            : 'Total reception reports across all bands in last 24h';
+            ? 'Unique countries reported across all bands in last 24h (pre-computed by PSKReporter, not a sum)'
+            : 'Unique reception reports across all bands in last 24h (pre-computed by PSKReporter, not a sum)';
         const allWeekTitle = isCountries
-            ? 'Total distinct countries reported across all bands in last 7 days'
-            : 'Total reception reports across all bands in last 7 days';
+            ? 'Unique countries reported across all bands in last 7 days (pre-computed by PSKReporter, not a sum)'
+            : 'Unique reception reports across all bands in last 7 days (pre-computed by PSKReporter, not a sum)';
 
         const makeTh = (col, label, title) => {
             const active = _sortCol === col;

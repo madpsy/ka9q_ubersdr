@@ -2500,7 +2500,7 @@
                         </select>
                         <div style="flex:1;"></div>
                         <button id="pskRankRefreshBtn" onclick="refreshPSKRank()" style="padding:5px 12px;border:1px solid #81c784;border-radius:4px;font-size:12px;cursor:pointer;background:#388e3c;color:white;">🔄 Refresh</button>
-                        <a href="https://www.pskreporter.info/pskstats.html" target="_blank" rel="noopener" style="font-size:11px;color:#2e7d32;text-decoration:none;" title="PSKReporter leaderboard">pskreporter.info ↗</a>
+                        <a href="https://www.pskreporter.info/cgi-bin/pskstats.pl" target="_blank" rel="noopener" style="font-size:11px;color:#2e7d32;text-decoration:none;" title="PSKReporter leaderboard">pskreporter.info ↗</a>
                     </div>
                     <!-- Status bar -->
                     <div id="pskRankStatus" style="padding: 6px 16px; font-size: 11px; color: #666; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; flex-shrink: 0;">Loading…</div>
@@ -7701,6 +7701,8 @@
         }
 
         // Fetch and render PSK rank summary cards for the configured callsign.
+        // Always shows: rank card for reports (All bands) + rank card for countries (All bands).
+        // Also shows extra 🏆 cards for any band where we are #1.
         async function updatePSKRankCards() {
             const inner = document.getElementById('pskRankCardsInner');
             if (!inner) return;
@@ -7712,11 +7714,12 @@
                 return;
             }
 
+            const cs = callsign.toUpperCase();
             inner.innerHTML = '<span style="color:#888;font-size:13px;">Loading PSK rank…</span>';
 
             try {
                 const resp = await authenticatedFetch(
-                    '/admin/psk-rank?table=reports&callsign=' + encodeURIComponent(callsign)
+                    '/admin/psk-rank?table=all&callsign=' + encodeURIComponent(callsign)
                 );
                 if (!resp || resp.status === 202) {
                     inner.innerHTML = '<span style="color:#888;font-size:13px;">⏳ PSK rank data not yet available.</span>';
@@ -7727,47 +7730,97 @@
                     return;
                 }
                 const data = await resp.json();
-                const rr = data.report_result || {};
+                const rr = data.report_result  || {};
+                const cr = data.country_result || {};
 
-                // Collect all bands where this callsign appears, sorted by day desc
-                const bandEntries = [];
-                Object.entries(rr).forEach(([band, entries]) => {
-                    entries.forEach(e => {
-                        if (e.callsign.toUpperCase() === callsign.toUpperCase()) {
-                            bandEntries.push({ band, day: e.day, week: e.week });
-                        }
-                    });
-                });
-                bandEntries.sort((a, b) => b.day - a.day);
-
-                if (bandEntries.length === 0) {
-                    inner.innerHTML = '<span style="color:#888;font-size:13px;">Not ranked in top monitors.</span>';
-                    return;
+                // Helper: find rank (1-based) of our callsign in a band's entry list.
+                // Returns null if not found.
+                function findRank(bandEntries) {
+                    if (!Array.isArray(bandEntries)) return null;
+                    const idx = bandEntries.findIndex(e => e.callsign.toUpperCase() === cs);
+                    return idx >= 0 ? idx + 1 : null;
                 }
 
-                // Show top 3 bands as cards, plus a total card
-                const totalDay  = bandEntries.reduce((s, e) => s + e.day,  0);
-                const totalWeek = bandEntries.reduce((s, e) => s + e.week, 0);
+                // Helper: find our entry in a band's list.
+                function findEntry(bandEntries) {
+                    if (!Array.isArray(bandEntries)) return null;
+                    return bandEntries.find(e => e.callsign.toUpperCase() === cs) || null;
+                }
 
                 const cards = [];
-                // Total card
-                cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:160px;cursor:pointer;"
-                            onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
-                    <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">📊 All Bands (24h)</div>
-                    <div style="font-size:26px;font-weight:700;color:#1b5e20;">${totalDay.toLocaleString()}</div>
-                    <div style="font-size:11px;color:#555;">${totalWeek.toLocaleString()} reports this week</div>
-                    <div style="font-size:10px;color:#888;margin-top:2px;">${callsign}</div>
-                </div>`);
 
-                // Top 3 per-band cards
-                bandEntries.slice(0, 3).forEach(({ band, day, week }) => {
-                    cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:140px;cursor:pointer;"
+                // ── Card 1: Reports rank (All bands) ────────────────────────────
+                const reportsAllEntry = findEntry(rr['All']);
+                const reportsAllRank  = findRank(rr['All']);
+                {
+                    const rankStr  = reportsAllRank  ? '#' + reportsAllRank  : '—';
+                    const dayVal   = reportsAllEntry ? reportsAllEntry.day   : 0;
+                    const weekVal  = reportsAllEntry ? reportsAllEntry.week  : 0;
+                    const rankColor = reportsAllRank === 1 ? '#e65100' : reportsAllRank && reportsAllRank <= 10 ? '#1b5e20' : '#555';
+                    cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:160px;cursor:pointer;"
                                 onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
-                        <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">${band}</div>
-                        <div style="font-size:22px;font-weight:700;color:#1b5e20;">${day.toLocaleString()}</div>
+                        <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">📊 Reports Rank (All Bands)</div>
+                        <div style="font-size:26px;font-weight:700;color:${rankColor};">${rankStr}</div>
+                        <div style="font-size:11px;color:#555;">${dayVal.toLocaleString()} unique 24h · ${weekVal.toLocaleString()} 7d</div>
+                        <div style="font-size:10px;color:#888;margin-top:2px;">${callsign}</div>
+                    </div>`);
+                }
+
+                // ── Card 2: Countries rank (All bands) ──────────────────────────
+                const countriesAllEntry = findEntry(cr['All']);
+                const countriesAllRank  = findRank(cr['All']);
+                {
+                    const rankStr  = countriesAllRank  ? '#' + countriesAllRank  : '—';
+                    const dayVal   = countriesAllEntry ? countriesAllEntry.day   : 0;
+                    const weekVal  = countriesAllEntry ? countriesAllEntry.week  : 0;
+                    const rankColor = countriesAllRank === 1 ? '#e65100' : countriesAllRank && countriesAllRank <= 10 ? '#1b5e20' : '#555';
+                    cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:160px;cursor:pointer;"
+                                onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
+                        <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">🌍 Countries Rank (All Bands)</div>
+                        <div style="font-size:26px;font-weight:700;color:${rankColor};">${rankStr}</div>
+                        <div style="font-size:11px;color:#555;">${dayVal.toLocaleString()} unique 24h · ${weekVal.toLocaleString()} 7d</div>
+                        <div style="font-size:10px;color:#888;margin-top:2px;">${callsign}</div>
+                    </div>`);
+                }
+
+                // ── Extra cards: bands where we are #1 ──────────────────────────
+                // Check both report_result and country_result per-band (exclude 'All', 'dummy', 'uhf')
+                const JUNK = new Set(['All', 'dummy', 'uhf']);
+                const topBands = []; // { band, table, day, week }
+
+                Object.entries(rr).forEach(([band, entries]) => {
+                    if (JUNK.has(band)) return;
+                    if (findRank(entries) === 1) {
+                        const e = findEntry(entries);
+                        topBands.push({ band, table: 'reports', day: e.day, week: e.week });
+                    }
+                });
+                Object.entries(cr).forEach(([band, entries]) => {
+                    if (JUNK.has(band)) return;
+                    if (findRank(entries) === 1) {
+                        const e = findEntry(entries);
+                        // Avoid duplicate if already added from reports
+                        if (!topBands.find(x => x.band === band && x.table === 'reports')) {
+                            topBands.push({ band, table: 'countries', day: e.day, week: e.week });
+                        }
+                    }
+                });
+
+                topBands.sort((a, b) => b.day - a.day);
+                topBands.forEach(({ band, table, day, week }) => {
+                    const label = table === 'countries' ? '🏆 #1 ' + band + ' Countries' : '🏆 #1 ' + band + ' Reports';
+                    cards.push(`<div style="padding:12px 16px;background:#fff8e1;border:2px solid #f9a825;border-radius:6px;min-width:140px;cursor:pointer;"
+                                onclick="openPSKRankModal()" title="You are #1 on ${band}!">
+                        <div style="font-size:11px;color:#e65100;font-weight:700;margin-bottom:4px;">${label}</div>
+                        <div style="font-size:22px;font-weight:700;color:#e65100;">${day.toLocaleString()}</div>
                         <div style="font-size:11px;color:#555;">${week.toLocaleString()} this week</div>
                     </div>`);
                 });
+
+                if (cards.length === 0) {
+                    inner.innerHTML = '<span style="color:#888;font-size:13px;">Not ranked in top monitors.</span>';
+                    return;
+                }
 
                 inner.innerHTML = cards.join('');
 

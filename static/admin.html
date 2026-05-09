@@ -7718,6 +7718,8 @@
             inner.innerHTML = '<span style="color:#888;font-size:13px;">Loading PSK rank…</span>';
 
             try {
+                // The server computes ranks against the full dataset before filtering,
+                // returning compact {rank, day, week} per band — no "always #1" bug.
                 const resp = await authenticatedFetch(
                     '/admin/psk-rank?table=all&callsign=' + encodeURIComponent(callsign)
                 );
@@ -7730,33 +7732,20 @@
                     return;
                 }
                 const data = await resp.json();
-                const rr = data.report_result  || {};
-                const cr = data.country_result || {};
-
-                // Helper: find rank (1-based) of our callsign in a band's entry list.
-                // Returns null if not found.
-                function findRank(bandEntries) {
-                    if (!Array.isArray(bandEntries)) return null;
-                    const idx = bandEntries.findIndex(e => e.callsign.toUpperCase() === cs);
-                    return idx >= 0 ? idx + 1 : null;
-                }
-
-                // Helper: find our entry in a band's list.
-                function findEntry(bandEntries) {
-                    if (!Array.isArray(bandEntries)) return null;
-                    return bandEntries.find(e => e.callsign.toUpperCase() === cs) || null;
-                }
+                const rankData = data.callsign_rank || {};
+                const rr = rankData.reports   || {};  // band → {rank, day, week}
+                const cr = rankData.countries || {};  // band → {rank, day, week}
 
                 const cards = [];
 
                 // ── Card 1: Reports rank (All bands) ────────────────────────────
-                const reportsAllEntry = findEntry(rr['All']);
-                const reportsAllRank  = findRank(rr['All']);
                 {
-                    const rankStr  = reportsAllRank  ? '#' + reportsAllRank  : '—';
-                    const dayVal   = reportsAllEntry ? reportsAllEntry.day   : 0;
-                    const weekVal  = reportsAllEntry ? reportsAllEntry.week  : 0;
-                    const rankColor = reportsAllRank === 1 ? '#e65100' : reportsAllRank && reportsAllRank <= 10 ? '#1b5e20' : '#555';
+                    const entry = rr['All'];
+                    const rankStr   = entry ? '#' + entry.rank : '—';
+                    const dayVal    = entry ? entry.day  : 0;
+                    const weekVal   = entry ? entry.week : 0;
+                    const rankColor = entry && entry.rank === 1 ? '#e65100'
+                                    : entry && entry.rank <= 10 ? '#1b5e20' : '#555';
                     cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:160px;cursor:pointer;"
                                 onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
                         <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">📊 Reports Rank (All Bands)</div>
@@ -7767,13 +7756,13 @@
                 }
 
                 // ── Card 2: Countries rank (All bands) ──────────────────────────
-                const countriesAllEntry = findEntry(cr['All']);
-                const countriesAllRank  = findRank(cr['All']);
                 {
-                    const rankStr  = countriesAllRank  ? '#' + countriesAllRank  : '—';
-                    const dayVal   = countriesAllEntry ? countriesAllEntry.day   : 0;
-                    const weekVal  = countriesAllEntry ? countriesAllEntry.week  : 0;
-                    const rankColor = countriesAllRank === 1 ? '#e65100' : countriesAllRank && countriesAllRank <= 10 ? '#1b5e20' : '#555';
+                    const entry = cr['All'];
+                    const rankStr   = entry ? '#' + entry.rank : '—';
+                    const dayVal    = entry ? entry.day  : 0;
+                    const weekVal   = entry ? entry.week : 0;
+                    const rankColor = entry && entry.rank === 1 ? '#e65100'
+                                    : entry && entry.rank <= 10 ? '#1b5e20' : '#555';
                     cards.push(`<div style="padding:12px 16px;background:#fff;border:1px solid #a5d6a7;border-radius:6px;min-width:160px;cursor:pointer;"
                                 onclick="openPSKRankModal()" title="Open PSK Rank leaderboard">
                         <div style="font-size:11px;color:#2e7d32;font-weight:600;margin-bottom:4px;">🌍 Countries Rank (All Bands)</div>
@@ -7783,36 +7772,40 @@
                     </div>`);
                 }
 
-                // ── Extra cards: bands where we are #1 ──────────────────────────
-                // Check both report_result and country_result per-band (exclude 'All', 'dummy', 'uhf')
+                // ── Extra cards: bands where we are top-3 (gold/silver/bronze) ──
+                // Exclude 'All' (already shown above) and junk keys.
                 const JUNK = new Set(['All', 'dummy', 'uhf']);
-                const topBands = []; // { band, table, day, week }
+                const MEDAL = {
+                    1: { emoji: '🥇', border: '#f9a825', bg: '#fff8e1', color: '#e65100', label: '#1' },
+                    2: { emoji: '🥈', border: '#9e9e9e', bg: '#f5f5f5', color: '#424242', label: '#2' },
+                    3: { emoji: '🥉', border: '#a1887f', bg: '#fbe9e7', color: '#6d4c41', label: '#3' },
+                };
+                const topBands = []; // { band, table, rank, day, week }
 
-                Object.entries(rr).forEach(([band, entries]) => {
+                Object.entries(rr).forEach(([band, entry]) => {
                     if (JUNK.has(band)) return;
-                    if (findRank(entries) === 1) {
-                        const e = findEntry(entries);
-                        topBands.push({ band, table: 'reports', day: e.day, week: e.week });
-                    }
+                    if (entry.rank >= 1 && entry.rank <= 3) topBands.push({ band, table: 'reports', rank: entry.rank, day: entry.day, week: entry.week });
                 });
-                Object.entries(cr).forEach(([band, entries]) => {
+                Object.entries(cr).forEach(([band, entry]) => {
                     if (JUNK.has(band)) return;
-                    if (findRank(entries) === 1) {
-                        const e = findEntry(entries);
-                        // Avoid duplicate if already added from reports
-                        if (!topBands.find(x => x.band === band && x.table === 'reports')) {
-                            topBands.push({ band, table: 'countries', day: e.day, week: e.week });
+                    if (entry.rank >= 1 && entry.rank <= 3) {
+                        // Avoid duplicate if already added from reports for same band at same rank
+                        if (!topBands.find(x => x.band === band && x.table === 'reports' && x.rank === entry.rank)) {
+                            topBands.push({ band, table: 'countries', rank: entry.rank, day: entry.day, week: entry.week });
                         }
                     }
                 });
 
-                topBands.sort((a, b) => b.day - a.day);
-                topBands.forEach(({ band, table, day, week }) => {
-                    const label = table === 'countries' ? '🏆 #1 ' + band + ' Countries' : '🏆 #1 ' + band + ' Reports';
-                    cards.push(`<div style="padding:12px 16px;background:#fff8e1;border:2px solid #f9a825;border-radius:6px;min-width:140px;cursor:pointer;"
-                                onclick="openPSKRankModal()" title="You are #1 on ${band}!">
-                        <div style="font-size:11px;color:#e65100;font-weight:700;margin-bottom:4px;">${label}</div>
-                        <div style="font-size:22px;font-weight:700;color:#e65100;">${day.toLocaleString()}</div>
+                // Sort: rank asc, then day desc
+                topBands.sort((a, b) => a.rank !== b.rank ? a.rank - b.rank : b.day - a.day);
+                topBands.forEach(({ band, table, rank, day, week }) => {
+                    const m = MEDAL[rank];
+                    const tableLabel = table === 'countries' ? 'Countries' : 'Reports';
+                    const label = `${m.emoji} ${m.label} ${band} ${tableLabel}`;
+                    cards.push(`<div style="padding:12px 16px;background:${m.bg};border:2px solid ${m.border};border-radius:6px;min-width:140px;cursor:pointer;"
+                                onclick="openPSKRankModal()" title="You are ${m.label} on ${band} ${tableLabel}!">
+                        <div style="font-size:11px;color:${m.color};font-weight:700;margin-bottom:4px;">${label}</div>
+                        <div style="font-size:22px;font-weight:700;color:${m.color};">${day.toLocaleString()}</div>
                         <div style="font-size:11px;color:#555;">${week.toLocaleString()} this week</div>
                     </div>`);
                 });

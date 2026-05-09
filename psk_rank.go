@@ -92,6 +92,38 @@ type PSKMonitorEntry struct {
 // sorted descending by Day.
 type PSKMonitorsByBand map[string][]PSKMonitorEntry
 
+// PSKBandRank holds a callsign's rank and values for a single band.
+type PSKBandRank struct {
+	Rank int `json:"rank"` // 1-based position in that band's sorted list
+	Day  int `json:"day"`
+	Week int `json:"week"`
+}
+
+// PSKCallsignRank holds per-band ranks for a single callsign across both tables.
+// Key = band name (including "All" for the cross-band total).
+// Only bands where the callsign appears are included.
+type PSKCallsignRank struct {
+	Reports   map[string]PSKBandRank `json:"reports,omitempty"`
+	Countries map[string]PSKBandRank `json:"countries,omitempty"`
+}
+
+// computeCallsignRank scans src and returns a map of band → PSKBandRank for
+// the given callsign (case-insensitive).  Only bands where the callsign
+// appears are included.
+func computeCallsignRank(src PSKMonitorsByBand, callsign string) map[string]PSKBandRank {
+	cs := strings.ToUpper(callsign)
+	out := make(map[string]PSKBandRank)
+	for band, entries := range src {
+		for rank, e := range entries {
+			if strings.ToUpper(e.Callsign) == cs {
+				out[band] = PSKBandRank{Rank: rank + 1, Day: e.Day, Week: e.Week}
+				break
+			}
+		}
+	}
+	return out
+}
+
 // PSKRankData holds the parsed content of one fetch from pskreporter.
 type PSKRankData struct {
 	FetchedAt     time.Time         `json:"fetched_at"`
@@ -362,11 +394,41 @@ func (ah *AdminHandler) HandlePSKRank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply band + callsign filters to the requested table(s).
+	// When a callsign is provided, return compact rank data instead of the full
+	// filtered leaderboard.  This avoids the "always #1" bug that occurred when
+	// the callsign filter stripped all other entries before rank was computed.
+	if callsign != "" {
+		type pskCallsignResponse struct {
+			FetchedAt    time.Time       `json:"fetched_at"`
+			FetchedMs    int64           `json:"fetched_ms"`
+			CallsignRank PSKCallsignRank `json:"callsign_rank"`
+			Error        string          `json:"error,omitempty"`
+		}
+		cr := PSKCallsignRank{}
+		switch table {
+		case "reports":
+			cr.Reports = computeCallsignRank(cached.ReportResult, callsign)
+		case "countries":
+			cr.Countries = computeCallsignRank(cached.CountryResult, callsign)
+		default: // "all"
+			cr.Reports = computeCallsignRank(cached.ReportResult, callsign)
+			cr.Countries = computeCallsignRank(cached.CountryResult, callsign)
+		}
+		out := pskCallsignResponse{
+			FetchedAt:    cached.FetchedAt,
+			FetchedMs:    cached.FetchedMs,
+			CallsignRank: cr,
+			Error:        cached.Error,
+		}
+		if err := json.NewEncoder(w).Encode(out); err != nil {
+			log.Printf("[PSKRank] encode callsign-rank response error: %v", err)
+		}
+		return
+	}
+
+	// No callsign filter — return the full leaderboard (with optional band filter).
 	applyFilters := func(src PSKMonitorsByBand) PSKMonitorsByBand {
-		out := filterPSKByBand(src, band)
-		out = filterPSKByCallsign(out, callsign)
-		return out
+		return filterPSKByBand(src, band)
 	}
 
 	type pskRankResponse struct {

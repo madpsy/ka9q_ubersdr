@@ -4120,6 +4120,21 @@ func (ah *AdminHandler) handleUpdateCWSkimmerConfig(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Update in-memory config so /api/description reflects the new values immediately
+	// (without this, the CW Skimmer installer reads the old callsign from the API)
+	if ah.cwSkimmerConfig != nil {
+		var updated CWSkimmerConfig
+		if err := yaml.Unmarshal(yamlData, &updated); err == nil {
+			ah.cwSkimmerConfig.Callsign = updated.Callsign
+			ah.cwSkimmerConfig.Enabled = updated.Enabled
+			ah.cwSkimmerConfig.RBNSpots = updated.RBNSpots
+			ah.cwSkimmerConfig.PSKReporterEnabled = updated.PSKReporterEnabled
+			ah.cwSkimmerConfig.PSKReporterCallsign = updated.PSKReporterCallsign
+			ah.cwSkimmerConfig.PSKReporterLocator = updated.PSKReporterLocator
+			ah.cwSkimmerConfig.PSKReporterAntenna = updated.PSKReporterAntenna
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 
 	if restart {

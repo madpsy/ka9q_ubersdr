@@ -7,6 +7,8 @@
 - Added **ASN/ISP Banning** to provide ability to block problematic ISPs (e.g. VPN providers / hosting companies etc)
 - Added **Time limit per 24 hours** to restrict number of seconds an IP has access for per rolling 24 hour window
 - Added **WSPR & PSK Reporter Stats** in Decoders tab in Admin when at least one decoder + Reporting is enabled
+- Added **Single bandwidth slider** with user preference saving between twin and single bandwidth sliders
+- Added **Round 1 KHz button** in the center of the frequency step buttons - rounds to nearest 1 KHz
 
 ### Bug Fixes
 - Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints

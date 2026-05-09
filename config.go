@@ -1238,6 +1238,12 @@ func (sc *ServerConfig) resolveContainerIPs() {
 	// Always-trusted built-in container names.
 	builtIn := []string{"tunnel-support-client", "tunnel-client", "caddy"}
 
+	// Build a set of built-in names so we can suppress warnings for them.
+	builtInSet := make(map[string]bool, len(builtIn))
+	for _, n := range builtIn {
+		builtInSet[n] = true
+	}
+
 	// Merge built-ins with user-configured names, deduplicating.
 	seen := make(map[string]bool, len(builtIn)+len(sc.TrustedContainers))
 	names := make([]string, 0, len(builtIn)+len(sc.TrustedContainers))
@@ -1271,14 +1277,18 @@ func (sc *ServerConfig) resolveContainerIPs() {
 	for _, name := range names {
 		ips, err := net.LookupHost(name)
 		if err != nil {
-			// Rate-limit resolve error logging to once per 5 minutes per container name.
-			now := time.Now()
-			if sc.containerResolveErrLastLog == nil {
-				sc.containerResolveErrLastLog = make(map[string]time.Time)
-			}
-			if last, ok := sc.containerResolveErrLastLog[name]; !ok || now.Sub(last) >= 5*time.Minute {
-				log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
-				sc.containerResolveErrLastLog[name] = now
+			// Only warn for user-configured containers; built-ins (e.g. tunnel-support-client)
+			// may simply not be running, which is expected and not worth logging.
+			if !builtInSet[name] {
+				// Rate-limit resolve error logging to once per 5 minutes per container name.
+				now := time.Now()
+				if sc.containerResolveErrLastLog == nil {
+					sc.containerResolveErrLastLog = make(map[string]time.Time)
+				}
+				if last, ok := sc.containerResolveErrLastLog[name]; !ok || now.Sub(last) >= 5*time.Minute {
+					log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
+					sc.containerResolveErrLastLog[name] = now
+				}
 			}
 			// Fall back to previously resolved IPs for this name, if any.
 			if prev, ok := prevIPsByName[name]; ok && len(prev) > 0 {

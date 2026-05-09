@@ -1224,23 +1224,39 @@ body {
 
 /* Different styling for different step sizes */
 .tuning-buttons button:nth-child(1),
-.tuning-buttons button:nth-child(6) {
+.tuning-buttons button:nth-child(7) {
     /* Coarse tuning (1 kHz) - larger, more prominent */
     font-size: 1.1em;
     background: #d4d8dd;
 }
 
 .tuning-buttons button:nth-child(2),
-.tuning-buttons button:nth-child(5) {
+.tuning-buttons button:nth-child(6) {
     /* Fine tuning (100 Hz) - medium */
     font-size: 1em;
 }
 
 .tuning-buttons button:nth-child(3),
-.tuning-buttons button:nth-child(4) {
+.tuning-buttons button:nth-child(5) {
     /* Ultra-fine tuning (10 Hz) - smaller */
     font-size: 0.9em;
     padding: 8px 10px;
+}
+
+/* Centre snap-to-kHz button */
+.tuning-btn-snap {
+    min-width: 20px !important;
+    padding: 8px 5px !important;
+    background: #2c3e50 !important;
+    border-color: #4a6278 !important;
+    color: #ffffff !important;
+    font-size: 0.7em !important;
+    opacity: 0.65;
+}
+
+.tuning-btn-snap:hover {
+    opacity: 1 !important;
+    background: #34495e !important;
 }
 
 .bandwidth-control {

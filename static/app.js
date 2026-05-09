@@ -4268,6 +4268,32 @@ function adjustFrequency(deltaHz) {
     autoTune();
 }
 
+// Round current frequency to the nearest 1 kHz
+function roundToNearestKHz() {
+    const freqInput = document.getElementById('frequency');
+    const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    const rounded = Math.round(currentFreq / 1000) * 1000;
+
+    const MIN_FREQ = 10000;
+    const MAX_FREQ = 30000000;
+    const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, rounded));
+
+    setFrequencyInputValue(clampedFreq);
+    updateBandButtons(clampedFreq);
+    updateBandSelector();
+    log(`Frequency snapped to nearest kHz → ${formatFrequency(clampedFreq)}`);
+    updateURL();
+
+    if (window.radioAPI) {
+        window.radioAPI.notifyFrequencyChange(clampedFreq);
+    }
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyChange(clampedFreq);
+    }
+
+    autoTune();
+}
+
 // Load settings from URL parameters
 function loadSettingsFromURL() {
     const params = new URLSearchParams(window.location.search);
@@ -9102,6 +9128,7 @@ window.setFrequency = setFrequency;
 window.setFrequencyInputValue = setFrequencyInputValue;
 window.setBand = setBand;
 window.adjustFrequency = adjustFrequency;
+window.roundToNearestKHz = roundToNearestKHz;
 window.setMode = setMode;
 window.updateBandwidthDisplay = updateBandwidthDisplay;
 window.updateBandwidth = updateBandwidth;

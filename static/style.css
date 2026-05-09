@@ -1271,21 +1271,25 @@ body {
     align-items: center;
 }
 
-.bandwidth-centre-dot {
-    width: 10px;
-    height: 10px;
-    min-width: 10px;
-    border-radius: 50%;
-    background-color: #3498db;
+.bandwidth-pill-toggle {
     flex-shrink: 0;
     align-self: center;
+    background-color: #3498db;
+    color: #fff;
     border: none;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 0.75em;
+    font-weight: bold;
+    line-height: 1.4;
     cursor: pointer;
-    padding: 0;
     transition: background-color 0.2s;
+    white-space: nowrap;
+    min-width: 20px;
+    text-align: center;
 }
 
-.bandwidth-centre-dot.active {
+.bandwidth-pill-toggle.active {
     background-color: #e74c3c;
 }
 

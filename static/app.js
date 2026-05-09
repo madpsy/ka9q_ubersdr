@@ -1520,14 +1520,16 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
         const savedBwSliderMode = localStorage.getItem('bandwidthSliderMode');
         if (savedBwSliderMode === 'combined') {
-            const dot          = document.getElementById('bandwidth-dot-toggle');
+            const pill         = document.getElementById('bandwidth-dot-toggle');
             const combinedGroup = document.getElementById('bandwidth-combined-group');
             const lowGroup     = document.getElementById('bandwidth-low-group');
             const highGroup    = document.getElementById('bandwidth-high-group');
-            if (dot && combinedGroup && lowGroup && highGroup) {
-                dot.classList.add('active');
-                lowGroup.style.display     = 'none';
-                highGroup.style.display    = 'none';
+            if (pill && combinedGroup && lowGroup && highGroup) {
+                pill.classList.add('active');
+                pill.textContent = '1';
+                pill.title = 'Click to switch back to two individual sliders';
+                lowGroup.style.display      = 'none';
+                highGroup.style.display     = 'none';
                 combinedGroup.style.display = '';
                 syncCombinedSliderToMode();
             }
@@ -4867,23 +4869,29 @@ function syncCombinedSliderToMode() {
  * The dot button turns red when combined mode is active.
  */
 function toggleCombinedBandwidthSlider() {
-    const dot          = document.getElementById('bandwidth-dot-toggle');
+    const pill         = document.getElementById('bandwidth-dot-toggle');
     const combinedGroup = document.getElementById('bandwidth-combined-group');
     const lowGroup     = document.getElementById('bandwidth-low-group');
     const highGroup    = document.getElementById('bandwidth-high-group');
-    if (!dot || !combinedGroup || !lowGroup || !highGroup) return;
+    if (!pill || !combinedGroup || !lowGroup || !highGroup) return;
 
-    const isActive = dot.classList.toggle('active');
+    const isActive = pill.classList.toggle('active');
 
     if (isActive) {
-        lowGroup.style.display     = 'none';
-        highGroup.style.display    = 'none';
+        // Combined mode: hide individual sliders, show single slider
+        lowGroup.style.display      = 'none';
+        highGroup.style.display     = 'none';
         combinedGroup.style.display = '';
+        pill.textContent = '1';
+        pill.title = 'Click to switch back to two individual sliders';
         syncCombinedSliderToMode();
     } else {
-        lowGroup.style.display     = '';
-        highGroup.style.display    = '';
+        // Individual mode: show both sliders, hide combined
+        lowGroup.style.display      = '';
+        highGroup.style.display     = '';
         combinedGroup.style.display = 'none';
+        pill.textContent = '2';
+        pill.title = 'Click to switch to a single combined bandwidth slider';
     }
 
     // Persist the user's choice

@@ -1207,6 +1207,9 @@ body {
     font-weight: bold;
     transition: all 0.2s;
     min-width: 45px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .tuning-buttons button:hover {
@@ -1247,16 +1250,12 @@ body {
 .tuning-btn-snap {
     min-width: 20px !important;
     padding: 8px 5px !important;
-    background: #2c3e50 !important;
-    border-color: #4a6278 !important;
-    color: #ffffff !important;
-    font-size: 0.7em !important;
-    opacity: 0.65;
+    font-size: 0.85em !important;
+    opacity: 0.7;
 }
 
 .tuning-btn-snap:hover {
-    opacity: 1 !important;
-    background: #34495e !important;
+    opacity: 1;
 }
 
 .bandwidth-control {

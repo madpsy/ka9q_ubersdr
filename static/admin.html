@@ -1185,8 +1185,9 @@
                     </div>
                     <!-- WSPR Rank cards — shown when WSPRNet is enabled with at least one WSPR band -->
                     <div id="wsprRankCards" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
-                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
                             <strong style="color: #333;">🏆 WSPR Rank:</strong>
+                            <button id="wspr-rank-refresh-card-btn" onclick="(async()=>{const b=this;b.disabled=true;b.textContent='⏳';try{await authenticatedFetch('/admin/wspr-rank?refresh=1');}catch(_){}b.disabled=false;b.textContent='🔄 Refresh';updateWSPRRankCards();})()" style="display: none; padding: 4px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 12px; cursor: pointer; background: #e8eaf6; color: #1a237e;" title="Refresh WSPR rank data">🔄 Refresh</button>
                             <button id="wspr-rank-btn" onclick="openWSPRRankModal()" style="display: none; margin-left: auto; padding: 5px 12px; background: #1a237e; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#283593'" onmouseout="this.style.background='#1a237e'">🏆 Open Leaderboard</button>
                         </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="wsprRankCardsInner">
@@ -1195,8 +1196,9 @@
                     </div>
                     <!-- PSK Rank cards — shown when PSKReporter is enabled -->
                     <div id="pskRankCards" style="display: none; margin-bottom: 20px; padding: 15px; background: #f1f8e9; border-radius: 5px; border: 1px solid #aed581;">
-                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                            <strong style="color: #33691e;">📡 PSK Reporter Rank:</strong>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                            <strong style="color: #33691e;">🏆 PSK Reporter Rank:</strong>
+                            <button id="psk-rank-refresh-card-btn" onclick="(async()=>{const b=this;b.disabled=true;b.textContent='⏳';try{await authenticatedFetch('/admin/psk-rank?refresh=1');}catch(_){}b.disabled=false;b.textContent='🔄 Refresh';updatePSKRankCards();})()" style="display: none; padding: 4px 10px; border: 1px solid #81c784; border-radius: 4px; font-size: 12px; cursor: pointer; background: #e8f5e9; color: #1b5e20;" title="Refresh PSK rank data">🔄 Refresh</button>
                             <button id="psk-rank-btn" onclick="openPSKRankModal()" style="display: none; margin-left: auto; padding: 5px 12px; background: #1b5e20; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#2e7d32'" onmouseout="this.style.background='#1b5e20'">🏆 Open Leaderboard</button>
                         </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="pskRankCardsInner">
@@ -7682,24 +7684,28 @@
                 phonePredBtn.style.display = wsprEnabled ? '' : 'none';
             }
             // Show/hide WSPR Rank button only when WSPRNet is enabled AND at least one WSPR band is enabled
-            const wsprRankBtn = document.getElementById('wspr-rank-btn');
-            const wsprRankCards = document.getElementById('wsprRankCards');
+            const wsprRankBtn            = document.getElementById('wspr-rank-btn');
+            const wsprRankRefreshCardBtn = document.getElementById('wspr-rank-refresh-card-btn');
+            const wsprRankCards          = document.getElementById('wsprRankCards');
             {
                 const bands = currentDecoderConfig.bands || [];
                 const hasEnabledWspr = currentDecoderConfig.wsprnet_enabled === true &&
                     bands.some(b => b.mode === 'WSPR' && b.enabled !== false);
-                if (wsprRankBtn)   wsprRankBtn.style.display   = hasEnabledWspr ? '' : 'none';
-                if (wsprRankCards) wsprRankCards.style.display = hasEnabledWspr ? '' : 'none';
+                if (wsprRankBtn)            wsprRankBtn.style.display            = hasEnabledWspr ? '' : 'none';
+                if (wsprRankRefreshCardBtn) wsprRankRefreshCardBtn.style.display = hasEnabledWspr ? '' : 'none';
+                if (wsprRankCards)          wsprRankCards.style.display          = hasEnabledWspr ? '' : 'none';
                 if (hasEnabledWspr) updateWSPRRankCards();
             }
             // Show/hide PSK Rank button when PSKReporter uploading is enabled
-            const pskRankBtn   = document.getElementById('psk-rank-btn');
-            const pskRankCards = document.getElementById('pskRankCards');
+            const pskRankBtn            = document.getElementById('psk-rank-btn');
+            const pskRankRefreshCardBtn = document.getElementById('psk-rank-refresh-card-btn');
+            const pskRankCards          = document.getElementById('pskRankCards');
             {
                 const hasPsk = currentDecoderConfig.pskreporter_enabled === true &&
                     (currentDecoderConfig.bands || []).some(b => b.enabled !== false);
-                if (pskRankBtn)   pskRankBtn.style.display   = hasPsk ? '' : 'none';
-                if (pskRankCards) pskRankCards.style.display = hasPsk ? '' : 'none';
+                if (pskRankBtn)            pskRankBtn.style.display            = hasPsk ? '' : 'none';
+                if (pskRankRefreshCardBtn) pskRankRefreshCardBtn.style.display = hasPsk ? '' : 'none';
+                if (pskRankCards)          pskRankCards.style.display          = hasPsk ? '' : 'none';
                 if (hasPsk) updatePSKRankCards();
             }
         }

@@ -103,8 +103,9 @@ type PSKBandRank struct {
 // Key = band name (including "All" for the cross-band total).
 // Only bands where the callsign appears are included.
 type PSKCallsignRank struct {
-	Reports   map[string]PSKBandRank `json:"reports,omitempty"`
-	Countries map[string]PSKBandRank `json:"countries,omitempty"`
+	LastUpdated time.Time              `json:"last_updated,omitempty"` // When the PSKReporter data was last fetched
+	Reports     map[string]PSKBandRank `json:"reports,omitempty"`
+	Countries   map[string]PSKBandRank `json:"countries,omitempty"`
 }
 
 // computeCallsignRank scans src and returns a map of band → PSKBandRank for

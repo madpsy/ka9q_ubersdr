@@ -211,8 +211,9 @@ func (ir *InstanceReporter) getPSKCallsignRank() *PSKCallsignRank {
 	}
 
 	return &PSKCallsignRank{
-		Reports:   reports,
-		Countries: countries,
+		LastUpdated: cached.FetchedAt,
+		Reports:     reports,
+		Countries:   countries,
 	}
 }
 

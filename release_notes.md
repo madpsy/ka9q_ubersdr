@@ -5,8 +5,8 @@
 ### New Features
 - Added **Session Log Retention** to clean up old session logs. Default 30 days, set in Admin -> Server
 - Added **ASN/ISP Banning** to provide ability to block problematic ISPs (e.g. VPN providers / hosting companies etc)
-- Added **Time limit per 24 hours** to restrict number of seconds an IP has access per rolling 24 hour window
-- Added **WSPR Rank** in Decoders tab in Admin when at least one WSPR decoder + Reporting is enabled
+- Added **Time limit per 24 hours** to restrict number of seconds an IP has access for per rolling 24 hour window
+- Added **WSPR & PSK Reporter Stats** in Decoders tab in Admin when at least one decoder + Reporting is enabled
 
 ### Bug Fixes
 - Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints

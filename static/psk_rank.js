@@ -320,7 +320,10 @@
             return _sortDir === 'asc' ? va - vb : vb - va;
         });
 
-        // Apply search filter
+        // Assign original rank after sorting (1-based), before filtering
+        rows.forEach((r, i) => { r.rank = i + 1; });
+
+        // Apply search filter — preserves original rank numbers
         const visible = _searchFilter
             ? rows.filter(r => r.callsign.toUpperCase().includes(_searchFilter))
             : rows;
@@ -349,7 +352,7 @@
             bandDayMax[b] = max;
         });
 
-        const dataRows = visible.map((row, idx) => {
+        const dataRows = visible.map((row) => {
             const isOwn = _ownCallsign && row.callsign.toUpperCase() === _ownCallsign;
             const rowBg = isOwn ? 'background:#fff8e1;outline:2px solid #f9a825;outline-offset:-2px;' : '';
             const csExtra = isOwn ? ' ⭐' : '';
@@ -370,7 +373,7 @@
             }).join('');
 
             return `<tr style="${rowBg}">
-                <td style="${rankStyle}">${idx + 1}</td>
+                <td style="${rankStyle}">${row.rank}</td>
                 <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">${_esc(row.callsign)}${csExtra}</td>
                 <td style="padding:5px 8px;text-align:right;font-weight:600;color:#1b5e20;">${row.totalDay.toLocaleString()}</td>
                 <td style="padding:5px 8px;text-align:right;color:#555;">${row.totalWeek.toLocaleString()}</td>

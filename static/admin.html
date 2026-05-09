@@ -1180,21 +1180,25 @@
                             <a href="decoder_spots_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🔍 Spot Analysis</a>
                             <a href="pskreporter_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 PSK Stats</a>
                             <a id="wspr-phone-prediction-btn" href="wspr_phone_prediction.html" target="_blank" style="display: none; padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📻 SSB Predictions</a>
-                            <button id="wspr-rank-btn" onclick="openWSPRRankModal()" style="display: none; padding: 6px 12px; background: #1a237e; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#283593'" onmouseout="this.style.background='#1a237e'">🏆 WSPR Rank</button>
-                            <button id="psk-rank-btn" onclick="openPSKRankModal()" style="display: none; padding: 6px 12px; background: #1b5e20; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#2e7d32'" onmouseout="this.style.background='#1b5e20'">📡 PSK Rank</button>
                             <a href="decoder_feed.html" target="_blank" onclick="return openFeedPopout('decoder_feed.html')" style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#218838'" onmouseout="this.style.background='#28a745'">⚡ Real-time Feed</a>
                         </div>
                     </div>
                     <!-- WSPR Rank cards — shown when WSPRNet is enabled with at least one WSPR band -->
                     <div id="wsprRankCards" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
-                        <strong style="color: #333; margin-bottom: 10px; display: block;">🏆 WSPR Rank:</strong>
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <strong style="color: #333;">🏆 WSPR Rank:</strong>
+                            <button id="wspr-rank-btn" onclick="openWSPRRankModal()" style="display: none; margin-left: auto; padding: 5px 12px; background: #1a237e; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#283593'" onmouseout="this.style.background='#1a237e'">🏆 Open Leaderboard</button>
+                        </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="wsprRankCardsInner">
                             <!-- populated by updateWSPRRankCards() -->
                         </div>
                     </div>
                     <!-- PSK Rank cards — shown when PSKReporter is enabled -->
                     <div id="pskRankCards" style="display: none; margin-bottom: 20px; padding: 15px; background: #f1f8e9; border-radius: 5px; border: 1px solid #aed581;">
-                        <strong style="color: #33691e; margin-bottom: 10px; display: block;">📡 PSK Reporter Rank:</strong>
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <strong style="color: #33691e;">📡 PSK Reporter Rank:</strong>
+                            <button id="psk-rank-btn" onclick="openPSKRankModal()" style="display: none; margin-left: auto; padding: 5px 12px; background: #1b5e20; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#2e7d32'" onmouseout="this.style.background='#1b5e20'">🏆 Open Leaderboard</button>
+                        </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="pskRankCardsInner">
                             <!-- populated by updatePSKRankCards() -->
                         </div>

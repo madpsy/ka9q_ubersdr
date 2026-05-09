@@ -4,7 +4,7 @@
  *
  * Exposes public functions: openPSKRankModal(), closePSKRankModal(),
  * switchPSKRankTable(), switchPSKRankBand(), refreshPSKRank(),
- * pskRankSearchChanged()
+ * pskRankSearchChanged(), clearPSKRankSelection()
  *
  * Fetches GET /admin/psk-rank?table=<t>&band=<b> and renders a
  * sortable, filterable leaderboard table inside a modal.
@@ -16,6 +16,11 @@
  * A band selector lets the user pick a single band or "All Bands".
  * Own-callsign rows are highlighted in gold.
  * The search box filters rows client-side (no re-fetch).
+ *
+ * Row-click selection: clicking a row toggles it into a "selected" set.
+ * When any rows are selected the table is filtered to show only those rows.
+ * Clicking a selected row deselects it.  The Clear button (and
+ * clearPSKRankSelection()) resets the selection entirely.
  */
 
 'use strict';
@@ -23,14 +28,15 @@
 (() => {
 
     // ── State ────────────────────────────────────────────────────────────────
-    let _currentTable  = 'reports';   // 'reports' | 'countries'
-    let _currentBand   = 'all';       // band name or 'all'
-    let _lastData      = null;        // last full /admin/psk-rank response
-    let _sortCol       = 'totalDay';
-    let _sortDir       = 'desc';
-    let _refreshTimer  = null;
-    let _ownCallsign   = '';
-    let _searchFilter  = '';
+    let _currentTable      = 'reports';   // 'reports' | 'countries'
+    let _currentBand       = 'all';       // band name or 'all'
+    let _lastData          = null;        // last full /admin/psk-rank response
+    let _sortCol           = 'totalDay';
+    let _sortDir           = 'desc';
+    let _refreshTimer      = null;
+    let _ownCallsign       = '';
+    let _searchFilter      = '';
+    let _selectedCallsigns = new Set();   // row-click selection
 
     // ── Band order: lowest frequency (longest wavelength) → highest frequency.
     // Exact band key strings as returned by PSKReporter's reportResult/countryResult.
@@ -147,6 +153,40 @@
         const el = document.getElementById('pskRankSearch');
         _searchFilter = el ? el.value.trim().toUpperCase() : '';
         if (_lastData) _renderTable(_lastData);
+    }
+
+    // ── Row-click selection ──────────────────────────────────────────────────
+    function _toggleCallsignSelection(callsign) {
+        if (_selectedCallsigns.has(callsign)) {
+            _selectedCallsigns.delete(callsign);
+        } else {
+            _selectedCallsigns.add(callsign);
+        }
+        _updateSelectionBadge();
+        if (_lastData) _renderTable(_lastData);
+    }
+
+    function clearPSKRankSelection() {
+        _selectedCallsigns.clear();
+        _updateSelectionBadge();
+        // Also clear the text search
+        const searchEl = document.getElementById('pskRankSearch');
+        if (searchEl) searchEl.value = '';
+        _searchFilter = '';
+        if (_lastData) _renderTable(_lastData);
+    }
+
+    function _updateSelectionBadge() {
+        const badge = document.getElementById('pskRankSelectionBadge');
+        if (!badge) return;
+        if (_selectedCallsigns.size === 0) {
+            badge.style.display = 'none';
+            badge.textContent = '';
+        } else {
+            const list = [..._selectedCallsigns].join(', ');
+            badge.textContent = '🔵 Comparing: ' + list;
+            badge.style.display = 'inline-block';
+        }
     }
 
     // ── Data fetch ───────────────────────────────────────────────────────────
@@ -323,8 +363,16 @@
         // Assign original rank after sorting (1-based), before filtering
         rows.forEach((r, i) => { r.rank = i + 1; });
 
-        // Apply search filter — preserves original rank numbers
-        const visible = _searchFilter
+        // Float selected rows to the top; the full table always remains visible
+        // so the user can keep clicking rows to add them to the comparison.
+        if (_selectedCallsigns.size > 0) {
+            const selected   = rows.filter(r =>  _selectedCallsigns.has(r.callsign));
+            const unselected = rows.filter(r => !_selectedCallsigns.has(r.callsign));
+            rows = [...selected, ...unselected];
+        }
+
+        // Apply text search filter (operates on the full reordered list)
+        let visible = _searchFilter
             ? rows.filter(r => r.callsign.toUpperCase().includes(_searchFilter))
             : rows;
 
@@ -335,7 +383,8 @@
         const tableLabel = _currentTable === 'countries' ? 'countries reported' : 'reception reports';
         _setStatus(
             'Fetched ' + fetchedAt + ' (' + (data.fetched_ms || 0) + ' ms) · ' +
-            rows.length + ' reporters · sorted by 24h ' + tableLabel
+            rows.length + ' reporters · sorted by 24h ' + tableLabel +
+            (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : '')
         );
 
         if (rows.length === 0) {
@@ -344,7 +393,7 @@
             return;
         }
 
-        // Per-band max (for green highlight)
+        // Per-band max (for green highlight) — computed over ALL rows, not just visible
         const bandDayMax = {};
         bandsToShow.forEach(b => {
             let max = 0;
@@ -353,8 +402,16 @@
         });
 
         const dataRows = visible.map((row) => {
-            const isOwn = _ownCallsign && row.callsign.toUpperCase() === _ownCallsign;
-            const rowBg = isOwn ? 'background:#fff8e1;outline:2px solid #f9a825;outline-offset:-2px;' : '';
+            const isOwn      = _ownCallsign && row.callsign.toUpperCase() === _ownCallsign;
+            const isSelected = _selectedCallsigns.has(row.callsign);
+            let rowBg;
+            if (isSelected) {
+                rowBg = 'background:#e3f2fd;outline:2px solid #1976d2;outline-offset:-2px;cursor:pointer;';
+            } else if (isOwn) {
+                rowBg = 'background:#fff8e1;outline:2px solid #f9a825;outline-offset:-2px;cursor:pointer;';
+            } else {
+                rowBg = 'cursor:pointer;';
+            }
             const csExtra = isOwn ? ' ⭐' : '';
             const rankStyle = isOwn
                 ? 'padding:5px 8px;text-align:right;font-weight:700;color:#e65100;font-size:12px;'
@@ -372,9 +429,11 @@
                 return `<td style="${cellStyle}" title="${_esc(b)} week: ${cell.week.toLocaleString()}">${cell.day.toLocaleString()}</td>`;
             }).join('');
 
-            return `<tr style="${rowBg}">
+            // Encode callsign for use in onclick attribute
+            const csEsc = _esc(row.callsign).replace(/'/g, '&#39;');
+            return `<tr style="${rowBg}" onclick="pskRankRowClicked('${csEsc}')" title="Click to select/deselect for comparison">
                 <td style="${rankStyle}">${row.rank}</td>
-                <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">${_esc(row.callsign)}${csExtra}</td>
+                <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">${_esc(row.callsign)}${csExtra}${isSelected ? ' 🔵' : ''}</td>
                 <td style="padding:5px 8px;text-align:right;font-weight:600;color:#1b5e20;">${row.totalDay.toLocaleString()}</td>
                 <td style="padding:5px 8px;text-align:right;color:#555;">${row.totalWeek.toLocaleString()}</td>
                 ${bandCells}
@@ -469,5 +528,8 @@
     window.switchPSKRankBand     = switchPSKRankBand;
     window.refreshPSKRank        = refreshPSKRank;
     window.pskRankSearchChanged  = pskRankSearchChanged;
+    window.clearPSKRankSelection = clearPSKRankSelection;
+    // Called from inline onclick on table rows
+    window.pskRankRowClicked     = _toggleCallsignSelection;
 
 })();

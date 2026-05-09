@@ -3,7 +3,8 @@
  * WSPR Live Receiver Ranking — admin modal
  *
  * Exposes public functions: openWSPRRankModal(), closeWSPRRankModal(),
- * switchWSPRRankWindow(), refreshWSPRRank(), wsprRankSearchChanged()
+ * switchWSPRRankWindow(), refreshWSPRRank(), wsprRankSearchChanged(),
+ * clearWSPRRankSelection()
  *
  * Fetches GET /admin/wspr-rank?format=table&window=<w> and renders a
  * sortable, filterable leaderboard table inside a modal.  Three window
@@ -14,6 +15,11 @@
  *
  * Own-callsign rows are highlighted in gold.
  * The search box filters rows client-side (no re-fetch).
+ *
+ * Row-click selection: clicking a row toggles it into a "selected" set.
+ * When any rows are selected the table is filtered to show only those rows.
+ * Clicking a selected row deselects it.  The Clear button (and
+ * clearWSPRRankSelection()) resets the selection entirely.
  */
 
 'use strict';
@@ -21,13 +27,14 @@
 (() => {
 
     // ── State ────────────────────────────────────────────────────────────────
-    let _currentWindow = 'yesterday'; // default window
-    let _lastData      = null;        // last WSPRRankTable response
-    let _sortCol       = 'unique';
-    let _sortDir       = 'desc';
-    let _refreshTimer  = null;        // rate-limit cooldown timer
-    let _ownCallsign   = '';          // set when modal opens; used for row highlight
-    let _searchFilter  = '';          // current search box value (uppercased)
+    let _currentWindow     = 'yesterday'; // default window
+    let _lastData          = null;        // last WSPRRankTable response
+    let _sortCol           = 'unique';
+    let _sortDir           = 'desc';
+    let _refreshTimer      = null;        // rate-limit cooldown timer
+    let _ownCallsign       = '';          // set when modal opens; used for row highlight
+    let _searchFilter      = '';          // current search box value (uppercased)
+    let _selectedCallsigns = new Set();   // row-click selection
 
     // ── Constants ────────────────────────────────────────────────────────────
     const WINDOW_LABELS = {
@@ -94,6 +101,40 @@
         const el = document.getElementById('wsprRankSearch');
         _searchFilter = el ? el.value.trim().toUpperCase() : '';
         if (_lastData) _renderTable(_lastData);
+    }
+
+    // ── Row-click selection ──────────────────────────────────────────────────
+    function _toggleCallsignSelection(callsign) {
+        if (_selectedCallsigns.has(callsign)) {
+            _selectedCallsigns.delete(callsign);
+        } else {
+            _selectedCallsigns.add(callsign);
+        }
+        _updateSelectionBadge();
+        if (_lastData) _renderTable(_lastData);
+    }
+
+    function clearWSPRRankSelection() {
+        _selectedCallsigns.clear();
+        _updateSelectionBadge();
+        // Also clear the text search
+        const searchEl = document.getElementById('wsprRankSearch');
+        if (searchEl) searchEl.value = '';
+        _searchFilter = '';
+        if (_lastData) _renderTable(_lastData);
+    }
+
+    function _updateSelectionBadge() {
+        const badge = document.getElementById('wsprRankSelectionBadge');
+        if (!badge) return;
+        if (_selectedCallsigns.size === 0) {
+            badge.style.display = 'none';
+            badge.textContent = '';
+        } else {
+            const list = [..._selectedCallsigns].join(', ');
+            badge.textContent = '🔵 Comparing: ' + list;
+            badge.style.display = 'inline-block';
+        }
     }
 
     // ── Data fetch ───────────────────────────────────────────────────────────
@@ -182,7 +223,8 @@
             'Fetched ' + fetchedAt +
             ' (' + data.fetched_ms + ' ms) · ' +
             'Showing ' + rows.length + ' receivers' +
-            (rowsBefore ? ' of ' + rowsBefore.toLocaleString() + ' total' : '')
+            (rowsBefore ? ' of ' + rowsBefore.toLocaleString() + ' total' : '') +
+            (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : '')
         );
 
         if (rows.length === 0) {
@@ -212,10 +254,19 @@
             return _sortDir === 'asc' ? va - vb : vb - va;
         });
 
-        // Apply search filter (client-side)
+        // Float selected rows to the top; the full table always remains visible
+        // so the user can keep clicking rows to add them to the comparison.
+        let reordered = sorted;
+        if (_selectedCallsigns.size > 0) {
+            const selected   = sorted.filter(r =>  _selectedCallsigns.has(r.reporter));
+            const unselected = sorted.filter(r => !_selectedCallsigns.has(r.reporter));
+            reordered = [...selected, ...unselected];
+        }
+
+        // Apply text search filter (operates on the full reordered list)
         const visible = _searchFilter
-            ? sorted.filter(r => r.reporter.toUpperCase().includes(_searchFilter))
-            : sorted;
+            ? reordered.filter(r => r.reporter.toUpperCase().includes(_searchFilter))
+            : reordered;
 
         // Compute per-band maximum across ALL rows (not just filtered visible ones),
         // so the green highlight always means "best in the full leaderboard".
@@ -243,18 +294,26 @@
 
         const dataRows = visible.map(row => {
             const bu = row.band_uniques || {};
-            const isOwn = _ownCallsign && row.reporter.toUpperCase() === _ownCallsign;
-            const rowBg = isOwn
-                ? 'background:#fff8e1;outline:2px solid #f9a825;outline-offset:-2px;'
-                : '';
+            const isOwn      = _ownCallsign && row.reporter.toUpperCase() === _ownCallsign;
+            const isSelected = _selectedCallsigns.has(row.reporter);
+            let rowBg;
+            if (isSelected) {
+                rowBg = 'background:#e3f2fd;outline:2px solid #1976d2;outline-offset:-2px;cursor:pointer;';
+            } else if (isOwn) {
+                rowBg = 'background:#fff8e1;outline:2px solid #f9a825;outline-offset:-2px;cursor:pointer;';
+            } else {
+                rowBg = 'cursor:pointer;';
+            }
             const rankStyle = isOwn
                 ? 'padding:5px 8px;text-align:right;font-weight:700;color:#e65100;font-size:12px;'
                 : 'padding:5px 8px;text-align:right;color:#888;font-size:12px;';
             const reporterExtra = isOwn ? ' ⭐' : '';
-            return `<tr style="${rowBg}">
+            // Encode reporter callsign for use in onclick attribute
+            const repEsc = _esc(row.reporter).replace(/'/g, '&#39;');
+            return `<tr style="${rowBg}" onclick="wsprRankRowClicked('${repEsc}')" title="Click to select/deselect for comparison">
                 <td style="${rankStyle}">${row.rank}</td>
                 <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">
-                    ${_esc(row.reporter)}${reporterExtra}
+                    ${_esc(row.reporter)}${reporterExtra}${isSelected ? ' 🔵' : ''}
                     <span style="color:#888;font-size:11px;margin-left:4px;">${_esc(row.locator)}</span>
                 </td>
                 <td style="padding:5px 8px;text-align:right;">${(row.raw || 0).toLocaleString()}</td>
@@ -344,10 +403,13 @@
     });
 
     // ── Public API ───────────────────────────────────────────────────────────
-    window.openWSPRRankModal     = openWSPRRankModal;
-    window.closeWSPRRankModal    = closeWSPRRankModal;
-    window.switchWSPRRankWindow  = switchWindow;
-    window.refreshWSPRRank       = refreshWSPRRank;
-    window.wsprRankSearchChanged = wsprRankSearchChanged;
+    window.openWSPRRankModal      = openWSPRRankModal;
+    window.closeWSPRRankModal     = closeWSPRRankModal;
+    window.switchWSPRRankWindow   = switchWindow;
+    window.refreshWSPRRank        = refreshWSPRRank;
+    window.wsprRankSearchChanged  = wsprRankSearchChanged;
+    window.clearWSPRRankSelection = clearWSPRRankSelection;
+    // Called from inline onclick on table rows
+    window.wsprRankRowClicked     = _toggleCallsignSelection;
 
 })();

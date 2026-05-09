@@ -1516,6 +1516,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize bandwidth control (tooltips and keyboard shortcuts)
     initializeBandwidthControl();
 
+    // Restore combined/individual bandwidth slider preference
+    try {
+        const savedBwSliderMode = localStorage.getItem('bandwidthSliderMode');
+        if (savedBwSliderMode === 'combined') {
+            const dot          = document.getElementById('bandwidth-dot-toggle');
+            const combinedGroup = document.getElementById('bandwidth-combined-group');
+            const lowGroup     = document.getElementById('bandwidth-low-group');
+            const highGroup    = document.getElementById('bandwidth-high-group');
+            if (dot && combinedGroup && lowGroup && highGroup) {
+                dot.classList.add('active');
+                lowGroup.style.display     = 'none';
+                highGroup.style.display    = 'none';
+                combinedGroup.style.display = '';
+                syncCombinedSliderToMode();
+            }
+        }
+    } catch (e) { /* localStorage unavailable */ }
+
     // Expose bandwidth control functions globally
     window.adjustBandwidth = adjustBandwidth;
     window.updateBandwidthTooltips = updateBandwidthTooltips;
@@ -4594,6 +4612,12 @@ function setMode(mode, preserveBandwidth = false) {
     // Update bandwidth tooltips when mode changes
     updateBandwidthTooltips();
 
+    // Re-sync combined slider if it is currently active
+    const _combinedDot = document.getElementById('bandwidth-dot-toggle');
+    if (_combinedDot && _combinedDot.classList.contains('active')) {
+        syncCombinedSliderToMode();
+    }
+
     // Update snap checkbox state based on new mode
     if (spectrumDisplay && spectrumDisplay.updateSnapCheckboxState) {
         spectrumDisplay.updateSnapCheckboxState();
@@ -4770,6 +4794,166 @@ function updateBandwidth() {
     updateURL();
 
     autoTune();
+}
+
+// ── Combined bandwidth slider ─────────────────────────────────────────────────
+
+/**
+ * Convert a combined slider value (always positive) to [low, high] based on mode.
+ * USB  → low fixed at 0,  high = +v
+ * LSB  → high fixed at 0, low  = -v
+ * All symmetric modes → low = -v, high = +v
+ */
+function combinedValueToLowHigh(v) {
+    switch (currentMode) {
+        case 'usb':             return [0,  v];
+        case 'lsb':             return [-v, 0];
+        case 'cwu': case 'cwl': return [-v, v];
+        case 'am':  case 'sam': return [-v, v];
+        case 'fm':              return [-v, v];
+        case 'nfm':             return [-v, v];
+        default:                return [0,  v];
+    }
+}
+
+/**
+ * Sync the combined slider's range and current value to the active mode.
+ * Called when the combined slider is first shown, and on every mode change
+ * while the combined slider is active.
+ */
+function syncCombinedSliderToMode() {
+    const slider = document.getElementById('bandwidth-combined');
+    const label  = document.getElementById('bandwidth-combined-value');
+    if (!slider || !label) return;
+
+    slider.min  = 50;
+    slider.step = 10;
+
+    switch (currentMode) {
+        case 'usb':
+            slider.max   = 6000;
+            slider.value = Math.max(50, currentBandwidthHigh);
+            break;
+        case 'lsb':
+            slider.max   = 6000;
+            slider.value = Math.max(50, Math.abs(currentBandwidthLow));
+            break;
+        case 'cwu': case 'cwl':
+            slider.max   = 500;
+            slider.value = Math.max(50, Math.abs(currentBandwidthHigh));
+            break;
+        case 'am': case 'sam':
+            slider.max   = 6000;
+            slider.value = Math.max(50, Math.abs(currentBandwidthHigh));
+            break;
+        case 'fm':
+            slider.max   = 8000;
+            slider.value = Math.max(50, Math.abs(currentBandwidthHigh));
+            break;
+        case 'nfm':
+            slider.max   = 5000;
+            slider.value = Math.max(50, Math.abs(currentBandwidthHigh));
+            break;
+        default:
+            slider.max   = 6000;
+            slider.value = Math.max(50, currentBandwidthHigh);
+    }
+
+    label.textContent = slider.value;
+}
+
+/**
+ * Toggle between individual Low/High sliders and the single combined slider.
+ * The dot button turns red when combined mode is active.
+ */
+function toggleCombinedBandwidthSlider() {
+    const dot          = document.getElementById('bandwidth-dot-toggle');
+    const combinedGroup = document.getElementById('bandwidth-combined-group');
+    const lowGroup     = document.getElementById('bandwidth-low-group');
+    const highGroup    = document.getElementById('bandwidth-high-group');
+    if (!dot || !combinedGroup || !lowGroup || !highGroup) return;
+
+    const isActive = dot.classList.toggle('active');
+
+    if (isActive) {
+        lowGroup.style.display     = 'none';
+        highGroup.style.display    = 'none';
+        combinedGroup.style.display = '';
+        syncCombinedSliderToMode();
+    } else {
+        lowGroup.style.display     = '';
+        highGroup.style.display    = '';
+        combinedGroup.style.display = 'none';
+    }
+
+    // Persist the user's choice
+    try {
+        localStorage.setItem('bandwidthSliderMode', isActive ? 'combined' : 'individual');
+    } catch (e) { /* localStorage unavailable */ }
+}
+
+/**
+ * Real-time display update for the combined slider (oninput).
+ * Writes through to the hidden individual sliders so all existing code
+ * that reads them continues to work.
+ */
+function updateCombinedBandwidthDisplay() {
+    const v = parseInt(document.getElementById('bandwidth-combined').value);
+    document.getElementById('bandwidth-combined-value').textContent = v;
+
+    const [newLow, newHigh] = combinedValueToLowHigh(v);
+
+    // Keep hidden individual sliders in sync
+    const lowSlider  = document.getElementById('bandwidth-low');
+    const highSlider = document.getElementById('bandwidth-high');
+    lowSlider.value  = newLow;
+    highSlider.value = newHigh;
+    document.getElementById('bandwidth-low-value').textContent  = newLow;
+    document.getElementById('bandwidth-high-value').textContent = newHigh;
+
+    // Update globals and throttled live-tune (reuse existing logic)
+    const now = Date.now();
+    const timeSinceLastUpdate = now - window.bandwidthSliderState.lastUpdateTime;
+    if (timeSinceLastUpdate >= window.bandwidthSliderState.throttleMs) {
+        window.bandwidthSliderState.lastUpdateTime = now;
+        currentBandwidthLow  = newLow;
+        currentBandwidthHigh = newHigh;
+        window.currentBandwidthLow  = newLow;
+        window.currentBandwidthHigh = newHigh;
+
+        updateCurrentBandwidthDisplay(newLow, newHigh);
+
+        if (window.radioAPI) {
+            window.radioAPI.notifyBandwidthChange(newLow, newHigh);
+        }
+        if (spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
+            const freqInput = document.getElementById('frequency');
+            const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+            spectrumDisplay.updateConfig({
+                tunedFreq: currentFreq,
+                bandwidthLow: newLow,
+                bandwidthHigh: newHigh
+            });
+        }
+        if (bandpassEnabled && window.updateBandpassSliderRanges) {
+            window.updateBandpassSliderRanges();
+        }
+        if (window.updateURL) window.updateURL();
+        if (window.autoTune) window.autoTune();
+    }
+}
+
+/**
+ * Commit combined bandwidth on slider release (onchange).
+ * Delegates to the existing updateBandwidth() which reads the hidden sliders.
+ */
+function updateCombinedBandwidth() {
+    // Ensure hidden sliders are up to date first
+    const v = parseInt(document.getElementById('bandwidth-combined').value);
+    const [newLow, newHigh] = combinedValueToLowHigh(v);
+    document.getElementById('bandwidth-low').value  = newLow;
+    document.getElementById('bandwidth-high').value = newHigh;
+    updateBandwidth();
 }
 
 // Squelch control functions for FM/NFM modes
@@ -8838,6 +9022,11 @@ window.adjustFrequency = adjustFrequency;
 window.setMode = setMode;
 window.updateBandwidthDisplay = updateBandwidthDisplay;
 window.updateBandwidth = updateBandwidth;
+window.toggleCombinedBandwidthSlider = toggleCombinedBandwidthSlider;
+window.syncCombinedSliderToMode = syncCombinedSliderToMode;
+window.updateCombinedBandwidthDisplay = updateCombinedBandwidthDisplay;
+window.updateCombinedBandwidth = updateCombinedBandwidth;
+window.combinedValueToLowHigh = combinedValueToLowHigh;
 
 // Visualization controls
 window.openRecorderModal = openRecorderModal;

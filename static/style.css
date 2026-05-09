@@ -1265,9 +1265,32 @@ body {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
-    gap: 20px;
+    gap: 5px;
     margin-top: 10px;
     width: 100%;
+    align-items: center;
+}
+
+.bandwidth-centre-dot {
+    width: 10px;
+    height: 10px;
+    min-width: 10px;
+    border-radius: 50%;
+    background-color: #3498db;
+    flex-shrink: 0;
+    align-self: center;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background-color 0.2s;
+}
+
+.bandwidth-centre-dot.active {
+    background-color: #e74c3c;
+}
+
+.bandwidth-combined-group {
+    flex: 2;
 }
 
 .bandwidth-controls .control-group {

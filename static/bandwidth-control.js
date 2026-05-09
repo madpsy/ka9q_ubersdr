@@ -187,11 +187,12 @@ export function adjustBandwidth(direction) {
     
     // Update spectrum display bandwidth indicator
     // Skip if chat is syncing to prevent flickering
+    // Note: do NOT pass tunedFreq here — passing it triggers the pan-to-follow
+    // logic in updateConfig() which can cause edge-tune to fire and change the
+    // dial frequency. The mouse-slider path (updateBandwidth in app.js) also
+    // omits tunedFreq for the same reason.
     if (window.spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
-        const freqInput = document.getElementById('frequency');
-        const currentFreq = freqInput ? parseInt(freqInput.value) : 0;
         window.spectrumDisplay.updateConfig({
-            tunedFreq: currentFreq,
             bandwidthLow: newLow,
             bandwidthHigh: newHigh
         });

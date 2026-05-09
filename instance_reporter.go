@@ -29,6 +29,7 @@ type InstanceReporter struct {
 	freqRefMonitor      *FrequencyReferenceMonitor // For getting frequency reference information
 	addonsConfig        *AddonProxiesConfig        // For reporting enabled addon proxy names
 	multiDecoder        *MultiDecoder              // For getting WSPR SSB phone predictions
+	pskRank             *PSKRankFetcher            // For getting PSKReporter rank data
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -85,6 +86,7 @@ type InstanceReport struct {
 	Addons                     []string                 `json:"addons"`                       // Names of enabled addon proxies
 	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
 	SSBGridSquares             []WSPRGridSquareEntry    `json:"ssb_grid_squares,omitempty"`   // WSPR-derived grid-square map overlay data (omitted when unavailable)
+	PSKReporterRank            *PSKCallsignRank         `json:"pskreporter_rank,omitempty"`   // PSKReporter leaderboard rank for this callsign (omitted when unavailable)
 	Test                       bool                     `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport              bool                     `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
 	NotifyInstanceDisconnected bool                     `json:"notify_instance_disconnected"` // Notify when instance disconnects
@@ -161,6 +163,57 @@ func (ir *InstanceReporter) SetMultiDecoder(md *MultiDecoder) {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	ir.multiDecoder = md
+}
+
+// SetPSKRankFetcher sets the PSK rank fetcher for PSKReporter rank data
+// This must be called after the fetcher is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetPSKRankFetcher(f *PSKRankFetcher) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.pskRank = f
+}
+
+// getPSKCallsignRank returns the PSKReporter rank for the configured callsign,
+// or nil if data is not yet available or PSKReporter is not enabled.
+func (ir *InstanceReporter) getPSKCallsignRank() *PSKCallsignRank {
+	// Only include if PSKReporter is enabled in decoder config
+	if !ir.config.Decoder.Enabled || !ir.config.Decoder.PSKReporterEnabled {
+		return nil
+	}
+
+	ir.mu.RLock()
+	fetcher := ir.pskRank
+	ir.mu.RUnlock()
+
+	if fetcher == nil {
+		return nil
+	}
+
+	cached := fetcher.Cached()
+	if cached == nil {
+		return nil
+	}
+
+	// PSKReporter uses ReceiverCallsign (no separate PSKReporter callsign on DecoderConfig)
+	callsign := strings.TrimSpace(ir.config.Decoder.ReceiverCallsign)
+	if callsign == "" {
+		callsign = strings.TrimSpace(ir.config.Admin.Callsign)
+	}
+	if callsign == "" || strings.EqualFold(callsign, "N0CALL") {
+		return nil
+	}
+
+	reports := computeCallsignRank(cached.ReportResult, callsign)
+	countries := computeCallsignRank(cached.CountryResult, callsign)
+
+	if len(reports) == 0 && len(countries) == 0 {
+		return nil
+	}
+
+	return &PSKCallsignRank{
+		Reports:   reports,
+		Countries: countries,
+	}
 }
 
 // getSSBPredictions returns WSPR-derived SSB phone predictions and grid-square
@@ -611,6 +664,7 @@ func (ir *InstanceReporter) sendReport() error {
 		report.SSBPredictions = ssbResult.Predictions
 		report.SSBGridSquares = ssbResult.GridSquares
 	}
+	report.PSKReporterRank = ir.getPSKCallsignRank()
 
 	jsonData, err := json.Marshal(report)
 	if err != nil {
@@ -996,6 +1050,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		report.SSBPredictions = ssbResult.Predictions
 		report.SSBGridSquares = ssbResult.GridSquares
 	}
+	report.PSKReporterRank = ir.getPSKCallsignRank()
 
 	jsonData, err := json.Marshal(report)
 	if err != nil {

@@ -1870,6 +1870,9 @@ func main() {
 	pskRankFetcher := NewPSKRankFetcher()
 	pskRankFetcher.Start()
 	defer pskRankFetcher.Stop()
+	if instanceReporter != nil {
+		instanceReporter.SetPSKRankFetcher(pskRankFetcher)
+	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher)
 
 	// Wire the admin handler into the router now that it exists, then seed the
@@ -1932,7 +1935,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, addonsConfig)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, addonsConfig, pskRankFetcher)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -3276,7 +3279,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig, pskRankFetcher *PSKRankFetcher) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -3453,6 +3456,27 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"addons":               enabledAddons,
 		"server_time":          time.Now().UTC().Format(time.RFC3339),
 		"server_time_sync":     GetNTPSynced(),
+	}
+
+	// Include PSKReporter rank for the configured callsign if available
+	if pskRankFetcher != nil && config.Decoder.Enabled && config.Decoder.PSKReporterEnabled {
+		cached := pskRankFetcher.Cached()
+		if cached != nil {
+			callsign := strings.TrimSpace(config.Decoder.ReceiverCallsign)
+			if callsign == "" {
+				callsign = strings.TrimSpace(config.Admin.Callsign)
+			}
+			if callsign != "" && !strings.EqualFold(callsign, "N0CALL") {
+				reports := computeCallsignRank(cached.ReportResult, callsign)
+				countries := computeCallsignRank(cached.CountryResult, callsign)
+				if len(reports) > 0 || len(countries) > 0 {
+					response["pskreporter_rank"] = PSKCallsignRank{
+						Reports:   reports,
+						Countries: countries,
+					}
+				}
+			}
+		}
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

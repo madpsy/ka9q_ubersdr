@@ -1526,7 +1526,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const highGroup    = document.getElementById('bandwidth-high-group');
             if (pill && combinedGroup && lowGroup && highGroup) {
                 pill.classList.add('active');
-                pill.textContent = '1';
+                pill.textContent = '◄\u2009►';
                 pill.title = 'Click to switch back to two individual sliders';
                 lowGroup.style.display      = 'none';
                 highGroup.style.display     = 'none';
@@ -4920,7 +4920,7 @@ function _activateCombinedBandwidthSlider() {
     lowGroup.style.display      = 'none';
     highGroup.style.display     = 'none';
     combinedGroup.style.display = '';
-    pill.textContent = '1';
+    pill.textContent = '◄\u2009►';
     pill.title = 'Click to switch back to two individual sliders';
     syncCombinedSliderToMode();
 }
@@ -4941,7 +4941,7 @@ function _deactivateCombinedBandwidthSlider() {
     lowGroup.style.display      = '';
     highGroup.style.display     = '';
     combinedGroup.style.display = 'none';
-    pill.textContent = '2';
+    pill.textContent = '►';
     pill.title = 'Click to switch to a single combined bandwidth slider';
 }
 
@@ -4983,7 +4983,7 @@ function toggleCombinedBandwidthSlider() {
         lowGroup.style.display      = 'none';
         highGroup.style.display     = 'none';
         combinedGroup.style.display = '';
-        pill.textContent = '1';
+        pill.textContent = '◄\u2009►';
         pill.title = 'Click to switch back to two individual sliders';
         syncCombinedSliderToMode();
     } else {
@@ -4991,7 +4991,7 @@ function toggleCombinedBandwidthSlider() {
         lowGroup.style.display      = '';
         highGroup.style.display     = '';
         combinedGroup.style.display = 'none';
-        pill.textContent = '2';
+        pill.textContent = '►';
         pill.title = 'Click to switch to a single combined bandwidth slider';
     }
 

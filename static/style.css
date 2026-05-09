@@ -1287,15 +1287,15 @@ body {
     background-color: #3498db;
     color: #fff;
     border: none;
-    border-radius: 10px;
-    padding: 1px 7px;
-    font-size: 0.75em;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.85em;
     font-weight: bold;
     line-height: 1.4;
     cursor: pointer;
     transition: background-color 0.2s;
     white-space: nowrap;
-    min-width: 20px;
+    min-width: 24px;
     text-align: center;
 }
 
@@ -2023,9 +2023,9 @@ input[type="range"]::-moz-range-thumb {
 
     /* Larger touch target for the bandwidth pill toggle on mobile */
     .bandwidth-pill-toggle {
-        padding: 6px 12px;
-        font-size: 0.85em;
-        min-width: 32px;
+        padding: 6px 10px;
+        font-size: 1em;
+        min-width: 36px;
         min-height: 32px;
     }
 

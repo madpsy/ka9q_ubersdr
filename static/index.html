@@ -489,9 +489,9 @@
                     </div>
                     <button class="bandwidth-pill-toggle" id="bandwidth-dot-toggle"
                             aria-label="Toggle combined bandwidth slider"
-                            title="Click to switch between two sliders and one combined slider"
+                            title="Click to switch to a single combined bandwidth slider"
                             onclick="toggleCombinedBandwidthSlider()"
-                            ontouchend="event.preventDefault(); toggleCombinedBandwidthSlider()">2</button>
+                            ontouchend="event.preventDefault(); toggleCombinedBandwidthSlider()">►</button>
                     <div class="control-group bandwidth-combined-group" id="bandwidth-combined-group" style="display:none;">
                         <label for="bandwidth-combined">BW: <span id="bandwidth-combined-value">2700</span> Hz</label>
                         <input type="range" id="bandwidth-combined" min="50" max="6000" value="2700" step="10" oninput="updateCombinedBandwidthDisplay()" onchange="updateCombinedBandwidth()">

@@ -129,7 +129,7 @@ section_cpu_model() {
     sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l 2>/dev/null)
     sockets=$(echo "$sockets" | tr -d '[:space:]')
     [[ "$sockets" =~ ^[0-9]+$ ]] || sockets=0
-    (( sockets == 0 )) && sockets=1
+    if (( sockets == 0 )); then sockets=1; fi
     kv "Sockets" "$sockets"
 
     local cores_per_socket
@@ -408,7 +408,7 @@ section_cache() {
         for _nd in /sys/devices/system/node/node[0-9]*/; do
             [[ -d "$_nd" ]] && (( _numa_fallback++ )) || true
         done
-        (( _numa_fallback < 1 )) && _numa_fallback=1
+        if (( _numa_fallback < 1 )); then _numa_fallback=1; fi
         L3_DOMAIN_COUNT="$_numa_fallback"
     fi
 }
@@ -1014,7 +1014,7 @@ sleep 5
     # elapsed in ticks
     local elapsed_ticks
     elapsed_ticks=$(echo "$uptime2 $uptime1 $sys_hz" | awk '{printf "%d", ($1-$2)*$3}')
-    (( elapsed_ticks < 1 )) && elapsed_ticks=1
+    if (( elapsed_ticks < 1 )); then elapsed_ticks=1; fi
 
     # Second sample + display
     for tid_dir in "${task_dir}"/*/; do
@@ -1060,8 +1060,8 @@ sleep 5
         local cpu_colour="$RESET"
         local cpu_f
         cpu_f=$(echo "$cpu_pct_t" | awk '{printf "%d", $1}')
-        (( cpu_f >= 50 )) && cpu_colour="$YELLOW"
-        (( cpu_f >= 80 )) && cpu_colour="$RED"
+        if (( cpu_f >= 50 )); then cpu_colour="$YELLOW"; fi
+        if (( cpu_f >= 80 )); then cpu_colour="$RED"; fi
 
         printf "  %-8s %-20s ${cpu_colour}%5s%%${RESET} %5s  %-12s  %s\n" \
             "$tid" "$tname" "$cpu_pct_t" "${last_cpu:-?}" "$sched_str" "$state_char"
@@ -1073,7 +1073,7 @@ sleep 5
             IFS=',' read -ra _pin_parts <<< "$RADIOD_PINNED_CPUS"
             for _pp in "${_pin_parts[@]}"; do
                 if [[ "$_pp" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                    (( last_cpu >= BASH_REMATCH[1] && last_cpu <= BASH_REMATCH[2] )) && _in_pinned=true && break
+                    if (( last_cpu >= BASH_REMATCH[1] && last_cpu <= BASH_REMATCH[2] )); then _in_pinned=true; break; fi
                 else
                     [[ "$_pp" == "$last_cpu" ]] && _in_pinned=true && break
                 fi
@@ -1265,7 +1265,7 @@ section_irq_affinity() {
                         _irq_cpus+=("$_a")
                     fi
                 done
-                (( ${#_irq_cpus[@]} >= total_logical_cpus )) && irq_covers_all=true
+                if (( ${#_irq_cpus[@]} >= total_logical_cpus )); then irq_covers_all=true; fi
 
                 # Check for overlap with radiod's pinned CPUs
                 local _pin_cpus=()
@@ -1373,15 +1373,15 @@ sleep 5
 
         # Bar (20 chars wide)
         local bar_len=$(( busy_pct / 5 ))
-        (( bar_len > 20 )) && bar_len=20
+        if (( bar_len > 20 )); then bar_len=20; fi
         local bar
         printf -v bar '%*s' "$bar_len" ''
         bar="${bar// /█}"
         printf -v bar '%-20s' "$bar"
 
         local colour="$GREEN"
-        (( busy_pct >= 50 )) && colour="$YELLOW"
-        (( busy_pct >= 80 )) && colour="$RED"
+        if (( busy_pct >= 50 )); then colour="$YELLOW"; fi
+        if (( busy_pct >= 80 )); then colour="$RED"; fi
 
         # Mark if radiod is pinned to this CPU.
         # Use RADIOD_PINNED_CPUS (real Docker cpuset) when available, so the stars
@@ -1392,7 +1392,7 @@ sleep 5
             IFS=',' read -ra aff_parts <<< "$RADIOD_PINNED_CPUS"
             for ap in "${aff_parts[@]}"; do
                 if [[ "$ap" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                    (( cpu_n >= BASH_REMATCH[1] && cpu_n <= BASH_REMATCH[2] )) && in_aff=true
+                    if (( cpu_n >= BASH_REMATCH[1] && cpu_n <= BASH_REMATCH[2] )); then in_aff=true; fi
                 else
                     [[ "$ap" == "$cpu_n" ]] && in_aff=true
                 fi
@@ -1406,7 +1406,7 @@ sleep 5
                 IFS=',' read -ra aff_parts <<< "$aff"
                 for ap in "${aff_parts[@]}"; do
                     if [[ "$ap" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                        (( cpu_n >= BASH_REMATCH[1] && cpu_n <= BASH_REMATCH[2] )) && in_aff=true
+                        if (( cpu_n >= BASH_REMATCH[1] && cpu_n <= BASH_REMATCH[2] )); then in_aff=true; fi
                     else
                         [[ "$ap" == "$cpu_n" ]] && in_aff=true
                     fi
@@ -1580,7 +1580,7 @@ section_summary() {
     # CPU usage summary (populated by section_threads)
     if $RADIOD_RUNNING && [[ -n "$RADIOD_TOTAL_CPU" ]]; then
         local _pinned="${RADIOD_PINNED_CPU_COUNT:-0}"
-        (( _pinned < 1 )) && _pinned=$(nproc --all 2>/dev/null || echo "1")
+        if (( _pinned < 1 )); then _pinned=$(nproc --all 2>/dev/null || echo "1"); fi
         local _total_log
         _total_log=$(nproc --all 2>/dev/null || echo "1")
         local _per_core _normalised

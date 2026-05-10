@@ -352,7 +352,7 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 
 # Install HPSDR bridge binary
 echo "Installing UberSDR HPSDR bridge..."
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge_amd64 -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then
     sudo mv /tmp/ubersdr-hpsdr-bridge /usr/local/bin/ubersdr-hpsdr-bridge
     sudo chmod +x /usr/local/bin/ubersdr-hpsdr-bridge
     echo "HPSDR bridge binary installed successfully."
@@ -378,7 +378,7 @@ fi
 
 # Install RTL-TCP bridge binary
 echo "Installing UberSDR RTL-TCP bridge..."
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-rtltcp-bridge -o /tmp/ubersdr-rtltcp-bridge 2>/dev/null; then
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-rtltcp-bridge_amd64 -o /tmp/ubersdr-rtltcp-bridge 2>/dev/null; then
     sudo mv /tmp/ubersdr-rtltcp-bridge /usr/local/bin/ubersdr-rtltcp-bridge
     sudo chmod +x /usr/local/bin/ubersdr-rtltcp-bridge
     echo "RTL-TCP bridge binary installed successfully."
@@ -591,7 +591,7 @@ echo "Fetching addons.json..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/addons.json -o "$ACTUAL_HOME/ubersdr/addons.json"
 
 echo "Fetching benchmark binary..."
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/benchmark -o "$ACTUAL_HOME/ubersdr/benchmark" 2>/dev/null; then
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/benchmark_amd64 -o "$ACTUAL_HOME/ubersdr/benchmark" 2>/dev/null; then
     chmod +x "$ACTUAL_HOME/ubersdr/benchmark"
     echo "benchmark binary installed to ~/ubersdr/benchmark."
 else

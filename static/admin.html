@@ -4045,6 +4045,54 @@
                                 input.dispatchEvent(new Event('change'));
                             };
                             field.appendChild(exampleBtn);
+
+                            // Add PSKr Ranking Example button
+                            const pskrExampleBtn = document.createElement('button');
+                            pskrExampleBtn.textContent = 'Load PSKr Ranking Example';
+                            pskrExampleBtn.type = 'button';
+                            pskrExampleBtn.style.marginTop = '8px';
+                            pskrExampleBtn.style.marginLeft = '8px';
+                            pskrExampleBtn.style.padding = '6px 12px';
+                            pskrExampleBtn.style.backgroundColor = '#4CAF50';
+                            pskrExampleBtn.style.color = 'white';
+                            pskrExampleBtn.style.border = 'none';
+                            pskrExampleBtn.style.borderRadius = '4px';
+                            pskrExampleBtn.style.cursor = 'pointer';
+                            pskrExampleBtn.style.fontSize = '13px';
+                            pskrExampleBtn.onclick = () => {
+                                input.value = '<script>\n' +
+'(async () => {\n' +
+'  let desc;\n' +
+'  try {\n' +
+'    const r = await fetch(\'/api/description\');\n' +
+'    if (!r.ok) return;\n' +
+'    desc = await r.json();\n' +
+'  } catch { return; }\n' +
+'\n' +
+'  const rank = desc?.pskreporter_rank;\n' +
+'  if (!rank) return;\n' +
+'\n' +
+'  const repAll = rank.reports?.All;\n' +
+'  const ctyAll = rank.countries?.All;\n' +
+'  if (!repAll && !ctyAll) return;\n' +
+'\n' +
+'  const lines = [];\n' +
+'  if (repAll)  lines.push(\'📡 PSKr Overall rank #\' + repAll.rank);\n' +
+'  if (ctyAll)  lines.push(\'🌍 PSKr Country rank #\' + ctyAll.rank);\n' +
+'\n' +
+'  const badge = document.createElement(\'div\');\n' +
+'  badge.style.cssText = \'position:fixed;top:8px;right:8px;z-index:99999;background:rgba(27,94,32,0.92);color:#fff;font:12px/1.5 monospace;padding:6px 10px;border-radius:6px;pointer-events:none;white-space:pre\';\n' +
+'  badge.textContent = lines.join(\'\\n\');\n' +
+'\n' +
+'  const attach = () => document.body && document.body.appendChild(badge);\n' +
+'  document.readyState === \'loading\'\n' +
+'    ? document.addEventListener(\'DOMContentLoaded\', attach)\n' +
+'    : attach();\n' +
+'})();\n' +
+'</' + 'script>';
+                                input.dispatchEvent(new Event('change'));
+                            };
+                            field.appendChild(pskrExampleBtn);
                         } else if (key === 'custom_ads_txt') {
                             const hint = document.createElement('small');
                             hint.textContent = 'Content for /ads.txt endpoint. Format: domain, publisher_id, relationship, certification_authority_id (one entry per line). Example: google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0';

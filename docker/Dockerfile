@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y \
     libgfortran5 \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
-    && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/js8 -O /usr/bin/js8 \
+    && wget https://github.com/madpsy/ubersdr-js8call/releases/download/latest/js8_amd64 -O /usr/bin/js8 \
     && chmod +x /usr/bin/js8 \
     && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/wsjtx_3.1.0_improved_AL_PLUS_260228_amd64.deb -O /tmp/wsjtx.deb \
     && dpkg-deb -x /tmp/wsjtx.deb /tmp/wsjtx-extract \

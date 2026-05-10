@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+# arm64 jemalloc workaround: fluent-bit has jemalloc issues on arm64
+if [ "$(uname -m)" = "aarch64" ]; then
+    echo "WARNING: fluent-bit has jemalloc issues on arm64 - logging disabled on this architecture"
+    while true; do sleep 3600; done
+fi
+
 CONFIG_FILE="/app/config/config.yaml"
 FLUENT_BIT_CONF="/tmp/fluent-bit.conf"
 FLUENT_BIT_PID=""

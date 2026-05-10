@@ -27,7 +27,11 @@
 #
 # No root required for most information; some IRQ/cpuset details need root.
 
-set -euo pipefail
+set -uo pipefail
+# NOTE: -e (errexit) is intentionally omitted — this is a read-only diagnostic
+# script and many grep/sysfs reads legitimately return non-zero on ARM/embedded
+# systems where x86-specific fields are absent.  pipefail is kept so that
+# explicit pipeline errors in critical paths are still visible.
 
 # ── Colour setup ──────────────────────────────────────────────────────────────
 
@@ -118,22 +122,25 @@ section_cpu_model() {
     header "CPU Model & Topology"
 
     local model
-    model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || echo "unknown")
+    model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
+    model="${model:-unknown}"
     kv "Model" "$model" "${BOLD}"
 
     local vendor
-    vendor=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || echo "unknown")
+    vendor=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
+    vendor="${vendor:-unknown}"
     kv "Vendor" "$vendor"
 
     local sockets
-    sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l 2>/dev/null)
+    sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l || true)
     sockets=$(echo "$sockets" | tr -d '[:space:]')
     [[ "$sockets" =~ ^[0-9]+$ ]] || sockets=0
     if (( sockets == 0 )); then sockets=1; fi
     kv "Sockets" "$sockets"
 
     local cores_per_socket
-    cores_per_socket=$(grep 'cpu cores' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2- | tr -d ' ' || echo "?")
+    cores_per_socket=$(grep 'cpu cores' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2- | tr -d ' ' || true)
+    cores_per_socket="${cores_per_socket:-?}"
     kv "Physical cores/socket" "$cores_per_socket"
 
     local logical_cpus
@@ -150,7 +157,7 @@ section_cpu_model() {
         _seen_phys_cores["$sib"]=1
     done
     local total_phys="${#_seen_phys_cores[@]}"
-    [[ $total_phys -eq 0 ]] && total_phys="$logical_cpus"
+    if [[ $total_phys -eq 0 ]]; then total_phys="$logical_cpus"; fi
     kv "Physical cores (total)" "$total_phys"
 
     local ht_status ht_colour
@@ -236,7 +243,8 @@ section_cpu_model() {
     kv "Hyper-Threading" "$ht_status" "$ht_colour"
 
     local ucode
-    ucode=$(grep -m1 'microcode' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | tr -d ' ' || echo "unknown")
+    ucode=$(grep -m1 'microcode' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | tr -d ' ' || true)
+    ucode="${ucode:-unknown}"
     kv "Microcode revision" "$ucode"
 
     local min_mhz max_mhz
@@ -253,7 +261,8 @@ section_cpu_flags() {
     header "CPU Feature Flags (SDR-relevant)"
 
     local flags
-    flags=$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | cut -d: -f2- || echo "")
+    flags=$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | cut -d: -f2- || true)
+    flags="${flags:-}"
 
     # flag → description
     declare -A flag_desc

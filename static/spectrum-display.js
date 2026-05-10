@@ -1850,9 +1850,9 @@ class SpectrumDisplay {
             let normalized = Math.max(0, Math.min(1, (db - this.actualMinDb) / dbRange));
             let magnitude = normalized * 255;
 
-            if (magnitude < this.config.contrast) {
+            if (!this.config.manualRangeEnabled && magnitude < this.config.contrast) {
                 magnitude = 0;
-            } else {
+            } else if (!this.config.manualRangeEnabled) {
                 magnitude = ((magnitude - this.config.contrast) / (255 - this.config.contrast)) * 255;
             }
 
@@ -1951,9 +1951,9 @@ class SpectrumDisplay {
             let normalized = Math.max(0, Math.min(1, (db - this.actualMinDb) / dbRange));
             let magnitude = normalized * 255;
 
-            if (magnitude < this.config.contrast) {
+            if (!this.config.manualRangeEnabled && magnitude < this.config.contrast) {
                 magnitude = 0;
-            } else {
+            } else if (!this.config.manualRangeEnabled) {
                 magnitude = ((magnitude - this.config.contrast) / (255 - this.config.contrast)) * 255;
             }
 

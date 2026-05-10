@@ -1071,6 +1071,18 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Hot-update the two server fields that are safe to apply without a restart.
+	// Both handleIndexPage and handleAdsTxt read directly from the live config pointer
+	// on every request, so mutating here takes effect immediately for the next request.
+	if server, ok := newConfig["server"].(map[string]interface{}); ok {
+		if v, ok := server["custom_head_html"].(string); ok {
+			ah.config.Server.CustomHeadHTML = v
+		}
+		if v, ok := server["custom_ads_txt"].(string); ok {
+			ah.config.Server.CustomAdsTxt = v
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 
 	if restart {

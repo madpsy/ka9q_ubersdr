@@ -1,3 +1,19 @@
+## Build Dependencies
+
+On Debian/Ubuntu-based systems, install the required development libraries before building:
+
+```bash
+sudo apt install libwebsockets-dev libbsd-dev libzstd-dev uuid-dev
+```
+
+Then build with:
+
+```bash
+make
+```
+
+---
+
 ka9q_hpsdr translates ka9q-radio channel data in to protocol2 hpsdr
 data and sent via ethernet UDP packets. Protocol2 is defined in this
 document: https://github.com/TAPR/OpenHPSDR-Firmware/blob/master/Protocol%202/Documentation/openHPSDR%20Ethernet%20Protocol%20v4.3.pdf

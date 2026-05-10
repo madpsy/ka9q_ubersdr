@@ -30,6 +30,9 @@ FROM ubuntu:24.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Build argument for target architecture (set automatically by docker buildx)
+ARG TARGETARCH
+
 # Install runtime dependencies including yq for YAML merging, WSJT-X, libopus, and js8 dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -46,19 +49,24 @@ RUN apt-get update && apt-get install -y \
     libfftw3-single3 \
     libfftw3-bin \
     libgfortran5 \
-    && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
+    && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${TARGETARCH} -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
-    && wget https://github.com/madpsy/ubersdr-js8call/releases/download/latest/js8_amd64 -O /usr/bin/js8 \
+    && wget https://github.com/madpsy/ubersdr-js8call/releases/download/latest/js8_${TARGETARCH} -O /usr/bin/js8 \
     && chmod +x /usr/bin/js8 \
-    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/wsjtx_3.1.0_improved_AL_PLUS_260228_amd64.deb -O /tmp/wsjtx.deb \
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+         wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/wsjtx-3.1.0_improved_AL_PLUS_260418_Rpi_trixie_arm64.deb -O /tmp/wsjtx.deb; \
+       else \
+         wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/wsjtx_3.1.0_improved_AL_PLUS_260228_amd64.deb -O /tmp/wsjtx.deb; \
+       fi \
     && dpkg-deb -x /tmp/wsjtx.deb /tmp/wsjtx-extract \
     && cp /tmp/wsjtx-extract/usr/bin/jt9 /usr/bin/jt9 \
     && cp /tmp/wsjtx-extract/usr/bin/wsprd /usr/bin/wsprd \
     && chmod +x /usr/bin/jt9 /usr/bin/wsprd \
     && rm -rf /tmp/wsjtx.deb /tmp/wsjtx-extract \
-    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_amd64 -O /usr/local/bin/jt9_decode \
+    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_${TARGETARCH} -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
     && mkdir -p /opt/freedv \
+    # NOTE: freedv.zip only contains an amd64 binary; arm64 support pending upstream release
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/freedv.zip -O /tmp/freedv.zip \
     && unzip /tmp/freedv.zip -d /opt/freedv \
     && chmod +x /opt/freedv/freedv-ka9q \

@@ -126,7 +126,9 @@ section_cpu_model() {
     kv "Vendor" "$vendor"
 
     local sockets
-    sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l || echo "1")
+    sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l 2>/dev/null)
+    sockets=$(echo "$sockets" | tr -d '[:space:]')
+    [[ "$sockets" =~ ^[0-9]+$ ]] || sockets=0
     (( sockets == 0 )) && sockets=1
     kv "Sockets" "$sockets"
 

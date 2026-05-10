@@ -24,11 +24,28 @@ export ACTUAL_USER
 export ACTUAL_HOME
 export ACTUAL_HOSTNAME
 
+# Detect system architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)
+        ARCH_SUFFIX="amd64"
+        ;;
+    aarch64|arm64)
+        ARCH_SUFFIX="arm64"
+        ;;
+    *)
+        echo "Error: Unsupported architecture: $ARCH"
+        echo "Supported architectures: x86_64 (amd64), aarch64/arm64"
+        exit 1
+        ;;
+esac
+
 # Print detected user context
 echo "=== Detected User Context ==="
 echo "User: $ACTUAL_USER"
 echo "Home: $ACTUAL_HOME"
 echo "Hostname: $ACTUAL_HOSTNAME"
+echo "Architecture: $ARCH ($ARCH_SUFFIX)"
 echo
 
 # Parse command line arguments
@@ -150,6 +167,9 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     if (( IGNORE_AVX2 )); then
         echo "AVX2 CPU extension check skipped (--ignore-avx2)"
         avx2_found=1  # Pretend it was found
+    elif [ "$ARCH_SUFFIX" != "amd64" ]; then
+        echo "AVX2 CPU extension check skipped (not applicable on $ARCH)"
+        avx2_found=1  # Not required on non-amd64 architectures
     else
         if grep -q avx2 /proc/cpuinfo; then
             echo "AVX2 CPU extension found"
@@ -352,7 +372,7 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 
 # Install HPSDR bridge binary
 echo "Installing UberSDR HPSDR bridge..."
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge_amd64 -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge_${ARCH_SUFFIX} -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then
     sudo mv /tmp/ubersdr-hpsdr-bridge /usr/local/bin/ubersdr-hpsdr-bridge
     sudo chmod +x /usr/local/bin/ubersdr-hpsdr-bridge
     echo "HPSDR bridge binary installed successfully."
@@ -378,7 +398,7 @@ fi
 
 # Install RTL-TCP bridge binary
 echo "Installing UberSDR RTL-TCP bridge..."
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-rtltcp-bridge_amd64 -o /tmp/ubersdr-rtltcp-bridge 2>/dev/null; then
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-rtltcp-bridge_${ARCH_SUFFIX} -o /tmp/ubersdr-rtltcp-bridge 2>/dev/null; then
     sudo mv /tmp/ubersdr-rtltcp-bridge /usr/local/bin/ubersdr-rtltcp-bridge
     sudo chmod +x /usr/local/bin/ubersdr-rtltcp-bridge
     echo "RTL-TCP bridge binary installed successfully."
@@ -599,7 +619,7 @@ echo "Fetching addons.json..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/addons.json -o "$ACTUAL_HOME/ubersdr/addons.json"
 
 echo "Fetching benchmark binary..."
-if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/benchmark_amd64 -o "$ACTUAL_HOME/ubersdr/benchmark" 2>/dev/null; then
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/benchmark_${ARCH_SUFFIX} -o "$ACTUAL_HOME/ubersdr/benchmark" 2>/dev/null; then
     chmod +x "$ACTUAL_HOME/ubersdr/benchmark"
     echo "benchmark binary installed to ~/ubersdr/benchmark."
 else

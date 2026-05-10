@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y \
     && cp /tmp/wsjtx-extract/usr/bin/wsprd /usr/bin/wsprd \
     && chmod +x /usr/bin/jt9 /usr/bin/wsprd \
     && rm -rf /tmp/wsjtx.deb /tmp/wsjtx-extract \
-    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode -O /usr/local/bin/jt9_decode \
+    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_amd64 -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
     && mkdir -p /opt/freedv \
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/freedv.zip -O /tmp/freedv.zip \

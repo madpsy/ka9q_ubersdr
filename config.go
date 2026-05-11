@@ -796,6 +796,11 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.DXCluster.KeepAliveDelay == 0 {
 		config.DXCluster.KeepAliveDelay = 300 // 5 minutes default
 	}
+	// Uppercase DX cluster callsign so prompt detection works regardless of config case
+	// (clusters always echo the callsign in uppercase in the final prompt line)
+	if config.DXCluster.Callsign != "" {
+		config.DXCluster.Callsign = strings.ToUpper(config.DXCluster.Callsign)
+	}
 
 	// Set FreeDV Reporter defaults if not specified
 	if config.FreeDVReporter.URI == "" {

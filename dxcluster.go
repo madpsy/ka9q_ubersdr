@@ -306,8 +306,11 @@ func (c *DXClusterClient) login() error {
 		}
 
 		// Check if this is the prompt line (contains our callsign followed by " de ")
-		// and ends with ">"
-		if strings.Contains(line, c.config.Callsign+" de ") && strings.HasSuffix(line, ">") {
+		// and ends with ">". Use case-insensitive comparison since some clusters may
+		// echo the callsign in a different case than what was configured.
+		lineLowerForPrompt := strings.ToLower(line)
+		callsignLower := strings.ToLower(c.config.Callsign)
+		if strings.Contains(lineLowerForPrompt, callsignLower+" de ") && strings.HasSuffix(line, ">") {
 			// This is the final prompt, we're done
 			break
 		}

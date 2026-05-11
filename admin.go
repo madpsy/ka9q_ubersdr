@@ -4323,25 +4323,69 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 	}
 }
 
-// getCPUTemperature reads the CPU temperature from the Linux hwmon subsystem.
-// It scans by driver name (k10temp for AMD, coretemp for Intel) so it is
-// immune to hwmon index changes across reboots.
-// Returns (tempCelsius, driverName, error).
+// getCPUTemperature reads the CPU temperature using a two-stage strategy:
+//
+// Stage 1 — Linux hwmon subsystem (/sys/class/hwmon):
+//   - k10temp    : AMD Ryzen / EPYC
+//   - coretemp   : Intel
+//   - cpu_thermal: Raspberry Pi 5 (BCM2712 SoC)
+//
+// Stage 2 — Linux thermal subsystem (/sys/class/thermal/thermal_zone*):
+//
+//	Used when hwmon is absent or does not expose a CPU sensor.
+//	Scans zone types and picks the best CPU-representative zone:
+//	- Raspberry Pi 5  : "cpu-thermal"
+//	- RK3588 (Rock 5B, Orange Pi 5, Radxa, etc.): prefers "bigcore0-thermal"
+//	  (the high-performance A76 cluster); falls back to "soc-thermal" or
+//	  "littlecore-thermal" if that is absent.
+//	- Generic ARM     : any zone whose type contains "cpu"
+//
+// Returns (tempCelsius, sourceName, error).
 func getCPUTemperature() (float64, string, error) {
-	entries, err := os.ReadDir("/sys/class/hwmon")
-	if err != nil {
-		return 0, "", fmt.Errorf("cannot read hwmon: %w", err)
-	}
-	for _, e := range entries {
-		base := "/sys/class/hwmon/" + e.Name()
-		nameBytes, err := os.ReadFile(base + "/name")
-		if err != nil {
-			continue
+	// ── Stage 1: hwmon subsystem ──────────────────────────────────────────────
+	if entries, err := os.ReadDir("/sys/class/hwmon"); err == nil {
+		for _, e := range entries {
+			base := "/sys/class/hwmon/" + e.Name()
+			nameBytes, err := os.ReadFile(base + "/name")
+			if err != nil {
+				continue
+			}
+			driver := strings.TrimSpace(string(nameBytes))
+			switch driver {
+			case "k10temp", "coretemp", // AMD, Intel
+				"cpu_thermal": // Raspberry Pi 5 (BCM2712)
+				data, err := os.ReadFile(base + "/temp1_input")
+				if err != nil {
+					continue
+				}
+				milliC, err := strconv.Atoi(strings.TrimSpace(string(data)))
+				if err != nil {
+					continue
+				}
+				return float64(milliC) / 1000.0, driver, nil
+			}
 		}
-		driver := strings.TrimSpace(string(nameBytes))
-		switch driver {
-		case "k10temp", "coretemp":
-			data, err := os.ReadFile(base + "/temp1_input")
+	}
+
+	// ── Stage 2: thermal subsystem (/sys/class/thermal/thermal_zone*) ────────
+	// Build a map of zone type → temperature for all readable zones.
+	type thermalZone struct {
+		zoneType string
+		milliC   int
+	}
+	var zones []thermalZone
+	if entries, err := os.ReadDir("/sys/class/thermal"); err == nil {
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), "thermal_zone") {
+				continue
+			}
+			base := "/sys/class/thermal/" + e.Name()
+			typeBytes, err := os.ReadFile(base + "/type")
+			if err != nil {
+				continue
+			}
+			zoneType := strings.TrimSpace(string(typeBytes))
+			data, err := os.ReadFile(base + "/temp")
 			if err != nil {
 				continue
 			}
@@ -4349,10 +4393,36 @@ func getCPUTemperature() (float64, string, error) {
 			if err != nil {
 				continue
 			}
-			return float64(milliC) / 1000.0, driver, nil
+			zones = append(zones, thermalZone{zoneType, milliC})
 		}
 	}
-	return 0, "", fmt.Errorf("no CPU thermal sensor found (k10temp/coretemp)")
+
+	// Priority-ordered list of zone type substrings to try.
+	// RK3588 big cores (A76) are the most representative CPU temp;
+	// "cpu-thermal" covers Pi 5 and generic ARM; "soc-thermal" is the
+	// RK3588 fallback when bigcore zones are absent.
+	priorities := []string{
+		"bigcore0-thermal",   // RK3588 A76 cluster 0 (preferred)
+		"bigcore1-thermal",   // RK3588 A76 cluster 1
+		"cpu-thermal",        // Raspberry Pi 5, generic ARM
+		"littlecore-thermal", // RK3588 A55 cluster (fallback)
+		"soc-thermal",        // RK3588 SoC-wide sensor (last resort)
+	}
+	for _, want := range priorities {
+		for _, z := range zones {
+			if strings.EqualFold(z.zoneType, want) {
+				return float64(z.milliC) / 1000.0, "thermal:" + z.zoneType, nil
+			}
+		}
+	}
+	// Generic fallback: any zone whose type contains "cpu"
+	for _, z := range zones {
+		if strings.Contains(strings.ToLower(z.zoneType), "cpu") {
+			return float64(z.milliC) / 1000.0, "thermal:" + z.zoneType, nil
+		}
+	}
+
+	return 0, "", fmt.Errorf("no CPU thermal sensor found (k10temp/coretemp/cpu_thermal/thermal_zone)")
 }
 
 // HandleSystemStats returns system statistics by executing system commands

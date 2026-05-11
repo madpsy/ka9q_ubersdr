@@ -47,19 +47,27 @@ export function adjustBandwidth(direction) {
     
     switch(currentMode) {
         case 'usb':
-            // USB: only change high (upper edge); low is fixed at +50 Hz
+            // USB: only change high (upper edge)
             newHigh = currentBandwidthHigh + change;
-            // Clamp to valid range (100 to 6000 Hz, keeping min bandwidth of 50 Hz above fixed low)
-            newHigh = Math.max(100, Math.min(6000, newHigh));
-            newLow = 50; // enforce fixed lower edge
+            // In combined slider mode, enforce 50 Hz fixed low edge and 100 Hz min high
+            if (document.getElementById('bandwidth-dot-toggle')?.classList.contains('active')) {
+                newHigh = Math.max(100, Math.min(6000, newHigh));
+                newLow = 50;
+            } else {
+                newHigh = Math.max(0, Math.min(6000, newHigh));
+            }
             break;
             
         case 'lsb':
-            // LSB: only change low (lower edge); high is fixed at -50 Hz
+            // LSB: only change low (lower edge)
             newLow = currentBandwidthLow - change;
-            // Clamp to valid range (-6000 to -100 Hz, keeping min bandwidth of 50 Hz below fixed high)
-            newLow = Math.max(-6000, Math.min(-100, newLow));
-            newHigh = -50; // enforce fixed upper edge
+            // In combined slider mode, enforce -50 Hz fixed high edge and -100 Hz max low
+            if (document.getElementById('bandwidth-dot-toggle')?.classList.contains('active')) {
+                newLow = Math.max(-6000, Math.min(-100, newLow));
+                newHigh = -50;
+            } else {
+                newLow = Math.max(-6000, Math.min(0, newLow));
+            }
             break;
             
         case 'cwu':

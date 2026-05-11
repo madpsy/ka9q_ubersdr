@@ -396,14 +396,14 @@ function loadVFOState(vfo) {
     
     switch(state.mode) {
         case 'usb':
-            minLow = 50;
+            minLow = 0;
             maxLow = 500;
             maxHigh = 6000;
             break;
         case 'lsb':
             minLow = -6000;
-            maxLow = -50;
-            maxHigh = -50;
+            maxLow = 0;
+            maxHigh = 0;
             break;
         case 'am':
         case 'sam':
@@ -4480,7 +4480,7 @@ function setMode(mode, preserveBandwidth = false) {
 
     switch(mode) {
     	case 'usb':
-    		minLow = 50;
+    		minLow = 0;
     		maxLow = 500;
     		defaultLow = 50;
     		maxHigh = 6000;
@@ -4488,9 +4488,9 @@ function setMode(mode, preserveBandwidth = false) {
     		break;
     	case 'lsb':
     		minLow = -6000;
-    		maxLow = -50;
+    		maxLow = 0;
     		defaultLow = -2700;
-    		maxHigh = -50;
+    		maxHigh = 0;
     		defaultHigh = -50;  // -50 Hz is correct for LSB upper edge
     		break;
         case 'am':
@@ -4569,6 +4569,13 @@ function setMode(mode, preserveBandwidth = false) {
         }
     } else {
         // Preserve existing bandwidth values, just update the display
+        // In combined slider mode, enforce the 50 Hz fixed edge for USB/LSB
+        const _combinedActive = document.getElementById('bandwidth-dot-toggle')?.classList.contains('active');
+        if (_combinedActive) {
+            if (mode === 'usb' && currentBandwidthLow < 50) { currentBandwidthLow = 50; window.currentBandwidthLow = 50; }
+            if (mode === 'lsb' && currentBandwidthHigh > -50) { currentBandwidthHigh = -50; window.currentBandwidthHigh = -50; }
+        }
+
         bandwidthLowSlider.value = currentBandwidthLow;
         document.getElementById('bandwidth-low-value').textContent = currentBandwidthLow;
 
@@ -4689,11 +4696,8 @@ if (!window.bandwidthSliderState) {
 
 // Update bandwidth display (called on input for real-time display with throttled tune)
 function updateBandwidthDisplay() {
-    let bandwidthLow = parseInt(document.getElementById('bandwidth-low').value);
-    let bandwidthHigh = parseInt(document.getElementById('bandwidth-high').value);
-    // Enforce fixed edges for USB/LSB (50 Hz guard zone)
-    if (currentMode === 'usb' && bandwidthLow < 50) { bandwidthLow = 50; document.getElementById('bandwidth-low').value = 50; }
-    if (currentMode === 'lsb' && bandwidthHigh > -50) { bandwidthHigh = -50; document.getElementById('bandwidth-high').value = -50; }
+    const bandwidthLow = parseInt(document.getElementById('bandwidth-low').value);
+    const bandwidthHigh = parseInt(document.getElementById('bandwidth-high').value);
     document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
     document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
 
@@ -4766,11 +4770,8 @@ function updateBandwidthDisplay() {
 
 // Update bandwidth value and trigger tune (called on change when slider is released)
 function updateBandwidth() {
-    let bandwidthLow = parseInt(document.getElementById('bandwidth-low').value);
-    let bandwidthHigh = parseInt(document.getElementById('bandwidth-high').value);
-    // Enforce fixed edges for USB/LSB (50 Hz guard zone)
-    if (currentMode === 'usb' && bandwidthLow < 50) { bandwidthLow = 50; document.getElementById('bandwidth-low').value = 50; }
-    if (currentMode === 'lsb' && bandwidthHigh > -50) { bandwidthHigh = -50; document.getElementById('bandwidth-high').value = -50; }
+    const bandwidthLow = parseInt(document.getElementById('bandwidth-low').value);
+    const bandwidthHigh = parseInt(document.getElementById('bandwidth-high').value);
     currentBandwidthLow = bandwidthLow;
     currentBandwidthHigh = bandwidthHigh;
     // Update global references

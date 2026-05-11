@@ -66,8 +66,7 @@ RUN apt-get update && apt-get install -y \
     && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_${TARGETARCH} -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
     && mkdir -p /opt/freedv \
-    # NOTE: freedv.zip only contains an amd64 binary; arm64 support pending upstream release
-    && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/freedv.zip -O /tmp/freedv.zip \
+    && wget https://github.com/madpsy/ubersdr_freedv/releases/download/latest/freedv_${TARGETARCH}.zip -O /tmp/freedv.zip \
     && unzip /tmp/freedv.zip -d /opt/freedv \
     && chmod +x /opt/freedv/freedv-ka9q \
     && rm /tmp/freedv.zip \

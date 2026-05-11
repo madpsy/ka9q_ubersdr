@@ -1,62 +1,63 @@
-# Multi-stage build: Use debug image to get bash and utilities, then copy to standard image
+# Multi-stage build: compile Fluent Bit from source for both amd64 and arm64.
+# Building from source avoids the jemalloc page-size issue present in the
+# official fluent/fluent-bit images on arm64 kernels with non-4KB page sizes
+# (e.g. Apple Silicon / Raspberry Pi OS 64-bit which use 16KB pages).
 
-# Stage 1: debug image provides binaries and libs
-FROM fluent/fluent-bit:latest-debug AS shell-provider
+ARG FLB_VERSION=3.2.2
 
-# Stage 2: collect arch-specific libs into /usr/lib and /usr/lib64 paths using the debug shell
-# Note: /lib and /lib64 are symlinks to /usr/lib and /usr/lib64 in the runtime image
-FROM fluent/fluent-bit:latest-debug AS lib-collector
+# Stage 1: build Fluent Bit from source
+FROM debian:bookworm AS builder
 
-ARG TARGETARCH
+ARG FLB_VERSION
 
-RUN mkdir -p /out/usr/lib64 && \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-        LIBDIR="/lib/aarch64-linux-gnu"; \
-        mkdir -p "/out/usr/lib/aarch64-linux-gnu"; \
-        for lib in libtinfo.so.6 libc.so.6 libpcre2-8.so.0 libacl.so.1 libselinux.so.1 \
-                   libproc2.so.0 libsystemd.so.0 libcap.so.2 libm.so.6; do \
-            cp "${LIBDIR}/${lib}" "/out/usr/lib/aarch64-linux-gnu/${lib}" 2>/dev/null || true; \
-        done; \
-        cp /lib/ld-linux-aarch64.so.1 /out/usr/lib/ld-linux-aarch64.so.1 2>/dev/null || true; \
-    else \
-        LIBDIR="/lib/x86_64-linux-gnu"; \
-        mkdir -p "/out/usr/lib/x86_64-linux-gnu"; \
-        for lib in libtinfo.so.6 libc.so.6 libpcre2-8.so.0 libacl.so.1 libselinux.so.1 \
-                   libproc2.so.0 libsystemd.so.0 libcap.so.2 libm.so.6; do \
-            cp "${LIBDIR}/${lib}" "/out/usr/lib/x86_64-linux-gnu/${lib}" 2>/dev/null || true; \
-        done; \
-        cp /lib64/ld-linux-x86-64.so.2 /out/usr/lib64/ld-linux-x86-64.so.2 2>/dev/null || true; \
-    fi
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    ca-certificates \
+    libssl-dev \
+    libsasl2-dev \
+    zlib1g-dev \
+    libyaml-dev \
+    flex \
+    bison \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
-# Stage 3: minimal runtime image
-FROM fluent/fluent-bit:latest
+RUN git clone --depth=1 --branch v${FLB_VERSION} \
+    https://github.com/fluent/fluent-bit.git /src/fluent-bit
 
-ARG TARGETARCH
+WORKDIR /src/fluent-bit/build
 
-# Copy bash, sh, and all utilities needed by the entrypoint script from debug image
-USER root
-COPY --from=shell-provider /usr/bin/bash /usr/bin/bash
-COPY --from=shell-provider /usr/bin/sh /usr/bin/sh
-COPY --from=shell-provider /usr/bin/ln /usr/bin/ln
-COPY --from=shell-provider /usr/bin/chmod /usr/bin/chmod
-COPY --from=shell-provider /usr/bin/seq /usr/bin/seq
-COPY --from=shell-provider /usr/bin/grep /usr/bin/grep
-COPY --from=shell-provider /usr/bin/sed /usr/bin/sed
-COPY --from=shell-provider /usr/bin/cat /usr/bin/cat
-COPY --from=shell-provider /usr/bin/sleep /usr/bin/sleep
-COPY --from=shell-provider /usr/bin/kill /usr/bin/kill
-COPY --from=shell-provider /usr/bin/cut /usr/bin/cut
-COPY --from=shell-provider /usr/bin/head /usr/bin/head
-COPY --from=shell-provider /usr/bin/pgrep /usr/bin/pgrep
+RUN cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DFLB_JEMALLOC=OFF \
+    -DFLB_TLS=ON \
+    -DFLB_SHARED_LIB=OFF \
+    -DFLB_EXAMPLES=OFF \
+    -DFLB_IN_SYSTEMD=OFF \
+    -DFLB_IN_NODE_EXPORTER_METRICS=OFF \
+    -DFLB_OUT_PGSQL=OFF \
+    && make -j$(nproc) \
+    && make install
 
-# Copy arch-specific shared libraries from the lib-collector stage
-# Staged under /out/usr/lib/ and /out/usr/lib64/ to match the runtime image's symlink layout
-# (/lib -> /usr/lib, /lib64 -> /usr/lib64)
-COPY --from=lib-collector /out/usr/ /usr/
+# Stage 2: minimal runtime image
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    libsasl2-2 \
+    zlib1g \
+    libyaml-0-2 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/fluent-bit /usr/local/bin/fluent-bit
+COPY --from=builder /usr/local/etc/fluent-bit/ /usr/local/etc/fluent-bit/
 
 # Copy entrypoint script
 COPY fluent-bit-entrypoint.sh /usr/local/bin/fluent-bit-entrypoint.sh
-RUN ["/usr/bin/chmod", "+x", "/usr/local/bin/fluent-bit-entrypoint.sh"]
+RUN chmod +x /usr/local/bin/fluent-bit-entrypoint.sh
 
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/fluent-bit-entrypoint.sh"]

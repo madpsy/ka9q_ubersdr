@@ -14,6 +14,7 @@
 - Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints
 - SAM mode missing from bookmarks
 - Local and server bookmarks now store and load bandwidth high/low values
+- USB/LSB/CWU/CWL mode utton ordering fixed
 
 ### Other Announcements
 - All required containers and binaries are now distributed for ARM64, meaning the standard installation method works on a Raspberry Pi 5

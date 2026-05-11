@@ -15,6 +15,10 @@
 - SAM mode missing from bookmarks
 - Local and server bookmarks now store and load bandwidth high/low values
 
+### Other Announcements
+- All required containers and binaries are now distributed for ARM64, meaning the standard installation method works on a Raspberry Pi 5
+- Note: Pi 5 requires FFT Wisdom generated and fft-threads set to 2 in the Radiod Config (default is 1). Wisdom generation can take over 6 hours but is essential.
+
 ## Version 0.1.48 - Latest Stable
 
 ### New Features

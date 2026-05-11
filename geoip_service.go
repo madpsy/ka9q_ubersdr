@@ -158,7 +158,7 @@ func (g *GeoIPService) GetCountryCode(ipStr string) (string, error) {
 }
 
 // Lookup performs a full geolocation lookup for an IP address.
-// If reverseDNS is true, a reverse DNS lookup is attempted with a 500ms timeout.
+// If reverseDNS is true, a reverse DNS lookup is attempted with a 2 second timeout.
 func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, error) {
 	if !g.enabled {
 		return nil, fmt.Errorf("GeoIP service not enabled")
@@ -181,7 +181,7 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 
 	// Perform reverse DNS lookup if requested
 	if reverseDNS {
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		resolver := &net.Resolver{}
 		if names, err := resolver.LookupAddr(ctx, ipStr); err == nil && len(names) > 0 {

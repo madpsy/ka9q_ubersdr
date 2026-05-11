@@ -7472,9 +7472,12 @@
                 // Build info display
                 let infoHtml = '';
                 infoHtml += `<strong>IP:</strong> ${data.ip || ip}`;
+                if (data.hostname) {
+                    infoHtml += `&nbsp;&nbsp;<strong>Hostname:</strong> <span style="font-family:monospace;">${data.hostname}</span>`;
+                }
                 if (data.country) {
                     const flag = data.country_code ? String.fromCodePoint(...[...data.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
-                    infoHtml += `&nbsp;&nbsp;<strong>Country:</strong> ${flag} ${data.country}${data.country_code ? ' (' + data.country_code + ')' : ''}`;
+                    infoHtml += `<br><strong>Country:</strong> ${flag} ${data.country}${data.country_code ? ' (' + data.country_code + ')' : ''}`;
                 }
                 if (data.isp || data.asn) {
                     infoHtml += `<br><strong>ISP / ASN:</strong> `;

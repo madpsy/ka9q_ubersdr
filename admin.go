@@ -6691,8 +6691,7 @@ func (ah *AdminHandler) HandleGeoIPLookup(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		IP         string `json:"ip"`
-		ReverseDNS bool   `json:"reverse_dns"`
+		IP string `json:"ip"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -6705,8 +6704,8 @@ func (ah *AdminHandler) HandleGeoIPLookup(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Perform lookup
-	result, err := ah.geoIPService.Lookup(req.IP, req.ReverseDNS)
+	// Perform lookup — always attempt reverse DNS with a 2-second timeout
+	result, err := ah.geoIPService.Lookup(req.IP, true)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Lookup failed: %v", err), http.StatusBadRequest)
 		return

@@ -18,7 +18,7 @@
 
 ### Other Announcements
 - All required containers and binaries are now distributed for ARM64, meaning the standard installation method works on a Raspberry Pi 5
-- Note: Pi 5 requires FFTW Wisdom generated and fft-threads set to 2 in the Radiod Config (default is 1). Wisdom generation can take over 6 hours but is essential. Tested to support all band WSPR decode at 5000 cycles and 10 simultaneous web users. Don't expect miricles from it though.
+- Note: Pi 5 requires FFTW Wisdom generated and fft-threads set to 2 in the Radiod Config (default is 1). Wisdom generation can take over 6 hours but is essential. Tested to support all band WSPR decode at 5000 cycles and 10 simultaneous web users. Don't expect miracles from it though.
 - The RK3588 ARM CPU will be tested next - I suspect this will be able to support a number of digital decoders, addons and hopefully 20 simultaneous web users.
 
 ## Version 0.1.48 - Latest Stable

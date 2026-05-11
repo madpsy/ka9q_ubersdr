@@ -18505,6 +18505,7 @@ const tooltipLine2 = timeStr;
                     <span style="color: ${authorizedColor}; font-size: 14px; font-weight: bold;">Authorised: ${authorizedText}</span><br>
                     <span style="color: ${tunnelUpColor}; font-size: 14px; font-weight: bold;">Tunnel: ${tunnelUpText}</span><br>
                     <span style="color: #667eea; font-size: 14px; font-weight: bold;">Connected Users: ${data.user_count || 0}</span><br>
+                    ${data.max_users !== undefined && data.max_users !== null ? `<span style="color: #667eea; font-size: 14px;">Maximum Allowed Users: ${data.max_users}</span><br>` : ''}
                     <span style="color: #666; font-size: 14px;">Callsign: ${data.callsign || 'N/A'}</span><br>
                     <span style="color: #666; font-size: 14px;">Tunnel Server: ${currentConfig.instance_reporting.tunnel_server_host || 'Not configured'}</span>
                 `;

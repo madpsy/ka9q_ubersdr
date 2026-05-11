@@ -5292,7 +5292,7 @@ function toggleNBQuick() {
     // Update button appearance
     const button = document.getElementById('nb-quick-toggle');
     if (button) {
-        button.style.backgroundColor = noiseBlankerEnabled ? '#28a745' : '#17a2b8';
+        button.style.backgroundColor = noiseBlankerEnabled ? '#28a745' : '#6c757d';
     }
     
     // Show notification
@@ -7903,7 +7903,7 @@ function _updateNRUI() {
     const nrEngineControls = document.getElementById('nr-engine-controls');
 
     if (noiseReductionMode === 'off') {
-        if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#fd7e14'; }
+        if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#6c757d'; }
         if (statusBadge) { statusBadge.textContent = 'DISABLED'; statusBadge.className = 'filter-status-badge filter-disabled'; }
         if (checkbox) checkbox.checked = false;
         if (modeLabel) { modeLabel.textContent = '(NR)'; modeLabel.style.color = ''; }

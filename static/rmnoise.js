@@ -1009,7 +1009,7 @@ function rmNoise_updateButton() {
     } else if (rmNoise.ready && rmNoise.enabled) {
         colour = '#28a745';  // green
     } else if (!rmNoise.enabled) {
-        colour = '#6f42c1';  // purple (idle)
+        colour = '#6c757d';  // grey (idle/disabled)
     } else {
         colour = '#dc3545';  // red (failed)
     }

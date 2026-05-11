@@ -3165,6 +3165,7 @@
                 // Always reset to unchecked so browser-restored state doesn't silently
                 // include unknown channels without the user explicitly opting in.
                 document.getElementById('showUnknownChannels').checked = false;
+                loadRadiodValues();
                 loadRadiodChannels();
                 startRadiodChannelsAutoRefresh();
             } else if (tab === 'bookmarks') {
@@ -19857,6 +19858,8 @@ const tooltipLine2 = timeStr;
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!radiodChannelsRefreshInterval) {
+                    // Re-fetch radiod values on manual refresh so suggestion stays current
+                    await loadRadiodValues();
                     showAlert(`Loaded ${data.total_channels} radiod channel(s)`, 'success');
                 }
             } catch (error) {
@@ -19886,6 +19889,20 @@ const tooltipLine2 = timeStr;
             if (radiodChannelsRefreshInterval) {
                 clearInterval(radiodChannelsRefreshInterval);
                 radiodChannelsRefreshInterval = null;
+            }
+        }
+
+        // Cached radiod .conf values (fetched once on tab load, re-fetched on manual Refresh)
+        let radiodValuesData = null;
+
+        async function loadRadiodValues() {
+            try {
+                const response = await authenticatedFetch('/admin/radiod-values');
+                if (!response || !response.ok) return;
+                radiodValuesData = await response.json();
+            } catch (e) {
+                // Silently ignore — suggestion block simply won't render
+                console.warn('Could not load radiod values:', e);
             }
         }
 
@@ -20041,6 +20058,36 @@ const tooltipLine2 = timeStr;
                 ${data.cpu_stats && data.cpu_stats.available ? (() => {
                     const n = data.cpu_stats.num_logical_cpus || 1;
                     const norm = v => (v / n).toFixed(1);
+
+                    // FFT thread suggestion
+                    let fftSuggestionHtml = '';
+                    const fftThreadsRaw = radiodValuesData && radiodValuesData.global && radiodValuesData.global['fft-threads'];
+                    const fftThreads = fftThreadsRaw ? parseInt(fftThreadsRaw, 10) : NaN;
+                    if (!isNaN(fftThreads) && fftThreads >= 1) {
+                        const fftPct = data.cpu_stats.fft_pct;
+                        const perThread = fftPct / fftThreads;
+                        let suggColor, suggIcon, suggText;
+                        if (perThread >= 85) {
+                            suggColor = '#dc3545';
+                            suggIcon = '⚠️';
+                            suggText = `FFT threads are near saturation (${perThread.toFixed(1)}% per thread). Consider increasing <code>fft-threads</code> from ${fftThreads} to ${fftThreads + 1} in the <code>[global]</code> section of the radiod config.`;
+                        } else if (perThread >= 70) {
+                            suggColor = '#fd7e14';
+                            suggIcon = '🔶';
+                            suggText = `FFT threads are heavily loaded (${perThread.toFixed(1)}% per thread). Consider increasing <code>fft-threads</code> from ${fftThreads} to ${fftThreads + 1} if you plan to add more channels.`;
+                        } else if (perThread <= 30 && fftThreads > 1) {
+                            const suggested = Math.max(1, Math.floor(fftPct / 50) || 1);
+                            suggColor = '#667eea';
+                            suggIcon = '💡';
+                            suggText = `FFT threads are lightly loaded (${perThread.toFixed(1)}% per thread). You could reduce <code>fft-threads</code> from ${fftThreads} to ${suggested} in the <code>[global]</code> section to free up CPU for other tasks.`;
+                        } else {
+                            suggColor = '#28a745';
+                            suggIcon = '✅';
+                            suggText = `FFT thread count looks appropriate for current load (${perThread.toFixed(1)}% per thread with ${fftThreads} thread${fftThreads !== 1 ? 's' : ''}).`;
+                        }
+                        fftSuggestionHtml = `<div style="margin-top: 6px; font-size: 12px; color: ${suggColor};">${suggIcon} <strong>fft-threads suggestion:</strong> ${suggText}</div>`;
+                    }
+
                     return `
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
                     <strong>CPU:</strong>
@@ -20050,6 +20097,7 @@ const tooltipLine2 = timeStr;
                     <span style="margin-left: 8px;">• Channels: <strong style="color: #999;">${data.cpu_stats.channels_pct.toFixed(1)}% (${norm(data.cpu_stats.channels_pct)}%)</strong></span>
                     <span style="margin-left: 8px;">• Other: <strong style="color: #999;">${data.cpu_stats.other_pct.toFixed(1)}% (${norm(data.cpu_stats.other_pct)}%)</strong></span>
                     <div style="margin-top: 6px; font-size: 11px; color: #aaa;">Values show per-core % and (normalised % of all ${n} logical CPUs)</div>
+                    ${fftSuggestionHtml}
                 </div>`;
                 })() : data.cpu_stats && !data.cpu_stats.available ? `
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">

@@ -4200,6 +4200,74 @@ func (ah *AdminHandler) handleGetRadiodConfig(w http.ResponseWriter, r *http.Req
 	}
 }
 
+// parseRadiodConf parses an INI-style ka9q-radio .conf file into a map of
+// section → (key → value).  Rules:
+//   - Lines beginning with '#' (after trimming) are skipped entirely.
+//   - Section headers are [name] lines; the name becomes the map key.
+//   - Key-value lines are "key = value"; inline comments (# …) are stripped
+//     from the value and the result is trimmed.
+//   - Lines that appear before the first section header are ignored.
+func parseRadiodConf(data []byte) map[string]map[string]string {
+	result := make(map[string]map[string]string)
+	var currentSection string
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+
+		// Skip blank lines and full-line comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Section header: [name]
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = line[1 : len(line)-1]
+			if _, exists := result[currentSection]; !exists {
+				result[currentSection] = make(map[string]string)
+			}
+			continue
+		}
+
+		// Key = value (only inside a section)
+		if currentSection == "" {
+			continue
+		}
+		if idx := strings.Index(line, "="); idx > 0 {
+			key := strings.TrimSpace(line[:idx])
+			val := strings.TrimSpace(line[idx+1:])
+			// Strip inline comment
+			if ci := strings.Index(val, "#"); ci >= 0 {
+				val = strings.TrimSpace(val[:ci])
+			}
+			result[currentSection][key] = val
+		}
+	}
+	return result
+}
+
+// HandleRadiodValues parses the radiod .conf file and returns each [section]
+// as a JSON object whose fields are the active (non-commented) key=value pairs.
+// Inline comments are stripped; fully-commented lines are excluded.
+func (ah *AdminHandler) HandleRadiodValues(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	radiodConfigPath := "/etc/ka9q-radio/radiod@ubersdr.conf"
+	data, err := os.ReadFile(radiodConfigPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read radiod config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	parsed := parseRadiodConf(data)
+	if err := json.NewEncoder(w).Encode(parsed); err != nil {
+		log.Printf("Error encoding radiod values: %v", err)
+	}
+}
+
 // handleUpdateRadiodConfig updates the radiod configuration file
 func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.Request) {
 	// Check for restart flag

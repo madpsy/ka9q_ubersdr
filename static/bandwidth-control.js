@@ -47,19 +47,19 @@ export function adjustBandwidth(direction) {
     
     switch(currentMode) {
         case 'usb':
-            // USB: only change high (upper edge)
-            // Increasing high = wider bandwidth
+            // USB: only change high (upper edge); low is fixed at +50 Hz
             newHigh = currentBandwidthHigh + change;
-            // Clamp to valid range (0 to 6000 Hz)
-            newHigh = Math.max(0, Math.min(6000, newHigh));
+            // Clamp to valid range (100 to 6000 Hz, keeping min bandwidth of 50 Hz above fixed low)
+            newHigh = Math.max(100, Math.min(6000, newHigh));
+            newLow = 50; // enforce fixed lower edge
             break;
             
         case 'lsb':
-            // LSB: only change low (lower edge)
-            // Decreasing low (more negative) = wider bandwidth
+            // LSB: only change low (lower edge); high is fixed at -50 Hz
             newLow = currentBandwidthLow - change;
-            // Clamp to valid range (-6000 to 0 Hz)
-            newLow = Math.max(-6000, Math.min(0, newLow));
+            // Clamp to valid range (-6000 to -100 Hz, keeping min bandwidth of 50 Hz below fixed high)
+            newLow = Math.max(-6000, Math.min(-100, newLow));
+            newHigh = -50; // enforce fixed upper edge
             break;
             
         case 'cwu':

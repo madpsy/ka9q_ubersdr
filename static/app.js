@@ -4838,14 +4838,14 @@ function updateBandwidth() {
 
 /**
  * Convert a combined slider value (always positive) to [low, high] based on mode.
- * USB  → low fixed at 0,  high = +v
- * LSB  → high fixed at 0, low  = -v
+ * USB  → low fixed at 50 Hz,  high = +v
+ * LSB  → high fixed at -50 Hz, low  = -v
  * All symmetric modes → low = -v, high = +v
  */
 function combinedValueToLowHigh(v) {
     switch (currentMode) {
-        case 'usb':             return [0,  v];
-        case 'lsb':             return [-v, 0];
+        case 'usb':             return [50,  v];
+        case 'lsb':             return [-v, -50];
         case 'cwu': case 'cwl': return [-v, v];
         case 'am':  case 'sam': return [-v, v];
         case 'fm':              return [-v, v];
@@ -4869,12 +4869,14 @@ function syncCombinedSliderToMode() {
 
     switch (currentMode) {
         case 'usb':
+            slider.min   = 100;
             slider.max   = 6000;
-            slider.value = Math.max(50, currentBandwidthHigh);
+            slider.value = Math.max(100, currentBandwidthHigh);
             break;
         case 'lsb':
+            slider.min   = 100;
             slider.max   = 6000;
-            slider.value = Math.max(50, Math.abs(currentBandwidthLow));
+            slider.value = Math.max(100, Math.abs(currentBandwidthLow));
             break;
         case 'cwu': case 'cwl':
             slider.max   = 500;

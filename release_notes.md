@@ -15,6 +15,7 @@
 - SAM mode missing from bookmarks
 - Local and server bookmarks now store and load bandwidth high/low values
 - USB/LSB/CWU/CWL mode utton ordering fixed
+- DX Cluster login being case sensitive when should not be
 
 ### Other Announcements
 - All required containers and binaries are now distributed for ARM64, meaning the standard installation method works on a Raspberry Pi 5

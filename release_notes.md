@@ -1,6 +1,6 @@
-# Latest Stable - 0.1.48 - 5th May 2026
+# Latest Stable - 0.1.49 - 12th May 2026
 
-## Version 0.1.49 - Upcoming Release
+## Version 0.1.49 - Latest Stable
 
 ### New Features
 - Added **Session Log Retention** to clean up old session logs. Default 30 days, set in Admin -> Server
@@ -14,7 +14,7 @@
 - Voice Activity 'all' endpoint was not using the cumulative cache so returned fewer results than per band endpoints
 - SAM mode missing from bookmarks
 - Local and server bookmarks now store and load bandwidth high/low values
-- USB/LSB/CWU/CWL mode utton ordering fixed
+- USB/LSB/CWU/CWL mode button ordering fixed
 - DX Cluster login being case sensitive when should not be
 
 ### Other Announcements
@@ -23,7 +23,7 @@
 - Note: Pi 5 requires FFTW Wisdom generated and fft-threads set to 2 in the Radiod Config (default is 1). Wisdom generation can take over 6 hours but is essential. Tested to support all band WSPR decode at 5000 cycles and 10 simultaneous web users. Don't expect miracles from it though.
 - The RK3588 ARM CPU will be tested next - I suspect this will be able to support a number of digital decoders, addons and hopefully 20 simultaneous web users.
 
-## Version 0.1.48 - Latest Stable
+## Version 0.1.48
 
 ### New Features
 - Added **Add-on Manager** in the Admin Addon tab to make it easier to install/manage add-ons

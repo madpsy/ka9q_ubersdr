@@ -471,7 +471,7 @@
         };
 
         thead.innerHTML = `<tr>
-            ${makeTh('rank',      '#',           'Rank by 24h total')}
+            <th title="Rank by 24h total" style="padding:7px 8px;white-space:nowrap;cursor:default;user-select:none;background:#1b5e20;color:white;">#</th>
             ${makeTh('callsign',  'Reporter',    'Receiver callsign')}
             ${makeTh('totalDay',  allDayLabel,   allDayTitle)}
             ${makeTh('totalWeek', allWeekLabel,  allWeekTitle)}

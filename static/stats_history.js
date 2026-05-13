@@ -624,7 +624,7 @@ function renderRBN(data) {
             if (!cd) continue;
             labels.push(label);
             spotCounts.push(cd.statistics?.spot_count ?? null);
-            ranks.push(cd.statistics_rank > 0 ? cd.statistics_rank : null);
+            ranks.push(cd.stats_rank > 0 ? cd.stats_rank : null);
         } else {
             // Full mode: sum all spot counts
             labels.push(label);
@@ -672,51 +672,63 @@ function renderRBN(data) {
         rankCard.classList.add('hidden');
     }
 
-    // Skew chart — latest snapshot, top 30 by |skew|
+    // Skew chart
     const skewCard = document.getElementById('rbn-skew-card');
     const latest = data.snapshots[data.snapshots.length - 1];
-    if (latest?.skew_entries?.length) {
+    const ctx = document.getElementById('rbn-skew-chart');
+    if (state.charts.rbnSkew) { state.charts.rbnSkew.destroy(); state.charts.rbnSkew = null; }
+
+    if (cs) {
+        // Callsign mode: skew over time as a line chart
+        const skewLabels = [];
+        const skewVals   = [];
+        for (const snap of data.snapshots) {
+            const skewEntry = snap.callsign_data?.skew;
+            if (skewEntry == null) continue;
+            skewLabels.push(fmtDate(snap.fetched_at));
+            skewVals.push(typeof skewEntry.skew === 'number' ? skewEntry.skew : null);
+        }
+        if (skewLabels.length) {
+            skewCard.classList.remove('hidden');
+            const datasets = [{
+                label: `${cs} skew (Hz)`,
+                data: skewVals,
+                borderColor: PALETTE[4],
+                backgroundColor: PALETTE[4]+'33',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 4,
+            }];
+            state.charts.rbnSkew = new Chart(ctx, makeChartConfig(skewLabels, datasets, 'Skew (Hz)'));
+        } else {
+            skewCard.classList.add('hidden');
+        }
+    } else if (latest?.skew_entries?.length) {
+        // Full mode: bar chart of top 30 skimmers by |skew| from latest snapshot
         skewCard.classList.remove('hidden');
         const sorted = [...latest.skew_entries]
             .sort((a, b) => Math.abs(b.skew) - Math.abs(a.skew))
             .slice(0, 30);
-        const skewSorted = sorted;
-        const skLabels = skewSorted.map(e => e.callsign);
-        const skValues = skewSorted.map(e => e.skew);
+        const skLabels = sorted.map(e => e.callsign);
+        const skValues = sorted.map(e => e.skew);
         const skColors = skValues.map(v => v >= 0 ? PALETTE[0]+'cc' : PALETTE[3]+'cc');
 
-        const ctx = document.getElementById('rbn-skew-chart');
-        if (state.charts.rbnSkew) state.charts.rbnSkew.destroy();
         state.charts.rbnSkew = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: skLabels,
-                datasets: [{
-                    label: 'Skew (Hz)',
-                    data: skValues,
-                    backgroundColor: skColors,
-                }],
+                datasets: [{ label: 'Skew (Hz)', data: skValues, backgroundColor: skColors }],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: item => `${item.raw > 0 ? '+' : ''}${item.raw.toFixed(2)} Hz`,
-                        },
-                    },
+                    tooltip: { callbacks: { label: item => `${item.raw > 0 ? '+' : ''}${item.raw.toFixed(2)} Hz` } },
                 },
                 scales: {
-                    x: {
-                        ticks: { maxRotation: 60, autoSkip: true, maxTicksLimit: 30, font: { size: 10 } },
-                        grid: { color: 'rgba(255,255,255,0.06)' },
-                    },
-                    y: {
-                        title: { display: true, text: 'Skew (Hz)', color: '#a0aec0' },
-                        grid: { color: 'rgba(255,255,255,0.06)' },
-                    },
+                    x: { ticks: { maxRotation: 60, autoSkip: true, maxTicksLimit: 30, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                    y: { title: { display: true, text: 'Skew (Hz)', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 },
             },
         });

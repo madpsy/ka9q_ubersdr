@@ -60,9 +60,12 @@ function lightenColor(hex) {
 // same time-of-day bucket.  This helper merges them by averaging Y values and returns
 // the result sorted by X so Chart.js draws a single clean line instead of zigzagging
 // back across the chart.
-function aggregateTimeOfDayPoints(rawPoints) {
+// Optional maxX (ms since midnight): if provided, points with x > maxX are excluded.
+// This is used to clip primary data at the current time-of-day when the range includes today.
+function aggregateTimeOfDayPoints(rawPoints, maxX) {
     const buckets = new Map(); // x (ms since midnight) → { sumY, count, latestActualTime }
     for (const pt of rawPoints) {
+        if (maxX !== undefined && pt.x > maxX) continue;
         const existing = buckets.get(pt.x);
         if (existing) {
             existing.sumY += pt.y;
@@ -85,6 +88,21 @@ function aggregateTimeOfDayPoints(rawPoints) {
     }
     merged.sort((a, b) => a.x - b.x);
     return merged;
+}
+
+// Calculate the current time-of-day clip limit for primary data in time-of-day mode.
+// Returns ms-since-midnight if the primary range includes the current moment (i.e. "to"
+// is now or in the future), otherwise returns undefined (no clipping needed).
+function getPrimaryTimeOfDayClip(request) {
+    const now = new Date();
+    const primaryTo = new Date(request.primary.to);
+    // If the primary range ends at or after the current time, clip at "now"
+    if (primaryTo >= now) {
+        const midnight = new Date(now);
+        midnight.setHours(0, 0, 0, 0);
+        return now.getTime() - midnight.getTime();
+    }
+    return undefined; // range is entirely in the past — no clipping
 }
 
 // Load band configurations from the server and populate BANDS / BAND_COLORS
@@ -720,6 +738,8 @@ function createFieldChart(field, data, request) {
     
     if (useTimeOfDayAlignment) {
         // Time-of-day alignment: align by hour of day (e.g., 17:00 yesterday aligns with 17:00 today)
+        // Clip primary data at current time-of-day if the range includes today
+        const primaryClipX = getPrimaryTimeOfDayClip(request);
         
         // Primary datasets
         request.bands.forEach(band => {
@@ -737,8 +757,8 @@ function createFieldChart(field, data, request) {
                         actualTime: timestamp // Store actual timestamp for tooltip
                     };
                 });
-                // Merge points that share the same time-of-day and sort by X
-                const bandData = aggregateTimeOfDayPoints(rawPoints);
+                // Merge points that share the same time-of-day, clip at current time if needed, and sort by X
+                const bandData = aggregateTimeOfDayPoints(rawPoints, primaryClipX);
                 
                 datasets.push({
                     label: data.comparison ? `${band} (Primary)` : band,
@@ -1190,6 +1210,8 @@ function createFieldChartData(field, data, request, ctx) {
     
     if (useTimeOfDayAlignment) {
         // Time-of-day alignment code (same as in createFieldChart)
+        // Clip primary data at current time-of-day if the range includes today
+        const primaryClipX = getPrimaryTimeOfDayClip(request);
         request.bands.forEach(band => {
             if (data.primary[band]) {
                 const rawPoints = data.primary[band].map(point => {
@@ -1204,8 +1226,8 @@ function createFieldChartData(field, data, request, ctx) {
                         actualTime: timestamp
                     };
                 });
-                // Merge points that share the same time-of-day and sort by X
-                const bandData = aggregateTimeOfDayPoints(rawPoints);
+                // Merge points that share the same time-of-day, clip at current time if needed, and sort by X
+                const bandData = aggregateTimeOfDayPoints(rawPoints, primaryClipX);
                 
                 datasets.push({
                     label: data.comparison ? `${band} (Primary)` : band,

@@ -466,6 +466,7 @@ function renderWSPRAwards(data) {
 /**
  * WSPR snapshot summary — shows current spots and rank for each window
  * that has data for the callsign (or overall totals in full mode).
+ * In callsign mode also shows per-band unique counts + per-band ranks.
  */
 function renderWSPRSummary(data) {
     const el = document.getElementById('wspr-summary');
@@ -481,27 +482,53 @@ function renderWSPRSummary(data) {
     const pill = (key, val, extraClass = '') =>
         `<span class="summary-pill"><span class="pill-key">${key}</span><span class="pill-val${extraClass ? ' ' + extraClass : ''}">${val}</span></span>`;
 
+    // Sort bands by numeric frequency (e.g. 160m < 80m < ... < 10m)
+    const bandFreqOrder = band => {
+        const m = band.match(/^(\d+)/);
+        return m ? parseInt(m[1], 10) : 9999;
+    };
+
     let html = '';
 
     if (cs) {
-        // Callsign mode: per-window unique spots + rank
+        // Callsign mode: per-window overall + per-band breakdown
         if (!latest?.callsign_rank) { el.classList.add('hidden'); return; }
 
-        const groups = [];
+        const sections = [];
         WINDOWS.forEach(win => {
             const w = latest.callsign_rank[win];
             if (!w) return;
-            let parts = '';
-            if (w.unique != null) parts += pill('Unique', w.unique.toLocaleString());
-            if (w.raw    != null) parts += pill('Raw',    w.raw.toLocaleString());
-            if (w.rank   != null) parts += pill('Rank',   `#${w.rank}`, 'pill-rank');
-            if (parts) groups.push(`<span class="summary-label">${WIN_LABELS[win]}</span>${parts}`);
+
+            // Overall row
+            let overallParts = '';
+            if (w.unique != null) overallParts += pill('Unique', w.unique.toLocaleString());
+            if (w.raw    != null) overallParts += pill('Raw',    w.raw.toLocaleString());
+            if (w.rank   != null) overallParts += pill('Rank',   `#${w.rank}`, 'pill-rank');
+            if (!overallParts) return;
+
+            let winHtml = `<span class="summary-group"><span class="summary-label">${WIN_LABELS[win]}</span>${overallParts}</span>`;
+
+            // Per-band row (only if band_uniques present)
+            if (w.band_uniques && Object.keys(w.band_uniques).length) {
+                const bands = Object.keys(w.band_uniques).sort((a, b) => bandFreqOrder(a) - bandFreqOrder(b));
+                let bandParts = '';
+                for (const band of bands) {
+                    const u = w.band_uniques[band];
+                    const r = w.band_ranks?.[band];
+                    let inner = `<span class="pill-key">${band}</span><span class="pill-val">${u.toLocaleString()}</span>`;
+                    if (r != null) inner += `<span class="pill-rank">#${r}</span>`;
+                    bandParts += `<span class="summary-pill">${inner}</span>`;
+                }
+                if (bandParts) {
+                    winHtml += `<span class="summary-group"><span class="summary-label" style="opacity:0.5">bands</span>${bandParts}</span>`;
+                }
+            }
+
+            sections.push(winHtml);
         });
 
-        if (!groups.length) { el.classList.add('hidden'); return; }
-        html = groups.map(g => `<span class="summary-group">${g}</span>`).join(
-            '<span class="summary-divider"></span>'
-        );
+        if (!sections.length) { el.classList.add('hidden'); return; }
+        html = sections.join('<span class="summary-divider"></span>');
     } else {
         // Full mode: sum all rows across windows
         const groups = [];

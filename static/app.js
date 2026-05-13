@@ -292,18 +292,17 @@ let dbfsHistory = [];
 window.dbfsHistory = dbfsHistory;
 
 // SAM → AM silence watchdog
-// When in SAM mode, if no signal quality updates arrive for >2 seconds, fall back to AM.
-// Signal updates are pushed to snrHistory on every audio packet; when the carrier is lost
-// radiod stops sending packets entirely, so snrHistory stops updating.
+// When in SAM mode, if no audio packets arrive for >2 seconds, fall back to AM.
+// ka9q-radio stops sending RTP packets entirely when the carrier is lost, so we
+// stamp _lastAudioPacketTime on every binary packet and detect the gap here.
 let _samSilenceWatchdogTimer = null;
-const SAM_SILENCE_FALLBACK_MS = 2000; // 2 seconds of no signal updates triggers fallback
+let _lastAudioPacketTime = 0; // Date.now() of last received binary audio packet
+const SAM_SILENCE_FALLBACK_MS = 2000; // 2 seconds of no packets triggers fallback
 
 function _checkSAMSilenceFallback() {
     if (currentMode !== 'sam') return;
-    const history = window.snrHistory;
-    if (!history || history.length === 0) return;
-    const lastUpdate = history[history.length - 1].timestamp;
-    if (Date.now() - lastUpdate >= SAM_SILENCE_FALLBACK_MS) {
+    if (_lastAudioPacketTime === 0) return; // no packet ever received yet
+    if (Date.now() - _lastAudioPacketTime >= SAM_SILENCE_FALLBACK_MS) {
         setMode('am');
         showNotification('SAM: no signal for 2s — switched to AM', 'info', 3000);
     }
@@ -2767,6 +2766,9 @@ async function handleBinaryMessage(data) {
     if (!audioContext) {
         return;
     }
+
+    // Stamp arrival time for SAM silence watchdog
+    _lastAudioPacketTime = Date.now();
 
     try {
         // Convert Blob to ArrayBuffer if needed

@@ -305,6 +305,74 @@ h1 {
     margin: 0 4px;
 }
 
+/* ── Snapshot summary bar ──────────────────────────────────────────────── */
+.snapshot-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    padding: 10px 18px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.07);
+    margin-bottom: 4px;
+    align-items: center;
+    font-size: 0.82em;
+    line-height: 1.4;
+}
+
+.summary-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 10px;
+    align-items: center;
+}
+
+.summary-label {
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #718096;
+    white-space: nowrap;
+    margin-right: 2px;
+}
+
+.summary-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #cbd5e0;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.summary-pill .pill-key {
+    color: #718096;
+    font-size: 0.9em;
+}
+
+.summary-pill .pill-val {
+    color: #e2e8f0;
+    font-weight: 600;
+}
+
+.summary-pill .pill-rank {
+    color: #63b3ed;
+    font-weight: 700;
+}
+
+.summary-divider {
+    width: 1px;
+    height: 18px;
+    background: rgba(255,255,255,0.1);
+    margin: 0 2px;
+    flex-shrink: 0;
+}
+
 /* ── Utility ───────────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

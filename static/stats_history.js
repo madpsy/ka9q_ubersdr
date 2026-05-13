@@ -408,10 +408,12 @@ function renderWSPR(data) {
         destroyChart({ chart: state.charts.wsprUnique });
         destroyChart({ chart: state.charts.wsprRank });
         document.getElementById('wspr-awards').classList.add('hidden');
+        document.getElementById('wspr-summary').classList.add('hidden');
         return;
     }
     noData.classList.add('hidden');
     renderWSPRAwards(data);
+    renderWSPRSummary(data);
     renderWSPRUnique(data);
     renderWSPRRank(data);
 }
@@ -459,6 +461,67 @@ function renderWSPRAwards(data) {
     });
 
     renderAwards('wspr-awards', badges);
+}
+
+/**
+ * WSPR snapshot summary — shows current spots and rank for each window
+ * that has data for the callsign (or overall totals in full mode).
+ */
+function renderWSPRSummary(data) {
+    const el = document.getElementById('wspr-summary');
+    if (!data.snapshots || data.snapshots.length === 0) { el.classList.add('hidden'); return; }
+
+    const latest = data.snapshots[data.snapshots.length - 1];
+    const cs = state.callsign;
+
+    const WINDOWS = ['rolling_24h', 'yesterday', 'today'];
+    const WIN_LABELS = { rolling_24h: '24h', yesterday: 'Yesterday', today: 'Today' };
+
+    // Build pill HTML helper
+    const pill = (key, val, extraClass = '') =>
+        `<span class="summary-pill"><span class="pill-key">${key}</span><span class="pill-val${extraClass ? ' ' + extraClass : ''}">${val}</span></span>`;
+
+    let html = '';
+
+    if (cs) {
+        // Callsign mode: per-window unique spots + rank
+        if (!latest?.callsign_rank) { el.classList.add('hidden'); return; }
+
+        const groups = [];
+        WINDOWS.forEach(win => {
+            const w = latest.callsign_rank[win];
+            if (!w) return;
+            let parts = '';
+            if (w.unique != null) parts += pill('Unique', w.unique.toLocaleString());
+            if (w.raw    != null) parts += pill('Raw',    w.raw.toLocaleString());
+            if (w.rank   != null) parts += pill('Rank',   `#${w.rank}`, 'pill-rank');
+            if (parts) groups.push(`<span class="summary-label">${WIN_LABELS[win]}</span>${parts}`);
+        });
+
+        if (!groups.length) { el.classList.add('hidden'); return; }
+        html = groups.map(g => `<span class="summary-group">${g}</span>`).join(
+            '<span class="summary-divider"></span>'
+        );
+    } else {
+        // Full mode: sum all rows across windows
+        const groups = [];
+        WINDOWS.forEach(win => {
+            const w = latest?.[win];
+            if (!w?.data?.length) return;
+            const totalUnique = w.data.reduce((s, r) => s + (r.unique || 0), 0);
+            const totalRaw    = w.data.reduce((s, r) => s + (r.raw    || 0), 0);
+            let parts = pill('Unique', totalUnique.toLocaleString()) + pill('Raw', totalRaw.toLocaleString());
+            groups.push(`<span class="summary-label">${WIN_LABELS[win]}</span>${parts}`);
+        });
+
+        if (!groups.length) { el.classList.add('hidden'); return; }
+        html = groups.map(g => `<span class="summary-group">${g}</span>`).join(
+            '<span class="summary-divider"></span>'
+        );
+    }
+
+    el.innerHTML = html;
+    el.classList.remove('hidden');
 }
 
 function getWSPRWindow(snap, win) {
@@ -641,6 +704,89 @@ function renderPSKAwards(data) {
     renderAwards('psk-awards', badges);
 }
 
+/**
+ * PSK snapshot summary — for callsign mode shows current rank + count for
+ * every band that has data, one line for Reports and one for Countries.
+ * In full mode shows total day-count across all bands.
+ */
+function renderPSKSummary(data) {
+    const el = document.getElementById('psk-summary');
+    if (!data.snapshots || data.snapshots.length === 0) { el.classList.add('hidden'); return; }
+
+    const latest = data.snapshots[data.snapshots.length - 1];
+    const cs = state.callsign;
+
+    const pill = (key, val, extraClass = '') =>
+        `<span class="summary-pill"><span class="pill-key">${key}</span><span class="pill-val${extraClass ? ' ' + extraClass : ''}">${val}</span></span>`;
+
+    // Sort bands: All first, then numeric ascending
+    const bandOrder = band => {
+        if (band === 'All') return -1;
+        const m = band.match(/^(\d+)/);
+        return m ? parseInt(m[1], 10) : 9999;
+    };
+    const sortBands = bands => [...bands].sort((a, b) => bandOrder(a) - bandOrder(b));
+
+    if (cs) {
+        const cr = latest?.callsign_rank;
+        if (!cr) { el.classList.add('hidden'); return; }
+
+        let html = '';
+
+        // Reports row
+        if (cr.reports && Object.keys(cr.reports).length) {
+            const bands = sortBands(Object.keys(cr.reports));
+            let parts = '';
+            for (const band of bands) {
+                const v = cr.reports[band];
+                if (!v) continue;
+                let inner = `<span class="pill-key">${band}</span>`;
+                if (v.day  != null) inner += `<span class="pill-val">${v.day.toLocaleString()}</span>`;
+                if (v.rank != null) inner += `<span class="pill-rank">#${v.rank}</span>`;
+                parts += `<span class="summary-pill">${inner}</span>`;
+            }
+            if (parts) html += `<span class="summary-group"><span class="summary-label">Reports</span>${parts}</span>`;
+        }
+
+        // Countries row
+        if (cr.countries && Object.keys(cr.countries).length) {
+            if (html) html += '<span class="summary-divider"></span>';
+            const bands = sortBands(Object.keys(cr.countries));
+            let parts = '';
+            for (const band of bands) {
+                const v = cr.countries[band];
+                if (!v) continue;
+                let inner = `<span class="pill-key">${band}</span>`;
+                if (v.day  != null) inner += `<span class="pill-val">${v.day.toLocaleString()}</span>`;
+                if (v.rank != null) inner += `<span class="pill-rank">#${v.rank}</span>`;
+                parts += `<span class="summary-pill">${inner}</span>`;
+            }
+            if (parts) html += `<span class="summary-group"><span class="summary-label">Countries</span>${parts}</span>`;
+        }
+
+        if (!html) { el.classList.add('hidden'); return; }
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+    } else {
+        // Full mode: total day-count from latest snapshot
+        let totalReports   = 0;
+        let totalCountries = 0;
+        for (const entries of Object.values(latest?.report_result  || {})) {
+            if (Array.isArray(entries)) entries.forEach(e => { totalReports   += e.day || 0; });
+        }
+        for (const entries of Object.values(latest?.country_result || {})) {
+            if (Array.isArray(entries)) entries.forEach(e => { totalCountries += e.day || 0; });
+        }
+        if (!totalReports && !totalCountries) { el.classList.add('hidden'); return; }
+        let html = '<span class="summary-group">';
+        if (totalReports)   html += pill('Reports today',   totalReports.toLocaleString());
+        if (totalCountries) html += pill('Countries today', totalCountries.toLocaleString());
+        html += '</span>';
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+    }
+}
+
 function renderPSK(data) {
     const noData = document.getElementById('psk-no-data');
     if (!data.snapshots || data.snapshots.length === 0) {
@@ -649,10 +795,12 @@ function renderPSK(data) {
             if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
         });
         document.getElementById('psk-awards').classList.add('hidden');
+        document.getElementById('psk-summary').classList.add('hidden');
         return;
     }
     noData.classList.add('hidden');
     renderPSKAwards(data);
+    renderPSKSummary(data);
 
     const cs = state.callsign;
 
@@ -851,7 +999,51 @@ function renderRBNAwards(data) {
         return;
     }
 
-    renderAwards('rbn-awards', [{ label: 'Overall', badges: [{ rank, text: `#${rank} Spot count` }] }]);
+    renderAwards('rbn-awards', [{ rank, text: 'Spot count', priority: 0 }]);
+}
+
+/**
+ * RBN snapshot summary — shows current spot count, rank, and skew
+ * for the callsign (callsign mode) or total spot count (full mode).
+ */
+function renderRBNSummary(data) {
+    const el = document.getElementById('rbn-summary');
+    if (!data.snapshots || data.snapshots.length === 0) { el.classList.add('hidden'); return; }
+
+    const latest = data.snapshots[data.snapshots.length - 1];
+    const cs = state.callsign;
+
+    const pill = (key, val, extraClass = '') =>
+        `<span class="summary-pill"><span class="pill-key">${key}</span><span class="pill-val${extraClass ? ' ' + extraClass : ''}">${val}</span></span>`;
+
+    if (cs) {
+        const cd = latest?.callsign_data;
+        if (!cd) { el.classList.add('hidden'); return; }
+
+        let html = '<span class="summary-group">';
+        const spotCount = cd.statistics?.spot_count;
+        if (spotCount != null) html += pill('Spots', spotCount.toLocaleString());
+        if (cd.stats_rank > 0) html += pill('Rank', `#${cd.stats_rank}`, 'pill-rank');
+
+        // Latest skew value
+        const skewEntry = cd.skew;
+        if (skewEntry?.skew != null) {
+            const skewVal = skewEntry.skew;
+            const skewStr = (skewVal >= 0 ? '+' : '') + skewVal.toFixed(2) + ' Hz';
+            html += pill('Skew', skewStr);
+        }
+        html += '</span>';
+
+        if (!spotCount && !cd.stats_rank) { el.classList.add('hidden'); return; }
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+    } else {
+        // Full mode: total spot count from latest snapshot
+        const total = (latest?.stats_entries || []).reduce((s, e) => s + (e.spot_count || 0), 0);
+        if (!total) { el.classList.add('hidden'); return; }
+        el.innerHTML = `<span class="summary-group">${pill('Total spots', total.toLocaleString())}</span>`;
+        el.classList.remove('hidden');
+    }
 }
 
 function renderRBN(data) {
@@ -862,10 +1054,12 @@ function renderRBN(data) {
             if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
         });
         document.getElementById('rbn-awards').classList.add('hidden');
+        document.getElementById('rbn-summary').classList.add('hidden');
         return;
     }
     noData.classList.add('hidden');
     renderRBNAwards(data);
+    renderRBNSummary(data);
 
     const cs = state.callsign;
 

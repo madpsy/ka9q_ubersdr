@@ -7756,6 +7756,13 @@
                 if (wsprRankRefreshCardBtn) wsprRankRefreshCardBtn.style.display = hasEnabledWspr ? '' : 'none';
                 if (wsprPublicStatsBtn)     wsprPublicStatsBtn.style.display     = hasEnabledWspr ? '' : 'none';
                 if (wsprRankCards)          wsprRankCards.style.display          = hasEnabledWspr ? '' : 'none';
+                if (wsprPublicStatsBtn && hasEnabledWspr) {
+                    const wsprCs = (currentDecoderConfig.wsprnet_callsign || '').trim() ||
+                                   (currentDecoderConfig.receiver_callsign || '').trim();
+                    wsprPublicStatsBtn.href = wsprCs && wsprCs !== 'N0CALL'
+                        ? `/stats_history.html?callsign=${encodeURIComponent(wsprCs.toUpperCase())}#wspr`
+                        : '/stats_history.html#wspr';
+                }
                 if (hasEnabledWspr) updateWSPRRankCards();
             }
             // Show/hide PSK Rank button when PSKReporter uploading is enabled
@@ -7770,6 +7777,13 @@
                 if (pskRankRefreshCardBtn) pskRankRefreshCardBtn.style.display = hasPsk ? '' : 'none';
                 if (pskPublicStatsBtn)     pskPublicStatsBtn.style.display     = hasPsk ? '' : 'none';
                 if (pskRankCards)          pskRankCards.style.display          = hasPsk ? '' : 'none';
+                if (pskPublicStatsBtn && hasPsk) {
+                    const pskCs = (currentDecoderConfig.pskreporter_callsign || '').trim() ||
+                                  (currentDecoderConfig.receiver_callsign    || '').trim();
+                    pskPublicStatsBtn.href = pskCs && pskCs !== 'N0CALL'
+                        ? `/stats_history.html?callsign=${encodeURIComponent(pskCs.toUpperCase())}#psk`
+                        : '/stats_history.html#psk';
+                }
                 if (hasPsk) updatePSKRankCards();
             }
         }
@@ -9811,6 +9825,15 @@ function resetStationIdColor() {
             updateCWSkimmerManagementButtons();
             updateRBNDataPanelVisibility();
             loadRBNDataForConfigCallsign();
+
+            // Update RBN Public Stats link with callsign
+            const rbnPublicStatsLink = document.querySelector('a[href*="stats_history.html#rbn"], a[href*="stats_history.html?callsign"][href*="#rbn"]');
+            if (rbnPublicStatsLink) {
+                const rbnCs = (currentCWSkimmerConfig.callsign || '').trim().toUpperCase();
+                rbnPublicStatsLink.href = rbnCs && rbnCs !== 'N0CALL'
+                    ? `/stats_history.html?callsign=${encodeURIComponent(rbnCs)}#rbn`
+                    : '/stats_history.html#rbn';
+            }
 
             // Connection Settings Section
             const connectionSection = document.createElement('div');

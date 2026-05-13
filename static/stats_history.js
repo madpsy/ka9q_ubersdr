@@ -148,14 +148,32 @@ document.addEventListener('DOMContentLoaded', () => {
     bindControls();
     bindWindowTabs();
     setDefaultDates();
+    // Apply URL ?callsign= param before description fetch so it takes priority.
+    applyURLParams();
     // Apply hash-based tab selection before loading data.
     applyHashTab();
-    // Load description first (pre-fills callsign), then auto-run the initial query.
+    // Load description first (pre-fills callsign if not already set), then auto-run.
     loadDescription().then(() => loadAll());
 });
 
 // Handle browser back/forward navigation between tabs.
 window.addEventListener('hashchange', () => applyHashTab());
+
+/**
+ * Read ?callsign= from the URL query string and pre-fill the callsign input.
+ * This runs before loadDescription so a URL-supplied callsign takes priority
+ * over the station's own callsign.
+ */
+function applyURLParams() {
+    const params = new URLSearchParams(location.search);
+    const cs = (params.get('callsign') || '').trim().toUpperCase();
+    if (cs) {
+        const inp = document.getElementById('callsign-input');
+        if (inp) inp.value = cs;
+        // Mark as URL-supplied so loadDescription won't overwrite it.
+        state._urlCallsign = cs;
+    }
+}
 
 async function loadDescription() {
     try {
@@ -169,12 +187,13 @@ async function loadDescription() {
                 `${d.receiver.name} — WSPR · PSK · RBN Historical Data`;
         }
 
-        // Station callsign — prefer receiver.callsign, fall back to cw_skimmer_callsign
+        // Station callsign — only pre-fill if not already set by URL param.
         const cs = (d.receiver?.callsign || d.cw_skimmer_callsign || '').trim().toUpperCase();
         if (cs && cs !== 'N0CALL') {
             state.stationCallsign = cs;
             const inp = document.getElementById('callsign-input');
-            if (!inp.value) inp.value = cs;
+            // Don't overwrite a callsign that came from the URL.
+            if (!state._urlCallsign && !inp.value) inp.value = cs;
         }
 
         // Version in footer

@@ -55,6 +55,38 @@ function lightenColor(hex) {
     return `#${lr.toString(16).padStart(2, '0')}${lg.toString(16).padStart(2, '0')}${lb.toString(16).padStart(2, '0')}`;
 }
 
+// Aggregate time-of-day data points that share the same X value (ms since midnight).
+// When a date range spans multiple calendar days, multiple raw points can map to the
+// same time-of-day bucket.  This helper merges them by averaging Y values and returns
+// the result sorted by X so Chart.js draws a single clean line instead of zigzagging
+// back across the chart.
+function aggregateTimeOfDayPoints(rawPoints) {
+    const buckets = new Map(); // x (ms since midnight) → { sumY, count, latestActualTime }
+    for (const pt of rawPoints) {
+        const existing = buckets.get(pt.x);
+        if (existing) {
+            existing.sumY += pt.y;
+            existing.count += 1;
+            // Keep the most recent actual timestamp for tooltip display
+            if (pt.actualTime > existing.latestActualTime) {
+                existing.latestActualTime = pt.actualTime;
+            }
+        } else {
+            buckets.set(pt.x, { sumY: pt.y, count: 1, latestActualTime: pt.actualTime });
+        }
+    }
+    const merged = [];
+    for (const [x, bucket] of buckets) {
+        merged.push({
+            x: x,
+            y: bucket.sumY / bucket.count,
+            actualTime: bucket.latestActualTime
+        });
+    }
+    merged.sort((a, b) => a.x - b.x);
+    return merged;
+}
+
 // Load band configurations from the server and populate BANDS / BAND_COLORS
 async function loadBandConfigs() {
     try {
@@ -692,7 +724,7 @@ function createFieldChart(field, data, request) {
         // Primary datasets
         request.bands.forEach(band => {
             if (data.primary[band]) {
-                const bandData = data.primary[band].map(point => {
+                const rawPoints = data.primary[band].map(point => {
                     const timestamp = new Date(point.timestamp);
                     // Calculate milliseconds since midnight
                     const midnight = new Date(timestamp);
@@ -705,6 +737,8 @@ function createFieldChart(field, data, request) {
                         actualTime: timestamp // Store actual timestamp for tooltip
                     };
                 });
+                // Merge points that share the same time-of-day and sort by X
+                const bandData = aggregateTimeOfDayPoints(rawPoints);
                 
                 datasets.push({
                     label: data.comparison ? `${band} (Primary)` : band,
@@ -714,7 +748,7 @@ function createFieldChart(field, data, request) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0,
+                    tension: 0.4,
                     borderDash: [] // Solid line for primary
                 });
             }
@@ -723,7 +757,7 @@ function createFieldChart(field, data, request) {
         // Comparison datasets
         request.bands.forEach(band => {
             if (data.comparison[band]) {
-                const bandData = data.comparison[band].map(point => {
+                const rawPoints = data.comparison[band].map(point => {
                     const timestamp = new Date(point.timestamp);
                     // Calculate milliseconds since midnight
                     const midnight = new Date(timestamp);
@@ -736,6 +770,8 @@ function createFieldChart(field, data, request) {
                         actualTime: timestamp // Store actual timestamp for tooltip
                     };
                 });
+                // Merge points that share the same time-of-day and sort by X
+                const bandData = aggregateTimeOfDayPoints(rawPoints);
                 
                 datasets.push({
                     label: `${band} (Comparison)`,
@@ -745,7 +781,7 @@ function createFieldChart(field, data, request) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0,
+                    tension: 0.4,
                     borderDash: [] // Solid line (different color distinguishes it)
                 });
             }
@@ -775,7 +811,7 @@ function createFieldChart(field, data, request) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0,
+                    tension: 0.4,
                     borderDash: []
                 });
             }
@@ -802,7 +838,7 @@ function createFieldChart(field, data, request) {
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        tension: 0,
+                        tension: 0.4,
                         borderDash: []
                     });
                 }
@@ -1058,7 +1094,7 @@ function toggleDifferenceView(field, data, request, button) {
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        tension: 0
+                        tension: 0.4
                     });
                 }
             }
@@ -1156,7 +1192,7 @@ function createFieldChartData(field, data, request, ctx) {
         // Time-of-day alignment code (same as in createFieldChart)
         request.bands.forEach(band => {
             if (data.primary[band]) {
-                const bandData = data.primary[band].map(point => {
+                const rawPoints = data.primary[band].map(point => {
                     const timestamp = new Date(point.timestamp);
                     const midnight = new Date(timestamp);
                     midnight.setHours(0, 0, 0, 0);
@@ -1168,6 +1204,8 @@ function createFieldChartData(field, data, request, ctx) {
                         actualTime: timestamp
                     };
                 });
+                // Merge points that share the same time-of-day and sort by X
+                const bandData = aggregateTimeOfDayPoints(rawPoints);
                 
                 datasets.push({
                     label: data.comparison ? `${band} (Primary)` : band,
@@ -1177,7 +1215,7 @@ function createFieldChartData(field, data, request, ctx) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0,
+                    tension: 0.4,
                     borderDash: []
                 });
             }
@@ -1185,7 +1223,7 @@ function createFieldChartData(field, data, request, ctx) {
         
         request.bands.forEach(band => {
             if (data.comparison[band]) {
-                const bandData = data.comparison[band].map(point => {
+                const rawPoints = data.comparison[band].map(point => {
                     const timestamp = new Date(point.timestamp);
                     const midnight = new Date(timestamp);
                     midnight.setHours(0, 0, 0, 0);
@@ -1197,6 +1235,8 @@ function createFieldChartData(field, data, request, ctx) {
                         actualTime: timestamp
                     };
                 });
+                // Merge points that share the same time-of-day and sort by X
+                const bandData = aggregateTimeOfDayPoints(rawPoints);
                 
                 datasets.push({
                     label: `${band} (Comparison)`,
@@ -1206,7 +1246,7 @@ function createFieldChartData(field, data, request, ctx) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0,
+                    tension: 0.4,
                     borderDash: []
                 });
             }
@@ -1234,7 +1274,7 @@ function createFieldChartData(field, data, request, ctx) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0,
+                    tension: 0.4,
                     borderDash: []
                 });
             }
@@ -1260,7 +1300,7 @@ function createFieldChartData(field, data, request, ctx) {
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        tension: 0,
+                        tension: 0.4,
                         borderDash: []
                     });
                 }

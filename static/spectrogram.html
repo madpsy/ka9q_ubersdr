@@ -1266,26 +1266,32 @@ function hoverCacheInvalidate(){
   hoverCacheLoading=false;
 }
 
-/* Zoom/pan state */
-var zoom={scale:1,tx:0,ty:0,dragging:false,dragStartX:0,dragStartY:0,dragStartTx:0,dragStartTy:0};
+/* Zoom/pan state.
+   zoom.scale  — interactive (wheel/drag) zoom, applied equally to X and Y.
+   zoom.scaleY — time-window vertical-only zoom (set by applyTimeWindow).
+                 The effective Y scale is zoom.scale * zoom.scaleY.
+                 The effective X scale is zoom.scale (unchanged by time window).
+   zoom.tx/ty  — pan offsets in CSS pixels. */
+var zoom={scale:1,scaleY:1,tx:0,ty:0,dragging:false,dragStartX:0,dragStartY:0,dragStartTx:0,dragStartTy:0};
 var MIN_SCALE=1, MAX_SCALE=20;
 
 function applyZoom(){
   var zw=document.getElementById('zoom-wrap');
-  zw.style.transform='translate('+zoom.tx+'px,'+zoom.ty+'px) scale('+zoom.scale+')';
+  var sy=zoom.scale*zoom.scaleY;
+  zw.style.transform='translate('+zoom.tx+'px,'+zoom.ty+'px) scaleX('+zoom.scale+') scaleY('+sy+')';
   /* Rebuild both axes so labels reflect the visible range and density */
   if(meta){buildFreqAxis();buildTimeAxis();}
 }
 
 /* Apply the time-window selector: zoom vertically so only the last N rows
    are visible, scrolled to the bottom of the image.
-   windowRows=0 means "all day" (reset to scale=1). */
+   windowRows=0 means "all day" (reset scaleY=1). */
 function applyTimeWindow(){
   var tsel=document.getElementById('tsel');
   var windowRows=parseInt(tsel.value,10)||0;
   if(!meta||windowRows<=0||windowRows>=meta.row_count){
-    /* All day — reset vertical zoom/pan */
-    zoom.scale=1; zoom.tx=0; zoom.ty=0;
+    /* All day — reset vertical-only zoom/pan */
+    zoom.scaleY=1; zoom.tx=0; zoom.ty=0;
     applyZoom();
     return;
   }
@@ -1299,16 +1305,20 @@ function applyTimeWindow(){
     return;
   }
 
-  /* scale = total rows / window rows (so windowRows rows fill the full container height) */
-  var newScale=meta.row_count/windowRows;
-  if(newScale<1)newScale=1;
-  if(newScale>MAX_SCALE)newScale=MAX_SCALE;
+  /* scaleY = total rows / window rows (so windowRows rows fill the full container height).
+     Divide by zoom.scale so the combined effective Y scale (zoom.scale * scaleY) equals
+     the desired value even when the user has also applied interactive zoom. */
+  var effectiveY=meta.row_count/windowRows;
+  if(effectiveY<1)effectiveY=1;
+  if(effectiveY>MAX_SCALE)effectiveY=MAX_SCALE;
+  var newScaleY=effectiveY/zoom.scale;
+  if(newScaleY<1/zoom.scale)newScaleY=1/zoom.scale; /* keep effective >= 1 */
 
-  /* Pan to bottom: ty = -(scale - 1) * ch so the bottom of the scaled image
+  /* Pan to bottom: ty = -(effectiveY - 1) * ch so the bottom of the scaled image
      aligns with the bottom of the container (transform-origin is top-left). */
-  var newTy=-(newScale-1)*ch;
+  var newTy=-(effectiveY-1)*ch;
 
-  zoom.scale=newScale;
+  zoom.scaleY=newScaleY;
   zoom.tx=0;
   zoom.ty=newTy;
   applyZoom();
@@ -1323,7 +1333,7 @@ function resetZoom(){
   /* Also reset the time window selector to "All day" */
   var tsel=document.getElementById('tsel');
   if(tsel)tsel.value='0';
-  zoom.scale=1; zoom.tx=0; zoom.ty=0;
+  zoom.scale=1; zoom.scaleY=1; zoom.tx=0; zoom.ty=0;
   applyZoom();
 }
 
@@ -1335,16 +1345,19 @@ function setupZoom(){
   container.addEventListener('wheel',function(e){
     e.preventDefault();
     var rect=container.getBoundingClientRect();
-    /* Cursor position in zoom-wrap's local coordinate space */
+    /* Cursor position in zoom-wrap's local coordinate space.
+       Effective Y scale = zoom.scale * zoom.scaleY. */
+    var sy=zoom.scale*zoom.scaleY;
     var cx=(e.clientX-rect.left-zoom.tx)/zoom.scale;
-    var cy=(e.clientY-rect.top -zoom.ty)/zoom.scale;
+    var cy=(e.clientY-rect.top -zoom.ty)/sy;
 
     var factor=e.deltaY<0?1.15:1/1.15;
     var newScale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,zoom.scale*factor));
     if(newScale===zoom.scale)return;
 
+    var newSy=newScale*zoom.scaleY;
     zoom.tx=e.clientX-rect.left - cx*newScale;
-    zoom.ty=e.clientY-rect.top  - cy*newScale;
+    zoom.ty=e.clientY-rect.top  - cy*newSy;
     zoom.scale=newScale;
     clampZoom(rect);
     applyZoom();
@@ -1352,7 +1365,7 @@ function setupZoom(){
 
   /* Click+drag to pan when zoomed */
   container.addEventListener('mousedown',function(e){
-    if(zoom.scale<=1)return;
+    if(zoom.scale<=1&&zoom.scaleY<=1)return;
     zoom.dragging=true;
     zoom.dragStartX=e.clientX; zoom.dragStartY=e.clientY;
     zoom.dragStartTx=zoom.tx;  zoom.dragStartTy=zoom.ty;
@@ -1383,8 +1396,9 @@ function setupZoom(){
 function clampZoom(rect){
   var w=rect?rect.width:document.querySelector('.sg-right').getBoundingClientRect().width;
   var h=rect?rect.height:document.querySelector('.sg-right').getBoundingClientRect().height;
+  var sy=zoom.scale*zoom.scaleY;
   zoom.tx=Math.max(w*(1-zoom.scale),Math.min(0,zoom.tx));
-  zoom.ty=Math.max(h*(1-zoom.scale),Math.min(0,zoom.ty));
+  zoom.ty=Math.max(h*(1-sy),Math.min(0,zoom.ty));
 }
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
@@ -1839,7 +1853,7 @@ function buildFreqAxis(){
 /* Time axis — zoom-aware, rebuilds on every zoom/pan change.
    The time axis is OUTSIDE zoom-wrap so positions must be in screen-space.
    A canvas row fraction f maps to screen position:
-     screenPct = (f * zoom.scale + zoom.ty / axisHeight) * 100%
+     screenPct = (f * zoom.scale * zoom.scaleY + zoom.ty / axisHeight) * 100%
    Only labels within [0%, 100%] of the axis are shown.
    #time-axis is a flex sibling of .sg-right and stretches to the same height,
    so its getBoundingClientRect().height equals the unscaled canvas display height. */
@@ -1858,8 +1872,9 @@ function buildTimeAxis(){
   if(ch===0)ch=600;
 
   /* Convert a canvas row fraction [0..1] to screen fraction [0..1] */
+  var sy=zoom.scale*zoom.scaleY; /* effective Y scale */
   function canvasRowToScreen(frac){
-    return frac*zoom.scale + zoom.ty/ch;
+    return frac*sy + zoom.ty/ch;
   }
 
   /* The image height in pixels equals meta.row_count (variable-height PNG).
@@ -1868,8 +1883,8 @@ function buildTimeAxis(){
   var canvasRows=meta.row_count;
 
   /* Visible row range in canvas fractions */
-  var visTop=Math.max(0,-zoom.ty/(ch*zoom.scale));
-  var visBottom=Math.min(1,(-zoom.ty+ch)/(ch*zoom.scale));
+  var visTop=Math.max(0,-zoom.ty/(ch*sy));
+  var visBottom=Math.min(1,(-zoom.ty+ch)/(ch*sy));
   var visibleSpanRows=(visBottom-visTop)*canvasRows;
   if(visibleSpanRows<=0)visibleSpanRows=canvasRows;
 
@@ -1950,7 +1965,8 @@ function buildDayNightOverlay(){
 
   /* Same row→screen mapping as buildTimeAxis(): result in screen pixels */
   function rowFracToScreenPx(rowFrac){
-    return (rowFrac*zoom.scale + zoom.ty/ch)*ch;
+    var sy=zoom.scale*zoom.scaleY;
+    return (rowFrac*sy + zoom.ty/ch)*ch;
   }
 
   /* Determine the UTC timestamp of row 0 */
@@ -2032,20 +2048,21 @@ function setupHover(){
 
     /* Compute canvas-local coordinates by reversing the zoom transform directly.
        We use the unscaled sg-right container rect + the zoom state variables
-       (zoom.tx, zoom.ty, zoom.scale) rather than calling getBoundingClientRect()
-       on #cwrap (which is a child of the CSS-transformed #zoom-wrap).
-       getBoundingClientRect() on transformed children is unreliable in some
-       browsers and does not update correctly after zoom reset without a reload. */
+       (zoom.tx, zoom.ty, zoom.scale, zoom.scaleY) rather than calling
+       getBoundingClientRect() on #cwrap (which is a child of the CSS-transformed
+       #zoom-wrap).  getBoundingClientRect() on transformed children is unreliable
+       in some browsers and does not update correctly after zoom reset without a reload. */
     var sgRect=sgRight.getBoundingClientRect();
 
     /* Cursor position relative to the top-left of sg-right (unscaled container) */
     var localX=e.clientX-sgRect.left;
     var localY=e.clientY-sgRect.top;
 
-    /* Reverse the CSS transform: translate(tx,ty) scale(s) with transform-origin:0 0
-       to get the cursor position in unscaled canvas CSS coordinates */
+    /* Reverse the CSS transform: translate(tx,ty) scaleX(sx) scaleY(sy) with transform-origin:0 0
+       to get the cursor position in unscaled canvas CSS coordinates.
+       Effective X scale = zoom.scale; effective Y scale = zoom.scale * zoom.scaleY. */
     var canvasLocalX=(localX-zoom.tx)/zoom.scale;
-    var canvasLocalY=(localY-zoom.ty)/zoom.scale;
+    var canvasLocalY=(localY-zoom.ty)/(zoom.scale*zoom.scaleY);
 
     /* Unscaled CSS dimensions of the canvas.
        When "Fixed height" is active, #img-canvas has an explicit CSS height that
@@ -3021,8 +3038,9 @@ function sgRowToScreenFrac(rowIdx){
   var container=document.querySelector('.sg-right');
   var ch=container?container.getBoundingClientRect().height:600;
   if(ch===0)ch=600;
+  var sy=zoom.scale*zoom.scaleY;
   var frac=rowIdx/meta.row_count;
-  return frac*zoom.scale + zoom.ty/ch;
+  return frac*sy + zoom.ty/ch;
 }
 
 /* Convert a screen Y fraction (0..1 within sg-right) to a row index. */
@@ -3031,9 +3049,10 @@ function sgScreenFracToRow(frac){
   var container=document.querySelector('.sg-right');
   var ch=container?container.getBoundingClientRect().height:600;
   if(ch===0)ch=600;
-  /* Invert: frac = rowFrac*zoom.scale + zoom.ty/ch
-     rowFrac = (frac - zoom.ty/ch) / zoom.scale */
-  var rowFrac=(frac - zoom.ty/ch)/zoom.scale;
+  /* Invert: frac = rowFrac*sy + zoom.ty/ch
+     rowFrac = (frac - zoom.ty/ch) / sy */
+  var sy=zoom.scale*zoom.scaleY;
+  var rowFrac=(frac - zoom.ty/ch)/sy;
   if(rowFrac<0)rowFrac=0;
   if(rowFrac>1)rowFrac=1;
   var row=Math.floor(rowFrac*meta.row_count);
@@ -3547,14 +3566,14 @@ function sgDrawRowSpectrumCanvas(data, overrideRange){
       zoom.scale=newScale;
 
       /* Vertical pan: keep the selected row centred in the visible image area.
-         sgRowToScreenFrac() returns the row's current screen fraction [0..1].
-         We want it to stay at 0.5 (centre) after the scale change.
-         screenFrac = rowFrac * newScale + zoom.ty / ch
-         → zoom.ty = (0.5 - rowFrac * newScale) * ch */
+         Effective Y scale = newScale * zoom.scaleY.
+         screenFrac = rowFrac * newSy + zoom.ty / ch
+         → zoom.ty = (0.5 - rowFrac * newSy) * ch */
       if(meta&&meta.row_count>0){
         var ch=rect.height||600;
+        var newSy=newScale*zoom.scaleY;
         var rowFrac=(sgSelectedRow+0.5)/meta.row_count;
-        zoom.ty=(0.5-rowFrac*newScale)*ch;
+        zoom.ty=(0.5-rowFrac*newSy)*ch;
       }
 
       clampZoom(rect);
@@ -3595,7 +3614,7 @@ function sgSelectRow(rowIdx, userInteraction){
   /* If the selected row is outside the current zoomed viewport, scroll to it.
      This handles seeks from the scrub bar, activity chart clicks, and strip
      clicks when the image is zoomed in to a different time window. */
-  if(userInteraction && zoom.scale > 1){
+  if(userInteraction && zoom.scale*zoom.scaleY > 1){
     var screenFracCheck = sgRowToScreenFrac(rowIdx + 0.5);
     if(screenFracCheck < 0 || screenFracCheck > 1){
       /* Row is outside the visible area — scroll to centre it */
@@ -3866,15 +3885,16 @@ function sgPlayRenderFromCache(rowIdx){
 /* Auto-scroll the zoom viewport to keep the selected row centred vertically */
 function sgPlayAutoScroll(rowIdx){
   if(!meta||meta.row_count===0)return;
-  if(zoom.scale<=1)return; /* no scroll needed when not zoomed */
+  var sy=zoom.scale*zoom.scaleY;
+  if(sy<=1)return; /* no scroll needed when not zoomed */
   var container=document.querySelector('.sg-right');
   var ch=container?container.getBoundingClientRect().height:600;
   if(ch===0)return;
   var rowFrac=(rowIdx+0.5)/meta.row_count;
   /* Target: row sits at vertical centre of the viewport
-     screenFrac = rowFrac * scale + ty/ch = 0.5
-     → ty = (0.5 - rowFrac * scale) * ch */
-  zoom.ty=(0.5-rowFrac*zoom.scale)*ch;
+     screenFrac = rowFrac * sy + ty/ch = 0.5
+     → ty = (0.5 - rowFrac * sy) * ch */
+  zoom.ty=(0.5-rowFrac*sy)*ch;
   clampZoom();
   applyZoom();
 }

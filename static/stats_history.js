@@ -212,7 +212,7 @@ async function fetchSpaceWeather() {
  * @param {string[]} labels  - ISO timestamp labels already on the chart
  * @param {Function} lookup  - result of buildSWLookup()
  */
-function makeSFIDataset(labels, lookup) {
+function makeSFIDataset(labels, lookup, axisId = 'ySW') {
     const data = labels.map(lbl => {
         const r = lookup(lbl);
         return r ? r.solar_flux : null;
@@ -227,7 +227,7 @@ function makeSFIDataset(labels, lookup) {
         pointRadius: 0,
         tension: 0.3,
         fill: false,
-        yAxisID: 'ySW',
+        yAxisID: axisId,
         order: 10,   // draw behind main datasets
     };
 }
@@ -235,7 +235,7 @@ function makeSFIDataset(labels, lookup) {
 /**
  * Build a Chart.js dataset for K-index overlay.
  */
-function makeKIndexDataset(labels, lookup) {
+function makeKIndexDataset(labels, lookup, axisId = 'ySW') {
     const data = labels.map(lbl => {
         const r = lookup(lbl);
         return r ? r.k_index : null;
@@ -250,7 +250,7 @@ function makeKIndexDataset(labels, lookup) {
         pointRadius: 0,
         tension: 0.2,
         fill: false,
-        yAxisID: 'ySW',
+        yAxisID: axisId,
         order: 10,
     };
 }
@@ -259,7 +259,7 @@ function makeKIndexDataset(labels, lookup) {
  * Build a Chart.js dataset for A-index overlay (daily geomagnetic index).
  * For daily-resolution charts (RBN), use the last SW record of each day.
  */
-function makeAIndexDataset(labels, lookup) {
+function makeAIndexDataset(labels, lookup, axisId = 'ySW') {
     // labels must be ISO timestamp strings (fetched_at), not formatted display labels
     const data = labels.map(lbl => {
         const r = lookup(lbl);
@@ -275,7 +275,7 @@ function makeAIndexDataset(labels, lookup) {
         pointRadius: 2,
         tension: 0.2,
         fill: false,
-        yAxisID: 'ySW',
+        yAxisID: axisId,
         order: 10,
     };
 }
@@ -801,7 +801,8 @@ function renderWSPRUnique(data) {
     const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
     if (swEnabled) {
         const lookup = buildSWLookup(state.swData);
-        datasets.push(makeSFIDataset(isoLabels, lookup));
+        datasets.push(makeSFIDataset(isoLabels, lookup, 'ySFI'));
+        datasets.push(makeKIndexDataset(isoLabels, lookup, 'yK'));
     }
 
     const ctx = document.getElementById('wspr-unique-chart');
@@ -817,7 +818,10 @@ function renderWSPRUnique(data) {
             scales: {
                 x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 y: { title: { display: true, text: 'Spots', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
-                ...(swEnabled ? { ySW: makeSWAxis('Solar Flux (SFU)', 60, 220) } : {}),
+                ...(swEnabled ? {
+                    ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
+                    yK:   { type: 'linear', position: 'right', title: { display: true, text: 'K-index', color: '#fc8181', font: { size: 11 } }, grid: { drawOnChartArea: false }, ticks: { color: '#fc8181', precision: 0 }, min: 0, suggestedMax: 9 },
+                } : {}),
             },
         },
     });
@@ -862,7 +866,8 @@ function renderWSPRRank(data) {
     const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
     if (swEnabled) {
         const lookup = buildSWLookup(state.swData);
-        datasets.push(makeKIndexDataset(isoLabels, lookup));
+        datasets.push(makeSFIDataset(isoLabels, lookup, 'ySFI'));
+        datasets.push(makeKIndexDataset(isoLabels, lookup, 'yK'));
     }
 
     const ctx = document.getElementById('wspr-rank-chart');
@@ -878,7 +883,10 @@ function renderWSPRRank(data) {
             scales: {
                 x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 y: { reverse: true, title: { display: true, text: 'Rank (lower = better)', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
-                ...(swEnabled ? { ySW: makeSWAxis('K-index', 0, 9) } : {}),
+                ...(swEnabled ? {
+                    ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
+                    yK:   { type: 'linear', position: 'right', title: { display: true, text: 'K-index', color: '#fc8181', font: { size: 11 } }, grid: { drawOnChartArea: false }, ticks: { color: '#fc8181', precision: 0 }, min: 0, suggestedMax: 9 },
+                } : {}),
             },
         },
     });
@@ -1384,7 +1392,8 @@ function renderRBN(data) {
         const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
         if (swEnabled) {
             const lookup = buildSWLookup(state.swData);
-            datasets.push(makeAIndexDataset(isoLabels, lookup));
+            datasets.push(makeSFIDataset(isoLabels, lookup, 'ySFI'));
+            datasets.push(makeAIndexDataset(isoLabels, lookup, 'yA'));
         }
 
         const ctx = document.getElementById('rbn-spots-chart');
@@ -1400,7 +1409,10 @@ function renderRBN(data) {
                 scales: {
                     x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                     y: { title: { display: true, text: 'Spot count', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
-                    ...(swEnabled ? { ySW: makeSWAxis('A-index', 0, 50) } : {}),
+                    ...(swEnabled ? {
+                        ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
+                        yA:   { type: 'linear', position: 'right', title: { display: true, text: 'A-index', color: '#fc8181', font: { size: 11 } }, grid: { drawOnChartArea: false }, ticks: { color: '#fc8181', precision: 0 }, min: 0, suggestedMax: 50 },
+                    } : {}),
                 },
             },
         });
@@ -1412,6 +1424,10 @@ function renderRBN(data) {
     if (cs) {
         rankCard.classList.remove('hidden');
         document.getElementById('rbn-rank-label').textContent = `— ${cs}`;
+        const isoLabels = data.snapshots
+            .filter(snap => !!snap.callsign_data)
+            .map(snap => snap.fetched_at);
+        const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
         const datasets = [{
             label: 'Rank',
             data: ranks,
@@ -1420,10 +1436,33 @@ function renderRBN(data) {
             tension: 0.3,
             fill: true,
             pointRadius: 4,
+            yAxisID: 'y',
         }];
+        if (swEnabled) {
+            const lookup = buildSWLookup(state.swData);
+            datasets.push(makeSFIDataset(isoLabels, lookup, 'ySFI'));
+            datasets.push(makeAIndexDataset(isoLabels, lookup, 'yA'));
+        }
         const ctx = document.getElementById('rbn-rank-chart');
         if (state.charts.rbnRank) state.charts.rbnRank.destroy();
-        state.charts.rbnRank = new Chart(ctx, makeChartConfig(labels, datasets, 'Rank (lower = better)', true));
+        state.charts.rbnRank = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+                scales: {
+                    x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                    y: { reverse: true, title: { display: true, text: 'Rank (lower = better)', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
+                    ...(swEnabled ? {
+                        ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
+                        yA:   { type: 'linear', position: 'right', title: { display: true, text: 'A-index', color: '#fc8181', font: { size: 11 } }, grid: { drawOnChartArea: false }, ticks: { color: '#fc8181', precision: 0 }, min: 0, suggestedMax: 50 },
+                    } : {}),
+                },
+            },
+        });
     } else {
         rankCard.classList.add('hidden');
     }

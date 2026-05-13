@@ -679,6 +679,10 @@ function createFieldChart(field, data, request) {
     // Use time-of-day alignment when comparing similar-length periods (e.g., today vs yesterday)
     const useTimeOfDayAlignment = data.comparison && shouldUseTimeOfDayAlignment(data, request);
     
+    // Hoist start times so the tick callback closure can always access them
+    let primaryStartTime = null;
+    let comparisonStartTime = null;
+
     // Create datasets
     const datasets = [];
     
@@ -748,9 +752,8 @@ function createFieldChart(field, data, request) {
         });
     } else {
         // Elapsed time alignment: use relative time from start of each dataset
-        let primaryStartTime = null;
-        let comparisonStartTime = null;
-        
+        // (primaryStartTime / comparisonStartTime already declared above)
+
         // Find earliest timestamp in primary data
         request.bands.forEach(band => {
             if (data.primary[band] && data.primary[band].length > 0) {
@@ -1174,6 +1177,11 @@ function createFieldChartData(field, data, request, ctx) {
     // This is the chart creation logic extracted from createFieldChart
     // We'll need to refactor createFieldChart to use this
     const useTimeOfDayAlignment = data.comparison && shouldUseTimeOfDayAlignment(data, request);
+
+    // Hoist start times so the tick callback closure can always access them
+    let primaryStartTime = null;
+    let comparisonStartTime = null;
+
     const datasets = [];
     
     if (useTimeOfDayAlignment) {
@@ -1237,9 +1245,8 @@ function createFieldChartData(field, data, request, ctx) {
         });
     } else {
         // Elapsed time alignment code (same as in createFieldChart)
-        let primaryStartTime = null;
-        let comparisonStartTime = null;
-        
+        // (primaryStartTime / comparisonStartTime already declared above)
+
         request.bands.forEach(band => {
             if (data.primary[band] && data.primary[band].length > 0) {
                 const firstTime = new Date(data.primary[band][0].timestamp).getTime();

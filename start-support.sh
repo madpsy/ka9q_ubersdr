@@ -148,6 +148,7 @@ tmux new-session -d -s "$SESSION_NAME" -n 'Support Session' \
         --rm \
         --name '$CONTAINER_NAME' \
         --network '$NETWORK' \
+        --cpu-shares 1024 \
         --volume '${CONFIG_VOLUME}:/app/config:ro' \
         --env 'TZ=${TZ:-UTC}' \
         --log-driver fluentd \

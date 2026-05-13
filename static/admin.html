@@ -1189,6 +1189,7 @@
                             <strong style="color: #333;">🏆 WSPR Rank:</strong>
                             <button id="wspr-rank-refresh-card-btn" onclick="(async()=>{const b=this;b.disabled=true;b.textContent='⏳';try{await authenticatedFetch('/admin/wspr-rank?refresh=1');}catch(_){}b.disabled=false;b.textContent='🔄 Refresh';updateWSPRRankCards();})()" style="display: none; padding: 4px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 12px; cursor: pointer; background: #e8eaf6; color: #1a237e;" title="Refresh WSPR rank data">🔄 Refresh</button>
                             <button id="wspr-rank-btn" onclick="openWSPRRankModal()" style="display: none; margin-left: auto; padding: 5px 12px; background: #1a237e; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#283593'" onmouseout="this.style.background='#1a237e'">🏆 Open Leaderboard</button>
+                            <a href="/stats_history.html#wspr" target="_blank" style="display: none; padding: 5px 12px; background: #e8eaf6; color: #1a237e; border: 1px solid #9fa8da; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; white-space: nowrap;" id="wspr-public-stats-btn">📈 Public Stats</a>
                         </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="wsprRankCardsInner">
                             <!-- populated by updateWSPRRankCards() -->
@@ -1200,6 +1201,7 @@
                             <strong style="color: #33691e;">🏆 PSK Reporter Rank:</strong>
                             <button id="psk-rank-refresh-card-btn" onclick="(async()=>{const b=this;b.disabled=true;b.textContent='⏳';try{await authenticatedFetch('/admin/psk-rank?refresh=1');}catch(_){}b.disabled=false;b.textContent='🔄 Refresh';updatePSKRankCards();})()" style="display: none; padding: 4px 10px; border: 1px solid #81c784; border-radius: 4px; font-size: 12px; cursor: pointer; background: #e8f5e9; color: #1b5e20;" title="Refresh PSK rank data">🔄 Refresh</button>
                             <button id="psk-rank-btn" onclick="openPSKRankModal()" style="display: none; margin-left: auto; padding: 5px 12px; background: #1b5e20; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#2e7d32'" onmouseout="this.style.background='#1b5e20'">🏆 Open Leaderboard</button>
+                            <a href="/stats_history.html#psk" target="_blank" style="display: none; padding: 5px 12px; background: #e8f5e9; color: #1b5e20; border: 1px solid #81c784; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; white-space: nowrap;" id="psk-public-stats-btn">📈 Public Stats</a>
                         </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 12px;" id="pskRankCardsInner">
                             <!-- populated by updatePSKRankCards() -->
@@ -1264,6 +1266,7 @@
                                 <button class="btn" onclick="lookupRBNCallsign()" style="background: #3f51b5; color: white; font-size: 13px; padding: 5px 12px;">🔍 Look Up</button>
                                 <button class="btn" id="rbnRefreshBtn" onclick="refreshRBNData()" style="background: #5c6bc0; color: white; font-size: 13px; padding: 5px 12px;">🔄 Refresh</button>
                                 <button class="btn" onclick="openRBNStatsModal()" style="background: #283593; color: white; font-size: 13px; padding: 5px 12px;">📊 All Statistics</button>
+                                <a href="/stats_history.html#rbn" target="_blank" style="padding: 5px 12px; background: #e8eaf6; color: #283593; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; white-space: nowrap;">📈 Public Stats</a>
                             </div>
                         </div>
                         <div id="rbnRateLimitError" style="display: none; margin-bottom: 10px; padding: 8px 12px; background: #fff3e0; border: 1px solid #ffb74d; border-radius: 4px; color: #e65100; font-size: 13px;"></div>
@@ -7743,6 +7746,7 @@
             // Show/hide WSPR Rank button only when WSPRNet is enabled AND at least one WSPR band is enabled
             const wsprRankBtn            = document.getElementById('wspr-rank-btn');
             const wsprRankRefreshCardBtn = document.getElementById('wspr-rank-refresh-card-btn');
+            const wsprPublicStatsBtn     = document.getElementById('wspr-public-stats-btn');
             const wsprRankCards          = document.getElementById('wsprRankCards');
             {
                 const bands = currentDecoderConfig.bands || [];
@@ -7750,18 +7754,21 @@
                     bands.some(b => b.mode === 'WSPR' && b.enabled !== false);
                 if (wsprRankBtn)            wsprRankBtn.style.display            = hasEnabledWspr ? '' : 'none';
                 if (wsprRankRefreshCardBtn) wsprRankRefreshCardBtn.style.display = hasEnabledWspr ? '' : 'none';
+                if (wsprPublicStatsBtn)     wsprPublicStatsBtn.style.display     = hasEnabledWspr ? '' : 'none';
                 if (wsprRankCards)          wsprRankCards.style.display          = hasEnabledWspr ? '' : 'none';
                 if (hasEnabledWspr) updateWSPRRankCards();
             }
             // Show/hide PSK Rank button when PSKReporter uploading is enabled
             const pskRankBtn            = document.getElementById('psk-rank-btn');
             const pskRankRefreshCardBtn = document.getElementById('psk-rank-refresh-card-btn');
+            const pskPublicStatsBtn     = document.getElementById('psk-public-stats-btn');
             const pskRankCards          = document.getElementById('pskRankCards');
             {
                 const hasPsk = currentDecoderConfig.pskreporter_enabled === true &&
                     (currentDecoderConfig.bands || []).some(b => b.enabled !== false);
                 if (pskRankBtn)            pskRankBtn.style.display            = hasPsk ? '' : 'none';
                 if (pskRankRefreshCardBtn) pskRankRefreshCardBtn.style.display = hasPsk ? '' : 'none';
+                if (pskPublicStatsBtn)     pskPublicStatsBtn.style.display     = hasPsk ? '' : 'none';
                 if (pskRankCards)          pskRankCards.style.display          = hasPsk ? '' : 'none';
                 if (hasPsk) updatePSKRankCards();
             }

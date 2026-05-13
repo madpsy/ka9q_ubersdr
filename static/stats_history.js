@@ -148,9 +148,14 @@ document.addEventListener('DOMContentLoaded', () => {
     bindControls();
     bindWindowTabs();
     setDefaultDates();
+    // Apply hash-based tab selection before loading data.
+    applyHashTab();
     // Load description first (pre-fills callsign), then auto-run the initial query.
     loadDescription().then(() => loadAll());
 });
+
+// Handle browser back/forward navigation between tabs.
+window.addEventListener('hashchange', () => applyHashTab());
 
 async function loadDescription() {
     try {
@@ -191,17 +196,32 @@ function setDefaultDates() {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────
+const VALID_TABS = new Set(['psk', 'wspr', 'rbn']);
+
+function switchTab(tab) {
+    if (!VALID_TABS.has(tab)) return;
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(c => {
+        c.classList.toggle('hidden', !c.id.endsWith(tab));
+        c.classList.toggle('active', c.id.endsWith(tab));
+    });
+    state.activeTab = tab;
+}
+
+function applyHashTab() {
+    const hash = location.hash.replace('#', '').toLowerCase();
+    if (VALID_TABS.has(hash)) switchTab(hash);
+}
+
 function bindTabs() {
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const tab = btn.dataset.tab;
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            document.querySelectorAll('.tab-content').forEach(c => {
-                c.classList.toggle('hidden', !c.id.endsWith(tab));
-                c.classList.toggle('active', c.id.endsWith(tab));
-            });
-            state.activeTab = tab;
+            switchTab(tab);
+            // Update URL hash without triggering a page scroll.
+            history.replaceState(null, '', `#${tab}`);
         });
     });
 }

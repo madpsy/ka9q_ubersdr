@@ -751,41 +751,19 @@ function createFieldChart(field, data, request) {
             }
         });
     } else {
-        // Elapsed time alignment: use relative time from start of each dataset
-        // (primaryStartTime / comparisonStartTime already declared above)
+        // Real-timestamp mode: plot each dataset at its actual date/time.
+        // Primary and comparison appear as separate clusters on the time axis.
+        // (primaryStartTime / comparisonStartTime not needed here but kept in scope)
 
-        // Find earliest timestamp in primary data
-        request.bands.forEach(band => {
-            if (data.primary[band] && data.primary[band].length > 0) {
-                const firstTime = new Date(data.primary[band][0].timestamp).getTime();
-                if (primaryStartTime === null || firstTime < primaryStartTime) {
-                    primaryStartTime = firstTime;
-                }
-            }
-        });
-        
-        // Find earliest timestamp in comparison data
-        if (data.comparison) {
-            request.bands.forEach(band => {
-                if (data.comparison[band] && data.comparison[band].length > 0) {
-                    const firstTime = new Date(data.comparison[band][0].timestamp).getTime();
-                    if (comparisonStartTime === null || firstTime < comparisonStartTime) {
-                        comparisonStartTime = firstTime;
-                    }
-                }
-            });
-        }
-        
         // Primary datasets
         request.bands.forEach(band => {
             if (data.primary[band]) {
                 const bandData = data.primary[band].map(point => {
                     const timestamp = new Date(point.timestamp);
-                    const relativeTime = timestamp.getTime() - primaryStartTime;
                     return {
-                        x: relativeTime,
+                        x: timestamp.getTime(),
                         y: point.values[field],
-                        actualTime: timestamp // Store actual timestamp for tooltip
+                        actualTime: timestamp
                     };
                 });
                 
@@ -798,7 +776,7 @@ function createFieldChart(field, data, request) {
                     pointRadius: 0,
                     pointHoverRadius: 5,
                     tension: 0.4,
-                    borderDash: [] // Solid line for primary
+                    borderDash: []
                 });
             }
         });
@@ -809,11 +787,10 @@ function createFieldChart(field, data, request) {
                 if (data.comparison[band]) {
                     const bandData = data.comparison[band].map(point => {
                         const timestamp = new Date(point.timestamp);
-                        const relativeTime = timestamp.getTime() - comparisonStartTime;
                         return {
-                            x: relativeTime,
+                            x: timestamp.getTime(),
                             y: point.values[field],
-                            actualTime: timestamp // Store actual timestamp for tooltip
+                            actualTime: timestamp
                         };
                     });
                     
@@ -826,7 +803,7 @@ function createFieldChart(field, data, request) {
                         pointRadius: 0,
                         pointHoverRadius: 5,
                         tension: 0.4,
-                        borderDash: [] // Solid line (different color distinguishes it)
+                        borderDash: []
                     });
                 }
             });
@@ -917,12 +894,13 @@ function createFieldChart(field, data, request) {
                     max: useTimeOfDayAlignment ? 86400000 : undefined, // 24 hours in milliseconds
                     ticks: {
                         color: '#fff',
+                        maxRotation: 45,
                         callback: function(value) {
                             if (useTimeOfDayAlignment) {
                                 return formatTimeOfDay(value);
                             }
-                            const realTime = new Date(primaryStartTime + value);
-                            return realTime.toLocaleString('en-GB', {
+                            // value is a real Unix timestamp in ms
+                            return new Date(value).toLocaleString('en-GB', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
@@ -1027,59 +1005,49 @@ function toggleDifferenceView(field, data, request, button) {
         
         request.bands.forEach(band => {
             if (data.primary[band] && data.comparison[band]) {
-                // Create a map of comparison data by x value for easy lookup
-                const comparisonMap = new Map();
-                
-                data.comparison[band].forEach(point => {
-                    const timestamp = new Date(point.timestamp);
-                    let xValue;
-                    
-                    if (useTimeOfDayAlignment) {
-                        const midnight = new Date(timestamp);
-                        midnight.setHours(0, 0, 0, 0);
-                        xValue = timestamp.getTime() - midnight.getTime();
-                    } else {
-                        // For elapsed time, we need to use the comparison start time
-                        // This is a simplified approach - we'll match by index instead
-                        xValue = point.timestamp;
-                    }
-                    
-                    comparisonMap.set(xValue, point.values[field]);
-                });
-                
-                // Calculate differences
+                // Calculate differences by matching points by index
+                // (primary and comparison have the same number of intervals but different actual timestamps)
                 const differenceData = [];
-                data.primary[band].forEach((point, index) => {
-                    const timestamp = new Date(point.timestamp);
-                    let xValue;
-                    
-                    if (useTimeOfDayAlignment) {
+
+                if (useTimeOfDayAlignment) {
+                    // Build a map of comparison data keyed by time-of-day ms
+                    const comparisonMap = new Map();
+                    data.comparison[band].forEach(point => {
+                        const timestamp = new Date(point.timestamp);
                         const midnight = new Date(timestamp);
                         midnight.setHours(0, 0, 0, 0);
-                        xValue = timestamp.getTime() - midnight.getTime();
-                    } else {
-                        xValue = point.timestamp;
-                    }
-                    
-                    // Try to find matching comparison point
-                    let comparisonValue = comparisonMap.get(xValue);
-                    
-                    // If no exact match and using elapsed time, try matching by index
-                    if (comparisonValue === undefined && !useTimeOfDayAlignment) {
-                        if (index < data.comparison[band].length) {
-                            comparisonValue = data.comparison[band][index].values[field];
+                        const xValue = timestamp.getTime() - midnight.getTime();
+                        comparisonMap.set(xValue, point.values[field]);
+                    });
+
+                    data.primary[band].forEach(point => {
+                        const timestamp = new Date(point.timestamp);
+                        const midnight = new Date(timestamp);
+                        midnight.setHours(0, 0, 0, 0);
+                        const xValue = timestamp.getTime() - midnight.getTime();
+                        const comparisonValue = comparisonMap.get(xValue);
+                        if (comparisonValue !== undefined) {
+                            differenceData.push({
+                                x: xValue,
+                                y: point.values[field] - comparisonValue,
+                                actualTime: timestamp
+                            });
                         }
-                    }
-                    
-                    if (comparisonValue !== undefined) {
-                        const difference = point.values[field] - comparisonValue;
-                        differenceData.push({
-                            x: useTimeOfDayAlignment ? xValue : (timestamp.getTime() - new Date(data.primary[band][0].timestamp).getTime()),
-                            y: difference,
-                            actualTime: timestamp
-                        });
-                    }
-                });
+                    });
+                } else {
+                    // Match by index; use primary's real timestamp as X
+                    data.primary[band].forEach((point, index) => {
+                        if (index < data.comparison[band].length) {
+                            const timestamp = new Date(point.timestamp);
+                            const comparisonValue = data.comparison[band][index].values[field];
+                            differenceData.push({
+                                x: timestamp.getTime(),
+                                y: point.values[field] - comparisonValue,
+                                actualTime: timestamp
+                            });
+                        }
+                    });
+                }
                 
                 if (differenceData.length > 0) {
                     differenceDatasets.push({
@@ -1244,36 +1212,15 @@ function createFieldChartData(field, data, request, ctx) {
             }
         });
     } else {
-        // Elapsed time alignment code (same as in createFieldChart)
-        // (primaryStartTime / comparisonStartTime already declared above)
+        // Real-timestamp mode: plot each dataset at its actual date/time.
+        // (primaryStartTime / comparisonStartTime not needed here but kept in scope)
 
-        request.bands.forEach(band => {
-            if (data.primary[band] && data.primary[band].length > 0) {
-                const firstTime = new Date(data.primary[band][0].timestamp).getTime();
-                if (primaryStartTime === null || firstTime < primaryStartTime) {
-                    primaryStartTime = firstTime;
-                }
-            }
-        });
-        
-        if (data.comparison) {
-            request.bands.forEach(band => {
-                if (data.comparison[band] && data.comparison[band].length > 0) {
-                    const firstTime = new Date(data.comparison[band][0].timestamp).getTime();
-                    if (comparisonStartTime === null || firstTime < comparisonStartTime) {
-                        comparisonStartTime = firstTime;
-                    }
-                }
-            });
-        }
-        
         request.bands.forEach(band => {
             if (data.primary[band]) {
                 const bandData = data.primary[band].map(point => {
                     const timestamp = new Date(point.timestamp);
-                    const relativeTime = timestamp.getTime() - primaryStartTime;
                     return {
-                        x: relativeTime,
+                        x: timestamp.getTime(),
                         y: point.values[field],
                         actualTime: timestamp
                     };
@@ -1298,9 +1245,8 @@ function createFieldChartData(field, data, request, ctx) {
                 if (data.comparison[band]) {
                     const bandData = data.comparison[band].map(point => {
                         const timestamp = new Date(point.timestamp);
-                        const relativeTime = timestamp.getTime() - comparisonStartTime;
                         return {
-                            x: relativeTime,
+                            x: timestamp.getTime(),
                             y: point.values[field],
                             actualTime: timestamp
                         };
@@ -1405,12 +1351,13 @@ function createFieldChartData(field, data, request, ctx) {
                     max: useTimeOfDayAlignment ? 86400000 : undefined,
                     ticks: {
                         color: '#fff',
+                        maxRotation: 45,
                         callback: function(value) {
                             if (useTimeOfDayAlignment) {
                                 return formatTimeOfDay(value);
                             }
-                            const realTime = new Date(primaryStartTime + value);
-                            return realTime.toLocaleString('en-GB', {
+                            // value is a real Unix timestamp in ms
+                            return new Date(value).toLocaleString('en-GB', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',

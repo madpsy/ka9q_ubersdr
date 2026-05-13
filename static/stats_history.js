@@ -16,10 +16,11 @@ const PALETTE = [
 
 // ── PSK band order (low → high frequency) ────────────────────────────────
 const PSK_BAND_ORDER = [
+    'All',
     'vlf','4000m','2200m','1000m','630m','600m','560m','160m','80m','60m',
     '40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','1.25m',
     '70cm','33cm','23cm','13cm','9cm','6cm','3cm','1.25cm','6mm','4mm',
-    '2.5mm','2mm','1mm','All','invalid',
+    '2.5mm','2mm','1mm','invalid',
 ];
 
 function pskBandSort(a, b) {
@@ -109,7 +110,7 @@ function makeBarConfig(labels, datasets, yLabel) {
 
 // ── App state ─────────────────────────────────────────────────────────────
 const state = {
-    activeTab: 'wspr',
+    activeTab: 'psk',
     stationCallsign: '',   // from /api/description receiver.callsign
     callsign: '',          // user-entered filter
 
@@ -126,8 +127,9 @@ const state = {
     },
 
     // active window for WSPR charts
-    wsprUniqueWin: 'rolling_24h',
-    wsprRankWin:   'rolling_24h',
+    wsprUniqueWin:  'rolling_24h',
+    wsprRankWin:    'rolling_24h',
+    wsprUniqueBand: 'All',   // 'All' or a specific band name (callsign mode only)
 
     // active band for PSK charts
     pskReportsBand:    'All',
@@ -402,12 +404,12 @@ function renderWSPRAwards(data) {
         const w = latest.callsign_rank[win];
         if (!w) return;
 
-        // Overall rank for this window — priority 0 (before per-band)
+        // Overall rank for this window.
         if (w.rank >= 1 && w.rank <= 3) {
             badges.push({ rank: w.rank, text: `${WIN_LABELS[win]} Overall`, priority: wi * 1000 });
         }
 
-        // Per-band ranks — priority 1+ within the window
+        // Per-band rank — computed server-side by comparing against all rows.
         if (w.band_ranks) {
             Object.entries(w.band_ranks)
                 .filter(([, r]) => r >= 1 && r <= 3)
@@ -430,7 +432,31 @@ function renderWSPRUnique(data) {
     const win = state.wsprUniqueWin;
     const cs  = state.callsign;
 
-    const labels   = [];
+    // In callsign mode, collect all bands present across all snapshots for this window.
+    if (cs) {
+        const bandSet = new Set(['All']);
+        for (const snap of data.snapshots) {
+            const w = getWSPRWindow(snap, win);
+            if (w?.bands) w.bands.forEach(b => bandSet.add(b));
+        }
+        const bands = ['All', ...[...bandSet].filter(b => b !== 'All')];
+
+        // Ensure active band is still valid.
+        if (!bandSet.has(state.wsprUniqueBand)) state.wsprUniqueBand = 'All';
+
+        buildBandSelector('wspr-band-selector', bands, state.wsprUniqueBand, b => {
+            state.wsprUniqueBand = b;
+            renderWSPRUnique(data);
+        });
+        document.getElementById('wspr-band-selector').classList.remove('hidden');
+        document.getElementById('wspr-unique-label').textContent = `— ${cs}`;
+    } else {
+        document.getElementById('wspr-band-selector').innerHTML = '';
+        document.getElementById('wspr-band-selector').classList.add('hidden');
+        document.getElementById('wspr-unique-label').textContent = '';
+    }
+
+    const labels     = [];
     const uniqueVals = [];
     const rawVals    = [];
 
@@ -440,22 +466,34 @@ function renderWSPRUnique(data) {
         labels.push(fmtTime(snap.generated_at));
 
         if (cs) {
-            // callsign_rank mode: unique / raw per window
-            uniqueVals.push(w.unique ?? null);
-            rawVals.push(w.raw ?? null);
+            const band = state.wsprUniqueBand;
+            if (band === 'All') {
+                uniqueVals.push(w.unique ?? null);
+                rawVals.push(w.raw ?? null);
+            } else {
+                // Per-band unique from band_uniques map.
+                const u = w.band_uniques?.[band] ?? null;
+                uniqueVals.push(u);
+                rawVals.push(null); // raw not available per-band
+            }
         } else {
-            // full window: sum all rows
+            // Full window: sum all rows.
             const rows = w.data || [];
             uniqueVals.push(rows.reduce((s, r) => s + (r.unique || 0), 0));
             rawVals.push(rows.reduce((s, r) => s + (r.raw || 0), 0));
         }
     }
 
+    const isBandFiltered = cs && state.wsprUniqueBand !== 'All';
     const datasets = cs
-        ? [
-            { label: 'Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
-            { label: 'Raw',    data: rawVals,    borderColor: PALETTE[1], backgroundColor: PALETTE[1]+'33', tension: 0.3, fill: false, pointRadius: 3 },
-          ]
+        ? isBandFiltered
+            ? [
+                { label: `${state.wsprUniqueBand} Unique`, data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
+              ]
+            : [
+                { label: 'Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
+                { label: 'Raw',    data: rawVals,    borderColor: PALETTE[1], backgroundColor: PALETTE[1]+'33', tension: 0.3, fill: false, pointRadius: 3 },
+              ]
         : [
             { label: 'Total Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
             { label: 'Total Raw',    data: rawVals,    borderColor: PALETTE[2], backgroundColor: PALETTE[2]+'22', tension: 0.3, fill: false, pointRadius: 3 },

@@ -49,24 +49,100 @@ type wsprCallsignRank struct {
 
 // wsprWindowRank is the rank of a callsign within one time window.
 type wsprWindowRank struct {
-	Rank   int    `json:"rank"`
-	Unique uint64 `json:"unique"`
-	Raw    uint64 `json:"raw"`
+	Rank        int               `json:"rank"`
+	Unique      uint64            `json:"unique"`
+	Raw         uint64            `json:"raw"`
+	Bands       []string          `json:"bands,omitempty"`        // ordered band names present for this callsign
+	BandUniques map[string]uint64 `json:"band_uniques,omitempty"` // band name → unique count
+	BandRanks   map[string]int    `json:"band_ranks,omitempty"`   // band name → rank among all receivers on that band
 }
 
-// extractWSPRWindowRank finds callsign in win.Data and returns its rank, or nil.
+// extractWSPRWindowRank finds callsign in win.Data and returns its rank,
+// per-band unique counts, and per-band ranks computed from the full dataset.
+// Returns nil if the callsign is not found.
 func extractWSPRWindowRank(win WSPRRankWindow, callsign string) *wsprWindowRank {
 	upper := strings.ToUpper(callsign)
+
+	// Build metres→name map once.
+	metresName := make(map[int16]string, len(wsprBandOrder))
+	for _, bd := range wsprBandOrder {
+		metresName[bd.Metres] = bd.Name
+	}
+
+	// Helper: expand a row's band arrays into a name→unique map.
+	rowBandUniques := func(row WSPRRankRow) map[string]uint64 {
+		m := make(map[string]uint64, len(row.Bands))
+		for j, metres := range row.Bands {
+			name, ok := metresName[metres]
+			if !ok {
+				continue
+			}
+			var u uint64
+			if j < len(row.Uniques) {
+				u = row.Uniques[j]
+			}
+			m[name] = u
+		}
+		return m
+	}
+
+	// Find the target row and build its band_uniques.
+	targetIdx := -1
+	var targetBU map[string]uint64
 	for i, row := range win.Data {
 		if strings.ToUpper(row.RxSign) == upper {
-			return &wsprWindowRank{
-				Rank:   i + 1,
-				Unique: row.Unique,
-				Raw:    row.Raw,
-			}
+			targetIdx = i
+			targetBU = rowBandUniques(row)
+			break
 		}
 	}
-	return nil
+	if targetIdx < 0 {
+		return nil
+	}
+
+	row := win.Data[targetIdx]
+	wr := &wsprWindowRank{
+		Rank:        targetIdx + 1,
+		Unique:      row.Unique,
+		Raw:         row.Raw,
+		BandUniques: targetBU,
+	}
+
+	// Collect bands present for this callsign in canonical order.
+	presentSet := make(map[string]bool, len(targetBU))
+	for name := range targetBU {
+		presentSet[name] = true
+	}
+	for _, bd := range wsprBandOrder {
+		if presentSet[bd.Name] {
+			wr.Bands = append(wr.Bands, bd.Name)
+		}
+	}
+
+	// Compute per-band rank: for each band the callsign appears on,
+	// count how many other receivers have a strictly higher unique count.
+	// Rank = 1 + number of receivers with a higher count (ties share the same rank).
+	if len(targetBU) > 0 {
+		wr.BandRanks = make(map[string]int, len(targetBU))
+		for band, myCount := range targetBU {
+			if myCount == 0 {
+				continue
+			}
+			rank := 1
+			for _, other := range win.Data {
+				if strings.ToUpper(other.RxSign) == upper {
+					continue
+				}
+				otherBU := rowBandUniques(other)
+				if otherBU[band] > myCount {
+					rank++
+				}
+			}
+			wr.BandRanks[band] = rank
+		}
+	}
+
+	return wr
 }
 
 // handleWSPRRankHistory serves GET /api/stats/wspr-rank.

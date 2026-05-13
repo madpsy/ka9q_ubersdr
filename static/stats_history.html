@@ -20,8 +20,8 @@
 
         <!-- Tab bar -->
         <div class="tab-bar">
-            <button class="tab-btn active" data-tab="wspr">📡 WSPR Rank</button>
-            <button class="tab-btn" data-tab="psk">📻 PSK Rank</button>
+            <button class="tab-btn active" data-tab="psk">📻 PSK Rank</button>
+            <button class="tab-btn" data-tab="wspr">📡 WSPR Rank</button>
             <button class="tab-btn" data-tab="rbn">📶 RBN</button>
         </div>
 
@@ -59,15 +59,16 @@
         <div id="status" class="status-bar">Select a period and click Load Data</div>
 
         <!-- ── WSPR tab ─────────────────────────────────────────────────── -->
-        <div id="tab-wspr" class="tab-content active">
+        <div id="tab-wspr" class="tab-content hidden">
             <div id="wspr-awards" class="awards-bar hidden"></div>
             <div class="chart-card" id="wspr-unique-card">
-                <h2>Unique Spots Over Time</h2>
+                <h2>Unique Spots Over Time <span class="callsign-label" id="wspr-unique-label"></span></h2>
                 <div class="window-tabs">
                     <button class="win-btn active" data-win="rolling_24h">Rolling 24h</button>
                     <button class="win-btn" data-win="yesterday">Yesterday</button>
                     <button class="win-btn" data-win="today">Today</button>
                 </div>
+                <div class="band-selector" id="wspr-band-selector"></div>
                 <div class="chart-wrap"><canvas id="wspr-unique-chart"></canvas></div>
             </div>
             <div class="chart-card" id="wspr-rank-card">
@@ -83,7 +84,7 @@
         </div>
 
         <!-- ── PSK tab ──────────────────────────────────────────────────── -->
-        <div id="tab-psk" class="tab-content hidden">
+        <div id="tab-psk" class="tab-content active">
             <div id="psk-awards" class="awards-bar hidden"></div>
             <div class="chart-card">
                 <h2>PSK Reports Rank Over Time <span class="callsign-label" id="psk-reports-label"></span></h2>

@@ -1,5 +1,10 @@
 # Latest Stable - 0.1.49 - 12th May 2026
 
+## Version 0.1.50 - Under Development
+
+### New Features
+- Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank (stats_history.html)
+
 ## Version 0.1.49 - Latest Stable
 
 ### New Features

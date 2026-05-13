@@ -373,6 +373,56 @@ h1 {
     flex-shrink: 0;
 }
 
+/* ── Space weather toggle ──────────────────────────────────────────────── */
+.sw-toggle-group {
+    justify-content: flex-end;
+    min-width: auto;
+}
+
+.sw-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-size: 0.88em !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    opacity: 1 !important;
+    color: #e0e0e0;
+    padding: 8px 12px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    transition: background 0.2s, border-color 0.2s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.sw-toggle-label:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(246,173,85,0.5);
+}
+
+.sw-toggle-label input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: #f6ad55;
+    cursor: pointer;
+    flex-shrink: 0;
+    /* override the generic control-group input styles */
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+}
+
+/* Highlight the label when checked */
+#sw-overlay:checked + .sw-toggle-label,
+.sw-toggle-label:has(#sw-overlay:checked) {
+    border-color: rgba(246,173,85,0.6);
+    background: rgba(246,173,85,0.1);
+    color: #f6ad55;
+}
+
 /* ── Utility ───────────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

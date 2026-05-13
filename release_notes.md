@@ -5,6 +5,9 @@
 ### New Features
 - Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank (stats_history.html)
 
+### Bug Fixes
+- Time (X Axis) on noise floor history page displayed relative rather than absolute times
+
 ## Version 0.1.49 - Latest Stable
 
 ### New Features

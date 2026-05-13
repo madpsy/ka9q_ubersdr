@@ -140,7 +140,163 @@ const state = {
     wsprData: null,
     pskData:  null,
     rbnData:  null,
+
+    // space weather overlay
+    swData:   null,   // array of SpaceWeatherData records, or null if unavailable
 };
+
+// ── Space weather helpers ─────────────────────────────────────────────────
+
+/** Returns true if the SW overlay checkbox is checked */
+function swOverlayEnabled() {
+    const cb = document.getElementById('sw-overlay');
+    return cb ? cb.checked : false;
+}
+
+/**
+ * Build a lookup function from an array of SW records.
+ * Given an ISO timestamp string, returns the nearest SW record (or null).
+ */
+function buildSWLookup(swRecords) {
+    if (!swRecords || swRecords.length === 0) return () => null;
+    return function (iso) {
+        const t = new Date(iso).getTime();
+        let best = null, bestDiff = Infinity;
+        for (const r of swRecords) {
+            const diff = Math.abs(new Date(r.timestamp).getTime() - t);
+            if (diff < bestDiff) { bestDiff = diff; best = r; }
+        }
+        return best;
+    };
+}
+
+/**
+ * Convert the current period selector to explicit from/to date strings
+ * (YYYY-MM-DD) for use with /api/spaceweather/history.
+ */
+function getSWDateRange() {
+    const period = document.getElementById('period-select').value;
+    const today  = new Date();
+    const fmt    = d => d.toISOString().slice(0, 10);
+    if (period === 'custom') {
+        const from = document.getElementById('from-date').value;
+        const to   = document.getElementById('to-date').value || fmt(today);
+        return { from, to };
+    }
+    const days = period === '24h' ? 1 : period === '7d' ? 7 : 30;
+    const from = new Date(today);
+    from.setDate(today.getDate() - (days - 1));
+    return { from: fmt(from), to: fmt(today) };
+}
+
+/**
+ * Fetch space weather history for the current date range.
+ * Returns an array of records, or [] if unavailable / not enabled.
+ */
+async function fetchSpaceWeather() {
+    const { from, to } = getSWDateRange();
+    if (!from) return [];
+    try {
+        const res = await fetch(`/api/spaceweather/history?from_date=${from}&to_date=${to}`);
+        if (!res.ok) return [];          // 404 = CSV logging disabled, 503 = SW disabled
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    } catch (e) {
+        console.warn('Space weather fetch failed:', e);
+        return [];
+    }
+}
+
+/**
+ * Build a Chart.js dataset for Solar Flux Index (SFI) overlay.
+ * @param {string[]} labels  - ISO timestamp labels already on the chart
+ * @param {Function} lookup  - result of buildSWLookup()
+ */
+function makeSFIDataset(labels, lookup) {
+    const data = labels.map(lbl => {
+        const r = lookup(lbl);
+        return r ? r.solar_flux : null;
+    });
+    return {
+        label: 'Solar Flux (SFU)',
+        data,
+        borderColor: '#f6ad55',
+        backgroundColor: 'rgba(246,173,85,0.08)',
+        borderDash: [5, 4],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: false,
+        yAxisID: 'ySW',
+        order: 10,   // draw behind main datasets
+    };
+}
+
+/**
+ * Build a Chart.js dataset for K-index overlay.
+ */
+function makeKIndexDataset(labels, lookup) {
+    const data = labels.map(lbl => {
+        const r = lookup(lbl);
+        return r ? r.k_index : null;
+    });
+    return {
+        label: 'K-index',
+        data,
+        borderColor: '#fc8181',
+        backgroundColor: 'rgba(252,129,129,0.08)',
+        borderDash: [5, 4],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.2,
+        fill: false,
+        yAxisID: 'ySW',
+        order: 10,
+    };
+}
+
+/**
+ * Build a Chart.js dataset for A-index overlay (daily geomagnetic index).
+ * For daily-resolution charts (RBN), use the last SW record of each day.
+ */
+function makeAIndexDataset(labels, lookup) {
+    // labels must be ISO timestamp strings (fetched_at), not formatted display labels
+    const data = labels.map(lbl => {
+        const r = lookup(lbl);
+        return r ? r.a_index : null;
+    });
+    return {
+        label: 'A-index',
+        data,
+        borderColor: '#fc8181',
+        backgroundColor: 'rgba(252,129,129,0.08)',
+        borderDash: [5, 4],
+        borderWidth: 1.5,
+        pointRadius: 2,
+        tension: 0.2,
+        fill: false,
+        yAxisID: 'ySW',
+        order: 10,
+    };
+}
+
+/**
+ * Return a right-side Y-axis config for SW overlays.
+ * @param {string} label  - axis title
+ * @param {number} min
+ * @param {number} suggestedMax
+ */
+function makeSWAxis(label, min, suggestedMax) {
+    return {
+        type: 'linear',
+        position: 'right',
+        title: { display: true, text: label, color: '#f6ad55', font: { size: 11 } },
+        grid: { drawOnChartArea: false },
+        ticks: { color: '#f6ad55', precision: 0 },
+        min,
+        suggestedMax,
+    };
+}
 
 // ── Initialise ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -259,6 +415,12 @@ function bindControls() {
     document.getElementById('callsign-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') loadAll();
     });
+
+    // SW overlay checkbox: re-run loadAll so SW data is fetched (or dropped) and
+    // charts are re-rendered.  Only fires if data has already been loaded once.
+    document.getElementById('sw-overlay').addEventListener('change', () => {
+        if (state.wsprData || state.pskData || state.rbnData) loadAll();
+    });
 }
 
 // ── WSPR window sub-tabs ──────────────────────────────────────────────────
@@ -317,10 +479,13 @@ async function loadAll() {
     setStatus('Loading…', 'loading');
 
     try {
-        const [wsprRes, pskRes, rbnRes] = await Promise.all([
+        // Fetch stats data + space weather in parallel (SW failure is non-fatal)
+        const swEnabled = swOverlayEnabled();
+        const [wsprRes, pskRes, rbnRes, swRecords] = await Promise.all([
             fetch(`/api/stats/wspr-rank?${params}`),
             fetch(`/api/stats/psk-rank?${params}`),
             fetch(`/api/stats/rbn?${params}`),
+            swEnabled ? fetchSpaceWeather() : Promise.resolve([]),
         ]);
 
         const [wsprJson, pskJson, rbnJson] = await Promise.all([
@@ -336,16 +501,19 @@ async function loadAll() {
         state.wsprData = wsprJson;
         state.pskData  = pskJson;
         state.rbnData  = rbnJson;
+        state.swData   = swEnabled ? swRecords : null;
 
         renderWSPR(wsprJson);
         renderPSK(pskJson);
         renderRBN(rbnJson);
 
-        const total = (wsprJson.count || 0) + (pskJson.count || 0) + (rbnJson.count || 0);
-        setStatus(
-            `Loaded — WSPR: ${wsprJson.count} snapshots · PSK: ${pskJson.count} snapshots · RBN: ${rbnJson.count} days`,
-            'success'
-        );
+        let statusMsg = `Loaded — WSPR: ${wsprJson.count} snapshots · PSK: ${pskJson.count} snapshots · RBN: ${rbnJson.count} days`;
+        if (swEnabled) {
+            statusMsg += swRecords.length > 0
+                ? ` · ☀️ SW: ${swRecords.length} records`
+                : ' · ☀️ SW: unavailable';
+        }
+        setStatus(statusMsg, 'success');
     } catch (e) {
         setStatus(`Error: ${e.message}`, 'error');
         console.error(e);
@@ -586,6 +754,7 @@ function renderWSPRUnique(data) {
     }
 
     const labels     = [];
+    const isoLabels  = [];   // raw ISO timestamps for SW lookup
     const uniqueVals = [];
     const rawVals    = [];
 
@@ -593,6 +762,7 @@ function renderWSPRUnique(data) {
         const w = getWSPRWindow(snap, win);
         if (!w) continue;
         labels.push(fmtTime(snap.generated_at));
+        isoLabels.push(snap.generated_at);
 
         if (cs) {
             const band = state.wsprUniqueBand;
@@ -617,20 +787,40 @@ function renderWSPRUnique(data) {
     const datasets = cs
         ? isBandFiltered
             ? [
-                { label: `${state.wsprUniqueBand} Unique`, data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
+                { label: `${state.wsprUniqueBand} Unique`, data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3, yAxisID: 'y' },
               ]
             : [
-                { label: 'Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
-                { label: 'Raw',    data: rawVals,    borderColor: PALETTE[1], backgroundColor: PALETTE[1]+'33', tension: 0.3, fill: false, pointRadius: 3 },
+                { label: 'Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true,  pointRadius: 3, yAxisID: 'y' },
+                { label: 'Raw',    data: rawVals,    borderColor: PALETTE[1], backgroundColor: PALETTE[1]+'33', tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y' },
               ]
         : [
-            { label: 'Total Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true, pointRadius: 3 },
-            { label: 'Total Raw',    data: rawVals,    borderColor: PALETTE[2], backgroundColor: PALETTE[2]+'22', tension: 0.3, fill: false, pointRadius: 3 },
+            { label: 'Total Unique', data: uniqueVals, borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'33', tension: 0.3, fill: true,  pointRadius: 3, yAxisID: 'y' },
+            { label: 'Total Raw',    data: rawVals,    borderColor: PALETTE[2], backgroundColor: PALETTE[2]+'22', tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y' },
           ];
+
+    const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
+    if (swEnabled) {
+        const lookup = buildSWLookup(state.swData);
+        datasets.push(makeSFIDataset(isoLabels, lookup));
+    }
 
     const ctx = document.getElementById('wspr-unique-chart');
     if (state.charts.wsprUnique) state.charts.wsprUnique.destroy();
-    state.charts.wsprUnique = new Chart(ctx, makeChartConfig(labels, datasets, 'Spots'));
+    state.charts.wsprUnique = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+            scales: {
+                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                y: { title: { display: true, text: 'Spots', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
+                ...(swEnabled ? { ySW: makeSWAxis('Solar Flux (SFU)', 60, 220) } : {}),
+            },
+        },
+    });
 }
 
 function renderWSPRRank(data) {
@@ -646,13 +836,15 @@ function renderWSPRRank(data) {
     rankCard.classList.remove('hidden');
     document.getElementById('wspr-rank-label').textContent = cs ? `— ${cs}` : '';
 
-    const labels = [];
-    const ranks  = [];
+    const labels    = [];
+    const isoLabels = [];   // raw ISO timestamps for SW lookup
+    const ranks     = [];
 
     for (const snap of data.snapshots) {
         const w = getWSPRWindow(snap, win);
         if (!w) continue;
         labels.push(fmtTime(snap.generated_at));
+        isoLabels.push(snap.generated_at);
         ranks.push(w.rank ?? null);
     }
 
@@ -664,11 +856,32 @@ function renderWSPRRank(data) {
         tension: 0.3,
         fill: true,
         pointRadius: 3,
+        yAxisID: 'y',
     }];
+
+    const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
+    if (swEnabled) {
+        const lookup = buildSWLookup(state.swData);
+        datasets.push(makeKIndexDataset(isoLabels, lookup));
+    }
 
     const ctx = document.getElementById('wspr-rank-chart');
     if (state.charts.wsprRank) state.charts.wsprRank.destroy();
-    state.charts.wsprRank = new Chart(ctx, makeChartConfig(labels, datasets, 'Rank (lower = better)', true));
+    state.charts.wsprRank = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+            scales: {
+                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                y: { reverse: true, title: { display: true, text: 'Rank (lower = better)', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
+                ...(swEnabled ? { ySW: makeSWAxis('K-index', 0, 9) } : {}),
+            },
+        },
+    });
 }
 
 // ── PSK rendering ─────────────────────────────────────────────────────────
@@ -920,10 +1133,19 @@ function renderPSKRankChart(data, table, bands) {
         days.push(entry?.day  ?? null);
     }
 
+    const isoLabels = data.snapshots
+        .filter(snap => snap.callsign_rank)
+        .map(snap => snap.fetched_at);
+
+    const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
     const datasets = [
         { label: 'Rank',      data: ranks, borderColor: PALETTE[3], backgroundColor: PALETTE[3]+'33', tension: 0.3, fill: true,  pointRadius: 3, yAxisID: 'yRank' },
         { label: 'Day count', data: days,  borderColor: PALETTE[0], backgroundColor: PALETTE[0]+'22', tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'yCount' },
     ];
+    if (swEnabled) {
+        const lookup = buildSWLookup(state.swData);
+        datasets.push(makeKIndexDataset(isoLabels, lookup));
+    }
 
     const ctx = document.getElementById(chartId);
     if (state.charts[chartKey]) state.charts[chartKey].destroy();
@@ -939,6 +1161,7 @@ function renderPSKRankChart(data, table, bands) {
                 x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 yRank:  { type: 'linear', position: 'left',  reverse: true,  title: { display: true, text: 'Rank', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                 yCount: { type: 'linear', position: 'right', reverse: false, title: { display: true, text: 'Day count', color: '#a0aec0' }, grid: { drawOnChartArea: false }, ticks: { precision: 0 } },
+                ...(swEnabled ? { ySW: makeSWAxis('K-index', 0, 9) } : {}),
             },
         },
     });
@@ -968,11 +1191,36 @@ function renderPSKTrendChart(data, table, canvasId, chartKey) {
         tension: 0.3,
         fill: true,
         pointRadius: 3,
+        yAxisID: 'y',
     }];
+
+    const isoLabels = data.snapshots
+        .filter(snap => (table === 'reports' ? snap.report_result : snap.country_result))
+        .map(snap => snap.fetched_at);
+
+    const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
+    if (swEnabled) {
+        const lookup = buildSWLookup(state.swData);
+        datasets.push(makeKIndexDataset(isoLabels, lookup));
+    }
 
     const ctx = document.getElementById(canvasId);
     if (state.charts[chartKey]) state.charts[chartKey].destroy();
-    state.charts[chartKey] = new Chart(ctx, makeChartConfig(labels, datasets, 'Count'));
+    state.charts[chartKey] = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+            scales: {
+                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                y: { title: { display: true, text: 'Count', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
+                ...(swEnabled ? { ySW: makeSWAxis('K-index', 0, 9) } : {}),
+            },
+        },
+    });
 }
 
 function renderPSKFullChart(data) {
@@ -1125,10 +1373,37 @@ function renderRBN(data) {
             tension: 0.3,
             fill: true,
             pointRadius: 4,
+            yAxisID: 'y',
         }];
+
+        // Build ISO timestamp array parallel to labels for SW lookup
+        const isoLabels = data.snapshots
+            .filter(snap => cs ? !!snap.callsign_data : true)
+            .map(snap => snap.fetched_at);
+
+        const swEnabled = swOverlayEnabled() && state.swData && state.swData.length > 0;
+        if (swEnabled) {
+            const lookup = buildSWLookup(state.swData);
+            datasets.push(makeAIndexDataset(isoLabels, lookup));
+        }
+
         const ctx = document.getElementById('rbn-spots-chart');
         if (state.charts.rbnSpots) state.charts.rbnSpots.destroy();
-        state.charts.rbnSpots = new Chart(ctx, makeChartConfig(labels, datasets, 'Spot count'));
+        state.charts.rbnSpots = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+                scales: {
+                    x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                    y: { title: { display: true, text: 'Spot count', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
+                    ...(swEnabled ? { ySW: makeSWAxis('A-index', 0, 50) } : {}),
+                },
+            },
+        });
         document.getElementById('rbn-spots-label').textContent = cs ? `— ${cs}` : '';
     }
 

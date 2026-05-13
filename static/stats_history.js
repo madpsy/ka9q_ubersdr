@@ -319,6 +319,51 @@ function setStatus(msg, cls = '') {
     el.className = 'status-bar' + (cls ? ` ${cls}` : '');
 }
 
+// ── Awards helpers ────────────────────────────────────────────────────────
+
+const MEDAL_CLASS = ['gold', 'silver', 'bronze'];
+const MEDAL_EMOJI = ['🥇', '🥈', '🥉'];
+
+/**
+ * Render an awards bar.
+ * @param {string} containerId  - id of the .awards-bar div
+ * @param {Array}  groups       - [{label, badges:[{rank,text}]}]
+ *   label  = section heading (e.g. "24h" or "40m Reports")
+ *   badges = array of {rank (1-based), text} — only rank 1/2/3 shown
+ */
+function renderAwards(containerId, groups) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+
+    // Filter to groups that actually have at least one medal-worthy badge
+    const validGroups = groups.filter(g => g.badges && g.badges.some(b => b.rank >= 1 && b.rank <= 3));
+
+    if (validGroups.length === 0) {
+        el.classList.add('hidden');
+        el.innerHTML = '';
+        return;
+    }
+
+    const parts = [];
+    validGroups.forEach((g, gi) => {
+        if (gi > 0) parts.push('<span class="awards-divider"></span>');
+        if (g.label) parts.push(`<span class="awards-bar-label">${g.label}</span>`);
+        g.badges.forEach(b => {
+            if (b.rank < 1 || b.rank > 3) return;
+            const cls = MEDAL_CLASS[b.rank - 1];
+            const em  = MEDAL_EMOJI[b.rank - 1];
+            parts.push(`<span class="award-badge ${cls}">${em} ${escHtml(b.text)}</span>`);
+        });
+    });
+
+    el.innerHTML = parts.join('');
+    el.classList.remove('hidden');
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 // ── WSPR rendering ────────────────────────────────────────────────────────
 function renderWSPR(data) {
     const noData = document.getElementById('wspr-no-data');
@@ -326,11 +371,58 @@ function renderWSPR(data) {
         noData.classList.remove('hidden');
         destroyChart({ chart: state.charts.wsprUnique });
         destroyChart({ chart: state.charts.wsprRank });
+        document.getElementById('wspr-awards').classList.add('hidden');
         return;
     }
     noData.classList.add('hidden');
+    renderWSPRAwards(data);
     renderWSPRUnique(data);
     renderWSPRRank(data);
+}
+
+/**
+ * WSPR awards — latest snapshot only, callsign mode.
+ * Shows rank medals for rolling_24h / yesterday / today windows.
+ * Also shows per-band spot-count medals if rank ≤ 3 for any band.
+ */
+function renderWSPRAwards(data) {
+    const cs = state.callsign;
+    if (!cs || !data.snapshots || data.snapshots.length === 0) {
+        document.getElementById('wspr-awards').classList.add('hidden');
+        return;
+    }
+
+    const latest = data.snapshots[data.snapshots.length - 1];
+    if (!latest?.callsign_rank) {
+        document.getElementById('wspr-awards').classList.add('hidden');
+        return;
+    }
+
+    const WINDOWS = ['rolling_24h', 'yesterday', 'today'];
+    const WIN_LABELS = { rolling_24h: '24h', yesterday: 'Yesterday', today: 'Today' };
+
+    const groups = [];
+
+    // Overall rank per window
+    const overallBadges = [];
+    for (const win of WINDOWS) {
+        const w = latest.callsign_rank[win];
+        if (!w || !w.rank) continue;
+        overallBadges.push({ rank: w.rank, text: `#${w.rank} ${WIN_LABELS[win]}` });
+    }
+    if (overallBadges.length) groups.push({ label: 'Overall', badges: overallBadges });
+
+    // Per-band spot count rank — WSPR callsign_rank windows may include band_ranks
+    for (const win of WINDOWS) {
+        const w = latest.callsign_rank[win];
+        if (!w?.band_ranks) continue;
+        const bandBadges = Object.entries(w.band_ranks)
+            .filter(([, r]) => r >= 1 && r <= 3)
+            .map(([band, r]) => ({ rank: r, text: `#${r} ${band} ${WIN_LABELS[win]}` }));
+        if (bandBadges.length) groups.push({ label: `${WIN_LABELS[win]} bands`, badges: bandBadges });
+    }
+
+    renderAwards('wspr-awards', groups);
 }
 
 function getWSPRWindow(snap, win) {
@@ -418,6 +510,48 @@ function renderWSPRRank(data) {
 }
 
 // ── PSK rendering ─────────────────────────────────────────────────────────
+
+/**
+ * PSK awards — latest snapshot only, callsign mode.
+ * Shows rank medals for any band in reports or countries where rank ≤ 3.
+ */
+function renderPSKAwards(data) {
+    const cs = state.callsign;
+    if (!cs || !data.snapshots || data.snapshots.length === 0) {
+        document.getElementById('psk-awards').classList.add('hidden');
+        return;
+    }
+
+    const latest = data.snapshots[data.snapshots.length - 1];
+    const cr = latest?.callsign_rank;
+    if (!cr) {
+        document.getElementById('psk-awards').classList.add('hidden');
+        return;
+    }
+
+    const groups = [];
+
+    // Reports rank per band
+    if (cr.reports) {
+        const badges = Object.entries(cr.reports)
+            .filter(([, v]) => v?.rank >= 1 && v.rank <= 3)
+            .sort(([a], [b]) => pskBandSort(a, b))
+            .map(([band, v]) => ({ rank: v.rank, text: `#${v.rank} ${band} Reports` }));
+        if (badges.length) groups.push({ label: 'Reports', badges });
+    }
+
+    // Countries rank per band
+    if (cr.countries) {
+        const badges = Object.entries(cr.countries)
+            .filter(([, v]) => v?.rank >= 1 && v.rank <= 3)
+            .sort(([a], [b]) => pskBandSort(a, b))
+            .map(([band, v]) => ({ rank: v.rank, text: `#${v.rank} ${band} Countries` }));
+        if (badges.length) groups.push({ label: 'Countries', badges });
+    }
+
+    renderAwards('psk-awards', groups);
+}
+
 function renderPSK(data) {
     const noData = document.getElementById('psk-no-data');
     if (!data.snapshots || data.snapshots.length === 0) {
@@ -425,9 +559,11 @@ function renderPSK(data) {
         ['pskReports','pskCountries','pskFull'].forEach(k => {
             if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
         });
+        document.getElementById('psk-awards').classList.add('hidden');
         return;
     }
     noData.classList.add('hidden');
+    renderPSKAwards(data);
 
     const cs = state.callsign;
 
@@ -601,6 +737,34 @@ function renderPSKFullChart(data) {
 }
 
 // ── RBN rendering ─────────────────────────────────────────────────────────
+
+/**
+ * RBN awards — latest snapshot only, callsign mode.
+ * Shows a rank medal if stats_rank ≤ 3.
+ */
+function renderRBNAwards(data) {
+    const cs = state.callsign;
+    if (!cs || !data.snapshots || data.snapshots.length === 0) {
+        document.getElementById('rbn-awards').classList.add('hidden');
+        return;
+    }
+
+    const latest = data.snapshots[data.snapshots.length - 1];
+    const cd = latest?.callsign_data;
+    if (!cd) {
+        document.getElementById('rbn-awards').classList.add('hidden');
+        return;
+    }
+
+    const rank = cd.stats_rank;
+    if (!rank || rank < 1 || rank > 3) {
+        document.getElementById('rbn-awards').classList.add('hidden');
+        return;
+    }
+
+    renderAwards('rbn-awards', [{ label: 'Overall', badges: [{ rank, text: `#${rank} Spot count` }] }]);
+}
+
 function renderRBN(data) {
     const noData = document.getElementById('rbn-no-data');
     if (!data.snapshots || data.snapshots.length === 0) {
@@ -608,9 +772,11 @@ function renderRBN(data) {
         ['rbnSpots','rbnRank','rbnSkew'].forEach(k => {
             if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
         });
+        document.getElementById('rbn-awards').classList.add('hidden');
         return;
     }
     noData.classList.add('hidden');
+    renderRBNAwards(data);
 
     const cs = state.callsign;
 

@@ -247,6 +247,64 @@ h1 {
 .site-footer a { color: #63b3ed; text-decoration: none; }
 .site-footer a:hover { text-decoration: underline; }
 
+/* ── Awards bar ────────────────────────────────────────────────────────── */
+.awards-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 18px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    margin-bottom: 4px;
+    align-items: center;
+}
+
+.awards-bar-label {
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #718096;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.award-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.82em;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+
+.award-badge.gold {
+    background: rgba(214,158,46,0.18);
+    border-color: rgba(214,158,46,0.45);
+    color: #f6e05e;
+}
+.award-badge.silver {
+    background: rgba(160,174,192,0.18);
+    border-color: rgba(160,174,192,0.45);
+    color: #cbd5e0;
+}
+.award-badge.bronze {
+    background: rgba(180,107,60,0.18);
+    border-color: rgba(180,107,60,0.45);
+    color: #f6ad55;
+}
+
+.awards-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(255,255,255,0.12);
+    margin: 0 4px;
+}
+
 /* ── Utility ───────────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

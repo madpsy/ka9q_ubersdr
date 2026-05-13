@@ -325,35 +325,30 @@ const MEDAL_CLASS = ['gold', 'silver', 'bronze'];
 const MEDAL_EMOJI = ['🥇', '🥈', '🥉'];
 
 /**
- * Render an awards bar.
- * @param {string} containerId  - id of the .awards-bar div
- * @param {Array}  groups       - [{label, badges:[{rank,text}]}]
- *   label  = section heading (e.g. "24h" or "40m Reports")
- *   badges = array of {rank (1-based), text} — only rank 1/2/3 shown
+ * Render an awards bar from a flat list of badge objects.
+ * Badges are sorted by rank (1→2→3) then by their existing order (priority).
+ *
+ * @param {string} containerId
+ * @param {Array}  badges  - [{rank (1-3), text, priority (lower = first within same rank)}]
  */
-function renderAwards(containerId, groups) {
+function renderAwards(containerId, badges) {
     const el = document.getElementById(containerId);
     if (!el) return;
 
-    // Filter to groups that actually have at least one medal-worthy badge
-    const validGroups = groups.filter(g => g.badges && g.badges.some(b => b.rank >= 1 && b.rank <= 3));
-
-    if (validGroups.length === 0) {
+    const valid = badges.filter(b => b.rank >= 1 && b.rank <= 3);
+    if (valid.length === 0) {
         el.classList.add('hidden');
         el.innerHTML = '';
         return;
     }
 
-    const parts = [];
-    validGroups.forEach((g, gi) => {
-        if (gi > 0) parts.push('<span class="awards-divider"></span>');
-        if (g.label) parts.push(`<span class="awards-bar-label">${g.label}</span>`);
-        g.badges.forEach(b => {
-            if (b.rank < 1 || b.rank > 3) return;
-            const cls = MEDAL_CLASS[b.rank - 1];
-            const em  = MEDAL_EMOJI[b.rank - 1];
-            parts.push(`<span class="award-badge ${cls}">${em} ${escHtml(b.text)}</span>`);
-        });
+    // Sort: primary = rank asc, secondary = priority asc (insertion order if equal)
+    valid.sort((a, b) => a.rank !== b.rank ? a.rank - b.rank : (a.priority || 0) - (b.priority || 0));
+
+    const parts = valid.map(b => {
+        const cls = MEDAL_CLASS[b.rank - 1];
+        const em  = MEDAL_EMOJI[b.rank - 1];
+        return `<span class="award-badge ${cls}">${em} ${escHtml(b.text)}</span>`;
     });
 
     el.innerHTML = parts.join('');
@@ -382,8 +377,8 @@ function renderWSPR(data) {
 
 /**
  * WSPR awards — latest snapshot only, callsign mode.
- * Shows rank medals for rolling_24h / yesterday / today windows.
- * Also shows per-band spot-count medals if rank ≤ 3 for any band.
+ * Flat badge list sorted by rank, then window order (24h → yesterday → today),
+ * then overall before per-band.
  */
 function renderWSPRAwards(data) {
     const cs = state.callsign;
@@ -401,28 +396,28 @@ function renderWSPRAwards(data) {
     const WINDOWS = ['rolling_24h', 'yesterday', 'today'];
     const WIN_LABELS = { rolling_24h: '24h', yesterday: 'Yesterday', today: 'Today' };
 
-    const groups = [];
+    const badges = [];
 
-    // Overall rank per window
-    const overallBadges = [];
-    for (const win of WINDOWS) {
+    WINDOWS.forEach((win, wi) => {
         const w = latest.callsign_rank[win];
-        if (!w || !w.rank) continue;
-        overallBadges.push({ rank: w.rank, text: `#${w.rank} ${WIN_LABELS[win]}` });
-    }
-    if (overallBadges.length) groups.push({ label: 'Overall', badges: overallBadges });
+        if (!w) return;
 
-    // Per-band spot count rank — WSPR callsign_rank windows may include band_ranks
-    for (const win of WINDOWS) {
-        const w = latest.callsign_rank[win];
-        if (!w?.band_ranks) continue;
-        const bandBadges = Object.entries(w.band_ranks)
-            .filter(([, r]) => r >= 1 && r <= 3)
-            .map(([band, r]) => ({ rank: r, text: `#${r} ${band} ${WIN_LABELS[win]}` }));
-        if (bandBadges.length) groups.push({ label: `${WIN_LABELS[win]} bands`, badges: bandBadges });
-    }
+        // Overall rank for this window — priority 0 (before per-band)
+        if (w.rank >= 1 && w.rank <= 3) {
+            badges.push({ rank: w.rank, text: `${WIN_LABELS[win]} Overall`, priority: wi * 1000 });
+        }
 
-    renderAwards('wspr-awards', groups);
+        // Per-band ranks — priority 1+ within the window
+        if (w.band_ranks) {
+            Object.entries(w.band_ranks)
+                .filter(([, r]) => r >= 1 && r <= 3)
+                .forEach(([band, r], bi) => {
+                    badges.push({ rank: r, text: `${WIN_LABELS[win]} ${band}`, priority: wi * 1000 + 1 + bi });
+                });
+        }
+    });
+
+    renderAwards('wspr-awards', badges);
 }
 
 function getWSPRWindow(snap, win) {
@@ -513,7 +508,9 @@ function renderWSPRRank(data) {
 
 /**
  * PSK awards — latest snapshot only, callsign mode.
- * Shows rank medals for any band in reports or countries where rank ≤ 3.
+ * Flat badge list sorted by rank first, then:
+ *   Reports before Countries (table priority 0 vs 1)
+ *   "All" band before per-band (pskBandSort puts All first)
  */
 function renderPSKAwards(data) {
     const cs = state.callsign;
@@ -529,27 +526,42 @@ function renderPSKAwards(data) {
         return;
     }
 
-    const groups = [];
+    // Build a sorted band list so "All" comes first, then numeric bands low→high
+    const bandOrder = band => {
+        if (band === 'All') return -1;
+        const m = band.match(/^(\d+)/);
+        return m ? parseInt(m[1], 10) : 9999;
+    };
 
-    // Reports rank per band
+    const badges = [];
+
+    // Reports — table priority 0
     if (cr.reports) {
-        const badges = Object.entries(cr.reports)
+        Object.entries(cr.reports)
             .filter(([, v]) => v?.rank >= 1 && v.rank <= 3)
-            .sort(([a], [b]) => pskBandSort(a, b))
-            .map(([band, v]) => ({ rank: v.rank, text: `#${v.rank} ${band} Reports` }));
-        if (badges.length) groups.push({ label: 'Reports', badges });
+            .forEach(([band, v]) => {
+                badges.push({
+                    rank: v.rank,
+                    text: `${band} Reports`,
+                    priority: 0 * 100000 + bandOrder(band),
+                });
+            });
     }
 
-    // Countries rank per band
+    // Countries — table priority 1
     if (cr.countries) {
-        const badges = Object.entries(cr.countries)
+        Object.entries(cr.countries)
             .filter(([, v]) => v?.rank >= 1 && v.rank <= 3)
-            .sort(([a], [b]) => pskBandSort(a, b))
-            .map(([band, v]) => ({ rank: v.rank, text: `#${v.rank} ${band} Countries` }));
-        if (badges.length) groups.push({ label: 'Countries', badges });
+            .forEach(([band, v]) => {
+                badges.push({
+                    rank: v.rank,
+                    text: `${band} Countries`,
+                    priority: 1 * 100000 + bandOrder(band),
+                });
+            });
     }
 
-    renderAwards('psk-awards', groups);
+    renderAwards('psk-awards', badges);
 }
 
 function renderPSK(data) {

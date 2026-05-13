@@ -142,11 +142,12 @@ const state = {
 
 // ── Initialise ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-    loadDescription();
     bindTabs();
     bindControls();
     bindWindowTabs();
     setDefaultDates();
+    // Load description first (pre-fills callsign), then auto-run the initial query.
+    loadDescription().then(() => loadAll());
 });
 
 async function loadDescription() {
@@ -213,6 +214,10 @@ function bindControls() {
     });
 
     document.getElementById('load-btn').addEventListener('click', loadAll);
+
+    document.getElementById('callsign-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') loadAll();
+    });
 }
 
 // ── WSPR window sub-tabs ──────────────────────────────────────────────────

@@ -291,6 +291,24 @@ let snrChartCtx = null;
 let dbfsHistory = [];
 window.dbfsHistory = dbfsHistory;
 
+// SAM → AM silence watchdog
+// When in SAM mode, if no signal quality updates arrive for >2 seconds, fall back to AM.
+// Signal updates are pushed to snrHistory on every audio packet; when the carrier is lost
+// radiod stops sending packets entirely, so snrHistory stops updating.
+let _samSilenceWatchdogTimer = null;
+const SAM_SILENCE_FALLBACK_MS = 2000; // 2 seconds of no signal updates triggers fallback
+
+function _checkSAMSilenceFallback() {
+    if (currentMode !== 'sam') return;
+    const history = window.snrHistory;
+    if (!history || history.length === 0) return;
+    const lastUpdate = history[history.length - 1].timestamp;
+    if (Date.now() - lastUpdate >= SAM_SILENCE_FALLBACK_MS) {
+        setMode('am');
+        showNotification('SAM: no signal for 2s — switched to AM', 'info', 3000);
+    }
+}
+
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
@@ -2500,12 +2518,23 @@ function startStatsUpdates() {
 
     // Then fetch every 10 seconds
     statsUpdateInterval = setInterval(fetchAndDisplayStats, 10000);
+
+    // Start SAM → AM silence watchdog (checks every 500ms)
+    if (!_samSilenceWatchdogTimer) {
+        _samSilenceWatchdogTimer = setInterval(_checkSAMSilenceFallback, 500);
+    }
 }
 
 function stopStatsUpdates() {
     if (statsUpdateInterval) {
         clearInterval(statsUpdateInterval);
         statsUpdateInterval = null;
+    }
+
+    // Stop SAM silence watchdog
+    if (_samSilenceWatchdogTimer) {
+        clearInterval(_samSilenceWatchdogTimer);
+        _samSilenceWatchdogTimer = null;
     }
 
     // Clear the display

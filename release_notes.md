@@ -3,10 +3,12 @@
 ## Version 0.1.50 - Under Development
 
 ### New Features
-- Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank (stats_history.html)
+- Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank inc. space weather (stats_history.html)
+- Added **Doppler add-on additional precomputed fields** in the SSE stream (see API usage at buttom of its UI)
 
 ### Bug Fixes
 - Time (X Axis) on noise floor history page displayed relative rather than absolute times
+- Window Zoom on Spectrogram page alterned frequency (X axis)
 
 ## Version 0.1.49 - Latest Stable
 

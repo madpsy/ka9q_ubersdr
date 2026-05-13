@@ -295,8 +295,10 @@ window.dbfsHistory = dbfsHistory;
 // When in SAM mode, if no audio packets arrive for >2 seconds, fall back to AM.
 // ka9q-radio stops sending RTP packets entirely when the carrier is lost, so we
 // stamp _lastAudioPacketTime on every binary packet and detect the gap here.
+// Both variables are exposed on window for console debugging.
 let _samSilenceWatchdogTimer = null;
 let _lastAudioPacketTime = 0; // Date.now() of last received binary audio packet
+window._lastAudioPacketTime = 0;
 const SAM_SILENCE_FALLBACK_MS = 2000; // 2 seconds of no packets triggers fallback
 
 function _checkSAMSilenceFallback() {
@@ -307,6 +309,7 @@ function _checkSAMSilenceFallback() {
         showNotification('SAM: no signal for 2s — switched to AM', 'info', 3000);
     }
 }
+window._checkSAMSilenceFallback = _checkSAMSilenceFallback;
 
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
@@ -2521,6 +2524,7 @@ function startStatsUpdates() {
     // Start SAM → AM silence watchdog (checks every 500ms)
     if (!_samSilenceWatchdogTimer) {
         _samSilenceWatchdogTimer = setInterval(_checkSAMSilenceFallback, 500);
+        window._samSilenceWatchdogTimer = _samSilenceWatchdogTimer;
     }
 }
 
@@ -2769,6 +2773,7 @@ async function handleBinaryMessage(data) {
 
     // Stamp arrival time for SAM silence watchdog
     _lastAudioPacketTime = Date.now();
+    window._lastAudioPacketTime = _lastAudioPacketTime;
 
     try {
         // Convert Blob to ArrayBuffer if needed

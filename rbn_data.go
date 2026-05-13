@@ -80,7 +80,8 @@ type RBNDataFetcher struct {
 	client          *http.Client
 	stopCh          chan struct{}
 	mu              sync.Mutex
-	lastManualFetch time.Time // guards the once-per-minute manual refresh rate limit
+	lastManualFetch time.Time    // guards the once-per-minute manual refresh rate limit
+	statsLogger     *StatsLogger // may be nil
 }
 
 // NewRBNDataFetcher creates a new fetcher backed by the given store.
@@ -97,15 +98,49 @@ func NewRBNDataFetcher(store *RBNDataStore, cwSkimmerConfig *CWSkimmerConfig) *R
 	}
 }
 
+// SetStatsLogger attaches a StatsLogger so that every successful fetch is
+// persisted to disk and the store can be seeded from disk on startup.
+func (f *RBNDataFetcher) SetStatsLogger(sl *StatsLogger) {
+	f.statsLogger = sl
+}
+
 // Start launches the background fetch loop and returns immediately.
 // The first fetch is delayed by 5 minutes so that a rapid startup/crash loop
 // does not hammer the remote server. After the initial fetch the loop sleeps
 // until 01:00 UTC each day. If either file's comment date is still yesterday
 // (i.e. the remote has not yet published today's data), individual retries are
 // scheduled every 3 hours until both files are current.
+//
+// If a StatsLogger is attached, the in-memory store is seeded from the most
+// recent persisted data before the background goroutine begins.
 func (f *RBNDataFetcher) Start() {
 	log.Println("[RBN] Starting (initial fetch in 5 min, then daily at 01:00 UTC)")
+	if f.statsLogger != nil {
+		f.seedFromDisk()
+	}
 	go f.fetchLoop()
+}
+
+// seedFromDisk loads the most recent RBN skew and statistics snapshots from
+// disk and populates the in-memory store.  Called once at startup.
+func (f *RBNDataFetcher) seedFromDisk() {
+	skewData, skewComment, skewAt := f.statsLogger.LoadLatestRBNSkew()
+	if skewData != nil {
+		f.store.mu.Lock()
+		f.store.skewData = skewData
+		f.store.skewComment = skewComment
+		f.store.skewUpdatedAt = skewAt
+		f.store.mu.Unlock()
+	}
+
+	statsData, statsComment, statsAt := f.statsLogger.LoadLatestRBNStats()
+	if statsData != nil {
+		f.store.mu.Lock()
+		f.store.statsData = statsData
+		f.store.statsComment = statsComment
+		f.store.statsUpdatedAt = statsAt
+		f.store.mu.Unlock()
+	}
 }
 
 // fetchLoop is the background goroutine started by Start.
@@ -276,6 +311,9 @@ func (f *RBNDataFetcher) fetchSkew() {
 	f.store.skewComment = comment
 	f.store.mu.Unlock()
 	log.Printf("[RBN] Skew data updated: %d entries (source comment: %q)", len(entries), comment)
+	if f.statsLogger != nil {
+		f.statsLogger.WriteRBNSkew(entries, comment, now)
+	}
 }
 
 // fetchStatistics fetches and parses statistics.csv, keeping the previous data on failure
@@ -309,6 +347,9 @@ func (f *RBNDataFetcher) fetchStatistics() {
 	f.store.statsComment = comment
 	f.store.mu.Unlock()
 	log.Printf("[RBN] Statistics data updated: %d entries (source comment: %q)", len(entries), comment)
+	if f.statsLogger != nil {
+		f.statsLogger.WriteRBNStats(entries, comment, now)
+	}
 }
 
 // fetchURL performs a GET request and returns the body bytes.

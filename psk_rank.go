@@ -144,6 +144,7 @@ type PSKRankFetcher struct {
 	lastManualFetch time.Time
 	stopCh          chan struct{}
 	client          *http.Client
+	statsLogger     *StatsLogger // may be nil
 }
 
 // NewPSKRankFetcher creates a fetcher.  Call Start() to begin background fetching.
@@ -156,9 +157,24 @@ func NewPSKRankFetcher() *PSKRankFetcher {
 	}
 }
 
+// SetStatsLogger attaches a StatsLogger so that every successful fetch is
+// persisted to disk and the cache can be seeded from disk on startup.
+func (f *PSKRankFetcher) SetStatsLogger(sl *StatsLogger) {
+	f.statsLogger = sl
+}
+
 // Start launches the background fetch loop and returns immediately.
+// If a StatsLogger is attached, the in-memory cache is seeded from the most
+// recent persisted data before the background goroutine begins.
 func (f *PSKRankFetcher) Start() {
 	log.Printf("[PSKRank] Starting (initial fetch in %s, then every %s)", pskRankStartupDelay, pskRankRefreshInterval)
+	if f.statsLogger != nil {
+		if cached := f.statsLogger.LoadLatestPSK(); cached != nil {
+			f.mu.Lock()
+			f.cached = cached
+			f.mu.Unlock()
+		}
+	}
 	go f.fetchLoop()
 }
 
@@ -203,12 +219,16 @@ func (f *PSKRankFetcher) fetchLoop() {
 	}
 }
 
-// runFetch performs a single fetch and stores the result under the write lock.
+// runFetch performs a single fetch, stores the result under the write lock,
+// and persists it to disk via the StatsLogger (if configured).
 func (f *PSKRankFetcher) runFetch() {
 	data := f.fetch()
 	f.mu.Lock()
 	f.cached = data
 	f.mu.Unlock()
+	if f.statsLogger != nil && data != nil && data.Error == "" {
+		f.statsLogger.WritePSK(data)
+	}
 }
 
 // fetch fetches and parses the PSKReporter stats page.

@@ -260,6 +260,7 @@ type WSPRRankFetcher struct {
 	lastManualFetch time.Time // guards the once-per-minute manual refresh rate limit
 	stopCh          chan struct{}
 	client          *http.Client
+	statsLogger     *StatsLogger // may be nil
 }
 
 // NewWSPRRankFetcher creates a fetcher.  Call Start() to begin background fetching.
@@ -272,10 +273,25 @@ func NewWSPRRankFetcher() *WSPRRankFetcher {
 	}
 }
 
+// SetStatsLogger attaches a StatsLogger so that every successful fetch is
+// persisted to disk and the cache can be seeded from disk on startup.
+func (f *WSPRRankFetcher) SetStatsLogger(sl *StatsLogger) {
+	f.statsLogger = sl
+}
+
 // Start launches the background fetch loop and returns immediately.
-// The first fetch is delayed by 5 minutes; subsequent fetches run every hour.
+// If a StatsLogger is attached, the in-memory cache is seeded from the most
+// recent persisted data before the background goroutine begins, so the UI is
+// populated immediately rather than waiting for the 5-minute startup delay.
 func (f *WSPRRankFetcher) Start() {
 	log.Printf("[WSPRRank] Starting (initial fetch in %s, then every %s)", wsprRankStartupDelay, wsprRankRefreshInterval)
+	if f.statsLogger != nil {
+		if cached := f.statsLogger.LoadLatestWSPR(); cached != nil {
+			f.mu.Lock()
+			f.cached = cached
+			f.mu.Unlock()
+		}
+	}
 	go f.fetchLoop()
 }
 
@@ -313,12 +329,16 @@ func (f *WSPRRankFetcher) fetchLoop() {
 	}
 }
 
-// runFetch fetches all three windows and stores the result under the write lock.
+// runFetch fetches all three windows, stores the result under the write lock,
+// and persists it to disk via the StatsLogger (if configured).
 func (f *WSPRRankFetcher) runFetch() {
 	resp := f.fetchAll()
 	f.mu.Lock()
 	f.cached = resp
 	f.mu.Unlock()
+	if f.statsLogger != nil && resp != nil && resp.Rolling24h.Error == "" {
+		f.statsLogger.WriteWSPR(resp)
+	}
 }
 
 // Cached returns the most recently fetched data, or nil if no fetch has

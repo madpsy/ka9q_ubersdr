@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stats History</title>
+    <link rel="stylesheet" href="stats_history.css">
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Stats History</h1>
+        <div class="subtitle" id="receiver-name">WSPR · PSK · RBN Historical Data</div>
+
+        <div style="text-align:center;margin:12px 0;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+            <a href="/" class="nav-link">🎙️ SDR Interface</a>
+            <a href="bandconditions.html" class="nav-link">🌐 Band Conditions</a>
+            <a href="spaceweather_history.html" class="nav-link">☀️ Space Weather</a>
+            <a href="decode_metrics.html" class="nav-link">📈 Decode Metrics</a>
+        </div>
+
+        <!-- Tab bar -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="wspr">📡 WSPR Rank</button>
+            <button class="tab-btn" data-tab="psk">📻 PSK Rank</button>
+            <button class="tab-btn" data-tab="rbn">📶 RBN</button>
+        </div>
+
+        <!-- Shared controls -->
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label>Period</label>
+                    <select id="period-select">
+                        <option value="24h">Last 24 hours</option>
+                        <option value="7d" selected>Last 7 days</option>
+                        <option value="30d">Last 30 days</option>
+                        <option value="custom">Custom range</option>
+                    </select>
+                </div>
+                <div class="control-group hidden" id="custom-dates">
+                    <label>From</label>
+                    <input type="date" id="from-date">
+                </div>
+                <div class="control-group hidden" id="custom-dates-to">
+                    <label>To</label>
+                    <input type="date" id="to-date">
+                </div>
+                <div class="control-group">
+                    <label>Callsign <span class="label-hint">(optional)</span></label>
+                    <input type="text" id="callsign-input" placeholder="e.g. MM3PSY" maxlength="10" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
+                </div>
+                <div class="control-group btn-group">
+                    <button id="load-btn" class="btn-primary">Load Data</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status bar -->
+        <div id="status" class="status-bar">Select a period and click Load Data</div>
+
+        <!-- ── WSPR tab ─────────────────────────────────────────────────── -->
+        <div id="tab-wspr" class="tab-content active">
+            <div class="chart-card" id="wspr-unique-card">
+                <h2>Unique Spots Over Time</h2>
+                <div class="window-tabs">
+                    <button class="win-btn active" data-win="rolling_24h">Rolling 24h</button>
+                    <button class="win-btn" data-win="yesterday">Yesterday</button>
+                    <button class="win-btn" data-win="today">Today</button>
+                </div>
+                <div class="chart-wrap"><canvas id="wspr-unique-chart"></canvas></div>
+            </div>
+            <div class="chart-card" id="wspr-rank-card">
+                <h2>Rank Over Time <span class="callsign-label" id="wspr-rank-label"></span></h2>
+                <div class="window-tabs">
+                    <button class="win-btn active" data-win="rolling_24h">Rolling 24h</button>
+                    <button class="win-btn" data-win="yesterday">Yesterday</button>
+                    <button class="win-btn" data-win="today">Today</button>
+                </div>
+                <div class="chart-wrap"><canvas id="wspr-rank-chart"></canvas></div>
+            </div>
+            <div id="wspr-no-data" class="no-data hidden">No WSPR data found for the selected period.</div>
+        </div>
+
+        <!-- ── PSK tab ──────────────────────────────────────────────────── -->
+        <div id="tab-psk" class="tab-content hidden">
+            <div class="chart-card">
+                <h2>PSK Reports Rank Over Time <span class="callsign-label" id="psk-reports-label"></span></h2>
+                <div class="band-selector" id="psk-band-selector">
+                    <!-- populated dynamically -->
+                </div>
+                <div class="chart-wrap"><canvas id="psk-reports-chart"></canvas></div>
+            </div>
+            <div class="chart-card">
+                <h2>PSK Countries Rank Over Time <span class="callsign-label" id="psk-countries-label"></span></h2>
+                <div class="band-selector" id="psk-countries-band-selector">
+                    <!-- populated dynamically -->
+                </div>
+                <div class="chart-wrap"><canvas id="psk-countries-chart"></canvas></div>
+            </div>
+            <div class="chart-card" id="psk-full-card">
+                <h2>Top Reporters (latest snapshot)</h2>
+                <div class="band-selector" id="psk-full-band-selector">
+                    <!-- populated dynamically -->
+                </div>
+                <div class="chart-wrap"><canvas id="psk-full-chart"></canvas></div>
+            </div>
+            <div id="psk-no-data" class="no-data hidden">No PSK data found for the selected period.</div>
+        </div>
+
+        <!-- ── RBN tab ──────────────────────────────────────────────────── -->
+        <div id="tab-rbn" class="tab-content hidden">
+            <div class="chart-card">
+                <h2>Spot Count Over Time <span class="callsign-label" id="rbn-spots-label"></span></h2>
+                <div class="chart-wrap"><canvas id="rbn-spots-chart"></canvas></div>
+            </div>
+            <div class="chart-card">
+                <h2>Rank Over Time <span class="callsign-label" id="rbn-rank-label"></span></h2>
+                <div class="chart-wrap"><canvas id="rbn-rank-chart"></canvas></div>
+            </div>
+            <div class="chart-card" id="rbn-skew-card">
+                <h2>Frequency Skew (latest snapshot, Hz)</h2>
+                <div class="chart-wrap"><canvas id="rbn-skew-chart"></canvas></div>
+            </div>
+            <div id="rbn-no-data" class="no-data hidden">No RBN data found for the selected period.</div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>
+            <a href="https://ubersdr.org" target="_blank">UberSDR</a> ·
+            <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> ·
+            <a href="/admin.html" target="_blank">Admin</a> ·
+            <a href="/" target="_blank">SDR Interface</a>
+            <span id="footer-version"></span>
+        </p>
+    </footer>
+
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="stats_history.js"></script>
+</body>
+</html>

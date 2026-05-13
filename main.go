@@ -1856,6 +1856,20 @@ func main() {
 	// Initialize RBN data store and fetcher (skew + statistics from sm7iun.se)
 	rbnStore := NewRBNDataStore()
 	rbnFetcher := NewRBNDataFetcher(rbnStore, cwskimmerConfig)
+
+	// Initialize stats logger for WSPR / PSK / RBN fetched-data persistence.
+	// Default directory: <configDir>/stats — always enabled (no config flag needed,
+	// the overhead is negligible: a few KB per day).
+	statsLogDir := *configDir + "/stats"
+	statsLogger, err := NewStatsLogger(statsLogDir, true)
+	if err != nil {
+		log.Printf("[StatsLogger] Failed to initialise (stats will not be persisted): %v", err)
+		statsLogger = nil
+	} else {
+		log.Printf("[StatsLogger] Persisting WSPR/PSK/RBN stats to %s", statsLogDir)
+	}
+
+	rbnFetcher.SetStatsLogger(statsLogger)
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()
 
@@ -1865,9 +1879,11 @@ func main() {
 	addonRouter := NewAddonProxyRouter()
 
 	wsprRankFetcher := NewWSPRRankFetcher()
+	wsprRankFetcher.SetStatsLogger(statsLogger)
 	wsprRankFetcher.Start()
 	defer wsprRankFetcher.Stop()
 	pskRankFetcher := NewPSKRankFetcher()
+	pskRankFetcher.SetStatsLogger(statsLogger)
 	pskRankFetcher.Start()
 	defer pskRankFetcher.Stop()
 	if instanceReporter != nil {
@@ -2113,6 +2129,18 @@ func main() {
 	}))
 	http.HandleFunc("/api/pskreporter/countries", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handlePSKReporterCountries(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
+
+	// Stats history endpoints — public, gzip-compressed, IP-ban checked, rate-limited.
+	// Serve time-series of persisted WSPR/PSK/RBN fetched data.
+	http.HandleFunc("/api/stats/wspr-rank", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleWSPRRankHistory(w, r, statsLogger, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/stats/psk-rank", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handlePSKRankHistory(w, r, statsLogger, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/stats/rbn", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleRBNHistory(w, r, statsLogger, ipBanManager, fftRateLimiter)
 	}))
 
 	// CW Skimmer spots endpoints (with gzip compression, IP ban checking, and rate limiting)

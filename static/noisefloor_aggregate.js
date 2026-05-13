@@ -375,6 +375,9 @@ function setPresetRange(preset) {
     
     handleDateSelection('comparisonFrom', comparisonFrom);
     handleDateSelection('comparisonTo', comparisonTo);
+    
+    // Auto-fetch data after setting preset range
+    fetchData();
 }
 
 function getSelectedBands() {
@@ -904,7 +907,7 @@ function createFieldChart(field, data, request) {
                     type: 'linear',
                     title: {
                         display: true,
-                        text: useTimeOfDayAlignment ? 'Time of Day' : getRelativeTimeLabel(request.interval),
+                        text: useTimeOfDayAlignment ? 'Time of Day' : 'Time',
                         color: '#fff'
                     },
                     min: useTimeOfDayAlignment ? 0 : undefined,
@@ -915,7 +918,13 @@ function createFieldChart(field, data, request) {
                             if (useTimeOfDayAlignment) {
                                 return formatTimeOfDay(value);
                             }
-                            return formatRelativeTime(value, request.interval);
+                            const realTime = new Date(primaryStartTime + value);
+                            return realTime.toLocaleString('en-GB', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
                         }
                     },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
@@ -1382,7 +1391,7 @@ function createFieldChartData(field, data, request, ctx) {
                     type: 'linear',
                     title: {
                         display: true,
-                        text: useTimeOfDayAlignment ? 'Time of Day' : getRelativeTimeLabel(request.interval),
+                        text: useTimeOfDayAlignment ? 'Time of Day' : 'Time',
                         color: '#fff'
                     },
                     min: useTimeOfDayAlignment ? 0 : undefined,
@@ -1393,7 +1402,13 @@ function createFieldChartData(field, data, request, ctx) {
                             if (useTimeOfDayAlignment) {
                                 return formatTimeOfDay(value);
                             }
-                            return formatRelativeTime(value, request.interval);
+                            const realTime = new Date(primaryStartTime + value);
+                            return realTime.toLocaleString('en-GB', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
                         }
                     },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }

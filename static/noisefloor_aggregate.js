@@ -714,7 +714,7 @@ function createFieldChart(field, data, request) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0.4,
+                    tension: 0,
                     borderDash: [] // Solid line for primary
                 });
             }
@@ -745,7 +745,7 @@ function createFieldChart(field, data, request) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0.4,
+                    tension: 0,
                     borderDash: [] // Solid line (different color distinguishes it)
                 });
             }
@@ -775,7 +775,7 @@ function createFieldChart(field, data, request) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0.4,
+                    tension: 0,
                     borderDash: []
                 });
             }
@@ -802,7 +802,7 @@ function createFieldChart(field, data, request) {
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        tension: 0.4,
+                        tension: 0,
                         borderDash: []
                     });
                 }
@@ -1058,7 +1058,7 @@ function toggleDifferenceView(field, data, request, button) {
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        tension: 0.4
+                        tension: 0
                     });
                 }
             }
@@ -1177,7 +1177,7 @@ function createFieldChartData(field, data, request, ctx) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0.4,
+                    tension: 0,
                     borderDash: []
                 });
             }
@@ -1206,7 +1206,7 @@ function createFieldChartData(field, data, request, ctx) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0.4,
+                    tension: 0,
                     borderDash: []
                 });
             }
@@ -1234,7 +1234,7 @@ function createFieldChartData(field, data, request, ctx) {
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHoverRadius: 5,
-                    tension: 0.4,
+                    tension: 0,
                     borderDash: []
                 });
             }
@@ -1260,7 +1260,7 @@ function createFieldChartData(field, data, request, ctx) {
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        tension: 0.4,
+                        tension: 0,
                         borderDash: []
                     });
                 }

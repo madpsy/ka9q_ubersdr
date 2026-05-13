@@ -2801,8 +2801,10 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
 	data := struct {
 		CustomHeadHTML template.HTML
+		CustomBodyHTML template.HTML
 	}{
 		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
+		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

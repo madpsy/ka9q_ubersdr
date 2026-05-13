@@ -992,6 +992,9 @@ func (ah *AdminHandler) handleGetConfig(w http.ResponseWriter, r *http.Request) 
 		if v, exists := server["custom_head_html"]; !exists || v == nil {
 			server["custom_head_html"] = ""
 		}
+		if v, exists := server["custom_body_html"]; !exists || v == nil {
+			server["custom_body_html"] = ""
+		}
 		if v, exists := server["custom_ads_txt"]; !exists || v == nil {
 			server["custom_ads_txt"] = ""
 		}
@@ -1077,6 +1080,9 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	if server, ok := newConfig["server"].(map[string]interface{}); ok {
 		if v, ok := server["custom_head_html"].(string); ok {
 			ah.config.Server.CustomHeadHTML = v
+		}
+		if v, ok := server["custom_body_html"].(string); ok {
+			ah.config.Server.CustomBodyHTML = v
 		}
 		if v, ok := server["custom_ads_txt"].(string); ok {
 			ah.config.Server.CustomAdsTxt = v

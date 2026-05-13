@@ -439,6 +439,21 @@ server:
   #
   custom_head_html: ""
 
+  # Custom HTML injection before </body> in index.html
+  # Use this for visible content that needs the DOM: banners, popups, Google Ads display unit <div>s,
+  # or any script that calls document.getElementById / document.body.appendChild.
+  # Scripts placed here run after the full page DOM is available.
+  # Leave empty (or comment out) to disable.
+  #
+  # Example usage:
+  # custom_body_html: |
+  #   <div id="my-banner" style="position:fixed;bottom:0;left:0;right:0;background:#222;color:#fff;text-align:center;padding:8px;z-index:9999;">
+  #     Welcome to my SDR! <a href="https://example.com" style="color:#4af;">Learn more</a>
+  #     <button onclick="this.parentElement.remove()" style="margin-left:12px;">✕</button>
+  #   </div>
+  #
+  custom_body_html: ""
+
   # Custom ads.txt content for Google AdSense verification
   # This content will be served at /ads.txt endpoint
   # Used for Google AdSense publisher verification and ad network authorization

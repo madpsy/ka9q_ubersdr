@@ -168,6 +168,7 @@ type ServerConfig struct {
 	SessionActivityLogIntervalSec   int                  `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
 	SessionActivityLogRetentionDays int                  `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
 	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
+	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in index.html (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
 	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
 	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)

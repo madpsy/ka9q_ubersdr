@@ -5,6 +5,7 @@ services:
     container_name: ka9q-radio
     privileged: true
     restart: unless-stopped
+    cpu_shares: 2048
 
     # Use external bridge network for multicast communication
     networks:
@@ -50,6 +51,7 @@ services:
     image: madpsy/ka9q_ubersdr:latest
     container_name: ka9q_ubersdr
     restart: unless-stopped
+    cpu_shares: 2048
     init: true  # Enable tini init to reap zombie processes from background watchers
 
     # Wait for ka9q-radio to be healthy before starting
@@ -117,6 +119,7 @@ services:
     image: caddy:latest
     container_name: caddy
     restart: unless-stopped
+    cpu_shares: 1024
     init: true  # Enable tini init to reap zombie processes (fixes defunct ssl_client)
 
     # Wait for ubersdr to be healthy before starting
@@ -172,6 +175,7 @@ services:
     image: madpsy/tunnel-client:latest
     container_name: tunnel-client
     restart: unless-stopped
+    cpu_shares: 1024
 
     # Wait for ubersdr to be healthy before starting
     depends_on:
@@ -210,6 +214,7 @@ services:
     image: madpsy/fluent-bit-ubersdr:latest
     container_name: fluent-bit
     restart: unless-stopped
+    cpu_shares: 512
 
     # DO NOT wait for ubersdr to be healthy before starting
     #depends_on:
@@ -248,6 +253,7 @@ services:
     image: madpsy/ubersdr-gotty:latest
     container_name: ubersdr-gotty
     restart: unless-stopped
+    cpu_shares: 512
 
     networks:
       - sdr-network
@@ -278,6 +284,7 @@ services:
     image: madpsy/ubersdr-multicast:latest
     container_name: multicast-relay
     restart: unless-stopped
+    cpu_shares: 512
 
     # REQUIRED: Host network mode for mDNS bridging and multicast routing
     network_mode: host

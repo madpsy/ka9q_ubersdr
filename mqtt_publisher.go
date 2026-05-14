@@ -30,6 +30,11 @@ type MQTTPublisher struct {
 	cwSkimmerConfig     *CWSkimmerConfig           // may be nil; used for CW Skimmer health publishing
 	cwSkimmerClient     *CWSkimmerClient           // may be nil; used for CW Skimmer health publishing
 
+	// Stored when StartPublisher is called so late-registered setters can
+	// launch their own goroutines after startup.
+	publisherCtx    context.Context
+	publisherConfig *Config
+
 	// Health tracking
 	mu              sync.RWMutex
 	connected       bool // authoritative connection state, set by handlers
@@ -202,25 +207,42 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 
 // SetSessionManager attaches a SessionManager so that frontend status can be
 // published to MQTT every 60 seconds.
+// If StartPublisher has already been called, the goroutine is launched immediately.
 func (mp *MQTTPublisher) SetSessionManager(sm *SessionManager) {
 	mp.sessionManager = sm
+	if mp.publisherCtx != nil {
+		go mp.startFrontendStatusPublisher(mp.publisherCtx)
+	}
 }
 
 // SetFrequencyReferenceMonitor attaches a FrequencyReferenceMonitor so that
 // frequency reference status can be published to MQTT every 60 seconds.
+// If StartPublisher has already been called, the goroutine is launched immediately.
 func (mp *MQTTPublisher) SetFrequencyReferenceMonitor(frm *FrequencyReferenceMonitor) {
 	mp.freqRefMonitor = frm
+	if mp.publisherCtx != nil {
+		go mp.startFrequencyReferencePublisher(mp.publisherCtx)
+	}
 }
 
 // SetCWSkimmer attaches CW Skimmer config and client so that health status
 // can be published to MQTT every 60 seconds.
+// If StartPublisher has already been called, the goroutine is launched immediately.
 func (mp *MQTTPublisher) SetCWSkimmer(cfg *CWSkimmerConfig, client *CWSkimmerClient) {
 	mp.cwSkimmerConfig = cfg
 	mp.cwSkimmerClient = client
+	if mp.publisherCtx != nil {
+		go mp.startCWSkimmerHealthPublisher(mp.publisherCtx)
+	}
 }
 
-// StartPublisher starts the background publishing goroutines
+// StartPublisher starts the background publishing goroutines.
+// It stores ctx and appConfig so that late-registered setters (called after
+// StartPublisher) can launch their own goroutines immediately.
 func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) {
+	mp.publisherCtx = ctx
+	mp.publisherConfig = appConfig
+
 	// Start metrics publisher
 	go mp.startMetricsPublisher(ctx, appConfig)
 
@@ -229,26 +251,14 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 		go mp.startSpectrumPublisher(ctx, appConfig)
 	}
 
-	// Start frontend status publisher if session manager is available
-	if mp.sessionManager != nil {
-		go mp.startFrontendStatusPublisher(ctx)
-	}
-
-	// Start frequency reference publisher if monitor is available
-	if mp.freqRefMonitor != nil {
-		go mp.startFrequencyReferencePublisher(ctx)
-	}
-
 	// System load publisher always runs (reads /proc/loadavg, no external deps)
 	go mp.startSystemLoadPublisher(ctx)
 
 	// NTP health publisher always runs (reads globalNTPState, no external deps)
 	go mp.startNTPHealthPublisher(ctx, appConfig)
 
-	// CW Skimmer health publisher if config is available
-	if mp.cwSkimmerConfig != nil {
-		go mp.startCWSkimmerHealthPublisher(ctx)
-	}
+	// The remaining publishers (frontend status, frequency reference, CW Skimmer)
+	// are started by their respective setters, which are called after StartPublisher.
 }
 
 // startMetricsPublisher publishes aggregate metrics at the configured interval

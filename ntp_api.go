@@ -24,10 +24,9 @@ type NtpHealthStatus struct {
 	Issues      []string `json:"issues"`
 }
 
-// handleNTPHealth serves the NTP time sync health status for the admin monitor.
-func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
-	w.Header().Set("Content-Type", "application/json")
-
+// buildNTPHealthPayload builds the NtpHealthStatus payload from global NTP state.
+// This is the same data returned by GET /admin/ntp-health and published to MQTT.
+func buildNTPHealthPayload(cfg *Config) NtpHealthStatus {
 	toleranceMs := cfg.NTP.SyncToleranceMs
 	if toleranceMs <= 0 {
 		toleranceMs = 500
@@ -42,25 +41,23 @@ func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
 
 	if result == nil {
 		issues = append(issues, "NTP check has not completed yet")
-		json.NewEncoder(w).Encode(NtpHealthStatus{
+		return NtpHealthStatus{
 			Healthy:     false,
 			NTPServer:   cfg.NTP.ntpServer(),
 			ToleranceMs: toleranceMs,
 			Issues:      issues,
-		})
-		return
+		}
 	}
 
 	if result.Error != "" {
 		issues = append(issues, "NTP query failed: "+result.Error)
-		json.NewEncoder(w).Encode(NtpHealthStatus{
+		return NtpHealthStatus{
 			Healthy:     false,
 			LastPoll:    result.LastPoll,
 			NTPServer:   cfg.NTP.ntpServer(),
 			ToleranceMs: toleranceMs,
 			Issues:      issues,
-		})
-		return
+		}
 	}
 
 	// Check for stale data (more than 3× poll interval)
@@ -77,7 +74,7 @@ func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
 
 	healthy := len(issues) == 0
 
-	json.NewEncoder(w).Encode(NtpHealthStatus{
+	return NtpHealthStatus{
 		Healthy:     healthy,
 		Synced:      result.Synced,
 		OffsetMs:    result.OffsetMs,
@@ -89,7 +86,13 @@ func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		NTPServer:   cfg.NTP.ntpServer(),
 		ToleranceMs: toleranceMs,
 		Issues:      issues,
-	})
+	}
+}
+
+// handleNTPHealth serves the NTP time sync health status for the admin monitor.
+func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(buildNTPHealthPayload(cfg))
 }
 
 // formatOffsetMs formats a float64 millisecond value to 2 decimal places as a string.

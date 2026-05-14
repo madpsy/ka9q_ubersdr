@@ -25,6 +25,10 @@ type MQTTPublisher struct {
 	metrics             *PrometheusMetrics
 	noiseFloorMonitor   *NoiseFloorMonitor
 	spaceWeatherMonitor *SpaceWeatherMonitor
+	sessionManager      *SessionManager            // may be nil; used for frontend status publishing
+	freqRefMonitor      *FrequencyReferenceMonitor // may be nil; used for frequency reference publishing
+	cwSkimmerConfig     *CWSkimmerConfig           // may be nil; used for CW Skimmer health publishing
+	cwSkimmerClient     *CWSkimmerClient           // may be nil; used for CW Skimmer health publishing
 
 	// Health tracking
 	mu              sync.RWMutex
@@ -196,6 +200,25 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 	return publisher, nil
 }
 
+// SetSessionManager attaches a SessionManager so that frontend status can be
+// published to MQTT every 60 seconds.
+func (mp *MQTTPublisher) SetSessionManager(sm *SessionManager) {
+	mp.sessionManager = sm
+}
+
+// SetFrequencyReferenceMonitor attaches a FrequencyReferenceMonitor so that
+// frequency reference status can be published to MQTT every 60 seconds.
+func (mp *MQTTPublisher) SetFrequencyReferenceMonitor(frm *FrequencyReferenceMonitor) {
+	mp.freqRefMonitor = frm
+}
+
+// SetCWSkimmer attaches CW Skimmer config and client so that health status
+// can be published to MQTT every 60 seconds.
+func (mp *MQTTPublisher) SetCWSkimmer(cfg *CWSkimmerConfig, client *CWSkimmerClient) {
+	mp.cwSkimmerConfig = cfg
+	mp.cwSkimmerClient = client
+}
+
 // StartPublisher starts the background publishing goroutines
 func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) {
 	// Start metrics publisher
@@ -204,6 +227,27 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 	// Start spectrum publisher if enabled
 	if mp.config.SpectrumPublishEnabled && mp.noiseFloorMonitor != nil {
 		go mp.startSpectrumPublisher(ctx, appConfig)
+	}
+
+	// Start frontend status publisher if session manager is available
+	if mp.sessionManager != nil {
+		go mp.startFrontendStatusPublisher(ctx)
+	}
+
+	// Start frequency reference publisher if monitor is available
+	if mp.freqRefMonitor != nil {
+		go mp.startFrequencyReferencePublisher(ctx)
+	}
+
+	// System load publisher always runs (reads /proc/loadavg, no external deps)
+	go mp.startSystemLoadPublisher(ctx)
+
+	// NTP health publisher always runs (reads globalNTPState, no external deps)
+	go mp.startNTPHealthPublisher(ctx, appConfig)
+
+	// CW Skimmer health publisher if config is available
+	if mp.cwSkimmerConfig != nil {
+		go mp.startCWSkimmerHealthPublisher(ctx)
 	}
 }
 
@@ -934,6 +978,414 @@ func (mp *MQTTPublisher) publishCWSkimmerMetrics(metrics map[string]map[string]i
 
 		mp.publish(topic, payload)
 	}
+}
+
+// startFrontendStatusPublisher publishes SDR frontend status every 60 seconds.
+// It looks up the wideband spectrum session SSRC, fetches the FrontendStatus,
+// builds the same payload as HandleFrontendStatus, and publishes it.
+// Topic: {prefix}/frontend_status
+func (mp *MQTTPublisher) startFrontendStatusPublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Frontend status publisher started (60s interval)")
+
+	// Publish immediately on start
+	mp.publishFrontendStatusOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Frontend status publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishFrontendStatusOnce()
+		}
+	}
+}
+
+// publishFrontendStatusOnce performs a single frontend status publish.
+func (mp *MQTTPublisher) publishFrontendStatusOnce() {
+	if !mp.isConnected() {
+		return
+	}
+
+	sm := mp.sessionManager
+	if sm == nil {
+		return
+	}
+
+	// Find the wideband spectrum session SSRC
+	sm.mu.RLock()
+	var widebandSSRC uint32
+	found := false
+	for id, session := range sm.sessions {
+		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
+			widebandSSRC = session.SSRC
+			found = true
+			break
+		}
+	}
+	sm.mu.RUnlock()
+
+	if !found {
+		return
+	}
+
+	frontendStatus := sm.radiod.GetFrontendStatus(widebandSSRC)
+	if frontendStatus == nil {
+		return
+	}
+
+	payload := buildFrontendStatusPayload(frontendStatus)
+
+	topic := fmt.Sprintf("%s/frontend_status", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal frontend status payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish frontend status to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startCWSkimmerHealthPublisher publishes CW Skimmer health status every 60 seconds.
+// The payload is identical to what GET /admin/cwskimmer-health returns.
+// Topic: {prefix}/cwskimmer_health
+func (mp *MQTTPublisher) startCWSkimmerHealthPublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: CW Skimmer health publisher started (60s interval)")
+
+	mp.publishCWSkimmerHealthOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: CW Skimmer health publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishCWSkimmerHealthOnce()
+		}
+	}
+}
+
+// publishCWSkimmerHealthOnce performs a single CW Skimmer health publish.
+func (mp *MQTTPublisher) publishCWSkimmerHealthOnce() {
+	if !mp.isConnected() {
+		return
+	}
+
+	payload := buildCWSkimmerHealthPayload(mp.cwSkimmerConfig, mp.cwSkimmerClient)
+
+	topic := fmt.Sprintf("%s/cwskimmer_health", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal CW Skimmer health payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish CW Skimmer health to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startNTPHealthPublisher publishes NTP health status every 60 seconds.
+// The payload is identical to what GET /admin/ntp-health returns.
+// Topic: {prefix}/ntp_health
+func (mp *MQTTPublisher) startNTPHealthPublisher(ctx context.Context, cfg *Config) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: NTP health publisher started (60s interval)")
+
+	// Publish immediately on start
+	mp.publishNTPHealthOnce(cfg)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: NTP health publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishNTPHealthOnce(cfg)
+		}
+	}
+}
+
+// publishNTPHealthOnce performs a single NTP health publish.
+func (mp *MQTTPublisher) publishNTPHealthOnce(cfg *Config) {
+	if !mp.isConnected() {
+		return
+	}
+
+	payload := buildNTPHealthPayload(cfg)
+
+	topic := fmt.Sprintf("%s/ntp_health", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal NTP health payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish NTP health to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startSystemLoadPublisher publishes system load averages every 60 seconds.
+// The payload is identical to what GET /admin/system-load returns.
+// Topic: {prefix}/system_load
+func (mp *MQTTPublisher) startSystemLoadPublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: System load publisher started (60s interval)")
+
+	// Publish immediately on start
+	mp.publishSystemLoadOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: System load publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishSystemLoadOnce()
+		}
+	}
+}
+
+// publishSystemLoadOnce performs a single system load publish.
+func (mp *MQTTPublisher) publishSystemLoadOnce() {
+	if !mp.isConnected() {
+		return
+	}
+
+	payload := getSystemLoad()
+
+	topic := fmt.Sprintf("%s/system_load", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal system load payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish system load to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startFrequencyReferencePublisher publishes frequency reference status every 60 seconds.
+// The payload is identical to what GET /api/frequency-reference returns: frm.GetStatus().
+// Topic: {prefix}/frequency_reference
+func (mp *MQTTPublisher) startFrequencyReferencePublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Frequency reference publisher started (60s interval)")
+
+	// Publish immediately on start
+	mp.publishFrequencyReferenceOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Frequency reference publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishFrequencyReferenceOnce()
+		}
+	}
+}
+
+// publishFrequencyReferenceOnce performs a single frequency reference status publish.
+func (mp *MQTTPublisher) publishFrequencyReferenceOnce() {
+	if !mp.isConnected() {
+		return
+	}
+
+	frm := mp.freqRefMonitor
+	if frm == nil {
+		return
+	}
+
+	status := frm.GetStatus()
+
+	topic := fmt.Sprintf("%s/frequency_reference", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(status)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal frequency reference payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish frequency reference to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// PublishWSPRRank publishes a WSPRRankResponse to MQTT.
+// The payload is the same JSON that is written to disk by StatsLogger.WriteWSPR.
+// Topic: {prefix}/stats/wspr_rank
+func (mp *MQTTPublisher) PublishWSPRRank(resp *WSPRRankResponse) {
+	if mp == nil || !mp.isConnected() || resp == nil {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/stats/wspr_rank", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal WSPR rank payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish WSPR rank to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// PublishPSKRank publishes a PSKRankData to MQTT.
+// The payload is the same JSON that is written to disk by StatsLogger.WritePSK.
+// Topic: {prefix}/stats/psk_rank
+func (mp *MQTTPublisher) PublishPSKRank(data *PSKRankData) {
+	if mp == nil || !mp.isConnected() || data == nil {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/stats/psk_rank", mp.config.TopicPrefix)
+
+	payload, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal PSK rank payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, payload)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish PSK rank to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// PublishRBNSkew publishes an RBN skew snapshot to MQTT.
+// The payload is the same JSON that is written to disk by StatsLogger.WriteRBNSkew.
+// Topic: {prefix}/stats/rbn_skew
+func (mp *MQTTPublisher) PublishRBNSkew(rec rbnSkewRecord) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/stats/rbn_skew", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(rec)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal RBN skew payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish RBN skew to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// PublishRBNStats publishes an RBN statistics snapshot to MQTT.
+// The payload is the same JSON that is written to disk by StatsLogger.WriteRBNStats.
+// Topic: {prefix}/stats/rbn_statistics
+func (mp *MQTTPublisher) PublishRBNStats(rec rbnStatsRecord) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/stats/rbn_statistics", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(rec)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal RBN statistics payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish RBN statistics to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
 }
 
 // Disconnect gracefully disconnects from the MQTT broker

@@ -144,7 +144,8 @@ type PSKRankFetcher struct {
 	lastManualFetch time.Time
 	stopCh          chan struct{}
 	client          *http.Client
-	statsLogger     *StatsLogger // may be nil
+	statsLogger     *StatsLogger   // may be nil
+	mqttPublisher   *MQTTPublisher // may be nil
 }
 
 // NewPSKRankFetcher creates a fetcher.  Call Start() to begin background fetching.
@@ -161,6 +162,12 @@ func NewPSKRankFetcher() *PSKRankFetcher {
 // persisted to disk and the cache can be seeded from disk on startup.
 func (f *PSKRankFetcher) SetStatsLogger(sl *StatsLogger) {
 	f.statsLogger = sl
+}
+
+// SetMQTTPublisher attaches an MQTTPublisher so that every successful fetch
+// is also published to MQTT.
+func (f *PSKRankFetcher) SetMQTTPublisher(mp *MQTTPublisher) {
+	f.mqttPublisher = mp
 }
 
 // Start launches the background fetch loop and returns immediately.
@@ -226,8 +233,13 @@ func (f *PSKRankFetcher) runFetch() {
 	f.mu.Lock()
 	f.cached = data
 	f.mu.Unlock()
-	if f.statsLogger != nil && data != nil && data.Error == "" {
-		f.statsLogger.WritePSK(data)
+	if data != nil && data.Error == "" {
+		if f.statsLogger != nil {
+			f.statsLogger.WritePSK(data)
+		}
+		if f.mqttPublisher != nil {
+			go f.mqttPublisher.PublishPSKRank(data)
+		}
 	}
 }
 

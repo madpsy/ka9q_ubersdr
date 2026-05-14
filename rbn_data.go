@@ -80,8 +80,9 @@ type RBNDataFetcher struct {
 	client          *http.Client
 	stopCh          chan struct{}
 	mu              sync.Mutex
-	lastManualFetch time.Time    // guards the once-per-minute manual refresh rate limit
-	statsLogger     *StatsLogger // may be nil
+	lastManualFetch time.Time      // guards the once-per-minute manual refresh rate limit
+	statsLogger     *StatsLogger   // may be nil
+	mqttPublisher   *MQTTPublisher // may be nil
 }
 
 // NewRBNDataFetcher creates a new fetcher backed by the given store.
@@ -102,6 +103,12 @@ func NewRBNDataFetcher(store *RBNDataStore, cwSkimmerConfig *CWSkimmerConfig) *R
 // persisted to disk and the store can be seeded from disk on startup.
 func (f *RBNDataFetcher) SetStatsLogger(sl *StatsLogger) {
 	f.statsLogger = sl
+}
+
+// SetMQTTPublisher attaches an MQTTPublisher so that every successful fetch
+// is also published to MQTT.
+func (f *RBNDataFetcher) SetMQTTPublisher(mp *MQTTPublisher) {
+	f.mqttPublisher = mp
 }
 
 // Start launches the background fetch loop and returns immediately.
@@ -314,6 +321,17 @@ func (f *RBNDataFetcher) fetchSkew() {
 	if f.statsLogger != nil {
 		f.statsLogger.WriteRBNSkew(entries, comment, now)
 	}
+	if f.mqttPublisher != nil {
+		slice := make([]RBNSkewEntry, 0, len(entries))
+		for _, e := range entries {
+			slice = append(slice, e)
+		}
+		go f.mqttPublisher.PublishRBNSkew(rbnSkewRecord{
+			FetchedAt:     now,
+			SourceComment: comment,
+			Entries:       slice,
+		})
+	}
 }
 
 // fetchStatistics fetches and parses statistics.csv, keeping the previous data on failure
@@ -349,6 +367,17 @@ func (f *RBNDataFetcher) fetchStatistics() {
 	log.Printf("[RBN] Statistics data updated: %d entries (source comment: %q)", len(entries), comment)
 	if f.statsLogger != nil {
 		f.statsLogger.WriteRBNStats(entries, comment, now)
+	}
+	if f.mqttPublisher != nil {
+		slice := make([]RBNStatisticsEntry, 0, len(entries))
+		for _, e := range entries {
+			slice = append(slice, e)
+		}
+		go f.mqttPublisher.PublishRBNStats(rbnStatsRecord{
+			FetchedAt:     now,
+			SourceComment: comment,
+			Entries:       slice,
+		})
 	}
 }
 

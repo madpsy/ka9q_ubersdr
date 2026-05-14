@@ -260,7 +260,8 @@ type WSPRRankFetcher struct {
 	lastManualFetch time.Time // guards the once-per-minute manual refresh rate limit
 	stopCh          chan struct{}
 	client          *http.Client
-	statsLogger     *StatsLogger // may be nil
+	statsLogger     *StatsLogger   // may be nil
+	mqttPublisher   *MQTTPublisher // may be nil
 }
 
 // NewWSPRRankFetcher creates a fetcher.  Call Start() to begin background fetching.
@@ -277,6 +278,12 @@ func NewWSPRRankFetcher() *WSPRRankFetcher {
 // persisted to disk and the cache can be seeded from disk on startup.
 func (f *WSPRRankFetcher) SetStatsLogger(sl *StatsLogger) {
 	f.statsLogger = sl
+}
+
+// SetMQTTPublisher attaches an MQTTPublisher so that every successful fetch
+// is also published to MQTT.
+func (f *WSPRRankFetcher) SetMQTTPublisher(mp *MQTTPublisher) {
+	f.mqttPublisher = mp
 }
 
 // Start launches the background fetch loop and returns immediately.
@@ -336,8 +343,13 @@ func (f *WSPRRankFetcher) runFetch() {
 	f.mu.Lock()
 	f.cached = resp
 	f.mu.Unlock()
-	if f.statsLogger != nil && resp != nil && resp.Rolling24h.Error == "" {
-		f.statsLogger.WriteWSPR(resp)
+	if resp != nil && resp.Rolling24h.Error == "" {
+		if f.statsLogger != nil {
+			f.statsLogger.WriteWSPR(resp)
+		}
+		if f.mqttPublisher != nil {
+			go f.mqttPublisher.PublishWSPRRank(resp)
+		}
 	}
 }
 

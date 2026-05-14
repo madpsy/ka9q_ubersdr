@@ -1870,6 +1870,16 @@ func main() {
 	}
 
 	rbnFetcher.SetStatsLogger(statsLogger)
+	if prometheusMetrics.mqttPublisher != nil {
+		rbnFetcher.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
+		prometheusMetrics.mqttPublisher.SetSessionManager(sessions)
+		if freqRefMonitor != nil {
+			prometheusMetrics.mqttPublisher.SetFrequencyReferenceMonitor(freqRefMonitor)
+		}
+		if cwskimmerConfig != nil {
+			prometheusMetrics.mqttPublisher.SetCWSkimmer(cwskimmerConfig, cwSkimmer)
+		}
+	}
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()
 
@@ -1880,10 +1890,16 @@ func main() {
 
 	wsprRankFetcher := NewWSPRRankFetcher()
 	wsprRankFetcher.SetStatsLogger(statsLogger)
+	if prometheusMetrics.mqttPublisher != nil {
+		wsprRankFetcher.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
+	}
 	wsprRankFetcher.Start()
 	defer wsprRankFetcher.Stop()
 	pskRankFetcher := NewPSKRankFetcher()
 	pskRankFetcher.SetStatsLogger(statsLogger)
+	if prometheusMetrics.mqttPublisher != nil {
+		pskRankFetcher.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
+	}
 	pskRankFetcher.Start()
 	defer pskRankFetcher.Stop()
 	if instanceReporter != nil {

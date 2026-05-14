@@ -2410,40 +2410,9 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleFrontendStatus returns the SDR frontend status from the wideband spectrum channel
-func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-
-	// Find the wideband spectrum session (pattern: "noisefloor-wideband-XXXXXXXX")
-	ah.sessions.mu.RLock()
-	var widebandSSRC uint32
-	found := false
-	for id, session := range ah.sessions.sessions {
-		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
-			widebandSSRC = session.SSRC
-			found = true
-			break
-		}
-	}
-	ah.sessions.mu.RUnlock()
-
-	if !found {
-		http.Error(w, "Wideband spectrum channel not found", http.StatusNotFound)
-		return
-	}
-
-	// Get frontend status for the wideband channel
-	frontendStatus := ah.sessions.radiod.GetFrontendStatus(widebandSSRC)
-	if frontendStatus == nil {
-		http.Error(w, "Frontend status not available", http.StatusServiceUnavailable)
-		return
-	}
-
+// buildFrontendStatusPayload converts a FrontendStatus into the JSON-serialisable
+// map that is returned by HandleFrontendStatus and published to MQTT.
+func buildFrontendStatusPayload(frontendStatus *FrontendStatus) map[string]interface{} {
 	// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
 	sanitizeFloat := func(f float32) interface{} {
 		if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
@@ -2479,17 +2448,12 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Calculate overrange ratio as "seconds worth of overranges"
-	// This represents how many seconds it would take to accumulate this many overranges
-	// if every sample overranged continuously. It's a cumulative metric, not a rate.
 	var overrangeSeconds float64
 	if frontendStatus.InputSamprate > 0 {
 		overrangeSeconds = float64(frontendStatus.ADOverranges) / float64(frontendStatus.InputSamprate)
 	}
 
 	// A/D overranges are informational only - they don't affect health status.
-	// The cumulative count (ad_overranges) increases over the lifetime of radiod
-	// and doesn't indicate current overload conditions without additional context.
-	// Use samples_since_over and time_since_overrange for recent overrange detection.
 	healthy := true
 	status := "ok"
 	issues := []string{}
@@ -2516,20 +2480,16 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Calculate input power in dBm (same logic as control.c line 1413-1414)
-	// Input dBm = IF Power (dBFS) - (RF Gain - RF Atten + RF Level Cal)
-	// Note: IF Power is already in dBFS (dB), not linear, so we don't need power2dB conversion
 	var inputPowerDBm interface{}
 	if frontendStatus.IFPower > -200 && !math.IsNaN(float64(frontendStatus.IFPower)) && !math.IsInf(float64(frontendStatus.IFPower), 0) {
-		// IF power is already in dBFS, just subtract the net RF gain
 		netRFGain := float64(frontendStatus.RFGain - frontendStatus.RFAtten + frontendStatus.RFLevelCal)
 		dbmValue := float64(frontendStatus.IFPower) - netRFGain
-		// Sanitize the result
 		if !math.IsNaN(dbmValue) && !math.IsInf(dbmValue, 0) {
 			inputPowerDBm = dbmValue
 		}
 	}
 
-	response := map[string]interface{}{
+	return map[string]interface{}{
 		"lna_gain":             frontendStatus.LNAGain,
 		"mixer_gain":           frontendStatus.MixerGain,
 		"if_gain":              frontendStatus.IFGain,
@@ -2558,6 +2518,43 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		"status":               status,
 		"issues":               issues,
 	}
+}
+
+// HandleFrontendStatus returns the SDR frontend status from the wideband spectrum channel
+func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Find the wideband spectrum session (pattern: "noisefloor-wideband-XXXXXXXX")
+	ah.sessions.mu.RLock()
+	var widebandSSRC uint32
+	found := false
+	for id, session := range ah.sessions.sessions {
+		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
+			widebandSSRC = session.SSRC
+			found = true
+			break
+		}
+	}
+	ah.sessions.mu.RUnlock()
+
+	if !found {
+		http.Error(w, "Wideband spectrum channel not found", http.StatusNotFound)
+		return
+	}
+
+	// Get frontend status for the wideband channel
+	frontendStatus := ah.sessions.radiod.GetFrontendStatus(widebandSSRC)
+	if frontendStatus == nil {
+		http.Error(w, "Frontend status not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	response := buildFrontendStatusPayload(frontendStatus)
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -4658,61 +4655,40 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// HandleCWSkimmerHealth serves the health status of the CW Skimmer client
-// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
-func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// Build health status response
+// buildCWSkimmerHealthPayload builds the CW Skimmer health status map.
+// This is the same data returned by GET /admin/cwskimmer-health and published to MQTT.
+func buildCWSkimmerHealthPayload(cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient) map[string]interface{} {
 	status := map[string]interface{}{
-		"enabled": ah.cwSkimmerConfig.Enabled,
+		"enabled": cwSkimmerConfig.Enabled,
 		"healthy": false,
 		"issues":  []string{},
 	}
 
-	// If not enabled, return early
-	if !ah.cwSkimmerConfig.Enabled {
+	if !cwSkimmerConfig.Enabled {
 		status["issues"] = []string{"CW Skimmer is not enabled"}
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(status); err != nil {
-			log.Printf("Error encoding CW Skimmer health status: %v", err)
-		}
-		return
+		return status
 	}
 
-	// Check if client exists
-	if ah.cwSkimmerClient == nil {
+	if cwSkimmerClient == nil {
 		status["issues"] = []string{"CW Skimmer client not initialized"}
-		w.WriteHeader(http.StatusServiceUnavailable)
-		if err := json.NewEncoder(w).Encode(status); err != nil {
-			log.Printf("Error encoding CW Skimmer health status: %v", err)
-		}
-		return
+		return status
 	}
 
-	// Get connection status
-	connected := ah.cwSkimmerClient.IsConnected()
+	connected := cwSkimmerClient.IsConnected()
 	status["connected"] = connected
 
-	// Get last spot time (actual CW spots, not just ping/pong)
-	ah.cwSkimmerClient.mu.RLock()
-	lastSpot := ah.cwSkimmerClient.lastSpotTime
-	lastActivity := ah.cwSkimmerClient.lastActivityTime
-	ah.cwSkimmerClient.mu.RUnlock()
+	cwSkimmerClient.mu.RLock()
+	lastSpot := cwSkimmerClient.lastSpotTime
+	lastActivity := cwSkimmerClient.lastActivityTime
+	cwSkimmerClient.mu.RUnlock()
 
-	// Report last spot time (actual CW activity)
 	if !lastSpot.IsZero() {
 		status["last_spot"] = lastSpot.Format(time.RFC3339)
 		timeSinceSpot := time.Since(lastSpot)
 		status["seconds_since_spot"] = int(timeSinceSpot.Seconds())
-
-		// Format time since last spot in human-readable format
 		status["time_since_spot"] = formatDuration(timeSinceSpot)
-
-		// Consider recent if spot within last 5 minutes
 		recentSpots := timeSinceSpot <= 5*time.Minute
 		status["recent_spots"] = recentSpots
-
 		if !recentSpots {
 			status["issues"] = append(status["issues"].([]string),
 				fmt.Sprintf("No CW spots for %d seconds", int(timeSinceSpot.Seconds())))
@@ -4727,7 +4703,6 @@ func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// Also report last activity time (includes ping/pong for connection health)
 	if !lastActivity.IsZero() {
 		status["last_activity"] = lastActivity.Format(time.RFC3339)
 		status["seconds_since_activity"] = int(time.Since(lastActivity).Seconds())
@@ -4736,19 +4711,32 @@ func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Req
 		status["seconds_since_activity"] = nil
 	}
 
-	// Check connection status
 	if !connected {
 		status["issues"] = append(status["issues"].([]string), "Not connected to CW Skimmer server")
 	}
 
-	// Determine overall health
 	issues := status["issues"].([]string)
-	if len(issues) == 0 {
-		status["healthy"] = true
-		w.WriteHeader(http.StatusOK)
+	status["healthy"] = len(issues) == 0
+
+	return status
+}
+
+// HandleCWSkimmerHealth serves the health status of the CW Skimmer client
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	status := buildCWSkimmerHealthPayload(ah.cwSkimmerConfig, ah.cwSkimmerClient)
+
+	if healthy, ok := status["healthy"].(bool); ok && !healthy {
+		// Only use 503 when the client is missing (not just unhealthy metrics)
+		if _, clientMissing := status["connected"]; !clientMissing && ah.cwSkimmerConfig.Enabled {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
 	} else {
-		status["healthy"] = false
-		w.WriteHeader(http.StatusServiceUnavailable)
+		w.WriteHeader(http.StatusOK)
 	}
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {

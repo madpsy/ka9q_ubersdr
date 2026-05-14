@@ -651,6 +651,40 @@
             gap: 0;
             margin-top: 8px;
         }
+        /* ── Inline textarea with line-number gutter ── */
+        .cm-lined-wrapper {
+            display: flex;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .cm-line-numbers {
+            background: #f5f5f5;
+            color: #aaa;
+            text-align: right;
+            padding: 8px 6px 8px 8px;
+            user-select: none;
+            white-space: pre;
+            border-right: 1px solid #e0e0e0;
+            min-width: 36px;
+            overflow: hidden;
+        }
+        .cm-lined-wrapper textarea {
+            flex: 1;
+            border: none !important;
+            border-radius: 0 !important;
+            outline: none;
+            resize: vertical;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -4038,15 +4072,36 @@
                     } else if (typeof value === 'string' && (key === 'custom_head_html' || key === 'custom_body_html' || key === 'custom_ads_txt' || value.includes('\n') || value.length > 100)) {
                         // Use textarea for multiline strings or long strings
                         input = document.createElement('textarea');
-                        input.style.width = '100%';
                         input.style.minHeight = (key === 'custom_head_html' || key === 'custom_body_html') ? '200px' : (key === 'custom_ads_txt' ? '150px' : '80px');
                         input.style.fontFamily = 'monospace';
                         input.style.fontSize = '13px';
+                        input.style.lineHeight = '1.5';
                         input.style.padding = '8px';
-                        input.style.border = '1px solid #ddd';
-                        input.style.borderRadius = '5px';
                         input.style.resize = 'vertical';
                         input.value = value;
+
+                        // For the two HTML fields, wrap in a line-number gutter container
+                        if (key === 'custom_head_html' || key === 'custom_body_html') {
+                            const wrapper = document.createElement('div');
+                            wrapper.className = 'cm-lined-wrapper';
+
+                            const gutterEl = document.createElement('div');
+                            gutterEl.className = 'cm-line-numbers';
+
+                            function updateGutter() {
+                                const lines = input.value.split('\n').length;
+                                gutterEl.textContent = Array.from({length: lines}, (_, i) => i + 1).join('\n');
+                                // Keep gutter height in sync with textarea scroll height
+                                gutterEl.style.minHeight = input.style.minHeight;
+                            }
+                            updateGutter();
+                            input.addEventListener('input', updateGutter);
+                            input.addEventListener('scroll', () => { gutterEl.scrollTop = input.scrollTop; });
+
+                            wrapper.appendChild(gutterEl);
+                            wrapper.appendChild(input);
+                            field.appendChild(wrapper);
+                        }
 
                         if (key === 'custom_head_html') {
                             const hint = document.createElement('small');
@@ -4062,7 +4117,7 @@
                             headBtnRow.className = 'cm-field-btn-row';
                             const headEditBtn = document.createElement('button');
                             headEditBtn.type = 'button';
-                            headEditBtn.textContent = '✏️ Edit in Editor';
+                            headEditBtn.textContent = '✏️ Open in Editor';
                             headEditBtn.className = 'btn-open-cm-editor';
                             headEditBtn.onclick = () => openCmEditorModal(input, fullPath, 'Custom Head HTML');
                             headBtnRow.appendChild(headEditBtn);
@@ -4178,7 +4233,7 @@
                             // Edit in Editor button — far right
                             const bodyEditBtn = document.createElement('button');
                             bodyEditBtn.type = 'button';
-                            bodyEditBtn.textContent = '✏️ Edit in Editor';
+                            bodyEditBtn.textContent = '✏️ Open in Editor';
                             bodyEditBtn.className = 'btn-open-cm-editor';
                             bodyEditBtn.style.marginTop = '8px';
                             bodyEditBtn.onclick = () => openCmEditorModal(input, fullPath, 'Custom Body HTML');
@@ -4224,7 +4279,10 @@
 
                     input.dataset.path = fullPath;
                     input.addEventListener('change', (e) => updateConfigValue(e.target.dataset.path, e.target.value));
-                    field.appendChild(input);
+                    // custom_head_html and custom_body_html are already appended inside cm-lined-wrapper
+                    if (key !== 'custom_head_html' && key !== 'custom_body_html') {
+                        field.appendChild(input);
+                    }
 
                     container.appendChild(field);
                 }
@@ -23262,7 +23320,8 @@ Referer: ${log.referer}`;
             <div class="cm-modal-body" id="cm-modal-body"></div>
             <div class="cm-modal-footer">
                 <button class="btn-cm-cancel" onclick="closeCmEditorModal()">Close without saving</button>
-                <button class="btn-cm-save" onclick="saveCmEditorModal()">💾 Save Configuration</button>
+                <button class="btn-cm-save" onclick="saveCmEditorModal(false)">💾 Save</button>
+                <button class="btn-cm-save" onclick="saveCmEditorModal(true)">💾 Save &amp; Close</button>
             </div>
         </div>
     </div>
@@ -23314,7 +23373,7 @@ Referer: ${log.referer}`;
         _cmTargetPath     = null;
     }
 
-    async function saveCmEditorModal() {
+    async function saveCmEditorModal(andClose = true) {
         if (!_cmEditorInstance || !_cmTargetInput || !_cmTargetPath) return;
 
         // Flush editor value into currentConfig
@@ -23323,11 +23382,13 @@ Referer: ${log.referer}`;
         _cmTargetInput.dispatchEvent(new Event('change'));
         updateConfigValue(_cmTargetPath, newVal);
 
-        // Close modal first so the save feedback is visible on the main page
-        document.getElementById('cm-editor-modal').classList.remove('open');
-        _cmEditorInstance = null;
-        _cmTargetInput    = null;
-        _cmTargetPath     = null;
+        if (andClose) {
+            // Close modal so the save feedback is visible on the main page
+            document.getElementById('cm-editor-modal').classList.remove('open');
+            _cmEditorInstance = null;
+            _cmTargetInput    = null;
+            _cmTargetPath     = null;
+        }
 
         // Trigger the same save as the "Save Configuration" button
         await saveConfig();

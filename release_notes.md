@@ -11,6 +11,7 @@
 ### Bug Fixes
 - Time (X Axis) on noise floor history page displayed relative rather than absolute times
 - Window Zoom on Spectrogram page alterned frequency (X axis)
+- Various data sources missing from MQTT (frontend status, frequency reference, voice actibity to name a few)
 
 ## Version 0.1.49 - Latest Stable
 

@@ -531,6 +531,7 @@
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="jszip.min.js"></script>
+    <script src="codemirror-bundle.min.js"></script>
     <script src="suncalc.js"></script>
     <script src="maidenhead.js"></script>
     <script src="radiod_config_analyzer.js"></script>
@@ -539,6 +540,118 @@
     <script src="d3-geo.v3.min.js"></script>
     <script src="topojson.v3.min.js"></script>
     <script src="rotator-display.js"></script>
+    <style>
+        /* ── CodeMirror HTML Editor Modal ─────────────────────────── */
+        #cm-editor-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            background: rgba(0,0,0,0.55);
+            align-items: center;
+            justify-content: center;
+        }
+        #cm-editor-modal.open {
+            display: flex;
+        }
+        #cm-editor-modal .cm-modal-box {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+            width: 90vw;
+            max-width: 1100px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #cm-editor-modal .cm-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border-radius: 10px 10px 0 0;
+        }
+        #cm-editor-modal .cm-modal-header h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        #cm-editor-modal .cm-modal-close {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-size: 22px;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0 4px;
+            opacity: 0.85;
+        }
+        #cm-editor-modal .cm-modal-close:hover { opacity: 1; }
+        #cm-editor-modal .cm-modal-body {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+        }
+        #cm-editor-modal .cm-modal-body .cm-editor {
+            height: 100%;
+            min-height: 400px;
+            font-size: 13px;
+        }
+        #cm-editor-modal .cm-modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 12px 20px;
+            border-top: 1px solid #e0e0e0;
+            background: #f9f9f9;
+            border-radius: 0 0 10px 10px;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-save {
+            padding: 8px 22px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-save:hover { opacity: 0.9; }
+        #cm-editor-modal .cm-modal-footer .btn-cm-cancel {
+            padding: 8px 18px;
+            background: #e0e0e0;
+            color: #333;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-cancel:hover { background: #ccc; }
+        .btn-open-cm-editor {
+            margin-left: auto;
+            padding: 6px 14px;
+            background: #667eea;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .btn-open-cm-editor:hover { background: #5a6fd6; }
+        .cm-field-btn-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0;
+            margin-top: 8px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -3943,6 +4056,17 @@
                             hint.style.color = '#666';
                             hint.style.fontStyle = 'italic';
                             field.appendChild(hint);
+
+                            // Button row: Edit button on the far right
+                            const headBtnRow = document.createElement('div');
+                            headBtnRow.className = 'cm-field-btn-row';
+                            const headEditBtn = document.createElement('button');
+                            headEditBtn.type = 'button';
+                            headEditBtn.textContent = '✏️ Edit in Editor';
+                            headEditBtn.className = 'btn-open-cm-editor';
+                            headEditBtn.onclick = () => openCmEditorModal(input, fullPath, 'Custom Head HTML');
+                            headBtnRow.appendChild(headEditBtn);
+                            field.appendChild(headBtnRow);
                         } else if (key === 'custom_body_html') {
                             const hint = document.createElement('small');
                             hint.textContent = 'Click Save at the bottom - no restart required. Injected just before </body>. Use this for visible banners, popups, DOM-dependent scripts, Google Ads display unit <div>s, or any HTML that needs the page DOM to exist first.';
@@ -3951,6 +4075,10 @@
                             hint.style.color = '#666';
                             hint.style.fontStyle = 'italic';
                             field.appendChild(hint);
+
+                            // Button row: example buttons on the left, Edit button on the far right
+                            const bodyBtnRow = document.createElement('div');
+                            bodyBtnRow.className = 'cm-field-btn-row';
 
                             // Add popup example button
                             const exampleBtn = document.createElement('button');
@@ -3997,7 +4125,7 @@
 '</' + 'script>';
                                 input.dispatchEvent(new Event('change'));
                             };
-                            field.appendChild(exampleBtn);
+                            bodyBtnRow.appendChild(exampleBtn);
 
                             // Add PSKr Ranking Example button
                             const pskrExampleBtn = document.createElement('button');
@@ -4045,7 +4173,18 @@
 '</' + 'script>';
                                 input.dispatchEvent(new Event('change'));
                             };
-                            field.appendChild(pskrExampleBtn);
+                            bodyBtnRow.appendChild(pskrExampleBtn);
+
+                            // Edit in Editor button — far right
+                            const bodyEditBtn = document.createElement('button');
+                            bodyEditBtn.type = 'button';
+                            bodyEditBtn.textContent = '✏️ Edit in Editor';
+                            bodyEditBtn.className = 'btn-open-cm-editor';
+                            bodyEditBtn.style.marginTop = '8px';
+                            bodyEditBtn.onclick = () => openCmEditorModal(input, fullPath, 'Custom Body HTML');
+                            bodyBtnRow.appendChild(bodyEditBtn);
+
+                            field.appendChild(bodyBtnRow);
                         } else if (key === 'custom_ads_txt') {
                             const hint = document.createElement('small');
                             hint.textContent = 'Click Save at the bottom - no restart required. Content for /ads.txt endpoint. Format: domain, publisher_id, relationship, certification_authority_id (one entry per line). Example: google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0';
@@ -23112,5 +23251,99 @@ Referer: ${log.referer}`;
     </script>
     <script src="wspr_rank.js"></script>
     <script src="psk_rank.js"></script>
+
+    <!-- ── CodeMirror HTML Editor Modal ──────────────────────────── -->
+    <div id="cm-editor-modal" role="dialog" aria-modal="true" aria-labelledby="cm-modal-title">
+        <div class="cm-modal-box">
+            <div class="cm-modal-header">
+                <h3 id="cm-modal-title">Edit HTML</h3>
+                <button class="cm-modal-close" onclick="closeCmEditorModal()" aria-label="Close">×</button>
+            </div>
+            <div class="cm-modal-body" id="cm-modal-body"></div>
+            <div class="cm-modal-footer">
+                <button class="btn-cm-cancel" onclick="closeCmEditorModal()">Close without saving</button>
+                <button class="btn-cm-save" onclick="saveCmEditorModal()">💾 Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ── CodeMirror modal state ────────────────────────────────────────
+    let _cmEditorInstance = null;   // active EditorView
+    let _cmTargetInput    = null;   // the <textarea> to sync back to
+    let _cmTargetPath     = null;   // config path string e.g. 'server.custom_body_html'
+
+    function openCmEditorModal(inputEl, configPath, title) {
+        _cmTargetInput = inputEl;
+        _cmTargetPath  = configPath;
+
+        // Set modal title
+        document.getElementById('cm-modal-title').textContent = 'Edit: ' + title;
+
+        // Clear previous editor
+        const body = document.getElementById('cm-modal-body');
+        body.innerHTML = '';
+
+        // Mount CodeMirror editor
+        _cmEditorInstance = new CM.EditorView({
+            doc: inputEl.value || '',
+            extensions: [
+                CM.basicSetup,
+                CM.html(),
+            ],
+            parent: body,
+        });
+
+        // Open modal
+        document.getElementById('cm-editor-modal').classList.add('open');
+
+        // Focus editor
+        _cmEditorInstance.focus();
+    }
+
+    function closeCmEditorModal() {
+        if (_cmEditorInstance && _cmTargetInput) {
+            // Sync value back to the textarea so the inline preview is up to date
+            const newVal = _cmEditorInstance.state.doc.toString();
+            _cmTargetInput.value = newVal;
+            _cmTargetInput.dispatchEvent(new Event('change'));
+        }
+        document.getElementById('cm-editor-modal').classList.remove('open');
+        _cmEditorInstance = null;
+        _cmTargetInput    = null;
+        _cmTargetPath     = null;
+    }
+
+    async function saveCmEditorModal() {
+        if (!_cmEditorInstance || !_cmTargetInput || !_cmTargetPath) return;
+
+        // Flush editor value into currentConfig
+        const newVal = _cmEditorInstance.state.doc.toString();
+        _cmTargetInput.value = newVal;
+        _cmTargetInput.dispatchEvent(new Event('change'));
+        updateConfigValue(_cmTargetPath, newVal);
+
+        // Close modal first so the save feedback is visible on the main page
+        document.getElementById('cm-editor-modal').classList.remove('open');
+        _cmEditorInstance = null;
+        _cmTargetInput    = null;
+        _cmTargetPath     = null;
+
+        // Trigger the same save as the "Save Configuration" button
+        await saveConfig();
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('cm-editor-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeCmEditorModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('cm-editor-modal').classList.contains('open')) {
+            closeCmEditorModal();
+        }
+    });
+    </script>
 </body>
 </html>

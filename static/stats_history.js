@@ -40,7 +40,7 @@ function fmtTime(iso) {
         month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit',
         timeZone: 'UTC',
-    }) + ' UTC';
+    });
 }
 
 function fmtDate(iso) {
@@ -68,6 +68,7 @@ function makeChartConfig(labels, datasets, yLabel, invertY = false) {
             },
             scales: {
                 x: {
+                    title: { display: true, text: 'Time (UTC)', color: '#a0aec0' },
                     ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 },
                     grid: { color: 'rgba(255,255,255,0.06)' },
                 },
@@ -95,6 +96,7 @@ function makeBarConfig(labels, datasets, yLabel) {
             },
             scales: {
                 x: {
+                    title: { display: true, text: 'Time (UTC)', color: '#a0aec0' },
                     ticks: { maxRotation: 60, autoSkip: true, maxTicksLimit: 30, font: { size: 10 } },
                     grid: { color: 'rgba(255,255,255,0.06)' },
                 },
@@ -816,7 +818,7 @@ function renderWSPRUnique(data) {
             interaction: { mode: 'index', intersect: false },
             plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
             scales: {
-                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                x: { title: { display: true, text: 'Time (UTC)', color: '#a0aec0' }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 y: { title: { display: true, text: 'Spots', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                 ...(swEnabled ? {
                     ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
@@ -881,7 +883,7 @@ function renderWSPRRank(data) {
             interaction: { mode: 'index', intersect: false },
             plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
             scales: {
-                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                x: { title: { display: true, text: 'Time (UTC)', color: '#a0aec0' }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 y: { reverse: true, title: { display: true, text: 'Rank (lower = better)', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                 ...(swEnabled ? {
                     ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
@@ -1166,7 +1168,7 @@ function renderPSKRankChart(data, table, bands) {
             interaction: { mode: 'index', intersect: false },
             plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
             scales: {
-                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                x: { title: { display: true, text: 'Time (UTC)', color: '#a0aec0' }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 yRank:  { type: 'linear', position: 'left',  reverse: true,  title: { display: true, text: 'Rank', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                 yCount: { type: 'linear', position: 'right', reverse: false, title: { display: true, text: 'Day count', color: '#a0aec0' }, grid: { drawOnChartArea: false }, ticks: { precision: 0 } },
                 ...(swEnabled ? { ySW: makeSWAxis('K-index', 0, 9) } : {}),
@@ -1223,7 +1225,7 @@ function renderPSKTrendChart(data, table, canvasId, chartKey) {
             interaction: { mode: 'index', intersect: false },
             plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
             scales: {
-                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                x: { title: { display: true, text: 'Time (UTC)', color: '#a0aec0' }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                 y: { title: { display: true, text: 'Count', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                 ...(swEnabled ? { ySW: makeSWAxis('K-index', 0, 9) } : {}),
             },
@@ -1407,7 +1409,7 @@ function renderRBN(data) {
                 interaction: { mode: 'index', intersect: false },
                 plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
                 scales: {
-                    x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                    x: { title: { display: true, text: 'Time (UTC)', color: '#a0aec0' }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                     y: { title: { display: true, text: 'Spot count', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                     ...(swEnabled ? {
                         ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),
@@ -1454,7 +1456,7 @@ function renderRBN(data) {
                 interaction: { mode: 'index', intersect: false },
                 plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
                 scales: {
-                    x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                    x: { title: { display: true, text: 'Time (UTC)', color: '#a0aec0' }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.06)' } },
                     y: { reverse: true, title: { display: true, text: 'Rank (lower = better)', color: '#a0aec0' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { precision: 0 } },
                     ...(swEnabled ? {
                         ySFI: makeSWAxis('Solar Flux (SFU)', 60, 220),

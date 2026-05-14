@@ -628,6 +628,10 @@ func (h *DXClusterWebSocketHandler) broadcastSpot(spot DXSpot) {
 	// Record spot in Prometheus (by band)
 	if h.prometheusMetrics != nil {
 		h.prometheusMetrics.RecordDXSpot(spot.Band)
+		// Publish to MQTT if enabled
+		if h.prometheusMetrics.mqttPublisher != nil {
+			go h.prometheusMetrics.mqttPublisher.PublishDXSpot(spot)
+		}
 	}
 
 	message := map[string]interface{}{

@@ -1879,6 +1879,9 @@ func main() {
 		if cwskimmerConfig != nil {
 			prometheusMetrics.mqttPublisher.SetCWSkimmer(cwskimmerConfig, cwSkimmer)
 		}
+		if instanceReporter != nil {
+			prometheusMetrics.mqttPublisher.SetInstanceReporter(instanceReporter)
+		}
 	}
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()

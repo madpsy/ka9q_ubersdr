@@ -31,6 +31,12 @@ type RotctlAPIHandler struct {
 	lastUpdate     time.Time
 	connectedSince time.Time
 	wasConnected   bool
+
+	// MQTT publishing — publish on position/moving change
+	mqttPublisher       *MQTTPublisher
+	lastPublishedAz     int
+	lastPublishedEl     int
+	lastPublishedMoving bool
 }
 
 // NewRotctlAPIHandler creates a new rotctl API handler
@@ -115,8 +121,28 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 			h.mu.Lock()
 			h.lastUpdate = time.Now()
 			h.mu.Unlock()
+
+			// Publish to MQTT if position or moving state changed
+			if h.mqttPublisher != nil {
+				state := h.controller.GetState()
+				az := int(state.Position.Azimuth + 0.5)
+				el := int(state.Position.Elevation + 0.5)
+				moving := state.Moving
+				if az != h.lastPublishedAz || el != h.lastPublishedEl || moving != h.lastPublishedMoving {
+					h.lastPublishedAz = az
+					h.lastPublishedEl = el
+					h.lastPublishedMoving = moving
+					go h.mqttPublisher.PublishRotatorStatus(h)
+				}
+			}
 		}
 	}
+}
+
+// SetMQTTPublisher attaches an MQTTPublisher so that rotator status is published
+// to MQTT whenever the position or moving state changes.
+func (h *RotctlAPIHandler) SetMQTTPublisher(mp *MQTTPublisher) {
+	h.mqttPublisher = mp
 }
 
 // Close closes the rotctl connection

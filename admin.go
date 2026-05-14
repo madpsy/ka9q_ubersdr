@@ -4744,66 +4744,46 @@ func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// HandleInstanceReporterHealth serves the health status of the instance reporter
-// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
-func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// Build health status response
+// buildInstanceReporterHealthPayload builds the instance reporter health status map.
+// This is the same data returned by GET /admin/instance-reporter-health and published to MQTT.
+func buildInstanceReporterHealthPayload(cfg *Config, instanceReporter *InstanceReporter) map[string]interface{} {
 	status := map[string]interface{}{
-		"enabled": ah.config.InstanceReporting.Enabled,
+		"enabled": cfg.InstanceReporting.Enabled,
 	}
 
-	// If not enabled, return early
-	if !ah.config.InstanceReporting.Enabled {
+	if !cfg.InstanceReporting.Enabled {
 		status["message"] = "Instance reporting is not enabled"
-		status["healthy"] = true // Not enabled is not unhealthy
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(status); err != nil {
-			log.Printf("Error encoding instance reporter status: %v", err)
-		}
-		return
+		status["healthy"] = true
+		return status
 	}
 
-	// Check if instance reporter exists
-	if ah.instanceReporter == nil {
+	if instanceReporter == nil {
 		status["message"] = "Instance reporter not initialized"
 		status["healthy"] = false
 		status["issues"] = []string{"Instance reporter not initialized"}
-		w.WriteHeader(http.StatusServiceUnavailable)
-		if err := json.NewEncoder(w).Encode(status); err != nil {
-			log.Printf("Error encoding instance reporter status: %v", err)
-		}
-		return
+		return status
 	}
 
-	// Get report status from instance reporter
-	reportStatus := ah.instanceReporter.GetReportStatus()
-
-	// Merge the report status into our response
+	reportStatus := instanceReporter.GetReportStatus()
 	for k, v := range reportStatus {
 		status[k] = v
 	}
 
-	// Determine health based on response code and status
 	healthy := true
 	issues := []string{}
 
-	// Check if we have a last response code
 	if lastCode, ok := status["last_response_code"].(int); ok {
 		if lastCode != 200 {
 			healthy = false
 			issues = append(issues, fmt.Sprintf("Last HTTP response code was %d (expected 200)", lastCode))
 		}
 	} else {
-		// No response code yet - not necessarily unhealthy if we haven't reported yet
 		if lastError, ok := status["last_report_error"].(string); ok && lastError != "" {
 			healthy = false
 			issues = append(issues, fmt.Sprintf("Last report error: %s", lastError))
 		}
 	}
 
-	// Check if status is "ok"
 	if lastStatus, ok := status["last_response_status"].(string); ok {
 		if lastStatus != "ok" {
 			healthy = false
@@ -4811,7 +4791,6 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 		}
 	}
 
-	// Check if email is verified
 	if emailVerified, ok := status["email_verified"].(bool); ok {
 		if !emailVerified {
 			healthy = false
@@ -4819,7 +4798,6 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 		}
 	}
 
-	// Check for errors
 	if lastError, ok := status["last_report_error"].(string); ok && lastError != "" {
 		healthy = false
 		if len(issues) == 0 {
@@ -4832,10 +4810,76 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 		status["issues"] = issues
 	}
 
+	return status
+}
+
+// HandleInstanceReporterHealth serves the health status of the instance reporter
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(status); err != nil {
+	if err := json.NewEncoder(w).Encode(buildInstanceReporterHealthPayload(ah.config, ah.instanceReporter)); err != nil {
 		log.Printf("Error encoding instance reporter status: %v", err)
 	}
+}
+
+// fetchTunnelServerHealth fetches the tunnel server health status and returns it as a map.
+// This is the same data returned by GET /admin/tunnel-server-health and published to MQTT.
+// Returns a map suitable for JSON encoding; never returns nil.
+func fetchTunnelServerHealth(cfg *Config) map[string]interface{} {
+	if !cfg.InstanceReporting.TunnelServerEnabled {
+		return map[string]interface{}{
+			"enabled": false,
+			"message": "Tunnel server integration is not enabled",
+		}
+	}
+
+	if cfg.InstanceReporting.TunnelServerHost == "" {
+		return map[string]interface{}{
+			"error":   true,
+			"message": "Tunnel server host not configured",
+		}
+	}
+
+	if cfg.InstanceReporting.InstanceUUID == "" {
+		return map[string]interface{}{
+			"error":   true,
+			"message": "Instance UUID not configured",
+		}
+	}
+
+	tunnelURL := fmt.Sprintf("https://%s/api/tunnel/status", cfg.InstanceReporting.TunnelServerHost)
+	requestBody := map[string]string{
+		"secret_uuid": cfg.InstanceReporting.InstanceUUID,
+	}
+
+	requestData, err := json.Marshal(requestBody)
+	if err != nil {
+		return map[string]interface{}{
+			"error":   true,
+			"message": fmt.Sprintf("Failed to marshal request: %v", err),
+		}
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(tunnelURL, "application/json", strings.NewReader(string(requestData)))
+	if err != nil {
+		return map[string]interface{}{
+			"error":   true,
+			"message": fmt.Sprintf("Failed to connect to tunnel server: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	var tunnelStatus map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&tunnelStatus); err != nil {
+		return map[string]interface{}{
+			"error":   true,
+			"message": fmt.Sprintf("Failed to parse tunnel server response: %v", err),
+		}
+	}
+
+	return tunnelStatus
 }
 
 // HandleTunnelServerHealth fetches and returns tunnel server health status
@@ -4847,95 +4891,8 @@ func (ah *AdminHandler) HandleTunnelServerHealth(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-
-	// Check if tunnel server is enabled
-	if !ah.config.InstanceReporting.TunnelServerEnabled {
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"enabled": false,
-			"message": "Tunnel server integration is not enabled",
-		}); err != nil {
-			log.Printf("Error encoding tunnel health response: %v", err)
-		}
-		return
-	}
-
-	// Check if tunnel server host is configured
-	if ah.config.InstanceReporting.TunnelServerHost == "" {
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   true,
-			"message": "Tunnel server host not configured",
-		}); err != nil {
-			log.Printf("Error encoding tunnel health response: %v", err)
-		}
-		return
-	}
-
-	// Check if instance UUID is configured
-	if ah.config.InstanceReporting.InstanceUUID == "" {
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   true,
-			"message": "Instance UUID not configured",
-		}); err != nil {
-			log.Printf("Error encoding tunnel health response: %v", err)
-		}
-		return
-	}
-
-	// Build request to tunnel server
-	tunnelURL := fmt.Sprintf("https://%s/api/tunnel/status", ah.config.InstanceReporting.TunnelServerHost)
-	requestBody := map[string]string{
-		"secret_uuid": ah.config.InstanceReporting.InstanceUUID,
-	}
-
-	requestData, err := json.Marshal(requestBody)
-	if err != nil {
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   true,
-			"message": fmt.Sprintf("Failed to marshal request: %v", err),
-		}); err != nil {
-			log.Printf("Error encoding tunnel health response: %v", err)
-		}
-		return
-	}
-
-	// Make request to tunnel server with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Post(tunnelURL, "application/json", strings.NewReader(string(requestData)))
-	if err != nil {
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   true,
-			"message": fmt.Sprintf("Failed to connect to tunnel server: %v", err),
-		}); err != nil {
-			log.Printf("Error encoding tunnel health response: %v", err)
-		}
-		return
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	var tunnelStatus map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&tunnelStatus); err != nil {
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   true,
-			"message": fmt.Sprintf("Failed to parse tunnel server response: %v", err),
-		}); err != nil {
-			log.Printf("Error encoding tunnel health response: %v", err)
-		}
-		return
-	}
-
-	// Return the tunnel status
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(tunnelStatus); err != nil {
+	if err := json.NewEncoder(w).Encode(fetchTunnelServerHealth(ah.config)); err != nil {
 		log.Printf("Error encoding tunnel health response: %v", err)
 	}
 }

@@ -29,6 +29,7 @@ type MQTTPublisher struct {
 	freqRefMonitor      *FrequencyReferenceMonitor // may be nil; used for frequency reference publishing
 	cwSkimmerConfig     *CWSkimmerConfig           // may be nil; used for CW Skimmer health publishing
 	cwSkimmerClient     *CWSkimmerClient           // may be nil; used for CW Skimmer health publishing
+	instanceReporter    *InstanceReporter          // may be nil; used for instance reporter health publishing
 
 	// Stored when StartPublisher is called so late-registered setters can
 	// launch their own goroutines after startup.
@@ -236,6 +237,16 @@ func (mp *MQTTPublisher) SetCWSkimmer(cfg *CWSkimmerConfig, client *CWSkimmerCli
 	}
 }
 
+// SetInstanceReporter attaches an InstanceReporter so that instance reporter health
+// can be published to MQTT every 60 seconds.
+// If StartPublisher has already been called, the goroutine is launched immediately.
+func (mp *MQTTPublisher) SetInstanceReporter(ir *InstanceReporter) {
+	mp.instanceReporter = ir
+	if mp.publisherCtx != nil && mp.publisherConfig != nil {
+		go mp.startInstanceReporterHealthPublisher(mp.publisherCtx, mp.publisherConfig)
+	}
+}
+
 // StartPublisher starts the background publishing goroutines.
 // It stores ctx and appConfig so that late-registered setters (called after
 // StartPublisher) can launch their own goroutines immediately.
@@ -259,6 +270,11 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 
 	// The remaining publishers (frontend status, frequency reference, CW Skimmer)
 	// are started by their respective setters, which are called after StartPublisher.
+
+	// Tunnel server health publisher — only when tunnel server integration is enabled.
+	if appConfig.InstanceReporting.TunnelServerEnabled {
+		go mp.startTunnelServerHealthPublisher(ctx, appConfig)
+	}
 }
 
 // startMetricsPublisher publishes aggregate metrics at the configured interval
@@ -839,6 +855,90 @@ func (mp *MQTTPublisher) PublishChatMessage(timestamp time.Time, ipAddress, user
 	}()
 }
 
+// PublishRotatorStatus publishes the current rotator status to MQTT.
+// Called from RotctlAPIHandler.backgroundUpdater whenever position or moving state changes.
+// Topic: {prefix}/rotator_status
+// Payload matches GET /api/rotctl/status.
+func (mp *MQTTPublisher) PublishRotatorStatus(h *RotctlAPIHandler) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	state := h.controller.GetState()
+	isConnected := h.controller.client.IsConnected()
+
+	h.mu.RLock()
+	lastUpdate := h.lastUpdate
+	connectedSince := h.connectedSince
+	h.mu.RUnlock()
+
+	payload := map[string]interface{}{
+		"enabled":   true,
+		"connected": isConnected,
+		"read_only": h.config.Password == "",
+		"position": map[string]interface{}{
+			"azimuth":   int(state.Position.Azimuth + 0.5),
+			"elevation": int(state.Position.Elevation + 0.5),
+		},
+		"moving":      state.Moving,
+		"last_update": lastUpdate,
+	}
+
+	if isConnected && !connectedSince.IsZero() {
+		duration := time.Since(connectedSince)
+		payload["connected_duration_seconds"] = int(duration.Seconds())
+		payload["connected_since"] = connectedSince
+	}
+
+	if state.LastError != nil {
+		payload["error"] = state.LastError.Error()
+	}
+
+	topic := fmt.Sprintf("%s/rotator_status", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal rotator status payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish rotator status to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// PublishDXSpot publishes a DX cluster spot to MQTT.
+// Topic: {prefix}/dx_spots/{band}
+// The payload is the DXSpot struct serialised as JSON.
+func (mp *MQTTPublisher) PublishDXSpot(spot DXSpot) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/dx_spots/%s", mp.config.TopicPrefix, spot.Band)
+
+	data, err := json.Marshal(spot)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal DX spot payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish DX spot to %s: %v", topic, token.Error())
+		}
+	}()
+}
+
 // PublishCWSpot publishes a CW Skimmer spot to MQTT
 // Topic structure: {prefix}/cw_spots/{band}
 // Uses the same JSON format as websocket messages for consistency
@@ -1061,6 +1161,108 @@ func (mp *MQTTPublisher) publishFrontendStatusOnce() {
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish frontend status to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startTunnelServerHealthPublisher publishes tunnel server health status every 60 seconds.
+// The payload is identical to what GET /admin/tunnel-server-health returns.
+// Topic: {prefix}/tunnel_server_health
+func (mp *MQTTPublisher) startTunnelServerHealthPublisher(ctx context.Context, cfg *Config) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Tunnel server health publisher started (60s interval)")
+
+	mp.publishTunnelServerHealthOnce(cfg)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Tunnel server health publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishTunnelServerHealthOnce(cfg)
+		}
+	}
+}
+
+// publishTunnelServerHealthOnce performs a single tunnel server health publish.
+func (mp *MQTTPublisher) publishTunnelServerHealthOnce(cfg *Config) {
+	if !mp.isConnected() {
+		return
+	}
+
+	payload := fetchTunnelServerHealth(cfg)
+
+	topic := fmt.Sprintf("%s/tunnel_server_health", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal tunnel server health payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish tunnel server health to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startInstanceReporterHealthPublisher publishes instance reporter health status every 60 seconds.
+// The payload is identical to what GET /admin/instance-reporter-health returns.
+// Topic: {prefix}/instance_reporter_health
+func (mp *MQTTPublisher) startInstanceReporterHealthPublisher(ctx context.Context, cfg *Config) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Instance reporter health publisher started (60s interval)")
+
+	mp.publishInstanceReporterHealthOnce(cfg)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Instance reporter health publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishInstanceReporterHealthOnce(cfg)
+		}
+	}
+}
+
+// publishInstanceReporterHealthOnce performs a single instance reporter health publish.
+func (mp *MQTTPublisher) publishInstanceReporterHealthOnce(cfg *Config) {
+	if !mp.isConnected() {
+		return
+	}
+
+	payload := buildInstanceReporterHealthPayload(cfg, mp.instanceReporter)
+
+	topic := fmt.Sprintf("%s/instance_reporter_health", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal instance reporter health payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish instance reporter health to %s: %v", topic, token.Error())
 		} else {
 			mp.mu.Lock()
 			mp.messagesSent++

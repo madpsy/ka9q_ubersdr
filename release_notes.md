@@ -6,6 +6,7 @@
 - Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank inc. space weather (stats_history.html)
 - Added **Doppler add-on additional precomputed fields** in the SSE stream (see API usage at buttom of its UI)
 - Added **Automatic SAM -> AM transition** when no signal for 2 seconds as weak signals mean no PLL lock and so no audio
+- Added **Code Editor** in Admin -> Server, for custom Head and Body HTML, to make it easier to view/edit code
 
 ### Bug Fixes
 - Time (X Axis) on noise floor history page displayed relative rather than absolute times

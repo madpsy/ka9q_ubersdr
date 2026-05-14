@@ -1285,6 +1285,85 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 	return filtered, nil
 }
 
+// GetVoiceActivityResponseForBand builds the full VoiceActivityResponse for a band,
+// identical to what GET /api/noisefloor/voice-activity?band=X returns.
+// Used by the MQTT publisher to avoid duplicating the handler logic.
+func GetVoiceActivityResponseForBand(nfm *NoiseFloorMonitor, band string, params DetectionParams) VoiceActivityResponse {
+	if nfm == nil {
+		return VoiceActivityResponse{
+			Band:            band,
+			Timestamp:       time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			Activities:      []VoiceActivity{},
+			TotalActivities: 0,
+		}
+	}
+
+	// Excluded bands
+	if band == "2200m" || band == "630m" || band == "30m" {
+		return VoiceActivityResponse{
+			Band:            band,
+			Timestamp:       time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			NoiseFloorDB:    0,
+			ThresholdDB:     params.ThresholdDB,
+			MinBandwidth:    params.MinBandwidth,
+			MaxBandwidth:    params.MaxBandwidth,
+			Activities:      []VoiceActivity{},
+			TotalActivities: 0,
+			BandType:        "excluded",
+		}
+	}
+
+	nfm.fftMu.RLock()
+	buffer, ok := nfm.fftBuffers[band]
+	nfm.fftMu.RUnlock()
+
+	if !ok {
+		return VoiceActivityResponse{
+			Band:            band,
+			Timestamp:       time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			Activities:      []VoiceActivity{},
+			TotalActivities: 0,
+		}
+	}
+
+	newActivities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
+	newActivities = filterActivitiesBySSBStart(newActivities, band)
+	newActivities = filterActivitiesByExclusionRange(newActivities, band)
+	activities := voiceActivityCache.mergeWithCache(band, newActivities)
+	activities = filterActivitiesBySSBStart(activities, band)
+	activities = filterActivitiesByExclusionRange(activities, band)
+
+	filtered := []VoiceActivity{}
+	for _, activity := range activities {
+		if activity.Confidence >= params.MinConfidence {
+			filtered = append(filtered, activity)
+		}
+	}
+
+	fft := buffer.GetAveragedFFT(5 * time.Second)
+	var noiseFloor float32
+	var timestamp string
+	if fft != nil {
+		noiseFloor = estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)
+		timestamp = fft.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		noiseFloor = 0
+		timestamp = time.Now().Format("2006-01-02T15:04:05Z07:00")
+	}
+
+	return VoiceActivityResponse{
+		Band:            band,
+		Timestamp:       timestamp,
+		NoiseFloorDB:    noiseFloor,
+		ThresholdDB:     params.ThresholdDB,
+		MinBandwidth:    params.MinBandwidth,
+		MaxBandwidth:    params.MaxBandwidth,
+		Activities:      filtered,
+		TotalActivities: len(filtered),
+		BandType:        "normal",
+	}
+}
+
 // GetAllBandsVoiceActivity gets voice activity for all configured bands
 func GetAllBandsVoiceActivity(nfm *NoiseFloorMonitor, params DetectionParams) map[string][]VoiceActivity {
 	if nfm == nil {

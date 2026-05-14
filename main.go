@@ -1889,6 +1889,9 @@ func main() {
 			rotatorScheduler.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
 		}
 		prometheusMetrics.mqttPublisher.SetSessionsContext(dxClusterWsHandler, geoIPService)
+		if multiDecoder != nil {
+			prometheusMetrics.mqttPublisher.SetMultiDecoder(multiDecoder)
+		}
 	}
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()

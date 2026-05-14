@@ -32,6 +32,7 @@ type MQTTPublisher struct {
 	instanceReporter    *InstanceReporter          // may be nil; used for instance reporter health publishing
 	dxClusterWsHandler  *DXClusterWebSocketHandler // may be nil; used for sessions publishing
 	geoIPService        *GeoIPService              // may be nil; used for sessions publishing
+	multiDecoder        *MultiDecoder              // may be nil; used for WSPR phone prediction publishing
 
 	// Stored when StartPublisher is called so late-registered setters can
 	// launch their own goroutines after startup.
@@ -249,6 +250,16 @@ func (mp *MQTTPublisher) SetInstanceReporter(ir *InstanceReporter) {
 	}
 }
 
+// SetMultiDecoder attaches a MultiDecoder so that WSPR phone predictions can be
+// published to MQTT every 2 minutes.
+// If StartPublisher has already been called, the goroutine is launched immediately.
+func (mp *MQTTPublisher) SetMultiDecoder(md *MultiDecoder) {
+	mp.multiDecoder = md
+	if mp.publisherCtx != nil {
+		go mp.startWSPRPredictionPublisher(mp.publisherCtx)
+	}
+}
+
 // SetSessionsContext attaches the DXClusterWebSocketHandler and GeoIPService needed
 // to build the full sessions payload, and starts the 1-second sessions publisher.
 // sessionManager must already be set via SetSessionManager before calling this.
@@ -289,6 +300,13 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 	if appConfig.InstanceReporting.TunnelServerEnabled {
 		go mp.startTunnelServerHealthPublisher(ctx, appConfig)
 	}
+
+	// Voice activity publisher — only when noise floor monitoring is enabled with bands configured.
+	if mp.noiseFloorMonitor != nil && len(appConfig.NoiseFloor.Bands) > 0 {
+		go mp.startVoiceActivityPublisher(ctx, appConfig)
+	}
+
+	// WSPR phone prediction publisher is started by SetMultiDecoder (called after StartPublisher).
 }
 
 // startMetricsPublisher publishes aggregate metrics at the configured interval
@@ -1130,6 +1148,116 @@ func (mp *MQTTPublisher) publishCWSkimmerMetrics(metrics map[string]map[string]i
 		topic := fmt.Sprintf("%s/cw_skimmer/%s", mp.config.TopicPrefix, band)
 
 		mp.publish(topic, payload)
+	}
+}
+
+// startWSPRPredictionPublisher publishes WSPR SSB phone predictions every 2 minutes.
+// The payload is the WSPRSummaryResult (predictions by band + grid squares), using the
+// same defaults as the instance reporter: 250W phone power, 60-minute lookback window.
+// Topic: {prefix}/wspr_phone_prediction
+func (mp *MQTTPublisher) startWSPRPredictionPublisher(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
+	log.Println("MQTT: WSPR phone prediction publisher started (2 min interval)")
+
+	mp.publishWSPRPredictionOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: WSPR phone prediction publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishWSPRPredictionOnce()
+		}
+	}
+}
+
+// publishWSPRPredictionOnce performs a single WSPR phone prediction publish.
+func (mp *MQTTPublisher) publishWSPRPredictionOnce() {
+	if !mp.isConnected() || mp.multiDecoder == nil || mp.multiDecoder.spotsLogger == nil {
+		return
+	}
+
+	result := computeWSPRSummaryByBand(mp.multiDecoder.spotsLogger, 250, 60)
+	if result == nil {
+		return // no qualifying spots yet
+	}
+
+	topic := fmt.Sprintf("%s/wspr_phone_prediction", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal WSPR prediction payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish WSPR prediction to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startVoiceActivityPublisher publishes voice activity for each configured band every 1 second.
+// Each band is published to its own subtopic: {prefix}/voice_activity/{band}
+// The payload is identical to what GET /api/noisefloor/voice-activity?band=X returns.
+func (mp *MQTTPublisher) startVoiceActivityPublisher(ctx context.Context, cfg *Config) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Voice activity publisher started (1s interval, per-band subtopics)")
+
+	mp.publishVoiceActivityOnce(cfg)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Voice activity publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishVoiceActivityOnce(cfg)
+		}
+	}
+}
+
+// publishVoiceActivityOnce publishes voice activity for all configured bands.
+func (mp *MQTTPublisher) publishVoiceActivityOnce(cfg *Config) {
+	if !mp.isConnected() || mp.noiseFloorMonitor == nil {
+		return
+	}
+
+	params := DefaultDetectionParams()
+
+	for _, band := range cfg.NoiseFloor.Bands {
+		response := GetVoiceActivityResponseForBand(mp.noiseFloorMonitor, band.Name, params)
+
+		topic := fmt.Sprintf("%s/voice_activity/%s", mp.config.TopicPrefix, band.Name)
+
+		data, err := json.Marshal(response)
+		if err != nil {
+			log.Printf("MQTT ERROR: Failed to marshal voice activity payload for band %s: %v", band.Name, err)
+			continue
+		}
+
+		token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+		go func(t mqtt.Token, bandName string) {
+			if t.Wait() && t.Error() != nil {
+				mp.logPublishError("MQTT ERROR: Failed to publish voice activity for band %s: %v", bandName, t.Error())
+			} else {
+				mp.mu.Lock()
+				mp.messagesSent++
+				mp.lastMessageTime = time.Now()
+				mp.mu.Unlock()
+			}
+		}(token, band.Name)
 	}
 }
 

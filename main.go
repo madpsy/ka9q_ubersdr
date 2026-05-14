@@ -1882,6 +1882,13 @@ func main() {
 		if instanceReporter != nil {
 			prometheusMetrics.mqttPublisher.SetInstanceReporter(instanceReporter)
 		}
+		if rotctlHandler != nil {
+			rotctlHandler.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
+		}
+		if rotatorScheduler != nil {
+			rotatorScheduler.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
+		}
+		prometheusMetrics.mqttPublisher.SetSessionsContext(dxClusterWsHandler, geoIPService)
 	}
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()

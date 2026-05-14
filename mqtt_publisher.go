@@ -30,6 +30,8 @@ type MQTTPublisher struct {
 	cwSkimmerConfig     *CWSkimmerConfig           // may be nil; used for CW Skimmer health publishing
 	cwSkimmerClient     *CWSkimmerClient           // may be nil; used for CW Skimmer health publishing
 	instanceReporter    *InstanceReporter          // may be nil; used for instance reporter health publishing
+	dxClusterWsHandler  *DXClusterWebSocketHandler // may be nil; used for sessions publishing
+	geoIPService        *GeoIPService              // may be nil; used for sessions publishing
 
 	// Stored when StartPublisher is called so late-registered setters can
 	// launch their own goroutines after startup.
@@ -244,6 +246,18 @@ func (mp *MQTTPublisher) SetInstanceReporter(ir *InstanceReporter) {
 	mp.instanceReporter = ir
 	if mp.publisherCtx != nil && mp.publisherConfig != nil {
 		go mp.startInstanceReporterHealthPublisher(mp.publisherCtx, mp.publisherConfig)
+	}
+}
+
+// SetSessionsContext attaches the DXClusterWebSocketHandler and GeoIPService needed
+// to build the full sessions payload, and starts the 1-second sessions publisher.
+// sessionManager must already be set via SetSessionManager before calling this.
+// If StartPublisher has already been called, the goroutine is launched immediately.
+func (mp *MQTTPublisher) SetSessionsContext(dxWsHandler *DXClusterWebSocketHandler, geoIPService *GeoIPService) {
+	mp.dxClusterWsHandler = dxWsHandler
+	mp.geoIPService = geoIPService
+	if mp.publisherCtx != nil && mp.sessionManager != nil {
+		go mp.startSessionsPublisher(mp.publisherCtx)
 	}
 }
 
@@ -855,6 +869,35 @@ func (mp *MQTTPublisher) PublishChatMessage(timestamp time.Time, ipAddress, user
 	}()
 }
 
+// PublishRotatorLog publishes a single rotator scheduler trigger log entry to MQTT.
+// Called from RotatorScheduler.addTriggerLog whenever a new entry is added.
+// Topic: {prefix}/rotator_log
+func (mp *MQTTPublisher) PublishRotatorLog(entry ScheduleTriggerLog) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/rotator_log", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal rotator log payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish rotator log to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
 // PublishRotatorStatus publishes the current rotator status to MQTT.
 // Called from RotctlAPIHandler.backgroundUpdater whenever position or moving state changes.
 // Topic: {prefix}/rotator_status
@@ -1088,6 +1131,57 @@ func (mp *MQTTPublisher) publishCWSkimmerMetrics(metrics map[string]map[string]i
 
 		mp.publish(topic, payload)
 	}
+}
+
+// startSessionsPublisher publishes active session data every 1 second.
+// The payload is identical to what GET /admin/sessions returns.
+// Topic: {prefix}/sessions
+func (mp *MQTTPublisher) startSessionsPublisher(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: Sessions publisher started (1s interval)")
+
+	mp.publishSessionsOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Sessions publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishSessionsOnce()
+		}
+	}
+}
+
+// publishSessionsOnce performs a single sessions publish.
+func (mp *MQTTPublisher) publishSessionsOnce() {
+	if !mp.isConnected() || mp.sessionManager == nil {
+		return
+	}
+
+	payload := buildSessionsPayload(mp.sessionManager, mp.dxClusterWsHandler, mp.geoIPService)
+
+	topic := fmt.Sprintf("%s/sessions", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal sessions payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish sessions to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
 }
 
 // startFrontendStatusPublisher publishes SDR frontend status every 60 seconds.

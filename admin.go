@@ -2289,27 +2289,15 @@ func (ah *AdminHandler) reloadBands() error {
 	return nil
 }
 
-// HandleSessions returns information about all active sessions
-func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-
-	sessions := ah.sessions.GetAllSessionsInfo()
+// buildSessionsPayload builds the sessions response map used by HandleSessions and MQTT.
+func buildSessionsPayload(sm *SessionManager, dxWsHandler *DXClusterWebSocketHandler, geoIPService *GeoIPService) map[string]interface{} {
+	sessions := sm.GetAllSessionsInfo()
 
 	// Enrich each session with per-channel CPU usage from the radiod thread-stats CSV.
-	// thread_cpu_pct      — raw per-core % for this channel's thread (same scale as radiod channels tab)
-	// thread_cpu_norm_pct — normalised: divided by num_logical_cpus (fraction of total system CPU)
-	// Shared spectrum subscribers always get 0.0 for both fields: the shared radiod channel's CPU
-	// cost is not attributable to any individual user (they all share one thread).
 	{
 		threadStats, statsAvailable := readThreadStats()
 		numCPUs := runtime.NumCPU()
 		for i := range sessions {
-			// Shared spectrum subscribers contribute 0 CPU — the channel is shared
 			if isShared, _ := sessions[i]["is_shared_subscriber"].(bool); isShared {
 				sessions[i]["thread_cpu_pct"] = 0.0
 				sessions[i]["thread_cpu_norm_pct"] = 0.0
@@ -2339,46 +2327,37 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enhance with chat usernames and LastSeen if DX cluster websocket handler (with chat) is available
-	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+	// Enhance with chat usernames and LastSeen
+	if dxWsHandler != nil && dxWsHandler.chatManager != nil {
 		for i := range sessions {
 			if userSessionID, ok := sessions[i]["user_session_id"].(string); ok && userSessionID != "" {
-				if username, exists := ah.dxClusterWsHandler.chatManager.GetUsername(userSessionID); exists {
+				if username, exists := dxWsHandler.chatManager.GetUsername(userSessionID); exists {
 					sessions[i]["chat_username"] = username
-
-					// Add LastSeen time if available
-					if lastSeen, exists := ah.dxClusterWsHandler.chatManager.GetUserLastSeen(userSessionID); exists {
-						// Calculate time ago
-						secondsAgo := int(time.Since(lastSeen).Seconds())
-						sessions[i]["chat_last_seen_seconds"] = secondsAgo
+					if lastSeen, exists := dxWsHandler.chatManager.GetUserLastSeen(userSessionID); exists {
+						sessions[i]["chat_last_seen_seconds"] = int(time.Since(lastSeen).Seconds())
 					}
 				}
 			}
 		}
 	}
 
-	// Enhance with GeoIP coordinates if GeoIP service is available
-	if ah.geoIPService != nil && ah.geoIPService.IsEnabled() {
+	// Enhance with GeoIP coordinates
+	if geoIPService != nil && geoIPService.IsEnabled() {
 		for i := range sessions {
 			if clientIP, ok := sessions[i]["client_ip"].(string); ok && clientIP != "" {
-				// Perform GeoIP lookup
-				if result, err := ah.geoIPService.Lookup(clientIP, false); err == nil {
-					// Add latitude and longitude if available
+				if result, err := geoIPService.Lookup(clientIP, false); err == nil {
 					if result.Latitude != nil {
 						sessions[i]["latitude"] = *result.Latitude
 					}
 					if result.Longitude != nil {
 						sessions[i]["longitude"] = *result.Longitude
 					}
-					// Add accuracy radius if available
 					if result.AccuracyRadius != nil {
 						sessions[i]["accuracy_radius_km"] = *result.AccuracyRadius
 					}
-					// Add city if available
 					if result.City != "" {
 						sessions[i]["city"] = result.City
 					}
-					// Add region (first subdivision) if available
 					if len(result.Subdivisions) > 0 && result.Subdivisions[0].Name != "" {
 						sessions[i]["region"] = result.Subdivisions[0].Name
 					}
@@ -2387,25 +2366,31 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enrich each session with rolling 24-hour per-IP time usage (in seconds).
-	// Two sessions from the same IP will show the same value because the tracker
-	// is keyed by IP, not by session or UUID.
-	// The field is always present; value is 0 when no time has been tracked for that IP.
+	// Enrich with rolling 24-hour per-IP time usage
 	for i := range sessions {
 		if clientIP, ok := sessions[i]["client_ip"].(string); ok && clientIP != "" {
-			sessions[i]["daily_time_used_secs"] = ah.sessions.dailyTracker.GetUsedSeconds(clientIP)
+			sessions[i]["daily_time_used_secs"] = sm.dailyTracker.GetUsedSeconds(clientIP)
 		} else {
 			sessions[i]["daily_time_used_secs"] = int64(0)
 		}
 	}
 
-	response := map[string]interface{}{
+	return map[string]interface{}{
 		"sessions": sessions,
 		"count":    len(sessions),
 	}
+}
 
+// HandleSessions returns information about all active sessions
+func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := json.NewEncoder(w).Encode(buildSessionsPayload(ah.sessions, ah.dxClusterWsHandler, ah.geoIPService)); err != nil {
 		log.Printf("Error encoding sessions: %v", err)
 	}
 }

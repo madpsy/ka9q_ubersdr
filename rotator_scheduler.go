@@ -67,6 +67,7 @@ type RotatorScheduler struct {
 	lastSunAzimuth    float64              // Last sun azimuth (for tracking changes)
 	lastSunUpdate     time.Time            // Last time sun position was updated
 	sunTrackingActive bool                 // Whether sun tracking is currently active
+	mqttPublisher     *MQTTPublisher       // may be nil; publishes each new log entry to MQTT
 }
 
 // GetAvailableSolarEvents returns the list of available solar event triggers
@@ -729,6 +730,12 @@ func (rs *RotatorScheduler) executeScheduledPosition(pos *ScheduledPosition) {
 	log.Printf("Successfully set rotator to scheduled bearing %.0f°", pos.Bearing)
 }
 
+// SetMQTTPublisher attaches an MQTTPublisher so that each new scheduler trigger
+// log entry is published to MQTT as it is added.
+func (rs *RotatorScheduler) SetMQTTPublisher(mp *MQTTPublisher) {
+	rs.mqttPublisher = mp
+}
+
 // addTriggerLog adds a trigger log entry, maintaining a maximum of 100 entries
 func (rs *RotatorScheduler) addTriggerLog(log ScheduleTriggerLog) {
 	rs.mu.Lock()
@@ -740,6 +747,13 @@ func (rs *RotatorScheduler) addTriggerLog(log ScheduleTriggerLog) {
 	// Keep only the last 100 entries
 	if len(rs.triggerLogs) > 100 {
 		rs.triggerLogs = rs.triggerLogs[len(rs.triggerLogs)-100:]
+	}
+
+	// Publish to MQTT asynchronously — the goroutine captures log by value and
+	// mp by pointer, so no lock is needed inside the goroutine.
+	if rs.mqttPublisher != nil {
+		mp := rs.mqttPublisher
+		go mp.PublishRotatorLog(log)
 	}
 }
 

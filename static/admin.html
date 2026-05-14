@@ -658,6 +658,7 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             overflow: hidden;
+            resize: vertical;
             font-family: monospace;
             font-size: 13px;
             line-height: 1.5;
@@ -678,12 +679,14 @@
             border: none !important;
             border-radius: 0 !important;
             outline: none;
-            resize: vertical;
+            resize: none;
             padding: 8px;
             font-family: monospace;
             font-size: 13px;
             line-height: 1.5;
             overflow-y: auto;
+            height: 100%;
+            box-sizing: border-box;
         }
     </style>
 </head>
@@ -4073,7 +4076,9 @@
                         // Use textarea for multiline strings or long strings
                         input = document.createElement('textarea');
                         input.style.width = '100%';
-                        input.style.minHeight = (key === 'custom_head_html' || key === 'custom_body_html') ? '200px' : (key === 'custom_ads_txt' ? '150px' : '80px');
+                        if (key !== 'custom_head_html' && key !== 'custom_body_html') {
+                            input.style.minHeight = key === 'custom_ads_txt' ? '150px' : '80px';
+                        }
                         input.style.fontFamily = 'monospace';
                         input.style.fontSize = '13px';
                         input.style.lineHeight = '1.5';
@@ -4106,6 +4111,7 @@
                             // Now append the textarea (with line-number gutter) BELOW the buttons
                             const headWrapper = document.createElement('div');
                             headWrapper.className = 'cm-lined-wrapper';
+                            headWrapper.style.height = '390px'; // ~20 lines default; drag to resize
                             const headGutter = document.createElement('div');
                             headGutter.className = 'cm-line-numbers';
                             function updateHeadGutter() {
@@ -4241,6 +4247,7 @@
                             // Now append the textarea (with line-number gutter) BELOW the buttons
                             const bodyWrapper = document.createElement('div');
                             bodyWrapper.className = 'cm-lined-wrapper';
+                            bodyWrapper.style.height = '390px'; // ~20 lines default; drag to resize
                             const bodyGutter = document.createElement('div');
                             bodyGutter.className = 'cm-line-numbers';
                             function updateBodyGutter() {

@@ -4072,36 +4072,16 @@
                     } else if (typeof value === 'string' && (key === 'custom_head_html' || key === 'custom_body_html' || key === 'custom_ads_txt' || value.includes('\n') || value.length > 100)) {
                         // Use textarea for multiline strings or long strings
                         input = document.createElement('textarea');
+                        input.style.width = '100%';
                         input.style.minHeight = (key === 'custom_head_html' || key === 'custom_body_html') ? '200px' : (key === 'custom_ads_txt' ? '150px' : '80px');
                         input.style.fontFamily = 'monospace';
                         input.style.fontSize = '13px';
                         input.style.lineHeight = '1.5';
                         input.style.padding = '8px';
+                        input.style.border = '1px solid #ddd';
+                        input.style.borderRadius = '5px';
                         input.style.resize = 'vertical';
                         input.value = value;
-
-                        // For the two HTML fields, wrap in a line-number gutter container
-                        if (key === 'custom_head_html' || key === 'custom_body_html') {
-                            const wrapper = document.createElement('div');
-                            wrapper.className = 'cm-lined-wrapper';
-
-                            const gutterEl = document.createElement('div');
-                            gutterEl.className = 'cm-line-numbers';
-
-                            function updateGutter() {
-                                const lines = input.value.split('\n').length;
-                                gutterEl.textContent = Array.from({length: lines}, (_, i) => i + 1).join('\n');
-                                // Keep gutter height in sync with textarea scroll height
-                                gutterEl.style.minHeight = input.style.minHeight;
-                            }
-                            updateGutter();
-                            input.addEventListener('input', updateGutter);
-                            input.addEventListener('scroll', () => { gutterEl.scrollTop = input.scrollTop; });
-
-                            wrapper.appendChild(gutterEl);
-                            wrapper.appendChild(input);
-                            field.appendChild(wrapper);
-                        }
 
                         if (key === 'custom_head_html') {
                             const hint = document.createElement('small');
@@ -4112,7 +4092,7 @@
                             hint.style.fontStyle = 'italic';
                             field.appendChild(hint);
 
-                            // Button row: Edit button on the far right
+                            // Button row: Open in Editor button on the far right — ABOVE the textarea
                             const headBtnRow = document.createElement('div');
                             headBtnRow.className = 'cm-field-btn-row';
                             const headEditBtn = document.createElement('button');
@@ -4122,6 +4102,22 @@
                             headEditBtn.onclick = () => openCmEditorModal(input, fullPath, 'Custom Head HTML');
                             headBtnRow.appendChild(headEditBtn);
                             field.appendChild(headBtnRow);
+
+                            // Now append the textarea (with line-number gutter) BELOW the buttons
+                            const headWrapper = document.createElement('div');
+                            headWrapper.className = 'cm-lined-wrapper';
+                            const headGutter = document.createElement('div');
+                            headGutter.className = 'cm-line-numbers';
+                            function updateHeadGutter() {
+                                const lines = input.value.split('\n').length;
+                                headGutter.textContent = Array.from({length: lines}, (_, i) => i + 1).join('\n');
+                            }
+                            updateHeadGutter();
+                            input.addEventListener('input', updateHeadGutter);
+                            input.addEventListener('scroll', () => { headGutter.scrollTop = input.scrollTop; });
+                            headWrapper.appendChild(headGutter);
+                            headWrapper.appendChild(input);
+                            field.appendChild(headWrapper);
                         } else if (key === 'custom_body_html') {
                             const hint = document.createElement('small');
                             hint.textContent = 'Click Save at the bottom - no restart required. Injected just before </body>. Use this for visible banners, popups, DOM-dependent scripts, Google Ads display unit <div>s, or any HTML that needs the page DOM to exist first.';
@@ -4131,7 +4127,7 @@
                             hint.style.fontStyle = 'italic';
                             field.appendChild(hint);
 
-                            // Button row: example buttons on the left, Edit button on the far right
+                            // Button row: example buttons on the left, Open in Editor on the far right — ABOVE the textarea
                             const bodyBtnRow = document.createElement('div');
                             bodyBtnRow.className = 'cm-field-btn-row';
 
@@ -4179,6 +4175,7 @@
 '})();\n' +
 '</' + 'script>';
                                 input.dispatchEvent(new Event('change'));
+                                updateBodyGutter();
                             };
                             bodyBtnRow.appendChild(exampleBtn);
 
@@ -4227,10 +4224,11 @@
 '})();\n' +
 '</' + 'script>';
                                 input.dispatchEvent(new Event('change'));
+                                updateBodyGutter();
                             };
                             bodyBtnRow.appendChild(pskrExampleBtn);
 
-                            // Edit in Editor button — far right
+                            // Open in Editor button — far right
                             const bodyEditBtn = document.createElement('button');
                             bodyEditBtn.type = 'button';
                             bodyEditBtn.textContent = '✏️ Open in Editor';
@@ -4238,8 +4236,23 @@
                             bodyEditBtn.style.marginTop = '8px';
                             bodyEditBtn.onclick = () => openCmEditorModal(input, fullPath, 'Custom Body HTML');
                             bodyBtnRow.appendChild(bodyEditBtn);
-
                             field.appendChild(bodyBtnRow);
+
+                            // Now append the textarea (with line-number gutter) BELOW the buttons
+                            const bodyWrapper = document.createElement('div');
+                            bodyWrapper.className = 'cm-lined-wrapper';
+                            const bodyGutter = document.createElement('div');
+                            bodyGutter.className = 'cm-line-numbers';
+                            function updateBodyGutter() {
+                                const lines = input.value.split('\n').length;
+                                bodyGutter.textContent = Array.from({length: lines}, (_, i) => i + 1).join('\n');
+                            }
+                            updateBodyGutter();
+                            input.addEventListener('input', updateBodyGutter);
+                            input.addEventListener('scroll', () => { bodyGutter.scrollTop = input.scrollTop; });
+                            bodyWrapper.appendChild(bodyGutter);
+                            bodyWrapper.appendChild(input);
+                            field.appendChild(bodyWrapper);
                         } else if (key === 'custom_ads_txt') {
                             const hint = document.createElement('small');
                             hint.textContent = 'Click Save at the bottom - no restart required. Content for /ads.txt endpoint. Format: domain, publisher_id, relationship, certification_authority_id (one entry per line). Example: google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0';

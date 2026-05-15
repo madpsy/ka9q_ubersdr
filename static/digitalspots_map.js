@@ -31,6 +31,15 @@ class DigitalSpotsMap {
         this.bandConditionsAvailable = false; // Track if band conditions are available
         this.currentStatus = 'disconnected'; // Track current connection status to avoid unnecessary DOM updates
 
+        // Globe.gl state
+        this.globe = null; // Globe.gl instance
+        this.mapMode = localStorage.getItem('mapMode') || 'leaflet'; // 'leaflet' or 'globe'
+        this.globeSpinning = false; // Whether auto-spin is active
+        this.globeSpinInterval = null; // Auto-spin animation frame ID
+        this.globeUserInteracting = false; // True while user is dragging
+        this.globeTooltipEl = null; // Tooltip DOM element for globe hover
+        this.globeRefreshTimer = null; // Debounce timer for globe point refresh
+
         // Decode cycle tracking
         this.decodeCycles = new Map(); // Track cycles per mode-band combination
         this.cycleHistory = new Map(); // Historical cycle data
@@ -171,6 +180,15 @@ class DigitalSpotsMap {
 
         // Setup cycles visibility toggle
         this.setupCyclesVisibilityToggle();
+
+        // Setup map view toggle (2D/3D)
+        this.setupMapViewToggle();
+
+        // If user previously chose globe, switch to it after map is ready
+        if (this.mapMode === 'globe') {
+            // Defer until after receiver location loads
+            setTimeout(() => this.switchMapView('globe'), 500);
+        }
     }
 
     loadPreferences() {
@@ -590,6 +608,12 @@ class DigitalSpotsMap {
 
         // Setup map view state saving
         this.setupMapViewSaving();
+
+        // If globe mode was saved, hide the leaflet map div immediately
+        // (the actual globe init happens after receiver location loads)
+        if (this.mapMode === 'globe') {
+            document.getElementById('map').style.display = 'none';
+        }
     }
 
     setupMapViewSaving() {
@@ -602,6 +626,282 @@ class DigitalSpotsMap {
             this.savePreference('mapZoom', zoom);
         });
     }
+
+    // ─── Globe.gl methods ────────────────────────────────────────────────────
+
+    setupMapViewToggle() {
+        const btn = document.getElementById('map-view-toggle');
+        if (!btn) return;
+
+        // Set initial button icon and tooltip
+        btn.textContent = this.mapMode === 'globe' ? '🗺️' : '🌍';
+        btn.title = this.mapMode === 'globe' ? 'Switch to 2D Map' : 'Switch to 3D Globe';
+        if (this.mapMode === 'globe') btn.classList.add('active-globe');
+
+        btn.addEventListener('click', () => {
+            const newMode = this.mapMode === 'leaflet' ? 'globe' : 'leaflet';
+            this.mapMode = newMode;
+            localStorage.setItem('mapMode', newMode);
+            this.switchMapView(newMode);
+        });
+    }
+
+    switchMapView(mode) {
+        const mapEl = document.getElementById('map');
+        const globeEl = document.getElementById('globe-container');
+        const btn = document.getElementById('map-view-toggle');
+
+        if (mode === 'globe') {
+            mapEl.style.display = 'none';
+            globeEl.style.display = 'block';
+            if (btn) {
+                btn.textContent = '🗺️';
+                btn.title = 'Switch to 2D Map';
+                btn.classList.add('active-globe');
+            }
+            if (!this.globe) {
+                this.initGlobe();
+            } else {
+                // Globe already exists — refresh data and restart spin
+                this.refreshGlobePoints();
+                this.refreshGlobeGreyline();
+                this.startGlobeSpin();
+            }
+        } else {
+            mapEl.style.display = 'block';
+            globeEl.style.display = 'none';
+            if (btn) {
+                btn.textContent = '🌍';
+                btn.title = 'Switch to 3D Globe';
+                btn.classList.remove('active-globe');
+            }
+            this.stopGlobeSpin();
+        }
+    }
+
+    initGlobe() {
+        const container = document.getElementById('globe-container');
+        if (!container || typeof Globe === 'undefined') {
+            console.error('[Globe] Globe.gl not loaded or container missing');
+            return;
+        }
+
+        // Build initial filtered spots array
+        const spotsArray = this.getFilteredSpotsArray();
+
+        // Build night polygon for greyline
+        const nightPolygon = this.createNightPolygon(new Date());
+        const nightGeoJson = nightPolygon.length > 2 ? [{
+            type: 'Feature',
+            geometry: {
+                type: 'Polygon',
+                coordinates: [nightPolygon.map(p => [p[1], p[0]])]
+            }
+        }] : [];
+
+        // Receiver ring data
+        const receiverRings = this.receiverLocation ? [{
+            lat: this.receiverLocation.lat,
+            lng: this.receiverLocation.lon,
+            maxR: 1.5,
+            propagationSpeed: 1,
+            repeatPeriod: 2000
+        }] : [];
+
+        this.globe = Globe({ animateIn: true })(container)
+            // Appearance
+            .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
+            .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
+            .showAtmosphere(true)
+            .atmosphereColor('#1a6aff')
+            .atmosphereAltitude(0.15)
+
+            // Spot points
+            .pointsData(spotsArray)
+            .pointLat('latitude')
+            .pointLng('longitude')
+            .pointColor(d => this.bandColors[d.band] || '#999')
+            .pointRadius(0.25)
+            .pointAltitude(0.005)
+            .pointResolution(6)
+            .onPointClick((spot) => {
+                this.showGlobePopup(spot);
+            })
+            .onPointHover((spot) => {
+                this.handleGlobeHover(spot);
+            })
+
+            // Night/greyline polygon overlay
+            .polygonsData(nightGeoJson)
+            .polygonCapColor(() => 'rgba(0, 0, 40, 0.35)')
+            .polygonSideColor(() => 'transparent')
+            .polygonStrokeColor(() => 'transparent')
+            .polygonAltitude(0.001)
+
+            // Receiver location ring
+            .ringsData(receiverRings)
+            .ringColor(() => '#ff4444')
+            .ringMaxRadius('maxR')
+            .ringPropagationSpeed('propagationSpeed')
+            .ringRepeatPeriod('repeatPeriod')
+            .ringAltitude(0.005);
+
+        // Set initial camera position — centre on receiver or world view
+        const initLat = this.receiverLocation ? this.receiverLocation.lat : 20;
+        const initLng = this.receiverLocation ? this.receiverLocation.lon : 0;
+        this.globe.pointOfView({ lat: initLat, lng: initLng, altitude: 2.5 }, 0);
+
+        // Detect user interaction to pause auto-spin
+        const renderer = container.querySelector('canvas');
+        if (renderer) {
+            renderer.addEventListener('mousedown', () => {
+                this.globeUserInteracting = true;
+                this.stopGlobeSpin();
+            });
+            renderer.addEventListener('mouseup', () => {
+                this.globeUserInteracting = false;
+                // Resume spin after 3 seconds of inactivity
+                setTimeout(() => {
+                    if (!this.globeUserInteracting && this.mapMode === 'globe') {
+                        this.startGlobeSpin();
+                    }
+                }, 3000);
+            });
+            renderer.addEventListener('touchstart', () => {
+                this.globeUserInteracting = true;
+                this.stopGlobeSpin();
+            }, { passive: true });
+            renderer.addEventListener('touchend', () => {
+                this.globeUserInteracting = false;
+                setTimeout(() => {
+                    if (!this.globeUserInteracting && this.mapMode === 'globe') {
+                        this.startGlobeSpin();
+                    }
+                }, 3000);
+            }, { passive: true });
+        }
+
+        // Create tooltip element
+        this.globeTooltipEl = document.createElement('div');
+        this.globeTooltipEl.className = 'globe-tooltip';
+        this.globeTooltipEl.style.display = 'none';
+        document.body.appendChild(this.globeTooltipEl);
+
+        // Track mouse position for tooltip placement
+        document.addEventListener('mousemove', (e) => {
+            if (this.globeTooltipEl && this.globeTooltipEl.style.display !== 'none') {
+                this.globeTooltipEl.style.left = (e.clientX + 14) + 'px';
+                this.globeTooltipEl.style.top = (e.clientY - 10) + 'px';
+            }
+        });
+
+        // Start auto-spin
+        this.startGlobeSpin();
+
+        console.log('[Globe] Initialised with', spotsArray.length, 'spots');
+    }
+
+    startGlobeSpin() {
+        if (this.globeSpinning || !this.globe) return;
+        this.globeSpinning = true;
+
+        const spinSpeed = 0.08; // degrees per frame (~5°/sec at 60fps)
+        const spin = () => {
+            if (!this.globeSpinning || this.globeUserInteracting) return;
+            const pov = this.globe.pointOfView();
+            this.globe.pointOfView({ lat: pov.lat, lng: pov.lng + spinSpeed, altitude: pov.altitude }, 0);
+            this.globeSpinInterval = requestAnimationFrame(spin);
+        };
+        this.globeSpinInterval = requestAnimationFrame(spin);
+    }
+
+    stopGlobeSpin() {
+        this.globeSpinning = false;
+        if (this.globeSpinInterval) {
+            cancelAnimationFrame(this.globeSpinInterval);
+            this.globeSpinInterval = null;
+        }
+    }
+
+    getFilteredSpotsArray() {
+        const now = Date.now();
+        const result = [];
+        this.spots.forEach(spot => {
+            if (!spot.latitude || !spot.longitude) return;
+            const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
+            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
+            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
+            let ageMatch = true;
+            if (this.ageFilter !== 'none') {
+                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
+                const age = now - new Date(spot.timestamp).getTime();
+                ageMatch = age <= maxAgeMs;
+            }
+            if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
+                result.push(spot);
+            }
+        });
+        return result;
+    }
+
+    refreshGlobePoints() {
+        if (!this.globe) return;
+        this.globe.pointsData(this.getFilteredSpotsArray());
+    }
+
+    debouncedGlobeRefresh() {
+        // Coalesce rapid incoming spots into a single refresh after 250ms idle
+        if (this.globeRefreshTimer) {
+            clearTimeout(this.globeRefreshTimer);
+        }
+        this.globeRefreshTimer = setTimeout(() => {
+            this.globeRefreshTimer = null;
+            this.refreshGlobePoints();
+        }, 250);
+    }
+
+    refreshGlobeGreyline() {
+        if (!this.globe) return;
+        const nightPolygon = this.createNightPolygon(new Date());
+        const nightGeoJson = nightPolygon.length > 2 ? [{
+            type: 'Feature',
+            geometry: {
+                type: 'Polygon',
+                coordinates: [nightPolygon.map(p => [p[1], p[0]])]
+            }
+        }] : [];
+        this.globe.polygonsData(nightGeoJson);
+    }
+
+    handleGlobeHover(spot) {
+        if (!this.globeTooltipEl) return;
+        if (!spot) {
+            this.globeTooltipEl.style.display = 'none';
+            return;
+        }
+        this.globeTooltipEl.innerHTML = this.createPopupContent(spot);
+        this.globeTooltipEl.style.display = 'block';
+    }
+
+    showGlobePopup(spot) {
+        if (!spot || !this.globe) return;
+        // Fly to the spot
+        this.globe.pointOfView(
+            { lat: spot.latitude, lng: spot.longitude, altitude: 1.2 },
+            800
+        );
+        // Pause spin while viewing
+        this.stopGlobeSpin();
+        setTimeout(() => {
+            if (!this.globeUserInteracting && this.mapMode === 'globe') {
+                this.startGlobeSpin();
+            }
+        }, 5000);
+    }
+
+    // ─── End Globe.gl methods ─────────────────────────────────────────────────
 
     setupTextZoom() {
         // Load saved zoom level or default to 100%
@@ -957,6 +1257,11 @@ class DigitalSpotsMap {
         this.updateRarestEntities(); // Update rarest entities when filters change
         this.updateDecodeCyclesDisplay(); // Update decode cycles when filters change
         this.updateSpaceWeatherPosition(); // Update space weather panel position
+
+        // Refresh globe points if in globe mode
+        if (this.mapMode === 'globe') {
+            this.refreshGlobePoints();
+        }
     }
 
     setFilter(type, value) {
@@ -1303,6 +1608,11 @@ class DigitalSpotsMap {
 
         // Store marker
         this.markers.set(key, marker);
+
+        // If in globe mode, debounce-refresh globe points (avoid per-spot overhead)
+        if (this.mapMode === 'globe') {
+            this.debouncedGlobeRefresh();
+        }
     }
 
     createPopupContent(spot) {
@@ -1398,6 +1708,10 @@ class DigitalSpotsMap {
                 this.updateDistanceStatistics();
                 this.updateLiveMessagesDisplay();
                 this.updateRarestEntities();
+                // Refresh globe after batch removal
+                if (this.mapMode === 'globe') {
+                    this.refreshGlobePoints();
+                }
             }
         }, 60000); // Every minute
     }
@@ -1974,6 +2288,11 @@ class DigitalSpotsMap {
         }
 
         this.greylineLayer.addTo(this.map);
+
+        // Also update globe greyline if in globe mode
+        if (this.mapMode === 'globe') {
+            this.refreshGlobeGreyline();
+        }
     }
 
     createNightPolygon(date) {
@@ -2279,7 +2598,16 @@ class DigitalSpotsMap {
     }
 
     showSpotOnMap(spotKey) {
-        // Find the marker for this spot
+        if (this.mapMode === 'globe') {
+            // In globe mode: fly to the spot's coordinates
+            const spot = this.spots.get(spotKey);
+            if (spot && spot.latitude && spot.longitude) {
+                this.showGlobePopup(spot);
+            }
+            return;
+        }
+
+        // Leaflet mode: find the marker for this spot
         const marker = this.markers.get(spotKey);
         if (marker) {
             // Pan to the marker

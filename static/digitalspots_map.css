@@ -619,3 +619,72 @@
         .cycle-trend.neutral {
             color: #888;
         }
+
+        /* Map view toggle — fixed overlay, top-right, below Leaflet zoom controls */
+        #map-view-toggle-wrap {
+            position: fixed;
+            top: 140px; /* below the Leaflet zoom +/- buttons (60px header + ~70px for zoom control) */
+            right: 10px;
+            z-index: 1001;
+        }
+
+        /* Map view toggle button */
+        .map-view-btn {
+            display: block;
+            padding: 0;
+            width: 34px;
+            height: 34px;
+            background: #fff;
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            color: #333;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            line-height: 30px;
+            text-align: center;
+            transition: background 0.15s;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            white-space: nowrap;
+        }
+
+        .map-view-btn:hover {
+            background: #f4f4f4;
+        }
+
+        .map-view-btn.active-globe {
+            background: #e8f0fe;
+            border-color: #4a9eff;
+        }
+
+        /* Globe container */
+        #globe-container {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+            display: none;
+            background: #000010;
+        }
+
+        #globe-container canvas {
+            display: block;
+        }
+
+        /* Globe tooltip */
+        .globe-tooltip {
+            position: fixed;
+            background: rgba(26, 26, 26, 0.95);
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #fff;
+            pointer-events: none;
+            z-index: 9999;
+            max-width: 260px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }

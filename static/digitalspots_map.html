@@ -6,6 +6,7 @@
     <title>Digital Spots Map</title>
     <link rel="stylesheet" href="leaflet.css" />
     <link rel="stylesheet" href="digitalspots_map.css" />
+    <script src="https://unpkg.com/globe.gl@2.30.0/dist/globe.gl.min.js"></script>
 </head>
 <body>
     <!-- Resolution Info Overlay -->
@@ -131,6 +132,12 @@
     </div>
 
     <div id="map"></div>
+    <div id="globe-container"></div>
+
+    <!-- Map view toggle — fixed top-right, same position as Leaflet zoom controls -->
+    <div id="map-view-toggle-wrap">
+        <button id="map-view-toggle" class="map-view-btn" title="Switch to 3D Globe view">🌍 3D Globe</button>
+    </div>
 
     <div class="legend" id="band-legend">
         <div class="legend-item">

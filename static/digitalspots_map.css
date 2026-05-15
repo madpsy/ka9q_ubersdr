@@ -624,7 +624,7 @@
         #map-view-toggle-wrap {
             position: fixed;
             top: 70px; /* same vertical position as Leaflet zoom control (60px header + 10px Leaflet offset) */
-            left: 80px; /* 10px Leaflet margin + ~60px zoom control width + 10px gap */
+            left: 46px; /* 10px Leaflet margin + ~26px zoom control width + 10px gap */
             z-index: 1001;
         }
 

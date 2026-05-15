@@ -33,7 +33,11 @@ class DigitalSpotsMap {
 
         // Globe.gl state
         this.globe = null; // Globe.gl instance
-        this.mapMode = localStorage.getItem('mapMode') || 'leaflet'; // 'leaflet' or 'globe'
+        // URL param ?view=globe|map takes priority over localStorage
+        const urlView = new URLSearchParams(window.location.search).get('view');
+        this.mapMode = (urlView === 'globe' || urlView === 'map')
+            ? (urlView === 'globe' ? 'globe' : 'leaflet')
+            : (localStorage.getItem('mapMode') || 'leaflet');
         this.globeSpinning = false; // Whether auto-spin is active
         this.globeSpinInterval = null; // Auto-spin animation frame ID
         this.globeUserInteracting = false; // True while user is dragging
@@ -642,6 +646,10 @@ class DigitalSpotsMap {
             const newMode = this.mapMode === 'leaflet' ? 'globe' : 'leaflet';
             this.mapMode = newMode;
             localStorage.setItem('mapMode', newMode);
+            // Update URL param so the link is shareable without a page reload
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', newMode === 'globe' ? 'globe' : 'map');
+            history.replaceState(null, '', url.toString());
             this.switchMapView(newMode);
         });
     }

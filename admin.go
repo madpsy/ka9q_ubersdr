@@ -394,6 +394,24 @@ type AdminHandler struct {
 	pskRank             *PSKRankFetcher     // PSKReporter top-monitor ranking fetcher
 }
 
+// GetEnabledPublicAddonNames returns the names of currently enabled, non-admin-only
+// addon proxies from the live in-memory config. Thread-safe — reads addonsConfig
+// under the read lock so it always reflects the latest add/update/delete operations
+// without requiring a server restart or disk read.
+func (ah *AdminHandler) GetEnabledPublicAddonNames() []string {
+	ah.addonsMu.RLock()
+	defer ah.addonsMu.RUnlock()
+	names := []string{}
+	if ah.addonsConfig != nil {
+		for _, p := range ah.addonsConfig.Proxies {
+			if p.Enabled && !p.RequireAdmin {
+				names = append(names, p.Name)
+			}
+		}
+	}
+	return names
+}
+
 // restartServer triggers a server restart after a short delay
 // It properly shuts down all components before exiting
 func (ah *AdminHandler) restartServer() {

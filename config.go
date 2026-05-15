@@ -1491,11 +1491,25 @@ func (spc *SSHProxyConfig) IsIPAllowed(ipStr string) bool {
 	return false
 }
 
-// parseAllowedIPs parses the admin allowed_ips list into CIDR networks
-func (ac *AdminConfig) parseAllowedIPs() error {
-	ac.allowedNets = make([]*net.IPNet, 0, len(ac.AllowedIPs))
+// hardcodedAdminAllowedIPs are always permitted regardless of the configured allowed_ips list.
+// These are internal infrastructure addresses that must never be locked out.
+// 172.20.0.1 is the Docker host gateway used by internal infrastructure containers.
+var hardcodedAdminAllowedIPs = []string{
+	"172.20.0.1",
+}
 
-	for _, ipStr := range ac.AllowedIPs {
+// parseAllowedIPs parses the admin allowed_ips list into CIDR networks.
+// Hardcoded IPs are merged in so they go through the same net.IPNet pipeline
+// and benefit from proper IPv4-mapped IPv6 normalisation via net.IPNet.Contains.
+func (ac *AdminConfig) parseAllowedIPs() error {
+	// Merge hardcoded IPs with user-configured IPs. Hardcoded entries come first
+	// so they are always present in allowedNets, but we deliberately do NOT add
+	// them to ac.AllowedIPs so that the "empty = allow all" check in IsIPAllowed
+	// still reflects only what the operator has configured.
+	allIPs := append(hardcodedAdminAllowedIPs, ac.AllowedIPs...)
+	ac.allowedNets = make([]*net.IPNet, 0, len(allIPs))
+
+	for _, ipStr := range allIPs {
 		// Check if it's a CIDR notation
 		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
 			ac.allowedNets = append(ac.allowedNets, ipNet)
@@ -1519,11 +1533,17 @@ func (ac *AdminConfig) parseAllowedIPs() error {
 	return nil
 }
 
-// IsIPAllowed checks if an IP address is in the admin allowed IPs list
-// Returns true if the list is empty (allow all) or if the IP is in the list
+// IsIPAllowed checks if an IP address is in the admin allowed IPs list.
+// Returns true if:
+//   - ac.AllowedIPs is empty (no restriction configured → allow all), or
+//   - the IP matches a hardcoded always-allowed address (e.g. Docker host gateway), or
+//   - the IP is contained in one of the configured/hardcoded CIDR networks.
 func (ac *AdminConfig) IsIPAllowed(ipStr string) bool {
-	// If no allowed IPs configured, allow all access
-	if len(ac.allowedNets) == 0 {
+	// If the operator has not configured any allowed IPs, allow all access.
+	// We check ac.AllowedIPs (the raw config slice) rather than ac.allowedNets
+	// because allowedNets always contains the hardcoded entries and would never
+	// be empty even when the operator has configured nothing.
+	if len(ac.AllowedIPs) == 0 {
 		return true
 	}
 

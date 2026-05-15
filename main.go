@@ -1980,7 +1980,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, addonsConfig, pskRankFetcher)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -3339,7 +3339,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig, pskRankFetcher *PSKRankFetcher) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -3447,15 +3447,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		effectiveDefaultMode = "usb" // built-in default
 	}
 
-	// Collect names of enabled, publicly accessible addon proxies (exclude require_admin ones)
-	enabledAddons := []string{}
-	if addonsConfig != nil {
-		for _, p := range addonsConfig.Proxies {
-			if p.Enabled && !p.RequireAdmin {
-				enabledAddons = append(enabledAddons, p.Name)
-			}
-		}
-	}
+	// Collect names of enabled, publicly accessible addon proxies (exclude require_admin ones).
+	// Read from the live AdminHandler in-memory state so dynamic add/update/delete operations
+	// are reflected immediately without a server restart.
+	enabledAddons := adminHandler.GetEnabledPublicAddonNames()
 
 	// Collect unique enabled digital mode types (e.g. ["FT8","WSPR"]) when decoder is enabled.
 	// Iterates enabled bands and deduplicates by DecoderMode integer value — no string parsing.

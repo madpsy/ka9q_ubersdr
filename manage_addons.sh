@@ -280,17 +280,42 @@ UBERSDR_BASE_URL="${UBERSDR_BASE_URL:-http://localhost:8080}"
 
 # Internal helper: run a curl call against the admin API using X-Admin-Password header.
 # Usage: _api_curl <method> <path> [extra curl args...]
+# On a non-2xx HTTP response the body is printed to stderr as an error and the
+# function returns 1, so callers can rely on a non-zero exit code and will never
+# accidentally pipe an HTML/plain-text error body into jq.
 _api_curl() {
     local method="$1"
     local path="$2"
     shift 2
     local password
     password=$(get_admin_password) || return 1
-    curl -s -X "$method" \
+
+    local body http_code
+    # Write body to a temp file so we can read it after curl exits, then also
+    # capture the HTTP status code appended by -w.
+    local tmpfile
+    tmpfile=$(mktemp)
+    http_code=$(curl -s -o "$tmpfile" -w "%{http_code}" -X "$method" \
         -H "X-Admin-Password: ${password}" \
         -H "Content-Type: application/json" \
         "${UBERSDR_BASE_URL}${path}" \
-        "$@"
+        "$@")
+    local curl_exit=$?
+    body=$(cat "$tmpfile")
+    rm -f "$tmpfile"
+
+    if [[ $curl_exit -ne 0 ]]; then
+        echo "Error: curl failed (exit $curl_exit) calling ${method} ${UBERSDR_BASE_URL}${path}" >&2
+        return 1
+    fi
+
+    # Treat any non-2xx status as an error
+    if [[ "$http_code" != 2* ]]; then
+        echo "Error: UberSDR API returned HTTP ${http_code} for ${method} ${path}: ${body}" >&2
+        return 1
+    fi
+
+    printf '%s' "$body"
 }
 
 # List all addon proxies currently registered in UberSDR.

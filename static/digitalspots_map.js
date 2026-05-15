@@ -669,12 +669,12 @@ class DigitalSpotsMap {
         const mapEl = document.getElementById('map');
         const globeEl = document.getElementById('globe-container');
         const btn = document.getElementById('map-view-toggle');
-        const themeWrap = document.getElementById('globe-theme-wrap');
+        const themeSelect = document.getElementById('globe-theme-select');
 
         if (mode === 'globe') {
             mapEl.style.display = 'none';
             globeEl.style.display = 'block';
-            if (themeWrap) themeWrap.style.display = 'flex';
+            if (themeSelect) themeSelect.style.display = 'block';
             if (btn) {
                 btn.textContent = '🗺️';
                 btn.title = 'Switch to 2D Map';
@@ -690,13 +690,17 @@ class DigitalSpotsMap {
         } else {
             mapEl.style.display = 'block';
             globeEl.style.display = 'none';
-            if (themeWrap) themeWrap.style.display = 'none';
+            if (themeSelect) themeSelect.style.display = 'none';
             if (btn) {
                 btn.textContent = '🌍';
                 btn.title = 'Switch to 3D Globe';
                 btn.classList.remove('active-globe');
             }
             this.stopGlobeSpin();
+            // Leaflet loses track of its container size when hidden — force a recalculation
+            if (this.map) {
+                setTimeout(() => this.map.invalidateSize(), 50);
+            }
         }
     }
 
@@ -715,7 +719,7 @@ class DigitalSpotsMap {
         const validThemes = Object.keys(this.globeTextures);
         const savedTheme = (urlTheme && validThemes.includes(urlTheme))
             ? urlTheme
-            : (localStorage.getItem('globeTheme') || 'night');
+            : (localStorage.getItem('globeTheme') || 'blue-marble');
         const themeUrl = this.globeTextures[savedTheme];
         // Sync the select element to the resolved value
         const themeSelect = document.getElementById('globe-theme-select');

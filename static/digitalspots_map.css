@@ -629,31 +629,23 @@
         }
 
         /* Globe theme selector — centred top, only shown in globe mode */
-        #globe-theme-wrap {
+        #globe-theme-select {
             position: fixed;
-            top: 70px;
+            top: 74px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1001;
             display: none; /* shown only in globe mode */
-            align-items: center;
             background: rgba(26, 26, 26, 0.92);
-            border: 1px solid #444;
-            border-radius: 6px;
-            padding: 5px 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-            backdrop-filter: blur(6px);
-        }
-
-        #globe-theme-select {
-            background: #2a2a2a;
             border: 1px solid #555;
-            border-radius: 4px;
+            border-radius: 6px;
             color: #fff;
             font-size: 12px;
-            padding: 3px 6px;
+            padding: 5px 10px;
             cursor: pointer;
             outline: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            backdrop-filter: blur(6px);
         }
 
         #globe-theme-select:hover {

@@ -677,7 +677,15 @@
         }
 
         .map-view-btn.active-globe {
-            background: #e8f0fe;
+            background: rgba(26, 26, 26, 0.92);
+            border-color: #555;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            backdrop-filter: blur(6px);
+        }
+
+        .map-view-btn.active-globe:hover {
+            background: rgba(40, 40, 40, 0.95);
             border-color: #4a9eff;
         }
 

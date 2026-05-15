@@ -664,7 +664,6 @@ class DigitalSpotsMap {
             } else {
                 // Globe already exists — refresh data and restart spin
                 this.refreshGlobePoints();
-                this.refreshGlobeGreyline();
                 this.startGlobeSpin();
             }
         } else {
@@ -689,16 +688,6 @@ class DigitalSpotsMap {
         // Build initial filtered spots array
         const spotsArray = this.getFilteredSpotsArray();
 
-        // Build night polygon for greyline
-        const nightPolygon = this.createNightPolygon(new Date());
-        const nightGeoJson = nightPolygon.length > 2 ? [{
-            type: 'Feature',
-            geometry: {
-                type: 'Polygon',
-                coordinates: [nightPolygon.map(p => [p[1], p[0]])]
-            }
-        }] : [];
-
         // Receiver ring data
         const receiverRings = this.receiverLocation ? [{
             lat: this.receiverLocation.lat,
@@ -721,7 +710,11 @@ class DigitalSpotsMap {
             .pointLat('latitude')
             .pointLng('longitude')
             .pointColor(d => this.bandColors[d.band] || '#999')
-            .pointRadius(0.25)
+            .pointRadius(() => {
+                // Scale radius with camera altitude so points stay ~constant screen size
+                const alt = this.globe ? this.globe.pointOfView().altitude : 2.5;
+                return Math.max(0.05, 0.1 * alt);
+            })
             .pointAltitude(0.005)
             .pointResolution(6)
             .onPointClick((spot) => {
@@ -730,13 +723,6 @@ class DigitalSpotsMap {
             .onPointHover((spot) => {
                 this.handleGlobeHover(spot);
             })
-
-            // Night/greyline polygon overlay
-            .polygonsData(nightGeoJson)
-            .polygonCapColor(() => 'rgba(0, 0, 40, 0.35)')
-            .polygonSideColor(() => 'transparent')
-            .polygonStrokeColor(() => 'transparent')
-            .polygonAltitude(0.001)
 
             // Receiver location ring
             .ringsData(receiverRings)
@@ -751,21 +737,30 @@ class DigitalSpotsMap {
         const initLng = this.receiverLocation ? this.receiverLocation.lon : 0;
         this.globe.pointOfView({ lat: initLat, lng: initLng, altitude: 2.5 }, 0);
 
+        // Re-evaluate pointRadius after zoom so markers stay constant screen size
+        const updatePointRadius = () => {
+            if (!this.globe) return;
+            const alt = this.globe.pointOfView().altitude;
+            this.globe.pointRadius(Math.max(0.05, 0.1 * alt));
+        };
+
         // Detect user interaction to pause auto-spin
         const renderer = container.querySelector('canvas');
         if (renderer) {
+            // Recompute point radius after wheel zoom (debounced 100ms)
+            let wheelTimer = null;
+            renderer.addEventListener('wheel', () => {
+                if (wheelTimer) clearTimeout(wheelTimer);
+                wheelTimer = setTimeout(updatePointRadius, 100);
+            }, { passive: true });
+
             renderer.addEventListener('mousedown', () => {
                 this.globeUserInteracting = true;
                 this.stopGlobeSpin();
             });
             renderer.addEventListener('mouseup', () => {
                 this.globeUserInteracting = false;
-                // Resume spin after 3 seconds of inactivity
-                setTimeout(() => {
-                    if (!this.globeUserInteracting && this.mapMode === 'globe') {
-                        this.startGlobeSpin();
-                    }
-                }, 3000);
+                // Spin stays stopped after user interaction — user must not be interrupted
             });
             renderer.addEventListener('touchstart', () => {
                 this.globeUserInteracting = true;
@@ -773,13 +768,18 @@ class DigitalSpotsMap {
             }, { passive: true });
             renderer.addEventListener('touchend', () => {
                 this.globeUserInteracting = false;
-                setTimeout(() => {
-                    if (!this.globeUserInteracting && this.mapMode === 'globe') {
-                        this.startGlobeSpin();
-                    }
-                }, 3000);
+                // Spin stays stopped after user interaction
+                updatePointRadius();
+            }, { passive: true });
+            // Pinch-to-zoom: recompute radius during touch move
+            renderer.addEventListener('touchmove', () => {
+                if (wheelTimer) clearTimeout(wheelTimer);
+                wheelTimer = setTimeout(updatePointRadius, 100);
             }, { passive: true });
         }
+
+        // Store for use in showGlobePopup after fly-to
+        this.updateGlobePointRadius = updatePointRadius;
 
         // Create tooltip element
         this.globeTooltipEl = document.createElement('div');
@@ -862,19 +862,6 @@ class DigitalSpotsMap {
         }, 250);
     }
 
-    refreshGlobeGreyline() {
-        if (!this.globe) return;
-        const nightPolygon = this.createNightPolygon(new Date());
-        const nightGeoJson = nightPolygon.length > 2 ? [{
-            type: 'Feature',
-            geometry: {
-                type: 'Polygon',
-                coordinates: [nightPolygon.map(p => [p[1], p[0]])]
-            }
-        }] : [];
-        this.globe.polygonsData(nightGeoJson);
-    }
-
     handleGlobeHover(spot) {
         if (!this.globeTooltipEl) return;
         if (!spot) {
@@ -892,13 +879,12 @@ class DigitalSpotsMap {
             { lat: spot.latitude, lng: spot.longitude, altitude: 1.2 },
             800
         );
-        // Pause spin while viewing
+        // Stop spin — stays stopped until user switches back to globe view
         this.stopGlobeSpin();
+        // Recompute point radius after fly-to animation completes (800ms)
         setTimeout(() => {
-            if (!this.globeUserInteracting && this.mapMode === 'globe') {
-                this.startGlobeSpin();
-            }
-        }, 5000);
+            if (this.updateGlobePointRadius) this.updateGlobePointRadius();
+        }, 850);
     }
 
     // ─── End Globe.gl methods ─────────────────────────────────────────────────
@@ -2290,9 +2276,6 @@ class DigitalSpotsMap {
         this.greylineLayer.addTo(this.map);
 
         // Also update globe greyline if in globe mode
-        if (this.mapMode === 'globe') {
-            this.refreshGlobeGreyline();
-        }
     }
 
     createNightPolygon(date) {

@@ -15,7 +15,7 @@ class DigitalSpotsMap {
         this.maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         this.userSessionID = this.generateUserSessionID();
         this.modeFilter = 'all'; // Current mode filter
-        this.ageFilter = '60'; // Current age filter (max age in minutes) - default 1 hour
+        this.ageFilter = '2'; // Current age filter (max age in minutes) - default 2 minutes
         this.bandFilter = 'all'; // Current band filter
         this.countryFilter = 'all'; // Current country filter
         this.continentFilter = 'all'; // Current continent filter
@@ -654,14 +654,27 @@ class DigitalSpotsMap {
         });
     }
 
+    // Globe texture URLs keyed by theme name
+    get globeTextures() {
+        return {
+            'night':       'https://unpkg.com/three-globe/example/img/earth-night.jpg',
+            'day':         'https://unpkg.com/three-globe/example/img/earth-day.jpg',
+            'blue-marble': 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+            'dark':        'https://unpkg.com/three-globe/example/img/earth-dark.jpg',
+            'topology':    'https://unpkg.com/three-globe/example/img/earth-topology.png',
+        };
+    }
+
     switchMapView(mode) {
         const mapEl = document.getElementById('map');
         const globeEl = document.getElementById('globe-container');
         const btn = document.getElementById('map-view-toggle');
+        const themeWrap = document.getElementById('globe-theme-wrap');
 
         if (mode === 'globe') {
             mapEl.style.display = 'none';
             globeEl.style.display = 'block';
+            if (themeWrap) themeWrap.style.display = 'flex';
             if (btn) {
                 btn.textContent = '🗺️';
                 btn.title = 'Switch to 2D Map';
@@ -677,6 +690,7 @@ class DigitalSpotsMap {
         } else {
             mapEl.style.display = 'block';
             globeEl.style.display = 'none';
+            if (themeWrap) themeWrap.style.display = 'none';
             if (btn) {
                 btn.textContent = '🌍';
                 btn.title = 'Switch to 3D Globe';
@@ -696,6 +710,17 @@ class DigitalSpotsMap {
         // Build initial filtered spots array
         const spotsArray = this.getFilteredSpotsArray();
 
+        // Resolve globe theme — URL param takes priority over localStorage
+        const urlTheme = new URLSearchParams(window.location.search).get('theme');
+        const validThemes = Object.keys(this.globeTextures);
+        const savedTheme = (urlTheme && validThemes.includes(urlTheme))
+            ? urlTheme
+            : (localStorage.getItem('globeTheme') || 'night');
+        const themeUrl = this.globeTextures[savedTheme];
+        // Sync the select element to the resolved value
+        const themeSelect = document.getElementById('globe-theme-select');
+        if (themeSelect) themeSelect.value = savedTheme;
+
         // Receiver ring data
         const receiverRings = this.receiverLocation ? [{
             lat: this.receiverLocation.lat,
@@ -707,7 +732,7 @@ class DigitalSpotsMap {
 
         this.globe = Globe({ animateIn: true })(container)
             // Appearance
-            .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
+            .globeImageUrl(themeUrl)
             .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
             .showAtmosphere(true)
             .atmosphereColor('#1a6aff')
@@ -802,6 +827,29 @@ class DigitalSpotsMap {
                 this.globeTooltipEl.style.top = (e.clientY - 10) + 'px';
             }
         });
+
+        // Resize globe when container size changes (e.g. window resize)
+        const resizeObserver = new ResizeObserver(() => {
+            if (!this.globe) return;
+            this.globe
+                .width(container.clientWidth)
+                .height(container.clientHeight);
+        });
+        resizeObserver.observe(container);
+
+        // Wire globe theme select
+        if (themeSelect) {
+            themeSelect.addEventListener('change', (e) => {
+                const theme = e.target.value;
+                const url = this.globeTextures[theme] || this.globeTextures['night'];
+                localStorage.setItem('globeTheme', theme);
+                // Update URL param so the link is shareable
+                const pageUrl = new URL(window.location.href);
+                pageUrl.searchParams.set('theme', theme);
+                history.replaceState(null, '', pageUrl.toString());
+                if (this.globe) this.globe.globeImageUrl(url);
+            });
+        }
 
         // Start auto-spin
         this.startGlobeSpin();

@@ -78,11 +78,11 @@
                 <label class="filter-label" for="age-filter">Max Age:</label>
                 <select id="age-filter" class="filter-select">
                     <option value="none">None</option>
-                    <option value="2">2 min</option>
+                    <option value="2" selected>2 min</option>
                     <option value="5">5 min</option>
                     <option value="15">15 min</option>
                     <option value="30">30 min</option>
-                    <option value="60" selected>1 hour</option>
+                    <option value="60">1 hour</option>
                     <option value="180">3 hours</option>
                     <option value="360">6 hours</option>
                     <option value="1440">24 hours</option>
@@ -136,9 +136,21 @@
     <div id="map"></div>
     <div id="globe-container"></div>
 
-    <!-- Map view toggle — fixed top-right, same position as Leaflet zoom controls -->
+    <!-- Map view toggle — fixed top-left, to the right of Leaflet zoom controls -->
     <div id="map-view-toggle-wrap">
         <button id="map-view-toggle" class="map-view-btn" title="Switch to 3D Globe view">🌍 3D Globe</button>
+    </div>
+
+    <!-- Globe theme selector — only visible in globe mode, centred top -->
+    <div id="globe-theme-wrap">
+        <label for="globe-theme-select" style="font-size: 11px; color: #aaa; margin-right: 6px; white-space: nowrap;">🌐 Theme:</label>
+        <select id="globe-theme-select">
+            <option value="night">Night (City Lights)</option>
+            <option value="day">Day</option>
+            <option value="blue-marble">Blue Marble</option>
+            <option value="dark">Dark</option>
+            <option value="topology">Topology</option>
+        </select>
     </div>
 
     <div class="legend" id="band-legend">

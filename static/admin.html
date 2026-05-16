@@ -604,7 +604,7 @@
         #cm-editor-modal .cm-modal-footer {
             display: flex;
             align-items: center;
-            justify-content: flex-end;
+            justify-content: space-between;
             gap: 10px;
             padding: 12px 20px;
             border-top: 1px solid #e0e0e0;
@@ -632,6 +632,40 @@
             cursor: pointer;
         }
         #cm-editor-modal .cm-modal-footer .btn-cm-cancel:hover { background: #ccc; }
+        #cm-editor-modal .cm-modal-footer .btn-cm-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-clipboard {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #b0b8c1;
+            flex-shrink: 0;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-clipboard button {
+            padding: 8px 14px;
+            background: #f0f4f8;
+            color: #333;
+            border: none;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-clipboard button:hover { background: #dde3ea; }
+        #cm-editor-modal .cm-modal-footer .btn-cm-clipboard .btn-cm-clip-divider {
+            width: 1px;
+            background: #b0b8c1;
+            align-self: stretch;
+            flex-shrink: 0;
+        }
+        #cm-editor-modal .cm-modal-footer .btn-cm-clipboard button.btn-cm-copy { border-radius: 0; }
+        #cm-editor-modal .cm-modal-footer .btn-cm-clipboard button.btn-cm-paste { border-radius: 0; }
         .btn-open-cm-editor {
             margin-left: auto;
             padding: 6px 14px;
@@ -23339,9 +23373,16 @@ Referer: ${log.referer}`;
             </div>
             <div class="cm-modal-body" id="cm-modal-body"></div>
             <div class="cm-modal-footer">
-                <button class="btn-cm-cancel" onclick="closeCmEditorModal()">Close without saving</button>
-                <button class="btn-cm-save" onclick="saveCmEditorModal(false)">💾 Save</button>
-                <button class="btn-cm-save" onclick="saveCmEditorModal(true)">💾 Save &amp; Close</button>
+                <div class="btn-cm-clipboard">
+                    <button class="btn-cm-copy" onclick="cmClipboardCopy(this)" title="Copy all editor contents to clipboard">📋 Copy</button>
+                    <div class="btn-cm-clip-divider"></div>
+                    <button class="btn-cm-paste" onclick="cmClipboardPaste(this)" title="Paste from clipboard, replacing all editor contents">📥 Paste</button>
+                </div>
+                <div class="btn-cm-actions">
+                    <button class="btn-cm-cancel" onclick="closeCmEditorModal()">Close without saving</button>
+                    <button class="btn-cm-save" onclick="saveCmEditorModal(false)">💾 Save</button>
+                    <button class="btn-cm-save" onclick="saveCmEditorModal(true)">💾 Save &amp; Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -23412,6 +23453,40 @@ Referer: ${log.referer}`;
 
         // Trigger the same save as the "Save Configuration" button
         await saveConfig();
+    }
+
+    async function cmClipboardCopy(btn) {
+        if (!_cmEditorInstance) return;
+        const text = _cmEditorInstance.state.doc.toString();
+        try {
+            await navigator.clipboard.writeText(text);
+            const orig = btn.textContent;
+            btn.textContent = '✅ Copied!';
+            setTimeout(() => { btn.textContent = orig; }, 1500);
+        } catch (err) {
+            // Fallback for browsers that block clipboard API
+            const orig = btn.textContent;
+            btn.textContent = '❌ Failed';
+            setTimeout(() => { btn.textContent = orig; }, 1500);
+        }
+    }
+
+    async function cmClipboardPaste(btn) {
+        if (!_cmEditorInstance) return;
+        try {
+            const text = await navigator.clipboard.readText();
+            const transaction = _cmEditorInstance.state.update({
+                changes: { from: 0, to: _cmEditorInstance.state.doc.length, insert: text }
+            });
+            _cmEditorInstance.dispatch(transaction);
+            const orig = btn.textContent;
+            btn.textContent = '✅ Pasted!';
+            setTimeout(() => { btn.textContent = orig; }, 1500);
+        } catch (err) {
+            const orig = btn.textContent;
+            btn.textContent = '❌ Failed';
+            setTimeout(() => { btn.textContent = orig; }, 1500);
+        }
     }
 
     // Close modal on backdrop click

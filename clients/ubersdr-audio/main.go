@@ -1524,7 +1524,7 @@ func main() {
 	var dspFilters []DSPFilter
 
 	// dspStatusLabel shows the current insert state.
-	dspStatusLabel := widget.NewLabel("Not available on this server")
+	dspStatusLabel := widget.NewLabel("Not available on this instance")
 
 	// dspFilterSelect lets the user pick a filter.
 	// Must use widget.NewSelect (not a struct literal) so ExtendBaseWidget is called
@@ -1547,7 +1547,7 @@ func main() {
 			dspEnableCheck.Disable()
 			dspFilterSelect.Disable()
 			dspApplyBtn.Disable()
-			dspStatusLabel.SetText("Not available on this server")
+			dspStatusLabel.SetText("Not available on this instance")
 			return
 		}
 		if client.State() != StateConnected {
@@ -1557,7 +1557,7 @@ func main() {
 			if dspEnabled {
 				dspStatusLabel.SetText("Active (disconnected)")
 			} else {
-				dspStatusLabel.SetText("Available — connect to enable")
+				dspStatusLabel.SetText("Available on this instance — connect to enable")
 			}
 			return
 		}
@@ -1570,7 +1570,7 @@ func main() {
 			dspStatusLabel.SetText("Active")
 		} else {
 			dspApplyBtn.Disable()
-			dspStatusLabel.SetText("Available — enable to activate")
+			dspStatusLabel.SetText("Available — check the box to activate")
 		}
 	}
 
@@ -1641,7 +1641,7 @@ func main() {
 			// Container unreachable — keep dspAvailable and the filter list
 			// as-is (set from /api/description) so the dropdown stays usable.
 			dspFilters = nil
-			dspStatusLabel.SetText("DSP container unreachable")
+			dspStatusLabel.SetText("DSP container unreachable on this instance")
 			updateDSPUI()
 			return
 		}

@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g \
     libyaml-0-2 \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/bin/fluent-bit /usr/local/bin/fluent-bit

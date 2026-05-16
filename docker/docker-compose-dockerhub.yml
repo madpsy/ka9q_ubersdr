@@ -274,11 +274,9 @@ services:
     environment:
       - TZ=${TZ:-UTC}
 
-    # Healthcheck - verify fluent-bit is listening on port 24224
-    # Uses /proc/net/tcp since pgrep is not available in debian:bookworm-slim
-    # Port 24224 = 0x5EB0
+    # Healthcheck - verify fluent-bit process is running (pgrep provided by procps)
     healthcheck:
-      test: [CMD-SHELL, "grep -q '5EB0' /proc/net/tcp /proc/net/tcp6 2>/dev/null"]
+      test: [CMD, pgrep, -x, fluent-bit]
       interval: 30s
       timeout: 10s
       retries: 3

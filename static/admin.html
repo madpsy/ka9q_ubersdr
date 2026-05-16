@@ -23471,22 +23471,65 @@ Referer: ${log.referer}`;
         }
     }
 
-    async function cmClipboardPaste(btn) {
+    function cmClipboardPaste(btn) {
         if (!_cmEditorInstance) return;
-        try {
-            const text = await navigator.clipboard.readText();
-            const transaction = _cmEditorInstance.state.update({
-                changes: { from: 0, to: _cmEditorInstance.state.doc.length, insert: text }
+
+        // Try the Clipboard API first (works in most modern browsers when page is focused)
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(function(text) {
+                _cmApplyPastedText(text, btn);
+            }).catch(function() {
+                // Clipboard API denied — fall back to hidden textarea + paste event
+                _cmPasteViaTextarea(btn);
             });
-            _cmEditorInstance.dispatch(transaction);
-            const orig = btn.textContent;
-            btn.textContent = '✅ Pasted!';
-            setTimeout(() => { btn.textContent = orig; }, 1500);
-        } catch (err) {
-            const orig = btn.textContent;
-            btn.textContent = '❌ Failed';
-            setTimeout(() => { btn.textContent = orig; }, 1500);
+        } else {
+            _cmPasteViaTextarea(btn);
         }
+    }
+
+    function _cmApplyPastedText(text, btn) {
+        const transaction = _cmEditorInstance.state.update({
+            changes: { from: 0, to: _cmEditorInstance.state.doc.length, insert: text }
+        });
+        _cmEditorInstance.dispatch(transaction);
+        const orig = btn.textContent;
+        btn.textContent = '✅ Pasted!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+    }
+
+    function _cmPasteViaTextarea(btn) {
+        // Create an off-screen textarea, focus it, and capture the user's Ctrl+V / Cmd+V
+        const ta = document.createElement('textarea');
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+
+        const orig = btn.textContent;
+        btn.textContent = '⌨️ Press Ctrl+V…';
+
+        function onPaste(e) {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text');
+            document.body.removeChild(ta);
+            if (text !== null && _cmEditorInstance) {
+                _cmApplyPastedText(text, btn);
+            } else {
+                btn.textContent = orig;
+            }
+        }
+
+        function onBlur() {
+            // If the textarea loses focus without a paste, clean up
+            setTimeout(function() {
+                if (document.body.contains(ta)) {
+                    document.body.removeChild(ta);
+                    btn.textContent = orig;
+                }
+            }, 200);
+        }
+
+        ta.addEventListener('paste', onPaste, { once: true });
+        ta.addEventListener('blur', onBlur, { once: true });
     }
 
     // Close modal on backdrop click

@@ -1930,6 +1930,25 @@ func (sm *SessionManager) GetUniqueUserCount() int {
 	return len(sm.userSessionUUIDs)
 }
 
+// GetDSPUserCount returns the number of audio sessions that currently have the
+// DSP insert active (dspInsert != nil).  Spectrum sessions are never counted.
+func (sm *SessionManager) GetDSPUserCount() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	count := 0
+	for _, s := range sm.sessions {
+		if s.IsSpectrum {
+			continue
+		}
+		s.dspInsertMu.RLock()
+		if s.dspInsert != nil {
+			count++
+		}
+		s.dspInsertMu.RUnlock()
+	}
+	return count
+}
+
 // GetNonBypassedUserCount returns the current number of unique non-bypassed users
 // This counts users whose IPs are not in the timeout bypass list AND who did not
 // authenticate with a bypass password.

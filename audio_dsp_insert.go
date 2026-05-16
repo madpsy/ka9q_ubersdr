@@ -395,8 +395,10 @@ func buildDSPInfo(cfg *DSPConfig) map[string]interface{} {
 			filters = append(filters, name)
 		}
 	}
+	maxUsers := cfg.MaxUsers // 0 = unlimited
 	return map[string]interface{}{
-		"enabled": true,
-		"filters": filters,
+		"enabled":   true,
+		"filters":   filters,
+		"max_users": maxUsers,
 	}
 }

@@ -62,6 +62,11 @@ type DSPConfig struct {
 	// Default: "ubersdr-dsp:50051" (Docker service name + default port).
 	Address string `yaml:"address"`
 
+	// MaxUsers is the maximum number of concurrent sessions that may have the
+	// DSP insert active at the same time.  0 means unlimited.
+	// Default: 25.
+	MaxUsers int `yaml:"max_users"`
+
 	// Filters controls which noise reduction filters clients are allowed to use.
 	// Each filter can be individually enabled or disabled.
 	// If a filter is not listed here it defaults to disabled.

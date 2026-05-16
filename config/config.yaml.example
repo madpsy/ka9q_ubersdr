@@ -1741,6 +1741,15 @@ dsp:
   # if running the binary directly on the same host.
   address: "ubersdr-dsp:50051"
 
+  # Maximum number of concurrent sessions that may have the DSP insert active
+  # at the same time.  When the limit is reached, new enable requests are
+  # rejected with a "CAPACITY" error until an existing user disables DSP or
+  # disconnects.  A filter *change* by a user who already has DSP active does
+  # not count against the limit.
+  # 0 = unlimited.
+  # Default: 25
+  max_users: 25
+
   # Per-filter enable/disable.
   # Only filters listed as true here can be requested by clients.
   # The container must also have been built with the filter compiled in

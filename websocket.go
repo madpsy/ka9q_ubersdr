@@ -1114,6 +1114,27 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				continue
 			}
 
+			// Enforce max_users cap: reject if the server-wide DSP slot limit is reached.
+			// 0 means unlimited.  The check is done before closing the existing insert so
+			// that a filter *change* (insert already active) is never blocked by the cap —
+			// it doesn't increase the active count.
+			if maxDSP := wsh.config.DSP.MaxUsers; maxDSP > 0 {
+				currentSession.dspInsertMu.RLock()
+				alreadyActive := currentSession.dspInsert != nil
+				currentSession.dspInsertMu.RUnlock()
+				if !alreadyActive {
+					current := wsh.sessions.GetDSPUserCount()
+					if current >= maxDSP {
+						wsh.sendMessage(conn, ServerMessage{Type: "dsp_error", Info: map[string]interface{}{
+							"code":    "CAPACITY",
+							"message": fmt.Sprintf("DSP noise reduction is at capacity (%d/%d active); try again later", current, maxDSP),
+						}})
+						log.Printf("DSP: capacity limit reached (%d/%d) — rejecting set_dsp for session %s", current, maxDSP, currentSession.ID)
+						continue
+					}
+				}
+			}
+
 			// Rate-limit: at most one DSP filter start per second per session.
 			// This prevents rapid filter cycling which would thrash the gRPC stream.
 			const dspStartCooldown = 1 * time.Second

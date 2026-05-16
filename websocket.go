@@ -1114,6 +1114,20 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				continue
 			}
 
+			// Rate-limit: at most one DSP filter start per second per session.
+			// This prevents rapid filter cycling which would thrash the gRPC stream.
+			const dspStartCooldown = 1 * time.Second
+			if since := time.Since(currentSession.dspLastStarted); !currentSession.dspLastStarted.IsZero() && since < dspStartCooldown {
+				remaining := (dspStartCooldown - since).Milliseconds()
+				wsh.sendMessage(conn, ServerMessage{Type: "dsp_error", Info: map[string]interface{}{
+					"code":     "RATE_LIMITED",
+					"message":  fmt.Sprintf("DSP filter change too fast; wait %d ms before retrying", remaining),
+					"retry_ms": remaining,
+				}})
+				log.Printf("DSP: rate-limited set_dsp for session %s (%.0fms since last start)", currentSession.ID, since.Seconds()*1000)
+				continue
+			}
+
 			// Close any existing insert before opening a new one.
 			currentSession.dspInsertMu.Lock()
 			if currentSession.dspInsert != nil {
@@ -1132,6 +1146,9 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			currentSession.dspInsertMu.Lock()
 			currentSession.dspInsert = ins
 			currentSession.dspInsertMu.Unlock()
+
+			// Record the successful start time for rate-limiting subsequent requests.
+			currentSession.dspLastStarted = time.Now()
 
 			wsh.sendMessage(conn, ServerMessage{Type: "dsp_status", Info: map[string]interface{}{
 				"enabled": true,

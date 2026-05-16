@@ -1523,6 +1523,11 @@ func main() {
 	// Protected by the Fyne goroutine (all UI callbacks run on the same goroutine).
 	var dspFilters []DSPFilter
 
+	// dspCurrentParams holds the user's current parameter values for the active
+	// filter.  Keys are parameter names; values are the string representations
+	// last sent to (or confirmed by) the server.  Reset when the filter changes.
+	dspCurrentParams := map[string]string{}
+
 	// dspStatusLabel shows the current insert state.
 	dspStatusLabel := widget.NewLabel("Not available on this instance")
 
@@ -1541,12 +1546,17 @@ func main() {
 	dspApplyBtn := widget.NewButton("Apply", nil)
 	dspApplyBtn.Disable()
 
+	// dspConfigBtn opens the filter parameter configuration dialog.
+	dspConfigBtn := widget.NewButton("Config", nil)
+	dspConfigBtn.Disable()
+
 	// updateDSPUI refreshes the DSP card state based on dspAvailable/dspEnabled.
 	updateDSPUI := func() {
 		if !dspAvailable {
 			dspEnableCheck.Disable()
 			dspFilterSelect.Disable()
 			dspApplyBtn.Disable()
+			dspConfigBtn.Disable()
 			dspStatusLabel.SetText("Not available on this instance")
 			return
 		}
@@ -1554,6 +1564,7 @@ func main() {
 			dspEnableCheck.Disable()
 			dspFilterSelect.Disable()
 			dspApplyBtn.Disable()
+			dspConfigBtn.Disable()
 			if dspEnabled {
 				dspStatusLabel.SetText("Active (disconnected)")
 			} else {
@@ -1567,11 +1578,250 @@ func main() {
 		dspFilterSelect.Enable()
 		if dspEnabled {
 			dspApplyBtn.Enable()
+			dspConfigBtn.Enable()
 			dspStatusLabel.SetText("Active")
 		} else {
 			dspApplyBtn.Disable()
+			dspConfigBtn.Disable()
 			dspStatusLabel.SetText("Available — check the box to activate")
 		}
+	}
+
+	// dspConfigWin holds the singleton parameter window so we can re-focus it
+	// instead of opening a second copy.  Nil when the window is closed.
+	var dspConfigWin fyne.Window
+
+	// dspConfigPending is set true when the user clicked Config but dspFilters
+	// was not yet populated.  openDSPConfigDialog will be called again
+	// automatically once OnDSPFilters delivers the filter list.
+	dspConfigPending := false
+
+	// openDSPConfigDialog opens (or re-focuses) a child window with live
+	// filter-specific parameter controls.  Changes are sent to the server
+	// immediately via set_dsp_params with a 300 ms debounce per parameter so
+	// rapid slider drags don't flood the connection.
+	openDSPConfigDialog := func() {
+		filterName := dspFilterSelect.Selected
+		if filterName == "" {
+			return
+		}
+
+		// Re-focus the existing window if it is already open.
+		if dspConfigWin != nil {
+			dspConfigWin.RequestFocus()
+			return
+		}
+
+		// Find the ParamInfo list for the selected filter.
+		var paramInfos []DSPFilterInfo
+		for _, f := range dspFilters {
+			if f.Name == filterName {
+				paramInfos = f.Params
+				break
+			}
+		}
+
+		// If the filter list hasn't loaded yet, request it now and set a flag
+		// so we re-open the window automatically when the response arrives.
+		if len(dspFilters) == 0 {
+			dspConfigPending = true
+			go func() { _ = client.SendGetDSPFilters() }()
+			return
+		}
+
+		// Filter is known but has no runtime params (e.g. rn2).
+		if len(paramInfos) == 0 {
+			dialog.ShowInformation("Filter Parameters",
+				fmt.Sprintf("Filter %q has no configurable parameters.", filterName),
+				w)
+			return
+		}
+
+		// sendDebounced sends a single-key param update after a 300 ms quiet
+		// period.  Each call resets the timer for that parameter so rapid
+		// slider drags coalesce into one network message.
+		// debounceTimers maps param name → cancel channel for the pending send.
+		debounceTimers := map[string]chan struct{}{}
+		sendDebounced := func(name, val string) {
+			// Cancel any pending send for this param.
+			if ch, ok := debounceTimers[name]; ok {
+				close(ch)
+			}
+			stop := make(chan struct{})
+			debounceTimers[name] = stop
+			go func() {
+				select {
+				case <-stop:
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
+				dspCurrentParams[name] = val
+				_ = client.SendSetDSPParams(map[string]interface{}{name: val})
+			}()
+		}
+
+		rows := make([]fyne.CanvasObject, 0, len(paramInfos)*3)
+
+		for _, pi := range paramInfos {
+			// Skip init-only params — they cannot be changed mid-stream.
+			if !pi.RuntimeSafe {
+				continue
+			}
+
+			pi := pi // capture for closures
+
+			// Determine the current value: prefer what we've already sent,
+			// fall back to the server-reported default.
+			currentVal := pi.Default
+			if v, ok := dspCurrentParams[pi.Name]; ok {
+				currentVal = v
+			}
+
+			label := widget.NewLabel(pi.Name)
+			label.TextStyle = fyne.TextStyle{Bold: true}
+
+			var descLabel *widget.Label
+			if pi.Description != "" {
+				descLabel = widget.NewLabel(pi.Description)
+				descLabel.TextStyle = fyne.TextStyle{Italic: true}
+				descLabel.Wrapping = fyne.TextWrapWord
+			}
+
+			switch pi.Type {
+			case "float", "int":
+				minVal := 0.0
+				maxVal := 1.0
+				curVal := 0.0
+				if v, err := strconv.ParseFloat(pi.Min, 64); err == nil {
+					minVal = v
+				}
+				if v, err := strconv.ParseFloat(pi.Max, 64); err == nil {
+					maxVal = v
+				}
+				if v, err := strconv.ParseFloat(currentVal, 64); err == nil {
+					curVal = v
+				}
+				if curVal < minVal {
+					curVal = minVal
+				}
+				if curVal > maxVal {
+					curVal = maxVal
+				}
+
+				valueLabel := widget.NewLabel("")
+				slider := widget.NewSlider(minVal, maxVal)
+				slider.Step = func() float64 {
+					if pi.Type == "int" {
+						return 1
+					}
+					step := (maxVal - minVal) / 100.0
+					if step < 0.01 {
+						step = 0.01
+					}
+					return step
+				}()
+				slider.Value = curVal
+				slider.OnChanged = func(v float64) {
+					var s string
+					if pi.Type == "int" {
+						s = fmt.Sprintf("%.0f", v)
+					} else {
+						s = fmt.Sprintf("%.2f", v)
+					}
+					valueLabel.SetText(s)
+					sendDebounced(pi.Name, fmt.Sprintf("%.4g", v))
+				}
+				// Trigger initial label (no network send on init).
+				if pi.Type == "int" {
+					valueLabel.SetText(fmt.Sprintf("%.0f", curVal))
+				} else {
+					valueLabel.SetText(fmt.Sprintf("%.2f", curVal))
+				}
+
+				rangeLabel := widget.NewLabel(fmt.Sprintf("(%s – %s)", pi.Min, pi.Max))
+				rangeLabel.TextStyle = fyne.TextStyle{Italic: true}
+
+				sliderRow := container.NewBorder(nil, nil, nil,
+					container.NewHBox(valueLabel, rangeLabel),
+					slider,
+				)
+				rows = append(rows, label)
+				if descLabel != nil {
+					rows = append(rows, descLabel)
+				}
+				rows = append(rows, sliderRow)
+
+			case "bool":
+				check := widget.NewCheck("", nil)
+				switch strings.ToLower(currentVal) {
+				case "true", "1", "on":
+					check.SetChecked(true)
+				default:
+					check.SetChecked(false)
+				}
+				check.OnChanged = func(checked bool) {
+					val := "false"
+					if checked {
+						val = "true"
+					}
+					sendDebounced(pi.Name, val)
+				}
+				row := container.NewHBox(label, check)
+				if descLabel != nil {
+					rows = append(rows, row)
+					rows = append(rows, descLabel)
+				} else {
+					rows = append(rows, row)
+				}
+
+			default: // "string" and anything else
+				entry := widget.NewEntry()
+				entry.SetText(currentVal)
+				entry.SetPlaceHolder(pi.Default)
+				entry.OnChanged = func(val string) {
+					sendDebounced(pi.Name, val)
+				}
+				rows = append(rows, label)
+				if descLabel != nil {
+					rows = append(rows, descLabel)
+				}
+				rows = append(rows, entry)
+			}
+		}
+
+		if len(rows) == 0 {
+			dialog.ShowInformation("Filter Parameters",
+				fmt.Sprintf("Filter %q has no runtime-configurable parameters.", filterName),
+				w)
+			return
+		}
+
+		formContent := container.NewVBox(rows...)
+		scroll := container.NewScroll(formContent)
+
+		// Size the window to fit the content: ~30px per VBox row item
+		// (labels, description lines, sliders/entries each count as one row),
+		// plus 60px for window chrome and padding.  Clamped to [200, 700].
+		winH := float32(len(rows)*30 + 60)
+		if winH < 200 {
+			winH = 200
+		}
+		if winH > 700 {
+			winH = 700
+		}
+
+		win := a.NewWindow(fmt.Sprintf("%s Parameters", filterName))
+		win.SetContent(container.NewPadded(scroll))
+		win.Resize(fyne.NewSize(420, winH))
+		win.SetOnClosed(func() {
+			// Cancel all pending debounce goroutines.
+			for _, ch := range debounceTimers {
+				close(ch)
+			}
+			dspConfigWin = nil
+		})
+		dspConfigWin = win
+		win.Show()
 	}
 
 	// Wire the enable check.
@@ -1585,6 +1835,13 @@ func main() {
 			return
 		}
 		dspEnabled = checked
+		if !checked {
+			// Close the config window when the insert is disabled.
+			if dspConfigWin != nil {
+				dspConfigWin.Close()
+				dspConfigWin = nil
+			}
+		}
 		if client.State() != StateConnected {
 			updateDSPUI()
 			return
@@ -1605,11 +1862,14 @@ func main() {
 	}
 
 	// Wire the filter selector — when the insert is active, changing the filter
-	// immediately re-sends set_dsp with the new selection.
+	// immediately re-sends set_dsp with the new selection.  Also clears the
+	// current param cache since the new filter has different parameters.
 	dspFilterSelect.OnChanged = func(selected string) {
 		if suppressDSPChange {
 			return
 		}
+		// Clear cached params — they belong to the previous filter.
+		dspCurrentParams = map[string]string{}
 		if client.State() != StateConnected || !dspEnabled || selected == "" {
 			return
 		}
@@ -1629,6 +1889,11 @@ func main() {
 		_ = client.SendSetDSP(true, filter, nil)
 	}
 
+	// Wire the Config button.
+	dspConfigBtn.OnTapped = func() {
+		openDSPConfigDialog()
+	}
+
 	// Wire DSP callbacks from the client.
 	// These callbacks fire from the WebSocket receive goroutine.
 	// Only use goroutine-safe Fyne methods here (SetSelected, SetText, Enable,
@@ -1641,6 +1906,7 @@ func main() {
 			// Container unreachable — keep dspAvailable and the filter list
 			// as-is (set from /api/description) so the dropdown stays usable.
 			dspFilters = nil
+			dspConfigPending = false
 			dspStatusLabel.SetText("DSP container unreachable on this instance")
 			updateDSPUI()
 			return
@@ -1650,6 +1916,15 @@ func main() {
 		// from /api/description.
 		dspFilters = resp.Filters
 		updateDSPUI()
+		// If the user clicked Config before the filter list was available,
+		// open the window now that we have the metadata.
+		// a.NewWindow / win.Show are goroutine-safe in Fyne v2 — they post
+		// to the main event loop internally, so calling from the WS receive
+		// goroutine is fine.
+		if dspConfigPending {
+			dspConfigPending = false
+			go openDSPConfigDialog()
+		}
 	}
 
 	client.OnDSPStatus = func(enabled bool, filter string) {
@@ -1689,8 +1964,15 @@ func main() {
 		updateDSPUI()
 	}
 
+	// Wrap the filter dropdown in a fixed-width container so it doesn't expand
+	// to fill all available space, leaving room for the Config and Apply buttons.
+	dspFilterSelectFixed := container.New(layout.NewGridWrapLayout(fyne.NewSize(130, 36)), dspFilterSelect)
+
 	dspBox := container.NewVBox(
-		container.NewBorder(nil, nil, dspEnableCheck, dspApplyBtn, dspFilterSelect),
+		container.NewBorder(nil, nil, dspEnableCheck,
+			container.NewHBox(dspConfigBtn, dspApplyBtn),
+			dspFilterSelectFixed,
+		),
 		dspStatusLabel,
 	)
 

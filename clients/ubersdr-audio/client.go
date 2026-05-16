@@ -106,7 +106,7 @@ type DSPFiltersResponse struct {
 
 // DSPSetRequest is sent over the WebSocket to enable/disable the DSP insert.
 type DSPSetRequest struct {
-	Type    string                 `json:"type"`             // "set_dsp"
+	Type    string                 `json:"type"` // "set_dsp"
 	Enabled bool                   `json:"enabled"`
 	Filter  string                 `json:"filter,omitempty"` // filter name when enabling
 	Params  map[string]interface{} `json:"params,omitempty"` // initial params when enabling
@@ -114,7 +114,7 @@ type DSPSetRequest struct {
 
 // DSPParamsRequest is sent over the WebSocket to update DSP parameters mid-stream.
 type DSPParamsRequest struct {
-	Type   string                 `json:"type"`   // "set_dsp_params"
+	Type   string                 `json:"type"` // "set_dsp_params"
 	Params map[string]interface{} `json:"params"`
 }
 
@@ -839,12 +839,16 @@ func (c *RadioClient) handleJSON(data []byte) {
 	}
 	switch msg.Type {
 	case "dsp_filters":
-		var resp DSPFiltersResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
+		// The server wraps the payload in an "info" field:
+		// {"type":"dsp_filters","info":{"available":true,"filters":[...]}}
+		var envelope struct {
+			Info DSPFiltersResponse `json:"info"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
 			return
 		}
 		if cb := c.OnDSPFilters; cb != nil {
-			cb(resp)
+			cb(envelope.Info)
 		}
 	case "dsp_status":
 		var s struct {

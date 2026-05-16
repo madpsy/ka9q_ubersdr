@@ -46,6 +46,43 @@ services:
         fluentd-async: "true"
         tag: "ka9q-radio"
 
+  # ubersdr-dsp - DSP noise reduction gRPC server
+  # Optional: only needed when dsp.enabled: true in config.yaml.
+  # Provides noise reduction filters (nr2, rn2, nr4, dfnr, bnr) that clients
+  # can enable per-session via the WebSocket set_dsp message.
+  # The service name "ubersdr-dsp" matches the default dsp.address in config.yaml.
+  ubersdr-dsp:
+    image: madpsy/ubersdr-dsp:latest
+    container_name: ubersdr-dsp
+    restart: unless-stopped
+    cpu_shares: 1024
+
+    networks:
+      - sdr-network
+
+    # gRPC port — only accessible within the sdr-network (not exposed to host).
+    # ubersdr connects to ubersdr-dsp:50051 by service name.
+    expose:
+      - "50051"
+
+    environment:
+      - TZ=${TZ:-UTC}
+
+    # Healthcheck — verify the gRPC server process is running.
+    healthcheck:
+      test: [CMD, pgrep, -x, ubersdr-dsp]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "ubersdr-dsp"
+
   # ka9q_ubersdr service - Web interface
   ubersdr:
     image: madpsy/ka9q_ubersdr:latest
@@ -54,9 +91,12 @@ services:
     cpu_shares: 2048
     init: true  # Enable tini init to reap zombie processes from background watchers
 
-    # Wait for ka9q-radio to be healthy before starting
+    # Wait for ka9q-radio and ubersdr-dsp to be healthy before starting.
+    # Remove the ubersdr-dsp dependency if you are not using DSP noise reduction.
     depends_on:
       ka9q-radio:
+        condition: service_healthy
+      ubersdr-dsp:
         condition: service_healthy
 
     # Use external bridge network for multicast communication with radiod
@@ -234,13 +274,15 @@ services:
     environment:
       - TZ=${TZ:-UTC}
 
-    # Healthcheck
+    # Healthcheck - verify fluent-bit is listening on port 24224
+    # Uses /proc/net/tcp since pgrep is not available in debian:bookworm-slim
+    # Port 24224 = 0x5EB0
     healthcheck:
-      test: [CMD, pgrep, -x, fluent-bit]
+      test: [CMD-SHELL, "grep -q '5EB0' /proc/net/tcp /proc/net/tcp6 2>/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
     logging:
       driver: "json-file"

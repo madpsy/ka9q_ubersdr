@@ -728,7 +728,10 @@ func main() {
 	// ── doConnect — reads current UI state and starts a new connection ────────
 	// Declared as var so it can be referenced by connectAndClose (defined later
 	// inside the browseBtn closure) before doConnect's body is assigned.
+	// refreshDSPFromDescription is also declared here so doConnect and
+	// profileConnectAndClose can call it before the DSP block assigns its body.
 	var doConnect func()
+	var refreshDSPFromDescription func(*InstanceDescription)
 	doConnect = func() {
 		rawURL := strings.TrimSpace(urlEntry.Text)
 		if rawURL == "" {
@@ -1504,6 +1507,192 @@ func main() {
 			sessionTimerStop = nil
 		}
 	}
+
+	// ── DSP Noise Reduction ───────────────────────────────────────────────────
+	// dspAvailable is set true when /api/description reports DSP is enabled on
+	// the server.  The card is always shown but controls are disabled when DSP
+	// is not available.
+	dspAvailable := false
+	dspEnabled := false // current insert state (toggled by the check)
+
+	// suppressDSPChange prevents feedback loops when the server's dsp_status
+	// response causes SetChecked/SetSelected to fire OnChanged/OnChanged again.
+	suppressDSPChange := false
+
+	// dspFilters holds the filter list fetched from the server.
+	// Protected by the Fyne goroutine (all UI callbacks run on the same goroutine).
+	var dspFilters []DSPFilter
+
+	// dspStatusLabel shows the current insert state.
+	dspStatusLabel := widget.NewLabel("Not available on this server")
+
+	// dspFilterSelect lets the user pick a filter.
+	// Must use widget.NewSelect (not a struct literal) so ExtendBaseWidget is called
+	// and the widget is properly initialised — struct literals produce broken dropdowns.
+	dspFilterSelect := widget.NewSelect([]string{}, nil)
+	dspFilterSelect.PlaceHolder = "Select filter…"
+	dspFilterSelect.Disable()
+
+	// dspEnableCheck toggles the insert on/off.
+	dspEnableCheck := widget.NewCheck("Enable noise reduction", nil)
+	dspEnableCheck.Disable()
+
+	// dspApplyBtn sends the current filter selection to the server.
+	dspApplyBtn := widget.NewButton("Apply", nil)
+	dspApplyBtn.Disable()
+
+	// updateDSPUI refreshes the DSP card state based on dspAvailable/dspEnabled.
+	updateDSPUI := func() {
+		if !dspAvailable {
+			dspEnableCheck.Disable()
+			dspFilterSelect.Disable()
+			dspApplyBtn.Disable()
+			dspStatusLabel.SetText("Not available on this server")
+			return
+		}
+		if client.State() != StateConnected {
+			dspEnableCheck.Disable()
+			dspFilterSelect.Disable()
+			dspApplyBtn.Disable()
+			if dspEnabled {
+				dspStatusLabel.SetText("Active (disconnected)")
+			} else {
+				dspStatusLabel.SetText("Available — connect to enable")
+			}
+			return
+		}
+		// Connected and DSP available: enable the filter selector always so the
+		// user can pick a filter before (or after) enabling the insert.
+		dspEnableCheck.Enable()
+		dspFilterSelect.Enable()
+		if dspEnabled {
+			dspApplyBtn.Enable()
+			dspStatusLabel.SetText("Active")
+		} else {
+			dspApplyBtn.Disable()
+			dspStatusLabel.SetText("Available — enable to activate")
+		}
+	}
+
+	// Wire the enable check.
+	// suppressDSPChange guards against the feedback loop where OnDSPStatus
+	// calls SetChecked → fires OnChanged → sends set_dsp → server sends
+	// dsp_status → OnDSPStatus → SetChecked → ... (infinite loop).
+	// All Fyne OnChanged callbacks fire on the UI goroutine, so this bool
+	// is only ever read/written on the UI goroutine — no race condition.
+	dspEnableCheck.OnChanged = func(checked bool) {
+		if suppressDSPChange {
+			return
+		}
+		dspEnabled = checked
+		if client.State() != StateConnected {
+			updateDSPUI()
+			return
+		}
+		if checked {
+			filter := dspFilterSelect.Selected
+			if filter == "" && len(dspFilters) > 0 {
+				filter = dspFilters[0].Name
+				suppressDSPChange = true
+				dspFilterSelect.SetSelected(filter)
+				suppressDSPChange = false
+			}
+			_ = client.SendSetDSP(true, filter, nil)
+		} else {
+			_ = client.SendSetDSP(false, "", nil)
+		}
+		updateDSPUI()
+	}
+
+	// Wire the filter selector — when the insert is active, changing the filter
+	// immediately re-sends set_dsp with the new selection.
+	dspFilterSelect.OnChanged = func(selected string) {
+		if suppressDSPChange {
+			return
+		}
+		if client.State() != StateConnected || !dspEnabled || selected == "" {
+			return
+		}
+		_ = client.SendSetDSP(true, selected, nil)
+	}
+
+	// Wire the Apply button — re-sends set_dsp with the selected filter.
+	// Useful when the user wants to switch filters while the insert is active.
+	dspApplyBtn.OnTapped = func() {
+		if client.State() != StateConnected || !dspEnabled {
+			return
+		}
+		filter := dspFilterSelect.Selected
+		if filter == "" {
+			return
+		}
+		_ = client.SendSetDSP(true, filter, nil)
+	}
+
+	// Wire DSP callbacks from the client.
+	// These callbacks fire from the WebSocket receive goroutine.
+	// Only use goroutine-safe Fyne methods here (SetSelected, SetText, Enable,
+	// Disable, Refresh).  Do NOT write dspFilterSelect.Options from here —
+	// the filter list is already populated from /api/description on the UI
+	// goroutine in refreshDSPFromDescription, and overwriting it from the
+	// receive goroutine causes a data race that corrupts the dropdown.
+	client.OnDSPFilters = func(resp DSPFiltersResponse) {
+		if !resp.Available {
+			// Container unreachable — keep dspAvailable and the filter list
+			// as-is (set from /api/description) so the dropdown stays usable.
+			dspFilters = nil
+			dspStatusLabel.SetText("DSP container unreachable")
+			updateDSPUI()
+			return
+		}
+		// Store the richer filter data (parameter details) for future use.
+		// Do NOT touch dspFilterSelect.Options — the list is already correct
+		// from /api/description.
+		dspFilters = resp.Filters
+		updateDSPUI()
+	}
+
+	client.OnDSPStatus = func(enabled bool, filter string) {
+		// This fires from the WebSocket receive goroutine as a server confirmation.
+		// Do NOT call SetChecked here — it would post OnChanged to the UI event
+		// queue, which fires after suppressDSPChange is already cleared, causing
+		// the feedback loop again.  The client already set dspEnabled correctly
+		// when the user clicked the checkbox; we just need to sync the filter name.
+		suppressDSPChange = true
+		if enabled && filter != "" {
+			dspFilterSelect.SetSelected(filter)
+		}
+		suppressDSPChange = false
+		// Sync dspEnabled to server-confirmed state (in case it differs).
+		dspEnabled = enabled
+		updateDSPUI()
+	}
+
+	// refreshDSPFromDescription updates DSP availability from the last /api/description
+	// response.  Called after each successful FetchDescription.
+	refreshDSPFromDescription = func(desc *InstanceDescription) {
+		if desc == nil {
+			dspAvailable = false
+		} else {
+			dspAvailable = desc.DSP.Enabled
+			if dspAvailable && len(desc.DSP.Filters) > 0 {
+				// Pre-populate the filter selector from the description so it's
+				// available before the user requests get_dsp_filters.
+				names := desc.DSP.Filters
+				dspFilterSelect.Options = names
+				if dspFilterSelect.Selected == "" && len(names) > 0 {
+					dspFilterSelect.SetSelected(names[0])
+				}
+				dspFilterSelect.Refresh()
+			}
+		}
+		updateDSPUI()
+	}
+
+	dspBox := container.NewVBox(
+		container.NewBorder(nil, nil, dspEnableCheck, dspApplyBtn, dspFilterSelect),
+		dspStatusLabel,
+	)
 
 	// ── Callbacks ─────────────────────────────────────────────────────────────
 	client.OnStateChange = func(state ConnectionState, msg string) {

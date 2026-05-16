@@ -41,10 +41,83 @@ type Config struct {
 	EiBi               EiBiConfig               `yaml:"eibi"`
 	NTP                NTPConfig                `yaml:"ntp"`
 	UI                 UIConfig                 `yaml:"ui"`
+	DSP                DSPConfig                `yaml:"dsp"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
 	DefaultExtension   string                   `yaml:"default_extension,omitempty"`
+}
+
+// DSPConfig contains settings for the ubersdr-dsp noise reduction gRPC container.
+// The container exposes a bidirectional gRPC stream (ProcessAudio) that accepts
+// raw PCM audio, applies the selected noise reduction filter, and returns
+// processed PCM. ubersdr uses PCM_INT16_BE encoding so no format conversion
+// is needed — radiod's native big-endian int16 bytes are sent and received verbatim.
+type DSPConfig struct {
+	// Enabled controls whether the DSP insert feature is available to clients.
+	// When false, any set_dsp WebSocket message is rejected with an error.
+	Enabled bool `yaml:"enabled"`
+
+	// Address is the gRPC address of the ubersdr-dsp container.
+	// Default: "ubersdr-dsp:50051" (Docker service name + default port).
+	Address string `yaml:"address"`
+
+	// Filters controls which noise reduction filters clients are allowed to use.
+	// Each filter can be individually enabled or disabled.
+	// If a filter is not listed here it defaults to disabled.
+	// Note: the container must also have been built with the filter compiled in
+	// (dfnr and bnr are opt-in build options).
+	Filters DSPFiltersConfig `yaml:"filters"`
+}
+
+// DSPFiltersConfig controls which filters are available to clients.
+// Defaults: nr2, rn2, nr4, dfnr are enabled; bnr (NVIDIA Maxine) is disabled.
+// Unset fields default to false in Go/YAML, so we use a helper that applies
+// the intended defaults when the dsp section is absent from config.
+type DSPFiltersConfig struct {
+	// NR2 — SpectralNR (MMSE-LSA + OSMS spectral subtraction). Always compiled in.
+	NR2 bool `yaml:"nr2"`
+	// RN2 — RNNoise (Mozilla/Xiph RNN-based suppressor). Always compiled in.
+	RN2 bool `yaml:"rn2"`
+	// NR4 — libspecbleach (SPP-MMSE adaptive denoiser). Always compiled in.
+	NR4 bool `yaml:"nr4"`
+	// DFNR — DeepFilterNet3 neural denoiser. Opt-in build; requires ONNX model.
+	DFNR bool `yaml:"dfnr"`
+	// BNR — NVIDIA Maxine BNR. Opt-in build; requires GPU + NIM container.
+	// Disabled by default — requires special hardware and a NIM server.
+	BNR bool `yaml:"bnr"`
+}
+
+// applyDSPFilterDefaults sets nr2/rn2/nr4/dfnr to true if the entire filters
+// sub-section was omitted from config (all fields would be false).
+// BNR remains false unless explicitly enabled.
+func (f *DSPFiltersConfig) applyDSPFilterDefaults() {
+	if !f.NR2 && !f.RN2 && !f.NR4 && !f.DFNR && !f.BNR {
+		// All false → section was omitted; apply defaults.
+		f.NR2 = true
+		f.RN2 = true
+		f.NR4 = true
+		f.DFNR = true
+		// BNR stays false
+	}
+}
+
+// IsFilterAllowed returns true if the named filter is enabled in the config.
+func (d *DSPConfig) IsFilterAllowed(filter string) bool {
+	switch filter {
+	case "nr2":
+		return d.Filters.NR2
+	case "rn2":
+		return d.Filters.RN2
+	case "nr4":
+		return d.Filters.NR4
+	case "dfnr":
+		return d.Filters.DFNR
+	case "bnr":
+		return d.Filters.BNR
+	default:
+		return false
+	}
 }
 
 // NTPConfig contains NTP time synchronization check settings
@@ -530,6 +603,10 @@ func LoadConfig(filename string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	// Apply DSP filter defaults (nr2/rn2/nr4/dfnr enabled, bnr disabled)
+	// when the filters sub-section is absent from config.
+	config.DSP.Filters.applyDSPFilterDefaults()
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)

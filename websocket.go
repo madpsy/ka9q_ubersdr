@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/grpc"
 )
 
 // UUID validation regex (RFC 4122 compliant)
@@ -291,6 +292,7 @@ type WebSocketHandler struct {
 	rateLimiterManager *RateLimiterManager
 	connRateLimiter    *IPConnectionRateLimiter
 	prometheusMetrics  *PrometheusMetrics
+	dspConn            *grpc.ClientConn // shared gRPC connection to ubersdr-dsp (nil if DSP disabled)
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
@@ -315,6 +317,52 @@ type ClientMessage struct {
 	BandwidthHigh *int     `json:"bandwidthHigh,omitempty"` // Pointer to distinguish between 0 and not-sent
 	SquelchOpen   *float32 `json:"squelchOpen,omitempty"`   // Squelch open threshold in dB SNR (nil = no change, -999 = always open)
 	SquelchClose  *float32 `json:"squelchClose,omitempty"`  // Squelch close threshold in dB SNR (nil = no change)
+	// DSP insert fields (type: "set_dsp", "set_dsp_params", "get_dsp_filters")
+	Enabled *bool                  `json:"enabled,omitempty"` // set_dsp: true=enable, false=disable
+	Filter  string                 `json:"filter,omitempty"`  // set_dsp: filter name ("nr2","rn2","nr4","dfnr","bnr")
+	Params  map[string]interface{} `json:"params,omitempty"`  // set_dsp / set_dsp_params: filter parameters
+}
+
+// dspValidFilters is the set of known filter names.
+var dspValidFilters = map[string]bool{
+	"nr2": true, "rn2": true, "nr4": true, "dfnr": true, "bnr": true,
+}
+
+// dspInitOnlyParams are parameters that can only be set at session creation
+// (not via ParamUpdate mid-stream).
+var dspInitOnlyParams = map[string]bool{
+	"model":       true, // dfnr: path to ONNX model
+	"bnr-address": true, // bnr: NIM gRPC server address
+}
+
+// dspValidParams maps each filter to its valid runtime-safe parameter names.
+// Parameters not listed here are rejected before being sent to the container.
+var dspValidParams = map[string]map[string]bool{
+	"nr2": {
+		"gain-method": true,
+		"npe-method":  true,
+		"gain-max":    true,
+		"gain-smooth": true,
+		"qspp":        true,
+		"ae":          true,
+	},
+	"rn2": {}, // no tunable parameters
+	"nr4": {
+		"reduction":    true,
+		"smoothing":    true,
+		"whitening":    true,
+		"adaptive":     true,
+		"noise-method": true,
+	},
+	"dfnr": {
+		"atten-limit": true,
+		"pf-beta":     true,
+		// "model" is init-only — excluded from runtime updates
+	},
+	"bnr": {
+		"intensity": true,
+		// "bnr-address" is init-only — excluded from runtime updates
+	},
 }
 
 // ServerMessage represents a message to the client
@@ -660,7 +708,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	go wsh.streamAudio(conn, sessionHolder, done, format, version)
 
 	// Handle incoming messages (this will manage session lifecycle)
-	wsh.handleMessages(conn, sessionHolder, done)
+	wsh.handleMessages(conn, sessionHolder, done, version)
 
 	// Cleanup
 	currentSession := sessionHolder.getSession()
@@ -669,7 +717,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 }
 
 // handleMessages processes incoming WebSocket messages
-func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *sessionHolder, done chan struct{}) {
+func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *sessionHolder, done chan struct{}, version int) {
 	defer close(done)
 
 	for {
@@ -971,6 +1019,250 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}})
 			}
 
+		case "set_dsp":
+			// Enable or disable the DSP noise-reduction insert for this session.
+			// Version 2 only.  IQ modes are hard-blocked.
+			// Message: { "type": "set_dsp", "enabled": true, "filter": "nr4",
+			//            "params": { "reduction": "15" } }
+			//       or: { "type": "set_dsp", "enabled": false }
+			if version < 2 {
+				wsh.sendError(conn, "set_dsp requires protocol version 2")
+				continue
+			}
+			if !wsh.config.DSP.Enabled || wsh.dspConn == nil {
+				wsh.sendError(conn, "DSP noise reduction is not configured on this server")
+				continue
+			}
+			if msg.Enabled == nil {
+				wsh.sendError(conn, "set_dsp: 'enabled' field is required")
+				continue
+			}
+
+			if !*msg.Enabled {
+				// Disable: close existing insert if any.
+				currentSession.dspInsertMu.Lock()
+				if currentSession.dspInsert != nil {
+					currentSession.dspInsert.Close()
+					currentSession.dspInsert = nil
+				}
+				currentSession.dspInsertMu.Unlock()
+				wsh.sendMessage(conn, ServerMessage{Type: "dsp_status", Info: map[string]interface{}{
+					"enabled": false,
+				}})
+				log.Printf("DSP insert disabled for session %s", currentSession.ID)
+				continue
+			}
+
+			// Enable: validate mode and sample rate first.
+			isIQMode := currentSession.Mode == "iq" || currentSession.Mode == "iq48" ||
+				currentSession.Mode == "iq96" || currentSession.Mode == "iq192" ||
+				currentSession.Mode == "iq384"
+			if isIQMode {
+				wsh.sendError(conn, "DSP insert cannot be used with IQ modes")
+				continue
+			}
+			if currentSession.SampleRate != 12000 && currentSession.SampleRate != 24000 {
+				wsh.sendError(conn, fmt.Sprintf("DSP insert requires sample rate 12000 or 24000 Hz (current: %d Hz)", currentSession.SampleRate))
+				continue
+			}
+
+			// Validate filter name — must be a known filter AND enabled in config.
+			filterName := msg.Filter
+			if filterName == "" {
+				filterName = "nr4" // sensible default
+			}
+			if !dspValidFilters[filterName] {
+				wsh.sendError(conn, fmt.Sprintf("DSP: unknown filter %q (valid: nr2, rn2, nr4, dfnr, bnr)", filterName))
+				continue
+			}
+			if !wsh.config.DSP.IsFilterAllowed(filterName) {
+				wsh.sendError(conn, fmt.Sprintf("DSP: filter %q is not enabled on this server", filterName))
+				continue
+			}
+
+			// Validate and convert params map[string]interface{} → map[string]string.
+			// All values must be strings (or convertible); unknown keys are rejected.
+			validForFilter := dspValidParams[filterName]
+			initParams := make(map[string]string)
+			paramErr := ""
+			for k, v := range msg.Params {
+				// Allow init-only params at session creation time.
+				if !validForFilter[k] && !dspInitOnlyParams[k] {
+					paramErr = fmt.Sprintf("DSP: unknown parameter %q for filter %q", k, filterName)
+					break
+				}
+				switch sv := v.(type) {
+				case string:
+					initParams[k] = sv
+				case float64:
+					initParams[k] = fmt.Sprintf("%g", sv)
+				case bool:
+					if sv {
+						initParams[k] = "true"
+					} else {
+						initParams[k] = "false"
+					}
+				default:
+					paramErr = fmt.Sprintf("DSP: parameter %q has unsupported type %T", k, v)
+				}
+				if paramErr != "" {
+					break
+				}
+			}
+			if paramErr != "" {
+				wsh.sendError(conn, paramErr)
+				continue
+			}
+
+			// Close any existing insert before opening a new one.
+			currentSession.dspInsertMu.Lock()
+			if currentSession.dspInsert != nil {
+				currentSession.dspInsert.Close()
+				currentSession.dspInsert = nil
+			}
+			currentSession.dspInsertMu.Unlock()
+
+			// Open the gRPC stream.
+			ins, err := NewDSPInsert(wsh.dspConn, filterName, currentSession.SampleRate, currentSession.Channels, initParams)
+			if err != nil {
+				wsh.sendError(conn, fmt.Sprintf("DSP: failed to enable insert: %v", err))
+				continue
+			}
+
+			currentSession.dspInsertMu.Lock()
+			currentSession.dspInsert = ins
+			currentSession.dspInsertMu.Unlock()
+
+			wsh.sendMessage(conn, ServerMessage{Type: "dsp_status", Info: map[string]interface{}{
+				"enabled": true,
+				"filter":  filterName,
+			}})
+			log.Printf("DSP insert enabled for session %s (filter=%s, rate=%d)", currentSession.ID, filterName, currentSession.SampleRate)
+
+		case "set_dsp_params":
+			// Update DSP filter parameters mid-stream without restarting.
+			// Message: { "type": "set_dsp_params", "params": { "reduction": "20" } }
+			if version < 2 {
+				wsh.sendError(conn, "set_dsp_params requires protocol version 2")
+				continue
+			}
+			currentSession.dspInsertMu.RLock()
+			ins := currentSession.dspInsert
+			currentSession.dspInsertMu.RUnlock()
+
+			if ins == nil {
+				wsh.sendError(conn, "DSP insert is not active — enable it first with set_dsp")
+				continue
+			}
+			if len(msg.Params) == 0 {
+				wsh.sendError(conn, "set_dsp_params: 'params' field is required and must not be empty")
+				continue
+			}
+
+			// We need to know the current filter name to validate params.
+			// We don't store it on the session, so we accept any runtime-safe param
+			// from any filter (the server will reject unknown ones via ParamAck.rejected).
+			// Build the string map, validating types.
+			updateParams := make(map[string]string)
+			paramErr := ""
+			for k, v := range msg.Params {
+				// Reject init-only params — they cannot be changed mid-stream.
+				if dspInitOnlyParams[k] {
+					paramErr = fmt.Sprintf("DSP: parameter %q cannot be changed mid-stream (init-only)", k)
+					break
+				}
+				switch sv := v.(type) {
+				case string:
+					updateParams[k] = sv
+				case float64:
+					updateParams[k] = fmt.Sprintf("%g", sv)
+				case bool:
+					if sv {
+						updateParams[k] = "true"
+					} else {
+						updateParams[k] = "false"
+					}
+				default:
+					paramErr = fmt.Sprintf("DSP: parameter %q has unsupported type %T", k, v)
+				}
+				if paramErr != "" {
+					break
+				}
+			}
+			if paramErr != "" {
+				wsh.sendError(conn, paramErr)
+				continue
+			}
+
+			ins.UpdateParams(updateParams)
+			wsh.sendMessage(conn, ServerMessage{Type: "dsp_params_sent", Info: map[string]interface{}{
+				"params": updateParams,
+			}})
+
+		case "get_dsp_filters":
+			// Return the list of available filters from the DSP container.
+			// Message: { "type": "get_dsp_filters" }
+			if version < 2 {
+				wsh.sendError(conn, "get_dsp_filters requires protocol version 2")
+				continue
+			}
+			if !wsh.config.DSP.Enabled || wsh.dspConn == nil {
+				wsh.sendMessage(conn, ServerMessage{Type: "dsp_filters", Info: map[string]interface{}{
+					"available": false,
+					"reason":    "DSP noise reduction is not configured on this server",
+				}})
+				continue
+			}
+
+			filters := DSPGetFilters(wsh.dspConn)
+			if filters == nil {
+				wsh.sendMessage(conn, ServerMessage{Type: "dsp_filters", Info: map[string]interface{}{
+					"available": false,
+					"reason":    "DSP container is unreachable",
+				}})
+				continue
+			}
+
+			// Convert to a JSON-friendly structure.
+			type paramInfo struct {
+				Name        string `json:"name"`
+				Type        string `json:"type"`
+				Default     string `json:"default"`
+				Min         string `json:"min,omitempty"`
+				Max         string `json:"max,omitempty"`
+				Description string `json:"description,omitempty"`
+				RuntimeSafe bool   `json:"runtime_safe"`
+			}
+			type filterInfo struct {
+				Name        string      `json:"name"`
+				Description string      `json:"description"`
+				Params      []paramInfo `json:"params"`
+			}
+			var filterList []filterInfo
+			for _, f := range filters.Filters {
+				// Only include filters that are enabled in the server config.
+				if !wsh.config.DSP.IsFilterAllowed(f.Name) {
+					continue
+				}
+				fi := filterInfo{Name: f.Name, Description: f.Description}
+				for _, p := range f.Params {
+					fi.Params = append(fi.Params, paramInfo{
+						Name:        p.Name,
+						Type:        p.Type,
+						Default:     p.DefaultVal,
+						Min:         p.MinVal,
+						Max:         p.MaxVal,
+						Description: p.Description,
+						RuntimeSafe: p.RuntimeSafe,
+					})
+				}
+				filterList = append(filterList, fi)
+			}
+			wsh.sendMessage(conn, ServerMessage{Type: "dsp_filters", Info: map[string]interface{}{
+				"available": true,
+				"filters":   filterList,
+			}})
+
 		default:
 			log.Printf("Unknown message type: %s", msg.Type)
 		}
@@ -1197,6 +1489,37 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
+
+			// Apply DSP noise-reduction insert if active.
+			// Hard guards: IQ modes are never routed through the DSP (they carry raw RF
+			// samples, not demodulated audio), and only 12000/24000 Hz are supported.
+			// Fail-open: if the DSP container is slow or has crashed, we use the
+			// original PCM after a short timeout rather than dropping the packet.
+			pcmData := audioPacket.PCMData
+			session.dspInsertMu.RLock()
+			ins := session.dspInsert
+			session.dspInsertMu.RUnlock()
+			if ins != nil && !isIQMode && (session.SampleRate == 12000 || session.SampleRate == 24000) {
+				if ins.Send(pcmData) {
+					// Wait for the processed chunk with a 100 ms timeout (fail-open).
+					select {
+					case processed, ok := <-ins.Recv():
+						if ok && len(processed) > 0 {
+							pcmData = processed
+						}
+						// else: recvChan closed (DSP crashed) — use original pcmData
+					case <-time.After(100 * time.Millisecond):
+						// DSP container too slow — use original pcmData (fail-open)
+						if DebugMode {
+							log.Printf("DEBUG: DSP insert timeout for session %s — using original PCM", session.ID)
+						}
+					}
+				}
+				// Send returned false (channel full) — use original pcmData (fail-open)
+			}
+			// Replace audioPacket.PCMData with the (possibly processed) pcmData for
+			// all encoder paths below.
+			audioPacket.PCMData = pcmData
 
 			// Determine which format to use for this packet
 			// If in IQ mode, fall back to lossless pcm-zstd

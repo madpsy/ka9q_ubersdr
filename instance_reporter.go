@@ -83,6 +83,7 @@ type InstanceReport struct {
 	FrequencyReference         map[string]interface{}   `json:"frequency_reference"`          // Frequency reference tracking information
 	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
 	Spectrogram                bool                     `json:"spectrogram"`                  // Whether wideband spectrogram recording is enabled
+	DSP                        map[string]interface{}   `json:"dsp"`                          // DSP noise reduction insert info (enabled + allowed filter names)
 	Addons                     []string                 `json:"addons"`                       // Names of enabled addon proxies
 	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
 	SSBGridSquares             []WSPRGridSquareEntry    `json:"ssb_grid_squares,omitempty"`   // WSPR-derived grid-square map overlay data (omitted when unavailable)
@@ -657,6 +658,7 @@ func (ir *InstanceReporter) sendReport() error {
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
+		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
@@ -1042,6 +1044,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
+		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,

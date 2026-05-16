@@ -1706,6 +1706,57 @@ freedv_extension:
   max_users: 10
 
 # ==============================================================================
+# DSP Noise Reduction Insert (ubersdr-dsp gRPC container)
+# ==============================================================================
+# When enabled, clients can route their audio through the ubersdr-dsp container
+# for noise reduction before it is encoded and sent to them.  The insert sits
+# between the raw PCM received from radiod and the Opus/pcm-zstd encoder, so it
+# applies to both compressed and uncompressed audio streams.
+#
+# The container exposes a bidirectional gRPC stream (ProcessAudio).  ubersdr
+# sends PCM_INT16_BE (radiod's native big-endian int16 format) so no conversion
+# is needed on either side.
+#
+# IQ modes (iq, iq48, iq96, iq192, iq384) are NEVER routed through the DSP —
+# they carry raw RF samples, not demodulated audio.
+#
+# Available filters (depends on how the container was built):
+#   nr2  — SpectralNR (MMSE-LSA + OSMS spectral subtraction)
+#   rn2  — RNNoise (Mozilla/Xiph RNN-based suppressor, best on speech)
+#   nr4  — libspecbleach (SPP-MMSE adaptive denoiser) [default in container]
+#   dfnr — DeepFilterNet3 neural denoiser (opt-in, requires ONNX model)
+#   bnr  — NVIDIA Maxine BNR (opt-in, requires GPU + NIM container)
+#
+# Docker quick-start:
+#   docker run --rm -p 50051:50051 madpsy/ubersdr-dsp:latest
+# Or with docker compose (recommended — uses the "ubersdr-dsp" service name):
+#   docker compose -f docker/docker-compose.yml up
+dsp:
+  # Enable or disable the DSP insert feature.
+  # When false, any set_dsp WebSocket message from a client is rejected.
+  enabled: false
+
+  # gRPC address of the ubersdr-dsp container.
+  # "ubersdr-dsp" is the Docker Compose service name; change to "localhost"
+  # if running the binary directly on the same host.
+  address: "ubersdr-dsp:50051"
+
+  # Per-filter enable/disable.
+  # Only filters listed as true here can be requested by clients.
+  # The container must also have been built with the filter compiled in
+  # (dfnr and bnr are opt-in build options — see ubersdr-dsp README).
+  # If a filter is disabled here but compiled into the container, clients
+  # will receive an error if they request it.
+  #
+  # Default (when this section is omitted): nr2/rn2/nr4/dfnr enabled, bnr disabled.
+  filters:
+    nr2: true    # SpectralNR — MMSE-LSA spectral subtraction (always compiled in)
+    rn2: true    # RNNoise — Mozilla/Xiph RNN suppressor (always compiled in)
+    nr4: true    # libspecbleach — SPP-MMSE adaptive denoiser (always compiled in)
+    dfnr: true   # DeepFilterNet3 neural denoiser (opt-in build, requires ONNX model)
+    bnr: false   # NVIDIA Maxine BNR — disabled by default (requires GPU + NIM container)
+
+# ==============================================================================
 # NTP Time Synchronization Check
 # ==============================================================================
 # The /api/time endpoint queries an NTP server and compares it to the local

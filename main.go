@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/freedv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
@@ -1740,8 +1742,43 @@ func main() {
 		}
 	}()
 
+	// Initialize DSP gRPC connection if enabled.
+	// A single *grpc.ClientConn is shared across all sessions; each session that
+	// enables the insert opens its own ProcessAudio stream on this connection.
+	var dspConn *grpc.ClientConn
+	if config.DSP.Enabled {
+		addr := config.DSP.Address
+		if addr == "" {
+			addr = "ubersdr-dsp:50051"
+		}
+		var dspErr error
+		dspConn, dspErr = grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if dspErr != nil {
+			log.Printf("Warning: failed to create DSP gRPC client (%s): %v — DSP insert will be unavailable", addr, dspErr)
+			dspConn = nil
+		} else {
+			defer dspConn.Close()
+			log.Printf("DSP gRPC client created (address: %s)", addr)
+			// Pre-fetch the filter list so it is cached before the first client connects.
+			go func() {
+				resp := DSPGetFilters(dspConn)
+				if resp != nil {
+					log.Printf("DSP: %d filter(s) available", len(resp.Filters))
+					for _, f := range resp.Filters {
+						log.Printf("DSP:   %s — %s", f.Name, f.Description)
+					}
+				} else {
+					log.Printf("DSP: container unreachable at startup (filter list unavailable) — will retry on first client request")
+				}
+			}()
+		}
+	} else {
+		log.Printf("DSP noise reduction: disabled (set dsp.enabled: true in config to enable)")
+	}
+
 	// Initialize WebSocket handlers
 	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)
+	wsHandler.dspConn = dspConn
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)                         // New per-user spectrum
 	kiwiHandler := NewKiwiWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics, noiseFloorMonitor) // KiwiSDR compatibility
@@ -3508,6 +3545,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"rotator":              rotatorInfo,
 		"frequency_reference":  freqRefInfo,
 		"speech_to_text":       config.Whisper.Enabled,
+		"dsp":                  buildDSPInfo(&config.DSP),
 		"addons":               enabledAddons,
 		"server_time":          time.Now().UTC().Format(time.RFC3339),
 		"server_time_sync":     GetNTPSynced(),

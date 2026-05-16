@@ -15,10 +15,11 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/ua-parser/uap-go v0.0.0-20251207011819-db9adb27a0b8
-	golang.org/x/net v0.44.0
-	golang.org/x/sys v0.36.0
-	golang.org/x/text v0.29.0
+	golang.org/x/net v0.51.0
+	golang.org/x/sys v0.42.0
+	golang.org/x/text v0.34.0
 	gonum.org/v1/gonum v0.17.0
+	google.golang.org/grpc v1.81.1
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -47,5 +48,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	google.golang.org/protobuf v1.36.6 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )

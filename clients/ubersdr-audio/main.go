@@ -789,6 +789,9 @@ func main() {
 			} else {
 				stationLabel.SetText("")
 			}
+			refreshDSPFromDescription(desc)
+		} else {
+			refreshDSPFromDescription(nil)
 		}
 
 		hz, err := parseFreqKHz(freqEntry.Text)
@@ -1017,6 +1020,9 @@ func main() {
 				} else {
 					stationLabel.SetText("")
 				}
+				refreshDSPFromDescription(desc)
+			} else {
+				refreshDSPFromDescription(nil)
 			}
 
 			client.ConnectForce()
@@ -1510,6 +1516,12 @@ func main() {
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
 			statusDot.SetColor(dotColorGreen)
+			// Request DSP filter list from server (response arrives via OnDSPFilters callback).
+			// Only request if DSP is available on this server (known from /api/description).
+			if dspAvailable {
+				go func() { _ = client.SendGetDSPFilters() }()
+			}
+			updateDSPUI()
 			// Fetch /stats immediately on connect so the user count appears right away
 			// rather than waiting up to 10 s for the ticker to fire.
 			go func() {
@@ -1566,6 +1578,9 @@ func main() {
 			connectBtn.SetText("Cancel")
 			connectBtn.Importance = widget.MediumImportance
 		case StateError:
+			dspEnabled = false
+			dspEnableCheck.SetChecked(false)
+			updateDSPUI()
 			rebuildModeOptions(lastAllowedIQModes)
 			stopSessionTimer()
 			w.SetTitle("UberSDR - Disconnected")
@@ -1598,6 +1613,9 @@ func main() {
 				}()
 			}
 		default:
+			dspEnabled = false
+			dspEnableCheck.SetChecked(false)
+			updateDSPUI()
 			rebuildModeOptions(lastAllowedIQModes)
 			stopSessionTimer()
 			w.SetTitle("UberSDR - Disconnected")
@@ -1934,6 +1952,7 @@ func main() {
 		widget.NewCard("Instance", "", serverGrid),
 		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid)),
 		widget.NewCard("Audio", "", audioBox),
+		widget.NewCard("Noise Reduction", "", dspBox),
 		widget.NewCard("FLRig Sync", "", flrigBox),
 	)
 

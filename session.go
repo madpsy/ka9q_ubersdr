@@ -120,6 +120,13 @@ type Session struct {
 	// Audio extension tap (for streaming audio to background processors)
 	audioExtensionChan chan AudioSample
 	audioExtensionMu   sync.RWMutex
+
+	// DSP noise-reduction insert.
+	// Non-nil when the client has enabled the DSP insert for this session.
+	// Protected by dspInsertMu.  IQ modes never use the insert regardless of
+	// this field — streamAudio() checks the mode on every packet.
+	dspInsert   *DSPInsert
+	dspInsertMu sync.RWMutex
 }
 
 // SessionManager manages all active sessions
@@ -1567,6 +1574,15 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			}
 		}
 	}
+
+	// Close DSP insert if active (must happen before AudioChan is closed so the
+	// send/recv goroutines can exit cleanly without racing on the channel).
+	session.dspInsertMu.Lock()
+	if session.dspInsert != nil {
+		session.dspInsert.Close()
+		session.dspInsert = nil
+	}
+	session.dspInsertMu.Unlock()
 
 	// Close appropriate channel based on session type
 	if session.IsSpectrum {

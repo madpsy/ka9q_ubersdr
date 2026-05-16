@@ -70,6 +70,52 @@ type InstanceDescription struct {
 		Callsign string `json:"callsign"`
 		Location string `json:"location"`
 	} `json:"receiver"`
+	// DSP noise reduction insert info.
+	// Enabled is true when the server has DSP configured and available.
+	// Filters lists the filter names the server allows clients to use.
+	DSP struct {
+		Enabled bool     `json:"enabled"`
+		Filters []string `json:"filters"`
+	} `json:"dsp"`
+}
+
+// DSPFilterInfo describes a single filter parameter returned by get_dsp_filters.
+type DSPFilterInfo struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`    // "float", "int", "bool"
+	Default     string `json:"default"` // string representation of default value
+	Min         string `json:"min,omitempty"`
+	Max         string `json:"max,omitempty"`
+	Description string `json:"description,omitempty"`
+	RuntimeSafe bool   `json:"runtime_safe"`
+}
+
+// DSPFilter describes a single noise reduction filter returned by get_dsp_filters.
+type DSPFilter struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Params      []DSPFilterInfo `json:"params"`
+}
+
+// DSPFiltersResponse is the server's response to a get_dsp_filters message.
+type DSPFiltersResponse struct {
+	Available bool        `json:"available"`
+	Reason    string      `json:"reason,omitempty"` // set when available=false
+	Filters   []DSPFilter `json:"filters"`
+}
+
+// DSPSetRequest is sent over the WebSocket to enable/disable the DSP insert.
+type DSPSetRequest struct {
+	Type    string                 `json:"type"`             // "set_dsp"
+	Enabled bool                   `json:"enabled"`
+	Filter  string                 `json:"filter,omitempty"` // filter name when enabling
+	Params  map[string]interface{} `json:"params,omitempty"` // initial params when enabling
+}
+
+// DSPParamsRequest is sent over the WebSocket to update DSP parameters mid-stream.
+type DSPParamsRequest struct {
+	Type   string                 `json:"type"`   // "set_dsp_params"
+	Params map[string]interface{} `json:"params"`
 }
 
 // FetchDescription calls GET /api/description on the current BaseURL and returns
@@ -181,6 +227,8 @@ type RadioClient struct {
 	OnAudioInfo     func(sampleRate, channels int)            // called when audio params are known
 	OnSignalQuality func(basebandPower, noiseDensity float32) // called each full-header packet; -999 = no data
 	OnAudioLevel    func(dBFS float32)                        // called each audio frame with RMS level in dBFS
+	OnDSPFilters    func(DSPFiltersResponse)                  // called when server responds to get_dsp_filters
+	OnDSPStatus     func(enabled bool, filter string)         // called when server confirms set_dsp
 
 	// bytesReceived accumulates compressed wire bytes since last reset.
 	// Read and reset atomically with BytesReceivedAndReset().
@@ -557,6 +605,52 @@ func (c *RadioClient) Disconnect() {
 	}
 }
 
+// SendSetDSP sends a set_dsp message to enable or disable the noise reduction insert.
+// filter is the filter name (e.g. "nr4"); params are optional initial parameters.
+// When enabled=false, filter and params are ignored.
+func (c *RadioClient) SendSetDSP(enabled bool, filter string, params map[string]interface{}) error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	req := DSPSetRequest{
+		Type:    "set_dsp",
+		Enabled: enabled,
+		Filter:  filter,
+		Params:  params,
+	}
+	return conn.WriteJSON(req)
+}
+
+// SendSetDSPParams sends a set_dsp_params message to update filter parameters mid-stream.
+func (c *RadioClient) SendSetDSPParams(params map[string]interface{}) error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	req := DSPParamsRequest{
+		Type:   "set_dsp_params",
+		Params: params,
+	}
+	return conn.WriteJSON(req)
+}
+
+// SendGetDSPFilters requests the list of available DSP filters from the server.
+// The response is delivered asynchronously via the OnDSPFilters callback.
+func (c *RadioClient) SendGetDSPFilters() error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	return conn.WriteJSON(map[string]string{"type": "get_dsp_filters"})
+}
+
 // Tune sends a tune message over the existing WebSocket connection to change
 // frequency, mode, and/or bandwidth without reconnecting.
 func (c *RadioClient) Tune(frequency int, mode string, bwLow, bwHigh int) error {
@@ -728,8 +822,49 @@ func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 		if msgType == websocket.BinaryMessage {
 			c.bytesReceived.Add(int64(len(data)))
 			c.handleBinary(data)
+		} else if msgType == websocket.TextMessage {
+			c.handleJSON(data)
 		}
-		// JSON messages (status, error, pong) are ignored for now
+	}
+}
+
+// handleJSON processes a text (JSON) WebSocket frame from the server.
+// Currently handles DSP-related responses; other message types are silently ignored.
+func (c *RadioClient) handleJSON(data []byte) {
+	var msg struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	switch msg.Type {
+	case "dsp_filters":
+		var resp DSPFiltersResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return
+		}
+		if cb := c.OnDSPFilters; cb != nil {
+			cb(resp)
+		}
+	case "dsp_status":
+		var s struct {
+			Type    string `json:"type"`
+			Enabled bool   `json:"enabled"`
+			Filter  string `json:"filter,omitempty"`
+			Info    struct {
+				Enabled bool   `json:"enabled"`
+				Filter  string `json:"filter,omitempty"`
+			} `json:"info"`
+		}
+		if err := json.Unmarshal(data, &s); err != nil {
+			return
+		}
+		// Server sends dsp_status with an "info" sub-object.
+		enabled := s.Info.Enabled
+		filter := s.Info.Filter
+		if cb := c.OnDSPStatus; cb != nil {
+			cb(enabled, filter)
+		}
 	}
 }
 

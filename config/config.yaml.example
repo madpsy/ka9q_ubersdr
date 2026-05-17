@@ -1747,8 +1747,8 @@ dsp:
   # disconnects.  A filter *change* by a user who already has DSP active does
   # not count against the limit.
   # 0 = unlimited.
-  # Default: 25
-  max_users: 25
+  # Default: 5
+  max_users: 5
 
   # Per-filter enable/disable.
   # Only filters listed as true here can be requested by clients.
@@ -1759,7 +1759,7 @@ dsp:
   #
   # Default (when this section is omitted): nr2/rn2/nr4/dfnr enabled, bnr disabled.
   filters:
-    nr2: true    # SpectralNR — MMSE-LSA spectral subtraction (always compiled in)
+    nr2: false   # SpectralNR — MMSE-LSA spectral subtraction (always compiled in)
     rn2: true    # RNNoise — Mozilla/Xiph RNN suppressor (always compiled in)
     nr4: true    # libspecbleach — SPP-MMSE adaptive denoiser (always compiled in)
     dfnr: true   # DeepFilterNet3 neural denoiser (opt-in build, requires ONNX model)

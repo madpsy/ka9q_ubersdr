@@ -85,7 +85,10 @@ function clearMessage() {
 function setLoading(visible) {
     const ld = els.loading();
     const mc = els.mainContent();
-    if (ld) ld.classList.toggle('visible', visible);
+    if (ld) {
+        ld.classList.toggle('visible', visible);
+        ld.style.display = visible ? 'flex' : 'none';
+    }
     if (mc) mc.style.display = visible ? 'none' : '';
 }
 

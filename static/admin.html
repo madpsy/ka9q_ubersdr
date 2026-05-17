@@ -9102,17 +9102,33 @@ function resetStationIdColor() {
             renderCommunityWidgets(filtered);
         }
 
+        const COMMUNITY_PAGE_SIZE = 24;
+        let communityPage = 0;          // current page index (0-based)
+        let communityFiltered = [];     // the filtered list currently being paged
+
         function renderCommunityWidgets(widgets) {
+            communityFiltered = widgets;
+            communityPage = 0;
+            _renderCommunityPage();
+        }
+
+        function _renderCommunityPage() {
             const container = document.getElementById('communityWidgetsList');
-            if (widgets.length === 0) {
+            container.innerHTML = '';
+
+            if (communityFiltered.length === 0) {
                 container.innerHTML = '<em style="color:#aaa;font-size:13px;">No community widgets found.</em>';
                 return;
             }
-            // Grid wrapper
-            container.innerHTML = '';
+
+            const totalPages = Math.ceil(communityFiltered.length / COMMUNITY_PAGE_SIZE);
+            const start = communityPage * COMMUNITY_PAGE_SIZE;
+            const pageWidgets = communityFiltered.slice(start, start + COMMUNITY_PAGE_SIZE);
+
+            // Grid
             const grid = document.createElement('div');
-            grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;';
-            widgets.forEach(w => {
+            grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:14px;';
+            pageWidgets.forEach(w => {
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
                 const isMine    = myWidgetIDs.has(w.widget_id);
                 const card = document.createElement('div');
@@ -9139,6 +9155,24 @@ function resetStationIdColor() {
                 grid.appendChild(card);
             });
             container.appendChild(grid);
+
+            // Pagination bar (only shown when more than one page)
+            if (totalPages > 1) {
+                const bar = document.createElement('div');
+                bar.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 0;font-size:13px;color:#555;';
+                bar.innerHTML = `
+                    <button class="btn btn-secondary" onclick="communityPageNav(-1)" style="font-size:12px;padding:4px 12px;"${communityPage === 0 ? ' disabled' : ''}>&lsaquo; Prev</button>
+                    <span>Page ${communityPage + 1} of ${totalPages} &nbsp;<span style="color:#888;font-size:11px;">(${communityFiltered.length} widgets)</span></span>
+                    <button class="btn btn-secondary" onclick="communityPageNav(1)"  style="font-size:12px;padding:4px 12px;"${communityPage >= totalPages - 1 ? ' disabled' : ''}>Next &rsaquo;</button>`;
+                container.appendChild(bar);
+            }
+        }
+
+        function communityPageNav(delta) {
+            const totalPages = Math.ceil(communityFiltered.length / COMMUNITY_PAGE_SIZE);
+            communityPage = Math.max(0, Math.min(communityPage + delta, totalPages - 1));
+            _renderCommunityPage();
+            document.getElementById('communityWidgetsList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         function openNewWidgetEditor() {

@@ -2926,6 +2926,33 @@
             </div>
         </div>
 
+        <!-- Widget Version History Modal -->
+        <div id="widgetHistoryModal" class="modal">
+            <div class="modal-content" style="max-width: 900px; max-height: 88vh; display: flex; flex-direction: column;">
+                <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <h3 id="widgetHistoryModalTitle" style="margin:0; font-size:16px;">Version History</h3>
+                    <button onclick="closeWidgetHistoryModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="flex:1; overflow:hidden; display:flex; gap:0; padding:0; min-height:0;">
+                    <!-- Left: version list -->
+                    <div id="widgetHistoryList" style="width:200px; flex-shrink:0; overflow-y:auto; border-right:1px solid #e0e0e0; padding:8px;">
+                        <em style="color:#aaa; font-size:13px;">Loading…</em>
+                    </div>
+                    <!-- Right: code preview -->
+                    <div style="flex:1; overflow:auto; display:flex; flex-direction:column; min-width:0;">
+                        <div id="widgetHistoryPreviewHeader" style="padding:8px 12px; background:#f8f9fa; border-bottom:1px solid #e0e0e0; font-size:12px; color:#555; flex-shrink:0;"></div>
+                        <pre id="widgetHistoryCode" style="margin:0; padding:16px; font-size:12px; line-height:1.5; background:#1e1e1e; color:#d4d4d4; white-space:pre-wrap; word-break:break-all; flex:1; font-family:'Courier New',Courier,monospace;"><em style="color:#888;">Select a version to preview.</em></pre>
+                    </div>
+                </div>
+                <div style="padding:10px 16px; border-top:1px solid #e0e0e0; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; gap:8px;">
+                    <button id="widgetHistoryRestoreBtn" class="btn" onclick="restoreWidgetVersion()" style="display:none;">↩ Restore this version</button>
+                    <div style="margin-left:auto;">
+                        <button class="btn btn-secondary" onclick="closeWidgetHistoryModal()" style="margin-left:0;">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Auto-Calibration Modal -->
         <div id="autoCalibrationModal" class="modal">
             <div class="modal-content" style="max-width: 600px;">
@@ -9051,6 +9078,7 @@ function resetStationIdColor() {
                                 : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                             }
                             <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
+                            <button class="btn btn-secondary" onclick="openWidgetHistory('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;margin-left:0;" title="View version history">🕐 History</button>
                             <button class="btn btn-danger"    onclick="deleteWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
                         </div>`;
                     container.appendChild(row);
@@ -9233,6 +9261,115 @@ function resetStationIdColor() {
             document.getElementById('widgetCodeModal').style.display = 'none';
         }
 
+        // ── Widget Version History ────────────────────────────────────────────
+
+        let _historyWidgetID   = null;
+        let _historyWidgetName = null;
+        let _historySelectedVersion = null;
+
+        async function openWidgetHistory(widgetID, widgetName) {
+            _historyWidgetID   = widgetID;
+            _historyWidgetName = widgetName;
+            _historySelectedVersion = null;
+
+            const modal   = document.getElementById('widgetHistoryModal');
+            const title   = document.getElementById('widgetHistoryModalTitle');
+            const list    = document.getElementById('widgetHistoryList');
+            const code    = document.getElementById('widgetHistoryCode');
+            const header  = document.getElementById('widgetHistoryPreviewHeader');
+            const restBtn = document.getElementById('widgetHistoryRestoreBtn');
+
+            title.textContent = `Version History: ${widgetName}`;
+            list.innerHTML    = '<em style="color:#aaa;font-size:13px;">Loading…</em>';
+            code.innerHTML    = '<em style="color:#888;">Select a version to preview.</em>';
+            header.textContent = '';
+            restBtn.style.display = 'none';
+            modal.style.display = 'block';
+
+            try {
+                const resp = await authenticatedFetch(`/admin/widgets/versions?widget_id=${encodeURIComponent(widgetID)}`);
+                if (!resp || !resp.ok) { list.innerHTML = '<em style="color:#c62828;font-size:13px;">Failed to load versions.</em>'; return; }
+                const data = await resp.json();
+                const versions = data.versions || [];
+                if (versions.length === 0) { list.innerHTML = '<em style="color:#aaa;font-size:13px;">No versions found.</em>'; return; }
+
+                list.innerHTML = '';
+                versions.forEach((v, idx) => {
+                    const btn = document.createElement('button');
+                    btn.style.cssText = 'display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:4px;cursor:pointer;font-size:12px;background:transparent;margin-bottom:2px;';
+                    const date = new Date(v.updated_at).toLocaleString();
+                    btn.innerHTML = `<strong style="color:#283593;">v${v.version}</strong><br><span style="color:#888;font-size:11px;">${date}</span>`;
+                    if (idx === 0) btn.style.background = '#e8eaf6';
+                    btn.onmouseover = () => { if (_historySelectedVersion !== v.version) btn.style.background = '#f0f4ff'; };
+                    btn.onmouseout  = () => { if (_historySelectedVersion !== v.version) btn.style.background = 'transparent'; else btn.style.background = '#e8eaf6'; };
+                    btn.onclick = () => loadHistoryVersion(widgetID, v.version, date, btn, versions.length);
+                    list.appendChild(btn);
+                });
+
+                // Auto-load the latest version
+                const firstBtn = list.querySelector('button');
+                if (firstBtn) firstBtn.click();
+            } catch (e) {
+                list.innerHTML = `<em style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</em>`;
+            }
+        }
+
+        async function loadHistoryVersion(widgetID, version, dateStr, clickedBtn, totalVersions) {
+            _historySelectedVersion = version;
+            const code    = document.getElementById('widgetHistoryCode');
+            const header  = document.getElementById('widgetHistoryPreviewHeader');
+            const restBtn = document.getElementById('widgetHistoryRestoreBtn');
+
+            // Highlight selected button
+            document.querySelectorAll('#widgetHistoryList button').forEach(b => b.style.background = 'transparent');
+            clickedBtn.style.background = '#e8eaf6';
+
+            code.innerHTML = '<em style="color:#888;">Loading…</em>';
+            header.textContent = '';
+            restBtn.style.display = 'none';
+
+            try {
+                const resp = await authenticatedFetch(`/admin/widgets/version?widget_id=${encodeURIComponent(widgetID)}&version=${version}`);
+                if (!resp || !resp.ok) { code.textContent = 'Failed to load version content.'; return; }
+                const data = await resp.json();
+                code.textContent = data.html_content || '(empty)';
+                header.textContent = `v${version} — saved ${dateStr}`;
+                // Show restore button only if this is not the latest version (version < totalVersions)
+                if (version < totalVersions) {
+                    restBtn.style.display = 'inline-block';
+                }
+            } catch (e) {
+                code.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function restoreWidgetVersion() {
+            if (!_historyWidgetID || !_historySelectedVersion) return;
+            const code = document.getElementById('widgetHistoryCode');
+            const html = code.textContent;
+            if (!html || html === '(empty)') { showAlert('No content to restore.', 'error'); return; }
+            if (!confirm(`Restore v${_historySelectedVersion} of "${_historyWidgetName}"? This will overwrite the current version.`)) return;
+
+            // Open the editor with this widget and populate the HTML field
+            closeWidgetHistoryModal();
+            await openEditWidgetEditor(_historyWidgetID);
+            // Wait a tick for the editor to populate, then overwrite the HTML field
+            setTimeout(() => {
+                const htmlField = document.getElementById('widgetEditorHTML');
+                if (htmlField) {
+                    htmlField.value = html;
+                    showAlert(`v${_historySelectedVersion} loaded into editor. Review and save to restore.`, 'success');
+                }
+            }, 300);
+        }
+
+        function closeWidgetHistoryModal() {
+            document.getElementById('widgetHistoryModal').style.display = 'none';
+            _historyWidgetID = null;
+            _historyWidgetName = null;
+            _historySelectedVersion = null;
+        }
+
         async function cloneCommunityWidget(widgetID, widgetName, widgetDescription) {
             try {
                 // Fetch version list to get the latest version number
@@ -9342,7 +9479,12 @@ function resetStationIdColor() {
                     body: JSON.stringify(body)
                 });
                 if (!resp) return;
-                if (!resp.ok) throw new Error(await resp.text());
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    let errMsg = errText;
+                    try { const j = JSON.parse(errText); if (j.error) errMsg = j.error; } catch (_) {}
+                    throw new Error(errMsg);
+                }
                 // If this was a new widget, capture the returned widget_id so subsequent
                 // saves update rather than create a duplicate
                 if (!id) {

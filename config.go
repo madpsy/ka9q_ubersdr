@@ -248,6 +248,7 @@ type ServerConfig struct {
 	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
 	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in index.html (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
+	EnabledWidgets                  []string             `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
 	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
 	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
 	containerProxyIPs               []string             // Dynamically resolved container IPs (internal use)

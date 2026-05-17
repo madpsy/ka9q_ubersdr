@@ -1024,6 +1024,9 @@ func (ah *AdminHandler) handleGetConfig(w http.ResponseWriter, r *http.Request) 
 		if v, exists := server["trusted_containers"]; !exists || v == nil {
 			server["trusted_containers"] = []interface{}{}
 		}
+		if v, exists := server["enabled_widgets"]; !exists || v == nil {
+			server["enabled_widgets"] = []interface{}{}
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

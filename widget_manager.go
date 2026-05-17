@@ -1,0 +1,605 @@
+package main
+
+import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	// MaxEnabledWidgets is the maximum number of widgets that can be enabled at once
+	MaxEnabledWidgets = 10
+	// widgetCacheTTL is how long a cached widget entry is considered fresh
+	widgetCacheTTL = 15 * time.Minute
+	// widgetFetchTimeout is the HTTP timeout for collector requests
+	widgetFetchTimeout = 10 * time.Second
+)
+
+// WidgetMeta is the metadata shape returned by the collector list endpoints.
+// html_content is absent in list responses; present in single-widget responses.
+type WidgetMeta struct {
+	WidgetID    string `json:"widget_id"`
+	InstanceID  string `json:"instance_id"`
+	Callsign    string `json:"callsign"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	HTMLContent string `json:"html_content,omitempty"`
+	IsPublic    bool   `json:"is_public"`
+	Version     int    `json:"version"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// widgetCacheEntry holds a fetched widget's HTML and metadata.
+type widgetCacheEntry struct {
+	HTML        string
+	Name        string
+	Callsign    string
+	Description string
+	FetchedAt   time.Time
+}
+
+// WidgetManager manages the in-memory widget cache and proxies requests to the
+// collector widget API on behalf of the authenticated admin.
+type WidgetManager struct {
+	config     *Config
+	configFile string // path to the main config YAML for persistence
+	httpClient *http.Client
+
+	mu      sync.RWMutex
+	entries map[string]widgetCacheEntry // keyed by widget_id UUID
+
+	stopChan chan struct{}
+}
+
+// NewWidgetManager creates a WidgetManager and starts the background refresh ticker.
+// configFile is the path to the main config YAML (same value as AdminHandler.configFile).
+func NewWidgetManager(config *Config, configFile string) *WidgetManager {
+	wm := &WidgetManager{
+		config:     config,
+		configFile: configFile,
+		entries:    make(map[string]widgetCacheEntry),
+		stopChan:   make(chan struct{}),
+		httpClient: &http.Client{
+			Timeout: widgetFetchTimeout,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			},
+		},
+	}
+	// Pre-populate cache for any already-configured widgets.
+	wm.refreshAll()
+	// Start background refresh ticker.
+	go wm.backgroundRefresh()
+	return wm
+}
+
+// Stop halts the background refresh goroutine.
+func (wm *WidgetManager) Stop() {
+	close(wm.stopChan)
+}
+
+// collectorBaseURL returns the base URL for the collector API.
+func (wm *WidgetManager) collectorBaseURL() string {
+	scheme := "https"
+	if !wm.config.InstanceReporting.UseHTTPS {
+		scheme = "http"
+	}
+	host := wm.config.InstanceReporting.Hostname
+	if host == "" {
+		host = "instances.ubersdr.org"
+	}
+	port := wm.config.InstanceReporting.Port
+	if port == 0 || port == 443 {
+		return fmt.Sprintf("%s://%s", scheme, host)
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, host, port)
+}
+
+// instanceSecret returns the X-Instance-Secret value.
+func (wm *WidgetManager) instanceSecret() string {
+	return wm.config.InstanceReporting.InstanceUUID
+}
+
+// fetchWidgetHTML fetches a single widget's HTML from the collector.
+// Always sends the secret so private (own) widgets are accessible.
+func (wm *WidgetManager) fetchWidgetHTML(widgetID string) (*WidgetMeta, error) {
+	url := fmt.Sprintf("%s/api/widgets/%s", wm.collectorBaseURL(), widgetID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if secret := wm.instanceSecret(); secret != "" {
+		req.Header.Set("X-Instance-Secret", secret)
+	}
+	resp, err := wm.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("collector returned %d for widget %s", resp.StatusCode, widgetID)
+	}
+	var meta WidgetMeta
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// refreshAll re-fetches all currently enabled widgets and updates the cache.
+func (wm *WidgetManager) refreshAll() {
+	ids := wm.config.Server.EnabledWidgets
+	if len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		meta, err := wm.fetchWidgetHTML(id)
+		if err != nil {
+			log.Printf("[WidgetManager] Failed to fetch widget %s: %v", id, err)
+			continue
+		}
+		wm.mu.Lock()
+		wm.entries[id] = widgetCacheEntry{
+			HTML:        meta.HTMLContent,
+			Name:        meta.Name,
+			Callsign:    meta.Callsign,
+			Description: meta.Description,
+			FetchedAt:   time.Now(),
+		}
+		wm.mu.Unlock()
+		log.Printf("[WidgetManager] Cached widget %s (%q)", id, meta.Name)
+	}
+}
+
+// backgroundRefresh runs a ticker that refreshes all enabled widgets every widgetCacheTTL.
+func (wm *WidgetManager) backgroundRefresh() {
+	ticker := time.NewTicker(widgetCacheTTL)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			log.Printf("[WidgetManager] Background refresh of %d widget(s)", len(wm.config.Server.EnabledWidgets))
+			wm.refreshAll()
+		case <-wm.stopChan:
+			return
+		}
+	}
+}
+
+// AddToCache immediately fetches and caches a single widget.
+// Called when the admin enables a new widget.
+func (wm *WidgetManager) AddToCache(widgetID string) error {
+	meta, err := wm.fetchWidgetHTML(widgetID)
+	if err != nil {
+		return err
+	}
+	wm.mu.Lock()
+	wm.entries[widgetID] = widgetCacheEntry{
+		HTML:        meta.HTMLContent,
+		Name:        meta.Name,
+		Callsign:    meta.Callsign,
+		Description: meta.Description,
+		FetchedAt:   time.Now(),
+	}
+	wm.mu.Unlock()
+	log.Printf("[WidgetManager] Added widget %s (%q) to cache", widgetID, meta.Name)
+	return nil
+}
+
+// RemoveFromCache evicts a widget from the cache.
+// Called when the admin disables a widget.
+func (wm *WidgetManager) RemoveFromCache(widgetID string) {
+	wm.mu.Lock()
+	delete(wm.entries, widgetID)
+	wm.mu.Unlock()
+}
+
+// AssembleHTML builds the WidgetsHTML template.HTML value for index.html rendering.
+// It iterates EnabledWidgets in order, wrapping each in a sandboxed iframe srcdoc.
+// Missing cache entries (fetch failed at startup) are silently skipped.
+func (wm *WidgetManager) AssembleHTML(enabledIDs []string) template.HTML {
+	if len(enabledIDs) == 0 {
+		return ""
+	}
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	var sb strings.Builder
+	for _, id := range enabledIDs {
+		entry, ok := wm.entries[id]
+		if !ok || entry.HTML == "" {
+			continue
+		}
+		// Escape the HTML content for use as an srcdoc attribute value.
+		escaped := template.HTMLEscapeString(entry.HTML)
+		fmt.Fprintf(&sb,
+			"\n<!-- Widget: %s (%s) -->\n<iframe srcdoc=\"%s\" sandbox=\"allow-scripts allow-same-origin\" style=\"border:none;width:100%%;height:auto;\" loading=\"lazy\"></iframe>\n",
+			template.HTMLEscapeString(entry.Name), id, escaped,
+		)
+	}
+	return template.HTML(sb.String())
+}
+
+// ---------------------------------------------------------------------------
+// Admin HTTP handlers
+// ---------------------------------------------------------------------------
+
+// HandleEnabled handles GET and POST /admin/widgets/enabled.
+//
+//	GET  → returns the current EnabledWidgets list and cache status.
+//	POST → replaces the EnabledWidgets list (max 10), fetches new entries,
+//	       evicts removed entries, and saves the config to disk.
+func (wm *WidgetManager) HandleEnabled(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		wm.handleGetEnabled(w, r)
+	case http.MethodPost:
+		wm.handlePostEnabled(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (wm *WidgetManager) handleGetEnabled(w http.ResponseWriter, _ *http.Request) {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	type enabledEntry struct {
+		WidgetID    string `json:"widget_id"`
+		Name        string `json:"name"`
+		Callsign    string `json:"callsign,omitempty"`
+		Description string `json:"description,omitempty"`
+		Cached      bool   `json:"cached"`
+		FetchedAt   string `json:"fetched_at,omitempty"`
+	}
+
+	result := make([]enabledEntry, 0, len(wm.config.Server.EnabledWidgets))
+	for _, id := range wm.config.Server.EnabledWidgets {
+		entry, ok := wm.entries[id]
+		e := enabledEntry{WidgetID: id, Cached: ok}
+		if ok {
+			e.Name = entry.Name
+			e.Callsign = entry.Callsign
+			e.Description = entry.Description
+			e.FetchedAt = entry.FetchedAt.UTC().Format(time.RFC3339)
+		}
+		result = append(result, e)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":     result,
+		"count":       len(result),
+		"max_allowed": MaxEnabledWidgets,
+	})
+}
+
+func (wm *WidgetManager) handlePostEnabled(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WidgetIDs []string `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Deduplicate while preserving order.
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(body.WidgetIDs))
+	for _, id := range body.WidgetIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		deduped = append(deduped, id)
+	}
+
+	if len(deduped) > MaxEnabledWidgets {
+		http.Error(w, fmt.Sprintf("Too many widgets: maximum %d enabled at once", MaxEnabledWidgets), http.StatusBadRequest)
+		return
+	}
+
+	// Determine which IDs are newly added vs removed.
+	oldSet := make(map[string]bool)
+	for _, id := range wm.config.Server.EnabledWidgets {
+		oldSet[id] = true
+	}
+	newSet := make(map[string]bool)
+	for _, id := range deduped {
+		newSet[id] = true
+	}
+
+	// Fetch newly added widgets; abort if any fetch fails.
+	var fetchErrors []string
+	for _, id := range deduped {
+		if !oldSet[id] {
+			if err := wm.AddToCache(id); err != nil {
+				fetchErrors = append(fetchErrors, fmt.Sprintf("%s: %v", id, err))
+			}
+		}
+	}
+	if len(fetchErrors) > 0 {
+		http.Error(w, fmt.Sprintf("Failed to fetch widget(s): %s", strings.Join(fetchErrors, "; ")), http.StatusBadGateway)
+		return
+	}
+
+	// Evict removed widgets from cache.
+	for id := range oldSet {
+		if !newSet[id] {
+			wm.RemoveFromCache(id)
+		}
+	}
+
+	// Update live config.
+	wm.config.Server.EnabledWidgets = deduped
+
+	// Persist to disk.
+	if err := wm.saveEnabledWidgets(deduped); err != nil {
+		log.Printf("[WidgetManager] Failed to save enabled_widgets to config: %v", err)
+		// Non-fatal: live config is already updated; log and continue.
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"count":   len(deduped),
+		"widgets": deduped,
+	})
+}
+
+// saveEnabledWidgets persists the enabled_widgets list to the main config YAML file.
+// It reads the current YAML, updates only the server.enabled_widgets key, and writes back.
+func (wm *WidgetManager) saveEnabledWidgets(ids []string) error {
+	if wm.configFile == "" {
+		return fmt.Errorf("config file path not set")
+	}
+
+	data, err := os.ReadFile(wm.configFile)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+
+	var configMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &configMap); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	if configMap == nil {
+		configMap = make(map[string]interface{})
+	}
+
+	server, ok := configMap["server"].(map[string]interface{})
+	if !ok {
+		server = make(map[string]interface{})
+		configMap["server"] = server
+	}
+
+	// Store as []interface{} so yaml.Marshal produces a proper YAML list.
+	if len(ids) == 0 {
+		server["enabled_widgets"] = []interface{}{}
+	} else {
+		list := make([]interface{}, len(ids))
+		for i, id := range ids {
+			list[i] = id
+		}
+		server["enabled_widgets"] = list
+	}
+
+	yamlData, err := yaml.Marshal(configMap)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(wm.configFile, yamlData, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Collector proxy handlers — all require admin auth (enforced by AuthMiddleware)
+// ---------------------------------------------------------------------------
+
+// HandleMine proxies GET /admin/widgets/mine → collector GET /api/widgets/mine
+func (wm *WidgetManager) HandleMine(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	wm.proxyToCollector(w, r, http.MethodGet, "/api/widgets/mine", true, nil)
+}
+
+// HandlePublic proxies GET /admin/widgets/public → collector GET /api/widgets
+// Supports ?instance_id= and ?callsign= query params forwarded as-is.
+func (wm *WidgetManager) HandlePublic(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := "/api/widgets"
+	if q := r.URL.RawQuery; q != "" {
+		path += "?" + q
+	}
+	wm.proxyToCollector(w, r, http.MethodGet, path, false, nil)
+}
+
+// HandleCreate proxies POST /admin/widgets/create → collector POST /api/widgets
+func (wm *WidgetManager) HandleCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	wm.proxyToCollector(w, r, http.MethodPost, "/api/widgets", true, r.Body)
+}
+
+// HandleUpdate proxies PUT /admin/widgets/update?widget_id=<id> → collector PUT /api/widgets/:id
+// Also refreshes the cache entry if the widget is currently enabled.
+func (wm *WidgetManager) HandleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	widgetID := r.URL.Query().Get("widget_id")
+	if widgetID == "" {
+		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Buffer the body so we can both forward it and potentially re-fetch.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodPut, fmt.Sprintf("/api/widgets/%s", widgetID), true, bytes.NewReader(bodyBytes))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(respBody)
+
+	// If update succeeded and widget is enabled, refresh its cache entry.
+	if statusCode == http.StatusOK {
+		wm.mu.RLock()
+		_, isEnabled := wm.entries[widgetID]
+		wm.mu.RUnlock()
+		if isEnabled {
+			if err := wm.AddToCache(widgetID); err != nil {
+				log.Printf("[WidgetManager] Failed to refresh cache for updated widget %s: %v", widgetID, err)
+			}
+		}
+	}
+}
+
+// HandleDelete proxies DELETE /admin/widgets/delete?widget_id=<id> → collector DELETE /api/widgets/:id
+// Also removes the widget from EnabledWidgets and cache if present.
+func (wm *WidgetManager) HandleDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	widgetID := r.URL.Query().Get("widget_id")
+	if widgetID == "" {
+		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
+		return
+	}
+
+	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodDelete, fmt.Sprintf("/api/widgets/%s", widgetID), true, nil)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(respBody)
+
+	if statusCode == http.StatusOK {
+		// Remove from enabled list and cache.
+		wm.RemoveFromCache(widgetID)
+		newEnabled := make([]string, 0, len(wm.config.Server.EnabledWidgets))
+		for _, id := range wm.config.Server.EnabledWidgets {
+			if id != widgetID {
+				newEnabled = append(newEnabled, id)
+			}
+		}
+		if len(newEnabled) != len(wm.config.Server.EnabledWidgets) {
+			wm.config.Server.EnabledWidgets = newEnabled
+			if err := wm.saveEnabledWidgets(newEnabled); err != nil {
+				log.Printf("[WidgetManager] Failed to save enabled_widgets after delete: %v", err)
+			}
+		}
+	}
+}
+
+// HandlePreview proxies GET /admin/widgets/preview?widget_id=<id> → collector GET /api/widgets/:id
+// Always sends the secret so private (own) widgets can be previewed.
+func (wm *WidgetManager) HandlePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	widgetID := r.URL.Query().Get("widget_id")
+	if widgetID == "" {
+		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
+		return
+	}
+	wm.proxyToCollector(w, r, http.MethodGet, fmt.Sprintf("/api/widgets/%s", widgetID), true, nil)
+}
+
+// HandleVersions proxies GET /admin/widgets/versions?widget_id=<id> → collector GET /api/widgets/:id/versions
+func (wm *WidgetManager) HandleVersions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	widgetID := r.URL.Query().Get("widget_id")
+	if widgetID == "" {
+		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
+		return
+	}
+	wm.proxyToCollector(w, r, http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions", widgetID), true, nil)
+}
+
+// HandleVersionContent proxies GET /admin/widgets/version?widget_id=<id>&version=<n>
+// → collector GET /api/widgets/:id/versions/:n
+func (wm *WidgetManager) HandleVersionContent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	widgetID := r.URL.Query().Get("widget_id")
+	version := r.URL.Query().Get("version")
+	if widgetID == "" || version == "" {
+		http.Error(w, "Missing widget_id or version query parameter", http.StatusBadRequest)
+		return
+	}
+	wm.proxyToCollector(w, r, http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions/%s", widgetID, version), true, nil)
+}
+
+// ---------------------------------------------------------------------------
+// Internal proxy helpers
+// ---------------------------------------------------------------------------
+
+// proxyToCollector forwards a request to the collector and writes the response directly.
+func (wm *WidgetManager) proxyToCollector(w http.ResponseWriter, _ *http.Request, method, path string, withSecret bool, body io.Reader) {
+	respBody, statusCode := wm.proxyToCollectorRaw(method, path, withSecret, body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(respBody)
+}
+
+// proxyToCollectorRaw performs the collector request and returns the raw body + status code.
+func (wm *WidgetManager) proxyToCollectorRaw(method, path string, withSecret bool, body io.Reader) ([]byte, int) {
+	url := wm.collectorBaseURL() + path
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return []byte(fmt.Sprintf(`{"error":"failed to build request: %v"}`, err)), http.StatusInternalServerError
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if withSecret {
+		if secret := wm.instanceSecret(); secret != "" {
+			req.Header.Set("X-Instance-Secret", secret)
+		}
+	}
+
+	resp, err := wm.httpClient.Do(req)
+	if err != nil {
+		return []byte(fmt.Sprintf(`{"error":"collector unreachable: %v"}`, err)), http.StatusBadGateway
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return []byte(`{"error":"failed to read collector response"}`), http.StatusBadGateway
+	}
+	return respBody, resp.StatusCode
+}

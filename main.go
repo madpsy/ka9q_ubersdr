@@ -1957,6 +1957,10 @@ func main() {
 	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher)
 
+	// Widget manager: in-memory cache + collector proxy.
+	// Must be created after adminHandler so configPath is resolved.
+	widgetManager := NewWidgetManager(config, configPath)
+
 	// Wire the admin handler into the router now that it exists, then seed the
 	// initial routes from the already-built addonProxies slice.
 	addonRouter.SetAdminHandler(adminHandler)
@@ -2342,6 +2346,17 @@ func main() {
 	http.HandleFunc("/admin/decoder/stream", adminHandler.AuthMiddleware(HandleDecoderStream(decoderSSEHub)))
 	http.HandleFunc("/admin/cwskimmer/stream", adminHandler.AuthMiddleware(HandleCWSkimmerStream(cwSkimmerSSEHub)))
 
+	// Widget management endpoints (admin only)
+	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))
+	http.HandleFunc("/admin/widgets/mine", adminHandler.AuthMiddleware(widgetManager.HandleMine))
+	http.HandleFunc("/admin/widgets/public", adminHandler.AuthMiddleware(widgetManager.HandlePublic))
+	http.HandleFunc("/admin/widgets/create", adminHandler.AuthMiddleware(widgetManager.HandleCreate))
+	http.HandleFunc("/admin/widgets/update", adminHandler.AuthMiddleware(widgetManager.HandleUpdate))
+	http.HandleFunc("/admin/widgets/delete", adminHandler.AuthMiddleware(widgetManager.HandleDelete))
+	http.HandleFunc("/admin/widgets/preview", adminHandler.AuthMiddleware(widgetManager.HandlePreview))
+	http.HandleFunc("/admin/widgets/versions", adminHandler.AuthMiddleware(widgetManager.HandleVersions))
+	http.HandleFunc("/admin/widgets/version", adminHandler.AuthMiddleware(widgetManager.HandleVersionContent))
+
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {
 		http.HandleFunc("/terminal/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
@@ -2392,7 +2407,7 @@ func main() {
 	// Handle index.html with template, serve other static files normally
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-			handleIndexPage(w, r, config)
+			handleIndexPage(w, r, config, widgetManager)
 			return
 		}
 		// Serve other static files
@@ -2864,13 +2879,15 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 }
 
 // handleIndexPage serves the index.html template with custom HTML injection
-func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
+func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm *WidgetManager) {
 	data := struct {
 		CustomHeadHTML template.HTML
 		CustomBodyHTML template.HTML
+		WidgetsHTML    template.HTML
 	}{
 		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
 		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
+		WidgetsHTML:    wm.AssembleHTML(config.Server.EnabledWidgets),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

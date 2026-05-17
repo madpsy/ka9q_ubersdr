@@ -2245,6 +2245,119 @@
                         <div class="spinner"></div>
                         <p>Loading UI configuration...</p>
                     </div>
+
+                    <!-- ── Widgets ──────────────────────────────────────────────────── -->
+                    <div style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
+                        <h3 style="margin: 0 0 6px 0; color: #283593; font-size: 16px;">🧩 Widgets</h3>
+                        <p style="margin: 0 0 16px 0; color: #555; font-size: 13px;">
+                            Widgets are small HTML panels fetched from the UberSDR collector and injected into
+                            <code>index.html</code> as sandboxed iframes after the custom body HTML.
+                            You can create your own widgets or enable community widgets. Maximum <strong>10 enabled</strong> at once.
+                        </p>
+
+                        <!-- Sub-tab bar -->
+                        <div style="display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #9fa8da;">
+                            <button id="widgetSubTabMyBtn"
+                                onclick="switchWidgetSubTab('my')"
+                                style="padding: 8px 18px; border: none; background: #3f51b5; color: #fff; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px; margin-right: 4px;">
+                                My Widgets
+                            </button>
+                            <button id="widgetSubTabBrowseBtn"
+                                onclick="switchWidgetSubTab('browse')"
+                                style="padding: 8px 18px; border: none; background: #e8eaf6; color: #3f51b5; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px;">
+                                Browse &amp; Enable
+                            </button>
+                        </div>
+
+                        <!-- My Widgets sub-tab -->
+                        <div id="widgetSubTabMy">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <span style="font-size: 13px; color: #555;">Widgets you have created on this instance.</span>
+                                <button class="btn" onclick="openNewWidgetEditor()" style="font-size: 13px; padding: 6px 14px;">+ New Widget</button>
+                            </div>
+                            <div id="myWidgetsList" style="min-height: 60px;">
+                                <div class="loading"><div class="spinner"></div><p>Loading…</p></div>
+                            </div>
+
+                            <!-- Inline editor (hidden by default) -->
+                            <div id="widgetEditorPanel" style="display: none; margin-top: 16px; padding: 16px; background: #fff; border-radius: 6px; border: 1px solid #c5cae9;">
+                                <h4 style="margin: 0 0 12px 0; color: #283593;" id="widgetEditorTitle">New Widget</h4>
+                                <input type="hidden" id="widgetEditorID" value="">
+                                <div class="config-field" style="margin-bottom: 12px;">
+                                    <label style="font-weight: 500; color: #555; display: block; margin-bottom: 4px;">Name</label>
+                                    <input type="text" id="widgetEditorName" placeholder="My Widget" maxlength="50"
+                                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                                </div>
+                                <div class="config-field" style="margin-bottom: 12px;">
+                                    <label style="font-weight: 500; color: #555; display: block; margin-bottom: 4px;">
+                                        Description
+                                        <span style="font-weight: 400; color: #888; font-size: 12px;">(optional, max 500 characters)</span>
+                                    </label>
+                                    <textarea id="widgetEditorDescription" rows="2" maxlength="500"
+                                        placeholder="A short description of what this widget does…"
+                                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: vertical;"></textarea>
+                                </div>
+                                <div class="config-field" style="margin-bottom: 12px;">
+                                    <label style="font-weight: 500; color: #555; display: block; margin-bottom: 4px;">
+                                        HTML Content
+                                        <span style="font-weight: 400; color: #888; font-size: 12px;">(max 512 KB — rendered in a sandboxed iframe)</span>
+                                    </label>
+                                    <textarea id="widgetEditorHTML" rows="12"
+                                        placeholder="&lt;!-- Your widget HTML here --&gt;"
+                                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #555;">
+                                        <input type="checkbox" id="widgetEditorPublic">
+                                        Make public (visible to community)
+                                    </label>
+                                </div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <button class="btn" onclick="saveWidget()" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
+                                    <button class="btn btn-secondary" onclick="previewWidget()" style="font-size: 13px; padding: 7px 16px;">👁 Preview</button>
+                                    <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px;">Cancel</button>
+                                </div>
+                                <!-- Preview pane -->
+                                <div id="widgetPreviewPane" style="display: none; margin-top: 14px;">
+                                    <div style="font-size: 12px; color: #888; margin-bottom: 6px;">Preview (sandboxed):</div>
+                                    <iframe id="widgetPreviewFrame" sandbox="allow-scripts"
+                                        style="width: 100%; min-height: 200px; border: 1px solid #c5cae9; border-radius: 4px; background: #fff;"></iframe>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Browse & Enable sub-tab -->
+                        <div id="widgetSubTabBrowse" style="display: none;">
+                            <!-- Enabled widgets list -->
+                            <div style="margin-bottom: 20px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <strong style="font-size: 14px; color: #283593;">Enabled Widgets</strong>
+                                    <span id="enabledWidgetsCount" style="font-size: 12px; color: #888;">0 / 10</span>
+                                </div>
+                                <div id="enabledWidgetsList" style="min-height: 40px; padding: 10px; background: #fff; border-radius: 6px; border: 1px solid #c5cae9;">
+                                    <em style="color: #aaa; font-size: 13px;">No widgets enabled yet.</em>
+                                </div>
+                            </div>
+
+                            <!-- Community browser -->
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                                    <strong style="font-size: 14px; color: #283593;">Community Widgets</strong>
+                                    <div style="display: flex; gap: 6px; align-items: center;">
+                                        <input type="text" id="widgetSearchInput" placeholder="Search…"
+                                            oninput="filterCommunityWidgets()"
+                                            style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 180px;">
+                                        <button class="btn btn-secondary" onclick="loadCommunityWidgets()" style="font-size: 13px; padding: 6px 12px;">↻ Refresh</button>
+                                    </div>
+                                </div>
+                                <div id="communityWidgetsList" style="min-height: 60px;">
+                                    <div class="loading"><div class="spinner"></div><p>Loading…</p></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ── End Widgets ───────────────────────────────────────────────── -->
+
                 </div>
 
                 <div class="button-group" id="sessionButtons" style="display: flex;">
@@ -8846,6 +8959,364 @@ function resetStationIdColor() {
         }
 
         // ── End UI Config Tab ─────────────────────────────────────────────────────
+
+        // ── Widgets ───────────────────────────────────────────────────────────────
+
+        let allCommunityWidgets = [];   // cache for client-side search filtering
+        let enabledWidgetIDs = [];      // current enabled list (ordered)
+
+        function switchWidgetSubTab(tab) {
+            const myBtn      = document.getElementById('widgetSubTabMyBtn');
+            const browseBtn  = document.getElementById('widgetSubTabBrowseBtn');
+            const myPane     = document.getElementById('widgetSubTabMy');
+            const browsePane = document.getElementById('widgetSubTabBrowse');
+
+            const activeStyle   = { background: '#3f51b5', color: '#fff' };
+            const inactiveStyle = { background: '#e8eaf6', color: '#3f51b5' };
+
+            if (tab === 'my') {
+                Object.assign(myBtn.style,     activeStyle);
+                Object.assign(browseBtn.style, inactiveStyle);
+                myPane.style.display     = 'block';
+                browsePane.style.display = 'none';
+                loadMyWidgets();
+            } else {
+                Object.assign(browseBtn.style, activeStyle);
+                Object.assign(myBtn.style,     inactiveStyle);
+                myPane.style.display     = 'none';
+                browsePane.style.display = 'block';
+                loadEnabledWidgets();
+                loadCommunityWidgets();
+            }
+        }
+
+        async function loadMyWidgets() {
+            const container = document.getElementById('myWidgetsList');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading\u2026</p></div>';
+            try {
+                const resp = await authenticatedFetch('/admin/widgets/mine');
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                const widgets = data.widgets || [];
+                if (widgets.length === 0) {
+                    container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets yet. Click \u201c+ New Widget\u201d to create one.</em>';
+                    return;
+                }
+                container.innerHTML = '';
+                widgets.forEach(w => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;gap:10px;';
+                    row.innerHTML = `
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
+                            ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
+                            <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}</div>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                            <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
+                            <button class="btn btn-danger"    onclick="deleteWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
+                        </div>`;
+                    container.appendChild(row);
+                });
+            } catch (e) {
+                container.innerHTML = `<div style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function loadEnabledWidgets() {
+            try {
+                const resp = await authenticatedFetch('/admin/widgets/enabled');
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                // data.enabled is an array of {widget_id, name, callsign, description, cached, fetched_at}
+                const entries = data.enabled || [];
+                enabledWidgetIDs = entries.map(e => e.widget_id);
+                renderEnabledWidgets(entries);
+            } catch (e) {
+                document.getElementById('enabledWidgetsList').innerHTML =
+                    `<div style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderEnabledWidgets(entries) {
+            const container = document.getElementById('enabledWidgetsList');
+            const countEl   = document.getElementById('enabledWidgetsCount');
+            countEl.textContent = `${entries.length} / 10`;
+            if (entries.length === 0) {
+                container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets enabled yet.</em>';
+                return;
+            }
+            container.innerHTML = '';
+            entries.forEach(w => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8f9fa;border-radius:5px;border:1px solid #e0e0e0;margin-bottom:6px;';
+                const cachedBadge = w.cached
+                    ? ''
+                    : '<span style="font-size:10px;color:#e65100;margin-left:4px;" title="Not yet cached — will be fetched on next refresh">\u26a0\ufe0f</span>';
+                row.innerHTML = `
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            <strong>${escapeHtml(w.name || '(unnamed)')}</strong>${cachedBadge}
+                            ${w.callsign ? `<span style="color:#3f51b5;font-size:12px;margin-left:6px;">by ${escapeHtml(w.callsign)}</span>` : ''}
+                        </div>
+                        ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
+                    </div>
+                    <button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:4px 10px;flex-shrink:0;">Remove</button>`;
+                container.appendChild(row);
+            });
+        }
+
+        async function loadCommunityWidgets() {
+            const container = document.getElementById('communityWidgetsList');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading\u2026</p></div>';
+            try {
+                const resp = await authenticatedFetch('/admin/widgets/public');
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                allCommunityWidgets = data.widgets || [];
+                renderCommunityWidgets(allCommunityWidgets);
+            } catch (e) {
+                container.innerHTML = `<div style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function filterCommunityWidgets() {
+            const q = (document.getElementById('widgetSearchInput').value || '').toLowerCase();
+            const filtered = q
+                ? allCommunityWidgets.filter(w =>
+                    (w.name || '').toLowerCase().includes(q) ||
+                    (w.description || '').toLowerCase().includes(q) ||
+                    (w.callsign || '').toLowerCase().includes(q) ||
+                    (w.widget_id || '').toLowerCase().includes(q))
+                : allCommunityWidgets;
+            renderCommunityWidgets(filtered);
+        }
+
+        function renderCommunityWidgets(widgets) {
+            const container = document.getElementById('communityWidgetsList');
+            if (widgets.length === 0) {
+                container.innerHTML = '<em style="color:#aaa;font-size:13px;">No community widgets found.</em>';
+                return;
+            }
+            container.innerHTML = '';
+            widgets.forEach(w => {
+                const isEnabled = enabledWidgetIDs.includes(w.widget_id);
+                const row = document.createElement('div');
+                row.id = `community-row-${w.widget_id}`;
+                row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;';
+                row.innerHTML = `
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
+                        ${w.description ? `<div style="font-size:12px;color:#555;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
+                        <div style="font-size:11px;color:#888;margin-top:3px;">
+                            by <strong style="color:#3f51b5;">${escapeHtml(w.callsign || w.instance_id || 'unknown')}</strong>
+                            \u00b7 v${w.version}
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-shrink:0;">
+                        <button class="btn btn-secondary" onclick="previewCommunityWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\uD83D\uDC41 Preview</button>
+                        ${isEnabled
+                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Remove</button>`
+                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                        }
+                    </div>`;
+                container.appendChild(row);
+            });
+        }
+
+        function openNewWidgetEditor() {
+            document.getElementById('widgetEditorID').value          = '';
+            document.getElementById('widgetEditorName').value        = '';
+            document.getElementById('widgetEditorDescription').value = '';
+            document.getElementById('widgetEditorHTML').value        = '';
+            document.getElementById('widgetEditorPublic').checked    = false;
+            document.getElementById('widgetEditorTitle').textContent = 'New Widget';
+            document.getElementById('widgetPreviewPane').style.display  = 'none';
+            document.getElementById('widgetEditorPanel').style.display  = 'block';
+            document.getElementById('widgetEditorName').focus();
+        }
+
+        async function openEditWidgetEditor(widgetID) {
+            try {
+                // Fetch version list
+                const vListResp = await authenticatedFetch(`/admin/widgets/versions?widget_id=${encodeURIComponent(widgetID)}`);
+                if (!vListResp) return;
+                if (!vListResp.ok) throw new Error(await vListResp.text());
+                const vListData = await vListResp.json();
+                const versions  = vListData.versions || [];
+                let html = '';
+                if (versions.length > 0) {
+                    const vResp = await authenticatedFetch(`/admin/widgets/version?widget_id=${encodeURIComponent(widgetID)}&version=${versions[0].version}`);
+                    if (vResp && vResp.ok) {
+                        const vData = await vResp.json();
+                        html = vData.html_content || '';
+                    }
+                }
+                // Fetch meta
+                const allResp = await authenticatedFetch('/admin/widgets/mine');
+                let name = widgetID, description = '', isPublic = false;
+                if (allResp && allResp.ok) {
+                    const allData = await allResp.json();
+                    const found = (allData.widgets || []).find(w => w.widget_id === widgetID);
+                    if (found) { name = found.name; description = found.description || ''; isPublic = found.is_public; }
+                }
+                document.getElementById('widgetEditorID').value          = widgetID;
+                document.getElementById('widgetEditorName').value        = name;
+                document.getElementById('widgetEditorDescription').value = description;
+                document.getElementById('widgetEditorHTML').value        = html;
+                document.getElementById('widgetEditorPublic').checked    = isPublic;
+                document.getElementById('widgetEditorTitle').textContent = `Edit: ${name}`;
+                document.getElementById('widgetPreviewPane').style.display  = 'none';
+                document.getElementById('widgetEditorPanel').style.display  = 'block';
+                document.getElementById('widgetEditorName').focus();
+            } catch (e) {
+                showAlert('Error loading widget: ' + e.message, 'error');
+            }
+        }
+
+        function closeWidgetEditor() {
+            document.getElementById('widgetEditorPanel').style.display = 'none';
+            document.getElementById('widgetPreviewPane').style.display = 'none';
+        }
+
+        async function saveWidget() {
+            const id   = document.getElementById('widgetEditorID').value.trim();
+            const name = document.getElementById('widgetEditorName').value.trim();
+            const desc = document.getElementById('widgetEditorDescription').value.trim();
+            const html = document.getElementById('widgetEditorHTML').value;
+            const pub  = document.getElementById('widgetEditorPublic').checked;
+
+            if (!name)        { showAlert('Widget name is required.', 'error'); return; }
+            if (!html.trim()) { showAlert('Widget HTML content is required.', 'error'); return; }
+
+            try {
+                const endpoint = id ? '/admin/widgets/update' : '/admin/widgets/create';
+                const body     = id
+                    ? { widget_id: id, name, description: desc, html_content: html, is_public: pub }
+                    : { name, description: desc, html_content: html, is_public: pub };
+                const resp = await authenticatedFetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                showAlert(id ? 'Widget updated.' : 'Widget created.', 'success');
+                closeWidgetEditor();
+                loadMyWidgets();
+            } catch (e) {
+                showAlert('Error saving widget: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteWidget(widgetID, name) {
+            if (!confirm(`Delete widget "${name}"? This cannot be undone.`)) return;
+            try {
+                const resp = await authenticatedFetch('/admin/widgets/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ widget_id: widgetID })
+                });
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                showAlert('Widget deleted.', 'success');
+                if (enabledWidgetIDs.includes(widgetID)) {
+                    await disableWidget(widgetID, true);
+                }
+                loadMyWidgets();
+            } catch (e) {
+                showAlert('Error deleting widget: ' + e.message, 'error');
+            }
+        }
+
+        async function enableWidget(widgetID) {
+            if (enabledWidgetIDs.length >= 10) {
+                showAlert('Maximum 10 widgets can be enabled at once.', 'error');
+                return;
+            }
+            try {
+                const newList = [...enabledWidgetIDs, widgetID];
+                const resp = await authenticatedFetch('/admin/widgets/enabled', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newList })
+                });
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                showAlert('Widget enabled.', 'success');
+                await loadEnabledWidgets();
+                renderCommunityWidgets(allCommunityWidgets);
+            } catch (e) {
+                showAlert('Error enabling widget: ' + e.message, 'error');
+            }
+        }
+
+        async function disableWidget(widgetID, silent) {
+            try {
+                const newList = enabledWidgetIDs.filter(id => id !== widgetID);
+                const resp = await authenticatedFetch('/admin/widgets/enabled', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newList })
+                });
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                if (!silent) showAlert('Widget removed.', 'success');
+                await loadEnabledWidgets();
+                renderCommunityWidgets(allCommunityWidgets);
+            } catch (e) {
+                if (!silent) showAlert('Error removing widget: ' + e.message, 'error');
+            }
+        }
+
+        function previewWidget() {
+            const html  = document.getElementById('widgetEditorHTML').value;
+            const frame = document.getElementById('widgetPreviewFrame');
+            const pane  = document.getElementById('widgetPreviewPane');
+            frame.srcdoc = html;
+            pane.style.display = 'block';
+        }
+
+        async function previewCommunityWidget(widgetID) {
+            try {
+                const resp = await authenticatedFetch(`/admin/widgets/preview?widget_id=${encodeURIComponent(widgetID)}`);
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                const html = data.html_content || '';
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+                const safeHtml = html.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+                overlay.innerHTML = `
+                    <div style="background:#fff;border-radius:8px;padding:20px;max-width:700px;width:95%;max-height:85vh;display:flex;flex-direction:column;gap:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <strong style="color:#283593;">Widget Preview</strong>
+                            <button onclick="this.closest('[style*=fixed]').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#555;">\u2715</button>
+                        </div>
+                        <iframe sandbox="allow-scripts" style="flex:1;min-height:300px;border:1px solid #c5cae9;border-radius:4px;"></iframe>
+                    </div>`;
+                document.body.appendChild(overlay);
+                // Set srcdoc via JS to avoid attribute escaping issues
+                overlay.querySelector('iframe').srcdoc = html;
+            } catch (e) {
+                showAlert('Error loading preview: ' + e.message, 'error');
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // ── End Widgets ───────────────────────────────────────────────────────────
 
         async function loadDecoderConfig() {
             try {

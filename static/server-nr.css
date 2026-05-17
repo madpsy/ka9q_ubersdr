@@ -326,6 +326,15 @@ select.snr-select:focus {
     transform: none;
 }
 
+.snr-btn-enable {
+    background: var(--success);
+    color: #fff;
+}
+
+.snr-btn-enable:hover:not(:disabled) {
+    background: #2ecc71;
+}
+
 .snr-btn-disable {
     background: var(--danger);
     color: #fff;

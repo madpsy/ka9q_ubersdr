@@ -41,7 +41,7 @@ const els = {
     filterSelect:     () => document.getElementById('snr-filter-select'),
     filterDesc:       () => document.getElementById('snr-filter-desc'),
     paramsContainer:  () => document.getElementById('snr-params-container'),
-    btnDisable:       () => document.getElementById('snr-btn-disable'),
+    btnToggle:        () => document.getElementById('snr-btn-toggle'),
     btnRefresh:       () => document.getElementById('snr-btn-refresh'),
     message:          () => document.getElementById('snr-message'),
     unavailable:      () => document.getElementById('snr-unavailable'),
@@ -387,10 +387,20 @@ function disableDSP() {
 }
 
 function updateButtonStates() {
-    const btnDis = els.btnDisable();
+    const btn = els.btnToggle();
     const sel = els.filterSelect();
 
-    if (btnDis) btnDis.disabled = !state.connected || !state.enabled;
+    if (btn) {
+        if (state.enabled) {
+            btn.textContent = 'Disable';
+            btn.className = 'snr-btn snr-btn-disable';
+            btn.disabled = !state.connected;
+        } else {
+            btn.textContent = 'Enable';
+            btn.className = 'snr-btn snr-btn-enable';
+            btn.disabled = !state.connected || !state.available;
+        }
+    }
     // Filter selector: always unlocked — user can change filter while active
     if (sel) sel.disabled = false;
 }
@@ -522,11 +532,13 @@ function refreshFilters() {
 
 function init() {
     // Wire up buttons
-    const btnDis = els.btnDisable();
+    const btnToggle = els.btnToggle();
     const btnRef = els.btnRefresh();
     const sel = els.filterSelect();
 
-    if (btnDis) btnDis.addEventListener('click', disableDSP);
+    if (btnToggle) btnToggle.addEventListener('click', () => {
+        if (state.enabled) disableDSP(); else enableDSP();
+    });
     if (btnRef) btnRef.addEventListener('click', refreshFilters);
     if (sel) sel.addEventListener('change', onFilterSelectChange);
 

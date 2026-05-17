@@ -41,7 +41,6 @@ const els = {
     filterSelect:     () => document.getElementById('snr-filter-select'),
     filterDesc:       () => document.getElementById('snr-filter-desc'),
     paramsContainer:  () => document.getElementById('snr-params-container'),
-    btnEnable:        () => document.getElementById('snr-btn-enable'),
     btnDisable:       () => document.getElementById('snr-btn-disable'),
     btnRefresh:       () => document.getElementById('snr-btn-refresh'),
     message:          () => document.getElementById('snr-message'),
@@ -140,6 +139,11 @@ function onFilterSelectChange() {
     }
     desc.textContent = filter.description || '';
     renderParams(filter.params || []);
+
+    // If already enabled (or available and connected), auto-apply the new filter
+    if (state.connected && state.available) {
+        debounceEnableDSP();
+    }
 }
 
 // ── Dynamic parameter rendering ───────────────────────────────────────────────
@@ -252,7 +256,7 @@ function renderBoolParam(row, param) {
 
     cb.addEventListener('change', () => {
         state.paramValues[param.name] = cb.checked ? 'true' : 'false';
-        if (state.enabled) sendCurrentParams();
+        if (state.enabled) debounceSendParams(param.name);
     });
 
     const text = document.createElement('span');
@@ -293,7 +297,7 @@ function renderSelectOrTextParam(row, param) {
 
     input.addEventListener('change', () => {
         state.paramValues[param.name] = input.value;
-        if (state.enabled) sendCurrentParams();
+        if (state.enabled) debounceSendParams(param.name);
     });
 
     row.appendChild(input);
@@ -338,7 +342,7 @@ function debounceSendParams(paramName) {
     clearTimeout(state.paramTimers[paramName]);
     state.paramTimers[paramName] = setTimeout(() => {
         sendCurrentParams();
-    }, 120); // 120 ms debounce — fast enough for sliders
+    }, 100); // 100 ms debounce
 }
 
 function sendCurrentParams() {
@@ -347,6 +351,14 @@ function sendCurrentParams() {
 }
 
 // ── Enable / Disable ──────────────────────────────────────────────────────────
+
+/** Debounce timer for auto-enable on filter change */
+let _enableTimer = null;
+
+function debounceEnableDSP() {
+    clearTimeout(_enableTimer);
+    _enableTimer = setTimeout(enableDSP, 100);
+}
 
 function enableDSP() {
     const sel = els.filterSelect();
@@ -375,17 +387,9 @@ function disableDSP() {
 }
 
 function updateButtonStates() {
-    const btnEn = els.btnEnable();
     const btnDis = els.btnDisable();
     const sel = els.filterSelect();
 
-    // Enable button: always active when connected + available (works as both
-    // "Enable" and "Apply new filter" — matches desktop client behaviour).
-    if (btnEn) {
-        btnEn.disabled = !state.connected || !state.available;
-        // Update label to reflect current action
-        btnEn.textContent = state.enabled ? 'Apply' : 'Enable';
-    }
     if (btnDis) btnDis.disabled = !state.connected || !state.enabled;
     // Filter selector: always unlocked — user can change filter while active
     if (sel) sel.disabled = false;
@@ -450,7 +454,7 @@ function handleFiltersResponse(info) {
     if (!hasParams) {
         showMessage(`${state.filters.length} filter(s) available. Loading parameters…`, 'info');
     } else {
-        showMessage(`${state.filters.length} filter(s) available. Select a filter and click Enable.`, 'info');
+        showMessage(`${state.filters.length} filter(s) available. Select a filter to enable it.`, 'info');
     }
 }
 
@@ -518,12 +522,10 @@ function refreshFilters() {
 
 function init() {
     // Wire up buttons
-    const btnEn = els.btnEnable();
     const btnDis = els.btnDisable();
     const btnRef = els.btnRefresh();
     const sel = els.filterSelect();
 
-    if (btnEn) btnEn.addEventListener('click', enableDSP);
     if (btnDis) btnDis.addEventListener('click', disableDSP);
     if (btnRef) btnRef.addEventListener('click', refreshFilters);
     if (sel) sel.addEventListener('change', onFilterSelectChange);

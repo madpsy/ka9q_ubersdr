@@ -326,15 +326,6 @@ select.snr-select:focus {
     transform: none;
 }
 
-.snr-btn-enable {
-    background: var(--success);
-    color: #fff;
-}
-
-.snr-btn-enable:hover:not(:disabled) {
-    background: #2ecc71;
-}
-
 .snr-btn-disable {
     background: var(--danger);
     color: #fff;
@@ -452,16 +443,6 @@ select.snr-select:focus {
 
 @keyframes snr-spin {
     to { transform: rotate(360deg); }
-}
-
-/* ── Footer ──────────────────────────────────────────────────────────────────── */
-
-.snr-footer {
-    padding: 8px 16px;
-    border-top: 1px solid var(--border);
-    font-size: 10px;
-    color: var(--text-muted);
-    text-align: center;
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────────── */

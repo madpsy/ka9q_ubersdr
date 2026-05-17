@@ -9197,7 +9197,7 @@ function resetStationIdColor() {
                         <div style="font-weight:600;font-size:13px;color:#283593;margin-bottom:4px;line-height:1.3;">
                             ${isEnabled ? '<span title="Currently enabled" style="font-size:12px;margin-right:3px;">⭐</span>' : ''}${escapeHtml(w.name)}
                         </div>
-                        ${w.description ? `<div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(w.description)}</div>` : ''}
+                        ${w.description ? `<div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.4;">${escapeHtml(w.description)}</div>` : ''}
                         <div style="font-size:10px;color:#888;line-height:1.4;">
                             by <strong style="color:#3f51b5;">${escapeHtml(w.callsign || w.instance_id || 'unknown')}</strong>
                             &middot; v${w.version}

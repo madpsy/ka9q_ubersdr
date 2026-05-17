@@ -47,8 +47,13 @@ type widgetCacheEntry struct {
 	Name        string
 	Callsign    string
 	Description string
+	Version     int
 	FetchedAt   time.Time
 }
+
+// errWidgetGone is returned by fetchWidgetVersion when the collector responds
+// with 404 (widget deleted or made private by its owner).
+var errWidgetGone = fmt.Errorf("widget no longer available")
 
 // WidgetManager manages the in-memory widget cache and proxies requests to the
 // collector widget API on behalf of the authenticated admin.
@@ -112,7 +117,46 @@ func (wm *WidgetManager) instanceSecret() string {
 	return wm.config.InstanceReporting.InstanceUUID
 }
 
-// fetchWidgetHTML fetches a single widget's HTML from the collector.
+// fetchWidgetVersion fetches the latest version number for a widget from the
+// collector's versions endpoint (no HTML content — lightweight check).
+// Returns errWidgetGone if the collector responds with 404 (deleted or private).
+// Returns a regular error for transient failures (network, 5xx) — caller should
+// keep the stale cache in that case.
+func (wm *WidgetManager) fetchWidgetVersion(widgetID string) (int, error) {
+	url := fmt.Sprintf("%s/api/widgets/%s/versions", wm.collectorBaseURL(), widgetID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	if secret := wm.instanceSecret(); secret != "" {
+		req.Header.Set("X-Instance-Secret", secret)
+	}
+	resp, err := wm.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return 0, errWidgetGone
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("collector returned %d for widget %s versions", resp.StatusCode, widgetID)
+	}
+	// Collector returns a JSON array of WidgetVersionMeta ordered by version DESC.
+	// The first entry is the latest version.
+	var versions []struct {
+		Version int `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
+		return 0, fmt.Errorf("failed to decode versions for widget %s: %w", widgetID, err)
+	}
+	if len(versions) == 0 {
+		return 0, errWidgetGone
+	}
+	return versions[0].Version, nil
+}
+
+// fetchWidgetHTML fetches a single widget's full HTML content from the collector.
 // Always sends the secret so private (own) widgets are accessible.
 func (wm *WidgetManager) fetchWidgetHTML(widgetID string) (*WidgetMeta, error) {
 	url := fmt.Sprintf("%s/api/widgets/%s", wm.collectorBaseURL(), widgetID)
@@ -138,16 +182,53 @@ func (wm *WidgetManager) fetchWidgetHTML(widgetID string) (*WidgetMeta, error) {
 	return &meta, nil
 }
 
-// refreshAll re-fetches all currently enabled widgets and updates the cache.
+// refreshAll performs a two-phase refresh of all currently enabled widgets:
+//  1. Cheap version check via /api/widgets/:id/versions (no HTML download).
+//     - 404 → widget gone (deleted or made private): auto-evict from enabled list + cache.
+//     - Network/5xx error → transient failure: keep stale cache, do not evict.
+//     - Version unchanged → skip HTML re-fetch.
+//  2. Full HTML fetch only when the version has changed.
 func (wm *WidgetManager) refreshAll() {
-	ids := wm.config.Server.EnabledWidgets
+	// Snapshot the enabled list under read lock to avoid holding the lock
+	// during slow network calls.
+	wm.mu.RLock()
+	ids := make([]string, len(wm.config.Server.EnabledWidgets))
+	copy(ids, wm.config.Server.EnabledWidgets)
+	wm.mu.RUnlock()
+
 	if len(ids) == 0 {
 		return
 	}
+
+	var toEvict []string
+
 	for _, id := range ids {
+		latestVersion, err := wm.fetchWidgetVersion(id)
+		if err == errWidgetGone {
+			log.Printf("[WidgetManager] Widget %s is no longer available — removing from enabled list", id)
+			toEvict = append(toEvict, id)
+			continue
+		}
+		if err != nil {
+			// Transient error (network, 5xx) — keep stale cache.
+			log.Printf("[WidgetManager] Transient error checking widget %s version: %v (keeping stale cache)", id, err)
+			continue
+		}
+
+		// Check cached version.
+		wm.mu.RLock()
+		cached, hasCached := wm.entries[id]
+		wm.mu.RUnlock()
+
+		if hasCached && cached.Version == latestVersion {
+			// No change — skip HTML fetch.
+			continue
+		}
+
+		// Version changed (or not yet cached) — fetch full HTML.
 		meta, err := wm.fetchWidgetHTML(id)
 		if err != nil {
-			log.Printf("[WidgetManager] Failed to fetch widget %s: %v", id, err)
+			log.Printf("[WidgetManager] Failed to fetch HTML for widget %s (v%d): %v", id, latestVersion, err)
 			continue
 		}
 		wm.mu.Lock()
@@ -156,10 +237,36 @@ func (wm *WidgetManager) refreshAll() {
 			Name:        meta.Name,
 			Callsign:    meta.Callsign,
 			Description: meta.Description,
+			Version:     meta.Version,
 			FetchedAt:   time.Now(),
 		}
 		wm.mu.Unlock()
-		log.Printf("[WidgetManager] Cached widget %s (%q)", id, meta.Name)
+		if hasCached {
+			log.Printf("[WidgetManager] Widget %s (%q) updated v%d → v%d", id, meta.Name, cached.Version, meta.Version)
+		} else {
+			log.Printf("[WidgetManager] Widget %s (%q) cached at v%d", id, meta.Name, meta.Version)
+		}
+	}
+
+	// Evict widgets that are no longer available.
+	if len(toEvict) > 0 {
+		evictSet := make(map[string]bool, len(toEvict))
+		for _, id := range toEvict {
+			evictSet[id] = true
+			wm.RemoveFromCache(id)
+		}
+		wm.mu.Lock()
+		newEnabled := make([]string, 0, len(wm.config.Server.EnabledWidgets))
+		for _, id := range wm.config.Server.EnabledWidgets {
+			if !evictSet[id] {
+				newEnabled = append(newEnabled, id)
+			}
+		}
+		wm.config.Server.EnabledWidgets = newEnabled
+		wm.mu.Unlock()
+		if err := wm.saveEnabledWidgets(wm.config.Server.EnabledWidgets); err != nil {
+			log.Printf("[WidgetManager] Failed to save enabled_widgets after eviction: %v", err)
+		}
 	}
 }
 
@@ -191,10 +298,11 @@ func (wm *WidgetManager) AddToCache(widgetID string) error {
 		Name:        meta.Name,
 		Callsign:    meta.Callsign,
 		Description: meta.Description,
+		Version:     meta.Version,
 		FetchedAt:   time.Now(),
 	}
 	wm.mu.Unlock()
-	log.Printf("[WidgetManager] Added widget %s (%q) to cache", widgetID, meta.Name)
+	log.Printf("[WidgetManager] Added widget %s (%q) v%d to cache", widgetID, meta.Name, meta.Version)
 	return nil
 }
 

@@ -2313,8 +2313,9 @@
                                     </label>
                                 </div>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                    <button class="btn" onclick="saveWidget()" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
-                                    <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px;">Cancel</button>
+                                    <button class="btn" onclick="saveWidget(false)" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
+                                    <button class="btn" onclick="saveWidget(true)" style="font-size: 13px; padding: 7px 16px; background:#5a67d8;">💾 Save &amp; Close</button>
+                                    <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px; margin-left:0;">Cancel</button>
                                 </div>
                             </div>
                         </div>
@@ -2342,6 +2343,10 @@
                                             style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 180px;">
                                         <button class="btn btn-secondary" onclick="loadCommunityWidgets()" style="font-size: 13px; padding: 6px 12px;">↻ Refresh</button>
                                     </div>
+                                </div>
+                                <div style="margin-bottom: 10px; padding: 9px 12px; background: #fff8e1; border: 1px solid #f9a825; border-radius: 6px; font-size: 12px; color: #6d4c00; display: flex; align-items: flex-start; gap: 8px;">
+                                    <span style="font-size: 15px; flex-shrink: 0;">⚠️</span>
+                                    <span>Community widgets are HTML/JavaScript code written by other UberSDR users whom you may not know. Only enable widgets you trust.</span>
                                 </div>
                                 <div id="communityWidgetsList" style="min-height: 60px;">
                                     <div class="loading"><div class="spinner"></div><p>Loading…</p></div>
@@ -8974,7 +8979,7 @@ function resetStationIdColor() {
                 Object.assign(browseBtn.style, inactiveStyle);
                 myPane.style.display     = 'block';
                 browsePane.style.display = 'none';
-                // Load enabled list first so Enable/Remove buttons render correctly
+                // Load enabled list first so Enable/Disable buttons render correctly
                 await loadEnabledWidgets();
                 loadMyWidgets();
             } else {
@@ -9018,7 +9023,7 @@ function resetStationIdColor() {
                         </div>
                         <div style="display:flex;gap:6px;flex-shrink:0;">
                             ${isEnabled
-                                ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Remove</button>`
+                                ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Disable</button>`
                                 : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                             }
                             <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
@@ -9070,7 +9075,7 @@ function resetStationIdColor() {
                         </div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                     </div>
-                    <button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:4px 10px;flex-shrink:0;">Remove</button>`;
+                    <button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:4px 10px;flex-shrink:0;">Disable</button>`;
                 container.appendChild(row);
             });
         }
@@ -9148,7 +9153,7 @@ function resetStationIdColor() {
                     </div>
                     <div style="display:grid;grid-template-columns:1fr;gap:5px;width:100%;">
                         ${isEnabled
-                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Remove</button>`
+                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Disable</button>`
                             : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
                         <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="Clone to My Widgets and open editor">Clone</button>
@@ -9264,7 +9269,7 @@ function resetStationIdColor() {
             document.getElementById('widgetEditorPanel').style.display = 'none';
         }
 
-        async function saveWidget() {
+        async function saveWidget(closeAfter = true) {
             const id   = document.getElementById('widgetEditorID').value.trim();
             const name = document.getElementById('widgetEditorName').value.trim();
             const desc = document.getElementById('widgetEditorDescription').value.trim();
@@ -9286,8 +9291,19 @@ function resetStationIdColor() {
                 });
                 if (!resp) return;
                 if (!resp.ok) throw new Error(await resp.text());
+                // If this was a new widget, capture the returned widget_id so subsequent
+                // saves update rather than create a duplicate
+                if (!id) {
+                    try {
+                        const result = await resp.json();
+                        if (result.widget_id) {
+                            document.getElementById('widgetEditorID').value = result.widget_id;
+                            document.getElementById('widgetEditorTitle').textContent = `Edit: ${name}`;
+                        }
+                    } catch (_) {}
+                }
                 showAlert(id ? 'Widget updated.' : 'Widget created.', 'success');
-                closeWidgetEditor();
+                if (closeAfter) closeWidgetEditor();
                 loadMyWidgets();
             } catch (e) {
                 showAlert('Error saving widget: ' + e.message, 'error');
@@ -9331,7 +9347,7 @@ function resetStationIdColor() {
                 showAlert('Widget enabled.', 'success');
                 await loadEnabledWidgets();
                 renderCommunityWidgets(allCommunityWidgets);
-                // Refresh My Widgets list if that pane is visible (to update Enable/Remove buttons)
+                // Refresh My Widgets list if that pane is visible (to update Enable/Disable buttons)
                 if (document.getElementById('widgetSubTabMy').style.display !== 'none') {
                     loadMyWidgets();
                 }
@@ -9353,7 +9369,7 @@ function resetStationIdColor() {
                 if (!silent) showAlert('Widget removed.', 'success');
                 await loadEnabledWidgets();
                 renderCommunityWidgets(allCommunityWidgets);
-                // Refresh My Widgets list if that pane is visible (to update Enable/Remove buttons)
+                // Refresh My Widgets list if that pane is visible (to update Enable/Disable buttons)
                 if (document.getElementById('widgetSubTabMy').style.display !== 'none') {
                     loadMyWidgets();
                 }

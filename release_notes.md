@@ -9,7 +9,7 @@
 - Added **Code Editor** in Admin -> Server, for custom Head and Body HTML, to make it easier to view/edit code
 - Added **Globe View** on the Digital Spots map with toggle and URL parameters
 - Added **UI Widgets** which are HTML blobs injected into the main page. This allows adding custom widgets or modifying the page in general. Users can share theirs for others to use on their instance (UI tab in Admin)
-- Added **Server Side DSP** to provide more advanced noise reduction before audio is sent to the client. Runs as a new container. Each type can be enabled/disabled (some use more CPU than others). Extensions feed from audio before these DSP filters so are not affected.
+- Added **Server Side DSP** to provide more advanced noise reduction before audio is sent to the client. Runs as a new container. Each type can be enabled/disabled (some use more CPU than others). Extensions feed from audio before these DSP filters so are not affected
 
 ### Bug Fixes
 - Time (X Axis) on noise floor history page displayed relative rather than absolute times

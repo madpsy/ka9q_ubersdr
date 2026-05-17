@@ -414,6 +414,11 @@ function handleFiltersResponse(info) {
     }
 
     state.available = true;
+    // If the main page sent us filters, we must be connected (it only does so when
+    // DSP is enabled and the WS is open, or from instanceDescription fast-path).
+    // Mark connected so the Enable button is enabled.
+    state.connected = true;
+
     state.filters = info.filters || [];
 
     if (state.filters.length === 0) {
@@ -421,9 +426,20 @@ function handleFiltersResponse(info) {
         return;
     }
 
+    // Update status badge from "LOADING…" to "DISABLED"
+    setStatus('DISABLED', 'disabled');
+
     populateFilterSelect(state.filters);
     updateButtonStates();
-    showMessage(`${state.filters.length} filter(s) available. Select a filter and click Enable.`, 'info');
+
+    // Only show the hint message if we don't yet have full param details
+    // (i.e. this is the fast-path response with empty params arrays).
+    const hasParams = state.filters.some(f => f.params && f.params.length > 0);
+    if (!hasParams) {
+        showMessage(`${state.filters.length} filter(s) available. Loading parameters…`, 'info');
+    } else {
+        showMessage(`${state.filters.length} filter(s) available. Select a filter and click Enable.`, 'info');
+    }
 }
 
 function handleDSPStatus(info) {

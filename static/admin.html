@@ -9146,11 +9146,12 @@ function resetStationIdColor() {
                             ${isMine ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                         </div>
                     </div>
-                    <div>
+                    <div style="display:flex;gap:6px;">
                         ${isEnabled
-                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;">Remove</button>`
-                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;flex:1;">Remove</button>`
+                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;flex:1;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
+                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;flex:1;" title="Clone to My Widgets and open editor">📋 Clone</button>
                     </div>`;
                 grid.appendChild(card);
             });
@@ -9173,6 +9174,42 @@ function resetStationIdColor() {
             communityPage = Math.max(0, Math.min(communityPage + delta, totalPages - 1));
             _renderCommunityPage();
             document.getElementById('communityWidgetsList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        async function cloneCommunityWidget(widgetID, widgetName, widgetDescription) {
+            try {
+                // Fetch version list to get the latest version number
+                const vListResp = await authenticatedFetch(`/admin/widgets/versions?widget_id=${encodeURIComponent(widgetID)}`);
+                if (!vListResp) return;
+                if (!vListResp.ok) throw new Error(await vListResp.text());
+                const vListData = await vListResp.json();
+                const versions  = vListData.versions || [];
+                if (versions.length === 0) {
+                    showAlert('No version data available for this widget.', 'error');
+                    return;
+                }
+                // Fetch the HTML content of the latest version
+                const vResp = await authenticatedFetch(`/admin/widgets/version?widget_id=${encodeURIComponent(widgetID)}&version=${versions[0].version}`);
+                if (!vResp || !vResp.ok) throw new Error('Failed to fetch widget content');
+                const vData = await vResp.json();
+                const html  = vData.html_content || '';
+
+                // Pre-fill the editor with cloned content and open it
+                const cloneName = widgetName + ' (Clone)';
+                document.getElementById('widgetEditorID').value          = '';
+                document.getElementById('widgetEditorName').value        = cloneName;
+                document.getElementById('widgetEditorDescription').value = widgetDescription || '';
+                document.getElementById('widgetEditorHTML').value        = html;
+                document.getElementById('widgetEditorPublic').checked    = false;
+                document.getElementById('widgetEditorTitle').textContent = `New Widget (cloned from ${widgetName})`;
+                document.getElementById('widgetEditorPanel').style.display = 'block';
+
+                // Switch to My Widgets sub-tab so the editor is visible
+                switchWidgetSubTab('my');
+                document.getElementById('widgetEditorPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (e) {
+                showAlert('Error cloning widget: ' + e.message, 'error');
+            }
         }
 
         function openNewWidgetEditor() {

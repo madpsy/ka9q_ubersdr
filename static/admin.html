@@ -9035,7 +9035,7 @@ function resetStationIdColor() {
                         <div style="flex:1;min-width:0;">
                             <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
                             ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
-                            <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${isEnabled ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}</div>
+                            <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}</div>
                         </div>
                         <div style="display:flex;gap:6px;flex-shrink:0;">
                             ${isEnabled
@@ -9087,6 +9087,7 @@ function resetStationIdColor() {
                     <div style="flex:1;min-width:0;">
                         <div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                             <strong>${escapeHtml(w.name || '(unnamed)')}</strong>${cachedBadge}
+                            ${myWidgetIDs.has(w.widget_id) ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                             ${w.callsign ? `<span style="color:#3f51b5;font-size:12px;margin-left:6px;">by ${escapeHtml(w.callsign)}</span>` : ''}
                         </div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}

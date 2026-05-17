@@ -60,14 +60,14 @@ function setStatus(text, cls) {
     el.className = cls; // 'disabled' | 'enabled' | 'pending' | 'unavail'
 }
 
-function showMessage(text, type = 'info', persistent = false) {
+function showMessage(text, type = 'info', persistent = true) {
     const el = els.message();
     if (!el) return;
     el.textContent = text;
     el.className = type; // 'info' | 'success' | 'error' | 'warning'
-    // Auto-clear after 6 s for non-error, non-persistent messages
+    // Only auto-clear when explicitly requested (persistent=false)
     clearTimeout(el._timer);
-    if (!persistent && type !== 'error') {
+    if (!persistent) {
         el._timer = setTimeout(() => {
             el.className = '';
             el.textContent = '';
@@ -436,9 +436,9 @@ function handleFiltersResponse(info) {
     // (i.e. this is the fast-path response with empty params arrays).
     const hasParams = state.filters.some(f => f.params && f.params.length > 0);
     if (!hasParams) {
-        showMessage(`${state.filters.length} filter(s) available. Loading parameters…`, 'info', true);
+        showMessage(`${state.filters.length} filter(s) available. Loading parameters…`, 'info');
     } else {
-        showMessage(`${state.filters.length} filter(s) available. Select a filter and click Enable.`, 'info', true);
+        showMessage(`${state.filters.length} filter(s) available. Select a filter and click Enable.`, 'info');
     }
 }
 

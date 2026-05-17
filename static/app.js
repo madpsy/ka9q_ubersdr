@@ -2421,6 +2421,20 @@ async function fetchSiteDescription() {
                     }
                 }
             }
+
+            // Show the Server NR button only when the server has DSP enabled.
+            // data.dsp mirrors the InstanceDescription.DSP struct from client.go:
+            //   { enabled: bool, filters: ["nr4", ...] }
+            const serverNRWrapper = document.getElementById('server-nr-btn-wrapper');
+            if (serverNRWrapper) {
+                if (data.dsp && data.dsp.enabled && Array.isArray(data.dsp.filters) && data.dsp.filters.length > 0) {
+                    serverNRWrapper.style.display = '';
+                    console.log('[ServerNR] DSP available — filters:', data.dsp.filters.join(', '));
+                } else {
+                    serverNRWrapper.style.display = 'none';
+                    console.log('[ServerNR] DSP not available on this server');
+                }
+            }
         } else {
             console.error('Failed to fetch site description:', response.status);
         }
@@ -3062,10 +3076,170 @@ function handleMessage(msg) {
             // Squelch state update from server (informational only)
             // The server sends this when squelch opens/closes
             break;
+
+        // ── Server-side DSP noise reduction ──────────────────────────────────
+        case 'dsp_filters':
+            // Forward filter list to the Server NR popout (if open)
+            serverNRForwardToPopout(msg);
+            break;
+        case 'dsp_status':
+            // Forward DSP enable/disable confirmation to the popout
+            serverNRForwardToPopout(msg);
+            break;
+        case 'dsp_error':
+            // Forward DSP error to the popout
+            serverNRForwardToPopout(msg);
+            log('DSP error: ' + (msg.info && msg.info.message ? msg.info.message : JSON.stringify(msg.info)), 'error');
+            break;
+        case 'dsp_params_sent':
+            // Param update acknowledged — no UI action needed
+            break;
+
         default:
             console.log('Unknown message type:', msg.type);
     }
 }
+
+// ── Server NR popout management ───────────────────────────────────────────────
+
+/** Reference to the open Server NR popout window (null when closed). */
+let _serverNRPopout = null;
+
+/**
+ * Open (or focus) the Server-Side Noise Reduction popout window.
+ * Called by the "Server NR" button in index.html.
+ */
+function openServerNR() {
+    if (_serverNRPopout && !_serverNRPopout.closed) {
+        _serverNRPopout.focus();
+        return;
+    }
+
+    const w = 380;
+    const h = 560;
+    const left = Math.round(window.screenX + (window.outerWidth  - w) / 2);
+    const top  = Math.round(window.screenY + (window.outerHeight - h) / 2);
+
+    _serverNRPopout = window.open(
+        'server-nr.html',
+        'ubersdr_server_nr',
+        `width=${w},height=${h},left=${left},top=${top},` +
+        'resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no'
+    );
+
+    if (!_serverNRPopout) {
+        showNotification('Popout blocked — please allow popups for this site.', 'error');
+        return;
+    }
+
+    // Notify the popout of the current connection state once it has loaded
+    _serverNRPopout.addEventListener('load', () => {
+        serverNRSendConnectionState();
+    });
+}
+
+/**
+ * Forward a server DSP message to the popout window.
+ * @param {object} msg — the raw server message object
+ */
+function serverNRForwardToPopout(msg) {
+    if (!_serverNRPopout || _serverNRPopout.closed) return;
+    try {
+        _serverNRPopout.postMessage(msg, window.location.origin);
+    } catch (e) {
+        console.warn('serverNRForwardToPopout: postMessage failed', e);
+    }
+}
+
+/**
+ * Send the current WebSocket connection state to the popout.
+ */
+function serverNRSendConnectionState() {
+    if (!_serverNRPopout || _serverNRPopout.closed) return;
+    const connected = wsManager && wsManager.isConnected();
+    try {
+        _serverNRPopout.postMessage(
+            { type: 'snr_connection_state', connected: !!connected },
+            window.location.origin
+        );
+    } catch (e) {
+        console.warn('serverNRSendConnectionState: postMessage failed', e);
+    }
+}
+
+/**
+ * Handle postMessage requests from the Server NR popout.
+ * The popout cannot send WebSocket messages directly — it asks the main page
+ * to relay them on its behalf.
+ */
+window.addEventListener('message', (event) => {
+    // Only accept messages from the same origin
+    if (event.origin !== window.location.origin) return;
+    const msg = event.data;
+    if (!msg || !msg.type) return;
+
+    switch (msg.type) {
+        case 'snr_request_filters': {
+            // Fast-path: if /api/description already told us DSP is disabled,
+            // reply immediately without touching the WebSocket.
+            const dspInfo = window.instanceDescription && window.instanceDescription.dsp;
+            if (dspInfo && !dspInfo.enabled) {
+                serverNRForwardToPopout({
+                    type: 'dsp_filters',
+                    info: {
+                        available: false,
+                        reason: 'DSP noise reduction is not configured on this server.',
+                    },
+                });
+                break;
+            }
+
+            // Not connected — tell the popout immediately
+            if (!wsManager || !wsManager.isConnected()) {
+                serverNRSendConnectionState();
+                break;
+            }
+
+            // Ask the server for the full filter+param list over the audio WS.
+            // The server's dsp_filters response will be forwarded to the popout
+            // by the handleMessage() dsp_filters case above.
+            wsManager.send({ type: 'get_dsp_filters' });
+            break;
+        }
+
+        case 'snr_enable':
+            // Popout wants to enable a DSP filter
+            if (wsManager && wsManager.isConnected()) {
+                wsManager.send({
+                    type: 'set_dsp',
+                    enabled: true,
+                    filter: msg.filter || 'nr4',
+                    params: msg.params || {},
+                });
+            }
+            break;
+
+        case 'snr_disable':
+            // Popout wants to disable the DSP insert
+            if (wsManager && wsManager.isConnected()) {
+                wsManager.send({ type: 'set_dsp', enabled: false });
+            }
+            break;
+
+        case 'snr_params':
+            // Popout wants to update DSP params mid-stream
+            if (wsManager && wsManager.isConnected()) {
+                wsManager.send({ type: 'set_dsp_params', params: msg.params || {} });
+            }
+            break;
+
+        default:
+            break;
+    }
+});
+
+// Expose openServerNR globally so index.html onclick can call it
+window.openServerNR = openServerNR;
 
 // Opus decoder context (will be initialized when needed)
 let opusDecoder = null;

@@ -860,6 +860,18 @@
                         </div>
                         <button onclick="resetNoiseReduction()" class="eq-reset-btn">Reset</button>
                     </div>
+                    <!-- Server-side DSP noise reduction popout button.
+                         Hidden by default; shown by fetchSiteDescription() when data.dsp.enabled=true. -->
+                    <div id="server-nr-btn-wrapper" style="display:none; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <button
+                            onclick="openServerNR()"
+                            title="Open server-side DSP noise reduction (runs in ubersdr-dsp container)"
+                            style="width: 100%; padding: 6px 10px; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; letter-spacing: 0.3px; transition: opacity 0.15s;"
+                            onmouseover="this.style.opacity='0.85'"
+                            onmouseout="this.style.opacity='1'"
+                        >🖥 Server NR (DSP Insert)</button>
+                        <p class="help-text" style="font-size: 10px; margin-top: 5px; color: #888; text-align: center;">Runs server-side — requires ubersdr-dsp</p>
+                    </div>
                 </div>
             </div>
 

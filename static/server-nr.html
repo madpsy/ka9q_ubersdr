@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server-Side Noise Reduction — UberSDR</title>
+    <link rel="stylesheet" href="server-nr.css">
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header class="snr-header">
+    <h1>Server NR <span>DSP Insert</span></h1>
+    <span id="snr-status-badge" class="pending">LOADING…</span>
+</header>
+
+<!-- ── Loading spinner (shown while waiting for filter list) ─────────────── -->
+<div id="snr-loading" class="visible">
+    <div class="snr-spinner"></div>
+    <span>Requesting filter list…</span>
+</div>
+
+<!-- ── Unavailable notice (shown when DSP is not configured) ─────────────── -->
+<div id="snr-unavailable">
+    <div class="snr-unavail-icon">🔇</div>
+    <p id="snr-unavail-reason">DSP noise reduction is not available on this server.</p>
+</div>
+
+<!-- ── Main content (hidden until filter list arrives) ───────────────────── -->
+<div id="snr-main-content" style="display:none;">
+    <div class="snr-body">
+
+        <!-- Status / info message -->
+        <div id="snr-message"></div>
+
+        <!-- Filter selection card -->
+        <div class="snr-card">
+            <div class="snr-card-title">Filter</div>
+
+            <div class="snr-filter-row">
+                <label for="snr-filter-select">Type:</label>
+                <select id="snr-filter-select">
+                    <option value="">— loading —</option>
+                </select>
+                <button id="snr-btn-refresh" class="snr-btn snr-btn-refresh" title="Re-fetch filter list">↺</button>
+            </div>
+
+            <div id="snr-filter-desc"></div>
+        </div>
+
+        <!-- Parameters card -->
+        <div class="snr-card">
+            <div class="snr-card-title">Parameters</div>
+            <div id="snr-params-container">
+                <p class="snr-no-params">Select a filter to see its parameters.</p>
+            </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="snr-actions">
+            <button id="snr-btn-enable"  class="snr-btn snr-btn-enable"  disabled>Enable</button>
+            <button id="snr-btn-disable" class="snr-btn snr-btn-disable" disabled>Disable</button>
+        </div>
+
+    </div><!-- /.snr-body -->
+</div><!-- /#snr-main-content -->
+
+<!-- ── Footer ──────────────────────────────────────────────────────────────── -->
+<footer class="snr-footer">
+    Server-side processing via ubersdr-dsp · parameters update live
+</footer>
+
+<script src="server-nr.js"></script>
+</body>
+</html>

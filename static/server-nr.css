@@ -1,0 +1,472 @@
+/* =============================================================================
+   Server-Side Noise Reduction Popout — server-nr.css
+   Styles for the DSP insert control panel (popout window).
+   ============================================================================= */
+
+:root {
+    --bg:           #1e2a38;
+    --panel:        #2c3e50;
+    --panel-light:  #34495e;
+    --accent:       #667eea;
+    --accent-end:   #764ba2;
+    --text:         #ecf0f1;
+    --text-muted:   #95a5a6;
+    --border:       #3d5166;
+    --success:      #27ae60;
+    --danger:       #e74c3c;
+    --warning:      #f39c12;
+    --radius:       6px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-x: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────────── */
+
+.snr-header {
+    background: linear-gradient(135deg, var(--accent), var(--accent-end));
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.snr-header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.snr-header h1 span {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.85;
+    margin-left: 6px;
+}
+
+/* ── Status badge ────────────────────────────────────────────────────────────── */
+
+#snr-status-badge {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1.5px solid currentColor;
+    white-space: nowrap;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+#snr-status-badge.disabled  { color: var(--danger);  }
+#snr-status-badge.enabled   { color: var(--success); }
+#snr-status-badge.pending   { color: var(--warning); }
+#snr-status-badge.unavail   { color: var(--text-muted); }
+
+/* ── Main body ───────────────────────────────────────────────────────────────── */
+
+.snr-body {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* ── Section card ────────────────────────────────────────────────────────────── */
+
+.snr-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.snr-card-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+/* ── Filter selector ─────────────────────────────────────────────────────────── */
+
+.snr-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.snr-filter-row label {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+#snr-filter-select {
+    flex: 1;
+    min-width: 120px;
+    background: var(--panel-light);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 5px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+#snr-filter-select:focus {
+    border-color: var(--accent);
+}
+
+#snr-filter-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Filter description ──────────────────────────────────────────────────────── */
+
+#snr-filter-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    min-height: 16px;
+}
+
+/* ── Parameter controls ──────────────────────────────────────────────────────── */
+
+#snr-params-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.snr-param-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.snr-param-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.snr-param-label {
+    font-size: 12px;
+    color: var(--text);
+}
+
+.snr-param-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 40px;
+    text-align: right;
+}
+
+.snr-param-desc {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Range slider */
+input[type="range"].snr-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--panel-light);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+input[type="range"].snr-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+}
+
+input[type="range"].snr-slider::-webkit-slider-thumb:hover {
+    background: var(--accent-end);
+    transform: scale(1.2);
+}
+
+input[type="range"].snr-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+}
+
+/* Checkbox param */
+.snr-param-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.snr-param-check input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* Text / number input param */
+input[type="text"].snr-input,
+input[type="number"].snr-input {
+    background: var(--panel-light);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 8px;
+    font-size: 12px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+input[type="text"].snr-input:focus,
+input[type="number"].snr-input:focus {
+    border-color: var(--accent);
+}
+
+/* Select param */
+select.snr-select {
+    background: var(--panel-light);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 8px;
+    font-size: 12px;
+    width: 100%;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+select.snr-select:focus {
+    border-color: var(--accent);
+}
+
+/* ── No-params notice ────────────────────────────────────────────────────────── */
+
+.snr-no-params {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: 6px 0;
+}
+
+/* ── Action buttons ──────────────────────────────────────────────────────────── */
+
+.snr-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.snr-btn {
+    flex: 1;
+    min-width: 80px;
+    padding: 7px 14px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s, background 0.15s;
+    outline: none;
+}
+
+.snr-btn:active {
+    transform: scale(0.97);
+}
+
+.snr-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.snr-btn-enable {
+    background: var(--success);
+    color: #fff;
+}
+
+.snr-btn-enable:hover:not(:disabled) {
+    background: #2ecc71;
+}
+
+.snr-btn-disable {
+    background: var(--danger);
+    color: #fff;
+}
+
+.snr-btn-disable:hover:not(:disabled) {
+    background: #c0392b;
+}
+
+.snr-btn-refresh {
+    background: var(--panel-light);
+    color: var(--text);
+    border: 1px solid var(--border);
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+.snr-btn-refresh:hover:not(:disabled) {
+    background: var(--border);
+}
+
+/* ── Info / error messages ───────────────────────────────────────────────────── */
+
+#snr-message {
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border-left: 3px solid transparent;
+    display: none;
+    word-break: break-word;
+}
+
+#snr-message.info {
+    background: rgba(102, 126, 234, 0.15);
+    border-color: var(--accent);
+    color: var(--text);
+    display: block;
+}
+
+#snr-message.success {
+    background: rgba(39, 174, 96, 0.15);
+    border-color: var(--success);
+    color: #2ecc71;
+    display: block;
+}
+
+#snr-message.error {
+    background: rgba(231, 76, 60, 0.15);
+    border-color: var(--danger);
+    color: #e74c3c;
+    display: block;
+}
+
+#snr-message.warning {
+    background: rgba(243, 156, 18, 0.15);
+    border-color: var(--warning);
+    color: var(--warning);
+    display: block;
+}
+
+/* ── Unavailable overlay ─────────────────────────────────────────────────────── */
+
+#snr-unavailable {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 30px 20px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+#snr-unavailable.visible {
+    display: flex;
+}
+
+#snr-unavailable .snr-unavail-icon {
+    font-size: 36px;
+    opacity: 0.5;
+}
+
+#snr-unavailable p {
+    font-size: 12px;
+    max-width: 260px;
+    line-height: 1.6;
+}
+
+/* ── Loading spinner ─────────────────────────────────────────────────────────── */
+
+#snr-loading {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+#snr-loading.visible {
+    display: flex;
+}
+
+.snr-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: snr-spin 0.7s linear infinite;
+}
+
+@keyframes snr-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────────── */
+
+.snr-footer {
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }

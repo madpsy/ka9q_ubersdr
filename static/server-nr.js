@@ -495,24 +495,32 @@ function init() {
     setLoading(true);
     updateButtonStates();
 
-    // Ask the main page for the filter list
-    // Give the opener a moment to register its message listener
-    setTimeout(() => {
+    // Retry sending snr_request_filters several times with increasing delays.
+    // This handles the race where the opener's message listener hasn't registered
+    // yet when the popout first loads (ES module evaluation timing).
+    let filterRequestAttempts = 0;
+    function requestFilters() {
+        if (state.available) return; // already got a response
+        filterRequestAttempts++;
+        console.log(`[ServerNR] Requesting filters from opener (attempt ${filterRequestAttempts})`);
         postToOpener({ type: 'snr_request_filters' });
-    }, 150);
+        if (filterRequestAttempts < 5) {
+            setTimeout(requestFilters, 300 * filterRequestAttempts);
+        }
+    }
+    // First attempt after a short delay to let the opener's load handler fire
+    setTimeout(requestFilters, 100);
 
-    // If opener doesn't respond within 3 s, show a timeout message
-    const timeoutId = setTimeout(() => {
+    // If we still haven't received dsp_filters after 5 s, show a timeout message.
+    // Only cancel this when dsp_filters actually arrives (handled in handleFiltersResponse).
+    setTimeout(() => {
         if (!state.available && !document.getElementById('snr-unavailable').classList.contains('visible')) {
             setLoading(false);
             showMessage('No response from main page. Is the main window still open and connected?', 'warning');
             setStatus('UNKNOWN', 'unavail');
             updateButtonStates();
         }
-    }, 3000);
-
-    // Cancel timeout once we get a response
-    window.addEventListener('message', () => clearTimeout(timeoutId), { once: true });
+    }, 5000);
 }
 
 // Run after DOM is ready

@@ -3132,10 +3132,8 @@ function openServerNR() {
         return;
     }
 
-    // Notify the popout of the current connection state once it has loaded
-    _serverNRPopout.addEventListener('load', () => {
-        serverNRSendConnectionState();
-    });
+    // The popout will send snr_request_filters once its script loads.
+    // No need to push anything proactively — the message listener below handles it.
 }
 
 /**
@@ -3180,9 +3178,9 @@ window.addEventListener('message', (event) => {
 
     switch (msg.type) {
         case 'snr_request_filters': {
-            // Fast-path: if /api/description already told us DSP is disabled,
-            // reply immediately without touching the WebSocket.
             const dspInfo = window.instanceDescription && window.instanceDescription.dsp;
+
+            // Fast-path: DSP disabled per /api/description — reply immediately.
             if (dspInfo && !dspInfo.enabled) {
                 serverNRForwardToPopout({
                     type: 'dsp_filters',
@@ -3194,16 +3192,35 @@ window.addEventListener('message', (event) => {
                 break;
             }
 
-            // Not connected — tell the popout immediately
-            if (!wsManager || !wsManager.isConnected()) {
-                serverNRSendConnectionState();
-                break;
+            // Fast-path: DSP enabled and we already know the filter names from
+            // /api/description (mirrors how the desktop client works).
+            // Send an immediate response so the popout can show the filter selector
+            // without waiting for a WebSocket round-trip.
+            if (dspInfo && dspInfo.enabled && Array.isArray(dspInfo.filters) && dspInfo.filters.length > 0) {
+                // Build minimal filter descriptors from the names we know.
+                // The popout will show these immediately; full param details arrive
+                // via get_dsp_filters below and update the UI when they land.
+                const quickFilters = dspInfo.filters.map(name => ({
+                    name,
+                    description: '',
+                    params: [],
+                }));
+                serverNRForwardToPopout({
+                    type: 'dsp_filters',
+                    info: { available: true, filters: quickFilters },
+                });
             }
 
-            // Ask the server for the full filter+param list over the audio WS.
+            // Also fire get_dsp_filters over the WebSocket to get full param
+            // descriptors (types, ranges, defaults, descriptions).
             // The server's dsp_filters response will be forwarded to the popout
-            // by the handleMessage() dsp_filters case above.
-            wsManager.send({ type: 'get_dsp_filters' });
+            // by handleMessage() → serverNRForwardToPopout(), updating the UI.
+            if (wsManager && wsManager.isConnected()) {
+                wsManager.send({ type: 'get_dsp_filters' });
+            } else {
+                // Not connected — tell the popout
+                serverNRSendConnectionState();
+            }
             break;
         }
 

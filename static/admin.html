@@ -9294,6 +9294,7 @@ function resetStationIdColor() {
                 if (versions.length === 0) { list.innerHTML = '<em style="color:#aaa;font-size:13px;">No versions found.</em>'; return; }
 
                 list.innerHTML = '';
+                const latestVersion = versions[0].version; // API returns newest-first
                 versions.forEach((v, idx) => {
                     const btn = document.createElement('button');
                     btn.style.cssText = 'display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:4px;cursor:pointer;font-size:12px;background:transparent;margin-bottom:2px;';
@@ -9302,7 +9303,7 @@ function resetStationIdColor() {
                     if (idx === 0) btn.style.background = '#e8eaf6';
                     btn.onmouseover = () => { if (_historySelectedVersion !== v.version) btn.style.background = '#f0f4ff'; };
                     btn.onmouseout  = () => { if (_historySelectedVersion !== v.version) btn.style.background = 'transparent'; else btn.style.background = '#e8eaf6'; };
-                    btn.onclick = () => loadHistoryVersion(widgetID, v.version, date, btn, versions.length);
+                    btn.onclick = () => loadHistoryVersion(widgetID, v.version, date, btn, latestVersion);
                     list.appendChild(btn);
                 });
 

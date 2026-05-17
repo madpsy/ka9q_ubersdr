@@ -1893,6 +1893,14 @@
                         ✅ <strong>No server restart required.</strong> Changes take effect immediately for new page loads — existing users are not affected.
                     </div>
 
+                    <div style="margin-bottom: 20px; padding: 14px 16px; background: #f0f4ff; border: 1px solid #c5cae9; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+                        <div>
+                            <strong style="color: #283593; font-size: 14px;">🧩 Widgets</strong>
+                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #555;">Inject custom HTML/JavaScript into the web UI. Create your own widgets or enable community-shared ones.</p>
+                        </div>
+                        <button class="btn" onclick="document.getElementById('widgetsSection').scrollIntoView({behavior:'smooth',block:'start'});" style="font-size: 13px; padding: 7px 16px; white-space: nowrap; flex-shrink: 0;">Go to Widgets ↓</button>
+                    </div>
+
                     <div id="uiConfigForm" style="display: none;">
 
                         <!-- Signal Bar Meter Mode -->
@@ -2247,7 +2255,7 @@
                     </div>
 
                     <!-- ── Widgets ──────────────────────────────────────────────────── -->
-                    <div style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
+                    <div id="widgetsSection" style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
                         <h3 style="margin: 0 0 6px 0; color: #283593; font-size: 16px;">🧩 Widgets</h3>
                         <p style="margin: 0 0 16px 0; color: #555; font-size: 13px;">
                             Widgets are HTML code blocks which are injected directly into

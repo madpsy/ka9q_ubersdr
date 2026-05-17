@@ -9133,7 +9133,7 @@ function resetStationIdColor() {
                 const isMine    = myWidgetIDs.has(w.widget_id);
                 const card = document.createElement('div');
                 card.id = `community-row-${w.widget_id}`;
-                card.style.cssText = `display:flex;flex-direction:column;justify-content:space-between;padding:12px 14px;background:${isMine ? '#f0f4ff' : '#fff'};border-radius:8px;border:1px solid ${isMine ? '#9fa8da' : '#e0e0e0'};box-shadow:0 1px 3px rgba(0,0,0,.06);`;
+                card.style.cssText = `display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:12px 14px;background:${isMine ? '#f0f4ff' : '#fff'};border-radius:8px;border:1px solid ${isMine ? '#9fa8da' : '#e0e0e0'};box-shadow:0 1px 3px rgba(0,0,0,.06);`;
                 card.innerHTML = `
                     <div style="flex:1;min-width:0;margin-bottom:10px;">
                         <div style="font-weight:600;font-size:13px;color:#283593;margin-bottom:4px;line-height:1.3;">
@@ -9146,12 +9146,12 @@ function resetStationIdColor() {
                             ${isMine ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                         </div>
                     </div>
-                    <div style="display:grid;grid-template-columns:1fr;gap:5px;">
+                    <div style="display:grid;grid-template-columns:1fr;gap:5px;width:100%;">
                         ${isEnabled
-                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;">Remove</button>`
-                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Remove</button>`
+                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
-                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;" title="Clone to My Widgets and open editor">📋 Clone</button>
+                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;" title="Clone to My Widgets and open editor">📋 Clone</button>
                     </div>`;
                 grid.appendChild(card);
             });

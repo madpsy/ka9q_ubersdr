@@ -610,13 +610,37 @@ func (wm *WidgetManager) proxyWidgetList(w http.ResponseWriter, path string, wit
 	w.Write([]byte(`{"error":"unexpected response shape from collector"}`))
 }
 
+// collectorAuthError returns true if the status code indicates a collector
+// authentication/authorisation failure (401 or 403).  In that case it writes
+// a 400 Bad Request with a descriptive JSON error to w so the admin UI never
+// sees a 401 and never triggers a false session-expiry logout.
+func collectorAuthError(w http.ResponseWriter, statusCode int) bool {
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"Widget features require instance reporting to be enabled and registered with the collector"}`))
+		return true
+	}
+	return false
+}
+
 // HandleCreate proxies POST /admin/widgets/create → collector POST /api/widgets
 func (wm *WidgetManager) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	wm.proxyToCollector(w, r, http.MethodPost, "/api/widgets", true, r.Body)
+	if wm.instanceSecret() == "" {
+		collectorAuthError(w, http.StatusUnauthorized)
+		return
+	}
+	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodPost, "/api/widgets", true, r.Body)
+	w.Header().Set("Content-Type", "application/json")
+	if collectorAuthError(w, statusCode) {
+		return
+	}
+	w.WriteHeader(statusCode)
+	w.Write(respBody)
 }
 
 // HandleUpdate proxies POST /admin/widgets/update → collector PUT /api/widgets/:id
@@ -652,6 +676,9 @@ func (wm *WidgetManager) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodPut, fmt.Sprintf("/api/widgets/%s", widgetID), true, bytes.NewReader(bodyBytes))
 	w.Header().Set("Content-Type", "application/json")
+	if collectorAuthError(w, statusCode) {
+		return
+	}
 	w.WriteHeader(statusCode)
 	w.Write(respBody)
 
@@ -696,6 +723,9 @@ func (wm *WidgetManager) HandleDelete(w http.ResponseWriter, r *http.Request) {
 
 	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodDelete, fmt.Sprintf("/api/widgets/%s", widgetID), true, nil)
 	w.Header().Set("Content-Type", "application/json")
+	if collectorAuthError(w, statusCode) {
+		return
+	}
 	w.WriteHeader(statusCode)
 	w.Write(respBody)
 
@@ -731,6 +761,9 @@ func (wm *WidgetManager) HandleVersions(w http.ResponseWriter, r *http.Request) 
 	}
 	body, statusCode := wm.proxyToCollectorRaw(http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions", widgetID), true, nil)
 	w.Header().Set("Content-Type", "application/json")
+	if collectorAuthError(w, statusCode) {
+		return
+	}
 	if statusCode != http.StatusOK {
 		w.WriteHeader(statusCode)
 		w.Write(body)
@@ -760,7 +793,13 @@ func (wm *WidgetManager) HandleVersionContent(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Missing widget_id or version query parameter", http.StatusBadRequest)
 		return
 	}
-	wm.proxyToCollector(w, r, http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions/%s", widgetID, version), true, nil)
+	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions/%s", widgetID, version), true, nil)
+	w.Header().Set("Content-Type", "application/json")
+	if collectorAuthError(w, statusCode) {
+		return
+	}
+	w.WriteHeader(statusCode)
+	w.Write(respBody)
 }
 
 // ---------------------------------------------------------------------------

@@ -2353,7 +2353,6 @@ func main() {
 	http.HandleFunc("/admin/widgets/create", adminHandler.AuthMiddleware(widgetManager.HandleCreate))
 	http.HandleFunc("/admin/widgets/update", adminHandler.AuthMiddleware(widgetManager.HandleUpdate))
 	http.HandleFunc("/admin/widgets/delete", adminHandler.AuthMiddleware(widgetManager.HandleDelete))
-	http.HandleFunc("/admin/widgets/preview", adminHandler.AuthMiddleware(widgetManager.HandlePreview))
 	http.HandleFunc("/admin/widgets/versions", adminHandler.AuthMiddleware(widgetManager.HandleVersions))
 	http.HandleFunc("/admin/widgets/version", adminHandler.AuthMiddleware(widgetManager.HandleVersionContent))
 

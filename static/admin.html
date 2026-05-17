@@ -2250,8 +2250,8 @@
                     <div style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
                         <h3 style="margin: 0 0 6px 0; color: #283593; font-size: 16px;">🧩 Widgets</h3>
                         <p style="margin: 0 0 16px 0; color: #555; font-size: 13px;">
-                            Widgets are small HTML panels fetched from the UberSDR collector and injected into
-                            <code>index.html</code> as sandboxed iframes after the custom body HTML.
+                            Widgets are HTML panels fetched from the UberSDR collector and injected directly into
+                            <code>index.html</code> after the custom body HTML.
                             You can create your own widgets or enable community widgets. Maximum <strong>10 enabled</strong> at once.
                         </p>
 
@@ -2314,14 +2314,7 @@
                                 </div>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <button class="btn" onclick="saveWidget()" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
-                                    <button class="btn btn-secondary" onclick="previewWidget()" style="font-size: 13px; padding: 7px 16px;">👁 Preview</button>
                                     <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px;">Cancel</button>
-                                </div>
-                                <!-- Preview pane -->
-                                <div id="widgetPreviewPane" style="display: none; margin-top: 14px;">
-                                    <div style="font-size: 12px; color: #888; margin-bottom: 6px;">Preview (sandboxed):</div>
-                                    <iframe id="widgetPreviewFrame" sandbox="allow-scripts"
-                                        style="width: 100%; min-height: 200px; border: 1px solid #c5cae9; border-radius: 4px; background: #fff;"></iframe>
                                 </div>
                             </div>
                         </div>
@@ -9117,7 +9110,6 @@ function resetStationIdColor() {
                         </div>
                     </div>
                     <div style="display:flex;gap:6px;flex-shrink:0;">
-                        <button class="btn btn-secondary" onclick="previewCommunityWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\uD83D\uDC41 Preview</button>
                         ${isEnabled
                             ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Remove</button>`
                             : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
@@ -9134,7 +9126,6 @@ function resetStationIdColor() {
             document.getElementById('widgetEditorHTML').value        = '';
             document.getElementById('widgetEditorPublic').checked    = false;
             document.getElementById('widgetEditorTitle').textContent = 'New Widget';
-            document.getElementById('widgetPreviewPane').style.display  = 'none';
             document.getElementById('widgetEditorPanel').style.display  = 'block';
             document.getElementById('widgetEditorName').focus();
         }
@@ -9169,7 +9160,6 @@ function resetStationIdColor() {
                 document.getElementById('widgetEditorHTML').value        = html;
                 document.getElementById('widgetEditorPublic').checked    = isPublic;
                 document.getElementById('widgetEditorTitle').textContent = `Edit: ${name}`;
-                document.getElementById('widgetPreviewPane').style.display  = 'none';
                 document.getElementById('widgetEditorPanel').style.display  = 'block';
                 document.getElementById('widgetEditorName').focus();
             } catch (e) {
@@ -9179,7 +9169,6 @@ function resetStationIdColor() {
 
         function closeWidgetEditor() {
             document.getElementById('widgetEditorPanel').style.display = 'none';
-            document.getElementById('widgetPreviewPane').style.display = 'none';
         }
 
         async function saveWidget() {
@@ -9269,40 +9258,6 @@ function resetStationIdColor() {
                 renderCommunityWidgets(allCommunityWidgets);
             } catch (e) {
                 if (!silent) showAlert('Error removing widget: ' + e.message, 'error');
-            }
-        }
-
-        function previewWidget() {
-            const html  = document.getElementById('widgetEditorHTML').value;
-            const frame = document.getElementById('widgetPreviewFrame');
-            const pane  = document.getElementById('widgetPreviewPane');
-            frame.srcdoc = html;
-            pane.style.display = 'block';
-        }
-
-        async function previewCommunityWidget(widgetID) {
-            try {
-                const resp = await authenticatedFetch(`/admin/widgets/preview?widget_id=${encodeURIComponent(widgetID)}`);
-                if (!resp) return;
-                if (!resp.ok) throw new Error(await resp.text());
-                const data = await resp.json();
-                const html = data.html_content || '';
-                const overlay = document.createElement('div');
-                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
-                const safeHtml = html.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-                overlay.innerHTML = `
-                    <div style="background:#fff;border-radius:8px;padding:20px;max-width:700px;width:95%;max-height:85vh;display:flex;flex-direction:column;gap:12px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <strong style="color:#283593;">Widget Preview</strong>
-                            <button onclick="this.closest('[style*=fixed]').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#555;">\u2715</button>
-                        </div>
-                        <iframe sandbox="allow-scripts" style="flex:1;min-height:300px;border:1px solid #c5cae9;border-radius:4px;"></iframe>
-                    </div>`;
-                document.body.appendChild(overlay);
-                // Set srcdoc via JS to avoid attribute escaping issues
-                overlay.querySelector('iframe').srcdoc = html;
-            } catch (e) {
-                showAlert('Error loading preview: ' + e.message, 'error');
             }
         }
 

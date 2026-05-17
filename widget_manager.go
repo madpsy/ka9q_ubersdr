@@ -207,7 +207,8 @@ func (wm *WidgetManager) RemoveFromCache(widgetID string) {
 }
 
 // AssembleHTML builds the WidgetsHTML template.HTML value for index.html rendering.
-// It iterates EnabledWidgets in order, wrapping each in a sandboxed iframe srcdoc.
+// It iterates EnabledWidgets in order and injects each widget's HTML directly into
+// the page (wrapped in a comment marker for identification).
 // Missing cache entries (fetch failed at startup) are silently skipped.
 func (wm *WidgetManager) AssembleHTML(enabledIDs []string) template.HTML {
 	if len(enabledIDs) == 0 {
@@ -222,12 +223,7 @@ func (wm *WidgetManager) AssembleHTML(enabledIDs []string) template.HTML {
 		if !ok || entry.HTML == "" {
 			continue
 		}
-		// Escape the HTML content for use as an srcdoc attribute value.
-		escaped := template.HTMLEscapeString(entry.HTML)
-		fmt.Fprintf(&sb,
-			"\n<!-- Widget: %s (%s) -->\n<iframe srcdoc=\"%s\" sandbox=\"allow-scripts allow-same-origin\" style=\"border:none;width:100%%;height:auto;\" loading=\"lazy\"></iframe>\n",
-			template.HTMLEscapeString(entry.Name), id, escaped,
-		)
+		fmt.Fprintf(&sb, "\n<!-- widget:%s -->\n%s\n<!-- /widget:%s -->\n", id, entry.HTML, id)
 	}
 	return template.HTML(sb.String())
 }
@@ -413,16 +409,19 @@ func (wm *WidgetManager) saveEnabledWidgets(ids []string) error {
 // ---------------------------------------------------------------------------
 
 // HandleMine proxies GET /admin/widgets/mine → collector GET /api/widgets/mine
+// The collector may return either a JSON array or an object keyed by string
+// integers; this handler normalises both into {"widgets": [...]}.
 func (wm *WidgetManager) HandleMine(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	wm.proxyToCollector(w, r, http.MethodGet, "/api/widgets/mine", true, nil)
+	wm.proxyWidgetList(w, "/api/widgets/mine", true)
 }
 
 // HandlePublic proxies GET /admin/widgets/public → collector GET /api/widgets
 // Supports ?instance_id= and ?callsign= query params forwarded as-is.
+// Normalises the response into {"widgets": [...]}.
 func (wm *WidgetManager) HandlePublic(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -432,7 +431,57 @@ func (wm *WidgetManager) HandlePublic(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.RawQuery; q != "" {
 		path += "?" + q
 	}
-	wm.proxyToCollector(w, r, http.MethodGet, path, false, nil)
+	wm.proxyWidgetList(w, path, false)
+}
+
+// proxyWidgetList fetches a widget list from the collector, normalises the
+// response (array OR string-keyed object) into {"widgets": [...]}, and writes
+// it to w.  This handles collector implementations that return objects like
+// {"0":{...},"1":{...}} instead of a proper JSON array.
+func (wm *WidgetManager) proxyWidgetList(w http.ResponseWriter, path string, withSecret bool) {
+	body, statusCode := wm.proxyToCollectorRaw(http.MethodGet, path, withSecret, nil)
+	w.Header().Set("Content-Type", "application/json")
+	if statusCode != http.StatusOK {
+		w.WriteHeader(statusCode)
+		w.Write(body)
+		return
+	}
+
+	// Try to decode as array first.
+	var asArray []json.RawMessage
+	if err := json.Unmarshal(body, &asArray); err == nil {
+		// Already an array — wrap it.
+		out, _ := json.Marshal(map[string]interface{}{"widgets": asArray})
+		w.Write(out)
+		return
+	}
+
+	// Try to decode as object (string-keyed map).
+	var asMap map[string]json.RawMessage
+	if err := json.Unmarshal(body, &asMap); err == nil {
+		// Collect values in key order (0, 1, 2, …).
+		widgets := make([]json.RawMessage, 0, len(asMap))
+		for i := 0; i < len(asMap); i++ {
+			key := fmt.Sprintf("%d", i)
+			if v, ok := asMap[key]; ok {
+				widgets = append(widgets, v)
+			}
+		}
+		// Fall back to unordered if key sequence is broken.
+		if len(widgets) != len(asMap) {
+			widgets = widgets[:0]
+			for _, v := range asMap {
+				widgets = append(widgets, v)
+			}
+		}
+		out, _ := json.Marshal(map[string]interface{}{"widgets": widgets})
+		w.Write(out)
+		return
+	}
+
+	// Unknown shape — pass through as-is wrapped in an error envelope.
+	w.WriteHeader(http.StatusBadGateway)
+	w.Write([]byte(`{"error":"unexpected response shape from collector"}`))
 }
 
 // HandleCreate proxies POST /admin/widgets/create → collector POST /api/widgets
@@ -485,13 +534,26 @@ func (wm *WidgetManager) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 // HandleDelete proxies DELETE /admin/widgets/delete?widget_id=<id> → collector DELETE /api/widgets/:id
 // Also removes the widget from EnabledWidgets and cache if present.
 func (wm *WidgetManager) HandleDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	widgetID := r.URL.Query().Get("widget_id")
+	// Accept widget_id from JSON body (POST) or query param (DELETE).
+	var widgetID string
+	if r.Method == http.MethodPost {
+		var body struct {
+			WidgetID string `json:"widget_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		widgetID = body.WidgetID
+	} else {
+		widgetID = r.URL.Query().Get("widget_id")
+	}
 	if widgetID == "" {
-		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
+		http.Error(w, "Missing widget_id", http.StatusBadRequest)
 		return
 	}
 
@@ -518,22 +580,8 @@ func (wm *WidgetManager) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandlePreview proxies GET /admin/widgets/preview?widget_id=<id> → collector GET /api/widgets/:id
-// Always sends the secret so private (own) widgets can be previewed.
-func (wm *WidgetManager) HandlePreview(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	widgetID := r.URL.Query().Get("widget_id")
-	if widgetID == "" {
-		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
-		return
-	}
-	wm.proxyToCollector(w, r, http.MethodGet, fmt.Sprintf("/api/widgets/%s", widgetID), true, nil)
-}
-
 // HandleVersions proxies GET /admin/widgets/versions?widget_id=<id> → collector GET /api/widgets/:id/versions
+// Wraps the bare array response into {"versions": [...]} for the frontend.
 func (wm *WidgetManager) HandleVersions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -544,7 +592,22 @@ func (wm *WidgetManager) HandleVersions(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
 		return
 	}
-	wm.proxyToCollector(w, r, http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions", widgetID), true, nil)
+	body, statusCode := wm.proxyToCollectorRaw(http.MethodGet, fmt.Sprintf("/api/widgets/%s/versions", widgetID), true, nil)
+	w.Header().Set("Content-Type", "application/json")
+	if statusCode != http.StatusOK {
+		w.WriteHeader(statusCode)
+		w.Write(body)
+		return
+	}
+	// Collector returns a bare array; wrap into {"versions": [...]}
+	var versions json.RawMessage
+	if err := json.Unmarshal(body, &versions); err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":"unexpected response from collector"}`))
+		return
+	}
+	out, _ := json.Marshal(map[string]interface{}{"versions": versions})
+	w.Write(out)
 }
 
 // HandleVersionContent proxies GET /admin/widgets/version?widget_id=<id>&version=<n>

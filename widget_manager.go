@@ -493,25 +493,36 @@ func (wm *WidgetManager) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	wm.proxyToCollector(w, r, http.MethodPost, "/api/widgets", true, r.Body)
 }
 
-// HandleUpdate proxies PUT /admin/widgets/update?widget_id=<id> → collector PUT /api/widgets/:id
+// HandleUpdate proxies POST /admin/widgets/update → collector PUT /api/widgets/:id
+// Accepts a JSON body with widget_id plus the update fields.
 // Also refreshes the cache entry if the widget is currently enabled.
 func (wm *WidgetManager) HandleUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	widgetID := r.URL.Query().Get("widget_id")
-	if widgetID == "" {
-		http.Error(w, "Missing widget_id query parameter", http.StatusBadRequest)
-		return
-	}
 
-	// Buffer the body so we can both forward it and potentially re-fetch.
+	// Buffer the body so we can extract widget_id and forward the rest.
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
+
+	// Extract widget_id from the JSON body (it's included by the JS but the
+	// collector doesn't need it in the body — it goes in the URL path).
+	var peek struct {
+		WidgetID string `json:"widget_id"`
+	}
+	if err := json.Unmarshal(bodyBytes, &peek); err != nil || peek.WidgetID == "" {
+		// Fall back to query param for backward compat.
+		peek.WidgetID = r.URL.Query().Get("widget_id")
+	}
+	if peek.WidgetID == "" {
+		http.Error(w, "Missing widget_id", http.StatusBadRequest)
+		return
+	}
+	widgetID := peek.WidgetID
 
 	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodPut, fmt.Sprintf("/api/widgets/%s", widgetID), true, bytes.NewReader(bodyBytes))
 	w.Header().Set("Content-Type", "application/json")

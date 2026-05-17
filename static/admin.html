@@ -2250,7 +2250,7 @@
                     <div style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
                         <h3 style="margin: 0 0 6px 0; color: #283593; font-size: 16px;">🧩 Widgets</h3>
                         <p style="margin: 0 0 16px 0; color: #555; font-size: 13px;">
-                            Widgets are HTML panels fetched from the UberSDR collector and injected directly into
+                            Widgets are HTML code blocks which are injected directly into
                             <code>index.html</code> after the custom body HTML.
                             You can create your own widgets or enable community widgets. Maximum <strong>10 enabled</strong> at once.
                         </p>
@@ -8958,7 +8958,7 @@ function resetStationIdColor() {
         let allCommunityWidgets = [];   // cache for client-side search filtering
         let enabledWidgetIDs = [];      // current enabled list (ordered)
 
-        function switchWidgetSubTab(tab) {
+        async function switchWidgetSubTab(tab) {
             const myBtn      = document.getElementById('widgetSubTabMyBtn');
             const browseBtn  = document.getElementById('widgetSubTabBrowseBtn');
             const myPane     = document.getElementById('widgetSubTabMy');
@@ -8972,6 +8972,8 @@ function resetStationIdColor() {
                 Object.assign(browseBtn.style, inactiveStyle);
                 myPane.style.display     = 'block';
                 browsePane.style.display = 'none';
+                // Load enabled list first so Enable/Remove buttons render correctly
+                await loadEnabledWidgets();
                 loadMyWidgets();
             } else {
                 Object.assign(browseBtn.style, activeStyle);
@@ -9000,6 +9002,7 @@ function resetStationIdColor() {
                 widgets.forEach(w => {
                     const row = document.createElement('div');
                     row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;gap:10px;';
+                    const isEnabled = enabledWidgetIDs.includes(w.widget_id);
                     row.innerHTML = `
                         <div style="flex:1;min-width:0;">
                             <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
@@ -9007,6 +9010,10 @@ function resetStationIdColor() {
                             <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}</div>
                         </div>
                         <div style="display:flex;gap:6px;flex-shrink:0;">
+                            ${isEnabled
+                                ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Remove</button>`
+                                : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            }
                             <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
                             <button class="btn btn-danger"    onclick="deleteWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
                         </div>`;
@@ -9238,6 +9245,10 @@ function resetStationIdColor() {
                 showAlert('Widget enabled.', 'success');
                 await loadEnabledWidgets();
                 renderCommunityWidgets(allCommunityWidgets);
+                // Refresh My Widgets list if that pane is visible (to update Enable/Remove buttons)
+                if (document.getElementById('widgetSubTabMy').style.display !== 'none') {
+                    loadMyWidgets();
+                }
             } catch (e) {
                 showAlert('Error enabling widget: ' + e.message, 'error');
             }
@@ -9256,6 +9267,10 @@ function resetStationIdColor() {
                 if (!silent) showAlert('Widget removed.', 'success');
                 await loadEnabledWidgets();
                 renderCommunityWidgets(allCommunityWidgets);
+                // Refresh My Widgets list if that pane is visible (to update Enable/Remove buttons)
+                if (document.getElementById('widgetSubTabMy').style.display !== 'none') {
+                    loadMyWidgets();
+                }
             } catch (e) {
                 if (!silent) showAlert('Error removing widget: ' + e.message, 'error');
             }

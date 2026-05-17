@@ -1763,7 +1763,6 @@ dsp:
     rn2: true    # RNNoise — Mozilla/Xiph RNN suppressor
     nr4: true    # libspecbleach — SPP-MMSE adaptive denoiser
     dfnr: true   # DeepFilterNet3 neural denoiser (x86 only  - not ARM - heavy on CPU)
-    bnr: false   # NVIDIA Maxine BNR — disabled by default (requires GPU + NIM container)
 
 # ==============================================================================
 # NTP Time Synchronization Check

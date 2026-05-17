@@ -7,11 +7,12 @@
 package dsp
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -176,7 +177,7 @@ func (*AudioRequest_ParamUpdate) isAudioRequest_Payload() {}
 
 type SessionConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Filter name: "nr2" | "rn2" | "nr4" | "dfnr" | "bnr"
+	// Filter name: "nr2" | "rn2" | "nr4" | "dfnr"
 	Filter string `protobuf:"bytes,1,opt,name=filter,proto3" json:"filter,omitempty"`
 	// Advisory chunk size hint, in frames at the client sample rate.
 	// The server accepts AudioChunk payloads of ANY size — all filters handle

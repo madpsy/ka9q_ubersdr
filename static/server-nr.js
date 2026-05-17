@@ -458,6 +458,16 @@ function handleDSPStatus(info) {
     state.enabled = !!info.enabled;
     state.activeFilter = info.filter || null;
 
+    // Sync the dropdown to reflect what the server reports as active,
+    // so the status message and the selector are always consistent.
+    if (state.enabled && state.activeFilter) {
+        const sel = els.filterSelect();
+        if (sel && sel.value !== state.activeFilter) {
+            sel.value = state.activeFilter;
+            onFilterSelectChange();
+        }
+    }
+
     if (state.enabled) {
         setStatus(`ACTIVE — ${(state.activeFilter || '').toUpperCase()}`, 'enabled');
         showMessage(`Server-side noise reduction active (${state.activeFilter}).`, 'success');

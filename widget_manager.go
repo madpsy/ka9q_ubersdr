@@ -519,9 +519,17 @@ func (wm *WidgetManager) saveEnabledWidgets(ids []string) error {
 // HandleMine proxies GET /admin/widgets/mine → collector GET /api/widgets/mine
 // The collector may return either a JSON array or an object keyed by string
 // integers; this handler normalises both into {"widgets": [...]}.
+// If no instance UUID is configured, returns an empty list immediately rather
+// than forwarding a request that will 401 (which would trigger a false logout
+// in the admin UI).
 func (wm *WidgetManager) HandleMine(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if wm.instanceSecret() == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"widgets":[]}`))
 		return
 	}
 	wm.proxyWidgetList(w, "/api/widgets/mine", true)
@@ -546,9 +554,19 @@ func (wm *WidgetManager) HandlePublic(w http.ResponseWriter, r *http.Request) {
 // response (array OR string-keyed object) into {"widgets": [...]}, and writes
 // it to w.  This handles collector implementations that return objects like
 // {"0":{...},"1":{...}} instead of a proper JSON array.
+// Auth errors (401/403) from the collector are translated to an empty list
+// with 200 OK so they never trigger a false session-expiry logout in the
+// admin UI.
 func (wm *WidgetManager) proxyWidgetList(w http.ResponseWriter, path string, withSecret bool) {
 	body, statusCode := wm.proxyToCollectorRaw(http.MethodGet, path, withSecret, nil)
 	w.Header().Set("Content-Type", "application/json")
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		// Collector auth failure — return empty list rather than forwarding
+		// the 401/403 which would cause the admin UI to log the user out.
+		log.Printf("[WidgetManager] Collector returned %d for %s — returning empty widget list", statusCode, path)
+		w.Write([]byte(`{"widgets":[]}`))
+		return
+	}
 	if statusCode != http.StatusOK {
 		w.WriteHeader(statusCode)
 		w.Write(body)

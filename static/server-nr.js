@@ -353,7 +353,12 @@ function enableDSP() {
     if (!sel || !sel.value) return;
 
     const filterName = sel.value;
-    setStatus('ENABLING…', 'pending');
+    // If already active with a different filter, this is a live swap — show APPLYING
+    if (state.enabled && filterName !== state.activeFilter) {
+        setStatus('APPLYING…', 'pending');
+    } else if (!state.enabled) {
+        setStatus('ENABLING…', 'pending');
+    }
     clearMessage();
 
     postToOpener({
@@ -374,9 +379,16 @@ function updateButtonStates() {
     const btnDis = els.btnDisable();
     const sel = els.filterSelect();
 
-    if (btnEn) btnEn.disabled = !state.connected || !state.available || state.enabled;
+    // Enable button: always active when connected + available (works as both
+    // "Enable" and "Apply new filter" — matches desktop client behaviour).
+    if (btnEn) {
+        btnEn.disabled = !state.connected || !state.available;
+        // Update label to reflect current action
+        btnEn.textContent = state.enabled ? 'Apply' : 'Enable';
+    }
     if (btnDis) btnDis.disabled = !state.connected || !state.enabled;
-    if (sel) sel.disabled = state.enabled; // Lock filter while active
+    // Filter selector: always unlocked — user can change filter while active
+    if (sel) sel.disabled = false;
 }
 
 // ── Incoming messages from opener ─────────────────────────────────────────────
@@ -452,9 +464,6 @@ function handleDSPStatus(info) {
     } else {
         setStatus('DISABLED', 'disabled');
         showMessage('Server-side noise reduction disabled.', 'info');
-        // Unlock filter selector
-        const sel = els.filterSelect();
-        if (sel) sel.disabled = false;
     }
     updateButtonStates();
 }

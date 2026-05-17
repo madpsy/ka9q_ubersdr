@@ -8958,6 +8958,7 @@ function resetStationIdColor() {
 
         let allCommunityWidgets = [];   // cache for client-side search filtering
         let enabledWidgetIDs = [];      // current enabled list (ordered)
+        let myWidgetIDs = new Set();    // widget_ids owned by this instance
 
         async function switchWidgetSubTab(tab) {
             const myBtn      = document.getElementById('widgetSubTabMyBtn');
@@ -8982,7 +8983,10 @@ function resetStationIdColor() {
                 myPane.style.display     = 'none';
                 browsePane.style.display = 'block';
                 loadEnabledWidgets();
-                loadCommunityWidgets();
+                // Pre-load my widget IDs so community list can badge them, then load community
+                authenticatedFetch('/admin/widgets/mine').then(r => {
+                    if (r && r.ok) r.json().then(d => { myWidgetIDs = new Set((d.widgets || []).map(w => w.widget_id)); });
+                }).catch(() => {}).finally(() => loadCommunityWidgets());
             }
         }
 
@@ -8995,6 +8999,8 @@ function resetStationIdColor() {
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
                 const widgets = data.widgets || [];
+                // Track which widget_ids belong to this instance so community list can badge them
+                myWidgetIDs = new Set(widgets.map(w => w.widget_id));
                 if (widgets.length === 0) {
                     container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets yet. Click \u201c+ New Widget\u201d to create one.</em>';
                     return;
@@ -9105,16 +9111,20 @@ function resetStationIdColor() {
             container.innerHTML = '';
             widgets.forEach(w => {
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
+                const isMine    = myWidgetIDs.has(w.widget_id);
                 const row = document.createElement('div');
                 row.id = `community-row-${w.widget_id}`;
-                row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;';
+                row.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;background:${isMine ? '#f0f4ff' : '#fff'};border-radius:6px;border:1px solid ${isMine ? '#9fa8da' : '#e0e0e0'};margin-bottom:8px;`;
                 row.innerHTML = `
                     <div style="flex:1;min-width:0;">
-                        <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
+                        <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            ${isMine ? '<span title="Created by you" style="font-size:13px;margin-right:4px;">⭐</span>' : ''}${escapeHtml(w.name)}
+                        </div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                         <div style="font-size:11px;color:#888;margin-top:3px;">
                             by <strong style="color:#3f51b5;">${escapeHtml(w.callsign || w.instance_id || 'unknown')}</strong>
                             \u00b7 v${w.version}
+                            ${isMine ? '<span style="margin-left:6px;padding:1px 6px;background:#3f51b5;color:#fff;border-radius:10px;font-size:10px;font-weight:600;">yours</span>' : ''}
                         </div>
                     </div>
                     <div style="display:flex;gap:6px;flex-shrink:0;">

@@ -9151,7 +9151,7 @@ function resetStationIdColor() {
                             ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Remove</button>`
                             : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
-                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;" title="Clone to My Widgets and open editor">📋 Clone</button>
+                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;" title="Clone to My Widgets and open editor">Clone</button>
                     </div>`;
                 grid.appendChild(card);
             });

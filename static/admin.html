@@ -2902,6 +2902,22 @@
             </div>
         </div>
 
+        <!-- Widget Code Viewer Modal -->
+        <div id="widgetCodeModal" class="modal">
+            <div class="modal-content" style="max-width: 860px; max-height: 85vh; display: flex; flex-direction: column;">
+                <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <h3 id="widgetCodeModalTitle" style="margin:0; font-size:16px;">Widget Source Code</h3>
+                    <button onclick="closeWidgetCodeModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="flex:1; overflow:auto; padding:0;">
+                    <pre id="widgetCodeContent" style="margin:0; padding:16px; font-size:12px; line-height:1.5; background:#1e1e1e; color:#d4d4d4; white-space:pre-wrap; word-break:break-all; min-height:200px; font-family:'Courier New',Courier,monospace;"><em style="color:#888;">Loading…</em></pre>
+                </div>
+                <div style="padding:10px 16px; border-top:1px solid #e0e0e0; display:flex; justify-content:flex-end; gap:8px; flex-shrink:0;">
+                    <button class="btn btn-secondary" onclick="closeWidgetCodeModal()" style="margin-left:0;">Close</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Auto-Calibration Modal -->
         <div id="autoCalibrationModal" class="modal">
             <div class="modal-content" style="max-width: 600px;">
@@ -9157,6 +9173,7 @@ function resetStationIdColor() {
                             : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
                         <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="Clone to My Widgets and open editor">Clone</button>
+                        <button class="btn btn-secondary" onclick="viewWidgetCode('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="View widget source code">View Code</button>
                     </div>`;
                 grid.appendChild(card);
             });
@@ -9179,6 +9196,32 @@ function resetStationIdColor() {
             communityPage = Math.max(0, Math.min(communityPage + delta, totalPages - 1));
             _renderCommunityPage();
             document.getElementById('communityWidgetsList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        async function viewWidgetCode(widgetID, widgetName) {
+            const modal   = document.getElementById('widgetCodeModal');
+            const title   = document.getElementById('widgetCodeModalTitle');
+            const content = document.getElementById('widgetCodeContent');
+            title.textContent = `Source: ${widgetName}`;
+            content.innerHTML = '<em style="color:#888;">Loading…</em>';
+            modal.style.display = 'block';
+            try {
+                const vListResp = await authenticatedFetch(`/admin/widgets/versions?widget_id=${encodeURIComponent(widgetID)}`);
+                if (!vListResp || !vListResp.ok) throw new Error('Failed to fetch version list');
+                const vListData = await vListResp.json();
+                const versions  = vListData.versions || [];
+                if (versions.length === 0) { content.textContent = '(no versions available)'; return; }
+                const vResp = await authenticatedFetch(`/admin/widgets/version?widget_id=${encodeURIComponent(widgetID)}&version=${versions[0].version}`);
+                if (!vResp || !vResp.ok) throw new Error('Failed to fetch widget content');
+                const vData = await vResp.json();
+                content.textContent = vData.html_content || '(empty)';
+            } catch (e) {
+                content.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        function closeWidgetCodeModal() {
+            document.getElementById('widgetCodeModal').style.display = 'none';
         }
 
         async function cloneCommunityWidget(widgetID, widgetName, widgetDescription) {

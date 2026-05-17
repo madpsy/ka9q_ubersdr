@@ -9146,12 +9146,12 @@ function resetStationIdColor() {
                             ${isMine ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                         </div>
                     </div>
-                    <div style="display:flex;gap:6px;">
+                    <div style="display:flex;flex-direction:column;gap:5px;">
                         ${isEnabled
-                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;flex:1;">Remove</button>`
-                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;flex:1;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;">Remove</button>`
+                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
-                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;flex:1;" title="Clone to My Widgets and open editor">📋 Clone</button>
+                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;" title="Clone to My Widgets and open editor">📋 Clone</button>
                     </div>`;
                 grid.appendChild(card);
             });

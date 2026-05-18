@@ -2299,6 +2299,7 @@
                             <div id="widgetEditorPanel" style="display: none; margin-top: 16px; padding: 16px; background: #fff; border-radius: 6px; border: 1px solid #c5cae9;">
                                 <h4 style="margin: 0 0 12px 0; color: #283593;" id="widgetEditorTitle">New Widget</h4>
                                 <input type="hidden" id="widgetEditorID" value="">
+                                <input type="hidden" id="widgetEditorVersion" value="">
                                 <div class="config-field" style="margin-bottom: 12px;">
                                     <label style="font-weight: 500; color: #555; display: block; margin-bottom: 4px;">Name</label>
                                     <input type="text" id="widgetEditorName" placeholder="My Widget" maxlength="50"
@@ -2340,6 +2341,7 @@
                                     <button class="btn" onclick="saveWidget(false)" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
                                     <button class="btn" onclick="saveWidget(true)" style="font-size: 13px; padding: 7px 16px; background:#5a67d8;">💾 Save &amp; Close</button>
                                     <button class="btn btn-secondary" onclick="cloneCurrentWidget()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Clone this widget as a new unsaved copy">🔁 Clone</button>
+                                    <button class="btn btn-secondary" onclick="downloadWidgetHTML()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Download HTML content as a file">⬇️ Download</button>
                                     <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px; margin-left:0;">Cancel</button>
                                 </div>
                             </div>
@@ -9365,6 +9367,7 @@ function resetStationIdColor() {
                 // Pre-fill the editor with cloned content and open it
                 const cloneName = widgetName + ' (Clone)';
                 document.getElementById('widgetEditorID').value          = '';
+                document.getElementById('widgetEditorVersion').value     = '';
                 document.getElementById('widgetEditorName').value        = cloneName;
                 document.getElementById('widgetEditorDescription').value = widgetDescription || '';
                 document.getElementById('widgetEditorHTML').value        = html;
@@ -9383,6 +9386,7 @@ function resetStationIdColor() {
 
         function openNewWidgetEditor() {
             document.getElementById('widgetEditorID').value          = '';
+            document.getElementById('widgetEditorVersion').value     = '';
             document.getElementById('widgetEditorName').value        = '';
             document.getElementById('widgetEditorDescription').value = '';
             document.getElementById('widgetEditorHTML').value        = '';
@@ -9418,6 +9422,7 @@ function resetStationIdColor() {
                     if (found) { name = found.name; description = found.description || ''; isPublic = found.is_public; }
                 }
                 document.getElementById('widgetEditorID').value          = widgetID;
+                document.getElementById('widgetEditorVersion').value     = versions.length > 0 ? versions[0].version : '';
                 document.getElementById('widgetEditorName').value        = name;
                 document.getElementById('widgetEditorDescription').value = description;
                 document.getElementById('widgetEditorHTML').value        = html;
@@ -9441,6 +9446,7 @@ function resetStationIdColor() {
             const html        = document.getElementById('widgetEditorHTML').value;
             const cloneName   = (name || 'Widget') + ' (Clone)';
             document.getElementById('widgetEditorID').value          = '';
+            document.getElementById('widgetEditorVersion').value     = '';
             document.getElementById('widgetEditorName').value        = cloneName;
             document.getElementById('widgetEditorDescription').value = description;
             document.getElementById('widgetEditorHTML').value        = html;
@@ -9448,6 +9454,23 @@ function resetStationIdColor() {
             document.getElementById('widgetEditorTitle').textContent = `New Widget (cloned from ${name || 'Widget'})`;
             updateWidgetPublicOverlay();
             document.getElementById('widgetEditorPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function downloadWidgetHTML() {
+            const name    = document.getElementById('widgetEditorName').value.trim() || 'widget';
+            const version = document.getElementById('widgetEditorVersion').value.trim();
+            const html    = document.getElementById('widgetEditorHTML').value;
+            const safeName = name.replace(/[^a-z0-9_\-]/gi, '_');
+            const filename = version ? `${safeName}_v${version}.html` : `${safeName}.html`;
+            const blob = new Blob([html], { type: 'text/html' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function updateWidgetPublicOverlay() {

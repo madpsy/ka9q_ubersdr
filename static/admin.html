@@ -2953,6 +2953,36 @@
             </div>
         </div>
 
+        <!-- Community Widget Enable-or-Clone Modal -->
+        <div id="widgetEnableChoiceModal" class="modal">
+            <div class="modal-content" style="max-width:520px;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 id="widgetEnableChoiceTitle" style="margin:0;font-size:16px;">Enable Widget</h3>
+                    <button onclick="closeWidgetEnableChoiceModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <p style="margin:0 0 16px 0;font-size:14px;color:#444;">How would you like to use this widget?</p>
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <!-- Follow option -->
+                        <div style="border:1px solid #c5cae9;border-radius:8px;padding:14px 16px;background:#f5f7ff;">
+                            <div style="font-weight:600;font-size:14px;color:#283593;margin-bottom:6px;">🔗 Follow Public Version</div>
+                            <div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:12px;">Always uses the latest published version. Will automatically receive updates when the author publishes a new version.</div>
+                            <button class="btn" id="widgetEnableChoiceFollowBtn" style="font-size:12px;padding:5px 16px;">Follow</button>
+                        </div>
+                        <!-- Clone option -->
+                        <div style="border:1px solid #c8e6c9;border-radius:8px;padding:14px 16px;background:#f1f8f1;">
+                            <div style="font-weight:600;font-size:14px;color:#1b5e20;margin-bottom:6px;">📋 Clone to My Widgets</div>
+                            <div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:12px;">Copies the current version locally. Won't follow future updates — you stay in control. Safer if you want a stable, unchanging widget.</div>
+                            <button class="btn btn-secondary" id="widgetEnableChoiceCloneBtn" style="font-size:12px;padding:5px 16px;">Clone</button>
+                        </div>
+                    </div>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;flex-shrink:0;">
+                    <button class="btn btn-secondary" onclick="closeWidgetEnableChoiceModal()" style="margin-left:0;">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Auto-Calibration Modal -->
         <div id="autoCalibrationModal" class="modal">
             <div class="modal-content" style="max-width: 600px;">
@@ -9207,7 +9237,7 @@ function resetStationIdColor() {
                     <div style="display:grid;grid-template-columns:1fr;gap:5px;width:100%;">
                         ${isEnabled
                             ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Disable</button>`
-                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            : `<button class="btn" onclick="promptEnableOrClone('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
                         <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="Clone to My Widgets and open editor">Clone</button>
                         <button class="btn btn-secondary" onclick="viewWidgetCode('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="View widget source code">View Code</button>
@@ -9523,6 +9553,35 @@ function resetStationIdColor() {
             } catch (e) {
                 showAlert('Error deleting widget: ' + e.message, 'error');
             }
+        }
+
+        function promptEnableOrClone(widgetID, widgetName, widgetDescription) {
+            const modal = document.getElementById('widgetEnableChoiceModal');
+            document.getElementById('widgetEnableChoiceTitle').textContent = `Enable "${widgetName}"`;
+
+            const followBtn = document.getElementById('widgetEnableChoiceFollowBtn');
+            const cloneBtn  = document.getElementById('widgetEnableChoiceCloneBtn');
+
+            // Replace buttons to clear any previous listeners
+            const newFollowBtn = followBtn.cloneNode(true);
+            const newCloneBtn  = cloneBtn.cloneNode(true);
+            followBtn.parentNode.replaceChild(newFollowBtn, followBtn);
+            cloneBtn.parentNode.replaceChild(newCloneBtn, cloneBtn);
+
+            newFollowBtn.addEventListener('click', () => {
+                closeWidgetEnableChoiceModal();
+                enableWidget(widgetID);
+            });
+            newCloneBtn.addEventListener('click', () => {
+                closeWidgetEnableChoiceModal();
+                cloneCommunityWidget(widgetID, widgetName, widgetDescription);
+            });
+
+            modal.style.display = 'block';
+        }
+
+        function closeWidgetEnableChoiceModal() {
+            document.getElementById('widgetEnableChoiceModal').style.display = 'none';
         }
 
         async function enableWidget(widgetID) {

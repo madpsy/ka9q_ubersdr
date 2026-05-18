@@ -678,6 +678,7 @@
             white-space: nowrap;
         }
         .btn-open-cm-editor:hover { background: #5a6fd6; }
+        .btn-open-cm-editor:disabled { background: #b0b8c8; cursor: not-allowed; opacity: 0.6; }
         .cm-field-btn-row {
             display: flex;
             align-items: center;
@@ -2321,12 +2322,8 @@
                                             <span style="font-weight: 400; color: #888; font-size: 12px;">(max 512 KB)</span>
                                         </label>
                                         <button id="widgetOpenEditorBtn" class="btn-open-cm-editor"
-                                            onclick="openCmEditorModal(
-                                                document.getElementById('widgetEditorHTML'),
-                                                null,
-                                                'Widget HTML Content',
-                                                function(v){ document.getElementById('widgetEditorHTML').value = v; }
-                                            )" title="Open in CodeMirror editor">✏️ Open in Editor</button>
+                                            onclick="openWidgetHtmlInCmEditor()"
+                                            title="Open in CodeMirror editor">✏️ Open in Editor</button>
                                     </div>
                                     <div style="position:relative;">
                                         <textarea id="widgetEditorHTML" rows="12"
@@ -9512,6 +9509,13 @@ function resetStationIdColor() {
             openEdtrBtn.title        = isPublic
                 ? 'Dismiss the public-widget warning before opening the editor'
                 : 'Open in CodeMirror editor';
+        }
+
+        function openWidgetHtmlInCmEditor() {
+            const ta = document.getElementById('widgetEditorHTML');
+            openCmEditorModal(ta, null, 'Widget HTML Content', function(v) {
+                document.getElementById('widgetEditorHTML').value = v;
+            });
         }
 
         function dismissPublicOverlay() {

@@ -545,7 +545,7 @@ if [ -f "$ACTUAL_HOME/ubersdr/docker-compose.yml" ] && [ $FORCE_COMPOSE -eq 0 ];
 
     # Attempt to merge any new services/volumes from the upstream template
     if [ $YQ_AVAILABLE -eq 1 ] && [ -x "$ACTUAL_HOME/ubersdr/merge-compose.sh" ]; then
-        bash "$ACTUAL_HOME/ubersdr/merge-compose.sh" "$ACTUAL_HOME/ubersdr/docker-compose.yml" || \
+        bash "$ACTUAL_HOME/ubersdr/merge-compose.sh" "$ACTUAL_HOME/ubersdr/docker-compose.yml" --exclude=caddy || \
             echo "Warning: merge-compose.sh encountered an error. docker-compose.yml unchanged."
     else
         echo "Skipping new container check (yq unavailable or merge-compose.sh not found)."

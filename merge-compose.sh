@@ -16,12 +16,14 @@
 #   - A merge log is written alongside the compose file recording what changed
 #
 # Usage:
-#   merge-compose.sh <compose-file> [template-url]
+#   merge-compose.sh <compose-file> [--exclude=svc1,svc2,...] [template-url]
 #
 # Arguments:
-#   compose-file   Path to the user's docker-compose.yml (required)
-#   template-url   URL to fetch the upstream template from (optional,
-#                  defaults to the canonical GitHub location)
+#   compose-file        Path to the user's docker-compose.yml (required)
+#   --exclude=svc,...   Comma-separated list of service names to never add,
+#                       even if they are missing from the user's file (optional)
+#   template-url        URL to fetch the upstream template from (optional,
+#                       defaults to the canonical GitHub location)
 #
 # Exit codes:
 #   0  Success (including "nothing to do")
@@ -29,13 +31,51 @@
 
 # Do NOT use set -e; we handle all errors explicitly to ensure cleanup runs.
 
-TEMPLATE_URL="${2:-https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml}"
 COMPOSE_FILE="${1:-}"
+EXCLUDE_LIST=""
+TEMPLATE_URL=""
+
+# Parse remaining arguments (order-independent after compose-file)
+shift || true
+for arg in "$@"; do
+    case "$arg" in
+        --exclude=*)
+            EXCLUDE_LIST="${arg#--exclude=}"
+            ;;
+        http://*|https://*)
+            TEMPLATE_URL="$arg"
+            ;;
+        *)
+            echo "Warning: Unknown argument ignored: $arg"
+            ;;
+    esac
+done
+
+TEMPLATE_URL="${TEMPLATE_URL:-https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml}"
+
 YQ_BIN="/usr/local/bin/yq"
 BACKUP_FILE=""
 TEMPLATE_FILE=""
 TMP_FILE=""
 ADDED_ITEMS=()   # Accumulates names of successfully added services/volumes
+
+# --- Check if a service name is in the exclude list ---
+is_excluded() {
+    local name="$1"
+    # Empty exclude list - nothing is excluded
+    [ -z "$EXCLUDE_LIST" ] && return 1
+    # Split EXCLUDE_LIST on commas and compare each entry
+    local IFS=','
+    for entry in $EXCLUDE_LIST; do
+        # Trim whitespace
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+        if [ "$entry" = "$name" ]; then
+            return 0  # excluded
+        fi
+    done
+    return 1  # not excluded
+}
 
 # --- Cleanup handler ---
 # Called on EXIT (normal or error). Removes temp files.
@@ -135,6 +175,12 @@ while IFS= read -r svc; do
     # Skip empty lines
     [ -z "$svc" ] && continue
 
+    # Skip if service is in the exclude list
+    if is_excluded "$svc"; then
+        echo "  Skipping excluded service: $svc"
+        continue
+    fi
+
     # Check if service already exists in user file
     exists=$("$YQ_BIN" ".services | has(\"$svc\")" "$COMPOSE_FILE" 2>/dev/null)
     if [ "$exists" != "true" ]; then
@@ -183,6 +229,12 @@ done < <("$YQ_BIN" '.services | keys | .[]' "$TEMPLATE_FILE" 2>/dev/null)
 while IFS= read -r vol; do
     # Skip empty lines
     [ -z "$vol" ] && continue
+
+    # Skip if volume is in the exclude list
+    if is_excluded "$vol"; then
+        echo "  Skipping excluded volume: $vol"
+        continue
+    fi
 
     # Check if volume already exists in user file
     exists=$("$YQ_BIN" ".volumes | has(\"$vol\")" "$COMPOSE_FILE" 2>/dev/null)

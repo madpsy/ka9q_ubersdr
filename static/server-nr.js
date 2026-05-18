@@ -121,6 +121,10 @@ function populateFilterSelect(filters) {
     // Restore active filter selection if still available
     if (state.activeFilter && filters.some(f => f.name === state.activeFilter)) {
         sel.value = state.activeFilter;
+    } else {
+        // Default to NR4 if available, otherwise leave the first option selected
+        const nr4 = filters.find(f => f.name.toLowerCase() === 'nr4');
+        if (nr4) sel.value = nr4.name;
     }
     onFilterSelectChange();
 }

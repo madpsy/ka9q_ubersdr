@@ -867,9 +867,10 @@
                          Hidden by default; shown by fetchSiteDescription() when data.dsp.enabled=true. -->
                     <div id="server-nr-btn-wrapper" style="display:none; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
                         <button
+                            id="server-nr-open-btn"
                             onclick="openServerNR()"
                             title="Open server-side DSP noise reduction (runs in ubersdr-dsp container)"
-                            style="width: 100%; padding: 6px 10px; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; letter-spacing: 0.3px; transition: opacity 0.15s;"
+                            style="width: 100%; padding: 6px 10px; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; letter-spacing: 0.3px; transition: background 0.2s, opacity 0.15s;"
                             onmouseover="this.style.opacity='0.85'"
                             onmouseout="this.style.opacity='1'"
                         >🖥 Server NR (DSP Insert)</button>

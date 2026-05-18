@@ -3086,6 +3086,13 @@ function handleMessage(msg) {
             serverNRForwardToPopout(msg);
             break;
         case 'dsp_status':
+            // Cache so we can replay it when the popout reopens
+            _lastDspStatus = msg;
+            // Update the Server NR button in the noise-reduction card
+            updateServerNRButton(
+                !!(msg.info && msg.info.enabled),
+                (msg.info && msg.info.filter) || null
+            );
             // Forward DSP enable/disable confirmation to the popout
             serverNRForwardToPopout(msg);
             break;
@@ -3107,6 +3114,29 @@ function handleMessage(msg) {
 
 /** Reference to the open Server NR popout window (null when closed). */
 let _serverNRPopout = null;
+
+/** Last dsp_status message received from the server — replayed when popout reopens. */
+let _lastDspStatus = null;
+
+/**
+ * Update the "Server NR (DSP Insert)" button in the noise-reduction card to
+ * reflect the current DSP state: green + filter name when active, purple when idle.
+ * @param {boolean} enabled
+ * @param {string|null} filterName
+ */
+function updateServerNRButton(enabled, filterName) {
+    const btn = document.getElementById('server-nr-open-btn');
+    if (!btn) return;
+    if (enabled && filterName) {
+        btn.style.background = 'linear-gradient(135deg, #1a9e4a, #27ae60)';
+        btn.textContent = `🖥 Server NR — ${filterName.toUpperCase()} ✓`;
+        btn.title = `Server-side DSP active: ${filterName.toUpperCase()} — click to open controls`;
+    } else {
+        btn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+        btn.textContent = '🖥 Server NR (DSP Insert)';
+        btn.title = 'Open server-side DSP noise reduction (runs in ubersdr-dsp container)';
+    }
+}
 
 /**
  * Open (or focus) the Server-Side Noise Reduction popout window.
@@ -3223,6 +3253,12 @@ window.addEventListener('message', (event) => {
             } else {
                 // Not connected — tell the popout
                 serverNRSendConnectionState();
+            }
+
+            // Replay the last known DSP status so the popout knows whether NR
+            // is already active and which filter is selected (handles reopen case).
+            if (_lastDspStatus) {
+                serverNRForwardToPopout(_lastDspStatus);
             }
             break;
         }

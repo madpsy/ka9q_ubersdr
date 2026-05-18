@@ -3225,6 +3225,14 @@ window.addEventListener('message', (event) => {
                 break;
             }
 
+            // Replay the last known DSP status FIRST so the popout has
+            // state.enabled = true before dsp_filters arrives.  This ensures
+            // handleFiltersResponse() sees the correct enabled state and does not
+            // clobber the ACTIVE badge / message with "DISABLED / Select a filter".
+            if (_lastDspStatus) {
+                serverNRForwardToPopout(_lastDspStatus);
+            }
+
             // Fast-path: DSP enabled and we already know the filter names from
             // /api/description (mirrors how the desktop client works).
             // Send an immediate response so the popout can show the filter selector
@@ -3253,12 +3261,6 @@ window.addEventListener('message', (event) => {
             } else {
                 // Not connected — tell the popout
                 serverNRSendConnectionState();
-            }
-
-            // Replay the last known DSP status so the popout knows whether NR
-            // is already active and which filter is selected (handles reopen case).
-            if (_lastDspStatus) {
-                serverNRForwardToPopout(_lastDspStatus);
             }
             break;
         }

@@ -467,19 +467,28 @@ function handleFiltersResponse(info) {
         return;
     }
 
-    // Update status badge from "LOADING…" to "DISABLED"
-    setStatus('DISABLED', 'disabled');
-
     populateFilterSelect(state.filters);
     updateButtonStates();
 
-    // Only show the hint message if we don't yet have full param details
-    // (i.e. this is the fast-path response with empty params arrays).
-    const hasParams = state.filters.some(f => f.params && f.params.length > 0);
-    if (!hasParams) {
-        showMessage(`${state.filters.length} filter(s) available. Loading parameters…`, 'info');
+    // Update status badge and message based on current NR state.
+    // The full WS dsp_filters response may arrive before or after _lastDspStatus
+    // is replayed, so we must handle both cases.
+    if (state.enabled && state.activeFilter) {
+        // NR is already active — show the active status (don't clobber it).
+        setStatus(`ACTIVE — ${state.activeFilter.toUpperCase()}`, 'enabled');
+        showMessage(`Server-side noise reduction active (${state.activeFilter}).`, 'success');
     } else {
-        showMessage(`${state.filters.length} filter(s) available. Select a filter to enable it.`, 'info');
+        // Update status badge from "LOADING…" to "DISABLED"
+        setStatus('DISABLED', 'disabled');
+
+        // Only show the hint message if we don't yet have full param details
+        // (i.e. this is the fast-path response with empty params arrays).
+        const hasParams = state.filters.some(f => f.params && f.params.length > 0);
+        if (!hasParams) {
+            showMessage(`${state.filters.length} filter(s) available. Loading parameters…`, 'info');
+        } else {
+            showMessage(`${state.filters.length} filter(s) available. Select a filter to enable it.`, 'info');
+        }
     }
 }
 

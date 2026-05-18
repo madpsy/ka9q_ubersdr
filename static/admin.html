@@ -9517,6 +9517,15 @@ function resetStationIdColor() {
             if (!name)        { showAlert('Widget name is required.', 'error'); return; }
             if (!html.trim()) { showAlert('Widget HTML content is required.', 'error'); return; }
 
+            if (pub) {
+                const confirmed = confirm(
+                    'This widget is marked as public.\n\n' +
+                    'Your code will be visible to the entire community and any changes you save will take effect immediately for all users who have this widget enabled.\n\n' +
+                    'Are you sure you want to save and publish?'
+                );
+                if (!confirmed) return;
+            }
+
             try {
                 const endpoint = id ? '/admin/widgets/update' : '/admin/widgets/create';
                 const body     = id

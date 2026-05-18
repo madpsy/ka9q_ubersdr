@@ -2277,20 +2277,20 @@
 
                         <!-- Sub-tab bar -->
                         <div style="display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #9fa8da;">
-                            <button id="widgetSubTabMyBtn"
-                                onclick="switchWidgetSubTab('my')"
-                                style="padding: 8px 18px; border: none; background: #3f51b5; color: #fff; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px; margin-right: 4px;">
-                                My Widgets
-                            </button>
                             <button id="widgetSubTabBrowseBtn"
                                 onclick="switchWidgetSubTab('browse')"
-                                style="padding: 8px 18px; border: none; background: #e8eaf6; color: #3f51b5; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px;">
+                                style="padding: 8px 18px; border: none; background: #3f51b5; color: #fff; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px; margin-right: 4px;">
                                 Community Widgets
+                            </button>
+                            <button id="widgetSubTabMyBtn"
+                                onclick="switchWidgetSubTab('my')"
+                                style="padding: 8px 18px; border: none; background: #e8eaf6; color: #3f51b5; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px;">
+                                My Widgets
                             </button>
                         </div>
 
                         <!-- My Widgets sub-tab -->
-                        <div id="widgetSubTabMy">
+                        <div id="widgetSubTabMy" style="display: none;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                 <span style="font-size: 13px; color: #555;">Widgets you have created on this instance.</span>
                                 <div style="display:flex;align-items:center;gap:14px;">
@@ -2367,7 +2367,7 @@
                         </div>
 
                         <!-- Community Widgets sub-tab -->
-                        <div id="widgetSubTabBrowse" style="display: none;">
+                        <div id="widgetSubTabBrowse">
                             <!-- Community browser -->
                             <div>
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
@@ -3557,7 +3557,7 @@
                 document.getElementById('uiTab').classList.add('active');
                 document.getElementById('uiButtons').style.display = 'flex';
                 loadAdminUIConfig();
-                switchWidgetSubTab('my');
+                switchWidgetSubTab('browse');
             } else if (tab === 'proxy') {
                 document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('proxyTab').classList.add('active');

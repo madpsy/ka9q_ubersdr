@@ -2337,11 +2337,13 @@
                                         Make public (visible to community)
                                     </label>
                                 </div>
+                                <input type="file" id="widgetUploadInput" accept=".html,text/html" style="display:none;" onchange="uploadWidgetHTML(this)">
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <button class="btn" onclick="saveWidget(false)" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
                                     <button class="btn" onclick="saveWidget(true)" style="font-size: 13px; padding: 7px 16px; background:#5a67d8;">💾 Save &amp; Close</button>
                                     <button class="btn btn-secondary" onclick="cloneCurrentWidget()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Clone this widget as a new unsaved copy">🔁 Clone</button>
                                     <button class="btn btn-secondary" onclick="downloadWidgetHTML()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Download HTML content as a file">⬇️ Download</button>
+                                    <button class="btn btn-secondary" onclick="document.getElementById('widgetUploadInput').value='';document.getElementById('widgetUploadInput').click();" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Upload an HTML file into the editor">⬆️ Upload</button>
                                     <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px; margin-left:0;">Cancel</button>
                                 </div>
                             </div>
@@ -9471,6 +9473,20 @@ function resetStationIdColor() {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        function uploadWidgetHTML(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('widgetEditorHTML').value = e.target.result;
+                showAlert(`Loaded "${file.name}" into editor.`, 'success');
+            };
+            reader.onerror = function() {
+                showAlert('Failed to read file.', 'error');
+            };
+            reader.readAsText(file);
         }
 
         function updateWidgetPublicOverlay() {

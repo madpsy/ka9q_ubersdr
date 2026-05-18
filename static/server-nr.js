@@ -144,8 +144,10 @@ function onFilterSelectChange() {
     desc.textContent = filter.description || '';
     renderParams(filter.params || []);
 
-    // If already enabled (or available and connected), auto-apply the new filter
-    if (state.connected && state.available) {
+    // Only auto-apply when the insert is already active — this handles live filter
+    // swaps while NR is running.  Do NOT auto-enable on initial population or reopen,
+    // as that would re-send set_dsp when the user hasn't asked for it.
+    if (state.enabled) {
         debounceEnableDSP();
     }
 }

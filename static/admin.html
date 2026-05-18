@@ -2331,6 +2331,7 @@
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <button class="btn" onclick="saveWidget(false)" style="font-size: 13px; padding: 7px 16px;">💾 Save</button>
                                     <button class="btn" onclick="saveWidget(true)" style="font-size: 13px; padding: 7px 16px; background:#5a67d8;">💾 Save &amp; Close</button>
+                                    <button class="btn btn-secondary" onclick="cloneCurrentWidget()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Clone this widget as a new unsaved copy">🔁 Clone</button>
                                     <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px; margin-left:0;">Cancel</button>
                                 </div>
                             </div>
@@ -9498,6 +9499,21 @@ function resetStationIdColor() {
 
         function closeWidgetEditor() {
             document.getElementById('widgetEditorPanel').style.display = 'none';
+        }
+
+        function cloneCurrentWidget() {
+            const name        = document.getElementById('widgetEditorName').value.trim();
+            const description = document.getElementById('widgetEditorDescription').value;
+            const html        = document.getElementById('widgetEditorHTML').value;
+            const cloneName   = (name || 'Widget') + ' (Clone)';
+            document.getElementById('widgetEditorID').value          = '';
+            document.getElementById('widgetEditorName').value        = cloneName;
+            document.getElementById('widgetEditorDescription').value = description;
+            document.getElementById('widgetEditorHTML').value        = html;
+            document.getElementById('widgetEditorPublic').checked    = false;
+            document.getElementById('widgetEditorTitle').textContent = `New Widget (cloned from ${name || 'Widget'})`;
+            updateWidgetPublicOverlay();
+            document.getElementById('widgetEditorPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         function updateWidgetPublicOverlay() {

@@ -8660,8 +8660,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load amateur radio bands
         loadBands();
 
-        // Load bookmarks
+        // Load bookmarks (and refresh every 5 minutes)
         loadBookmarks();
+        setInterval(() => loadBookmarks(), 5 * 60 * 1000);
 
         // Populate band selector dropdown after bands are loaded
         setTimeout(() => {

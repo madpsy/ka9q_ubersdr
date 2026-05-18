@@ -1535,23 +1535,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize bandwidth control (tooltips and keyboard shortcuts)
     initializeBandwidthControl();
 
-    // Restore combined/individual bandwidth slider preference
+    // Restore combined/individual bandwidth slider preference.
+    // Default is combined; only switch to individual if explicitly saved.
     try {
         const savedBwSliderMode = localStorage.getItem('bandwidthSliderMode');
-        if (savedBwSliderMode === 'combined') {
-            const pill         = document.getElementById('bandwidth-dot-toggle');
+        if (savedBwSliderMode === 'individual') {
+            const pill          = document.getElementById('bandwidth-dot-toggle');
             const combinedGroup = document.getElementById('bandwidth-combined-group');
-            const lowGroup     = document.getElementById('bandwidth-low-group');
-            const highGroup    = document.getElementById('bandwidth-high-group');
+            const lowGroup      = document.getElementById('bandwidth-low-group');
+            const highGroup     = document.getElementById('bandwidth-high-group');
             if (pill && combinedGroup && lowGroup && highGroup) {
-                pill.classList.add('active');
-                pill.textContent = '◄\u2009►';
-                pill.title = 'Click to switch back to two individual sliders';
-                lowGroup.style.display      = 'none';
-                highGroup.style.display     = 'none';
-                combinedGroup.style.display = '';
-                syncCombinedSliderToMode();
+                pill.classList.remove('active');
+                pill.textContent = '►';
+                pill.title = 'Click to switch to a single combined bandwidth slider';
+                lowGroup.style.display      = '';
+                highGroup.style.display     = '';
+                combinedGroup.style.display = 'none';
             }
+        } else {
+            // Combined is already the HTML default; just sync the slider value.
+            syncCombinedSliderToMode();
         }
     } catch (e) { /* localStorage unavailable */ }
 

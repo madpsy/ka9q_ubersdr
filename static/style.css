@@ -1089,6 +1089,10 @@ body {
 .bookmark-search-results {
     position: fixed;   /* set by JS portal; declaration here for specificity */
     z-index: 99999;
+    /* Match the visual scale of .controls (transform:scale(0.75) on desktop).
+       The portal lives on <body> so it doesn't inherit the transform — we
+       compensate with font-size so text matches the scaled-down UI. */
+    font-size: 0.75em;
     background: #2c3e50;
     border: 1px solid #7f8c8d;
     border-top: none;
@@ -2185,6 +2189,11 @@ input[type="range"]::-moz-range-thumb {
         overflow: visible !important;
         margin-top: 0;
         margin-bottom: 0;
+    }
+
+    /* On mobile .controls is scale(0.9) not scale(0.75) — adjust portal font */
+    .bookmark-search-results {
+        font-size: 0.9em;
     }
 
     /* Pull the second control-group (freq readout + search + mode buttons) up

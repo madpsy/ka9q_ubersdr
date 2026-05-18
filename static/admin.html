@@ -2281,7 +2281,15 @@
                         <div id="widgetSubTabMy">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                 <span style="font-size: 13px; color: #555;">Widgets you have created on this instance.</span>
-                                <button class="btn" onclick="openNewWidgetEditor()" style="font-size: 13px; padding: 6px 14px;">+ New Widget</button>
+                                <div style="display:flex;align-items:center;gap:14px;">
+                                    <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:#555;cursor:pointer;">
+                                        <input type="checkbox" id="myWidgetFilterPublic" checked onchange="filterMyWidgets()"> 🌐 Public
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:#555;cursor:pointer;">
+                                        <input type="checkbox" id="myWidgetFilterPrivate" checked onchange="filterMyWidgets()"> 🔒 Private
+                                    </label>
+                                    <button class="btn" onclick="openNewWidgetEditor()" style="font-size: 13px; padding: 6px 14px;">+ New Widget</button>
+                                </div>
                             </div>
                             <div id="myWidgetsList" style="min-height: 60px;">
                                 <div class="loading"><div class="spinner"></div><p>Loading…</p></div>
@@ -9085,6 +9093,8 @@ function resetStationIdColor() {
             }
         }
 
+        let _myWidgetsCache = [];
+
         async function loadMyWidgets() {
             const container = document.getElementById('myWidgetsList');
             container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading\u2026</p></div>';
@@ -9096,35 +9106,48 @@ function resetStationIdColor() {
                 const widgets = data.widgets || [];
                 // Track which widget_ids belong to this instance so community list can badge them
                 myWidgetIDs = new Set(widgets.map(w => w.widget_id));
-                if (widgets.length === 0) {
-                    container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets yet. Click \u201c+ New Widget\u201d to create one.</em>';
-                    return;
-                }
-                container.innerHTML = '';
-                widgets.forEach(w => {
-                    const row = document.createElement('div');
-                    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;gap:10px;';
-                    const isEnabled = enabledWidgetIDs.includes(w.widget_id);
-                    row.innerHTML = `
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
-                            ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
-                            <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}</div>
-                        </div>
-                        <div style="display:flex;gap:6px;flex-shrink:0;">
-                            ${isEnabled
-                                ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Disable</button>`
-                                : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
-                            }
-                            <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
-                            <button class="btn btn-secondary" onclick="openWidgetHistory('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;margin-left:0;" title="View version history">🕐 History</button>
-                            <button class="btn btn-danger"    onclick="deleteWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
-                        </div>`;
-                    container.appendChild(row);
-                });
+                _myWidgetsCache = widgets;
+                filterMyWidgets();
             } catch (e) {
-                container.innerHTML = `<div style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</div>`;
+                document.getElementById('myWidgetsList').innerHTML = `<div style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</div>`;
             }
+        }
+
+        function filterMyWidgets() {
+            const container   = document.getElementById('myWidgetsList');
+            const showPublic  = document.getElementById('myWidgetFilterPublic')?.checked ?? true;
+            const showPrivate = document.getElementById('myWidgetFilterPrivate')?.checked ?? true;
+            const widgets     = _myWidgetsCache.filter(w => w.is_public ? showPublic : showPrivate);
+            if (_myWidgetsCache.length === 0) {
+                container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets yet. Click \u201c+ New Widget\u201d to create one.</em>';
+                return;
+            }
+            if (widgets.length === 0) {
+                container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets match the current filter.</em>';
+                return;
+            }
+            container.innerHTML = '';
+            widgets.forEach(w => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;gap:10px;';
+                const isEnabled = enabledWidgetIDs.includes(w.widget_id);
+                row.innerHTML = `
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
+                        ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
+                        <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-shrink:0;">
+                        ${isEnabled
+                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Disable</button>`
+                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                        }
+                        <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
+                        <button class="btn btn-secondary" onclick="openWidgetHistory('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;margin-left:0;" title="View version history">🕐 History</button>
+                        <button class="btn btn-danger"    onclick="deleteWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
+                    </div>`;
+                container.appendChild(row);
+            });
         }
 
         async function loadEnabledWidgets() {

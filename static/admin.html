@@ -9182,7 +9182,7 @@ function resetStationIdColor() {
                         </div>
                         ${w.description ? `<div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.4;">${escapeHtml(w.description)}</div>` : ''}
                         <div style="font-size:10px;color:#888;line-height:1.4;">
-                            by <strong style="color:#3f51b5;">${escapeHtml(w.callsign || w.instance_id || 'unknown')}</strong>
+                            by <strong style="color:#3f51b5;">${w.instance_id ? `<a href="https://instances.ubersdr.org/?uuid=${encodeURIComponent(w.instance_id)}" target="_blank" rel="noopener" style="color:#3f51b5;text-decoration:underline;">${escapeHtml(w.callsign || w.instance_id)}</a>` : escapeHtml(w.callsign || 'unknown')}</strong>
                             &middot; v${w.version}
                             ${isMine ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                         </div>

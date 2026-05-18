@@ -131,20 +131,29 @@ while IFS= read -r svc; do
     if [ "$exists" != "true" ]; then
         echo "  Adding new service: $svc"
 
-        # Write merged result to temp file
-        if ! "$YQ_BIN" eval-all "
-            select(fi==0) |
-            .services.\"$svc\" = select(fi==1).services.\"$svc\"
-        " "$COMPOSE_FILE" "$TEMPLATE_FILE" > "$TMP_FILE" 2>/dev/null; then
+        # Use load() to read the service definition from the template file.
+        # This avoids the eval-all/select(fi==N) pattern where the RHS
+        # select() evaluates in the wrong file context and returns null.
+        if ! "$YQ_BIN" ".services.\"$svc\" = load(\"$TEMPLATE_FILE\").services.\"$svc\"" \
+            "$COMPOSE_FILE" > "$TMP_FILE" 2>/dev/null; then
             echo "  Warning: yq failed to merge service '$svc' - skipping"
             rm -f "$TMP_FILE"
             MERGE_ERROR=1
             continue
         fi
 
-        # Validate the merged result before replacing the live file
+        # Validate the merged result is non-empty and parseable
         if ! "$YQ_BIN" '.' "$TMP_FILE" > /dev/null 2>&1; then
             echo "  Warning: merged result for service '$svc' is not valid YAML - skipping"
+            rm -f "$TMP_FILE"
+            MERGE_ERROR=1
+            continue
+        fi
+
+        # Verify the service was actually written as a mapping (not null)
+        svc_type=$("$YQ_BIN" ".services.\"$svc\" | type" "$TMP_FILE" 2>/dev/null)
+        if [ "$svc_type" != "!!map" ]; then
+            echo "  Warning: merged service '$svc' is not a mapping (got: $svc_type) - skipping"
             rm -f "$TMP_FILE"
             MERGE_ERROR=1
             continue
@@ -170,18 +179,16 @@ while IFS= read -r vol; do
     if [ "$exists" != "true" ]; then
         echo "  Adding new volume: $vol"
 
-        # Write merged result to temp file
-        if ! "$YQ_BIN" eval-all "
-            select(fi==0) |
-            .volumes.\"$vol\" = select(fi==1).volumes.\"$vol\"
-        " "$COMPOSE_FILE" "$TEMPLATE_FILE" > "$TMP_FILE" 2>/dev/null; then
+        # Use load() to read the volume definition from the template file.
+        if ! "$YQ_BIN" ".volumes.\"$vol\" = load(\"$TEMPLATE_FILE\").volumes.\"$vol\"" \
+            "$COMPOSE_FILE" > "$TMP_FILE" 2>/dev/null; then
             echo "  Warning: yq failed to merge volume '$vol' - skipping"
             rm -f "$TMP_FILE"
             MERGE_ERROR=1
             continue
         fi
 
-        # Validate the merged result before replacing the live file
+        # Validate the merged result is parseable
         if ! "$YQ_BIN" '.' "$TMP_FILE" > /dev/null 2>&1; then
             echo "  Warning: merged result for volume '$vol' is not valid YAML - skipping"
             rm -f "$TMP_FILE"

@@ -489,6 +489,13 @@ fi
 echo "Creating ~/ubersdr directory..."
 sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_HOME/ubersdr"
 
+# Fetch merge-compose.sh now that the ubersdr directory exists, so it is
+# available for the compose merge step below
+echo "Fetching merge-compose.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/merge-compose.sh \
+    -o "$ACTUAL_HOME/ubersdr/merge-compose.sh" 2>/dev/null || true
+chmod +x "$ACTUAL_HOME/ubersdr/merge-compose.sh" 2>/dev/null || true
+
 # Generate SSH key for GoTTY container if it doesn't exist
 SSH_KEY_PATH="$ACTUAL_HOME/.ssh/ubersdr_gotty_key"
 if [ ! -f "$SSH_KEY_PATH" ]; then
@@ -640,10 +647,6 @@ chmod +x "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
 echo "Fetching manage_addons.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/manage_addons.sh -o "$ACTUAL_HOME/ubersdr/manage_addons.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/manage_addons.sh"
-
-echo "Fetching merge-compose.sh script..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/merge-compose.sh -o "$ACTUAL_HOME/ubersdr/merge-compose.sh"
-chmod +x "$ACTUAL_HOME/ubersdr/merge-compose.sh"
 
 echo "Fetching start-support.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/start-support.sh -o "$ACTUAL_HOME/ubersdr/start-support.sh"

@@ -1061,6 +1061,7 @@ body {
 /* Bookmark search box */
 .bookmark-search-wrap {
     position: relative;
+    z-index: 10010;
     margin-top: 4px;
     margin-bottom: 2px;
 }
@@ -2180,6 +2181,20 @@ input[type="range"]::-moz-range-thumb {
     /* Hide addons dropdown on mobile */
     #addons-dropdown {
         display: none !important;
+    }
+
+    /* Bookmark search wrap must not clip its absolutely-positioned dropdown */
+    .bookmark-search-wrap {
+        overflow: visible !important;
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    /* Pull the second control-group (freq readout + search + mode buttons) up
+       so there's no visible gap between the bookmark dropdowns above and the
+       search box below — the grid gap is cancelled by a negative margin. */
+    .controls .control-group:nth-child(2) {
+        margin-top: -10px;
     }
 
     /* Hide green per-digit frequency readout on mobile */

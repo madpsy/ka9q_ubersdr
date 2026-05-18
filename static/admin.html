@@ -9237,7 +9237,7 @@ function resetStationIdColor() {
                     <div style="display:grid;grid-template-columns:1fr;gap:5px;width:100%;">
                         ${isEnabled
                             ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Disable</button>`
-                            : `<button class="btn" onclick="promptEnableOrClone('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            : `<button class="btn" onclick="promptEnableOrClone('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}',${isMine});" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
                         <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="Clone to My Widgets and open editor">Clone</button>
                         <button class="btn btn-secondary" onclick="viewWidgetCode('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="View widget source code">View Code</button>
@@ -9555,7 +9555,12 @@ function resetStationIdColor() {
             }
         }
 
-        function promptEnableOrClone(widgetID, widgetName, widgetDescription) {
+        function promptEnableOrClone(widgetID, widgetName, widgetDescription, isMine) {
+            // If the user owns this widget, skip the modal and enable directly
+            if (isMine) {
+                enableWidget(widgetID);
+                return;
+            }
             const modal = document.getElementById('widgetEnableChoiceModal');
             document.getElementById('widgetEnableChoiceTitle').textContent = `Enable "${widgetName}"`;
 

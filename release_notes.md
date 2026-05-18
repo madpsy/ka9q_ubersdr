@@ -8,7 +8,7 @@
 - Added **Automatic SAM -> AM transition** when no signal for 2 seconds as weak signals mean no PLL lock and so no audio
 - Added **Code Editor** in Admin -> Server, for custom Head and Body HTML, to make it easier to view/edit code
 - Added **Globe View** on the Digital Spots map with toggle and URL parameters
-- Added **UI Widgets** which are HTML blobs injected into the main page. This allows adding custom widgets or modifying the page in general. Users can share theirs for others to use on their instance (UI tab in Admin)
+- Added **UI Widgets** which are HTML blobs injected into the main UI. This allows creating custom widgets including modifying aspects of the UI. Users can share widgets for others to use (UI tab in Admin). Creating and sharing widgets is for public instances only; private instances can use shared widgets from public instances.
 - Added **Server Side DSP** (experimental so button is under Audio Filters -> Noise Reduction) to provide more advanced noise reduction before audio is sent to the client. Runs as a new container. Each type can be enabled/disabled (some use more CPU than others). Extensions feed from audio before these DSP filters so are not affected. Needs enabled via Config -> DSP
 
 ### Bug Fixes

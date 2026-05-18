@@ -2310,13 +2310,21 @@
                                         HTML Content
                                         <span style="font-weight: 400; color: #888; font-size: 12px;">(max 512 KB — rendered in a sandboxed iframe)</span>
                                     </label>
-                                    <textarea id="widgetEditorHTML" rows="12"
-                                        placeholder="&lt;!-- Your widget HTML here --&gt;"
-                                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
+                                    <div style="position:relative;">
+                                        <textarea id="widgetEditorHTML" rows="12"
+                                            placeholder="&lt;!-- Your widget HTML here --&gt;"
+                                            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
+                                        <div id="widgetEditorPublicOverlay" style="display:none;position:absolute;inset:0;background:rgba(255,248,225,0.96);border-radius:4px;border:2px solid #f9a825;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;gap:12px;box-sizing:border-box;">
+                                            <div style="font-size:22px;">🌐</div>
+                                            <div style="font-weight:700;font-size:14px;color:#e65100;">This widget is public</div>
+                                            <div style="font-size:13px;color:#555;line-height:1.6;max-width:380px;">Any changes you save will be published immediately and visible to the entire community. For iterating or testing new ideas, consider working in a private clone first — then promote your changes here once you're satisfied.</div>
+                                            <button class="btn" onclick="document.getElementById('widgetEditorPublicOverlay').style.display='none';" style="font-size:13px;padding:6px 20px;background:#f9a825;color:#fff;border:none;">I Understand</button>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
                                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #555;">
-                                        <input type="checkbox" id="widgetEditorPublic">
+                                        <input type="checkbox" id="widgetEditorPublic" onchange="updateWidgetPublicOverlay()">
                                         Make public (visible to community)
                                     </label>
                                 </div>
@@ -9428,6 +9436,7 @@ function resetStationIdColor() {
                 document.getElementById('widgetEditorPublic').checked    = false;
                 document.getElementById('widgetEditorTitle').textContent = `New Widget (cloned from ${widgetName})`;
                 document.getElementById('widgetEditorPanel').style.display = 'block';
+                updateWidgetPublicOverlay();
 
                 // Switch to My Widgets sub-tab so the editor is visible
                 switchWidgetSubTab('my');
@@ -9445,6 +9454,7 @@ function resetStationIdColor() {
             document.getElementById('widgetEditorPublic').checked    = false;
             document.getElementById('widgetEditorTitle').textContent = 'New Widget';
             document.getElementById('widgetEditorPanel').style.display  = 'block';
+            updateWidgetPublicOverlay();
             document.getElementById('widgetEditorName').focus();
         }
 
@@ -9479,6 +9489,7 @@ function resetStationIdColor() {
                 document.getElementById('widgetEditorPublic').checked    = isPublic;
                 document.getElementById('widgetEditorTitle').textContent = `Edit: ${name}`;
                 document.getElementById('widgetEditorPanel').style.display  = 'block';
+                updateWidgetPublicOverlay();
                 document.getElementById('widgetEditorName').focus();
             } catch (e) {
                 showAlert('Error loading widget: ' + e.message, 'error');
@@ -9487,6 +9498,12 @@ function resetStationIdColor() {
 
         function closeWidgetEditor() {
             document.getElementById('widgetEditorPanel').style.display = 'none';
+        }
+
+        function updateWidgetPublicOverlay() {
+            const isPublic = document.getElementById('widgetEditorPublic').checked;
+            const overlay  = document.getElementById('widgetEditorPublicOverlay');
+            overlay.style.display = isPublic ? 'flex' : 'none';
         }
 
         async function saveWidget(closeAfter = true) {

@@ -2330,6 +2330,15 @@
                                             <button class="btn" onclick="dismissPublicOverlay();" style="font-size:13px;padding:6px 20px;background:#f9a825;color:#fff;border:none;">I Understand</button>
                                         </div>
                                     </div>
+                                    <div class="cm-field-btn-row" style="margin-top: 6px;">
+                                        <button class="btn-open-cm-editor"
+                                            onclick="openCmEditorModal(
+                                                document.getElementById('widgetEditorHTML'),
+                                                null,
+                                                'Widget HTML Content',
+                                                function(v){ document.getElementById('widgetEditorHTML').value = v; }
+                                            )">✏️ Open in Editor</button>
+                                    </div>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
                                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #555;">
@@ -24248,10 +24257,12 @@ Referer: ${log.referer}`;
     let _cmEditorInstance = null;   // active EditorView
     let _cmTargetInput    = null;   // the <textarea> to sync back to
     let _cmTargetPath     = null;   // config path string e.g. 'server.custom_body_html'
+    let _cmOnSave         = null;   // optional callback(value) — used instead of saveConfig()
 
-    function openCmEditorModal(inputEl, configPath, title) {
+    function openCmEditorModal(inputEl, configPath, title, onSave = null) {
         _cmTargetInput = inputEl;
         _cmTargetPath  = configPath;
+        _cmOnSave      = onSave || null;
 
         // Set modal title
         document.getElementById('cm-modal-title').textContent = 'Edit: ' + title;
@@ -24288,16 +24299,27 @@ Referer: ${log.referer}`;
         _cmEditorInstance = null;
         _cmTargetInput    = null;
         _cmTargetPath     = null;
+        _cmOnSave         = null;
     }
 
     async function saveCmEditorModal(andClose = true) {
-        if (!_cmEditorInstance || !_cmTargetInput || !_cmTargetPath) return;
+        if (!_cmEditorInstance || !_cmTargetInput) return;
 
-        // Flush editor value into currentConfig
+        // Flush editor value back to the source textarea
         const newVal = _cmEditorInstance.state.doc.toString();
         _cmTargetInput.value = newVal;
         _cmTargetInput.dispatchEvent(new Event('change'));
-        updateConfigValue(_cmTargetPath, newVal);
+
+        if (_cmOnSave) {
+            // Widget path: just invoke the callback (no server config save)
+            _cmOnSave(newVal);
+        } else {
+            // Config path: persist to server config
+            if (!_cmTargetPath) return;
+            updateConfigValue(_cmTargetPath, newVal);
+            // Trigger the same save as the "Save Configuration" button
+            await saveConfig();
+        }
 
         if (andClose) {
             // Close modal so the save feedback is visible on the main page
@@ -24305,10 +24327,8 @@ Referer: ${log.referer}`;
             _cmEditorInstance = null;
             _cmTargetInput    = null;
             _cmTargetPath     = null;
+            _cmOnSave         = null;
         }
-
-        // Trigger the same save as the "Save Configuration" button
-        await saveConfig();
     }
 
     async function cmClipboardCopy(btn) {

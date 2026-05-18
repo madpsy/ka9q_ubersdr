@@ -2315,10 +2315,19 @@
                                         style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: vertical;"></textarea>
                                 </div>
                                 <div class="config-field" style="margin-bottom: 12px;">
-                                    <label style="font-weight: 500; color: #555; display: block; margin-bottom: 4px;">
-                                        HTML Content
-                                        <span style="font-weight: 400; color: #888; font-size: 12px;">(max 512 KB)</span>
-                                    </label>
+                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                                        <label style="font-weight: 500; color: #555; margin: 0;">
+                                            HTML Content
+                                            <span style="font-weight: 400; color: #888; font-size: 12px;">(max 512 KB)</span>
+                                        </label>
+                                        <button id="widgetOpenEditorBtn" class="btn-open-cm-editor"
+                                            onclick="openCmEditorModal(
+                                                document.getElementById('widgetEditorHTML'),
+                                                null,
+                                                'Widget HTML Content',
+                                                function(v){ document.getElementById('widgetEditorHTML').value = v; }
+                                            )" title="Open in CodeMirror editor">✏️ Open in Editor</button>
+                                    </div>
                                     <div style="position:relative;">
                                         <textarea id="widgetEditorHTML" rows="12"
                                             placeholder="&lt;!-- Your widget HTML here --&gt;"
@@ -2329,15 +2338,6 @@
                                             <div style="font-size:13px;color:#555;line-height:1.6;max-width:380px;">Any changes you save will be published immediately and visible to the entire community. For iterating or testing new ideas, consider working in a private clone first — then promote your changes here once you're satisfied.</div>
                                             <button class="btn" onclick="dismissPublicOverlay();" style="font-size:13px;padding:6px 20px;background:#f9a825;color:#fff;border:none;">I Understand</button>
                                         </div>
-                                    </div>
-                                    <div class="cm-field-btn-row" style="margin-top: 6px;">
-                                        <button class="btn-open-cm-editor"
-                                            onclick="openCmEditorModal(
-                                                document.getElementById('widgetEditorHTML'),
-                                                null,
-                                                'Widget HTML Content',
-                                                function(v){ document.getElementById('widgetEditorHTML').value = v; }
-                                            )">✏️ Open in Editor</button>
                                     </div>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
@@ -9499,14 +9499,19 @@ function resetStationIdColor() {
         }
 
         function updateWidgetPublicOverlay() {
-            const isPublic  = document.getElementById('widgetEditorPublic').checked;
-            const overlay   = document.getElementById('widgetEditorPublicOverlay');
-            const uploadBtn = document.getElementById('widgetUploadBtn');
+            const isPublic    = document.getElementById('widgetEditorPublic').checked;
+            const overlay     = document.getElementById('widgetEditorPublicOverlay');
+            const uploadBtn   = document.getElementById('widgetUploadBtn');
+            const openEdtrBtn = document.getElementById('widgetOpenEditorBtn');
             overlay.style.display    = isPublic ? 'flex' : 'none';
             uploadBtn.disabled       = isPublic;
             uploadBtn.title          = isPublic
                 ? 'Dismiss the public-widget warning before uploading'
                 : 'Upload an HTML file into the editor';
+            openEdtrBtn.disabled     = isPublic;
+            openEdtrBtn.title        = isPublic
+                ? 'Dismiss the public-widget warning before opening the editor'
+                : 'Open in CodeMirror editor';
         }
 
         function dismissPublicOverlay() {
@@ -24311,23 +24316,34 @@ Referer: ${log.referer}`;
         _cmTargetInput.dispatchEvent(new Event('change'));
 
         if (_cmOnSave) {
-            // Widget path: just invoke the callback (no server config save)
+            // Widget path: flush value via callback then save the widget
             _cmOnSave(newVal);
+            if (andClose) {
+                document.getElementById('cm-editor-modal').classList.remove('open');
+                _cmEditorInstance = null;
+                _cmTargetInput    = null;
+                _cmTargetPath     = null;
+                _cmOnSave         = null;
+            }
+            // Delegate to the widget save function (closeAfter=false so the
+            // widget editor panel stays open after the modal closes)
+            await saveWidget(false);
         } else {
             // Config path: persist to server config
             if (!_cmTargetPath) return;
             updateConfigValue(_cmTargetPath, newVal);
+
+            if (andClose) {
+                // Close modal so the save feedback is visible on the main page
+                document.getElementById('cm-editor-modal').classList.remove('open');
+                _cmEditorInstance = null;
+                _cmTargetInput    = null;
+                _cmTargetPath     = null;
+                _cmOnSave         = null;
+            }
+
             // Trigger the same save as the "Save Configuration" button
             await saveConfig();
-        }
-
-        if (andClose) {
-            // Close modal so the save feedback is visible on the main page
-            document.getElementById('cm-editor-modal').classList.remove('open');
-            _cmEditorInstance = null;
-            _cmTargetInput    = null;
-            _cmTargetPath     = null;
-            _cmOnSave         = null;
         }
     }
 

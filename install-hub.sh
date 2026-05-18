@@ -338,6 +338,28 @@ else
     curl -sSL https://get.docker.com/ | sh
 fi
 
+# Install yq v4 for YAML-aware docker-compose merging
+# Failure is non-fatal - merge will be skipped if yq is unavailable
+YQ_BIN="/usr/local/bin/yq"
+YQ_AVAILABLE=0
+
+if [ -x "$YQ_BIN" ] && "$YQ_BIN" --version 2>&1 | grep -q "version v4"; then
+    echo "yq v4 already installed."
+    YQ_AVAILABLE=1
+else
+    echo "Installing yq v4..."
+    if wget -qO /tmp/yq_download \
+        "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH_SUFFIX}" 2>/dev/null; then
+        sudo mv /tmp/yq_download "$YQ_BIN"
+        sudo chmod +x "$YQ_BIN"
+        echo "yq v4 installed successfully."
+        YQ_AVAILABLE=1
+    else
+        rm -f /tmp/yq_download
+        echo "Warning: Failed to download yq v4. New container merging will be skipped."
+    fi
+fi
+
 # Add current user to docker and sudo groups
 if groups $ACTUAL_USER | grep -q '\bdocker\b'; then
     echo "User $ACTUAL_USER is already in the docker group."
@@ -513,6 +535,14 @@ fi
 if [ -f "$ACTUAL_HOME/ubersdr/docker-compose.yml" ] && [ $FORCE_COMPOSE -eq 0 ]; then
     echo "Existing docker-compose.yml detected. Preserving file."
     echo "Hint: Use --force-compose to overwrite docker-compose.yml."
+
+    # Attempt to merge any new services/volumes from the upstream template
+    if [ $YQ_AVAILABLE -eq 1 ] && [ -x "$ACTUAL_HOME/ubersdr/merge-compose.sh" ]; then
+        bash "$ACTUAL_HOME/ubersdr/merge-compose.sh" "$ACTUAL_HOME/ubersdr/docker-compose.yml" || \
+            echo "Warning: merge-compose.sh encountered an error. docker-compose.yml unchanged."
+    else
+        echo "Skipping new container check (yq unavailable or merge-compose.sh not found)."
+    fi
 else
     # Capture existing port configuration before overwriting
     if [ -f "$ACTUAL_HOME/ubersdr/docker-compose.yml" ]; then
@@ -610,6 +640,10 @@ chmod +x "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
 echo "Fetching manage_addons.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/manage_addons.sh -o "$ACTUAL_HOME/ubersdr/manage_addons.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/manage_addons.sh"
+
+echo "Fetching merge-compose.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/merge-compose.sh -o "$ACTUAL_HOME/ubersdr/merge-compose.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/merge-compose.sh"
 
 echo "Fetching start-support.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/start-support.sh -o "$ACTUAL_HOME/ubersdr/start-support.sh"

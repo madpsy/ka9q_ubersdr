@@ -10147,6 +10147,148 @@ window.selectBookmarkFromDropdown = selectBookmarkFromDropdown;
 window.populateLocalBookmarkSelector = populateLocalBookmarkSelector;
 window.selectLocalBookmarkFromDropdown = selectLocalBookmarkFromDropdown;
 
+// ─── Bookmark search box ──────────────────────────────────────────────────────
+
+let _bmSearchActiveIdx = -1;
+
+function bookmarkSearch(query) {
+    const results = document.getElementById('bookmark-search-results');
+    if (!results) return;
+
+    _bmSearchActiveIdx = -1;
+
+    const q = (query || '').trim().toLowerCase();
+    if (!q) {
+        results.style.display = 'none';
+        results.innerHTML = '';
+        return;
+    }
+
+    // Gather server bookmarks
+    const serverBMs = (window.bookmarks || [])
+        .filter(b => b.source !== 'local')   // exclude local entries that may have been merged in
+        .map(b => ({ ...b, _isLocal: false }));
+
+    // Gather local bookmarks
+    const localBMs = (window.localBookmarksUI
+        ? window.localBookmarksUI.manager.getAll()
+        : []
+    ).map(b => ({ ...b, _isLocal: true }));
+
+    const all = [...serverBMs, ...localBMs];
+
+    const matched = all.filter(b => {
+        const name    = (b.name    || '').toLowerCase();
+        const group   = (b.group   || '').toLowerCase();
+        const comment = (b.comment || '').toLowerCase();
+        const freq    = String(b.frequency || '');
+        const mode    = (b.mode    || '').toLowerCase();
+        return name.includes(q) || group.includes(q) || comment.includes(q) ||
+               freq.includes(q) || mode.includes(q);
+    });
+
+    results.innerHTML = '';
+
+    if (matched.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'bm-search-noresult';
+        li.textContent = 'No bookmarks found';
+        results.appendChild(li);
+        results.style.display = 'block';
+        return;
+    }
+
+    matched.forEach((bm, idx) => {
+        const li = document.createElement('li');
+        const freqKHz = (bm.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
+        const star = bm._isLocal
+            ? '<span class="bm-search-star">⭐</span>'
+            : '';
+        li.innerHTML = `${star}<strong>${_escHtml(bm.name)}</strong> <span style="color:#95a5a6;">[${freqKHz} kHz · ${(bm.mode || '').toUpperCase()}]</span>`;
+        li.dataset.idx = idx;
+        li.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // prevent input blur before click fires
+            _bmSearchSelect(bm);
+        });
+        results.appendChild(li);
+    });
+
+    results.style.display = 'block';
+}
+
+function bookmarkSearchFocus() {
+    const input = document.getElementById('bookmark-search');
+    if (input && input.value.trim()) {
+        bookmarkSearch(input.value);
+    }
+}
+
+function bookmarkSearchKeydown(e) {
+    const results = document.getElementById('bookmark-search-results');
+    if (!results || results.style.display === 'none') return;
+
+    const items = results.querySelectorAll('li:not(.bm-search-noresult)');
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _bmSearchActiveIdx = Math.min(_bmSearchActiveIdx + 1, items.length - 1);
+        _bmSearchHighlight(items);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _bmSearchActiveIdx = Math.max(_bmSearchActiveIdx - 1, 0);
+        _bmSearchHighlight(items);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_bmSearchActiveIdx >= 0 && items[_bmSearchActiveIdx]) {
+            items[_bmSearchActiveIdx].dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        }
+    } else if (e.key === 'Escape') {
+        _bmSearchClose();
+    }
+}
+
+function _bmSearchHighlight(items) {
+    items.forEach((li, i) => {
+        li.classList.toggle('bm-search-active', i === _bmSearchActiveIdx);
+    });
+    if (_bmSearchActiveIdx >= 0) {
+        items[_bmSearchActiveIdx].scrollIntoView({ block: 'nearest' });
+    }
+}
+
+function _bmSearchSelect(bm) {
+    if (window.handleBookmarkClick) {
+        window.handleBookmarkClick(bm, false, false);
+    }
+    _bmSearchClose();
+}
+
+function _bmSearchClose() {
+    const input   = document.getElementById('bookmark-search');
+    const results = document.getElementById('bookmark-search-results');
+    if (input)   input.value = '';
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    _bmSearchActiveIdx = -1;
+}
+
+function _escHtml(str) {
+    return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const wrap = document.querySelector('.bookmark-search-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+        const results = document.getElementById('bookmark-search-results');
+        if (results) results.style.display = 'none';
+    }
+});
+
+window.bookmarkSearch     = bookmarkSearch;
+window.bookmarkSearchFocus = bookmarkSearchFocus;
+window.bookmarkSearchKeydown = bookmarkSearchKeydown;
+
 // Audio Buffer Configuration Functions
 function openBufferConfigModal() {
     const modal = document.getElementById('buffer-config-modal');

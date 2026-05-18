@@ -11,6 +11,8 @@ NO_CACHE=""
 BUILD_FLUENT_BIT=false
 SKIP_GEOIP=false
 NO_GIT=false
+PLATFORM="linux/amd64,linux/arm64"   # default: both arches
+PUSH_OR_LOAD="--push"                 # default: push to registry
 
 for arg in "$@"; do
     case $arg in
@@ -34,9 +36,23 @@ for arg in "$@"; do
             NO_GIT=true
             echo "Running in --no-git mode (will skip git commit and push)"
             ;;
+        --amd64)
+            PLATFORM="linux/amd64"
+            PUSH_OR_LOAD="--load"
+            TAG_LATEST=false
+            NO_GIT=true
+            echo "Building amd64 only — image will be loaded into local Docker (not pushed)"
+            ;;
+        --arm64)
+            PLATFORM="linux/arm64"
+            PUSH_OR_LOAD="--push"
+            TAG_LATEST=false
+            NO_GIT=true
+            echo "Building arm64 only — image will be pushed to registry (not tagged latest)"
+            ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git]"
+            echo "Usage: $0 [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--amd64] [--arm64]"
             exit 1
             ;;
     esac
@@ -152,12 +168,12 @@ if [ "$TAG_LATEST" = true ]; then
     UBERSDR_TAGS="$UBERSDR_TAGS -t $IMAGE:latest"
 fi
 
-# Build and push UberSDR multi-arch image
-echo "Building and pushing UberSDR Docker image (linux/amd64 + linux/arm64)..."
+# Build UberSDR image
+echo "Building UberSDR Docker image (platform: $PLATFORM)..."
 if ! docker buildx build $NO_CACHE \
-    --platform linux/amd64,linux/arm64 \
+    --platform "$PLATFORM" \
     $UBERSDR_TAGS \
-    --push \
+    $PUSH_OR_LOAD \
     -f docker/Dockerfile .; then
     echo "ERROR: UberSDR Docker build failed!"
     exit 1
@@ -172,11 +188,11 @@ if [ "$BUILD_FLUENT_BIT" = true ]; then
         FLUENT_TAGS="$FLUENT_TAGS -t $FLUENT_BIT_IMAGE:latest"
     fi
 
-    echo "Building and pushing Fluent Bit Docker image (linux/amd64 + linux/arm64)..."
+    echo "Building Fluent Bit Docker image (platform: $PLATFORM)..."
     if ! docker buildx build $NO_CACHE \
-        --platform linux/amd64,linux/arm64 \
+        --platform "$PLATFORM" \
         $FLUENT_TAGS \
-        --push \
+        $PUSH_OR_LOAD \
         -f docker/Dockerfile.fluent-bit docker/; then
         echo "ERROR: Fluent Bit Docker build failed!"
         exit 1

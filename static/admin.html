@@ -2350,8 +2350,8 @@
                             <!-- Enabled widgets list -->
                             <div style="margin-bottom: 20px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <strong style="font-size: 14px; color: #283593;">Enabled Widgets</strong>
-                                    <span id="enabledWidgetsCount" style="font-size: 12px; color: #888;">0 / 10</span>
+                                    <strong style="font-size: 14px; color: #283593;">Enabled Widgets <span id="enabledWidgetsCount" style="font-size: 12px; color: #888; font-weight: 400;">0 / 10</span></strong>
+                                    <button class="btn btn-danger" onclick="disableAllWidgets()" style="font-size: 12px; padding: 4px 12px;" title="Disable all currently enabled widgets">Disable All</button>
                                 </div>
                                 <div id="enabledWidgetsList" style="min-height: 40px; padding: 10px; background: #fff; border-radius: 6px; border: 1px solid #c5cae9;">
                                     <em style="color: #aaa; font-size: 13px;">No widgets enabled yet.</em>
@@ -9690,6 +9690,28 @@ function resetStationIdColor() {
                 }
             } catch (e) {
                 if (!silent) showAlert('Error removing widget: ' + e.message, 'error');
+            }
+        }
+
+        async function disableAllWidgets() {
+            if (enabledWidgetIDs.length === 0) { showAlert('No widgets are currently enabled.', 'info'); return; }
+            if (!confirm(`Disable all ${enabledWidgetIDs.length} enabled widget(s)?`)) return;
+            try {
+                const resp = await authenticatedFetch('/admin/widgets/enabled', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: [] })
+                });
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                showAlert('All widgets disabled.', 'success');
+                await loadEnabledWidgets();
+                renderCommunityWidgets(allCommunityWidgets);
+                if (document.getElementById('widgetSubTabMy').style.display !== 'none') {
+                    loadMyWidgets();
+                }
+            } catch (e) {
+                showAlert('Error disabling all widgets: ' + e.message, 'error');
             }
         }
 

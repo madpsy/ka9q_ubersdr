@@ -1061,7 +1061,6 @@ body {
 /* Bookmark search box */
 .bookmark-search-wrap {
     position: relative;
-    z-index: 10010;
     margin-top: 4px;
     margin-bottom: 2px;
 }
@@ -1088,11 +1087,8 @@ body {
 }
 
 .bookmark-search-results {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    z-index: 9999;
+    position: fixed;   /* set by JS portal; declaration here for specificity */
+    z-index: 99999;
     background: #2c3e50;
     border: 1px solid #7f8c8d;
     border-top: none;
@@ -2068,7 +2064,8 @@ input[type="range"]::-moz-range-thumb {
         gap: 15px;
         width: auto;
         max-width: 100%;
-        overflow: hidden; /* Prevent long bookmark names from stretching the grid */
+        /* overflow must stay visible so the bookmark search dropdown can escape
+           the grid and float over the audio controls below */
     }
 
     /* Prevent <select> elements with long option text from expanding the controls.

@@ -10147,26 +10147,50 @@ window.selectBookmarkFromDropdown = selectBookmarkFromDropdown;
 window.populateLocalBookmarkSelector = populateLocalBookmarkSelector;
 window.selectLocalBookmarkFromDropdown = selectLocalBookmarkFromDropdown;
 
-// ─── Bookmark search box ──────────────────────────────────────────────────────
+// ─── Bookmark search box (portal dropdown) ────────────────────────────────────
+// The dropdown <ul> lives on <body> so it is never clipped by ancestor
+// overflow:hidden or transform stacking contexts (e.g. .controls scale(0.75)).
 
 let _bmSearchActiveIdx = -1;
+let _bmPortal = null;   // the body-level <ul>
+
+function _bmGetPortal() {
+    if (!_bmPortal) {
+        _bmPortal = document.createElement('ul');
+        _bmPortal.id = 'bookmark-search-results';
+        _bmPortal.className = 'bookmark-search-results';
+        _bmPortal.style.display = 'none';
+        _bmPortal.style.position = 'fixed';   // fixed so it escapes all transforms
+        document.body.appendChild(_bmPortal);
+    }
+    return _bmPortal;
+}
+
+function _bmPositionPortal() {
+    const input = document.getElementById('bookmark-search');
+    const portal = _bmGetPortal();
+    if (!input) return;
+
+    const rect = input.getBoundingClientRect();
+    portal.style.left  = rect.left + 'px';
+    portal.style.top   = (rect.bottom) + 'px';
+    portal.style.width = rect.width + 'px';
+}
 
 function bookmarkSearch(query) {
-    const results = document.getElementById('bookmark-search-results');
-    if (!results) return;
-
+    const portal = _bmGetPortal();
     _bmSearchActiveIdx = -1;
 
     const q = (query || '').trim().toLowerCase();
     if (!q) {
-        results.style.display = 'none';
-        results.innerHTML = '';
+        portal.style.display = 'none';
+        portal.innerHTML = '';
         return;
     }
 
     // Gather server bookmarks
     const serverBMs = (window.bookmarks || [])
-        .filter(b => b.source !== 'local')   // exclude local entries that may have been merged in
+        .filter(b => b.source !== 'local')
         .map(b => ({ ...b, _isLocal: false }));
 
     // Gather local bookmarks
@@ -10187,33 +10211,32 @@ function bookmarkSearch(query) {
                freq.includes(q) || mode.includes(q);
     });
 
-    results.innerHTML = '';
+    portal.innerHTML = '';
 
     if (matched.length === 0) {
         const li = document.createElement('li');
         li.className = 'bm-search-noresult';
         li.textContent = 'No bookmarks found';
-        results.appendChild(li);
-        results.style.display = 'block';
+        portal.appendChild(li);
+        _bmPositionPortal();
+        portal.style.display = 'block';
         return;
     }
 
-    matched.forEach((bm, idx) => {
+    matched.forEach((bm) => {
         const li = document.createElement('li');
         const freqKHz = (bm.frequency / 1000).toFixed(3).replace(/\.?0+$/, '');
-        const star = bm._isLocal
-            ? '<span class="bm-search-star">⭐</span>'
-            : '';
+        const star = bm._isLocal ? '<span class="bm-search-star">⭐</span>' : '';
         li.innerHTML = `${star}<strong>${_escHtml(bm.name)}</strong> <span style="color:#95a5a6;">[${freqKHz} kHz · ${(bm.mode || '').toUpperCase()}]</span>`;
-        li.dataset.idx = idx;
         li.addEventListener('mousedown', (e) => {
-            e.preventDefault(); // prevent input blur before click fires
+            e.preventDefault();
             _bmSearchSelect(bm);
         });
-        results.appendChild(li);
+        portal.appendChild(li);
     });
 
-    results.style.display = 'block';
+    _bmPositionPortal();
+    portal.style.display = 'block';
 }
 
 function bookmarkSearchFocus() {
@@ -10224,10 +10247,10 @@ function bookmarkSearchFocus() {
 }
 
 function bookmarkSearchKeydown(e) {
-    const results = document.getElementById('bookmark-search-results');
-    if (!results || results.style.display === 'none') return;
+    const portal = _bmGetPortal();
+    if (!portal || portal.style.display === 'none') return;
 
-    const items = results.querySelectorAll('li:not(.bm-search-noresult)');
+    const items = portal.querySelectorAll('li:not(.bm-search-noresult)');
     if (!items.length) return;
 
     if (e.key === 'ArrowDown') {
@@ -10265,10 +10288,11 @@ function _bmSearchSelect(bm) {
 }
 
 function _bmSearchClose() {
-    const input   = document.getElementById('bookmark-search');
-    const results = document.getElementById('bookmark-search-results');
-    if (input)   input.value = '';
-    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    const input  = document.getElementById('bookmark-search');
+    const portal = _bmGetPortal();
+    if (input)  input.value = '';
+    portal.style.display = 'none';
+    portal.innerHTML = '';
     _bmSearchActiveIdx = -1;
 }
 
@@ -10276,17 +10300,27 @@ function _escHtml(str) {
     return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Close dropdown when clicking outside
+// Close portal when clicking outside the input or the portal itself
 document.addEventListener('click', (e) => {
-    const wrap = document.querySelector('.bookmark-search-wrap');
-    if (wrap && !wrap.contains(e.target)) {
-        const results = document.getElementById('bookmark-search-results');
-        if (results) results.style.display = 'none';
+    const input  = document.getElementById('bookmark-search');
+    const portal = _bmGetPortal();
+    if (input && !input.contains(e.target) && !portal.contains(e.target)) {
+        portal.style.display = 'none';
     }
 });
 
-window.bookmarkSearch     = bookmarkSearch;
-window.bookmarkSearchFocus = bookmarkSearchFocus;
+// Reposition portal on scroll/resize so it tracks the input
+window.addEventListener('scroll', () => {
+    const portal = _bmGetPortal();
+    if (portal.style.display !== 'none') _bmPositionPortal();
+}, true);
+window.addEventListener('resize', () => {
+    const portal = _bmGetPortal();
+    if (portal.style.display !== 'none') _bmPositionPortal();
+});
+
+window.bookmarkSearch        = bookmarkSearch;
+window.bookmarkSearchFocus   = bookmarkSearchFocus;
 window.bookmarkSearchKeydown = bookmarkSearchKeydown;
 
 // Audio Buffer Configuration Functions

@@ -7,7 +7,8 @@
 # Existing services are NEVER modified, regardless of what changed upstream.
 #
 # Safety guarantees:
-#   - A timestamped backup is created before any modification
+#   - A timestamped backup is created only if there is something to merge,
+#     immediately before the first write to the live file
 #   - Each write goes to a .tmp file first; the live file is only replaced
 #     after the result is validated as parseable YAML
 #   - On any error the original file is restored from backup
@@ -44,6 +45,22 @@ cleanup() {
     rm -f "$TEMPLATE_FILE" "$TMP_FILE"
 }
 trap cleanup EXIT
+
+# --- Create backup on first write (lazy) ---
+# Called immediately before the first modification to the live file.
+# Subsequent calls are no-ops since BACKUP_FILE is already set.
+ensure_backup() {
+    if [ -n "$BACKUP_FILE" ]; then
+        return 0  # already created
+    fi
+    BACKUP_FILE="${COMPOSE_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
+    if ! cp "$COMPOSE_FILE" "$BACKUP_FILE"; then
+        echo "Error: Failed to create backup at $BACKUP_FILE - aborting"
+        rm -f "$TMP_FILE"
+        exit 1
+    fi
+    echo "  Backup created: $BACKUP_FILE"
+}
 
 # --- Restore backup and exit with error ---
 restore_and_fail() {
@@ -90,14 +107,6 @@ if ! "$YQ_BIN" '.services | keys' "$COMPOSE_FILE" > /dev/null 2>&1; then
     echo "Error: $COMPOSE_FILE does not appear to be a valid compose file (no 'services' key)"
     exit 1
 fi
-
-# --- Create timestamped backup before any modification ---
-BACKUP_FILE="${COMPOSE_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
-if ! cp "$COMPOSE_FILE" "$BACKUP_FILE"; then
-    echo "Error: Failed to create backup at $BACKUP_FILE - aborting"
-    exit 1
-fi
-echo "Backup created: $BACKUP_FILE"
 
 # --- Download template ---
 TEMPLATE_FILE="$(mktemp /tmp/docker-compose-template.XXXXXX.yml)"
@@ -159,7 +168,8 @@ while IFS= read -r svc; do
             continue
         fi
 
-        # Atomically replace the live file
+        # Create backup on first write, then atomically replace the live file
+        ensure_backup
         if ! mv "$TMP_FILE" "$COMPOSE_FILE"; then
             restore_and_fail "Failed to write updated compose file after merging service '$svc'"
         fi
@@ -196,7 +206,8 @@ while IFS= read -r vol; do
             continue
         fi
 
-        # Atomically replace the live file
+        # Create backup on first write, then atomically replace the live file
+        ensure_backup
         if ! mv "$TMP_FILE" "$COMPOSE_FILE"; then
             restore_and_fail "Failed to write updated compose file after merging volume '$vol'"
         fi
@@ -220,13 +231,14 @@ fi
 LOG_FILE="$(dirname "$COMPOSE_FILE")/merge-compose.log"
 
 if [ $ADDED -eq 0 ] && [ $MERGE_ERROR -eq 0 ]; then
+    # Nothing changed - no backup was created, nothing to clean up
     echo "  No new containers or volumes to add."
-    # Remove backup - file was not modified
-    rm -f "$BACKUP_FILE"
 else
     if [ $ADDED -gt 0 ]; then
         echo "  $ADDED new item(s) added to $(basename "$COMPOSE_FILE")."
-        echo "  Backup retained at: $BACKUP_FILE"
+        if [ -n "$BACKUP_FILE" ]; then
+            echo "  Backup retained at: $BACKUP_FILE"
+        fi
     fi
 
     if [ $MERGE_ERROR -ne 0 ]; then
@@ -245,7 +257,9 @@ else
         if [ $MERGE_ERROR -ne 0 ]; then
             echo "Warnings: some items could not be merged (check install output for details)"
         fi
-        echo "Backup: $BACKUP_FILE"
+        if [ -n "$BACKUP_FILE" ]; then
+            echo "Backup: $BACKUP_FILE"
+        fi
         echo ""
     } >> "$LOG_FILE"
 

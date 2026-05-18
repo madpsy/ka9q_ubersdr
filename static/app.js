@@ -3149,7 +3149,7 @@ function openServerNR() {
     }
 
     const w = 380;
-    const h = 560;
+    const h = 600;
     const left = Math.round(window.screenX + (window.outerWidth  - w) / 2);
     const top  = Math.round(window.screenY + (window.outerHeight - h) / 2);
 

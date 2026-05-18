@@ -10199,7 +10199,8 @@ function bookmarkSearch(query) {
         : []
     ).map(b => ({ ...b, _isLocal: true }));
 
-    const all = [...serverBMs, ...localBMs];
+    // Local bookmarks first so they appear at the top of results
+    const all = [...localBMs, ...serverBMs];
 
     const matched = all.filter(b => {
         const name    = (b.name    || '').toLowerCase();

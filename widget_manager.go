@@ -46,6 +46,7 @@ type widgetCacheEntry struct {
 	HTML        string
 	Name        string
 	Callsign    string
+	InstanceID  string
 	Description string
 	Version     int
 	FetchedAt   time.Time
@@ -236,6 +237,7 @@ func (wm *WidgetManager) refreshAll() {
 			HTML:        meta.HTMLContent,
 			Name:        meta.Name,
 			Callsign:    meta.Callsign,
+			InstanceID:  meta.InstanceID,
 			Description: meta.Description,
 			Version:     meta.Version,
 			FetchedAt:   time.Now(),
@@ -297,6 +299,7 @@ func (wm *WidgetManager) AddToCache(widgetID string) error {
 		HTML:        meta.HTMLContent,
 		Name:        meta.Name,
 		Callsign:    meta.Callsign,
+		InstanceID:  meta.InstanceID,
 		Description: meta.Description,
 		Version:     meta.Version,
 		FetchedAt:   time.Now(),
@@ -364,6 +367,7 @@ func (wm *WidgetManager) handleGetEnabled(w http.ResponseWriter, _ *http.Request
 		WidgetID    string `json:"widget_id"`
 		Name        string `json:"name"`
 		Callsign    string `json:"callsign,omitempty"`
+		InstanceID  string `json:"instance_id,omitempty"`
 		Description string `json:"description,omitempty"`
 		Cached      bool   `json:"cached"`
 		FetchedAt   string `json:"fetched_at,omitempty"`
@@ -376,6 +380,7 @@ func (wm *WidgetManager) handleGetEnabled(w http.ResponseWriter, _ *http.Request
 		if ok {
 			e.Name = entry.Name
 			e.Callsign = entry.Callsign
+			e.InstanceID = entry.InstanceID
 			e.Description = entry.Description
 			e.FetchedAt = entry.FetchedAt.UTC().Format(time.RFC3339)
 		}

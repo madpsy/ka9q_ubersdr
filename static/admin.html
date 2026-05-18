@@ -9102,7 +9102,7 @@ function resetStationIdColor() {
                         <div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                             <strong>${escapeHtml(w.name || '(unnamed)')}</strong>${cachedBadge}
                             ${myWidgetIDs.has(w.widget_id) ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
-                            ${w.callsign ? `<span style="color:#3f51b5;font-size:12px;margin-left:6px;">by ${escapeHtml(w.callsign)}</span>` : ''}
+                            ${(w.callsign || w.instance_id) ? `<span style="color:#3f51b5;font-size:12px;margin-left:6px;">by ${w.instance_id ? `<a href="https://instances.ubersdr.org/?uuid=${encodeURIComponent(w.instance_id)}" target="_blank" rel="noopener" style="color:#3f51b5;text-decoration:underline;">${escapeHtml(w.callsign || w.instance_id)}</a>` : escapeHtml(w.callsign)}</span>` : ''}
                         </div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                     </div>

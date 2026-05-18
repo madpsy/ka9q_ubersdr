@@ -9558,7 +9558,12 @@ function resetStationIdColor() {
                 if (closeAfter) closeWidgetEditor();
                 loadMyWidgets();
             } catch (e) {
-                showAlert('Error saving widget: ' + e.message, 'error');
+                const safeMsg = e.message
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\n/g, '<br>');
+                showAlert('Error saving widget:<br><code style="font-size:12px;white-space:pre-wrap;">' + safeMsg + '</code>', 'error', true, true);
             }
         }
 

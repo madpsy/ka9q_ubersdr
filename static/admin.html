@@ -2264,6 +2264,17 @@
                             You can create your own widgets or enable community widgets. Maximum <strong>10 enabled</strong> at once.
                         </p>
 
+                        <!-- Enabled Widgets (always visible) -->
+                        <div style="margin-bottom: 20px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <strong style="font-size: 14px; color: #283593;">Enabled Widgets <span id="enabledWidgetsCount" style="font-size: 12px; color: #888; font-weight: 400;">0 / 10</span></strong>
+                                <button class="btn btn-danger" onclick="disableAllWidgets()" style="font-size: 12px; padding: 4px 12px;" title="Disable all currently enabled widgets">Disable All</button>
+                            </div>
+                            <div id="enabledWidgetsList" style="min-height: 40px; padding: 10px; background: #fff; border-radius: 6px; border: 1px solid #c5cae9;">
+                                <em style="color: #aaa; font-size: 13px;">No widgets enabled yet.</em>
+                            </div>
+                        </div>
+
                         <!-- Sub-tab bar -->
                         <div style="display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #9fa8da;">
                             <button id="widgetSubTabMyBtn"
@@ -2274,7 +2285,7 @@
                             <button id="widgetSubTabBrowseBtn"
                                 onclick="switchWidgetSubTab('browse')"
                                 style="padding: 8px 18px; border: none; background: #e8eaf6; color: #3f51b5; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; font-size: 13px;">
-                                Browse &amp; Enable
+                                Community Widgets
                             </button>
                         </div>
 
@@ -2355,19 +2366,8 @@
                             </div>
                         </div>
 
-                        <!-- Browse & Enable sub-tab -->
+                        <!-- Community Widgets sub-tab -->
                         <div id="widgetSubTabBrowse" style="display: none;">
-                            <!-- Enabled widgets list -->
-                            <div style="margin-bottom: 20px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <strong style="font-size: 14px; color: #283593;">Enabled Widgets <span id="enabledWidgetsCount" style="font-size: 12px; color: #888; font-weight: 400;">0 / 10</span></strong>
-                                    <button class="btn btn-danger" onclick="disableAllWidgets()" style="font-size: 12px; padding: 4px 12px;" title="Disable all currently enabled widgets">Disable All</button>
-                                </div>
-                                <div id="enabledWidgetsList" style="min-height: 40px; padding: 10px; background: #fff; border-radius: 6px; border: 1px solid #c5cae9;">
-                                    <em style="color: #aaa; font-size: 13px;">No widgets enabled yet.</em>
-                                </div>
-                            </div>
-
                             <!-- Community browser -->
                             <div>
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">

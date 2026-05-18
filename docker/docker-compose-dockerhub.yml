@@ -91,12 +91,9 @@ services:
     cpu_shares: 2048
     init: true  # Enable tini init to reap zombie processes from background watchers
 
-    # Wait for ka9q-radio and ubersdr-dsp to be healthy before starting.
-    # Remove the ubersdr-dsp dependency if you are not using DSP noise reduction.
+    # Wait for ka9q-radio to be healthy before starting.
     depends_on:
       ka9q-radio:
-        condition: service_healthy
-      ubersdr-dsp:
         condition: service_healthy
 
     # Use external bridge network for multicast communication with radiod

@@ -2362,7 +2362,10 @@
                             <div>
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
                                     <strong style="font-size: 14px; color: #283593;">Community Widgets</strong>
-                                    <div style="display: flex; gap: 6px; align-items: center;">
+                                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:#555;cursor:pointer;white-space:nowrap;">
+                                            <input type="checkbox" id="communityFilterUnused" onchange="filterCommunityWidgets()"> Only show unused
+                                        </label>
                                         <input type="text" id="widgetSearchInput" placeholder="Search…"
                                             oninput="filterCommunityWidgets()"
                                             style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 180px;">
@@ -9211,14 +9214,19 @@ function resetStationIdColor() {
         }
 
         function filterCommunityWidgets() {
-            const q = (document.getElementById('widgetSearchInput').value || '').toLowerCase();
-            const filtered = q
-                ? allCommunityWidgets.filter(w =>
+            const q          = (document.getElementById('widgetSearchInput').value || '').toLowerCase();
+            const unusedOnly = document.getElementById('communityFilterUnused')?.checked ?? false;
+            let filtered = allCommunityWidgets;
+            if (q) {
+                filtered = filtered.filter(w =>
                     (w.name || '').toLowerCase().includes(q) ||
                     (w.description || '').toLowerCase().includes(q) ||
                     (w.callsign || '').toLowerCase().includes(q) ||
-                    (w.widget_id || '').toLowerCase().includes(q))
-                : allCommunityWidgets;
+                    (w.widget_id || '').toLowerCase().includes(q));
+            }
+            if (unusedOnly) {
+                filtered = filtered.filter(w => !enabledWidgetIDs.includes(w.widget_id));
+            }
             renderCommunityWidgets(filtered);
         }
 

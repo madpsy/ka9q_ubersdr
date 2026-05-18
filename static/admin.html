@@ -2327,7 +2327,7 @@
                                             <div style="font-size:22px;">🌐</div>
                                             <div style="font-weight:700;font-size:14px;color:#e65100;">This widget is public</div>
                                             <div style="font-size:13px;color:#555;line-height:1.6;max-width:380px;">Any changes you save will be published immediately and visible to the entire community. For iterating or testing new ideas, consider working in a private clone first — then promote your changes here once you're satisfied.</div>
-                                            <button class="btn" onclick="document.getElementById('widgetEditorPublicOverlay').style.display='none';" style="font-size:13px;padding:6px 20px;background:#f9a825;color:#fff;border:none;">I Understand</button>
+                                            <button class="btn" onclick="dismissPublicOverlay();" style="font-size:13px;padding:6px 20px;background:#f9a825;color:#fff;border:none;">I Understand</button>
                                         </div>
                                     </div>
                                 </div>
@@ -2343,7 +2343,7 @@
                                     <button class="btn" onclick="saveWidget(true)" style="font-size: 13px; padding: 7px 16px; background:#5a67d8;">💾 Save &amp; Close</button>
                                     <button class="btn btn-secondary" onclick="cloneCurrentWidget()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Clone this widget as a new unsaved copy">🔁 Clone</button>
                                     <button class="btn btn-secondary" onclick="downloadWidgetHTML()" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Download HTML content as a file">⬇️ Download</button>
-                                    <button class="btn btn-secondary" onclick="document.getElementById('widgetUploadInput').value='';document.getElementById('widgetUploadInput').click();" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Upload an HTML file into the editor">⬆️ Upload</button>
+                                    <button id="widgetUploadBtn" class="btn btn-secondary" onclick="document.getElementById('widgetUploadInput').value='';document.getElementById('widgetUploadInput').click();" style="font-size: 13px; padding: 7px 16px; margin-left:0;" title="Upload an HTML file into the editor">⬆️ Upload</button>
                                     <button class="btn btn-secondary" onclick="closeWidgetEditor()" style="font-size: 13px; padding: 7px 16px; margin-left:0;">Cancel</button>
                                 </div>
                             </div>
@@ -9490,9 +9490,21 @@ function resetStationIdColor() {
         }
 
         function updateWidgetPublicOverlay() {
-            const isPublic = document.getElementById('widgetEditorPublic').checked;
-            const overlay  = document.getElementById('widgetEditorPublicOverlay');
-            overlay.style.display = isPublic ? 'flex' : 'none';
+            const isPublic  = document.getElementById('widgetEditorPublic').checked;
+            const overlay   = document.getElementById('widgetEditorPublicOverlay');
+            const uploadBtn = document.getElementById('widgetUploadBtn');
+            overlay.style.display    = isPublic ? 'flex' : 'none';
+            uploadBtn.disabled       = isPublic;
+            uploadBtn.title          = isPublic
+                ? 'Dismiss the public-widget warning before uploading'
+                : 'Upload an HTML file into the editor';
+        }
+
+        function dismissPublicOverlay() {
+            document.getElementById('widgetEditorPublicOverlay').style.display = 'none';
+            const uploadBtn = document.getElementById('widgetUploadBtn');
+            uploadBtn.disabled = false;
+            uploadBtn.title    = 'Upload an HTML file into the editor';
         }
 
         async function saveWidget(closeAfter = true) {

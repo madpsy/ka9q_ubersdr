@@ -9068,6 +9068,15 @@ function resetStationIdColor() {
 
         async function loadEnabledWidgets() {
             try {
+                // Ensure myWidgetIDs is populated so "yours" badges render correctly
+                // on the enabled list even before the user visits the "My Widgets" tab.
+                if (myWidgetIDs.size === 0) {
+                    const r = await authenticatedFetch('/admin/widgets/mine');
+                    if (r && r.ok) {
+                        const d = await r.json();
+                        myWidgetIDs = new Set((d.widgets || []).map(w => w.widget_id));
+                    }
+                }
                 const resp = await authenticatedFetch('/admin/widgets/enabled');
                 if (!resp) return;
                 if (!resp.ok) throw new Error(await resp.text());

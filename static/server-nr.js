@@ -32,6 +32,12 @@ const state = {
     /** Debounce timers for slider params */
     paramTimers: {},
     connected: false,
+    /**
+     * When true, onFilterSelectChange() skips the auto-apply debounce.
+     * Set during programmatic dropdown sync (e.g. handleDSPStatus) to prevent
+     * re-sending set_dsp when we're just reflecting server-reported state.
+     */
+    suppressAutoApply: false,
 };
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -126,7 +132,11 @@ function populateFilterSelect(filters) {
         const nr4 = filters.find(f => f.name.toLowerCase() === 'nr4');
         if (nr4) sel.value = nr4.name;
     }
+    // Suppress auto-apply during population — we are just building the UI,
+    // not asking the server to (re-)enable anything.
+    state.suppressAutoApply = true;
     onFilterSelectChange();
+    state.suppressAutoApply = false;
 }
 
 function onFilterSelectChange() {
@@ -144,10 +154,9 @@ function onFilterSelectChange() {
     desc.textContent = filter.description || '';
     renderParams(filter.params || []);
 
-    // Only auto-apply when the insert is already active — this handles live filter
-    // swaps while NR is running.  Do NOT auto-enable on initial population or reopen,
-    // as that would re-send set_dsp when the user hasn't asked for it.
-    if (state.enabled) {
+    // Only auto-apply when the insert is already active AND we are not in the
+    // middle of a programmatic sync (e.g. handleDSPStatus reflecting server state).
+    if (state.enabled && !state.suppressAutoApply) {
         debounceEnableDSP();
     }
 }
@@ -480,11 +489,15 @@ function handleDSPStatus(info) {
 
     // Sync the dropdown to reflect what the server reports as active,
     // so the status message and the selector are always consistent.
+    // suppressAutoApply prevents onFilterSelectChange from re-sending set_dsp
+    // while we are merely reflecting server-reported state.
     if (state.enabled && state.activeFilter) {
         const sel = els.filterSelect();
         if (sel && sel.value !== state.activeFilter) {
+            state.suppressAutoApply = true;
             sel.value = state.activeFilter;
             onFilterSelectChange();
+            state.suppressAutoApply = false;
         }
     }
 

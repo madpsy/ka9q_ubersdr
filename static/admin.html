@@ -9520,9 +9520,12 @@ function resetStationIdColor() {
 
         function dismissPublicOverlay() {
             document.getElementById('widgetEditorPublicOverlay').style.display = 'none';
-            const uploadBtn = document.getElementById('widgetUploadBtn');
-            uploadBtn.disabled = false;
-            uploadBtn.title    = 'Upload an HTML file into the editor';
+            const uploadBtn   = document.getElementById('widgetUploadBtn');
+            const openEdtrBtn = document.getElementById('widgetOpenEditorBtn');
+            uploadBtn.disabled   = false;
+            uploadBtn.title      = 'Upload an HTML file into the editor';
+            openEdtrBtn.disabled = false;
+            openEdtrBtn.title    = 'Open in CodeMirror editor';
         }
 
         async function saveWidget(closeAfter = true) {

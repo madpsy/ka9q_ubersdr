@@ -1045,6 +1045,8 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					currentSession.dspInsert.Close()
 					currentSession.dspInsert = nil
 				}
+				currentSession.dspFilter = ""
+				currentSession.dspActiveParams = nil
 				currentSession.dspInsertMu.Unlock()
 				wsh.sendMessage(conn, ServerMessage{Type: "dsp_status", Info: map[string]interface{}{
 					"enabled": false,
@@ -1166,6 +1168,13 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 			currentSession.dspInsertMu.Lock()
 			currentSession.dspInsert = ins
+			currentSession.dspFilter = filterName
+			// Store a copy of initParams as the initial active params.
+			activeParams := make(map[string]string, len(initParams))
+			for k, v := range initParams {
+				activeParams[k] = v
+			}
+			currentSession.dspActiveParams = activeParams
 			currentSession.dspInsertMu.Unlock()
 
 			// Record the successful start time for rate-limiting subsequent requests.
@@ -1174,6 +1183,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			wsh.sendMessage(conn, ServerMessage{Type: "dsp_status", Info: map[string]interface{}{
 				"enabled": true,
 				"filter":  filterName,
+				"params":  activeParams,
 			}})
 			log.Printf("DSP insert enabled for session %s (filter=%s, rate=%d)", currentSession.ID, filterName, currentSession.SampleRate)
 
@@ -1184,23 +1194,29 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				wsh.sendError(conn, "set_dsp_params requires protocol version 2")
 				continue
 			}
-			currentSession.dspInsertMu.RLock()
+
+			// Use a write lock so we can safely merge into dspActiveParams after
+			// validating.  set_dsp_params is user-driven (not per-audio-packet) so
+			// the brief write-lock contention is negligible.
+			currentSession.dspInsertMu.Lock()
 			ins := currentSession.dspInsert
-			currentSession.dspInsertMu.RUnlock()
 
 			if ins == nil {
+				currentSession.dspInsertMu.Unlock()
 				wsh.sendError(conn, "DSP insert is not active — enable it first with set_dsp")
 				continue
 			}
 			if len(msg.Params) == 0 {
+				currentSession.dspInsertMu.Unlock()
 				wsh.sendError(conn, "set_dsp_params: 'params' field is required and must not be empty")
 				continue
 			}
 
-			// We need to know the current filter name to validate params.
-			// We don't store it on the session, so we accept any runtime-safe param
-			// from any filter (the server will reject unknown ones via ParamAck.rejected).
 			// Build the string map, validating types.
+			// We accept any runtime-safe param from any filter; the DSP container
+			// rejects unknown ones via ParamAck.rejected.  Now that we store the
+			// filter name on the session we could validate here too, but keeping
+			// the permissive approach avoids tight coupling to the filter schema.
 			updateParams := make(map[string]string)
 			paramErr := ""
 			for k, v := range msg.Params {
@@ -1228,9 +1244,20 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}
 			}
 			if paramErr != "" {
+				currentSession.dspInsertMu.Unlock()
 				wsh.sendError(conn, paramErr)
 				continue
 			}
+
+			// Merge updateParams into the session's active param map so that
+			// dsp_status replays always reflect the latest values.
+			if currentSession.dspActiveParams == nil {
+				currentSession.dspActiveParams = make(map[string]string, len(updateParams))
+			}
+			for k, v := range updateParams {
+				currentSession.dspActiveParams[k] = v
+			}
+			currentSession.dspInsertMu.Unlock()
 
 			ins.UpdateParams(updateParams)
 			wsh.sendMessage(conn, ServerMessage{Type: "dsp_params_sent", Info: map[string]interface{}{

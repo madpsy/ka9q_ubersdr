@@ -125,9 +125,11 @@ type Session struct {
 	// Non-nil when the client has enabled the DSP insert for this session.
 	// Protected by dspInsertMu.  IQ modes never use the insert regardless of
 	// this field — streamAudio() checks the mode on every packet.
-	dspInsert      *DSPInsert
-	dspInsertMu    sync.RWMutex
-	dspLastStarted time.Time // wall-clock time of the last successful DSP insert start (rate-limit)
+	dspInsert       *DSPInsert
+	dspInsertMu     sync.RWMutex
+	dspLastStarted  time.Time         // wall-clock time of the last successful DSP insert start (rate-limit)
+	dspFilter       string            // name of the active filter, e.g. "nr4" (empty when disabled)
+	dspActiveParams map[string]string // merged init + runtime params for the active filter (nil when disabled)
 }
 
 // SessionManager manages all active sessions

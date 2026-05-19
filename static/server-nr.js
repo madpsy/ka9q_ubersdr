@@ -38,6 +38,13 @@ const state = {
      * re-sending set_dsp when we're just reflecting server-reported state.
      */
     suppressAutoApply: false,
+    /**
+     * Param values reported by the server in the last dsp_status message.
+     * Keyed by param name (string → string).  Applied to controls after
+     * renderParams() resets them to defaults, so the UI always reflects
+     * what the server is actually using.
+     */
+    serverParams: null,
 };
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -162,6 +169,56 @@ function onFilterSelectChange() {
 }
 
 // ── Dynamic parameter rendering ───────────────────────────────────────────────
+
+/**
+ * Apply a map of saved param values (string→string) to the already-rendered
+ * parameter controls.  Called after renderParams() has built the controls from
+ * schema defaults, so the UI reflects what the server is actually using.
+ *
+ * @param {Object|null} savedParams  e.g. { "reduction": "18", "enable-vad": "true" }
+ */
+function applyParamValues(savedParams) {
+    if (!savedParams || typeof savedParams !== 'object') return;
+    const container = els.paramsContainer();
+    if (!container) return;
+
+    Object.entries(savedParams).forEach(([name, rawVal]) => {
+        // Find the rendered input for this param (slider, checkbox, or text).
+        const input = container.querySelector(`[data-param-name="${CSS.escape(name)}"]`);
+        if (!input) return;
+
+        if (input.type === 'checkbox') {
+            const checked = rawVal === 'true' || rawVal === true;
+            input.checked = checked;
+            state.paramValues[name] = checked ? 'true' : 'false';
+        } else {
+            // range or text
+            input.value = rawVal;
+            state.paramValues[name] = String(rawVal);
+
+            // For sliders, also update the displayed value span.
+            if (input.type === 'range') {
+                const header = input.closest('.snr-param-row')
+                    && input.closest('.snr-param-row').querySelector('.snr-param-value');
+                if (header) {
+                    // Find the param descriptor to format correctly.
+                    const sel = els.filterSelect();
+                    const filterName = sel ? sel.value : null;
+                    const filter = filterName
+                        ? state.filters.find(f => f.name === filterName)
+                        : null;
+                    const paramDesc = filter && filter.params
+                        ? filter.params.find(p => p.name === name)
+                        : null;
+                    const v = parseFloat(rawVal);
+                    header.textContent = paramDesc
+                        ? formatParamValue(v, paramDesc)
+                        : String(rawVal);
+                }
+            }
+        }
+    });
+}
 
 /**
  * Render parameter controls from the server's filter param descriptors.
@@ -477,6 +534,12 @@ function handleFiltersResponse(info) {
         // NR is already active — show the active status (don't clobber it).
         setStatus(`ACTIVE — ${state.activeFilter.toUpperCase()}`, 'enabled');
         showMessage(`Server-side noise reduction active (${state.activeFilter}).`, 'success');
+        // populateFilterSelect → onFilterSelectChange → renderParams has just reset
+        // all controls to schema defaults.  Restore the server-reported values now
+        // so the UI reflects what the filter is actually running with.
+        if (state.serverParams) {
+            applyParamValues(state.serverParams);
+        }
     } else {
         // Update status badge from "LOADING…" to "DISABLED"
         setStatus('DISABLED', 'disabled');
@@ -496,6 +559,15 @@ function handleDSPStatus(info) {
     state.enabled = !!info.enabled;
     state.activeFilter = info.filter || null;
 
+    // Cache the server-reported params so applyParamValues() can restore them
+    // after renderParams() builds controls from schema defaults.
+    // Only store when enabled and params are present; clear on disable.
+    if (state.enabled && info.params && typeof info.params === 'object') {
+        state.serverParams = info.params;
+    } else if (!state.enabled) {
+        state.serverParams = null;
+    }
+
     // Sync the dropdown to reflect what the server reports as active,
     // so the status message and the selector are always consistent.
     // suppressAutoApply prevents onFilterSelectChange from re-sending set_dsp
@@ -507,6 +579,11 @@ function handleDSPStatus(info) {
             sel.value = state.activeFilter;
             onFilterSelectChange();
             state.suppressAutoApply = false;
+        }
+        // If controls are already rendered (filter list arrived before status),
+        // apply the saved params now.
+        if (state.serverParams) {
+            applyParamValues(state.serverParams);
         }
     }
 

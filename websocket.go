@@ -1531,29 +1531,38 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// Apply DSP noise-reduction insert if active.
 			// Hard guards: IQ modes are never routed through the DSP (they carry raw RF
 			// samples, not demodulated audio), and only 12000/24000 Hz are supported.
-			// Fail-open: if the DSP container is slow or has crashed, we use the
-			// original PCM after a short timeout rather than dropping the packet.
+			//
+			// Pipelined (non-blocking) design:
+			//   Send packet N to the DSP (non-blocking — drops if sendChan full).
+			//   Immediately read back whatever the DSP has already finished (also
+			//   non-blocking via default).  On the first few packets the pipeline is
+			//   empty so we fall through with the original PCM (inaudible); once
+			//   primed, processed audio flows continuously with zero added latency to
+			//   this loop.
+			//
+			// The old design used time.After(100ms) which blocked the entire
+			// streamAudio loop on every packet, causing AudioChan to back up and
+			// the client to hear a multi-second stutter whenever a filter was enabled.
 			pcmData := audioPacket.PCMData
 			session.dspInsertMu.RLock()
 			ins := session.dspInsert
 			session.dspInsertMu.RUnlock()
 			if ins != nil && !isIQMode && (session.SampleRate == 12000 || session.SampleRate == 24000) {
-				if ins.Send(pcmData) {
-					// Wait for the processed chunk with a 100 ms timeout (fail-open).
-					select {
-					case processed, ok := <-ins.Recv():
-						if ok && len(processed) > 0 {
-							pcmData = processed
-						}
-						// else: recvChan closed (DSP crashed) — use original pcmData
-					case <-time.After(100 * time.Millisecond):
-						// DSP container too slow — use original pcmData (fail-open)
-						if DebugMode {
-							log.Printf("DEBUG: DSP insert timeout for session %s — using original PCM", session.ID)
-						}
+				ins.Send(pcmData) // non-blocking; drops silently if sendChan full (fail-open)
+				// Read back whatever the DSP has already processed — non-blocking.
+				select {
+				case processed, ok := <-ins.Recv():
+					if ok && len(processed) > 0 {
+						pcmData = processed
+					}
+					// else: recvChan closed (DSP crashed) — use original pcmData
+				default:
+					// Pipeline not yet primed, or DSP running slightly behind —
+					// use original pcmData this packet (fail-open).
+					if DebugMode {
+						log.Printf("DEBUG: DSP pipeline not ready for session %s — using original PCM", session.ID)
 					}
 				}
-				// Send returned false (channel full) — use original pcmData (fail-open)
 			}
 			// Replace audioPacket.PCMData with the (possibly processed) pcmData for
 			// all encoder paths below.

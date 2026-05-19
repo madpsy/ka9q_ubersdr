@@ -598,15 +598,13 @@ func (c *CWSkimmerClient) parseCWSpot(line string) (CWSkimmerSpot, bool) {
 		return CWSkimmerSpot{}, false
 	}
 
-	// Rest is comment (if any) - strip trailing mode word (RTTY) and time token (ends with Z)
+	// Rest is comment (if any) - strip only the trailing time token (ends with Z)
+	// The mode word (e.g. "RTTY") is kept in the comment so log readers can distinguish modes
+	// without a schema change: CW spots get "CQ"/"DE", RTTY spots get "CQ RTTY"/"DE RTTY"
 	if len(fields) > 6 {
 		remainingFields := fields[6:]
 		// Remove trailing time token if present (ends with Z, e.g. "1649Z")
 		if len(remainingFields) > 0 && strings.HasSuffix(remainingFields[len(remainingFields)-1], "Z") {
-			remainingFields = remainingFields[:len(remainingFields)-1]
-		}
-		// Remove trailing mode word if it matches the detected mode (e.g. "RTTY" in RTTY spots)
-		if len(remainingFields) > 0 && remainingFields[len(remainingFields)-1] == spot.Mode {
 			remainingFields = remainingFields[:len(remainingFields)-1]
 		}
 		spot.Comment = strings.TrimSpace(strings.Join(remainingFields, " "))

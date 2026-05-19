@@ -669,7 +669,12 @@
                 }
                 console.log('Fetching:', url);
                 const response = await fetch(url);
-                
+
+                // Silently ignore rate-limit responses — just keep the existing display
+                if (response.status === 429) {
+                    return;
+                }
+
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }

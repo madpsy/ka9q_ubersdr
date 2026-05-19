@@ -16,7 +16,8 @@ type CWSkimmerSpot struct {
 	DXCall    string    `json:"dx_call"`   // Callsign being spotted
 	Spotter   string    `json:"spotter"`   // Skimmer callsign
 	SNR       int       `json:"snr"`       // Signal strength in dB
-	WPM       int       `json:"wpm"`       // CW speed in WPM
+	WPM       int       `json:"wpm"`       // Speed in WPM (CW) or BPS (RTTY)
+	Mode      string    `json:"mode"`      // "CW" or "RTTY"
 	Comment   string    `json:"comment"`   // Additional info (CQ, DE, etc.)
 	Time      time.Time `json:"time"`      // Spot timestamp
 	Band      string    `json:"band"`      // Amateur radio band
@@ -581,26 +582,35 @@ func (c *CWSkimmerClient) parseCWSpot(line string) (CWSkimmerSpot, bool) {
 		return CWSkimmerSpot{}, false
 	}
 
-	// Parse WPM (should be followed by "WPM")
-	if len(fields) < 6 || fields[5] != "WPM" {
+	// Parse speed (WPM for CW, BPS for RTTY) and determine mode from unit token
+	if len(fields) < 6 {
+		return CWSkimmerSpot{}, false
+	}
+	switch fields[5] {
+	case "WPM":
+		spot.Mode = "CW"
+	case "BPS":
+		spot.Mode = "RTTY"
+	default:
 		return CWSkimmerSpot{}, false
 	}
 	if _, err := fmt.Sscanf(fields[4], "%d", &spot.WPM); err != nil {
 		return CWSkimmerSpot{}, false
 	}
 
-	// Rest is comment (if any) - just CQ, DE, or empty (don't include WPM or time)
+	// Rest is comment (if any) - strip trailing mode word (RTTY) and time token (ends with Z)
 	if len(fields) > 6 {
-		// Get remaining fields after WPM
 		remainingFields := fields[6:]
-		// Remove trailing time if present (ends with Z)
+		// Remove trailing time token if present (ends with Z, e.g. "1649Z")
 		if len(remainingFields) > 0 && strings.HasSuffix(remainingFields[len(remainingFields)-1], "Z") {
 			remainingFields = remainingFields[:len(remainingFields)-1]
 		}
-		// Join remaining fields (should be CQ, DE, or empty)
+		// Remove trailing mode word if it matches the detected mode (e.g. "RTTY" in RTTY spots)
+		if len(remainingFields) > 0 && remainingFields[len(remainingFields)-1] == spot.Mode {
+			remainingFields = remainingFields[:len(remainingFields)-1]
+		}
 		spot.Comment = strings.TrimSpace(strings.Join(remainingFields, " "))
 	}
-	// If no comment, leave it empty (not "0 WPM")
 
 	return spot, true
 }
@@ -623,7 +633,7 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		// CTY parser already converts to standard format (+ for East, - for West)
 		spot.Latitude = info.Latitude
 		spot.Longitude = info.Longitude
-	
+
 		// Calculate distance and bearing if receiver location is set
 		if c.receiverLat != 0 || c.receiverLon != 0 {
 			if info.Latitude != 0 || info.Longitude != 0 {
@@ -644,11 +654,11 @@ func (c *CWSkimmerClient) submitToPSKReporter(spot *CWSkimmerSpot) error {
 	// Convert CWSkimmerSpot to DecodeInfo for PSKReporter
 	decode := &DecodeInfo{
 		Callsign:  spot.DXCall,
-		Locator:   "", // CW spots don't have locators
+		Locator:   "", // CW/RTTY spots don't have locators
 		SNR:       spot.SNR,
 		Frequency: uint64(spot.Frequency),
 		Timestamp: spot.Time,
-		Mode:      "CW", // CW mode
+		Mode:      spot.Mode,
 	}
 
 	return c.pskReporter.Submit(decode)

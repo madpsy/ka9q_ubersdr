@@ -1257,11 +1257,32 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			for k, v := range updateParams {
 				currentSession.dspActiveParams[k] = v
 			}
+			// Snapshot the full merged params and filter name while still holding
+			// the lock, so we can include them in dsp_status after unlocking.
+			mergedParams := make(map[string]string, len(currentSession.dspActiveParams))
+			for k, v := range currentSession.dspActiveParams {
+				mergedParams[k] = v
+			}
+			snapshotFilter := currentSession.dspFilter
 			currentSession.dspInsertMu.Unlock()
 
 			ins.UpdateParams(updateParams)
+			// Acknowledge the delta to the client.
 			wsh.sendMessage(conn, ServerMessage{Type: "dsp_params_sent", Info: map[string]interface{}{
 				"params": updateParams,
+			}})
+			// Also send a dsp_status with the full merged params so that
+			// _lastDspStatus in the opener is always up-to-date.  This ensures
+			// that re-opening server-nr.html after a param change shows the
+			// current values rather than the enable-time defaults.
+			// "source":"params_update" lets the opener skip forwarding this to
+			// the already-open popout (which already has the correct values),
+			// while still caching it for replay on next open.
+			wsh.sendMessage(conn, ServerMessage{Type: "dsp_status", Info: map[string]interface{}{
+				"enabled": true,
+				"filter":  snapshotFilter,
+				"params":  mergedParams,
+				"source":  "params_update",
 			}})
 
 		case "get_dsp_filters":

@@ -3086,16 +3086,22 @@ function handleMessage(msg) {
             serverNRForwardToPopout(msg);
             break;
         case 'dsp_status':
-            // Cache so we can replay it when the popout reopens
-            _lastDspStatus = msg;
-            // Update the Server NR button in the noise-reduction card
-            updateServerNRButton(
-                !!(msg.info && msg.info.enabled),
-                (msg.info && msg.info.filter) || null
-            );
-            // Forward DSP enable/disable confirmation to the popout
-            serverNRForwardToPopout(msg);
-            break;
+                   // Cache so we can replay it when the popout reopens.
+                   // This includes param-update echoes (source:"params_update") so that
+                   // _lastDspStatus always carries the latest merged params.
+                   _lastDspStatus = msg;
+                   // Update the Server NR button in the noise-reduction card
+                   updateServerNRButton(
+                       !!(msg.info && msg.info.enabled),
+                       (msg.info && msg.info.filter) || null
+                   );
+                   // Forward to the popout — but skip param-update echoes when the
+                   // popout is already open (it already has the correct values; no need
+                   // to re-run handleDSPStatus and flash the status message).
+                   if (!(msg.info && msg.info.source === 'params_update')) {
+                       serverNRForwardToPopout(msg);
+                   }
+                   break;
         case 'dsp_error':
             // Forward DSP error to the popout
             serverNRForwardToPopout(msg);

@@ -972,7 +972,7 @@ function initializeSquelch() {
     console.log('Squelch initialized');
 }
 
-function toggleSquelch() {
+function toggleAudioGate() {
     const checkbox = document.getElementById('squelch-enable');
     const badge = document.getElementById('squelch-status-badge');
     squelchEnabled = checkbox.checked;
@@ -1003,7 +1003,7 @@ function toggleSquelch() {
     saveFilterSettings();
 }
 
-function updateSquelch() {
+function updateAudioGate() {
     const thresholdDb = parseInt(document.getElementById('squelch-threshold').value);
     const hysteresisDb = parseFloat(document.getElementById('squelch-hysteresis').value);
     const attackMs = parseInt(document.getElementById('squelch-attack').value);
@@ -1020,13 +1020,13 @@ function updateSquelch() {
     saveFilterSettings();
 }
 
-function resetSquelch() {
+function resetAudioGate() {
     const defaults = { threshold: -35, hysteresis: 3, attack: 20, release: 500 };
     document.getElementById('squelch-threshold').value = defaults.threshold;
     document.getElementById('squelch-hysteresis').value = defaults.hysteresis;
     document.getElementById('squelch-attack').value = defaults.attack;
     document.getElementById('squelch-release').value = defaults.release;
-    updateSquelch();
+    updateAudioGate();
     console.log('Squelch reset');
 }
 
@@ -1301,13 +1301,13 @@ function restoreFilterSettings() {
             const checkbox = document.getElementById('squelch-enable');
             if (checkbox) {
                 checkbox.checked = squelchSettings.enabled;
-                toggleSquelch();
+                toggleAudioGate();
             }
             if (squelchSettings.threshold) document.getElementById('squelch-threshold').value = squelchSettings.threshold;
             if (squelchSettings.hysteresis) document.getElementById('squelch-hysteresis').value = squelchSettings.hysteresis;
             if (squelchSettings.attack) document.getElementById('squelch-attack').value = squelchSettings.attack;
             if (squelchSettings.release) document.getElementById('squelch-release').value = squelchSettings.release;
-            updateSquelch();
+            updateAudioGate();
         }
 
         // Noise Reduction - from app.js
@@ -1501,9 +1501,9 @@ window.squelchOpen = squelchOpen;
 window.squelchCurrentLevel = squelchCurrentLevel;
 window.squelchTargetGain = squelchTargetGain;
 window.initializeSquelch = initializeSquelch;
-window.toggleSquelch = toggleSquelch;
-window.updateSquelch = updateSquelch;
-window.resetSquelch = resetSquelch;
+window.toggleAudioGate = toggleAudioGate;
+window.updateAudioGate = updateAudioGate;
+window.resetAudioGate = resetAudioGate;
 window.processSquelch = processSquelch;
 window.updateSquelchStatus = updateSquelchStatus;
 

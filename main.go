@@ -1648,9 +1648,9 @@ func main() {
 	aggregateRateLimiter := NewAggregateRateLimiter()
 	log.Printf("Aggregate endpoint rate limiting: 1 request per 5 seconds per IP")
 
-	// Initialize FFT endpoint rate limiter (1 request per 2 seconds per band per IP)
+	// Initialize FFT endpoint rate limiter (variable per endpoint; voice-activity: 4/sec, default: 1 per 2 seconds)
 	fftRateLimiter := NewFFTRateLimiter()
-	log.Printf("FFT endpoint rate limiting: 1 request per 2 seconds per band per IP")
+	log.Printf("FFT endpoint rate limiting: voice-activity 4/sec, noise-analysis 2/sec, default 1 per 2 seconds per IP")
 
 	// Initialize Summary endpoint rate limiter (10 requests per second per IP)
 	summaryRateLimiter := NewSummaryRateLimiter()

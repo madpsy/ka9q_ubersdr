@@ -1156,12 +1156,12 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		}
 	}
 
-	// Rate limit: 2 requests per second
+	// Rate limit: 4 requests per second
 	clientIP := getClientIP(r)
-	if !rateLimiter.AllowRequest(clientIP, "noise-analysis") {
+	if !rateLimiter.AllowRequest(clientIP, "voice-activity") {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Rate limit exceeded. Maximum 2 requests per second.",
+			"error": "Rate limit exceeded. Maximum 4 requests per second.",
 		})
 		log.Printf("Voice activity rate limit exceeded for IP: %s, band: %s", clientIP, band)
 		return
@@ -1447,10 +1447,10 @@ func handleAllBandsVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *No
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	if !rateLimiter.AllowRequest(clientIP, "voice-activity-all") {
+	if !rateLimiter.AllowRequest(clientIP, "voice-activity") {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+			"error": "Rate limit exceeded. Please wait before making another request.",
 		})
 		log.Printf("Voice activity all bands rate limit exceeded for IP: %s", clientIP)
 		return

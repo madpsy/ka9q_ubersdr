@@ -12047,7 +12047,31 @@ let voiceActivityWindow = null;
 let voiceActivityCurrentBand = null;
 
 /**
- * Opens voice activity popup for a specific band
+ * Opens voice activity popup in all-bands mode, with the given band as context
+ * @param {string} band - Band name used as context/fallback (e.g., '40m', '20m')
+ */
+function openAllBandsVoiceActivityPopup(band) {
+    const url = `voice-activity.html?all=1&band=${encodeURIComponent(band)}`;
+    const popup = openControlPopup(url, 550, 650);
+
+    if (popup && !popup.closed) {
+        voiceActivityWindow = popup;
+        voiceActivityCurrentBand = band;
+
+        const checkClosed = setInterval(() => {
+            if (!voiceActivityWindow || voiceActivityWindow.closed) {
+                voiceActivityWindow = null;
+                voiceActivityCurrentBand = null;
+                clearInterval(checkClosed);
+            }
+        }, 500);
+    }
+
+    return popup;
+}
+
+/**
+ * Opens voice activity popup for a specific band (single-band mode)
  * @param {string} band - Band name (e.g., '40m', '20m')
  */
 function openVoiceActivityPopup(band) {
@@ -12104,66 +12128,16 @@ function initializeVoiceActivityButton() {
         return;
     }
 
-    let lastActiveBand = null;
+    // Always enabled — opens all-bands view
+    button.disabled = false;
+    button.title = 'Voice Activity — All Bands';
 
-    // Update button state based on active band
-    function updateButtonState() {
-        const activeBand = getActiveBand();
-        if (activeBand) {
-            button.disabled = false;
-            button.title = `Voice Activity for ${activeBand}`;
-
-            // Update voice activity popup if band changed
-            if (lastActiveBand !== activeBand) {
-                updateVoiceActivityPopup(activeBand);
-                lastActiveBand = activeBand;
-            }
-        } else {
-            button.disabled = true;
-            button.title = 'Voice Activity (no band active)';
-            lastActiveBand = null;
-        }
-    }
-
-    // Handle button click
+    // Handle button click — always open all-bands mode
     button.addEventListener('click', () => {
-        const activeBand = getActiveBand();
-        if (activeBand) {
-            console.log(`[Voice Activity Button] Opening voice activity popup for ${activeBand}`);
-            openVoiceActivityPopup(activeBand);
-        }
+        const activeBand = getActiveBand() || '40m';
+        console.log(`[Voice Activity Button] Opening all-bands voice activity popup (context band: ${activeBand})`);
+        openAllBandsVoiceActivityPopup(activeBand);
     });
-
-    // Initial state update
-    updateButtonState();
-
-    // Update button state when frequency changes
-    // Listen for frequency changes by observing the frequency input
-    const freqInput = document.getElementById('frequency');
-    if (freqInput) {
-        // Use MutationObserver to watch for attribute changes
-        const observer = new MutationObserver(() => {
-            updateButtonState();
-        });
-        observer.observe(freqInput, { attributes: true, attributeFilter: ['data-hz-value', 'value'] });
-
-        // Also listen for input events
-        freqInput.addEventListener('input', updateButtonState);
-        freqInput.addEventListener('change', updateButtonState);
-    }
-
-    // Also update when band badges change (when active class is added/removed)
-    const bandContainer = document.getElementById('band-buttons-container');
-    if (bandContainer) {
-        const badgeObserver = new MutationObserver(() => {
-            updateButtonState();
-        });
-        badgeObserver.observe(bandContainer, {
-            attributes: true,
-            attributeFilter: ['class'],
-            subtree: true
-        });
-    }
 
     console.log('[Voice Activity Button] Initialized');
 }
@@ -12188,7 +12162,7 @@ function initializeBandBadgeRightClick() {
         
         // Add visual feedback on hover to indicate right-click is available
         badge.style.cursor = 'context-menu';
-        badge.title = `Left-click to tune to ${badge.getAttribute('data-band')} | Right-click for voice activity`;
+        badge.title = `Left-click to tune to ${badge.getAttribute('data-band')} | Right-click for voice activity (single band)`;
     });
     
     console.log(`[Band Badge] Initialized right-click handlers for ${bandBadges.length} band badges`);
@@ -12245,6 +12219,7 @@ function updateChannelsMapPopup() {
 
 // Expose globally
 window.openVoiceActivityPopup = openVoiceActivityPopup;
+window.openAllBandsVoiceActivityPopup = openAllBandsVoiceActivityPopup;
 window.updateVoiceActivityPopup = updateVoiceActivityPopup;
 window.initializeBandBadgeRightClick = initializeBandBadgeRightClick;
 window.initializeVoiceActivityButton = initializeVoiceActivityButton;

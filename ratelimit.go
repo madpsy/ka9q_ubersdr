@@ -263,6 +263,9 @@ func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
 		var refillRate float64
 		var maxTokens float64
 		switch band {
+		case "voice-activity":
+			refillRate = 4.0 // 4 requests per second for voice activity
+			maxTokens = 4.0
 		case "noise-analysis":
 			refillRate = 2.0 // 2 requests per second for noise analysis
 			maxTokens = 2.0

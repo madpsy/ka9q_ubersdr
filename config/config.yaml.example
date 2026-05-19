@@ -1772,7 +1772,7 @@ dsp:
   #
   # Default (when this section is omitted): nr2/rn2/nr4/dfnr enabled, bnr disabled.
   filters:
-    nr2: false   # SpectralNR — MMSE-LSA spectral subtraction
+    nr2: true    # SpectralNR — MMSE-LSA spectral subtraction
     rn2: true    # RNNoise — Mozilla/Xiph RNN suppressor
     nr4: true    # libspecbleach — SPP-MMSE adaptive denoiser
     dfnr: true   # DeepFilterNet3 neural denoiser (x86 only  - not ARM - heavy on CPU)

@@ -1738,7 +1738,6 @@ freedv_extension:
 #   rn2  — RNNoise (Mozilla/Xiph RNN-based suppressor, best on speech)
 #   nr4  — libspecbleach (SPP-MMSE adaptive denoiser) [default in container]
 #   dfnr — DeepFilterNet3 neural denoiser (opt-in, requires ONNX model)
-#   bnr  — NVIDIA Maxine BNR (opt-in, requires GPU + NIM container)
 #
 # Docker quick-start:
 #   docker run --rm -p 50051:50051 madpsy/ubersdr-dsp:latest

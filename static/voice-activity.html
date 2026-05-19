@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Activity - Band</title>
+    <title>Voice Activity</title>
     <style>
         * {
             margin: 0;
@@ -406,6 +406,71 @@
         .wspr-badge.good      { background: #fbbf24; color: #1a1a1a; }
         .wspr-badge.fair      { background: #ea580c; }
         .wspr-badge.poor      { background: #dc2626; }
+
+        .all-bands-btn {
+            background: #2ecc71;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .all-bands-btn:hover {
+            background: #27ae60;
+        }
+
+        .band-subheader {
+            background: #1e2d3d;
+            padding: 8px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #1a1a1a;
+            border-top: 2px solid #3498db;
+        }
+
+        .band-subheader:first-child {
+            border-top: none;
+        }
+
+        .band-subheader-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: #3498db;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .band-subheader-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .band-subheader-count {
+            font-size: 11px;
+            color: #95a5a6;
+        }
+
+        .switch-band-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 3px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .switch-band-btn:hover {
+            background: #2980b9;
+        }
     </style>
 </head>
 <body>
@@ -423,6 +488,7 @@
                     <option value="0.8">80%</option>
                 </select>
             </div>
+            <button class="all-bands-btn" id="all-bands-btn" onclick="toggleAllBands()">All</button>
             <button class="refresh-btn" onclick="fetchData()">↻ Refresh</button>
         </div>
     </div>
@@ -470,18 +536,66 @@
     <script>
         // Get band from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
-        const band = urlParams.get('band') || '40m';
-        
+        let band = urlParams.get('band') || '40m';
+        let allBandsMode = urlParams.get('all') === '1';
+
         // Update title
-        document.getElementById('band-title').textContent = `Voice Activity - ${band}`;
-        document.title = `Voice Activity - ${band}`;
-        document.getElementById('wspr-band-label').textContent = band;
+        function updateTitle() {
+            if (allBandsMode) {
+                document.getElementById('band-title').textContent = 'Voice Activity - All Bands';
+                document.title = 'Voice Activity - All Bands';
+                document.getElementById('all-bands-btn').textContent = 'Band';
+                document.getElementById('wspr-predictions').style.display = 'none';
+            } else {
+                document.getElementById('band-title').textContent = `Voice Activity - ${band}`;
+                document.title = `Voice Activity - ${band}`;
+                document.getElementById('all-bands-btn').textContent = 'All';
+                document.getElementById('wspr-band-label').textContent = band;
+            }
+        }
+
+        updateTitle();
 
         let autoRefreshInterval = null;
         let scanInterval = null;
         let currentScanIndex = 0;
         let scanActivities = [];
         let wsprPredictionInterval = null;
+
+        function toggleAllBands() {
+            allBandsMode = !allBandsMode;
+            updateURL();
+            updateTitle();
+            fetchData();
+            if (!allBandsMode) {
+                startWsprPolling();
+            } else {
+                if (wsprPredictionInterval) {
+                    clearInterval(wsprPredictionInterval);
+                    wsprPredictionInterval = null;
+                }
+            }
+        }
+
+        function switchToBand(targetBand) {
+            band = targetBand;
+            allBandsMode = false;
+            updateURL();
+            updateTitle();
+            fetchData();
+            startWsprPolling();
+        }
+
+        function updateURL() {
+            const params = new URLSearchParams();
+            if (allBandsMode) {
+                params.set('all', '1');
+                params.set('band', band);
+            } else {
+                params.set('band', band);
+            }
+            history.replaceState(null, '', `?${params.toString()}`);
+        }
 
         function toggleWsprPredictions() {
             const body = document.getElementById('wspr-predictions-body');
@@ -500,6 +614,7 @@
         }
 
         function fetchWsprPredictions() {
+            if (allBandsMode) return;
             // Re-use the predictions already fetched by bands_state.js in the opener
             // window rather than making a redundant API call.
             try {
@@ -545,8 +660,15 @@
                 // Get minimum confidence from dropdown (default to 0.7 if not found)
                 const minConfidenceEl = document.getElementById('min-confidence');
                 const minConfidence = minConfidenceEl ? minConfidenceEl.value : '0.7';
-                console.log('Fetching with min_confidence:', minConfidence);
-                const response = await fetch(`/api/noisefloor/voice-activity?band=${encodeURIComponent(band)}&min_confidence=${minConfidence}`);
+
+                let url;
+                if (allBandsMode) {
+                    url = `/api/noisefloor/voice-activity/all?min_confidence=${minConfidence}`;
+                } else {
+                    url = `/api/noisefloor/voice-activity?band=${encodeURIComponent(band)}&min_confidence=${minConfidence}`;
+                }
+                console.log('Fetching:', url);
+                const response = await fetch(url);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -554,13 +676,60 @@
 
                 const data = await response.json();
                 
-                displayData(data);
+                if (allBandsMode) {
+                    displayAllBands(data);
+                } else {
+                    displayData(data);
+                }
                 updateLastUpdated();
                 
             } catch (error) {
                 console.error('Error fetching voice activity:', error);
                 errorEl.innerHTML = `<div class="error">Error loading data: ${error.message}</div>`;
             }
+        }
+
+        function displayAllBands(data) {
+            // Stats grid for all-bands mode
+            const statsGrid = document.getElementById('stats-grid');
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Active Bands</div>
+                    <div class="stat-value">${data.total_bands || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Activities</div>
+                    <div class="stat-value">${data.total_activities || 0}</div>
+                </div>
+            `;
+
+            const activityList = document.getElementById('activity-list');
+            const bands = data.bands || {};
+            const bandNames = Object.keys(bands).sort();
+
+            if (bandNames.length === 0 || data.total_activities === 0) {
+                activityList.innerHTML = '<div class="no-data">No voice activity detected on any band</div>';
+                return;
+            }
+
+            let html = '';
+            for (const b of bandNames) {
+                const activities = bands[b];
+                if (!activities || activities.length === 0) continue;
+
+                const count = activities.length;
+                html += `
+                    <div class="band-subheader">
+                        <span class="band-subheader-name">${b}</span>
+                        <div class="band-subheader-right">
+                            <span class="band-subheader-count">${count} signal${count !== 1 ? 's' : ''}</span>
+                            <button class="switch-band-btn" onclick="switchToBand('${b}')">Switch</button>
+                        </div>
+                    </div>
+                `;
+                html += activities.map(activity => renderActivityRow(activity)).join('');
+            }
+            activityList.innerHTML = html;
         }
 
         function displayData(data) {
@@ -592,39 +761,41 @@
                 return;
             }
 
-            activityList.innerHTML = data.activities.map(activity => {
-                const freq = formatFrequency(activity.estimated_dial_freq || activity.start_freq);
-                const modeUpper = activity.mode || 'LSB';
-                const mode = modeUpper.toLowerCase(); // Convert to lowercase for tuneToChannel
-                const bandwidth = activity.bandwidth || 0;
-                const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
+            activityList.innerHTML = data.activities.map(activity => renderActivityRow(activity)).join('');
+        }
 
-                // Calculate confidence percentage and color class
-                const confidenceValue = activity.confidence ? activity.confidence * 100 : 0;
-                const confidence = confidenceValue > 0 ? confidenceValue.toFixed(0) + '%' : 'N/A';
-                let confidenceClass = 'confidence';
-                if (confidenceValue >= 70) {
-                    confidenceClass += ' high';
-                } else if (confidenceValue >= 50) {
-                    confidenceClass += ' medium';
-                } else if (confidenceValue >= 30) {
-                    confidenceClass += ' low';
-                }
-                
-                const dialFreq = activity.estimated_dial_freq || activity.start_freq;
-                
-                return `
-                    <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}')">
-                        <div class="frequency">${freq}</div>
-                        <div>
-                            <span class="mode">${modeUpper}</span>
-                            <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz</span>
-                        </div>
-                        <div class="${confidenceClass}">${confidence}</div>
-                        <div class="snr">${signalAboveNoise}</div>
+        function renderActivityRow(activity) {
+            const freq = formatFrequency(activity.estimated_dial_freq || activity.start_freq);
+            const modeUpper = activity.mode || 'LSB';
+            const mode = modeUpper.toLowerCase();
+            const bandwidth = activity.bandwidth || 0;
+            const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
+
+            // Calculate confidence percentage and color class
+            const confidenceValue = activity.confidence ? activity.confidence * 100 : 0;
+            const confidence = confidenceValue > 0 ? confidenceValue.toFixed(0) + '%' : 'N/A';
+            let confidenceClass = 'confidence';
+            if (confidenceValue >= 70) {
+                confidenceClass += ' high';
+            } else if (confidenceValue >= 50) {
+                confidenceClass += ' medium';
+            } else if (confidenceValue >= 30) {
+                confidenceClass += ' low';
+            }
+
+            const dialFreq = activity.estimated_dial_freq || activity.start_freq;
+
+            return `
+                <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}')">
+                    <div class="frequency">${freq}</div>
+                    <div>
+                        <span class="mode">${modeUpper}</span>
+                        <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz</span>
                     </div>
-                `;
-            }).join('');
+                    <div class="${confidenceClass}">${confidence}</div>
+                    <div class="snr">${signalAboveNoise}</div>
+                </div>
+            `;
         }
 
         function formatFrequency(hz) {
@@ -874,7 +1045,9 @@
         // Initial load
         fetchData();
         startAutoRefresh();
-        startWsprPolling();
+        if (!allBandsMode) {
+            startWsprPolling();
+        }
 
         // Cleanup on close
         window.addEventListener('beforeunload', () => {

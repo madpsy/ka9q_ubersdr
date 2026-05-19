@@ -539,6 +539,21 @@
         let band = urlParams.get('band') || '40m';
         let allBandsMode = urlParams.get('all') === '1';
 
+        // Restore all-bands mode if the opener reloaded us without all=1
+        // (window.name survives page reloads within the same popup window)
+        if (!allBandsMode && window.name === 'voice-activity-all-bands') {
+            allBandsMode = true;
+            const params = new URLSearchParams();
+            params.set('all', '1');
+            params.set('band', band);
+            history.replaceState(null, '', `?${params.toString()}`);
+        }
+
+        function syncWindowName() {
+            window.name = allBandsMode ? 'voice-activity-all-bands' : '';
+        }
+        syncWindowName();
+
         // Update title
         function updateTitle() {
             if (allBandsMode) {
@@ -564,6 +579,7 @@
 
         function toggleAllBands() {
             allBandsMode = !allBandsMode;
+            syncWindowName();
             updateURL();
             updateTitle();
             fetchData();
@@ -580,6 +596,7 @@
         function switchToBand(targetBand) {
             band = targetBand;
             allBandsMode = false;
+            syncWindowName();
             updateURL();
             updateTitle();
             fetchData();

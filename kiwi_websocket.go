@@ -963,7 +963,35 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	}
 
 	// Handle mod command (frequency/mode/bandwidth)
-	if mode, hasMod := params["mod"]; hasMod {
+	if kiwiMode, hasMod := params["mod"]; hasMod {
+		// Translate KiwiSDR mode names to radiod preset names.
+		// Modes not present in this map are unsupported (e.g. drm, qam, nsb,
+		// wide-IQ variants) and are silently dropped — the client stays on its
+		// current mode, matching real KiwiSDR behaviour for missing extensions.
+		kiwiModeToRadiod := map[string]string{
+			"usb":  "usb",
+			"lsb":  "lsb",
+			"am":   "am",
+			"amn":  "am", // narrow AM — edges supplied by low_cut/high_cut
+			"amw":  "am", // wide AM — same
+			"sam":  "sam",
+			"sal":  "sam", // SAM lower sideband
+			"sau":  "sam", // SAM upper sideband
+			"sas":  "sam", // SAM stereo
+			"cw":   "cwu", // KiwiSDR generic CW → cwu
+			"cwn":  "cwu", // narrow CW — edges from client
+			"usn":  "usb", // USB narrow — edges from client
+			"lsn":  "lsb", // LSB narrow — edges from client
+			"nbfm": "nfm", // KiwiSDR name for narrow FM
+			"nnfm": "nfm", // even narrower FM
+			"iq":   "iq",
+		}
+		mode, ok := kiwiModeToRadiod[strings.ToLower(kiwiMode)]
+		if !ok {
+			log.Printf("KiwiSDR: unsupported mode '%s' from %s — ignoring", kiwiMode, kc.clientIP)
+			return
+		}
+
 		var freq uint64
 		var lowCut, highCut int
 

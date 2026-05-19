@@ -2555,8 +2555,13 @@ class DigitalSpotsMap {
             this.liveMessages.pop();
         }
 
-        // Update display
-        this.updateLiveMessagesDisplay();
+        // Debounce the display update — rebuilding 200 rows of HTML on every spot is the
+        // dominant cause of main-thread stalls (839ms per burst per profiler).
+        if (this._liveMessagesTimer) clearTimeout(this._liveMessagesTimer);
+        this._liveMessagesTimer = setTimeout(() => {
+            this._liveMessagesTimer = null;
+            this.updateLiveMessagesDisplay();
+        }, 250);
     }
 
     updateLiveMessagesDisplay() {

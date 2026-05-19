@@ -886,33 +886,33 @@
                     <span id="squelch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
                         <label>
-                            <input type="checkbox" id="squelch-enable" onchange="toggleSquelch()">
+                            <input type="checkbox" id="squelch-enable" onchange="toggleAudioGate()">
                             Squelch (Audio Gate)
                         </label>
                     </div>
                     <div id="squelch-controls">
                         <div class="control-group">
                             <label for="squelch-threshold">Threshold: <span id="squelch-threshold-value">-35 dB</span></label>
-                            <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateSquelch()">
+                            <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateAudioGate()">
                         </div>
                         <div class="control-group">
                             <label for="squelch-hysteresis">Hysteresis: <span id="squelch-hysteresis-value">3 dB</span></label>
-                            <input type="range" id="squelch-hysteresis" min="1" max="10" value="3" step="0.5" oninput="updateSquelch()">
+                            <input type="range" id="squelch-hysteresis" min="1" max="10" value="3" step="0.5" oninput="updateAudioGate()">
                         </div>
                         <div class="control-group">
                             <label for="squelch-attack">Attack (Open): <span id="squelch-attack-value">20 ms</span></label>
-                            <input type="range" id="squelch-attack" min="5" max="200" value="20" step="5" oninput="updateSquelch()">
+                            <input type="range" id="squelch-attack" min="5" max="200" value="20" step="5" oninput="updateAudioGate()">
                         </div>
                         <div class="control-group">
                             <label for="squelch-release">Release (Close): <span id="squelch-release-value">500 ms</span></label>
-                            <input type="range" id="squelch-release" min="10" max="1000" value="500" step="10" oninput="updateSquelch()">
+                            <input type="range" id="squelch-release" min="10" max="1000" value="500" step="10" oninput="updateAudioGate()">
                         </div>
                         <div class="squelch-status">
                             <label>Status:</label>
                             <span id="squelch-status" style="font-weight: bold; color: #28a745;">OPEN</span>
                             <span id="squelch-level" style="margin-left: 15px; color: #888;">Level: -- dB</span>
                         </div>
-                        <button onclick="resetSquelch()" class="eq-reset-btn">Reset</button>
+                        <button onclick="resetAudioGate()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
             </div>

@@ -4,10 +4,7 @@
 
 ### New Features
 - Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank inc. space weather (stats_history.html)
-- Added **Doppler add-on additional precomputed fields** in the SSE stream (see API usage at buttom of its UI)
 - Added **Automatic SAM -> AM transition** when no signal for 2 seconds as weak signals mean no PLL lock and so no audio
-- Added **Code Editor** in Admin -> Server, for custom Head and Body HTML, to make it easier to view/edit code
-- Added **Globe View** on the Digital Spots map with toggle and URL parameters
 - Added **UI Widgets** which are HTML blobs injected into the main UI. This allows creating custom widgets including modifying aspects of the UI. Users can share widgets for others to use (UI tab in Admin). Creating and sharing widgets is for public instances only; private instances can use shared widgets from public instances.
 - Added **Server Side DSP** (experimental so button is under Audio Filters -> Noise Reduction) to provide more advanced noise reduction before audio is sent to the client. Runs as a new container. Each type can be enabled/disabled (some use more CPU than others). Extensions feed from audio before these DSP filters so are not affected. Needs enabled via Config -> DSP
 
@@ -15,6 +12,7 @@
 - Time (X Axis) on noise floor history page displayed relative rather than absolute times
 - Window Zoom on Spectrogram page alterned frequency (X axis)
 - Various data sources missing from MQTT (frontend status, frequency reference, voice activity to name a few)
+- Audio Filter 'Squelch' parameters sharing some names with with FM 'Squelcn' causing conflict
 
 ## Version 0.1.49 - Latest Stable
 

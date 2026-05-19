@@ -738,7 +738,7 @@ class DigitalSpotsMap {
             repeatPeriod: 2000
         }] : [];
 
-        this.globe = Globe({ animateIn: true })(container)
+        this.globe = Globe({ animateIn: false })(container)
             // Appearance
             .globeImageUrl(themeUrl)
             .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')

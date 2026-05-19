@@ -503,16 +503,6 @@ function loadVFOState(vfo) {
  * Toggle between VFO A and VFO B
  */
 function toggleVFO() {
-    // CRITICAL: Set skip edge detection flag FIRST, before any changes
-    if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
-        setTimeout(() => {
-            if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
-            }
-        }, 2000);
-    }
-    
     // Save current VFO state before switching
     saveCurrentVFOState();
     
@@ -541,6 +531,23 @@ function toggleVFO() {
     // Tune to the new VFO settings
     if (wsManager.isConnected()) {
         autoTune();
+
+        // Pan the spectrum to the new VFO frequency (same as bookmark dropdown selection).
+        // Use 'pan' (not 'zoom') so the current zoom level is preserved.
+        const spectrumDisplay = window.spectrumDisplay;
+        if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+            spectrumDisplay.skipEdgeDetectionTemporary = true;
+            setTimeout(() => {
+                if (spectrumDisplay) {
+                    spectrumDisplay.skipEdgeDetectionTemporary = false;
+                }
+            }, 2000);
+
+            spectrumDisplay.ws.send(JSON.stringify({
+                type: 'pan',
+                frequency: vfoStates[newVFO].frequency
+            }));
+        }
         
         // Trigger squelch update after tune completes (for FM/NFM modes)
         // Use setTimeout to ensure mode change is processed first

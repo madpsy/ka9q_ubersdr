@@ -289,6 +289,22 @@ function applyEQPreset(presetName) {
             6000: -12,   // Eliminate very high frequencies
             8000: -12    // Eliminate very high frequencies
         };
+    } else if (presetName === 'music') {
+        // Music preset: punchy bass, scooped mids, upper-mid presence boost
+        presetValues = {
+            60:   4,     // Bass body
+            170:  3,     // Bass warmth
+            310: -2,     // Cut mud / boxiness
+            600: -3,     // Mid scoop
+            1000: -2,    // Continue mid scoop
+            1500:  0,    // Neutral transition
+            2000:  2,    // Presence begins
+            2500:  3,    // Clarity / bite
+            3000:  4,    // Upper-mid presence peak
+            4000:  3,    // Attack / detail
+            6000:  2,    // Shimmer
+            8000:  1     // Air / treble extension
+        };
     } else {
         console.error('Unknown EQ preset:', presetName);
         return;

@@ -135,9 +135,11 @@ function populateFilterSelect(filters) {
     if (state.activeFilter && filters.some(f => f.name === state.activeFilter)) {
         sel.value = state.activeFilter;
     } else {
-        // Default to NR4 if available, otherwise leave the first option selected
+        // Default to NR2 if available, then NR4, otherwise leave the first option selected
+        const nr2 = filters.find(f => f.name.toLowerCase() === 'nr2');
         const nr4 = filters.find(f => f.name.toLowerCase() === 'nr4');
-        if (nr4) sel.value = nr4.name;
+        if (nr2) sel.value = nr2.name;
+        else if (nr4) sel.value = nr4.name;
     }
     // Suppress auto-apply during population — we are just building the UI,
     // not asking the server to (re-)enable anything.

@@ -572,9 +572,9 @@ class MinimalRadio {
     // Initialize audio context
     async initializeAudio(sampleRate) {
         if (sampleRate) {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate });
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate, latencyHint: 'playback' });
         } else {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
         }
         
         if (this.audioContext.state === 'suspended') {

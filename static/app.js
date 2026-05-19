@@ -94,7 +94,7 @@ const wsManager = new WebSocketManager({
         // create the analysers and start the visualization loop — they are only created here.
         if (!audioContext) {
             // Start with browser's default sample rate - will be recreated when first audio arrives
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
             window.audioContext = audioContext;
             currentAudioContextSampleRate = audioContext.sampleRate;
             nextPlayTime = audioContext.currentTime;
@@ -1049,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // This MUST be done inside a user gesture handler for mobile browsers
             if (!audioContext) {
                 console.log('[MediaSession] Creating AudioContext from user gesture');
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
                 window.audioContext = audioContext;
                 currentAudioContextSampleRate = audioContext.sampleRate;
                 nextPlayTime = audioContext.currentTime;
@@ -2896,7 +2896,8 @@ async function handleBinaryMessage(data) {
 
             // Create new context with matching sample rate
             audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: sampleRate
+                sampleRate: sampleRate,
+                latencyHint: 'playback'
             });
             window.audioContext = audioContext;
             currentAudioContextSampleRate = sampleRate;
@@ -3546,7 +3547,8 @@ async function handlePCMAudio(msg) {
 
         // Create new context with matching sample rate
         audioContext = new (window.AudioContext || window.webkitAudioContext)({
-            sampleRate: msg.sampleRate
+            sampleRate: msg.sampleRate,
+            latencyHint: 'playback'
         });
         window.audioContext = audioContext;
         currentAudioContextSampleRate = msg.sampleRate;

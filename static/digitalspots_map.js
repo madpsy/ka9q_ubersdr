@@ -697,6 +697,10 @@ class DigitalSpotsMap {
                 btn.classList.remove('active-globe');
             }
             this.stopGlobeSpin();
+            // Rebuild any Leaflet markers that were skipped while in globe mode,
+            // then re-apply filters so only matching spots are visible.
+            this.rebuildLeafletMarkers();
+            this.applyFilters();
             // Leaflet loses track of its container size when hidden — force a recalculation
             if (this.map) {
                 setTimeout(() => this.map.invalidateSize(), 50);
@@ -920,6 +924,29 @@ class DigitalSpotsMap {
             this.globeRefreshTimer = null;
             this.refreshGlobePoints();
         }, 250);
+    }
+
+    debouncedUIRefresh() {
+        // Coalesce per-spot O(n) UI panel updates into one call per burst
+        if (this._uiRefreshTimer) clearTimeout(this._uiRefreshTimer);
+        this._uiRefreshTimer = setTimeout(() => {
+            this._uiRefreshTimer = null;
+            this.updateSpotCount();
+            this.updateDistanceStatistics();
+            this.updateBandLegend();
+            this.updateFilterDropdowns();
+            this.updateRarestEntities();
+        }, 250);
+    }
+
+    rebuildLeafletMarkers() {
+        // Called once when switching globe→leaflet to create markers for spots
+        // that arrived while the Leaflet map was hidden (globe mode).
+        for (const [key, spot] of this.spots.entries()) {
+            if (!this.markers.has(key)) {
+                this.addOrUpdateMarker(key, spot);
+            }
+        }
     }
 
     handleGlobeHover(spot) {
@@ -1269,33 +1296,36 @@ class DigitalSpotsMap {
     }
 
     applyFilters() {
-        // Hide/show markers based on all filters
-        const now = Date.now();
-        this.markers.forEach((marker, key) => {
-            const spot = this.spots.get(key);
-            if (!spot) return;
+        // Hide/show markers based on all filters — only in leaflet mode.
+        // In globe mode there are no Leaflet markers; the globe is refreshed below.
+        if (this.mapMode === 'leaflet') {
+            const now = Date.now();
+            this.markers.forEach((marker, key) => {
+                const spot = this.spots.get(key);
+                if (!spot) return;
 
-            const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
-            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-            
-            // Age filter check
-            let ageMatch = true;
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000; // Convert minutes to milliseconds
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                ageMatch = age <= maxAgeMs;
-            }
+                const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
+                const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
+                const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
 
-            if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-                marker.addTo(this.map);
-            } else {
-                marker.remove();
-            }
-        });
+                // Age filter check
+                let ageMatch = true;
+                if (this.ageFilter !== 'none') {
+                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
+                    const spotTime = new Date(spot.timestamp).getTime();
+                    const age = now - spotTime;
+                    ageMatch = age <= maxAgeMs;
+                }
+
+                if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
+                    marker.addTo(this.map);
+                } else {
+                    marker.remove();
+                }
+            });
+        }
         
         this.updateSpotCount();
         this.updateDistanceStatistics();
@@ -1561,24 +1591,23 @@ class DigitalSpotsMap {
         // Check for new continent or country
         this.checkNewEntities(spot);
 
-        // Add or update marker
-        this.addOrUpdateMarker(key, spot);
+        // Add or update marker — skip in globe mode (no Leaflet DOM needed while globe is active)
+        if (this.mapMode === 'globe') {
+            // If a stale marker exists from before the mode switch, remove it
+            if (this.markers.has(key)) {
+                this.markers.get(key).remove();
+                this.markers.delete(key);
+            }
+            this.debouncedGlobeRefresh();
+        } else {
+            this.addOrUpdateMarker(key, spot);
+        }
 
         // Add to live messages
         this.addLiveMessage(spot);
 
-        // Update spot count and distance statistics
-        this.updateSpotCount();
-        this.updateDistanceStatistics();
-
-        // Update band legend
-        this.updateBandLegend();
-
-        // Update filter dropdowns
-        this.updateFilterDropdowns();
-
-        // Update rarest entities
-        this.updateRarestEntities();
+        // Debounce the O(n) UI panel updates — no need to run on every single spot arrival
+        this.debouncedUIRefresh();
 
         // Limit number of spots
         if (this.spots.size > this.maxSpots) {

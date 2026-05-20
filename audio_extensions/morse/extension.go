@@ -32,6 +32,7 @@ package morse
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -250,6 +251,12 @@ func (e *ExternalMorseExtension) readLoop(resultChan chan<- []byte) {
 	scanner := bufio.NewScanner(e.stdout)
 	for scanner.Scan() {
 		line := scanner.Bytes()
+
+		// ggmorse writes decoded characters directly to stdout before our JSON
+		// callback fires (e.g. "E HA{...}"). Strip everything before the first '{'.
+		if idx := bytes.IndexByte(line, '{'); idx > 0 {
+			line = line[idx:]
+		}
 
 		var ev cwEvent
 		if err := json.Unmarshal(line, &ev); err != nil {

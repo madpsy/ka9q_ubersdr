@@ -73,6 +73,32 @@
 .morse-header-controls {
     display: flex;
     gap: 8px;
+    align-items: center;
+}
+
+.morse-quality-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    margin-right: 2px;
+}
+
+.morse-quality-select {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+}
+
+.morse-quality-select:focus {
+    outline: none;
+    border-color: #888;
 }
 
 /* ── Output area ─────────────────────────────────────────────────────────── */

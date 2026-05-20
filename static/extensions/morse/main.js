@@ -29,6 +29,7 @@ class MorseExtension extends DecoderExtension {
 
         this.running = false;
         this.textBuffer = '';
+        this.minQuality = 'all'; // Minimum quality filter: all | low | medium | high
 
         // Intercept binary WS messages while running
         this._origHandler  = null;
@@ -91,13 +92,17 @@ class MorseExtension extends DecoderExtension {
         if (this._handlersSet) return;
         this._handlersSet = true;
 
-        const startBtn = document.getElementById('morse-start-btn');
-        const clearBtn = document.getElementById('morse-clear-btn');
-        const copyBtn  = document.getElementById('morse-copy-btn');
+        const startBtn    = document.getElementById('morse-start-btn');
+        const clearBtn    = document.getElementById('morse-clear-btn');
+        const copyBtn     = document.getElementById('morse-copy-btn');
+        const qualitySel  = document.getElementById('morse-min-quality');
 
-        if (startBtn) startBtn.addEventListener('click', () => this._toggleDecoder());
-        if (clearBtn) clearBtn.addEventListener('click', () => this._clearOutput());
-        if (copyBtn)  copyBtn.addEventListener('click',  () => this._copyOutput());
+        if (startBtn)   startBtn.addEventListener('click', () => this._toggleDecoder());
+        if (clearBtn)   clearBtn.addEventListener('click', () => this._clearOutput());
+        if (copyBtn)    copyBtn.addEventListener('click',  () => this._copyOutput());
+        if (qualitySel) qualitySel.addEventListener('change', (e) => {
+            this.minQuality = e.target.value;
+        });
     }
 
     // ── Decoder control ───────────────────────────────────────────────────────
@@ -266,6 +271,11 @@ class MorseExtension extends DecoderExtension {
     // ── UI helpers ────────────────────────────────────────────────────────────
 
     _appendText(text, conf) {
+        // Quality rank: poor=0, low=1, medium=2, high=3
+        const rank    = { poor: 0, low: 1, medium: 2, high: 3 };
+        const minRank = { all: 0, low: 1, medium: 2, high: 3 }[this.minQuality] ?? 0;
+        if ((rank[conf] ?? 0) < minRank) return; // filtered out
+
         const el = document.getElementById('morse-output-text');
         if (!el) return;
 

@@ -17,6 +17,7 @@ class CWSpotsGraph {
         this.autoTune = false; // Auto-tune to new spots
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
+        this.currentFrequency = null; // Tuned frequency relayed from parent (Hz)
 
         // CW decoder state
         this.morseRunning = false;
@@ -100,6 +101,9 @@ class CWSpotsGraph {
                 this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
             case 'cw_spots_initial':
+                if (event.data.currentFrequency != null) {
+                    this.currentFrequency = event.data.currentFrequency;
+                }
                 this.loadInitialSpots(data, event.data.bandFilter);
                 this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
@@ -110,6 +114,10 @@ class CWSpotsGraph {
                 if (syncBandSelect) syncBandSelect.value = data;
                 this.updateChart();
                 this.updateUI();
+                break;
+            case 'frequency_changed':
+                this.currentFrequency = event.data.frequency;
+                this.updateChart();
                 break;
             case 'cw_spots_clear':
                 this.clearSpots();
@@ -516,8 +524,8 @@ class CWSpotsGraph {
             }
         });
         
-        // Create datasets
-        return Object.values(groups).map(group => ({
+        // Build base SNR datasets
+        const datasets = Object.values(groups).map(group => ({
             label: group.label,
             data: group.data,
             backgroundColor: group.color,
@@ -525,6 +533,33 @@ class CWSpotsGraph {
             pointRadius: 4,
             pointHoverRadius: 6
         }));
+
+        // Tuned-frequency highlight dataset (±10 Hz tolerance, same as main extension)
+        if (this.currentFrequency != null) {
+            const tunedPoints = spots.filter(spot =>
+                Math.abs(spot.frequency - this.currentFrequency) <= 10
+            ).map(spot => ({
+                x: spot.timestamp,
+                y: spot.frequency / 1e6,
+                spot: spot
+            }));
+
+            if (tunedPoints.length > 0) {
+                datasets.push({
+                    label: 'Tuned',
+                    data: tunedPoints,
+                    backgroundColor: 'rgba(0,0,0,0)',   // transparent fill
+                    borderColor: '#00e676',              // bright green ring
+                    borderWidth: 2,
+                    pointRadius: 8,
+                    pointHoverRadius: 10,
+                    pointStyle: 'circle',
+                    order: -1  // draw on top of other datasets
+                });
+            }
+        }
+
+        return datasets;
     }
     
     tuneToSpot(spot) {

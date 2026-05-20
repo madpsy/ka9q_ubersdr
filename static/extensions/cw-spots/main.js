@@ -715,6 +715,10 @@ class CWSpotsExtension extends DecoderExtension {
         // Track tuned frequency and update row indicators
         this.currentTunedFrequency = spot.frequency;
         this.updateTunedIndicators();
+        // Relay to graph popup
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.postMessage({ type: 'frequency_changed', frequency: spot.frequency }, '*');
+        }
 
         // Update modal tuned info if modal is open
         this.updateModalTunedInfo(spot);
@@ -975,6 +979,10 @@ class CWSpotsExtension extends DecoderExtension {
                 // Update tuned indicators when radio frequency changes externally
                 this.currentTunedFrequency = currentFreq;
                 this.updateTunedIndicators();
+                // Relay to graph popup
+                if (this.graphWindow && !this.graphWindow.closed) {
+                    this.graphWindow.postMessage({ type: 'frequency_changed', frequency: currentFreq }, '*');
+                }
             }
         }, 500);
     }
@@ -2463,7 +2471,8 @@ class CWSpotsExtension extends DecoderExtension {
             this.graphWindow.postMessage({
                 type: 'cw_spots_initial',
                 data: this.spots,
-                bandFilter: this.bandFilter
+                bandFilter: this.bandFilter,
+                currentFrequency: this.currentTunedFrequency || null
             }, '*');
             // Also send explicit band filter sync as a separate message
             this.graphWindow.postMessage({

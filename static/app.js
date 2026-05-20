@@ -12361,6 +12361,34 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     let accumPx = 0;
     let drumPos = 0;
 
+    // ── rAF-gated tune flush ──────────────────────────────────────────────────
+    // The UI (frequency readout, drum animation) updates immediately on every
+    // pointermove for instant feel. The WebSocket tune message is coalesced to
+    // at most one send per animation frame (~16 ms at 60 fps) so that fast drags
+    // don't flood the server with dozens of redundant tune commands.
+    let rafPending = false;
+
+    function scheduleTune() {
+        if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(function () {
+                rafPending = false;
+                autoTune();
+            });
+        }
+    }
+
+    function flushTune() {
+        // Called on pointerup/pointercancel to guarantee the final frequency is
+        // always committed even if the rAF callback hasn't fired yet.
+        if (rafPending) {
+            rafPending = false;
+            // Cancel the pending rAF by letting it fire as a no-op is fine, but
+            // we send immediately here so there is zero perceptible release lag.
+        }
+        autoTune();
+    }
+
     // Show current step on load
     updateStepLabel();
 
@@ -12384,12 +12412,28 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
         const dx = e.clientX - lastX;
 
-        // Accumulate pixels; fire adjustFrequency each time threshold is crossed
+        // Accumulate pixels; fire a UI update each time the threshold is crossed
         accumPx += dx;
         const steps = Math.trunc(accumPx / PX_PER_STEP);
         if (steps !== 0) {
-            adjustFrequency(steps * getCurrentStepHz());
             accumPx -= steps * PX_PER_STEP;
+
+            // ── UI update: immediate so the display feels instant ─────────────
+            const freqInput = document.getElementById('frequency');
+            const currentHz = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+            const deltaHz   = steps * getCurrentStepHz();
+            const stepSize  = Math.abs(deltaHz);
+            const direction = Math.sign(deltaHz);
+            const snapped   = Math.round(currentHz / stepSize) * stepSize;
+            const newHz     = Math.max(10000, Math.min(30000000, snapped + direction * stepSize));
+
+            setFrequencyInputValue(newHz);
+            updateBandButtons(newHz);
+            updateBandSelector();
+            updateURL();
+
+            // ── Network send: coalesced to ≤1 WebSocket message per rAF frame ─
+            scheduleTune();
         }
 
         // Animate knurling texture to simulate drum rotation
@@ -12402,11 +12446,14 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     wheel.addEventListener('pointerup', function () {
         active = false;
         wheel.style.cursor = 'grab';
+        // Flush any pending tune so the final frequency is always committed
+        flushTune();
     });
 
     wheel.addEventListener('pointercancel', function () {
         active = false;
         wheel.style.cursor = 'grab';
+        flushTune();
     });
 })();
 

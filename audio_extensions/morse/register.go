@@ -51,7 +51,9 @@ func GetInfo() map[string]interface{} {
 		"parameters": map[string]interface{}{
 			"pitch": map[string]interface{}{
 				"type":        "number",
-				"description": "CW tone frequency in Hz passed to --pitch. Sets the ggmorse search window to pitch±150 Hz and locks pitch detection. Omit to use full auto-detect (default: ggmorse searches 500–700 Hz).",
+				"description": "CW tone frequency in Hz (100–2000). Locks ggmorse to pitch±150 Hz search window. Omit for full auto-detect (ggmorse searches 500–700 Hz by default).",
+				"minimum":     100,
+				"maximum":     2000,
 				"optional":    true,
 			},
 		},

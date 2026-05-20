@@ -111,6 +111,14 @@ type ExternalMorseExtension struct {
 // Set via the "pitch" extension parameter to lock to a specific frequency.
 const defaultPitchHz = 0
 
+// pitchMinHz / pitchMaxHz are the inclusive bounds for a user-supplied pitch.
+// Below 100 Hz is below ggmorse's high-pass filter floor; above 2000 Hz is
+// above the Nyquist limit of ggmorse's 4 kHz internal base sample rate.
+const (
+	pitchMinHz = 100.0
+	pitchMaxHz = 2000.0
+)
+
 // NewMorseExtension creates a new external morse extension.
 // Returns an error immediately if the binary is not found.
 // extensionParams may contain:
@@ -125,12 +133,19 @@ func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (
 
 	pitch := float64(defaultPitchHz)
 	if v, ok := extensionParams["pitch"]; ok {
+		var raw float64
 		switch p := v.(type) {
 		case float64:
-			pitch = p
+			raw = p
 		case int:
-			pitch = float64(p)
+			raw = float64(p)
+		default:
+			return nil, fmt.Errorf("morse: pitch must be a number, got %T", v)
 		}
+		if raw < pitchMinHz || raw > pitchMaxHz {
+			return nil, fmt.Errorf("morse: pitch %.0f Hz out of range [%.0f, %.0f]", raw, pitchMinHz, pitchMaxHz)
+		}
+		pitch = raw
 	}
 
 	return &ExternalMorseExtension{

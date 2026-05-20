@@ -554,6 +554,7 @@ class CWSpotsGraph {
                     pointRadius: 8,
                     pointHoverRadius: 10,
                     pointStyle: 'circle',
+                    clip: false,                         // don't clip ring at chart edge
                     order: -1  // draw on top of other datasets
                 });
             }

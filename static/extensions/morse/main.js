@@ -138,7 +138,7 @@ class MorseExtension extends DecoderExtension {
         this._restoreBinaryHandler();
         this.running = false;
         this._setStatus('Stopped');
-        this._updateStats(null, null, null, null);
+        this._clearStats();
 
         const btn = document.getElementById('morse-start-btn');
         if (btn) { btn.textContent = 'Start'; btn.classList.remove('running'); }
@@ -258,6 +258,7 @@ class MorseExtension extends DecoderExtension {
         // Subprocess is gone — clean up the WS handler and reset button
         this._restoreBinaryHandler();
         this.running = false;
+        this._clearStats();
         const btn = document.getElementById('morse-start-btn');
         if (btn) { btn.textContent = 'Start'; btn.classList.remove('running'); }
     }
@@ -288,16 +289,23 @@ class MorseExtension extends DecoderExtension {
         if (pitchEl) pitchEl.textContent = pitch != null ? Math.round(pitch) : '---';
         if (speedEl) speedEl.textContent = speed != null ? speed.toFixed(1)  : '---';
 
-        if (confEl) {
-            if (conf != null) {
-                const labels = { high: 'High', medium: 'Medium', low: 'Low', poor: 'Poor' };
-                confEl.textContent = labels[conf] ?? conf;
-                confEl.dataset.conf = conf;
-            } else {
-                confEl.textContent = '---';
-                delete confEl.dataset.conf;
-            }
+        // Only update quality when a real confidence value is provided.
+        // Stats-only events (0x11) pass conf=null and must not clear the last decode's quality.
+        if (confEl && conf != null) {
+            const labels = { high: 'High', medium: 'Medium', low: 'Low', poor: 'Poor' };
+            confEl.textContent = labels[conf] ?? conf;
+            confEl.dataset.conf = conf;
         }
+    }
+
+    // Reset all stats displays to '---' (called on stop/error)
+    _clearStats() {
+        const pitchEl = document.getElementById('morse-pitch-value');
+        const speedEl = document.getElementById('morse-speed-value');
+        const confEl  = document.getElementById('morse-conf-value');
+        if (pitchEl) pitchEl.textContent = '---';
+        if (speedEl) speedEl.textContent = '---';
+        if (confEl)  { confEl.textContent = '---'; delete confEl.dataset.conf; }
     }
 
     _setStatus(text, cls) {

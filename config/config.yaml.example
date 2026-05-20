@@ -1769,7 +1769,7 @@ dsp:
   # If a filter is disabled here but compiled into the container, clients
   # will receive an error if they request it.
   #
-  # Default (when this section is omitted): nr2/rn2/nr4/dfnr enabled, bnr disabled.
+  # Default (when this section is omitted): nr2/rn2/nr4/dfnr enabled.
   filters:
     nr2: true    # SpectralNR — MMSE-LSA spectral subtraction
     rn2: true    # RNNoise — Mozilla/Xiph RNN suppressor

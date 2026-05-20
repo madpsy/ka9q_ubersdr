@@ -21,7 +21,7 @@ class CWSpotsGraph {
         // CW decoder state
         this.morseRunning = false;
         this.morseTextBuffer = '';
-        this.morseCollapsed = false;
+        this.morseCollapsed = true; // Start collapsed; expands on Start or toggle
 
         this.init();
     }
@@ -37,6 +37,9 @@ class CWSpotsGraph {
         // Setup UI event handlers
         this.setupEventHandlers();
         this.setupDecoderHandlers();
+
+        // Apply initial collapsed state to decoder body
+        this._morseApplyCollapsedState();
 
         // Sync checkbox states (Firefox remembers form state across refreshes)
         this.syncCheckboxStates();
@@ -671,6 +674,11 @@ class CWSpotsGraph {
         this.morseRunning = true;
         this._morseSetStatus('Connecting…');
         this._morseUpdateButton();
+        // Auto-expand the decoder body when starting
+        if (this.morseCollapsed) {
+            this.morseCollapsed = false;
+            this._morseApplyCollapsedState();
+        }
     }
 
     _morseStop() {
@@ -817,11 +825,17 @@ class CWSpotsGraph {
 
     _morseToggleCollapse() {
         this.morseCollapsed = !this.morseCollapsed;
+        this._morseApplyCollapsedState();
+    }
+
+    _morseApplyCollapsedState() {
         const body      = document.getElementById('cw-decoder-body');
         const toggleBtn = document.getElementById('cw-decoder-toggle-btn');
-        if (body) body.classList.toggle('collapsed', this.morseCollapsed);
-        if (toggleBtn) toggleBtn.classList.toggle('collapsed', this.morseCollapsed);
-        toggleBtn.title = this.morseCollapsed ? 'Expand decoder' : 'Collapse decoder';
+        if (body)      body.classList.toggle('collapsed', this.morseCollapsed);
+        if (toggleBtn) {
+            toggleBtn.classList.toggle('collapsed', this.morseCollapsed);
+            toggleBtn.title = this.morseCollapsed ? 'Expand decoder' : 'Collapse decoder';
+        }
     }
 }
 

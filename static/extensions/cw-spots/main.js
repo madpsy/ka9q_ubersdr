@@ -2141,8 +2141,8 @@ class CWSpotsExtension extends DecoderExtension {
             window.dxClusterClient.unsubscribeFromCWSpots();
         }
 
-        // Stop morse relay if active (restores ws.onmessage before extension switches)
-        if (this._morseOrigHandler !== undefined && this._morseOrigHandler !== null) {
+        // Stop morse relay if active (removes addEventListener before extension switches)
+        if (this._morseBinaryListener) {
             this._morseStopRelay();
         }
 
@@ -2249,42 +2249,17 @@ class CWSpotsExtension extends DecoderExtension {
             return;
         }
 
-        // Save the current onmessage handler (may already be the CW spots handler)
-        if (!this._morseOrigHandler) {
-            this._morseOrigHandler = ws.onmessage;
-        }
+        // Remove any existing listener first (guard against double-start)
+        this._morseRemoveListener(ws);
 
-        // Install relay handler — forwards binary frames to the popup
-        ws.onmessage = (event) => {
-            if (event.data instanceof ArrayBuffer) {
-                // Transfer (zero-copy) the buffer to the popup
-                if (this.graphWindow && !this.graphWindow.closed) {
-                    this.graphWindow.postMessage(
-                        { type: 'morse_frame', data: event.data },
-                        '*',
-                        [event.data]
-                    );
-                }
-            } else if (event.data instanceof Blob) {
-                event.data.arrayBuffer().then(buf => {
-                    if (this.graphWindow && !this.graphWindow.closed) {
-                        this.graphWindow.postMessage(
-                            { type: 'morse_frame', data: buf },
-                            '*',
-                            [buf]
-                        );
-                    }
-                });
-            } else {
-                // JSON message — handle audio extension confirmations, pass rest to original
+        // addEventListener-based handler — same pattern as FT8/WEFAX/NAVTEX extensions.
+        // The DXClusterClient sets ws.onmessage internally; we must NOT replace it.
+        // Binary frames arrive as Blobs; convert to ArrayBuffer then transfer to popup.
+        this._morseBinaryListener = (event) => {
+            if (!(event.data instanceof Blob) && !(event.data instanceof ArrayBuffer)) {
+                // JSON frame — check for audio_extension_error
                 try {
                     const msg = JSON.parse(event.data);
-                    if (msg.type === 'audio_extension_attached') {
-                        if (this.graphWindow && !this.graphWindow.closed) {
-                            this.graphWindow.postMessage({ type: 'morse_attached' }, '*');
-                        }
-                        return; // consumed
-                    }
                     if (msg.type === 'audio_extension_error') {
                         if (this.graphWindow && !this.graphWindow.closed) {
                             this.graphWindow.postMessage({
@@ -2292,18 +2267,29 @@ class CWSpotsExtension extends DecoderExtension {
                                 msg: msg.error || 'Unknown server error'
                             }, '*');
                         }
-                        // Restore original handler since decoder failed to start
-                        this._morseRestoreHandler(ws);
-                        return; // consumed
+                        this._morseRemoveListener(ws);
                     }
-                } catch (_) { /* not JSON — fall through */ }
-
-                // Pass non-morse JSON messages to the original handler
-                if (this._morseOrigHandler) {
-                    this._morseOrigHandler.call(ws, event);
-                }
+                } catch (_) { /* not JSON */ }
+                return;
             }
+
+            // Binary frame — convert Blob → ArrayBuffer if needed, then transfer
+            const toBuffer = event.data instanceof Blob
+                ? event.data.arrayBuffer()
+                : Promise.resolve(event.data);
+
+            toBuffer.then(buf => {
+                if (this.graphWindow && !this.graphWindow.closed) {
+                    this.graphWindow.postMessage(
+                        { type: 'morse_frame', data: buf },
+                        '*',
+                        [buf]
+                    );
+                }
+            });
         };
+
+        ws.addEventListener('message', this._morseBinaryListener);
 
         // Ask the backend to attach the morse audio extension
         ws.send(JSON.stringify({
@@ -2311,6 +2297,13 @@ class CWSpotsExtension extends DecoderExtension {
             extension_name: 'morse',
             params: {}
         }));
+
+        // Notify the popup immediately — the DXClusterClient silently ignores
+        // audio_extension_attached in its handleMessage(), so we confirm here.
+        // If the backend rejects (binary 0x12 error frame), the popup will show the error.
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.postMessage({ type: 'morse_attached' }, '*');
+        }
 
         console.log('[CW Spots] Morse decoder relay started for graph popup');
     }
@@ -2320,16 +2313,16 @@ class CWSpotsExtension extends DecoderExtension {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'audio_extension_detach' }));
         }
-        this._morseRestoreHandler(ws);
+        this._morseRemoveListener(ws);
         console.log('[CW Spots] Morse decoder relay stopped');
     }
 
-    _morseRestoreHandler(ws) {
+    _morseRemoveListener(ws) {
         const sock = ws || this._morseGetWS();
-        if (sock && this._morseOrigHandler !== undefined) {
-            sock.onmessage = this._morseOrigHandler;
+        if (sock && this._morseBinaryListener) {
+            sock.removeEventListener('message', this._morseBinaryListener);
         }
-        this._morseOrigHandler = null;
+        this._morseBinaryListener = null;
     }
 
     getFilteredSpotsForGraph() {
@@ -2384,7 +2377,7 @@ class CWSpotsExtension extends DecoderExtension {
 
         // Open new window
         const width = 1000;
-        const height = 600;
+        const height = 750;
         const left = (screen.width - width) / 2;
         const top = (screen.height - height) / 2;
 

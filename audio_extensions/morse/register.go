@@ -48,7 +48,14 @@ func GetInfo() map[string]interface{} {
 		"displayName": "Morse Code Decoder",
 		"version":     "2.0.0",
 		"description": "CW decoder powered by ggmorse (cw-decoder subprocess). Auto-detects pitch and speed.",
-		"parameters":  map[string]interface{}{},
+		"parameters": map[string]interface{}{
+			"pitch": map[string]interface{}{
+				"type":        "number",
+				"description": "CW tone frequency in Hz passed to --pitch (default: 500). Sets the ggmorse search window to pitch±150 Hz.",
+				"default":     500,
+				"optional":    true,
+			},
+		},
 		"output_format": map[string]interface{}{
 			"type":        "binary",
 			"description": "Binary frames sent over the WebSocket",

@@ -90,6 +90,7 @@ type cwEvent struct {
 // Multiple instances may be created and run concurrently.
 type ExternalMorseExtension struct {
 	sampleRate int
+	pitchHz    float64 // CW tone frequency passed to --pitch; 0 means use binary default
 
 	mu     sync.Mutex
 	cmd    *exec.Cmd
@@ -104,16 +105,37 @@ type ExternalMorseExtension struct {
 	wg       sync.WaitGroup
 }
 
+// defaultPitchHz is the CW tone frequency passed to cw-decoder when no
+// "pitch" extension parameter is provided. 500 Hz centres the ggmorse search
+// window at 350–650 Hz, which is better than the binary's built-in default
+// (500–700 Hz) for signals spotted at 500 Hz audio offset.
+const defaultPitchHz = 500
+
 // NewMorseExtension creates a new external morse extension.
 // Returns an error immediately if the binary is not found.
-func NewMorseExtension(sampleRate int, _ map[string]interface{}) (*ExternalMorseExtension, error) {
+// extensionParams may contain:
+//
+//	"pitch" (float64 or int) — CW tone frequency in Hz (default: 500)
+func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (*ExternalMorseExtension, error) {
 	if _, err := os.Stat(cwDecoderBinary); os.IsNotExist(err) {
 		return nil, fmt.Errorf("cw-decoder binary not found at %s — "+
 			"build it from audio_extensions/morse/external/ and install to /usr/local/bin/",
 			cwDecoderBinary)
 	}
+
+	pitch := float64(defaultPitchHz)
+	if v, ok := extensionParams["pitch"]; ok {
+		switch p := v.(type) {
+		case float64:
+			pitch = p
+		case int:
+			pitch = float64(p)
+		}
+	}
+
 	return &ExternalMorseExtension{
 		sampleRate: sampleRate,
+		pitchHz:    pitch,
 	}, nil
 }
 
@@ -131,6 +153,9 @@ func (e *ExternalMorseExtension) Start(audioChan <-chan AudioSample, resultChan 
 	}
 
 	args := []string{"--sample-rate", strconv.Itoa(e.sampleRate)}
+	if e.pitchHz > 0 {
+		args = append(args, "--pitch", strconv.FormatFloat(e.pitchHz, 'f', 0, 64))
+	}
 	cmd := exec.Command(cwDecoderBinary, args...)
 	cmd.Stderr = io.Discard // suppress cw-decoder stderr (ggmorse character trace)
 

@@ -47,7 +47,9 @@ class MorseExtension extends DecoderExtension {
     }
 
     onActivate() {
-        // DOM may have been rebuilt — re-wire handlers only if not already set
+        // DOM is always rebuilt when the extension panel is shown — reset the
+        // guard so _setupHandlers() re-attaches listeners to the fresh elements.
+        this._handlersSet = false;
         this._waitForDOM(() => {
             this._setupHandlers();
         });
@@ -103,6 +105,13 @@ class MorseExtension extends DecoderExtension {
         if (qualitySel) qualitySel.addEventListener('change', (e) => {
             this.minQuality = e.target.value;
         });
+
+        // Sync DOM state back to JS state (DOM is fresh after re-activation)
+        if (qualitySel) qualitySel.value = this.minQuality;
+        if (startBtn && this.running) {
+            startBtn.textContent = 'Stop';
+            startBtn.classList.add('running');
+        }
     }
 
     // ── Decoder control ───────────────────────────────────────────────────────

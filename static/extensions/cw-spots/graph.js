@@ -193,8 +193,9 @@ class CWSpotsGraph {
             this.spots = this.spots.slice(0, 5000);
         }
 
-        // Only update latest spot display and auto-tune if spot passes current band filter
-        const passesFilter = !this.bandFilter || this.bandFilter === 'all' || spot.band === this.bandFilter;
+        // Only update latest spot display and auto-tune if spot passes current filters
+        const passesFilter = (!this.bandFilter || this.bandFilter === 'all' || spot.band === this.bandFilter)
+            && (this.snrFilter <= -999 || spot.snr >= this.snrFilter);
 
         if (passesFilter) {
             // Update last spot time

@@ -1,0 +1,11 @@
+# CMake out-of-source build directory (created by: cmake -B build ...)
+build/
+
+# Arch-suffixed binaries produced by: make  (e.g. cw-decoder_amd64, cw-decoder_arm64)
+cw-decoder_*
+
+# Plain binary if ever built without the Makefile
+cw-decoder
+
+*.o
+*.a

@@ -1,4 +1,4 @@
-/* Morse Code Decoder Extension Styles */
+/* Morse Code (CW) Decoder Extension — ggmorse/cw-decoder backend */
 
 .morse-container {
     display: flex;
@@ -9,398 +9,111 @@
     font-family: 'Courier New', monospace;
 }
 
-/* Header */
+/* ── Header ─────────────────────────────────────────────────────────────── */
 .morse-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    padding: 10px 16px;
     background: #2a2a2a;
     border-bottom: 2px solid #3a3a3a;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .morse-header h3 {
     margin: 0;
-    font-size: 18px;
+    font-size: 17px;
     color: #4CAF50;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    white-space: nowrap;
 }
 
-.morse-header-info {
+/* ── Stats row ───────────────────────────────────────────────────────────── */
+.morse-stats {
     display: flex;
-    align-items: center;
-    gap: 15px;
+    gap: 20px;
+    flex: 1;
+    justify-content: center;
 }
 
-.morse-channel-count {
-    background: #3a3a3a;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 12px;
-    color: #4CAF50;
+.morse-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 13px;
+}
+
+.morse-stat-label {
+    color: #888;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.morse-stat-value {
     font-weight: bold;
+    font-size: 15px;
+    color: #e0e0e0;
+    min-width: 3ch;
+    text-align: right;
 }
 
+.morse-stat-unit {
+    color: #666;
+    font-size: 11px;
+}
+
+/* Confidence colour coding */
+.morse-conf-value[data-conf="high"]   { color: #00ff88; }
+.morse-conf-value[data-conf="medium"] { color: #e0e040; }
+.morse-conf-value[data-conf="low"]    { color: #ff9020; }
+.morse-conf-value[data-conf="poor"]   { color: #ff4444; }
+
+/* ── Header controls ─────────────────────────────────────────────────────── */
 .morse-header-controls {
     display: flex;
     gap: 8px;
 }
 
-/* Configuration Panel */
-.morse-config-panel {
-    padding: 16px;
-    background: #252525;
-    border-bottom: 1px solid #3a3a3a;
-}
-
-.morse-config-row {
-    display: flex;
-    gap: 20px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-}
-
-.morse-config-row:last-child {
-    margin-bottom: 0;
-}
-
-.morse-config-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.morse-config-group label {
-    font-size: 13px;
-    color: #b0b0b0;
-    white-space: nowrap;
-}
-
-.morse-select,
-.morse-input {
-    background: #1a1a1a;
-    border: 1px solid #3a3a3a;
-    color: #e0e0e0;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 13px;
-    font-family: 'Courier New', monospace;
-}
-
-.morse-select {
-    min-width: 180px;
-}
-
-.morse-input {
-    width: 80px;
-}
-
-.morse-input:focus,
-.morse-select:focus {
-    outline: none;
-    border-color: #4CAF50;
-}
-
-/* Spectrum Display */
-.morse-spectrum-container {
-    background: #0a0a0a;
-    border-bottom: 1px solid #3a3a3a;
-    padding: 5px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-.morse-spectrum-canvas {
-    display: block;
-    width: 100%;
-    height: 150px;
-    background: #000;
-    border: 1px solid #333;
-    cursor: crosshair;
-}
-
-/* Channels Container */
-.morse-channels-container {
+/* ── Output area ─────────────────────────────────────────────────────────── */
+.morse-output-area {
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    padding: 12px 16px;
+    background: #111;
 }
 
-/* Individual Channel */
-.morse-channel {
-    background: #2a2a2a;
-    border: 1px solid #3a3a3a;
-    border-radius: 6px;
-    overflow: hidden;
-    transition: all 0.3s ease;
-}
-
-/* Channel-specific colors matching spectrum display */
-#morse-channel-0.active {
-    border-color: #FF5722;
-    box-shadow: 0 0 10px rgba(255, 87, 34, 0.3);
-}
-
-#morse-channel-1.active {
-    border-color: #2196F3;
-    box-shadow: 0 0 10px rgba(33, 150, 243, 0.3);
-}
-
-#morse-channel-2.active {
-    border-color: #4CAF50;
-    box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
-}
-
-#morse-channel-3.active {
-    border-color: #FFC107;
-    box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
-}
-
-#morse-channel-4.active {
-    border-color: #9C27B0;
-    box-shadow: 0 0 10px rgba(156, 39, 176, 0.3);
-}
-
-.morse-channel.idle {
-    opacity: 0.5;
-}
-
-/* Channel Header */
-.morse-channel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: #252525;
-    border-bottom: 1px solid #3a3a3a;
-}
-
-.morse-channel-title {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-/* Channel number colors matching spectrum display */
-#morse-channel-0 .morse-channel-number {
-    color: #FF5722;
-}
-
-#morse-channel-1 .morse-channel-number {
-    color: #2196F3;
-}
-
-#morse-channel-2 .morse-channel-number {
-    color: #4CAF50;
-}
-
-#morse-channel-3 .morse-channel-number {
-    color: #FFC107;
-}
-
-#morse-channel-4 .morse-channel-number {
-    color: #9C27B0;
-}
-
-.morse-channel-number {
-    font-weight: bold;
-    font-size: 14px;
-}
-
-.morse-channel-status {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: #3a3a3a;
-    color: #888;
-}
-
-/* Channel status colors matching spectrum display */
-#morse-channel-0.active .morse-channel-status {
-    background: #FF5722;
-    color: #fff;
-}
-
-#morse-channel-1.active .morse-channel-status {
-    background: #2196F3;
-    color: #fff;
-}
-
-#morse-channel-2.active .morse-channel-status {
-    background: #4CAF50;
-    color: #fff;
-}
-
-#morse-channel-3.active .morse-channel-status {
-    background: #FFC107;
-    color: #fff;
-}
-
-#morse-channel-4.active .morse-channel-status {
-    background: #9C27B0;
-    color: #fff;
-}
-
-.morse-channel-info {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    font-size: 13px;
-}
-
-.morse-channel-freq {
-    color: #64B5F6;
-    font-weight: bold;
-}
-
-.morse-channel-wpm {
-    color: #FFB74D;
-    font-weight: bold;
-}
-
-.morse-channel-controls {
-    display: flex;
-    gap: 4px;
-}
-
-.btn-icon {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-size: 16px;
-    padding: 4px 8px;
-    opacity: 0.6;
-    transition: opacity 0.2s;
-}
-
-.btn-icon:hover {
-    opacity: 1;
-}
-
-/* Channel Content - Independent horizontal scrolling for text and morse */
-.morse-channel-content {
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-.morse-channel-text-container {
-    padding: 8px 12px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    min-height: 38px;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
-}
-
-.morse-channel-text-container::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Opera */
-}
-
-.morse-channel-text {
-    font-size: 16px;
-    line-height: 1.4;
+.morse-output-text {
+    font-size: 18px;
+    line-height: 1.7;
     color: #e0e0e0;
-    white-space: nowrap;
-    font-weight: bold;
-    display: inline-block;
-    min-height: 22px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
-.morse-channel-morse-container {
-    padding: 4px 12px 8px 12px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    border-top: 1px solid #3a3a3a;
-    min-height: 32px;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
-}
+/* Confidence-coloured spans injected by JS */
+.morse-output-text .conf-high   { color: #00ff88; }
+.morse-output-text .conf-medium { color: #e0e040; }
+.morse-output-text .conf-low    { color: #ff9020; }
+.morse-output-text .conf-poor   { color: #ff4444; opacity: 0.7; }
 
-.morse-channel-morse-container::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Opera */
-}
-
-.morse-channel-morse {
-    font-size: 14px;
-    line-height: 1.4;
-    color: #888;
-    white-space: nowrap;
-    font-family: 'Courier New', monospace;
-    display: inline-block;
-    min-height: 20px;
-}
-
-.morse-channel-morse.hidden {
-    display: none;
-}
-
-/* Timestamp styling */
-.morse-timestamp {
-    color: #666;
-    font-size: 11px;
-    margin-right: 6px;
-}
-
-/* Status Bar */
+/* ── Status bar ──────────────────────────────────────────────────────────── */
 .morse-status-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px;
+    padding: 6px 16px;
     background: #2a2a2a;
     border-top: 1px solid #3a3a3a;
     font-size: 12px;
 }
 
-.morse-status-left {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-}
-
 .morse-status-text {
-    color: #b0b0b0;
-}
-
-.morse-status-indicators {
-    display: flex;
-    gap: 15px;
-}
-
-.morse-indicator {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.morse-indicator-label {
-    color: #888;
-}
-
-.morse-indicator-value {
-    color: #4CAF50;
-    font-weight: bold;
-}
-
-.morse-status-right {
     color: #888;
     font-style: italic;
 }
 
-.morse-help-text {
-    font-size: 11px;
-}
+.morse-status-text.error { color: #ff4444; font-style: normal; }
+.morse-status-text.ok    { color: #4CAF50; font-style: normal; }
 
-/* Buttons */
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
 .btn {
     padding: 6px 14px;
     border: none;
@@ -408,174 +121,26 @@
     cursor: pointer;
     font-size: 13px;
     font-family: 'Courier New', monospace;
-    transition: all 0.2s;
+    transition: background 0.2s;
 }
 
-.btn-primary {
-    background: #4CAF50;
-    color: white;
-}
+.btn-primary            { background: #4CAF50; color: #fff; }
+.btn-primary:hover      { background: #45a049; }
+.btn-primary.running    { background: #f44336; }
+.btn-primary.running:hover { background: #da190b; }
 
-.btn-primary:hover {
-    background: #45a049;
-}
+.btn-secondary          { background: #3a3a3a; color: #e0e0e0; }
+.btn-secondary:hover    { background: #4a4a4a; }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.btn-primary:disabled {
-    background: #666;
-    cursor: not-allowed;
-}
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+.morse-output-area::-webkit-scrollbar       { width: 6px; }
+.morse-output-area::-webkit-scrollbar-track { background: #111; }
+.morse-output-area::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+.morse-output-area::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
 
-.btn-secondary {
-    background: #3a3a3a;
-    color: #e0e0e0;
-}
-
-.btn-secondary:hover {
-    background: #4a4a4a;
-}
-
-/* Channel Enable/Disable Buttons */
-.morse-channel-enable-btn {
-    padding: 3px 8px;
-    font-size: 11px;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    font-family: 'Courier New', monospace;
-    transition: all 0.2s;
-}
-
-.morse-channel-enable-btn.btn-small {
-    background: #3a3a3a;
-    color: #e0e0e0;
-}
-
-.morse-channel-enable-btn.btn-small:hover {
-    background: #4a4a4a;
-}
-
-.morse-channel-enable-btn.btn-danger {
-    background: #f44336;
-    color: white;
-}
-
-.morse-channel-enable-btn.btn-danger:hover {
-    background: #da190b;
-}
-
-/* Scrollbar Styling */
-.morse-channels-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.morse-channels-container::-webkit-scrollbar-track {
-    background: #1a1a1a;
-}
-
-.morse-channels-container::-webkit-scrollbar-thumb {
-    background: #3a3a3a;
-    border-radius: 4px;
-}
-
-.morse-channels-container::-webkit-scrollbar-thumb:hover {
-    background: #4a4a4a;
-}
-
-
-/* Animations */
-@keyframes pulse {
-    0%, 100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.5;
-    }
-}
-
-.morse-channel.active .morse-channel-number {
-    animation: pulse 2s infinite;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .morse-config-row {
-        flex-direction: column;
-        gap: 10px;
-    }
-    
-    .morse-channel-header {
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-    
-    .morse-status-bar {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 8px;
-    }
-}
-
-/* Development Warning Overlay */
-.morse-dev-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.85);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10000;
-    backdrop-filter: blur(5px);
-}
-
-.morse-dev-overlay-content {
-    background: #2a2a2a;
-    border: 2px solid #FFC107;
-    border-radius: 8px;
-    padding: 30px;
-    max-width: 500px;
-    text-align: center;
-    box-shadow: 0 4px 20px rgba(255, 193, 7, 0.3);
-}
-
-.morse-dev-overlay-title {
-    color: #FFC107;
-    font-size: 24px;
-    font-weight: bold;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-}
-
-.morse-dev-overlay-message {
-    color: #e0e0e0;
-    font-size: 16px;
-    line-height: 1.6;
-    margin-bottom: 25px;
-}
-
-.morse-dev-overlay-button {
-    background: #FFC107;
-    color: #1a1a1a;
-    border: none;
-    padding: 12px 30px;
-    font-size: 16px;
-    font-weight: bold;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-family: 'Courier New', monospace;
-}
-
-.morse-dev-overlay-button:hover {
-    background: #FFD54F;
-    transform: scale(1.05);
-}
-
-.morse-dev-overlay-button:active {
-    transform: scale(0.95);
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+    .morse-stats { gap: 12px; }
+    .morse-header { flex-direction: column; align-items: flex-start; }
 }

@@ -65,6 +65,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /tmp/wsjtx.deb /tmp/wsjtx-extract \
     && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_${TARGETARCH} -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
+    && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/cw-decoder_${TARGETARCH} -O /usr/local/bin/cw-decoder \
+    && chmod +x /usr/local/bin/cw-decoder \
     && mkdir -p /opt/freedv \
     && wget https://github.com/madpsy/ubersdr_freedv/releases/download/latest/freedv_${TARGETARCH}.zip -O /tmp/freedv.zip \
     && unzip /tmp/freedv.zip -d /opt/freedv \

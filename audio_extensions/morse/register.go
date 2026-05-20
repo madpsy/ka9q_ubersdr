@@ -4,24 +4,27 @@ import (
 	"fmt"
 )
 
-// AudioExtensionParams contains audio stream parameters (from session, not user-configurable)
+// AudioExtensionParams contains audio stream parameters passed in from the session.
 type AudioExtensionParams struct {
-	SampleRate    int // Hz (e.g., 48000)
+	SampleRate    int // Hz — must be 12000 for cw-decoder
 	Channels      int // Always 1 (mono)
 	BitsPerSample int // Always 16
 }
 
-// AudioExtension interface for extensible audio processors
+// AudioExtension is the interface all audio extensions must satisfy.
 type AudioExtension interface {
 	Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error
 	Stop() error
 	GetName() string
 }
 
-// AudioExtensionFactory is a function that creates a new extension instance
+// AudioExtensionFactory creates a new extension instance.
 type AudioExtensionFactory func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error)
 
-// Factory creates a new Morse extension instance
+// Factory creates a new ExternalMorseExtension.
+// If the cw-decoder binary is missing it returns a stub that immediately sends
+// a 0x12 error frame when Start() is called, so the frontend can display a
+// human-readable message rather than a silent failure.
 func Factory(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
 	if audioParams.Channels != 1 {
 		return nil, fmt.Errorf("morse requires mono audio (got %d channels)", audioParams.Channels)
@@ -30,128 +33,66 @@ func Factory(audioParams AudioExtensionParams, extensionParams map[string]interf
 		return nil, fmt.Errorf("morse requires 16-bit audio (got %d bits)", audioParams.BitsPerSample)
 	}
 
-	return NewMorseExtension(audioParams.SampleRate, extensionParams)
+	ext, err := NewMorseExtension(audioParams.SampleRate, extensionParams)
+	if err != nil {
+		// Binary missing — return a stub that reports the error to the frontend.
+		return &missingBinaryStub{msg: err.Error()}, nil
+	}
+	return ext, nil
 }
 
-// GetInfo returns extension metadata
+// GetInfo returns extension metadata and wire-protocol documentation.
 func GetInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "morse",
-		"description": "Morse code decoder with adaptive WPM detection",
-		"version":     "1.0.0",
-		"parameters": map[string]interface{}{
-			"center_frequency": map[string]interface{}{
-				"type":        "number",
-				"description": "Center frequency in Hz (CW tone frequency)",
-				"default":     600.0,
-				"min":         100.0,
-				"max":         10000.0,
-			},
-			"bandwidth": map[string]interface{}{
-				"type":        "number",
-				"description": "Bandwidth in Hz (filter width)",
-				"default":     100.0,
-				"min":         10.0,
-				"max":         1000.0,
-			},
-			"min_wpm": map[string]interface{}{
-				"type":        "number",
-				"description": "Minimum words per minute",
-				"default":     12.0,
-				"min":         5.0,
-				"max":         100.0,
-			},
-			"max_wpm": map[string]interface{}{
-				"type":        "number",
-				"description": "Maximum words per minute",
-				"default":     45.0,
-				"min":         5.0,
-				"max":         100.0,
-			},
-			"threshold_snr": map[string]interface{}{
-				"type":        "number",
-				"description": "SNR threshold in dB for signal detection",
-				"default":     10.0,
-				"min":         1.0,
-				"max":         100.0,
-			},
-		},
+		"displayName": "Morse Code Decoder",
+		"version":     "2.0.0",
+		"description": "CW decoder powered by ggmorse (cw-decoder subprocess). Auto-detects pitch and speed.",
+		"parameters":  map[string]interface{}{},
 		"output_format": map[string]interface{}{
 			"type":        "binary",
-			"description": "Binary protocol with decoded text, Morse elements, and WPM",
+			"description": "Binary frames sent over the WebSocket",
 			"protocol": map[string]interface{}{
-				"text_message": map[string]interface{}{
-					"type":        0x01,
-					"description": "Decoded text message",
-					"format":      "[type:1][timestamp:8][text_length:4][text:length]",
-					"fields": []map[string]interface{}{
-						{
-							"name":        "type",
-							"bytes":       1,
-							"description": "Message type (0x01 for text)",
-						},
-						{
-							"name":        "timestamp",
-							"bytes":       8,
-							"description": "Unix timestamp (big-endian uint64)",
-						},
-						{
-							"name":        "text_length",
-							"bytes":       4,
-							"description": "Text length in bytes (big-endian uint32)",
-						},
-						{
-							"name":        "text",
-							"bytes":       -1,
-							"description": "UTF-8 encoded decoded text",
-						},
+				"decode_event": map[string]interface{}{
+					"type_byte":   "0x10",
+					"description": "Decoded text with quality metadata",
+					"format":      "[type:1=0x10][confidence:1][cost:4 float32 BE][pitch:4 float32 BE][speed:4 float32 BE][text_len:4 uint32 BE][text: UTF-8]",
+					"confidence_values": map[string]interface{}{
+						"0": "high   (cost < 0.15)",
+						"1": "medium (cost < 0.35)",
+						"2": "low    (cost < 0.60)",
+						"3": "poor   (cost >= 0.60)",
 					},
 				},
-				"morse_message": map[string]interface{}{
-					"type":        0x02,
-					"description": "Morse code elements (dots and dashes)",
-					"format":      "[type:1][timestamp:8][morse_length:4][morse:length]",
-					"fields": []map[string]interface{}{
-						{
-							"name":        "type",
-							"bytes":       1,
-							"description": "Message type (0x02 for morse)",
-						},
-						{
-							"name":        "timestamp",
-							"bytes":       8,
-							"description": "Unix timestamp (big-endian uint64)",
-						},
-						{
-							"name":        "morse_length",
-							"bytes":       4,
-							"description": "Morse length in bytes (big-endian uint32)",
-						},
-						{
-							"name":        "morse",
-							"bytes":       -1,
-							"description": "Morse elements (. - / and spaces)",
-						},
-					},
+				"stats_event": map[string]interface{}{
+					"type_byte":   "0x11",
+					"description": "Pitch/speed update without new text",
+					"format":      "[type:1=0x11][pitch:4 float32 BE][speed:4 float32 BE]",
 				},
-				"wpm_update": map[string]interface{}{
-					"type":        0x03,
-					"description": "Words per minute update",
-					"format":      "[type:1][wpm:8]",
-					"fields": []map[string]interface{}{
-						{
-							"name":        "type",
-							"bytes":       1,
-							"description": "Message type (0x03 for WPM)",
-						},
-						{
-							"name":        "wpm",
-							"bytes":       8,
-							"description": "WPM value (float64, big-endian)",
-						},
-					},
+				"error_event": map[string]interface{}{
+					"type_byte":   "0x12",
+					"description": "Error message (e.g. binary not found)",
+					"format":      "[type:1=0x12][msg_len:4 uint32 BE][msg: UTF-8]",
 				},
 			},
 		},
 	}
 }
+
+// missingBinaryStub is returned by Factory when cw-decoder is not installed.
+// It sends a single 0x12 error frame on Start() so the frontend can show a
+// meaningful message, then exits cleanly.
+type missingBinaryStub struct {
+	msg string
+}
+
+func (s *missingBinaryStub) GetName() string { return "morse" }
+
+func (s *missingBinaryStub) Start(_ <-chan AudioSample, resultChan chan<- []byte) error {
+	go func() {
+		resultChan <- encodeErrorMsg(s.msg)
+	}()
+	return nil
+}
+
+func (s *missingBinaryStub) Stop() error { return nil }

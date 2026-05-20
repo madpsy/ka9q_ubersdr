@@ -106,10 +106,10 @@ type ExternalMorseExtension struct {
 }
 
 // defaultPitchHz is the CW tone frequency passed to cw-decoder when no
-// "pitch" extension parameter is provided. 500 Hz centres the ggmorse search
-// window at 350–650 Hz, which is better than the binary's built-in default
-// (500–700 Hz) for signals spotted at 500 Hz audio offset.
-const defaultPitchHz = 500
+// "pitch" extension parameter is provided. 0 means do not pass --pitch,
+// leaving ggmorse in full auto-detect mode (searches 500–700 Hz by default).
+// Set via the "pitch" extension parameter to lock to a specific frequency.
+const defaultPitchHz = 0
 
 // NewMorseExtension creates a new external morse extension.
 // Returns an error immediately if the binary is not found.

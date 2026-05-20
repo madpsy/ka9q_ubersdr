@@ -338,7 +338,6 @@ class CWSpotsGraph {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                clip: false,
                 layout: {
                     padding: {
                         right: 10  // extra canvas margin so tuned-ring isn't clipped at right edge
@@ -560,7 +559,7 @@ class CWSpotsGraph {
                     pointRadius: 8,
                     pointHoverRadius: 10,
                     pointStyle: 'circle',
-                    clip: false,                         // don't clip ring at chart edge
+                    clip: -10,                           // allow ring to extend 10px beyond chart area (Chart.js v4)
                     order: -1  // draw on top of other datasets
                 });
             }

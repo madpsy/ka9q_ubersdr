@@ -435,11 +435,11 @@ body {
     white-space: pre-wrap;
 }
 
-/* Confidence colours — match morse extension */
-.cw-decoder-text .conf-high   { color: #4CAF50; }
-.cw-decoder-text .conf-medium { color: #ffc107; }
-.cw-decoder-text .conf-low    { color: #ff8c00; }
-.cw-decoder-text .conf-poor   { color: #888; }
+/* Confidence colours — match morse/styles.css exactly */
+.cw-decoder-text .conf-high   { color: #00ff88; }
+.cw-decoder-text .conf-medium { color: #e0e040; }
+.cw-decoder-text .conf-low    { color: #ff9020; }
+.cw-decoder-text .conf-poor   { color: #ff4444; opacity: 0.7; }
 
 .cw-decoder-status-bar {
     padding: 4px 12px;

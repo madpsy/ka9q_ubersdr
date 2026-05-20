@@ -339,6 +339,11 @@ class CWSpotsGraph {
                 responsive: true,
                 maintainAspectRatio: false,
                 clip: false,
+                layout: {
+                    padding: {
+                        right: 10  // extra canvas margin so tuned-ring isn't clipped at right edge
+                    }
+                },
                 plugins: {
                     legend: {
                         display: false

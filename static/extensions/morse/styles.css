@@ -83,6 +83,8 @@
     letter-spacing: 0.05em;
     white-space: nowrap;
     margin-right: 2px;
+    align-self: center;
+    line-height: 1;
 }
 
 .morse-quality-select {
@@ -94,6 +96,7 @@
     font-size: 12px;
     font-family: 'Courier New', monospace;
     cursor: pointer;
+    align-self: center;
 }
 
 .morse-quality-select:focus {

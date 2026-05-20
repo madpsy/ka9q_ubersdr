@@ -279,6 +279,69 @@ func main() {
 	bwSlider.Value = savedBW
 	bwValueLabel := widget.NewLabel(fmt.Sprintf("%.0f Hz", bwSlider.Value))
 
+	// AGC sliders — only shown for USB/LSB modes.
+	// Defaults match share/presets.conf: hang-time = 1.1 s, recovery-rate = 20 dB/s.
+	const (
+		agcHangTimeDefault   = 1.1
+		agcRecoveryDefault   = 20.0
+	)
+	agcHangSlider := widget.NewSlider(0.0, 10.0)
+	agcHangSlider.Step = 0.1
+	agcHangSlider.Value = agcHangTimeDefault
+	agcHangLabel := widget.NewLabel(fmt.Sprintf("%.1f s", agcHangTimeDefault))
+
+	agcRecoverySlider := widget.NewSlider(1.0, 100.0)
+	agcRecoverySlider.Step = 1.0
+	agcRecoverySlider.Value = agcRecoveryDefault
+	agcRecoveryLabel := widget.NewLabel(fmt.Sprintf("%.0f dB/s", agcRecoveryDefault))
+
+	// sendAGC sends the current AGC slider values to the server.
+	sendAGC := func() {
+		if client.State() != StateConnected {
+			return
+		}
+		ht := float32(agcHangSlider.Value)
+		rr := float32(agcRecoverySlider.Value)
+		_ = client.SendSetAGC(&ht, &rr)
+	}
+
+	agcHangSlider.OnChanged = func(v float64) {
+		agcHangLabel.SetText(fmt.Sprintf("%.1f s", v))
+	}
+	agcHangSlider.OnChangeEnded = func(_ float64) { sendAGC() }
+
+	agcRecoverySlider.OnChanged = func(v float64) {
+		agcRecoveryLabel.SetText(fmt.Sprintf("%.0f dB/s", v))
+	}
+	agcRecoverySlider.OnChangeEnded = func(_ float64) { sendAGC() }
+
+	// agcRow holds both sliders side-by-side; hidden when not in USB/LSB mode.
+	agcHangRow := container.NewBorder(nil, nil,
+		container.NewHBox(widget.NewLabel("Hang"), agcHangLabel),
+		nil,
+		agcHangSlider,
+	)
+	agcRecoveryRow := container.NewBorder(nil, nil,
+		container.NewHBox(widget.NewLabel("Recovery"), agcRecoveryLabel),
+		nil,
+		agcRecoverySlider,
+	)
+	agcRow := container.NewGridWithColumns(2, agcHangRow, agcRecoveryRow)
+
+	// isSSBMode returns true when the mode uses the SSB AGC preset.
+	isSSBMode := func(mode string) bool {
+		return mode == "usb" || mode == "lsb"
+	}
+
+	// updateAGCVisibility shows or hides the AGC row based on the current mode.
+	updateAGCVisibility := func() {
+		if isSSBMode(currentMode) {
+			agcRow.Show()
+		} else {
+			agcRow.Hide()
+		}
+	}
+
 	connectBtn := widget.NewButton("Connect", nil)
 	connectBtn.Importance = widget.HighImportance
 
@@ -432,13 +495,17 @@ func main() {
 			client.Mode = currentMode
 			client.BandwidthLow = lo
 			client.BandwidthHigh = hi
+			updateAGCVisibility()
 			client.ReconnectWS()
 			return
 		}
 		sendTune()
+		updateAGCVisibility()
 	})
 	modeSelect.SetSelected(savedModeLabel)
 	modeInitDone = true
+	// Set initial AGC row visibility based on the saved mode.
+	updateAGCVisibility()
 
 	// rebuildModeOptions rebuilds modeSelect.Options with the base modes plus any
 	// wide IQ modes permitted by the server (from the last /connection response).
@@ -2421,7 +2488,7 @@ func main() {
 	// Main scrollable body
 	body := container.NewVBox(
 		widget.NewCard("Instance", "", serverGrid),
-		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid)),
+		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid, agcRow)),
 		widget.NewCard("Audio", "", audioBox),
 		widget.NewCard("Noise Reduction", "", dspBox),
 		widget.NewCard("FLRig Sync", "", flrigBox),

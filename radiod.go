@@ -271,6 +271,58 @@ func getLoopbackInterface() (*net.Interface, error) {
 	return nil, fmt.Errorf("loopback interface not found")
 }
 
+// AGCParams holds optional AGC parameter overrides for a channel.
+// Any field left at its zero value is not sent (the preset default is kept).
+// Use pointer fields so callers can distinguish "not set" from "set to zero".
+type AGCParams struct {
+	Enable       *bool    // AGC on/off (nil = use preset default)
+	HangTime     *float32 // Hang time in seconds (nil = use preset default)
+	RecoveryRate *float32 // Recovery rate in dB/s (nil = use preset default)
+	Threshold    *float32 // Threshold in dB relative to headroom (nil = use preset default)
+}
+
+// SetAGC sends AGC parameter overrides to an existing channel identified by ssrc.
+// Only non-nil fields in params are sent; nil fields leave the current value unchanged.
+func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
+	buf := make([]byte, 0, 64)
+
+	// CMD packet type
+	buf = append(buf, pktTypeCmd)
+
+	// Identify the channel
+	buf = encodeInt32(&buf, tagOutputSSRC, ssrc)
+
+	if params.Enable != nil {
+		val := byte(0)
+		if *params.Enable {
+			val = 1
+		}
+		buf = encodeByte(&buf, tagAgcEnable, val)
+	}
+	if params.HangTime != nil {
+		buf = encodeFloat(&buf, tagAgcHangtime, *params.HangTime)
+	}
+	if params.RecoveryRate != nil {
+		buf = encodeFloat(&buf, tagAgcRecoveryRate, *params.RecoveryRate)
+	}
+	if params.Threshold != nil {
+		buf = encodeFloat(&buf, tagAgcThreshold, *params.Threshold)
+	}
+
+	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
+	buf = append(buf, tagEOL)
+
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send AGC params for SSRC 0x%08x: %w", ssrc, err)
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: SetAGC SSRC=0x%08x enable=%v hangTime=%v recoveryRate=%v threshold=%v",
+			ssrc, params.Enable, params.HangTime, params.RecoveryRate, params.Threshold)
+	}
+	return nil
+}
+
 // CreateChannel creates a new radiod channel with specified parameters and SSRC (default bandwidth)
 func (rc *RadiodController) CreateChannel(name string, frequency uint64, mode string, sampleRate int, ssrc uint32) error {
 	return rc.CreateChannelWithBandwidth(name, frequency, mode, sampleRate, ssrc, 0) // 0 = use radiod default

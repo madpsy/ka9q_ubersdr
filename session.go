@@ -29,6 +29,7 @@ type radiodController interface {
 	UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error
 	UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error
 	UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error
+	SetAGC(ssrc uint32, params AGCParams) error
 	GetFrontendStatus(ssrc uint32) *FrontendStatus
 	DisableChannelSilent(name string, ssrc uint32) error
 	GetAllChannelStatus() map[uint32]*ChannelStatus
@@ -1347,6 +1348,31 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.SampleRate = oldSampleRate
 		session.mu.Unlock()
 		return fmt.Errorf("failed to update radiod channel: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateAGC updates AGC parameters for an existing session.
+// Only non-nil fields in params are sent to radiod; nil fields leave the current value unchanged.
+func (sm *SessionManager) UpdateAGC(sessionID string, params AGCParams) error {
+	session, ok := sm.GetSession(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.IsSpectrum {
+		return fmt.Errorf("cannot update AGC on spectrum session")
+	}
+
+	// Update last active time
+	session.mu.Lock()
+	session.LastActive = time.Now()
+	session.mu.Unlock()
+
+	// Send AGC update command to radiod
+	if err := sm.radiod.SetAGC(session.SSRC, params); err != nil {
+		return fmt.Errorf("failed to update radiod AGC: %w", err)
 	}
 
 	return nil

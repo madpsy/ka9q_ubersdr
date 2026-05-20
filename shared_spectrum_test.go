@@ -47,6 +47,7 @@ func (r *stubRadiod) UpdateChannel(ssrc uint32, frequency uint64, mode string, b
 func (r *stubRadiod) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error {
 	return nil
 }
+func (r *stubRadiod) SetAGC(ssrc uint32, params AGCParams) error          { return nil }
 func (r *stubRadiod) GetFrontendStatus(ssrc uint32) *FrontendStatus       { return nil }
 func (r *stubRadiod) DisableChannelSilent(name string, ssrc uint32) error { return nil }
 func (r *stubRadiod) GetAllChannelStatus() map[uint32]*ChannelStatus      { return nil }

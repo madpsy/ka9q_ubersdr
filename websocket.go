@@ -317,6 +317,11 @@ type ClientMessage struct {
 	BandwidthHigh *int     `json:"bandwidthHigh,omitempty"` // Pointer to distinguish between 0 and not-sent
 	SquelchOpen   *float32 `json:"squelchOpen,omitempty"`   // Squelch open threshold in dB SNR (nil = no change, -999 = always open)
 	SquelchClose  *float32 `json:"squelchClose,omitempty"`  // Squelch close threshold in dB SNR (nil = no change)
+	// AGC fields (type: "set_agc") — all optional; nil = keep current value
+	AgcEnable       *bool    `json:"agcEnable,omitempty"`       // true = enable AGC, false = disable
+	AgcHangTime     *float32 `json:"agcHangTime,omitempty"`     // AGC hang time in seconds (0.0–10.0)
+	AgcRecoveryRate *float32 `json:"agcRecoveryRate,omitempty"` // AGC recovery rate in dB/s (1.0–200.0)
+	AgcThreshold    *float32 `json:"agcThreshold,omitempty"`    // AGC threshold in dB relative to headroom (-60.0–0.0)
 	// DSP insert fields (type: "set_dsp", "set_dsp_params", "get_dsp_filters")
 	Enabled *bool                  `json:"enabled,omitempty"` // set_dsp: true=enable, false=disable
 	Filter  string                 `json:"filter,omitempty"`  // set_dsp: filter name ("nr2","rn2","nr4","dfnr","bnr")
@@ -1018,6 +1023,63 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					"squelchClose": squelchClose,
 				}})
 			}
+
+		case "set_agc":
+			// Update AGC parameters for this channel.
+			// All fields are optional — only non-nil fields are sent to radiod.
+			// At least one field must be provided.
+			if msg.AgcEnable == nil && msg.AgcHangTime == nil && msg.AgcRecoveryRate == nil && msg.AgcThreshold == nil {
+				wsh.sendError(conn, "set_agc requires at least one of: agcEnable, agcHangTime, agcRecoveryRate, agcThreshold")
+				continue
+			}
+
+			// Validate ranges for provided fields
+			if msg.AgcHangTime != nil {
+				if *msg.AgcHangTime < 0.0 || *msg.AgcHangTime > 10.0 {
+					wsh.sendError(conn, fmt.Sprintf("agcHangTime %.2f s is out of valid range (0.0–10.0 s)", *msg.AgcHangTime))
+					continue
+				}
+			}
+			if msg.AgcRecoveryRate != nil {
+				if *msg.AgcRecoveryRate < 1.0 || *msg.AgcRecoveryRate > 100.0 {
+					wsh.sendError(conn, fmt.Sprintf("agcRecoveryRate %.1f dB/s is out of valid range (1.0–100.0 dB/s)", *msg.AgcRecoveryRate))
+					continue
+				}
+			}
+			if msg.AgcThreshold != nil {
+				if *msg.AgcThreshold < -60.0 || *msg.AgcThreshold > 0.0 {
+					wsh.sendError(conn, fmt.Sprintf("agcThreshold %.1f dB is out of valid range (-60.0–0.0 dB)", *msg.AgcThreshold))
+					continue
+				}
+			}
+
+			// Apply via session manager
+			agcParams := AGCParams{
+				Enable:       msg.AgcEnable,
+				HangTime:     msg.AgcHangTime,
+				RecoveryRate: msg.AgcRecoveryRate,
+				Threshold:    msg.AgcThreshold,
+			}
+			if err := wsh.sessions.UpdateAGC(currentSession.ID, agcParams); err != nil {
+				wsh.sendError(conn, "Failed to update AGC: "+err.Error())
+				continue
+			}
+
+			// Echo back what was applied
+			applied := map[string]interface{}{}
+			if msg.AgcEnable != nil {
+				applied["agcEnable"] = *msg.AgcEnable
+			}
+			if msg.AgcHangTime != nil {
+				applied["agcHangTime"] = *msg.AgcHangTime
+			}
+			if msg.AgcRecoveryRate != nil {
+				applied["agcRecoveryRate"] = *msg.AgcRecoveryRate
+			}
+			if msg.AgcThreshold != nil {
+				applied["agcThreshold"] = *msg.AgcThreshold
+			}
+			wsh.sendMessage(conn, ServerMessage{Type: "agc_updated", Info: applied})
 
 		case "set_dsp":
 			// Enable or disable the DSP noise-reduction insert for this session.

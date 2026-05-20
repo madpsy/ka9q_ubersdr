@@ -13,6 +13,7 @@
 - Window Zoom on Spectrogram page alterned frequency (X axis)
 - Various data sources missing from MQTT (frontend status, frequency reference, voice activity to name a few)
 - Audio Filter 'Squelch' parameters sharing some names with with FM 'Squelcn' causing conflict
+- CW Decoder frontend extension now works - expects tone around 500 - 700 Hz
 
 ## Version 0.1.49 - Latest Stable
 

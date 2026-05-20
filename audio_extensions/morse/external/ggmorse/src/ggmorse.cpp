@@ -983,12 +983,12 @@ void GGMorse::decode_float() {
                                 auto let = m_impl->alphabet.find(m_impl->curLetter);
                                 if (let != m_impl->alphabet.end()) {
                                     m_impl->rxData.push_back(let->second);
-                                    printf("%c", let->second);
+                                    fprintf(stderr, "%c", let->second);
                                 } else {
                                     m_impl->rxData.push_back('?');
-                                    printf("?");
+                                    fprintf(stderr, "?");
                                 }
-                                fflush(stdout);
+                                fflush(stderr);
                                 m_impl->curLetter = "";
                             }
                             {
@@ -996,7 +996,7 @@ void GGMorse::decode_float() {
                                 if (tmp.size()) {
                                     m_impl->rxData.push_back(tmp[0]);
                                 }
-                                printf("%s", tmp.c_str());
+                                fprintf(stderr, "%s", tmp.c_str());
                             }
                         }
                     }

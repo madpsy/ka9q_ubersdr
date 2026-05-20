@@ -131,7 +131,7 @@ func (e *ExternalMorseExtension) Start(audioChan <-chan AudioSample, resultChan 
 
 	args := []string{"--sample-rate", strconv.Itoa(e.sampleRate)}
 	cmd := exec.Command(cwDecoderBinary, args...)
-	cmd.Stderr = os.Stderr // forward cw-decoder log output to our stderr
+	cmd.Stderr = io.Discard // suppress cw-decoder stderr (ggmorse character trace)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

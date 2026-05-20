@@ -338,11 +338,6 @@ class CWSpotsGraph {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                layout: {
-                    padding: {
-                        right: 10  // extra canvas margin so tuned-ring isn't clipped at right edge
-                    }
-                },
                 plugins: {
                     legend: {
                         display: false
@@ -381,7 +376,14 @@ class CWSpotsGraph {
                         formatter: (value, context) => {
                             return value.spot.dx_call || 'Unknown';
                         },
-                        color: '#ffffff',
+                        color: (context) => {
+                            const spot = context.dataset.data[context.dataIndex]?.spot;
+                            if (spot && self.currentFrequency != null &&
+                                Math.abs(spot.frequency - self.currentFrequency) <= 10) {
+                                return '#00e676'; // bright green for tuned station
+                            }
+                            return '#ffffff';
+                        },
                         font: {
                             size: 10,
                             weight: 'normal'
@@ -529,8 +531,7 @@ class CWSpotsGraph {
             }
         });
         
-        // Build base SNR datasets
-        const datasets = Object.values(groups).map(group => ({
+        return Object.values(groups).map(group => ({
             label: group.label,
             data: group.data,
             backgroundColor: group.color,
@@ -538,34 +539,6 @@ class CWSpotsGraph {
             pointRadius: 4,
             pointHoverRadius: 6
         }));
-
-        // Tuned-frequency highlight dataset (±10 Hz tolerance, same as main extension)
-        if (this.currentFrequency != null) {
-            const tunedPoints = spots.filter(spot =>
-                Math.abs(spot.frequency - this.currentFrequency) <= 10
-            ).map(spot => ({
-                x: spot.timestamp,
-                y: spot.frequency / 1e6,
-                spot: spot
-            }));
-
-            if (tunedPoints.length > 0) {
-                datasets.push({
-                    label: 'Tuned',
-                    data: tunedPoints,
-                    backgroundColor: 'rgba(0,0,0,0)',   // transparent fill
-                    borderColor: '#00e676',              // bright green ring
-                    borderWidth: 2,
-                    pointRadius: 8,
-                    pointHoverRadius: 10,
-                    pointStyle: 'circle',
-                    clip: -10,                           // allow ring to extend 10px beyond chart area (Chart.js v4)
-                    order: -1  // draw on top of other datasets
-                });
-            }
-        }
-
-        return datasets;
     }
     
     tuneToSpot(spot) {

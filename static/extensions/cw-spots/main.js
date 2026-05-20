@@ -2141,10 +2141,20 @@ class CWSpotsExtension extends DecoderExtension {
             window.dxClusterClient.unsubscribeFromCWSpots();
         }
 
+        // Stop morse relay if active (restores ws.onmessage before extension switches)
+        if (this._morseOrigHandler !== undefined && this._morseOrigHandler !== null) {
+            this._morseStopRelay();
+        }
+
         // Notify graph window that extension is being disabled
         if (this.graphWindow && !this.graphWindow.closed) {
             this.graphWindow.postMessage({
                 type: 'extension_disabled'
+            }, '*');
+            // Also tell the popup the decoder was stopped
+            this.graphWindow.postMessage({
+                type: 'morse_error',
+                msg: 'CW Spots extension was disabled'
             }, '*');
         }
 
@@ -2209,8 +2219,117 @@ class CWSpotsExtension extends DecoderExtension {
                 if (bandFilter) bandFilter.value = band;
                 this.updateBadges();
                 this.filterAndRenderSpots();
+            } else if (event.data.type === 'morse_start') {
+                // Graph popup wants to start the CW decoder — relay via our WebSocket
+                this._morseStartRelay();
+            } else if (event.data.type === 'morse_stop') {
+                // Graph popup wants to stop the CW decoder
+                this._morseStopRelay();
             }
         });
+    }
+
+    // ── Morse decoder relay (for graph popup) ────────────────────────────────
+
+    _morseGetWS() {
+        const c = window.dxClusterClient;
+        if (!c || !c.ws || c.ws.readyState !== WebSocket.OPEN) return null;
+        return c.ws;
+    }
+
+    _morseStartRelay() {
+        const ws = this._morseGetWS();
+        if (!ws) {
+            if (this.graphWindow && !this.graphWindow.closed) {
+                this.graphWindow.postMessage({
+                    type: 'morse_error',
+                    msg: 'WebSocket not connected'
+                }, '*');
+            }
+            return;
+        }
+
+        // Save the current onmessage handler (may already be the CW spots handler)
+        if (!this._morseOrigHandler) {
+            this._morseOrigHandler = ws.onmessage;
+        }
+
+        // Install relay handler — forwards binary frames to the popup
+        ws.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                // Transfer (zero-copy) the buffer to the popup
+                if (this.graphWindow && !this.graphWindow.closed) {
+                    this.graphWindow.postMessage(
+                        { type: 'morse_frame', data: event.data },
+                        '*',
+                        [event.data]
+                    );
+                }
+            } else if (event.data instanceof Blob) {
+                event.data.arrayBuffer().then(buf => {
+                    if (this.graphWindow && !this.graphWindow.closed) {
+                        this.graphWindow.postMessage(
+                            { type: 'morse_frame', data: buf },
+                            '*',
+                            [buf]
+                        );
+                    }
+                });
+            } else {
+                // JSON message — handle audio extension confirmations, pass rest to original
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'audio_extension_attached') {
+                        if (this.graphWindow && !this.graphWindow.closed) {
+                            this.graphWindow.postMessage({ type: 'morse_attached' }, '*');
+                        }
+                        return; // consumed
+                    }
+                    if (msg.type === 'audio_extension_error') {
+                        if (this.graphWindow && !this.graphWindow.closed) {
+                            this.graphWindow.postMessage({
+                                type: 'morse_error',
+                                msg: msg.error || 'Unknown server error'
+                            }, '*');
+                        }
+                        // Restore original handler since decoder failed to start
+                        this._morseRestoreHandler(ws);
+                        return; // consumed
+                    }
+                } catch (_) { /* not JSON — fall through */ }
+
+                // Pass non-morse JSON messages to the original handler
+                if (this._morseOrigHandler) {
+                    this._morseOrigHandler.call(ws, event);
+                }
+            }
+        };
+
+        // Ask the backend to attach the morse audio extension
+        ws.send(JSON.stringify({
+            type: 'audio_extension_attach',
+            extension_name: 'morse',
+            params: {}
+        }));
+
+        console.log('[CW Spots] Morse decoder relay started for graph popup');
+    }
+
+    _morseStopRelay() {
+        const ws = this._morseGetWS();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'audio_extension_detach' }));
+        }
+        this._morseRestoreHandler(ws);
+        console.log('[CW Spots] Morse decoder relay stopped');
+    }
+
+    _morseRestoreHandler(ws) {
+        const sock = ws || this._morseGetWS();
+        if (sock && this._morseOrigHandler !== undefined) {
+            sock.onmessage = this._morseOrigHandler;
+        }
+        this._morseOrigHandler = null;
     }
 
     getFilteredSpotsForGraph() {

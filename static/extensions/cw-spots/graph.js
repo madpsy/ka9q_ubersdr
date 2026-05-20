@@ -18,6 +18,11 @@ class CWSpotsGraph {
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
 
+        // CW decoder state
+        this.morseRunning = false;
+        this.morseTextBuffer = '';
+        this.morseCollapsed = false;
+
         this.init();
     }
 
@@ -31,6 +36,7 @@ class CWSpotsGraph {
 
         // Setup UI event handlers
         this.setupEventHandlers();
+        this.setupDecoderHandlers();
 
         // Sync checkbox states (Firefox remembers form state across refreshes)
         this.syncCheckboxStates();
@@ -66,6 +72,12 @@ class CWSpotsGraph {
             overlay.style.display = 'flex';
         }
         this.updateStatus('disconnected');
+        // Stop the morse decoder if it was running — parent is gone
+        if (this.morseRunning) {
+            this.morseRunning = false;
+            this._morseSetStatus('Connection lost — decoder stopped', 'error');
+            this._morseUpdateButton();
+        }
     }
 
     hideDisconnectedOverlay() {
@@ -112,6 +124,20 @@ class CWSpotsGraph {
                 if (bandSelect) bandSelect.value = data;
                 this.updateChart();
                 this.updateUI();
+                break;
+            case 'morse_attached':
+                // Backend confirmed the morse decoder is running
+                this._morseSetStatus('Running — listening for CW…', 'ok');
+                break;
+            case 'morse_frame':
+                // Binary frame from the cw-decoder subprocess (relayed by parent)
+                if (event.data.data instanceof ArrayBuffer) {
+                    this._morseHandleBinary(event.data.data);
+                }
+                break;
+            case 'morse_error':
+                // Decoder error (WebSocket issue, subprocess crash, etc.)
+                this._morseHandleError(event.data.msg || 'Unknown error');
                 break;
             default:
                 // Ignore unknown message types
@@ -612,6 +638,190 @@ class CWSpotsGraph {
                 statusEl.classList.add('status-waiting');
                 statusEl.textContent = 'Waiting';
         }
+    }
+
+    // ── CW Decoder (relay from parent window) ────────────────────────────────
+
+    setupDecoderHandlers() {
+        const startBtn  = document.getElementById('cw-decoder-start-btn');
+        const clearBtn  = document.getElementById('cw-decoder-clear-btn');
+        const copyBtn   = document.getElementById('cw-decoder-copy-btn');
+        const toggleBtn = document.getElementById('cw-decoder-toggle-btn');
+
+        if (startBtn)  startBtn.addEventListener('click',  () => this._morseToggle());
+        if (clearBtn)  clearBtn.addEventListener('click',  () => this._morseClear());
+        if (copyBtn)   copyBtn.addEventListener('click',   () => this._morseCopy());
+        if (toggleBtn) toggleBtn.addEventListener('click', () => this._morseToggleCollapse());
+    }
+
+    _morseToggle() {
+        if (this.morseRunning) {
+            this._morseStop();
+        } else {
+            this._morseStart();
+        }
+    }
+
+    _morseStart() {
+        if (!window.opener || window.opener.closed) {
+            this._morseSetStatus('Error: parent window not available', 'error');
+            return;
+        }
+        window.opener.postMessage({ type: 'morse_start' }, '*');
+        this.morseRunning = true;
+        this._morseSetStatus('Connecting…');
+        this._morseUpdateButton();
+    }
+
+    _morseStop() {
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'morse_stop' }, '*');
+        }
+        this.morseRunning = false;
+        this._morseSetStatus('Stopped');
+        this._morseClearStats();
+        this._morseUpdateButton();
+    }
+
+    _morseUpdateButton() {
+        const btn = document.getElementById('cw-decoder-start-btn');
+        if (!btn) return;
+        if (this.morseRunning) {
+            btn.textContent = 'Stop';
+            btn.classList.add('running');
+        } else {
+            btn.textContent = 'Start';
+            btn.classList.remove('running');
+        }
+    }
+
+    // ── Binary frame parsing (mirrors morse/main.js _handleBinary) ────────────
+
+    _morseHandleBinary(buf) {
+        const view = new DataView(buf);
+        if (buf.byteLength < 1) return;
+        const type = view.getUint8(0);
+        switch (type) {
+            case 0x10: this._morseHandleDecode(view, buf); break;
+            case 0x11: this._morseHandleStats(view);       break;
+            case 0x12: this._morseHandleBinaryError(view, buf); break;
+            default:
+                console.warn('[CW Decoder popup] unknown binary message type:', type);
+        }
+    }
+
+    // 0x10 decode event
+    // [type:1][confidence:1][cost:4 f32 BE][pitch:4 f32 BE][speed:4 f32 BE][text_len:4][text]
+    _morseHandleDecode(view, buf) {
+        if (buf.byteLength < 18) return;
+        const confByte = view.getUint8(1);
+        const pitch    = view.getFloat32(6,  false);
+        const speed    = view.getFloat32(10, false);
+        const textLen  = view.getUint32(14,  false);
+        if (buf.byteLength < 18 + textLen) return;
+        const text     = new TextDecoder().decode(new Uint8Array(buf, 18, textLen));
+        const confName = ['high', 'medium', 'low', 'poor'][confByte] ?? 'poor';
+        this._morseAppendText(text, confName);
+        this._morseUpdateStats(pitch, speed, confName);
+    }
+
+    // 0x11 stats event
+    // [type:1][pitch:4 f32 BE][speed:4 f32 BE]
+    _morseHandleStats(view) {
+        if (view.byteLength < 9) return;
+        const pitch = view.getFloat32(1, false);
+        const speed = view.getFloat32(5, false);
+        this._morseUpdateStats(pitch, speed, null);
+    }
+
+    // 0x12 binary error event
+    // [type:1][msg_len:4][msg]
+    _morseHandleBinaryError(view, buf) {
+        if (buf.byteLength < 5) return;
+        const msgLen = view.getUint32(1, false);
+        if (buf.byteLength < 5 + msgLen) return;
+        const msg = new TextDecoder().decode(new Uint8Array(buf, 5, msgLen));
+        this._morseHandleError(msg);
+    }
+
+    _morseHandleError(msg) {
+        console.error('[CW Decoder popup] error:', msg);
+        this._morseSetStatus('Error: ' + msg, 'error');
+        this.morseRunning = false;
+        this._morseClearStats();
+        this._morseUpdateButton();
+    }
+
+    // ── UI helpers ────────────────────────────────────────────────────────────
+
+    _morseAppendText(text, conf) {
+        const el = document.getElementById('cw-decoder-text');
+        if (!el) return;
+        this.morseTextBuffer += text;
+        const span = document.createElement('span');
+        span.className = 'conf-' + conf;
+        span.textContent = text;
+        el.appendChild(span);
+        // Auto-scroll
+        const area = document.getElementById('cw-decoder-output');
+        if (area) area.scrollTop = area.scrollHeight;
+    }
+
+    _morseUpdateStats(pitch, speed, conf) {
+        const pitchEl   = document.getElementById('cw-decoder-pitch');
+        const speedEl   = document.getElementById('cw-decoder-speed');
+        const qualityEl = document.getElementById('cw-decoder-quality');
+        if (pitchEl) pitchEl.textContent = pitch != null ? Math.round(pitch) : '---';
+        if (speedEl) speedEl.textContent = speed != null ? speed.toFixed(1)  : '---';
+        if (qualityEl && conf != null) {
+            const labels = { high: 'High', medium: 'Medium', low: 'Low', poor: 'Poor' };
+            qualityEl.textContent = labels[conf] ?? conf;
+        }
+    }
+
+    _morseClearStats() {
+        const pitchEl   = document.getElementById('cw-decoder-pitch');
+        const speedEl   = document.getElementById('cw-decoder-speed');
+        const qualityEl = document.getElementById('cw-decoder-quality');
+        if (pitchEl)   pitchEl.textContent   = '---';
+        if (speedEl)   speedEl.textContent   = '---';
+        if (qualityEl) qualityEl.textContent = '---';
+    }
+
+    _morseSetStatus(text, cls) {
+        const el = document.getElementById('cw-decoder-status');
+        if (!el) return;
+        el.textContent = text;
+        el.className = cls || '';
+    }
+
+    _morseClear() {
+        this.morseTextBuffer = '';
+        const el = document.getElementById('cw-decoder-text');
+        if (el) el.innerHTML = '';
+    }
+
+    _morseCopy() {
+        if (!this.morseTextBuffer) return;
+        navigator.clipboard.writeText(this.morseTextBuffer).then(() => {
+            this._morseSetStatus('Copied to clipboard', 'ok');
+            setTimeout(() => {
+                this._morseSetStatus(
+                    this.morseRunning ? 'Running — listening for CW…' : 'Stopped'
+                );
+            }, 2000);
+        }).catch(err => {
+            console.error('[CW Decoder popup] copy failed:', err);
+        });
+    }
+
+    _morseToggleCollapse() {
+        this.morseCollapsed = !this.morseCollapsed;
+        const body      = document.getElementById('cw-decoder-body');
+        const toggleBtn = document.getElementById('cw-decoder-toggle-btn');
+        if (body) body.classList.toggle('collapsed', this.morseCollapsed);
+        if (toggleBtn) toggleBtn.classList.toggle('collapsed', this.morseCollapsed);
+        toggleBtn.title = this.morseCollapsed ? 'Expand decoder' : 'Collapse decoder';
     }
 }
 

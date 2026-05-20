@@ -12,6 +12,7 @@ body {
     color: #e0e0e0;
     padding: 15px;
     overflow: hidden;
+    height: 100vh;
 }
 
 .graph-container {
@@ -303,3 +304,150 @@ body {
         flex-wrap: wrap;
     }
 }
+
+/* ── CW Decoder Panel ─────────────────────────────────────────────────────── */
+
+.cw-decoder-panel {
+    margin-top: 10px;
+    background: #1e2a1e;
+    border: 1px solid #3a5a3a;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.cw-decoder-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #243024;
+    border-bottom: 1px solid #3a5a3a;
+    flex-wrap: wrap;
+}
+
+.cw-decoder-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 0.95em;
+    color: #4CAF50;
+    white-space: nowrap;
+}
+
+.cw-decoder-icon {
+    font-size: 1.1em;
+}
+
+.cw-decoder-stats {
+    display: flex;
+    gap: 16px;
+    flex: 1;
+}
+
+.cw-decoder-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 0.85em;
+}
+
+.cw-decoder-stat-label {
+    color: #888;
+    font-size: 0.85em;
+}
+
+.cw-decoder-stat-value {
+    color: #e0e0e0;
+    font-weight: 600;
+    font-family: monospace;
+    min-width: 36px;
+}
+
+.cw-decoder-stat-unit {
+    color: #666;
+    font-size: 0.8em;
+}
+
+.cw-decoder-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.cw-decoder-btn-start {
+    background: #4CAF50;
+    min-width: 60px;
+}
+
+.cw-decoder-btn-start:hover {
+    background: #45a049;
+}
+
+.cw-decoder-btn-start.running {
+    background: #e53935;
+}
+
+.cw-decoder-btn-start.running:hover {
+    background: #c62828;
+}
+
+.cw-decoder-btn-secondary {
+    background: #444;
+    color: #ccc;
+}
+
+.cw-decoder-btn-secondary:hover {
+    background: #555;
+}
+
+.cw-decoder-collapse-btn {
+    font-size: 0.75em;
+    padding: 6px 10px;
+}
+
+.cw-decoder-collapse-btn.collapsed {
+    transform: rotate(-90deg);
+}
+
+.cw-decoder-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.cw-decoder-body.collapsed {
+    display: none;
+}
+
+.cw-decoder-output {
+    height: 80px;
+    overflow-y: auto;
+    padding: 8px 12px;
+    background: #111;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9em;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+.cw-decoder-text {
+    white-space: pre-wrap;
+}
+
+/* Confidence colours — match morse extension */
+.cw-decoder-text .conf-high   { color: #4CAF50; }
+.cw-decoder-text .conf-medium { color: #ffc107; }
+.cw-decoder-text .conf-low    { color: #ff8c00; }
+.cw-decoder-text .conf-poor   { color: #888; }
+
+.cw-decoder-status-bar {
+    padding: 4px 12px;
+    background: #1a1a1a;
+    border-top: 1px solid #333;
+    font-size: 0.8em;
+    color: #888;
+}
+
+#cw-decoder-status.ok    { color: #4CAF50; }
+#cw-decoder-status.error { color: #e53935; }

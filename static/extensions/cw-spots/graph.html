@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CW Spots Graph</title>
-    <link rel="stylesheet" href="graph.css?v=4">
+    <link rel="stylesheet" href="graph.css?v=5">
     <script src="/chart.umd.min.js"></script>
     <script src="/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="/chartjs-plugin-datalabels.min.js"></script>
@@ -102,6 +102,46 @@
             <p>Click on a spot or callsign to tune to that frequency. Colours indicate SNR: <span class="snr-legend snr-high">Excellent (>26dB)</span> <span class="snr-legend snr-good">Good (13-26dB)</span> <span class="snr-legend snr-fair">Fair (6-12dB)</span> <span class="snr-legend snr-weak">Weak (<6dB)</span></p>
         </div>
 
+        <!-- CW Decoder Panel -->
+        <div class="cw-decoder-panel" id="cw-decoder-panel">
+            <div class="cw-decoder-header">
+                <div class="cw-decoder-title">
+                    <span class="cw-decoder-icon">⚡</span>
+                    <span>CW Decoder</span>
+                </div>
+                <div class="cw-decoder-stats" id="cw-decoder-stats">
+                    <span class="cw-decoder-stat">
+                        <span class="cw-decoder-stat-label">Pitch</span>
+                        <span class="cw-decoder-stat-value" id="cw-decoder-pitch">---</span>
+                        <span class="cw-decoder-stat-unit">Hz</span>
+                    </span>
+                    <span class="cw-decoder-stat">
+                        <span class="cw-decoder-stat-label">Speed</span>
+                        <span class="cw-decoder-stat-value" id="cw-decoder-speed">---</span>
+                        <span class="cw-decoder-stat-unit">WPM</span>
+                    </span>
+                    <span class="cw-decoder-stat">
+                        <span class="cw-decoder-stat-label">Quality</span>
+                        <span class="cw-decoder-stat-value" id="cw-decoder-quality">---</span>
+                    </span>
+                </div>
+                <div class="cw-decoder-controls">
+                    <button id="cw-decoder-start-btn" class="btn cw-decoder-btn-start">Start</button>
+                    <button id="cw-decoder-clear-btn" class="btn cw-decoder-btn-secondary">Clear</button>
+                    <button id="cw-decoder-copy-btn" class="btn cw-decoder-btn-secondary">Copy</button>
+                    <button id="cw-decoder-toggle-btn" class="btn cw-decoder-btn-secondary cw-decoder-collapse-btn" title="Collapse decoder">▼</button>
+                </div>
+            </div>
+            <div class="cw-decoder-body" id="cw-decoder-body">
+                <div class="cw-decoder-output" id="cw-decoder-output">
+                    <div class="cw-decoder-text" id="cw-decoder-text"></div>
+                </div>
+                <div class="cw-decoder-status-bar">
+                    <span id="cw-decoder-status">Ready — press Start to begin decoding</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Disconnected overlay -->
         <div id="disconnected-overlay" class="disconnected-overlay" style="display: none;">
             <div class="disconnected-message">
@@ -116,6 +156,6 @@
         </div>
     </div>
     
-    <script src="graph.js?v=4"></script>
+    <script src="graph.js?v=5"></script>
 </body>
 </html>

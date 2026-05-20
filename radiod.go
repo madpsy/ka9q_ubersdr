@@ -315,11 +315,6 @@ func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
 	if err := rc.sendCommand(buf); err != nil {
 		return fmt.Errorf("failed to send AGC params for SSRC 0x%08x: %w", ssrc, err)
 	}
-
-	if DebugMode {
-		log.Printf("DEBUG: SetAGC SSRC=0x%08x enable=%v hangTime=%v recoveryRate=%v threshold=%v",
-			ssrc, params.Enable, params.HangTime, params.RecoveryRate, params.Threshold)
-	}
 	return nil
 }
 

@@ -1669,9 +1669,6 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				default:
 					// Pipeline not yet primed, or DSP running slightly behind —
 					// use original pcmData this packet (fail-open).
-					if DebugMode {
-						log.Printf("DEBUG: DSP pipeline not ready for session %s — using original PCM", session.ID)
-					}
 				}
 			}
 			// Replace audioPacket.PCMData with the (possibly processed) pcmData for
@@ -1734,7 +1731,6 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
 				if err != nil {
-					log.Printf("Opus encoding error: %v", err)
 					continue
 				}
 

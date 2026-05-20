@@ -333,6 +333,15 @@ func main() {
 		return mode == "usb" || mode == "lsb"
 	}
 
+	// resetAGCSliders resets the AGC sliders to the preset defaults.
+	// Called on mode change so the UI stays in sync with what radiod applies from the preset.
+	resetAGCSliders := func() {
+		agcHangSlider.SetValue(agcHangTimeDefault)
+		agcHangLabel.SetText(fmt.Sprintf("%.1f s", agcHangTimeDefault))
+		agcRecoverySlider.SetValue(agcRecoveryDefault)
+		agcRecoveryLabel.SetText(fmt.Sprintf("%.0f dB/s", agcRecoveryDefault))
+	}
+
 	// updateAGCVisibility shows or hides the AGC row based on the current mode.
 	updateAGCVisibility := func() {
 		if isSSBMode(currentMode) {
@@ -495,9 +504,15 @@ func main() {
 			client.Mode = currentMode
 			client.BandwidthLow = lo
 			client.BandwidthHigh = hi
+			if isSSBMode(currentMode) {
+				resetAGCSliders()
+			}
 			updateAGCVisibility()
 			client.ReconnectWS()
 			return
+		}
+		if modeInitDone && isSSBMode(currentMode) {
+			resetAGCSliders()
 		}
 		sendTune()
 		updateAGCVisibility()

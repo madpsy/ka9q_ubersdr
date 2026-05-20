@@ -67,7 +67,6 @@ func (w *OpusEncoderWrapper) EncodeBinary(pcmData []byte) (encoded []byte, err e
 	opusData := make([]byte, 4000) // Max Opus frame size
 	n, err := w.encoder.Encode(pcmInt16, opusData)
 	if err != nil {
-		log.Printf("Opus encoding error: %v, sending PCM", err)
 		// Fall back to PCM on error
 		return pcmData, err
 	}

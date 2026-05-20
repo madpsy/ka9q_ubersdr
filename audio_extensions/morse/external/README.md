@@ -4,26 +4,42 @@ Standalone CW (Morse code) decoder. Reads raw PCM audio from stdin, writes decod
 
 Built on [ggmorse](https://github.com/ggerganov/ggmorse) (bundled, MIT licence).
 
+## Dependencies
+
+```bash
+# Debian / Ubuntu / Raspberry Pi OS
+sudo apt-get install -y cmake ninja-build g++
+```
+
 ## Build
 
 ```bash
 make
 ```
 
-Binary: `build/cw-decoder`
+This produces `cw-decoder_<arch>` in the current directory (e.g. `cw-decoder_amd64`, `cw-decoder_arm64`).
+
+To install to `/usr/local/bin/cw-decoder`:
+
+```bash
+sudo make install
+```
 
 ## Input
 
-**12 kHz mono signed 16-bit little-endian raw PCM on stdin.**
+**Mono signed 16-bit little-endian raw PCM on stdin** at the sample rate specified by `--sample-rate` (default: 12000 Hz).
 
 No WAV header — raw samples only. Use `sox` or `rtl_fm` to produce this format:
 
 ```bash
-# From a WAV file
-sox input.wav -t raw -r 12000 -c 1 -e signed -b 16 - | ./build/cw-decoder
+# From a WAV file (12 kHz, default)
+sox input.wav -t raw -r 12000 -c 1 -e signed -b 16 - | ./cw-decoder_amd64
+
+# From a WAV file at 24 kHz
+sox input.wav -t raw -r 24000 -c 1 -e signed -b 16 - | ./cw-decoder_amd64 --sample-rate 24000
 
 # From an RTL-SDR (USB SDR dongle)
-rtl_fm -f 14.074M -M usb -s 12000 - | ./build/cw-decoder
+rtl_fm -f 14.074M -M usb -s 12000 - | ./cw-decoder_amd64
 ```
 
 ## Output
@@ -67,6 +83,7 @@ Emitted whenever ggmorse updates its pitch/speed estimate between decode events.
 
 | Option | Description |
 |---|---|
+| `--sample-rate HZ` | Input PCM sample rate in Hz (default: 12000) |
 | `--pitch HZ` | Lock decoder pitch to HZ instead of auto-detecting |
 | `--speed WPM` | Lock decoder speed to WPM instead of auto-detecting |
 | `--help` | Print usage |
@@ -74,5 +91,5 @@ Emitted whenever ggmorse updates its pitch/speed estimate between decode events.
 Locking both pitch and speed improves decode reliability when the operator's keying parameters are already known.
 
 ```bash
-sox input.wav -t raw -r 12000 -c 1 -e signed -b 16 - | ./build/cw-decoder --pitch 600 --speed 20
+sox input.wav -t raw -r 12000 -c 1 -e signed -b 16 - | ./cw-decoder_amd64 --pitch 600 --speed 20
 ```

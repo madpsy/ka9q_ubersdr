@@ -338,6 +338,7 @@ class CWSpotsGraph {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                clip: false,
                 plugins: {
                     legend: {
                         display: false

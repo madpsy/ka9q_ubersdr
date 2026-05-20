@@ -376,6 +376,28 @@ body {
     align-items: center;
 }
 
+.cw-decoder-quality-label {
+    font-size: 0.78em;
+    color: #aaa;
+    white-space: nowrap;
+    margin-right: 2px;
+}
+
+.cw-decoder-quality-select {
+    background: #333;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.cw-decoder-quality-select:focus {
+    outline: none;
+    border-color: #888;
+}
+
 .cw-decoder-btn-start {
     background: #4CAF50;
     min-width: 60px;

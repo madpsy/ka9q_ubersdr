@@ -22,6 +22,7 @@ class CWSpotsGraph {
         this.morseRunning = false;
         this.morseTextBuffer = '';
         this.morseCollapsed = true; // Start collapsed; expands on Start or toggle
+        this.morseMinQuality = 'all'; // Minimum quality filter: all | low | medium | high
 
         this.init();
     }
@@ -646,15 +647,19 @@ class CWSpotsGraph {
     // ── CW Decoder (relay from parent window) ────────────────────────────────
 
     setupDecoderHandlers() {
-        const startBtn  = document.getElementById('cw-decoder-start-btn');
-        const clearBtn  = document.getElementById('cw-decoder-clear-btn');
-        const copyBtn   = document.getElementById('cw-decoder-copy-btn');
-        const toggleBtn = document.getElementById('cw-decoder-toggle-btn');
+        const startBtn    = document.getElementById('cw-decoder-start-btn');
+        const clearBtn    = document.getElementById('cw-decoder-clear-btn');
+        const copyBtn     = document.getElementById('cw-decoder-copy-btn');
+        const toggleBtn   = document.getElementById('cw-decoder-toggle-btn');
+        const qualitySel  = document.getElementById('cw-decoder-min-quality');
 
-        if (startBtn)  startBtn.addEventListener('click',  () => this._morseToggle());
-        if (clearBtn)  clearBtn.addEventListener('click',  () => this._morseClear());
-        if (copyBtn)   copyBtn.addEventListener('click',   () => this._morseCopy());
-        if (toggleBtn) toggleBtn.addEventListener('click', () => this._morseToggleCollapse());
+        if (startBtn)   startBtn.addEventListener('click',  () => this._morseToggle());
+        if (clearBtn)   clearBtn.addEventListener('click',  () => this._morseClear());
+        if (copyBtn)    copyBtn.addEventListener('click',   () => this._morseCopy());
+        if (toggleBtn)  toggleBtn.addEventListener('click', () => this._morseToggleCollapse());
+        if (qualitySel) qualitySel.addEventListener('change', (e) => {
+            this.morseMinQuality = e.target.value;
+        });
     }
 
     _morseToggle() {
@@ -763,6 +768,11 @@ class CWSpotsGraph {
     // ── UI helpers ────────────────────────────────────────────────────────────
 
     _morseAppendText(text, conf) {
+        // Quality rank: poor=0, low=1, medium=2, high=3
+        const rank = { poor: 0, low: 1, medium: 2, high: 3 };
+        const minRank = { all: 0, low: 1, medium: 2, high: 3 }[this.morseMinQuality] ?? 0;
+        if ((rank[conf] ?? 0) < minRank) return; // filtered out
+
         const el = document.getElementById('cw-decoder-text');
         if (!el) return;
         this.morseTextBuffer += text;

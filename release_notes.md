@@ -1,6 +1,6 @@
-# Latest Stable - 0.1.49 - 12th May 2026
+# Latest Stable - 0.1.50 - 20th May 2026
 
-## Version 0.1.50 - Under Development
+## Version 0.1.50 - Latest Stable
 
 ### New Features
 - Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank inc. space weather (stats_history.html)
@@ -15,7 +15,7 @@
 - Audio Filter 'Squelch' parameters sharing some names with with FM 'Squelcn' causing conflict
 - CW Decoder frontend extension now works - expects tone around 500 - 700 Hz
 
-## Version 0.1.49 - Latest Stable
+## Version 0.1.49
 
 ### New Features
 - Added **Session Log Retention** to clean up old session logs. Default 30 days, set in Admin -> Server

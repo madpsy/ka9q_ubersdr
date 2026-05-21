@@ -461,6 +461,9 @@ class RadioGUI:
         # FreeDV extension window
         self.freedv_window = None
 
+        # Morse (CW) decoder extension window
+        self.morse_window = None
+
         # SNR history window
         self.snr_history_window = None
         self.snr_history_display = None
@@ -8935,6 +8938,8 @@ class RadioGUI:
             self.open_whisper_window()
         elif ext_name == 'freedv':
             self.open_freedv_window()
+        elif ext_name == 'morse':
+            self.open_morse_window()
         else:
             messagebox.showinfo("Info", f"Extension '{ext_info['displayName']}' is not yet supported in the Python client")
 
@@ -8954,6 +8959,8 @@ class RadioGUI:
             return 'Whisper'
         if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
             return 'FreeDV'
+        if hasattr(self, 'morse_window') and self.morse_window and self.morse_window.window.winfo_exists():
+            return 'Morse (CW)'
         return None
 
     def open_navtex_window(self):
@@ -9331,6 +9338,59 @@ class RadioGUI:
                 _freedv_win.destroy()
             _freedv_win.protocol("WM_DELETE_WINDOW", _freedv_close)
 
+    def open_morse_window(self):
+        """Open the Morse (CW) decoder extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'morse_window') and self.morse_window and self.morse_window.window.winfo_exists():
+            self.morse_window.window.lift()
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to a server first")
+            return
+
+        # Import Morse extension
+        try:
+            from morse_extension import create_morse_window
+        except ImportError:
+            messagebox.showerror("Error", "Morse extension not available")
+            return
+
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
+        # Create Morse window
+        self.morse_window = create_morse_window(
+            self.root,
+            ws_manager,
+            self
+        )
+
+        # Restore saved geometry and wire close handler
+        if self.morse_window and hasattr(self.morse_window, 'window') and self.morse_window.window:
+            self.restore_window_geometry('morse', self.morse_window.window)
+            _morse_win = self.morse_window.window
+            def _morse_close():
+                self.save_window_geometry('morse', _morse_win)
+                self._mark_window_closed('morse')
+                _morse_win.destroy()
+            _morse_win.protocol("WM_DELETE_WINDOW", _morse_close)
+
     def auto_reopen_previous_windows(self):
         """Reopen windows that were open in the previous session.
 
@@ -9369,6 +9429,7 @@ class RadioGUI:
             ('ft8',             self.open_ft8_window,             3400),
             ('whisper',         self.open_whisper_window,         3400),
             ('freedv',          self.open_freedv_window,          3400),
+            ('morse',           self.open_morse_window,           3400),
         ]
 
         for key, open_fn, delay in connection_windows:
@@ -9432,6 +9493,8 @@ class RadioGUI:
             self.save_window_geometry('whisper', self.whisper_window.window)
         if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
             self.save_window_geometry('freedv', self.freedv_window.window)
+        if hasattr(self, 'morse_window') and self.morse_window and self.morse_window.window.winfo_exists():
+            self.save_window_geometry('morse', self.morse_window.window)
 
         if self.connected:
             self.disconnect()
@@ -9535,6 +9598,10 @@ class RadioGUI:
         # Close FreeDV window if open
         if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
             self.freedv_window.window.destroy()
+
+        # Close Morse (CW) window if open
+        if hasattr(self, 'morse_window') and self.morse_window and self.morse_window.window.winfo_exists():
+            self.morse_window.window.destroy()
 
         # Disconnect MIDI controller if active
         if self.midi_controller:

@@ -14,7 +14,7 @@ class ExtensionsWindow:
     """Window showing available extensions."""
     
     # Extensions that are implemented in the Python client
-    SUPPORTED_EXTENSIONS = {'navtex', 'fsk', 'wefax', 'sstv', 'ft8', 'whisper', 'freedv'}
+    SUPPORTED_EXTENSIONS = {'navtex', 'fsk', 'wefax', 'sstv', 'ft8', 'whisper', 'freedv', 'morse'}
     
     def __init__(self, parent: tk.Tk, base_url: str, on_extension_open: Callable):
         """

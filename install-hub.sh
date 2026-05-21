@@ -689,12 +689,55 @@ if [ -f "$INSTALLED_MARKER" ]; then
         echo "Pull successful. Restarting containers with new images..."
 
         # Clean up any existing containers and network (allow failures)
+        # Use set +e so that down/up failures do not kill the script
+        set +e
         echo "Stopping existing containers..."
-        sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down 2>/dev/null || true
+        DOWN_SUCCESS=0
+        for attempt in 1 2 3; do
+            echo "Stop attempt $attempt of 3..."
+            sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down
+            DOWN_EXIT=$?
+            if [ $DOWN_EXIT -eq 0 ]; then
+                DOWN_SUCCESS=1
+                echo "Containers stopped successfully on attempt $attempt."
+                break
+            else
+                echo "Warning: docker compose down failed (exit $DOWN_EXIT) on attempt $attempt."
+                if [ $attempt -lt 3 ]; then
+                    echo "Retrying in 5 seconds..."
+                    sleep 5
+                fi
+            fi
+        done
+        if [ $DOWN_SUCCESS -eq 0 ]; then
+            echo "Warning: docker compose down failed after 3 attempts. Proceeding with up anyway..."
+        fi
 
-        # Start Docker containers without setting password
+        # Start Docker containers without setting password, retry up to 3 times
         echo "Starting UberSDR containers..."
-        sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml up -d
+        UP_SUCCESS=0
+        for attempt in 1 2 3; do
+            echo "Start attempt $attempt of 3..."
+            sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml up -d
+            UP_EXIT=$?
+            if [ $UP_EXIT -eq 0 ]; then
+                UP_SUCCESS=1
+                echo "Containers started successfully on attempt $attempt."
+                break
+            else
+                echo "Warning: docker compose up -d failed (exit $UP_EXIT) on attempt $attempt."
+                if [ $attempt -lt 3 ]; then
+                    echo "Retrying in 10 seconds..."
+                    sleep 10
+                fi
+            fi
+        done
+        set -e
+
+        if [ $UP_SUCCESS -eq 0 ]; then
+            echo "ERROR: docker compose up -d failed after 3 attempts. Manual intervention required."
+            echo "Run: cd ~/ubersdr && docker compose up -d"
+        fi
     else
         # Pull failed - keep existing containers running
         echo "Warning: Failed to pull new images. Keeping existing containers running."

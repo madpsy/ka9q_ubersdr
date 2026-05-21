@@ -524,7 +524,16 @@ get_admin_password() {
         return 1
     fi
     local password
-    password=$(sudo grep -A 2 "^admin:" "$config_path" | grep "password:" | sed 's/.*password: *"\(.*\)".*/\1/')
+    password=$(sudo awk '
+        /^admin:/             { in_admin=1; next }
+        in_admin && /^[^ \t]/ { in_admin=0 }
+        in_admin && /[ \t]password:/ {
+            match($0, /password: *"?([^"#]*)"?/, arr)
+            gsub(/[[:space:]]+$/, "", arr[1])
+            print arr[1]
+            exit
+        }
+    ' "$config_path")
     if [[ -z "$password" ]]; then
         echo "Error: Could not extract password from config file" >&2
         return 1

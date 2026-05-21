@@ -457,6 +457,18 @@ class RadioClient:
         # blended with the original audio according to this ratio.
         self.rmnoise_mix_ratio = 1.0
 
+        # Server-side DSP insert state (version 2 protocol, requires ubersdr-dsp container)
+        self.server_dsp_available: bool = False          # True when /api/description says dsp.enabled
+        self.server_dsp_filter_names: list = []          # filter names from description fast-path
+        self.server_dsp_max_users: int = 0               # 0 = unlimited
+        self.server_dsp_filters: list = []               # full FilterInfo dicts from get_dsp_filters
+        self.server_dsp_enabled: bool = False            # current insert state
+        self.server_dsp_active_filter: str = ''          # active filter name
+        self.server_dsp_active_params: dict = {}         # active params (string→string)
+        # Callbacks set by GUI
+        self.dsp_filters_callback = None   # called with list of FilterInfo dicts
+        self.dsp_status_callback = None    # called with (enabled: bool, filter: str, params: dict)
+
         # Audio controls
         self.volume = max(0.0, min(2.0, volume))  # Clamp between 0.0 and 2.0 (0-200%)
         self.channel_left = channel_left
@@ -1697,6 +1709,92 @@ class RadioClient:
             # Keepalive response
             pass
 
+        elif msg_type == 'dsp_filters':
+            # Server responded to get_dsp_filters with full filter+param descriptors.
+            # info: { available: bool, reason?: str, filters: [{name, description, params:[...]}] }
+            info = message.get('info', {})
+            if info.get('available', False):
+                self.server_dsp_filters = info.get('filters', [])
+                self.server_dsp_available = True
+            else:
+                self.server_dsp_filters = []
+                self.server_dsp_available = False
+            if self.dsp_filters_callback:
+                try:
+                    self.dsp_filters_callback(self.server_dsp_filters)
+                except Exception as e:
+                    print(f"dsp_filters_callback error: {e}", file=sys.stderr)
+
+        elif msg_type == 'dsp_status':
+            # Server confirmed set_dsp or set_dsp_params.
+            # info: { enabled: bool, filter?: str, params?: {str→str} }
+            info = message.get('info', {})
+            self.server_dsp_enabled = bool(info.get('enabled', False))
+            self.server_dsp_active_filter = info.get('filter', '') or ''
+            raw_params = info.get('params', {}) or {}
+            # Normalise all values to strings (server sends strings, but be safe)
+            self.server_dsp_active_params = {k: str(v) for k, v in raw_params.items()}
+            if self.dsp_status_callback:
+                try:
+                    self.dsp_status_callback(
+                        self.server_dsp_enabled,
+                        self.server_dsp_active_filter,
+                        self.server_dsp_active_params,
+                    )
+                except Exception as e:
+                    print(f"dsp_status_callback error: {e}", file=sys.stderr)
+
+        elif msg_type in ('dsp_params_sent',):
+            # Acknowledgement of set_dsp_params delta — no action needed.
+            pass
+
+    # ------------------------------------------------------------------
+    # Server-side DSP send helpers
+    # ------------------------------------------------------------------
+
+    async def send_get_dsp_filters(self):
+        """Request full filter+param descriptors from the server."""
+        if self.ws is None:
+            return
+        try:
+            await self.ws.send(json.dumps({'type': 'get_dsp_filters'}))
+        except Exception as e:
+            print(f"send_get_dsp_filters error: {e}", file=sys.stderr)
+
+    async def send_set_dsp(self, enabled: bool, filter_name: str = '',
+                           params: Optional[Dict[str, str]] = None):
+        """Enable or disable the server-side DSP insert.
+
+        Args:
+            enabled:     True to enable, False to disable.
+            filter_name: Filter name (e.g. 'nr4').  Required when enabling.
+            params:      Optional initial parameter dict (string→string).
+        """
+        if self.ws is None:
+            return
+        msg: dict = {'type': 'set_dsp', 'enabled': enabled}
+        if enabled and filter_name:
+            msg['filter'] = filter_name
+        if enabled and params:
+            msg['params'] = params
+        try:
+            await self.ws.send(json.dumps(msg))
+        except Exception as e:
+            print(f"send_set_dsp error: {e}", file=sys.stderr)
+
+    async def send_set_dsp_params(self, params: Dict[str, str]):
+        """Send a live parameter update to the active DSP insert.
+
+        Args:
+            params: Dict of parameter name → string value to update.
+        """
+        if self.ws is None or not params:
+            return
+        try:
+            await self.ws.send(json.dumps({'type': 'set_dsp_params', 'params': params}))
+        except Exception as e:
+            print(f"send_set_dsp_params error: {e}", file=sys.stderr)
+
     async def send_keepalive(self, websocket):
         """Send periodic keepalive messages."""
         while self.running:
@@ -1867,6 +1965,21 @@ class RadioClient:
             receiver_name = description.get('receiver', {}).get('name', '')
             if receiver_name:
                 self._log(f"Receiver: {receiver_name}")
+
+            # Parse server-side DSP availability from description
+            dsp_info = description.get('dsp', {})
+            self.server_dsp_available = bool(dsp_info.get('enabled', False))
+            self.server_dsp_filter_names = list(dsp_info.get('filters', []))
+            self.server_dsp_max_users = int(dsp_info.get('max_users', 0))
+            if self.server_dsp_available:
+                self._log(f"Server DSP available: filters={self.server_dsp_filter_names}")
+            # Notify GUI of DSP availability (fast-path, before get_dsp_filters)
+            if self.dsp_status_callback:
+                self.dsp_status_callback(
+                    self.server_dsp_enabled,
+                    self.server_dsp_active_filter,
+                    self.server_dsp_active_params,
+                )
 
             # Apply server-configured defaults for frequency and mode when the
             # user has not explicitly specified them on the command line.

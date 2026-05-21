@@ -164,6 +164,9 @@ except ImportError:
     RMNOISE_WINDOW_AVAILABLE = False
     RMNOISE_AVAILABLE = False
 
+# Server-side DSP window (always available — pure Tkinter)
+from server_dsp_window import ServerDSPConfigDialog, DSPFilterInfo as _DSPFilterInfo
+
 try:
     from noise_blanker import create_noise_blanker
     NB_AVAILABLE = True
@@ -473,6 +476,10 @@ class RadioGUI:
 
         # RMNoise denoising window and bridge
         self.rmnoise_window: Optional['RMNoiseWindow'] = None
+
+        # Server-side DSP state
+        self._server_dsp_filters: list = []          # full FilterInfo dicts from server
+        self._server_dsp_config_dialog = None        # open config dialog (or None)
 
         # Signal data source selection (audio stream vs spectrum FFT)
         self.signal_data_source = tk.StringVar(value="audio")  # "audio" or "spectrum"
@@ -2128,6 +2135,44 @@ class RadioGUI:
 
         self.rm_status_label = ttk.Label(nr2_container, text="", foreground='gray')
         self.rm_status_label.grid(row=1, column=6, columnspan=3, sticky=tk.W, pady=(4, 0))
+
+        # Server-side DSP NR (row 2 inside nr2_container)
+        self.snr_enabled_var = tk.BooleanVar(value=False)
+        self.snr_check = ttk.Checkbutton(
+            nr2_container,
+            text="Enable Server NR",
+            variable=self.snr_enabled_var,
+            command=self.toggle_server_dsp,
+        )
+        self.snr_check.grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(4, 0))
+        self.snr_check.state(['disabled'])  # enabled once connected + DSP available
+
+        # Filter selector (compact combobox)
+        self.snr_filter_var = tk.StringVar(value='')
+        self.snr_filter_combo = ttk.Combobox(
+            nr2_container,
+            textvariable=self.snr_filter_var,
+            values=[],
+            state='disabled',
+            width=8,
+        )
+        self.snr_filter_combo.grid(row=2, column=1, columnspan=2, sticky=tk.W,
+                                   padx=(0, 6), pady=(4, 0))
+        self.snr_filter_combo.bind('<<ComboboxSelected>>', self._on_snr_filter_changed)
+
+        # Config button — opens modal param dialog
+        self.snr_config_btn = ttk.Button(
+            nr2_container,
+            text="Config…",
+            width=8,
+            command=self.open_server_dsp_config,
+            state='disabled',
+        )
+        self.snr_config_btn.grid(row=2, column=3, sticky=tk.W, padx=(0, 8), pady=(4, 0))
+
+        # Status label
+        self.snr_status_label = ttk.Label(nr2_container, text="", foreground='gray')
+        self.snr_status_label.grid(row=2, column=4, columnspan=5, sticky=tk.W, pady=(4, 0))
 
         # Noise Blanker (row 5) - use a frame to avoid column weight issues
         nb_container = ttk.Frame(audio_frame)
@@ -4048,6 +4093,14 @@ class RadioGUI:
             self.rm_configure_btn.config(state='disabled')
             self.rm_mix_scale.state(['disabled'])
 
+            # Disable Server NR (IQ modes are hard-blocked server-side)
+            if self.snr_enabled_var.get():
+                self.snr_enabled_var.set(False)
+                self.toggle_server_dsp()
+            self.snr_check.state(['disabled'])
+            self.snr_filter_combo.config(state='disabled')
+            self.snr_config_btn.config(state='disabled')
+
             # Disable audio filter (silently, without validation)
             if self.audio_filter_enabled_var.get():
                 self.audio_filter_enabled_var.set(False)
@@ -4124,6 +4177,9 @@ class RadioGUI:
             # Re-enable RM checkbox only for supported modes (USB/LSB/CWU/CWL)
             if RMNOISE_WINDOW_AVAILABLE:
                 self._update_rmnoise_mode_support(is_rm_supported)
+
+            # Re-enable Server NR if DSP is available on this server
+            self._update_server_dsp_controls()
 
             # Re-enable audio filter checkbox
             self.filter_check.config(state='normal')
@@ -5649,6 +5705,185 @@ class RadioGUI:
         if self.client:
             self.client.rmnoise_mix_ratio = mix_ratio
         self.rm_mix_label.config(text=f"{pct}% Filtered")
+
+    # ------------------------------------------------------------------
+    # Server-side DSP NR helpers
+    # ------------------------------------------------------------------
+
+    def _update_server_dsp_controls(self):
+        """Enable or disable the Server NR controls based on availability."""
+        available = (self.client is not None and
+                     getattr(self.client, 'server_dsp_available', False))
+        is_iq = self.mode_var.get().lower() in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+
+        if available and not is_iq:
+            self.snr_check.state(['!disabled'])
+            # Populate filter combo if we have names
+            names = getattr(self.client, 'server_dsp_filter_names', [])
+            if names and not self.snr_filter_combo['values']:
+                self.snr_filter_combo['values'] = names
+                if not self.snr_filter_var.get() and names:
+                    # Default to nr2 → nr4 → first available
+                    preferred = next(
+                        (n for n in ('nr2', 'nr4') if n in names), names[0])
+                    self.snr_filter_var.set(preferred)
+            if self.snr_filter_combo['values']:
+                self.snr_filter_combo.config(state='readonly')
+        else:
+            self.snr_check.state(['disabled'])
+            self.snr_filter_combo.config(state='disabled')
+            self.snr_config_btn.config(state='disabled')
+
+    def _on_server_dsp_filters(self, filters: list):
+        """Called from client thread when dsp_filters response arrives."""
+        # Schedule UI update on main thread
+        self.root.after(0, lambda: self._apply_server_dsp_filters(filters))
+
+    def _apply_server_dsp_filters(self, filters: list):
+        """Update filter combo with full descriptors (main thread)."""
+        self._server_dsp_filters = filters
+        names = [f.get('name', '') for f in filters if f.get('name')]
+        if names:
+            self.snr_filter_combo['values'] = names
+            current = self.snr_filter_var.get()
+            if current not in names:
+                preferred = next(
+                    (n for n in ('nr2', 'nr4') if n in names), names[0])
+                self.snr_filter_var.set(preferred)
+            self.snr_filter_combo.config(state='readonly')
+            self.snr_check.state(['!disabled'])
+        # Config button is always available once we have filter descriptors
+        if names:
+            self.snr_config_btn.config(state='normal')
+
+    def _on_server_dsp_status(self, enabled: bool, filter_name: str, params: dict):
+        """Called from client thread when dsp_status arrives."""
+        self.root.after(0, lambda: self._apply_server_dsp_status(enabled, filter_name, params))
+
+    def _apply_server_dsp_status(self, enabled: bool, filter_name: str, params: dict):
+        """Reflect server DSP state in the UI (main thread)."""
+        # Sync checkbox without re-triggering toggle
+        self.snr_enabled_var.set(enabled)
+
+        if enabled:
+            label = f"● ACTIVE — {filter_name.upper()}" if filter_name else "● ACTIVE"
+            self.snr_status_label.config(text=label, foreground='#28a745')
+            # Sync filter selector
+            if filter_name and filter_name in (self.snr_filter_combo['values'] or []):
+                self.snr_filter_var.set(filter_name)
+        else:
+            self.snr_status_label.config(text="", foreground='gray')
+        # Config button available whenever we have filter descriptors
+        if self._server_dsp_filters:
+            self.snr_config_btn.config(state='normal')
+
+        # Update open config dialog's enabled state if present
+        if (self._server_dsp_config_dialog is not None and
+                hasattr(self._server_dsp_config_dialog, 'top') and
+                self._server_dsp_config_dialog.top.winfo_exists()):
+            self._server_dsp_config_dialog._enabled = enabled
+
+    def toggle_server_dsp(self):
+        """Toggle server-side DSP insert on/off."""
+        if not self.connected or not self.client:
+            self.snr_enabled_var.set(False)
+            return
+
+        enabled = self.snr_enabled_var.get()
+        filter_name = self.snr_filter_var.get().strip()
+
+        if enabled:
+            if not filter_name:
+                messagebox.showerror("Server NR", "Please select a filter first.")
+                self.snr_enabled_var.set(False)
+                return
+            self.snr_status_label.config(text="Enabling…", foreground='orange')
+            # Request full filter descriptors if not yet fetched
+            if not self._server_dsp_filters:
+                asyncio.run_coroutine_threadsafe(
+                    self.client.send_get_dsp_filters(),
+                    self.event_loop)
+            asyncio.run_coroutine_threadsafe(
+                self.client.send_set_dsp(True, filter_name,
+                                         self.client.server_dsp_active_params or {}),
+                self.event_loop)
+            self.log_status(f"Server NR enabling ({filter_name})…")
+        else:
+            self.snr_status_label.config(text="", foreground='gray')
+            asyncio.run_coroutine_threadsafe(
+                self.client.send_set_dsp(False),
+                self.event_loop)
+            self.log_status("Server NR disabled")
+
+    def _on_snr_filter_changed(self, event=None):
+        """Re-apply DSP with new filter when selector changes while active."""
+        if not self.connected or not self.client:
+            return
+        if not self.snr_enabled_var.get():
+            return
+        filter_name = self.snr_filter_var.get().strip()
+        if not filter_name:
+            return
+        self.snr_status_label.config(text="Switching…", foreground='orange')
+        asyncio.run_coroutine_threadsafe(
+            self.client.send_set_dsp(True, filter_name, {}),
+            self.event_loop)
+
+    def open_server_dsp_config(self):
+        """Open (or re-focus) the Server NR parameter configuration dialog."""
+        if not self.client:
+            return
+
+        filter_name = self.snr_filter_var.get().strip()
+        if not filter_name:
+            messagebox.showinfo("Server NR", "Select a filter first.")
+            return
+
+        # Find the FilterInfo dict for the selected filter
+        filter_dict = next(
+            (f for f in self._server_dsp_filters if f.get('name') == filter_name),
+            None)
+
+        if filter_dict is None:
+            # No full descriptor yet — request it and inform user
+            asyncio.run_coroutine_threadsafe(
+                self.client.send_get_dsp_filters(),
+                self.event_loop)
+            messagebox.showinfo("Server NR",
+                "Filter parameters are still loading. Please try again in a moment.")
+            return
+
+        # If filter has no runtime-safe params, tell the user rather than opening an empty dialog
+        runtime_params = [p for p in (filter_dict.get('params') or [])
+                          if p.get('runtime_safe', True)]
+        if not runtime_params:
+            messagebox.showinfo(
+                "Server NR — No Parameters",
+                f"The '{filter_name.upper()}' filter has no adjustable parameters.")
+            return
+
+        # Close any existing dialog (clear stale reference first)
+        if self._server_dsp_config_dialog is not None:
+            try:
+                if self._server_dsp_config_dialog.top.winfo_exists():
+                    self._server_dsp_config_dialog.top.lift()
+                    return
+            except Exception:
+                pass
+            self._server_dsp_config_dialog = None
+
+        fi = _DSPFilterInfo(filter_dict)
+        current_params = dict(self.client.server_dsp_active_params or {})
+        enabled = self.snr_enabled_var.get()
+
+        def _send_params(params: dict):
+            if self.connected and self.client:
+                asyncio.run_coroutine_threadsafe(
+                    self.client.send_set_dsp_params(params),
+                    self.event_loop)
+
+        self._server_dsp_config_dialog = ServerDSPConfigDialog(
+            self.root, fi, current_params, _send_params, enabled)
 
     def toggle_noise_blanker(self):
         """Toggle Noise Blanker on/off."""
@@ -7644,6 +7879,10 @@ class RadioGUI:
 
             self.client = RadioClient(**client_kwargs)
 
+            # Wire server-side DSP callbacks
+            self.client.dsp_filters_callback = self._on_server_dsp_filters
+            self.client.dsp_status_callback  = self._on_server_dsp_status
+
             # Log the output mode being used
             self.log_status(f"Audio output mode: {output_mode}")
 
@@ -7904,6 +8143,22 @@ class RadioGUI:
         self.connect_btn.config(text="Connect")
         self.apply_freq_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
+
+        # Reset Server NR controls on disconnect
+        self.snr_enabled_var.set(False)
+        self.snr_status_label.config(text="", foreground='gray')
+        self.snr_check.state(['disabled'])
+        self.snr_filter_combo.config(state='disabled')
+        self.snr_filter_combo['values'] = []
+        self.snr_filter_var.set('')
+        self.snr_config_btn.config(state='disabled')
+        self._server_dsp_filters = []
+        # Close config dialog if open
+        if (self._server_dsp_config_dialog is not None and
+                hasattr(self._server_dsp_config_dialog, 'top') and
+                self._server_dsp_config_dialog.top.winfo_exists()):
+            self._server_dsp_config_dialog.top.destroy()
+        self._server_dsp_config_dialog = None
 
         # Reset Opus indicator
         if self.opus_active:
@@ -8358,6 +8613,13 @@ class RadioGUI:
                     # Update the GUI fields so the user sees the server's defaults
                     # before they click Apply.  Only applied when the frequency/mode
                     # lock checkboxes are not engaged (respects user overrides).
+                    # Also update Server NR controls now that DSP availability is known.
+                    self._update_server_dsp_controls()
+                    if self.client and getattr(self.client, 'server_dsp_available', False):
+                        # Pre-fetch full filter descriptors in the background
+                        asyncio.run_coroutine_threadsafe(
+                            self.client.send_get_dsp_filters(),
+                            self.event_loop)
                     if isinstance(msg, dict):
                         srv_freq = msg.get("frequency")
                         srv_mode = msg.get("mode")

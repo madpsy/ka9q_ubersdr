@@ -58,6 +58,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load version
     loadVersion();
+
+    // Load analytics on page load
+    loadAnalytics();
 });
 
 // Load receiver name from API

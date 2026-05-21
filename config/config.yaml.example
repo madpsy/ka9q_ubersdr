@@ -1746,7 +1746,7 @@ freedv_extension:
 dsp:
   # Enable or disable the DSP insert feature.
   # When false, any set_dsp WebSocket message from a client is rejected.
-  enabled: false
+  enabled: true
 
   # gRPC address of the ubersdr-dsp container.
   # "ubersdr-dsp" is the Docker Compose service name; change to "localhost"

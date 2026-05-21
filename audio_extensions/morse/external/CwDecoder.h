@@ -62,7 +62,7 @@ private:
     std::atomic<bool>  m_running{false};
     std::atomic<float> m_pitch{0.0f};
     std::atomic<float> m_speed{0.0f};
-    std::atomic<float> m_pitchRangeMin{500.0f};
+    std::atomic<float> m_pitchRangeMin{400.0f};
     std::atomic<float> m_pitchRangeMax{700.0f};
     std::atomic<bool>  m_pitchLocked{false};
     std::atomic<bool>  m_speedLocked{false};

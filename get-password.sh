@@ -9,9 +9,17 @@ if ! sudo test -f "$CONFIG_PATH"; then
     exit 1
 fi
 
-# Extract password using grep and sed
-# This looks for the password line under the admin section and extracts the value
-PASSWORD=$(sudo grep -A 2 "^admin:" "$CONFIG_PATH" | grep "password:" | sed 's/.*password: *"\(.*\)".*/\1/')
+# Extract password by walking the full admin: block (password may appear at any line within it)
+PASSWORD=$(sudo awk '
+    /^admin:/             { in_admin=1; next }
+    in_admin && /^[^ \t]/ { in_admin=0 }
+    in_admin && /[ \t]password:/ {
+        match($0, /password: *"?([^"#]*)"?/, arr)
+        gsub(/[[:space:]]+$/, "", arr[1])
+        print arr[1]
+        exit
+    }
+' "$CONFIG_PATH")
 
 if [ -z "$PASSWORD" ]; then
     echo "Error: Could not extract password from config file" >&2

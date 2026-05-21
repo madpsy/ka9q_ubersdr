@@ -669,12 +669,12 @@ class DigitalSpotsMap {
         const mapEl = document.getElementById('map');
         const globeEl = document.getElementById('globe-container');
         const btn = document.getElementById('map-view-toggle');
-        const themeSelect = document.getElementById('globe-theme-select');
+        const globeControls = document.getElementById('globe-controls');
 
         if (mode === 'globe') {
             mapEl.style.display = 'none';
             globeEl.style.display = 'block';
-            if (themeSelect) themeSelect.style.display = 'block';
+            if (globeControls) globeControls.style.display = 'flex';
             if (btn) {
                 btn.textContent = '🗺️';
                 btn.title = 'Switch to 2D Map';
@@ -690,7 +690,7 @@ class DigitalSpotsMap {
         } else {
             mapEl.style.display = 'block';
             globeEl.style.display = 'none';
-            if (themeSelect) themeSelect.style.display = 'none';
+            if (globeControls) globeControls.style.display = 'none';
             if (btn) {
                 btn.textContent = '🌍';
                 btn.title = 'Switch to 3D Globe';
@@ -859,6 +859,18 @@ class DigitalSpotsMap {
             });
         }
 
+        // Wire spin toggle button
+        const spinBtn = document.getElementById('globe-spin-btn');
+        if (spinBtn) {
+            spinBtn.addEventListener('click', () => {
+                if (this.globeSpinning) {
+                    this.stopGlobeSpin();
+                } else {
+                    this.startGlobeSpin();
+                }
+            });
+        }
+
         // Start auto-spin
         this.startGlobeSpin();
 
@@ -868,6 +880,7 @@ class DigitalSpotsMap {
     startGlobeSpin() {
         if (this.globeSpinning || !this.globe) return;
         this.globeSpinning = true;
+        this._updateSpinBtn();
 
         const spinSpeed = 0.08; // degrees per frame (~5°/sec at 60fps)
         const spin = () => {
@@ -884,6 +897,21 @@ class DigitalSpotsMap {
         if (this.globeSpinInterval) {
             cancelAnimationFrame(this.globeSpinInterval);
             this.globeSpinInterval = null;
+        }
+        this._updateSpinBtn();
+    }
+
+    _updateSpinBtn() {
+        const btn = document.getElementById('globe-spin-btn');
+        if (!btn) return;
+        if (this.globeSpinning) {
+            btn.textContent = '\u23F8 Spin';
+            btn.classList.add('spin-active');
+            btn.title = 'Stop globe spin';
+        } else {
+            btn.textContent = '\u27F3 Spin';
+            btn.classList.remove('spin-active');
+            btn.title = 'Start globe spin';
         }
     }
 

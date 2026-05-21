@@ -141,14 +141,17 @@
         <button id="map-view-toggle" class="map-view-btn" title="Switch to 3D Globe view">🌍 3D Globe</button>
     </div>
 
-    <!-- Globe theme selector — only visible in globe mode, centred top -->
-    <select id="globe-theme-select">
-        <option value="night">Night (City Lights)</option>
-        <option value="day">Day</option>
-        <option value="blue-marble" selected>Blue Marble</option>
-        <option value="dark">Dark</option>
-        <option value="topology">Topology</option>
-    </select>
+    <!-- Globe controls — only visible in globe mode, centred top -->
+    <div id="globe-controls" style="position:fixed; top:74px; left:50%; transform:translateX(-50%); z-index:1001; display:none; align-items:center; gap:6px;">
+        <button id="globe-spin-btn" title="Toggle globe spin">&#x27F3; Spin</button>
+        <select id="globe-theme-select">
+            <option value="night">Night (City Lights)</option>
+            <option value="day">Day</option>
+            <option value="blue-marble" selected>Blue Marble</option>
+            <option value="dark">Dark</option>
+            <option value="topology">Topology</option>
+        </select>
+    </div>
 
     <div class="legend" id="band-legend">
         <div class="legend-item">

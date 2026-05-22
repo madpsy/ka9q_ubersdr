@@ -1777,6 +1777,65 @@ dsp:
     dfnr: false  # DeepFilterNet3 neural denoiser (x86 only  - not ARM - heavy on CPU)
 
 # ==============================================================================
+# Lookup Services
+# ==============================================================================
+# Callsign lookup services enrich decoded spots, DX cluster entries, and other
+# amateur radio data with operator information (name, QTH, grid, DXCC entity,
+# CQ/ITU zone, LoTW/eQSL status, etc.) fetched from an external database.
+#
+# Lookups are cached in memory for 24 hours so each unique callsign is only
+# queried once per day regardless of how many times it appears in spots.
+#
+# Callsign normalisation is applied automatically before lookup:
+#   - Portable/mobile suffixes are stripped: /P /M /MM /AM /QRP /A /B
+#   - Country prefix overlays are stripped: G/MM3NDH → MM3NDH
+#   - The result is uppercased before the cache key is checked
+#
+# Currently supported providers:
+#   qrz  — QRZ.com XML Data API (requires paid XML subscription)
+#
+# Public HTTP endpoint:
+#   GET /api/lookup?callsign=W1AW&uuid=<user_session_id>
+#   Returns JSON with operator data from the configured provider.
+#   Requires a valid active session UUID (same UUID used by audio/spectrum WebSockets).
+#
+lookup_services:
+  # Enable callsign lookup services (default: false)
+  # When false, no external lookup API is called and no credentials are used.
+  enabled: false
+
+  # Which lookup provider to use (default: "qrz")
+  # Currently available: "qrz"
+  # Future providers will be added here as additional sub-sections.
+  provider: "qrz"
+
+  # Restrict the /api/lookup endpoint to bypassed users only (default: false)
+  # When true, only users whose IP or bypass password grants bypass privileges
+  # can call the lookup endpoint. All other users receive 403 Forbidden.
+  # When false, any user with a valid active session UUID may call the endpoint.
+  # Useful for limiting API usage to trusted/authenticated users on public instances.
+  bypassed_only: false
+
+  # Maximum lookup requests per session UUID per minute (default: 10)
+  # Prevents a single user from hammering the lookup endpoint.
+  # Set to 0 to disable rate limiting (not recommended for public instances).
+  rate_limit_per_minute: 10
+
+  # Maximum number of callsign results to hold in memory (default: 1000)
+  # When the limit is reached, expired entries are evicted first; if still over
+  # the limit, entries closest to expiry are removed to make room.
+  # Set to 0 to disable the limit (not recommended for public instances).
+  cache_max_size: 1000
+
+  # QRZ.com XML Data API settings
+  # Requires a paid QRZ.com XML Data subscription
+  qrz:
+    # QRZ.com login callsign
+    username: "N0CALL"
+    # QRZ.com password
+    password: "your-qrz-password"
+
+# ==============================================================================
 # NTP Time Synchronization Check
 # ==============================================================================
 # The /api/time endpoint queries an NTP server and compares it to the local

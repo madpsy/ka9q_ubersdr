@@ -2217,6 +2217,42 @@ func (sm *SessionManager) GetUUIDIP(userSessionID string) string {
 	return sm.uuidToIP[userSessionID]
 }
 
+// HasActiveAudioSession returns true if the given userSessionID currently has an
+// active audio (non-spectrum) session.  This is used by the /api/lookup endpoint
+// to ensure the caller is an active listener, not just a spectrum-only viewer.
+func (sm *SessionManager) HasActiveAudioSession(userSessionID string) bool {
+	if userSessionID == "" {
+		return false
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	_, exists := sm.uuidAudioSessions[userSessionID]
+	return exists
+}
+
+// IsUUIDBypassedByAnySession returns true if any active session associated with the
+// given userSessionID has a ClientIP or BypassPassword that grants bypass privileges.
+// This is used by the /api/lookup endpoint to enforce the bypassed_only restriction.
+func (sm *SessionManager) IsUUIDBypassedByAnySession(userSessionID string) bool {
+	if userSessionID == "" {
+		return false
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, session := range sm.sessions {
+		if session.UserSessionID == userSessionID {
+			if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // PrefetchReverseDNS starts an async reverse DNS lookup for the given clientIP if one
 // has not already been started. It is safe to call multiple times for the same IP —
 // only the first call triggers a goroutine. The lookup is capped at 3 seconds to

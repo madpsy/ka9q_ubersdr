@@ -42,10 +42,56 @@ type Config struct {
 	NTP                NTPConfig                `yaml:"ntp"`
 	UI                 UIConfig                 `yaml:"ui"`
 	DSP                DSPConfig                `yaml:"dsp"`
+	LookupServices     LookupServicesConfig     `yaml:"lookup_services"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
 	DefaultExtension   string                   `yaml:"default_extension,omitempty"`
+}
+
+// LookupServicesConfig contains settings for callsign lookup providers.
+// Only one provider is active at a time, selected by the Provider field.
+type LookupServicesConfig struct {
+	// Enabled controls whether callsign lookups are performed at all.
+	// When false, no external lookup API is called regardless of other settings.
+	// Default: false
+	Enabled bool `yaml:"enabled"`
+
+	// Provider selects which lookup backend to use.
+	// Currently supported: "qrz"
+	// Default: "qrz"
+	Provider string `yaml:"provider"`
+
+	// BypassedOnly restricts the public /api/lookup endpoint to bypassed users only.
+	// When true, only users whose IP or password grants bypass privileges can call the endpoint.
+	// When false, any user with a valid session UUID may call it (subject to rate limiting).
+	// Default: false
+	BypassedOnly bool `yaml:"bypassed_only"`
+
+	// RateLimitPerMinute is the maximum number of lookup requests a single session UUID
+	// may make per minute via the public /api/lookup endpoint.
+	// Set to 0 to disable rate limiting (not recommended for public instances).
+	// Default: 10
+	RateLimitPerMinute int `yaml:"rate_limit_per_minute"`
+
+	// CacheMaxSize is the maximum number of callsign results to hold in memory.
+	// When the limit is reached, expired entries are evicted first; if still over
+	// the limit, the entries closest to expiry are removed to make room.
+	// Default: 1000
+	CacheMaxSize int `yaml:"cache_max_size"`
+
+	// QRZ contains credentials for the QRZ.com XML subscription API.
+	QRZ QRZConfig `yaml:"qrz"`
+}
+
+// QRZConfig contains credentials for the QRZ.com XML Data subscription API.
+// A paid XML Data subscription is required (free accounts are not supported).
+type QRZConfig struct {
+	// Username is the QRZ.com login callsign.
+	Username string `yaml:"username"`
+	// Password is the QRZ.com XML subscription password
+	// (may differ from the website login password — set in QRZ account settings).
+	Password string `yaml:"password"`
 }
 
 // DSPConfig contains settings for the ubersdr-dsp noise reduction gRPC container.
@@ -613,6 +659,9 @@ func LoadConfig(filename string) (*Config, error) {
 	// Apply DSP filter defaults (nr2/rn2/nr4/dfnr enabled, bnr disabled)
 	// when the filters sub-section is absent from config.
 	config.DSP.Filters.applyDSPFilterDefaults()
+
+	// Apply lookup services defaults (provider defaults to "qrz")
+	config.LookupServices.applyDefaults()
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)
@@ -1856,6 +1905,22 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 		}
 	} else if zeroGainCount > 0 {
 		fmt.Printf("All %d frequency-dependent gain ranges have 0 dB gain - bypassing per-user processing for performance\n", zeroGainCount)
+	}
+}
+
+// Set lookup services defaults if not specified
+// Provider defaults to "qrz" when lookup_services is enabled but provider is empty.
+
+// lookupServicesDefaults applies defaults for the lookup_services section.
+func (lsc *LookupServicesConfig) applyDefaults() {
+	if lsc.Provider == "" {
+		lsc.Provider = "qrz"
+	}
+	if lsc.RateLimitPerMinute == 0 {
+		lsc.RateLimitPerMinute = 10 // Default 10 lookups per minute per UUID
+	}
+	if lsc.CacheMaxSize == 0 {
+		lsc.CacheMaxSize = 1000 // Default 1000 cached callsigns
 	}
 }
 

@@ -905,3 +905,70 @@ func (ssrl *SessionStatsRateLimiter) GetStats() int {
 	defer ssrl.mu.RUnlock()
 	return len(ssrl.limiters)
 }
+
+// LookupRateLimiter manages per-UUID rate limiters for the /api/lookup endpoint.
+// The limit is configurable (rate_limit_per_minute in lookup_services config).
+// Keyed by session UUID rather than IP so each user gets their own bucket.
+type LookupRateLimiter struct {
+	limiters      map[string]*RateLimiter
+	mu            sync.RWMutex
+	ratePerMinute float64 // tokens per minute (converted to tokens/sec internally)
+}
+
+// NewLookupRateLimiter creates a new lookup rate limiter.
+// ratePerMinute is the number of requests allowed per UUID per minute.
+// Pass 0 to disable rate limiting (always allow).
+func NewLookupRateLimiter(ratePerMinute int) *LookupRateLimiter {
+	return &LookupRateLimiter{
+		limiters:      make(map[string]*RateLimiter),
+		ratePerMinute: float64(ratePerMinute),
+	}
+}
+
+// AllowRequest returns true if the given UUID is allowed to make a lookup request.
+// Returns true unconditionally when ratePerMinute is 0 (disabled).
+func (lrl *LookupRateLimiter) AllowRequest(uuid string) bool {
+	if lrl.ratePerMinute <= 0 {
+		return true
+	}
+
+	lrl.mu.Lock()
+	defer lrl.mu.Unlock()
+
+	limiter, exists := lrl.limiters[uuid]
+	if !exists {
+		rpm := lrl.ratePerMinute
+		refillRate := rpm / 60.0 // convert per-minute to per-second
+		limiter = &RateLimiter{
+			tokens:     rpm, // start with a full bucket
+			maxTokens:  rpm,
+			refillRate: refillRate,
+			lastRefill: time.Now(),
+		}
+		lrl.limiters[uuid] = limiter
+	}
+	return limiter.Allow()
+}
+
+// Cleanup removes stale per-UUID limiters that have not been used in the last 10 minutes.
+// Should be called periodically (e.g. from the main cleanup ticker).
+func (lrl *LookupRateLimiter) Cleanup() {
+	lrl.mu.Lock()
+	defer lrl.mu.Unlock()
+
+	now := time.Now()
+	for uuid, limiter := range lrl.limiters {
+		limiter.mu.Lock()
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(lrl.limiters, uuid)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the number of currently tracked UUIDs.
+func (lrl *LookupRateLimiter) GetStats() int {
+	lrl.mu.RLock()
+	defer lrl.mu.RUnlock()
+	return len(lrl.limiters)
+}

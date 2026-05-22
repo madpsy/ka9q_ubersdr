@@ -53,6 +53,9 @@ var globalConfig *Config
 // Global index template for custom HTML injection
 var indexTemplate *template.Template
 
+// Global QRZ lookup service (nil when lookup_services.enabled is false)
+var globalQRZService *QRZService
+
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
@@ -573,6 +576,23 @@ func main() {
 	} else {
 		log.Println("GeoIP service disabled in configuration")
 		geoIPService = &GeoIPService{enabled: false}
+	}
+
+	// Initialize lookup services (callsign enrichment via QRZ.com or future providers)
+	if config.LookupServices.Enabled {
+		switch strings.ToLower(config.LookupServices.Provider) {
+		case "qrz":
+			if config.LookupServices.QRZ.Username == "" || config.LookupServices.QRZ.Password == "" {
+				log.Printf("Warning: lookup_services.provider is 'qrz' but username/password are not set — lookup disabled")
+			} else {
+				globalQRZService = NewQRZService(config.LookupServices.QRZ, config.LookupServices.CacheMaxSize)
+				log.Printf("QRZ lookup service initialised (provider: qrz, user: %s)", config.LookupServices.QRZ.Username)
+			}
+		default:
+			log.Printf("Warning: unknown lookup_services.provider %q — lookup disabled", config.LookupServices.Provider)
+		}
+	} else {
+		log.Println("Lookup services disabled in configuration")
 	}
 
 	// Initialize session manager (with GeoIP service for automatic country lookups)
@@ -1668,6 +1688,13 @@ func main() {
 	rmNoiseRateLimiter := NewRMNoiseRateLimiter()
 	log.Printf("RMNoise proxy rate limiting: 1 request per second per IP")
 
+	// Initialize lookup endpoint rate limiter (per-UUID token bucket, configurable rate)
+	var lookupRateLimiter *LookupRateLimiter
+	if config.LookupServices.Enabled && config.LookupServices.RateLimitPerMinute > 0 {
+		lookupRateLimiter = NewLookupRateLimiter(config.LookupServices.RateLimitPerMinute)
+		log.Printf("Lookup endpoint rate limiting: %d requests/min per session UUID", config.LookupServices.RateLimitPerMinute)
+	}
+
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
 	var sshProxy *SSHProxy
 	if config.SSHProxy.Enabled {
@@ -2028,6 +2055,9 @@ func main() {
 	})
 	http.HandleFunc("/api/session-stats", func(w http.ResponseWriter, r *http.Request) {
 		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter, geoIPService)
+	})
+	http.HandleFunc("/api/lookup", func(w http.ResponseWriter, r *http.Request) {
+		handleLookup(w, r, config, sessions, lookupRateLimiter)
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
@@ -3561,6 +3591,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"rotator":              rotatorInfo,
 		"frequency_reference":  freqRefInfo,
 		"speech_to_text":       config.Whisper.Enabled,
+		"lookup_service":       config.LookupServices.Enabled,
 		"dsp":                  buildDSPInfo(&config.DSP),
 		"addons":               enabledAddons,
 		"server_time":          time.Now().UTC().Format(time.RFC3339),

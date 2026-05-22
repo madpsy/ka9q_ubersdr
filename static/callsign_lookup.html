@@ -256,6 +256,23 @@
             margin-bottom: 12px;
         }
 
+        .rx-distance {
+            font-size: 13px;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .rx-distance .rx-val {
+            display: block;
+            color: #e0e0e0;
+        }
+
+        .rx-distance .rx-lbl {
+            display: block;
+            color: #888;
+            font-weight: 500;
+        }
+
         .info-grid {
             display: grid;
             grid-template-columns: auto 1fr;
@@ -299,6 +316,27 @@
             border-radius: 8px;
             overflow: hidden;
             border: 1px solid #333;
+        }
+
+        .map-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            background: #222;
+            border-bottom: 1px solid #333;
+            font-size: 12px;
+            color: #aaa;
+            user-select: none;
+        }
+
+        .map-toolbar input[type="checkbox"] {
+            accent-color: #4a9eff;
+            cursor: pointer;
+        }
+
+        .map-toolbar label {
+            cursor: pointer;
         }
 
         #location-map {
@@ -368,14 +406,36 @@
 
         // ── State ────────────────────────────────────────────────────────
 
-        let currentUUID = null;
-        let leafletMap  = null; // Leaflet map instance (reused across lookups)
-        let leafletMarker = null;
+        let currentUUID      = null;
+        let leafletMap       = null;   // Leaflet map instance (reused across lookups)
+        let leafletMarker    = null;   // callsign marker
+        let rxMarker         = null;   // receiver marker
+        let geodesicLine     = null;   // polyline between receiver and callsign
+        let currentSpotLat   = null;   // lat of the currently displayed callsign
+        let currentSpotLon   = null;
+        let receiverLat      = null;   // from /api/description receiver.gps.lat
+        let receiverLon      = null;
+        let receiverCallsign = null;   // from /api/description receiver.callsign
 
         // Read UUID from URL param (passed by the extension when opening the window)
         const urlParams = new URLSearchParams(window.location.search);
         const urlUUID   = urlParams.get('uuid');
         if (urlUUID) currentUUID = urlUUID;
+
+        // Fetch receiver location from /api/description once on load
+        fetch('/api/description')
+            .then(r => r.ok ? r.json() : null)
+            .then(desc => {
+                if (desc && desc.receiver) {
+                    const rx = desc.receiver;
+                    if (rx.gps && rx.gps.lat && rx.gps.lon) {
+                        receiverLat = rx.gps.lat;
+                        receiverLon = rx.gps.lon;
+                    }
+                    if (rx.callsign) receiverCallsign = rx.callsign;
+                }
+            })
+            .catch(() => {}); // silently ignore if unavailable
 
         // ── DOM refs ─────────────────────────────────────────────────────
 
@@ -436,12 +496,105 @@
         function destroyMap() {
             if (leafletMap) {
                 leafletMap.remove();
-                leafletMap   = null;
+                leafletMap    = null;
                 leafletMarker = null;
+                rxMarker      = null;
+                geodesicLine  = null;
             }
+            currentSpotLat = null;
+            currentSpotLon = null;
+        }
+
+        /**
+         * Calculate great-circle distance (km) and initial bearing (°) from
+         * receiver to callsign.  Returns null if receiver coords are unknown.
+         */
+        function calcDistanceBearing(spotLat, spotLon) {
+            if (receiverLat === null || receiverLon === null) return null;
+            const toRad = d => d * Math.PI / 180;
+            const R = 6371;
+            const φ1 = toRad(receiverLat), φ2 = toRad(spotLat);
+            const Δφ = toRad(spotLat - receiverLat);
+            const Δλ = toRad(spotLon - receiverLon);
+            const a = Math.sin(Δφ / 2) ** 2 +
+                      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+            const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const y = Math.sin(toRad(spotLon - receiverLon)) * Math.cos(φ2);
+            const x = Math.cos(φ1) * Math.sin(φ2) -
+                      Math.sin(φ1) * Math.cos(φ2) * Math.cos(toRad(spotLon - receiverLon));
+            const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            return { distKm: Math.round(distKm), bearing: Math.round(bearing) };
+        }
+
+        /** Build an array of [lat,lon] points approximating a geodesic arc */
+        function geodesicPoints(lat1, lon1, lat2, lon2, steps) {
+            const toRad = d => d * Math.PI / 180;
+            const toDeg = r => r * 180 / Math.PI;
+            const φ1 = toRad(lat1), λ1 = toRad(lon1);
+            const φ2 = toRad(lat2), λ2 = toRad(lon2);
+            const d = 2 * Math.asin(Math.sqrt(
+                Math.sin((φ2 - φ1) / 2) ** 2 +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+            ));
+            if (d === 0) return [[lat1, lon1]];
+            const pts = [];
+            for (let i = 0; i <= steps; i++) {
+                const f = i / steps;
+                const A = Math.sin((1 - f) * d) / Math.sin(d);
+                const B = Math.sin(f * d) / Math.sin(d);
+                const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+                const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+                const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+                pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))),
+                          toDeg(Math.atan2(y, x))]);
+            }
+            return pts;
+        }
+
+        function addReceiverOverlay(showReceiver) {
+            if (!leafletMap || !currentSpotLat || !currentSpotLon) return;
+
+            // Remove existing overlay layers
+            if (rxMarker)     { leafletMap.removeLayer(rxMarker);     rxMarker = null; }
+            if (geodesicLine) { leafletMap.removeLayer(geodesicLine); geodesicLine = null; }
+
+            if (!showReceiver || receiverLat === null || receiverLon === null) {
+                // Just zoom to the callsign marker
+                leafletMap.setView([currentSpotLat, currentSpotLon], 10);
+                return;
+            }
+
+            // Receiver marker — green dot
+            const rxIcon = L.divIcon({
+                className: '',
+                html: '<div style="width:14px;height:14px;background:#28a745;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(40,167,69,0.8);"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+            rxMarker = L.marker([receiverLat, receiverLon], { icon: rxIcon })
+                .addTo(leafletMap)
+                .bindTooltip(receiverCallsign || 'Receiver', { permanent: false, direction: 'top' });
+
+            // Geodesic arc
+            const pts = geodesicPoints(receiverLat, receiverLon, currentSpotLat, currentSpotLon, 64);
+            geodesicLine = L.polyline(pts, {
+                color: '#4a9eff',
+                weight: 2,
+                opacity: 0.8,
+                dashArray: '5, 5'
+            }).addTo(leafletMap);
+
+            // Fit both points
+            leafletMap.fitBounds(L.latLngBounds(
+                [receiverLat, receiverLon],
+                [currentSpotLat, currentSpotLon]
+            ).pad(0.15));
         }
 
         function initMap(lat, lon, callsign) {
+            currentSpotLat = lat;
+            currentSpotLon = lon;
+
             // The map container is injected into the DOM by renderResult before
             // this is called, so the element exists at this point.
             leafletMap = L.map('location-map', {
@@ -455,18 +608,32 @@
                 maxZoom: 18
             }).addTo(leafletMap);
 
-            // Custom dark-styled marker
+            // Custom dark-styled callsign marker — red dot
             const icon = L.divIcon({
                 className: '',
-                html: '<div style="width:14px;height:14px;background:#ffc107;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(255,193,7,0.8);"></div>',
+                html: '<div style="width:14px;height:14px;background:#dc3545;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(220,53,69,0.8);"></div>',
                 iconSize: [14, 14],
                 iconAnchor: [7, 7]
             });
 
+            // Build popup content — always include distance/bearing if receiver is known
+            const db = calcDistanceBearing(lat, lon);
+            const popupExtra = db
+                ? `<br>${db.distKm.toLocaleString()} km &nbsp;|&nbsp; ${db.bearing}°`
+                : '';
+
             leafletMarker = L.marker([lat, lon], { icon })
                 .addTo(leafletMap)
-                .bindPopup(`<b>${esc(callsign)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}`)
+                .bindPopup(`<b>${esc(callsign)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}${popupExtra}`)
                 .openPopup();
+
+            // Wire up the "Show receiver" checkbox
+            const cb = document.getElementById('map-show-receiver');
+            if (cb) {
+                // Apply current checkbox state immediately
+                addReceiverOverlay(cb.checked);
+                cb.onchange = () => addReceiverOverlay(cb.checked);
+            }
         }
 
         // ── Render ───────────────────────────────────────────────────────
@@ -528,6 +695,7 @@
             }
             addRow('Grid',     d.grid);
             addRow('County',   d.county);
+            addRow('DXCC',     d.dxcc);
             addRow('CQ Zone',  d.cqzone);
             addRow('ITU Zone', d.ituzone);
             addRow('Time Zone',d.timezone);
@@ -557,8 +725,29 @@
             // Map placeholder — only injected when lat/lon are present
             const hasLocation = d.lat && d.lon;
             const mapHtml = hasLocation
-                ? `<div class="location-map-wrap"><div id="location-map"></div></div>`
+                ? `<div class="location-map-wrap">
+                       <div class="map-toolbar">
+                           <input type="checkbox" id="map-show-receiver" checked />
+                           <label for="map-show-receiver">Show receiver &amp; draw path</label>
+                       </div>
+                       <div id="location-map"></div>
+                   </div>`
                 : '';
+
+            // Distance / bearing from receiver (shown under photo if receiver coords known)
+            // We compute eagerly; if receiverLat is still null (description not yet fetched)
+            // we fall back to a placeholder that updates when the map is initialised.
+            const rxDb = (d.lat && d.lon) ? calcDistanceBearing(d.lat, d.lon) : null;
+            const rxDistHtml = (d.lat && d.lon && rxDb)
+                ? `<div class="rx-distance" id="rx-dist-display">
+                       <span class="rx-lbl">Distance</span>
+                       <span class="rx-val">${rxDb.distKm.toLocaleString()} km</span>
+                       <span class="rx-lbl">Bearing</span>
+                       <span class="rx-val">${rxDb.bearing}°</span>
+                   </div>`
+                : (d.lat && d.lon
+                    ? `<div class="rx-distance" id="rx-dist-display">—</div>`
+                    : '');
 
             // Build aliases row — QRZ returns a comma-separated string
             const aliasCallsigns = d.aliases
@@ -575,6 +764,7 @@
                 <div class="operator-card">
                     <div class="operator-image-col">
                         ${imageHtml}
+                        ${rxDistHtml}
                         <a class="qrz-link" href="${esc(qrzUrl)}" target="_blank" rel="noopener">View on QRZ.com ↗</a>
                     </div>
                     <div class="operator-info-col">
@@ -610,6 +800,16 @@
                 // Use requestAnimationFrame to ensure the map div is laid out
                 requestAnimationFrame(() => {
                     initMap(d.lat, d.lon, callsign);
+                    // If description hadn't loaded yet when renderResult ran, fill in now
+                    const distEl = document.getElementById('rx-dist-display');
+                    if (distEl && distEl.textContent.trim() === '—') {
+                        const db2 = calcDistanceBearing(d.lat, d.lon);
+                        if (db2) distEl.innerHTML =
+                            `<span class="rx-lbl">Distance</span>` +
+                            `<span class="rx-val">${db2.distKm.toLocaleString()} km</span>` +
+                            `<span class="rx-lbl">Bearing</span>` +
+                            `<span class="rx-val">${db2.bearing}°</span>`;
+                    }
                 });
             }
         }

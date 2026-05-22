@@ -553,10 +553,38 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     openQRZ(callsign) {
-        // Strip anything after a slash (e.g., W1ABC/P becomes W1ABC)
-        const baseCallsign = callsign.split('/')[0];
-        const url = `https://www.qrz.com/db/${baseCallsign}`;
-        window.open(url, '_blank');
+        // Strip /P, /M, /QRP suffixes and EA8/ prefixes — pick the longest segment
+        const parts = callsign.split('/');
+        const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+
+        // If the server has the lookup service enabled, open our internal popup.
+        // window.instanceDescription is populated by app.js fetchSiteDescription().
+        const lookupEnabled = window.instanceDescription && window.instanceDescription.lookup_service === true;
+
+        if (lookupEnabled) {
+            const uuid = this.radio.getSessionId ? this.radio.getSessionId() : '';
+            const popupUrl = `/callsign_lookup.html?callsign=${encodeURIComponent(baseCallsign)}&uuid=${encodeURIComponent(uuid)}`;
+
+            // Reuse the same named window so repeated clicks don't open many tabs.
+            // If the window is already open, postMessage updates it without a reload.
+            if (this._lookupWindow && !this._lookupWindow.closed) {
+                this._lookupWindow.postMessage(
+                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                    window.location.origin
+                );
+                this._lookupWindow.focus();
+            } else {
+                this._lookupWindow = window.open(
+                    popupUrl,
+                    'callsign_lookup',
+                    'width=760,height=600,resizable=yes,scrollbars=yes'
+                );
+            }
+        } else {
+            // Lookup service disabled — fall back to opening QRZ.com directly.
+            const url = `https://www.qrz.com/db/${encodeURIComponent(baseCallsign)}`;
+            window.open(url, '_blank');
+        }
     }
 
     formatFrequency(hz) {

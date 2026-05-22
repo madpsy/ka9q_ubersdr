@@ -350,6 +350,11 @@
             filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
         }
 
+        /* Tighten Leaflet popup padding */
+        #location-map .leaflet-popup-content {
+            margin: 6px 10px;
+        }
+
         /* Responsive: stack on narrow windows */
         @media (max-width: 480px) {
             .operator-card {
@@ -584,11 +589,12 @@
                 dashArray: '5, 5'
             }).addTo(leafletMap);
 
-            // Fit both points
+            // Fit both points — paddingTopLeft reserves space for the popup
+            // so it is not clipped at the top of the map after fitBounds
             leafletMap.fitBounds(L.latLngBounds(
                 [receiverLat, receiverLon],
                 [currentSpotLat, currentSpotLon]
-            ).pad(0.15));
+            ).pad(0.15), { paddingTopLeft: [0, 60] });
         }
 
         function initMap(lat, lon, callsign) {
@@ -624,7 +630,9 @@
 
             leafletMarker = L.marker([lat, lon], { icon })
                 .addTo(leafletMap)
-                .bindPopup(`<b>${esc(callsign)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}${popupExtra}`)
+                .bindPopup(`<b>${esc(callsign)}</b>${popupExtra}`, {
+                    autoPanPaddingTopLeft: L.point(10, 60)
+                })
                 .openPopup();
 
             // Wire up the "Show receiver" checkbox

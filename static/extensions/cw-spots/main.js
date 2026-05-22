@@ -769,7 +769,7 @@ class CWSpotsExtension extends DecoderExtension {
                 this._lookupWindow = window.open(
                     popupUrl,
                     'callsign_lookup',
-                    'width=760,height=600,resizable=yes,scrollbars=yes'
+                    'width=520,height=800,resizable=yes,scrollbars=yes'
                 );
             }
         } else {

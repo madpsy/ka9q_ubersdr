@@ -91,7 +91,7 @@ type QRZCallsign struct {
 	Codes   string `xml:"codes"   json:"codes,omitempty"`
 
 	// Contact / profile
-	Email     string `xml:"email"     json:"email,omitempty"`
+	Email     string `xml:"email"     json:"-"` // never serialised to the public API
 	URL       string `xml:"url"       json:"url,omitempty"`
 	QSLMgr    string `xml:"qslmgr"   json:"qslmgr,omitempty"`
 	Image     string `xml:"image"     json:"image,omitempty"`

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // reValidCallsign matches a callsign that is 3–10 alphanumeric characters (after normalisation).
@@ -49,29 +51,35 @@ func handleLookup(
 	}
 
 	// ── 2. UUID validation — must have an active audio session ────────────────
-	uuid := strings.TrimSpace(r.URL.Query().Get("uuid"))
-	if uuid == "" {
+	rawUUID := strings.TrimSpace(r.URL.Query().Get("uuid"))
+	if rawUUID == "" {
 		writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "uuid parameter is required"})
+		return
+	}
+
+	// Validate UUID format before touching the session map.
+	if _, err := uuid.Parse(rawUUID); err != nil {
+		writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "uuid parameter is not a valid UUID"})
 		return
 	}
 
 	// Require an active audio (non-spectrum) session for this UUID.
 	// Spectrum-only viewers are not permitted to use the lookup endpoint.
-	if !sessions.HasActiveAudioSession(uuid) {
+	if !sessions.HasActiveAudioSession(rawUUID) {
 		writeJSON(w, http.StatusUnauthorized, lookupErrorResponse{Error: "an active audio session is required to use this endpoint"})
 		return
 	}
 
 	// ── 3. Bypass-only gate ───────────────────────────────────────────────────
 	if cfg.LookupServices.BypassedOnly {
-		if !sessions.IsUUIDBypassedByAnySession(uuid) {
+		if !sessions.IsUUIDBypassedByAnySession(rawUUID) {
 			writeJSON(w, http.StatusForbidden, lookupErrorResponse{Error: "lookup is restricted to privileged users"})
 			return
 		}
 	}
 
 	// ── 4. Rate limiting ──────────────────────────────────────────────────────
-	if rateLimiter != nil && !rateLimiter.AllowRequest(uuid) {
+	if rateLimiter != nil && !rateLimiter.AllowRequest(rawUUID) {
 		writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
 		return
 	}

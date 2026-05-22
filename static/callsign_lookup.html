@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Callsign Lookup</title>
+    <link rel="stylesheet" href="leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        /* ── Search bar ─────────────────────────────────────────────────── */
+        .search-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: #222;
+            border-bottom: 1px solid #333;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .search-bar label {
+            font-size: 13px;
+            color: #aaa;
+            white-space: nowrap;
+        }
+
+        #callsign-input {
+            flex: 1;
+            max-width: 200px;
+            padding: 7px 12px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #fff;
+            font-size: 14px;
+            font-family: monospace;
+            text-transform: uppercase;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #callsign-input:focus {
+            border-color: #4a9eff;
+            box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+        }
+
+        #lookup-btn {
+            padding: 7px 18px;
+            background: #4a9eff;
+            border: none;
+            border-radius: 5px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #lookup-btn:hover {
+            background: #3a8eef;
+        }
+
+        #lookup-btn:disabled {
+            background: #2a5a8a;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        /* ── Result area ────────────────────────────────────────────────── */
+        #result-area {
+            padding: 20px 16px;
+        }
+
+        /* Loading / error states */
+        .state-msg {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .state-msg.error {
+            color: #dc3545;
+        }
+
+        /* ── Operator card ──────────────────────────────────────────────── */
+        .operator-card {
+            display: flex;
+            gap: 20px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .operator-image-col {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .operator-image {
+            width: 160px;
+            height: 160px;
+            object-fit: cover;
+            border-radius: 6px;
+            border: 2px solid #444;
+            background: #2a2a2a;
+            display: block;
+        }
+
+        .image-placeholder {
+            width: 160px;
+            height: 160px;
+            border-radius: 6px;
+            border: 2px solid #333;
+            background: #2a2a2a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            font-size: 40px;
+        }
+
+        .qrz-link {
+            font-size: 11px;
+            color: #4a9eff;
+            text-decoration: none;
+        }
+
+        .qrz-link:hover {
+            text-decoration: underline;
+        }
+
+        .operator-info-col {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .callsign-heading {
+            font-size: 28px;
+            font-weight: 700;
+            color: #ffc107;
+            font-family: monospace;
+            margin-bottom: 4px;
+            letter-spacing: 1px;
+        }
+
+        .operator-name {
+            font-size: 16px;
+            color: #fff;
+            margin-bottom: 12px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 5px 14px;
+            font-size: 13px;
+        }
+
+        .info-label {
+            color: #888;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: #e0e0e0;
+            word-break: break-word;
+        }
+
+        .info-value.callsign-link {
+            color: #4a9eff;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .info-value.callsign-link:hover {
+            color: #6ab8ff;
+        }
+
+        /* Divider between sections */
+        .section-divider {
+            grid-column: 1 / -1;
+            border: none;
+            border-top: 1px solid #333;
+            margin: 6px 0;
+        }
+
+        /* ── Location map ───────────────────────────────────────────────── */
+        .location-map-wrap {
+            max-width: 700px;
+            margin: 14px auto 0;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+
+        #location-map {
+            width: 100%;
+            height: 220px;
+            background: #1a1a1a;
+        }
+
+        /* Dark tile filter so the map matches the dark UI */
+        #location-map .leaflet-tile {
+            filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+
+        /* Responsive: stack on narrow windows */
+        @media (max-width: 480px) {
+            .operator-card {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ── Search bar ──────────────────────────────────────────────────── -->
+    <div class="search-bar">
+        <label for="callsign-input">Callsign:</label>
+        <input type="text" id="callsign-input" placeholder="e.g. W1AW" maxlength="20" autocomplete="off" spellcheck="false" />
+        <button id="lookup-btn">Go</button>
+    </div>
+
+    <!-- ── Result area ─────────────────────────────────────────────────── -->
+    <div id="result-area">
+        <div class="state-msg" id="idle-msg">Enter a callsign above and press Go.</div>
+    </div>
+
+    <script src="leaflet.js"></script>
+    <script>
+    (function () {
+        'use strict';
+
+        // ── Helpers ──────────────────────────────────────────────────────
+
+        /** Strip /P, /M, /QRP etc. suffixes and prefixes like EA8/ */
+        function normalise(raw) {
+            const parts = raw.trim().toUpperCase().split('/');
+            // Pick the longest segment (usually the base callsign)
+            return parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // ── State ────────────────────────────────────────────────────────
+
+        let currentUUID = null;
+        let leafletMap  = null; // Leaflet map instance (reused across lookups)
+        let leafletMarker = null;
+
+        // Read UUID from URL param (passed by the extension when opening the window)
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlUUID   = urlParams.get('uuid');
+        if (urlUUID) currentUUID = urlUUID;
+
+        // ── DOM refs ─────────────────────────────────────────────────────
+
+        const input      = document.getElementById('callsign-input');
+        const btn        = document.getElementById('lookup-btn');
+        const resultArea = document.getElementById('result-area');
+
+        // ── Lookup ───────────────────────────────────────────────────────
+
+        async function doLookup(callsign) {
+            if (!callsign) return;
+
+            const base = normalise(callsign);
+            if (!base) return;
+
+            // Update input to show normalised callsign
+            input.value = base;
+
+            // Update window title
+            document.title = `Lookup: ${base}`;
+
+            // Update URL so the window can be bookmarked / refreshed
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.set('callsign', base);
+            if (currentUUID) newUrl.searchParams.set('uuid', currentUUID);
+            history.replaceState(null, '', newUrl.toString());
+
+            // Destroy any existing map before replacing the DOM
+            destroyMap();
+
+            // Show loading state
+            resultArea.innerHTML = '<div class="state-msg">Looking up <strong>' + esc(base) + '</strong>…</div>';
+            btn.disabled = true;
+
+            try {
+                if (!currentUUID) {
+                    throw new Error('No session UUID available. Please open this page from the Digital Spots extension.');
+                }
+
+                const apiUrl = `/api/lookup?callsign=${encodeURIComponent(base)}&uuid=${encodeURIComponent(currentUUID)}`;
+                const resp = await fetch(apiUrl);
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    throw new Error(data.error || `HTTP ${resp.status}`);
+                }
+
+                renderResult(data, base);
+            } catch (err) {
+                resultArea.innerHTML = `<div class="state-msg error">⚠ ${esc(err.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Map helpers ──────────────────────────────────────────────────
+
+        function destroyMap() {
+            if (leafletMap) {
+                leafletMap.remove();
+                leafletMap   = null;
+                leafletMarker = null;
+            }
+        }
+
+        function initMap(lat, lon, callsign) {
+            // The map container is injected into the DOM by renderResult before
+            // this is called, so the element exists at this point.
+            leafletMap = L.map('location-map', {
+                center: [lat, lon],
+                zoom: 10,
+                zoomControl: true,
+                attributionControl: false
+            });
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18
+            }).addTo(leafletMap);
+
+            // Custom dark-styled marker
+            const icon = L.divIcon({
+                className: '',
+                html: '<div style="width:14px;height:14px;background:#ffc107;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(255,193,7,0.8);"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+
+            leafletMarker = L.marker([lat, lon], { icon })
+                .addTo(leafletMap)
+                .bindPopup(`<b>${esc(callsign)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}`)
+                .openPopup();
+        }
+
+        // ── Render ───────────────────────────────────────────────────────
+
+        function renderResult(d, callsign) {
+            // Build name string
+            const nameParts = [d.fname, d.name].filter(Boolean);
+            const fullName  = nameParts.join(' ') || '';
+
+            // Build address
+            const addrParts = [d.addr1, d.addr2, d.state, d.zip, d.country].filter(Boolean);
+            const address   = addrParts.join(', ');
+
+            // QRZ profile URL
+            const qrzUrl = `https://www.qrz.com/db/${encodeURIComponent(callsign)}`;
+
+            // Image URL — fetched directly by the browser from QRZ
+            const imageUrl = d.image || '';
+
+            // ── Build info rows ──────────────────────────────────────────
+            const rows = [];
+
+            const addRow = (label, value, isCallsign) => {
+                if (!value && value !== 0) return;
+                const valClass = isCallsign ? 'info-value callsign-link' : 'info-value';
+                const valAttr  = isCallsign ? ` data-callsign="${esc(value)}"` : '';
+                rows.push(`<span class="info-label">${esc(label)}</span><span class="${valClass}"${valAttr}>${esc(String(value))}</span>`);
+            };
+
+            const addDivider = () => rows.push('<hr class="section-divider">');
+
+            // Licence / class
+            addRow('Class',    d.class);
+            addRow('Licences', d.licences);
+            addRow('Expires',  d.expdate);
+            addRow('Trustee',  d.trustee, true);
+
+            if (d.addr1 || d.addr2 || d.state || d.zip || d.country) {
+                addDivider();
+                addRow('Address', address);
+            }
+
+            if (d.lat && d.lon) {
+                addRow('Lat/Lon', `${d.lat}, ${d.lon}`);
+            }
+            addRow('Grid',     d.grid);
+            addRow('County',   d.county);
+            addRow('CQ Zone',  d.cqzone);
+            addRow('ITU Zone', d.ituzone);
+            addRow('Time Zone',d.timezone);
+            addRow('GMT Offset', d.gmtoffset !== undefined && d.gmtoffset !== '' ? d.gmtoffset : null);
+
+            if (d.url || d.qslmgr) {
+                addDivider();
+                addRow('Website',  d.url);
+                addRow('QSL Mgr',  d.qslmgr, true);
+            }
+
+            if (d.eqsl || d.mqsl || d.lotw) {
+                addDivider();
+                addRow('eQSL',  d.eqsl);
+                addRow('Mail QSL', d.mqsl);
+                addRow('LoTW',  d.lotw);
+            }
+
+            // ── Assemble card ────────────────────────────────────────────
+            const imageHtml = imageUrl
+                ? `<img class="operator-image" id="op-img" src="${esc(imageUrl)}" alt="${esc(callsign)}" onerror="this.style.display='none';document.getElementById('op-placeholder').style.display='flex';" />`
+                  + `<div class="image-placeholder" id="op-placeholder" style="display:none;">📷</div>`
+                : `<div class="image-placeholder" id="op-placeholder">📷</div>`;
+
+            // Map placeholder — only injected when lat/lon are present
+            const hasLocation = d.lat && d.lon;
+            const mapHtml = hasLocation
+                ? `<div class="location-map-wrap"><div id="location-map"></div></div>`
+                : '';
+
+            resultArea.innerHTML = `
+                <div class="operator-card">
+                    <div class="operator-image-col">
+                        ${imageHtml}
+                        <a class="qrz-link" href="${esc(qrzUrl)}" target="_blank" rel="noopener">View on QRZ.com ↗</a>
+                    </div>
+                    <div class="operator-info-col">
+                        <div class="callsign-heading">${esc(callsign)}</div>
+                        ${fullName ? `<div class="operator-name">${esc(fullName)}</div>` : ''}
+                        <div class="info-grid">
+                            ${rows.join('\n')}
+                        </div>
+                    </div>
+                </div>
+                ${mapHtml}
+            `;
+
+            // Wire up callsign links (trustee, QSL mgr) to trigger a new lookup
+            resultArea.querySelectorAll('.callsign-link').forEach(el => {
+                el.addEventListener('click', () => {
+                    const cs = el.getAttribute('data-callsign');
+                    if (cs) doLookup(cs);
+                });
+            });
+
+            // Initialise Leaflet map after DOM is updated
+            if (hasLocation) {
+                // Use requestAnimationFrame to ensure the map div is laid out
+                requestAnimationFrame(() => {
+                    initMap(d.lat, d.lon, callsign);
+                });
+            }
+        }
+
+        // ── Event wiring ─────────────────────────────────────────────────
+
+        btn.addEventListener('click', () => {
+            doLookup(input.value.trim());
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doLookup(input.value.trim());
+        });
+
+        input.addEventListener('input', () => {
+            input.value = input.value.toUpperCase();
+        });
+
+        // ── Auto-lookup from URL params ───────────────────────────────────
+
+        const urlCallsign = urlParams.get('callsign');
+        if (urlCallsign) {
+            input.value = urlCallsign.toUpperCase();
+            // Defer so the page is fully painted first
+            setTimeout(() => doLookup(urlCallsign), 50);
+        } else {
+            // Focus the input so the user can type immediately
+            input.focus();
+        }
+
+        // ── Cross-window messaging ────────────────────────────────────────
+        // The extension can post a message to update the UUID or trigger a lookup
+        // without needing to close and reopen the window.
+        window.addEventListener('message', (event) => {
+            if (!event.data) return;
+            if (event.data.type === 'callsign_lookup') {
+                if (event.data.uuid) currentUUID = event.data.uuid;
+                if (event.data.callsign) {
+                    input.value = event.data.callsign.toUpperCase();
+                    doLookup(event.data.callsign);
+                }
+            }
+        });
+
+    })();
+    </script>
+</body>
+</html>

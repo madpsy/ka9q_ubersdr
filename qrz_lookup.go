@@ -71,7 +71,7 @@ type QRZCallsign struct {
 	Addr1   string `xml:"addr1"   json:"-"` // street address — never serialised to the public API
 	Addr2   string `xml:"addr2"   json:"addr2,omitempty"`
 	State   string `xml:"state"   json:"state,omitempty"`
-	Zip     string `xml:"zip"     json:"zip,omitempty"`
+	Zip     string `xml:"zip"     json:"-"` // postcode — never serialised to the public API
 	Country string `xml:"country" json:"country,omitempty"`
 	Land    string `xml:"land"    json:"land,omitempty"`
 	CCode   int    `xml:"ccode"   json:"ccode,omitempty"`

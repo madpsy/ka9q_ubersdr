@@ -226,6 +226,30 @@
             letter-spacing: 1px;
         }
 
+        .aliases-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .alias-tag {
+            font-size: 13px;
+            font-family: monospace;
+            color: #4a9eff;
+            background: rgba(74, 158, 255, 0.1);
+            border: 1px solid rgba(74, 158, 255, 0.3);
+            border-radius: 4px;
+            padding: 2px 7px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+
+        .alias-tag:hover {
+            background: rgba(74, 158, 255, 0.2);
+            border-color: rgba(74, 158, 255, 0.6);
+        }
+
         .operator-name {
             font-size: 16px;
             color: #fff;
@@ -448,12 +472,22 @@
         // ── Render ───────────────────────────────────────────────────────
 
         function renderResult(d, callsign) {
-            // Build name string
-            const nameParts = [d.fname, d.name].filter(Boolean);
-            const fullName  = nameParts.join(' ') || '';
+            // Build name string.
+            // Prefer name_fmt (QRZ pre-formatted, e.g. 'Michael "Mike" Sauer').
+            // Fallback: assemble from fname + "nickname" + name.
+            let fullName = '';
+            if (d.name_fmt) {
+                fullName = d.name_fmt;
+            } else {
+                const parts = [];
+                if (d.fname)    parts.push(d.fname);
+                if (d.nickname) parts.push(`"${d.nickname}"`);
+                if (d.name)     parts.push(d.name);
+                fullName = parts.join(' ');
+            }
 
-            // Build address — addr1 (street) is suppressed server-side; country gets its own row
-            const addrParts = [d.addr2, d.state, d.zip].filter(Boolean);
+            // Build address — addr1 (street) and zip are suppressed server-side; country gets its own row
+            const addrParts = [d.addr2, d.state].filter(Boolean);
             const address   = addrParts.join(', ');
 
             // QRZ profile URL
@@ -483,9 +517,9 @@
             addRow('Expires',  d.expdate);
             addRow('Trustee',  d.trustee, true);
 
-            if (d.addr2 || d.state || d.zip || d.country) {
+            if (d.addr2 || d.state || d.country) {
                 addDivider();
-                if (address) addRow('Address', address);
+                if (address) addRow('Location', address);
                 addRow('Country', d.country);
             }
 
@@ -526,6 +560,17 @@
                 ? `<div class="location-map-wrap"><div id="location-map"></div></div>`
                 : '';
 
+            // Build aliases row — QRZ returns a comma-separated string
+            const aliasCallsigns = d.aliases
+                ? d.aliases.split(',').map(s => s.trim()).filter(Boolean)
+                : [];
+
+            const aliasesHtml = aliasCallsigns.length
+                ? `<div class="aliases-row">${aliasCallsigns.map(a =>
+                    `<span class="alias-tag" data-callsign="${esc(a)}">${esc(a)}</span>`
+                  ).join('')}</div>`
+                : '';
+
             resultArea.innerHTML = `
                 <div class="operator-card">
                     <div class="operator-image-col">
@@ -534,6 +579,7 @@
                     </div>
                     <div class="operator-info-col">
                         <div class="callsign-heading">${esc(callsign)}</div>
+                        ${aliasesHtml}
                         ${fullName ? `<div class="operator-name">${esc(fullName)}</div>` : ''}
                         <div class="info-grid">
                             ${rows.join('\n')}
@@ -543,7 +589,15 @@
                 ${mapHtml}
             `;
 
-            // Wire up callsign links (trustee, QSL mgr) to trigger a new lookup
+            // Wire up alias tags to trigger a new lookup
+            resultArea.querySelectorAll('.alias-tag').forEach(el => {
+                el.addEventListener('click', () => {
+                    const cs = el.getAttribute('data-callsign');
+                    if (cs) doLookup(cs);
+                });
+            });
+
+            // Wire up callsign links (trustee) to trigger a new lookup
             resultArea.querySelectorAll('.callsign-link').forEach(el => {
                 el.addEventListener('click', () => {
                     const cs = el.getAttribute('data-callsign');

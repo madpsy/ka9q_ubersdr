@@ -125,6 +125,68 @@
             border: 2px solid #444;
             background: #2a2a2a;
             display: block;
+            cursor: pointer;
+            transition: border-color 0.2s, opacity 0.2s;
+        }
+
+        .operator-image:hover {
+            border-color: #4a9eff;
+            opacity: 0.85;
+        }
+
+        /* ── Photo modal ────────────────────────────────────────────────── */
+        #photo-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.82);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #photo-modal.open {
+            display: flex;
+        }
+
+        #photo-modal-inner {
+            position: relative;
+            max-width: calc(100vw - 32px);
+            max-height: calc(100vh - 32px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #photo-modal-img {
+            max-width: 100%;
+            max-height: calc(100vh - 32px);
+            border-radius: 6px;
+            border: 2px solid #555;
+            display: block;
+        }
+
+        #photo-modal-close {
+            position: absolute;
+            top: -14px;
+            right: -14px;
+            width: 28px;
+            height: 28px;
+            background: #333;
+            border: 2px solid #555;
+            border-radius: 50%;
+            color: #fff;
+            font-size: 16px;
+            line-height: 24px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+
+        #photo-modal-close:hover {
+            background: #dc3545;
+            border-color: #dc3545;
         }
 
         .image-placeholder {
@@ -247,6 +309,14 @@
     <!-- ── Result area ─────────────────────────────────────────────────── -->
     <div id="result-area">
         <div class="state-msg" id="idle-msg">Enter a callsign above and press Go.</div>
+    </div>
+
+    <!-- ── Photo modal ────────────────────────────────────────────────── -->
+    <div id="photo-modal" role="dialog" aria-modal="true">
+        <div id="photo-modal-inner">
+            <img id="photo-modal-img" src="" alt="Operator photo" />
+            <div id="photo-modal-close" title="Close" aria-label="Close">✕</div>
+        </div>
     </div>
 
     <script src="leaflet.js"></script>
@@ -382,8 +452,8 @@
             const nameParts = [d.fname, d.name].filter(Boolean);
             const fullName  = nameParts.join(' ') || '';
 
-            // Build address
-            const addrParts = [d.addr1, d.addr2, d.state, d.zip, d.country].filter(Boolean);
+            // Build address — addr1 (street) is suppressed server-side; country gets its own row
+            const addrParts = [d.addr2, d.state, d.zip].filter(Boolean);
             const address   = addrParts.join(', ');
 
             // QRZ profile URL
@@ -394,6 +464,9 @@
 
             // ── Build info rows ──────────────────────────────────────────
             const rows = [];
+
+            /** Map QRZ "1"/"0" flag strings to human-readable Yes/No */
+            const yesNo = (v) => v === '1' ? 'Yes' : v === '0' ? 'No' : v;
 
             const addRow = (label, value, isCallsign) => {
                 if (!value && value !== 0) return;
@@ -410,9 +483,10 @@
             addRow('Expires',  d.expdate);
             addRow('Trustee',  d.trustee, true);
 
-            if (d.addr1 || d.addr2 || d.state || d.zip || d.country) {
+            if (d.addr2 || d.state || d.zip || d.country) {
                 addDivider();
-                addRow('Address', address);
+                if (address) addRow('Address', address);
+                addRow('Country', d.country);
             }
 
             if (d.lat && d.lon) {
@@ -428,19 +502,21 @@
             if (d.url || d.qslmgr) {
                 addDivider();
                 addRow('Website',  d.url);
-                addRow('QSL Mgr',  d.qslmgr, true);
+                addRow('QSL Mgr',  d.qslmgr); // plain text — not a clickable callsign lookup
             }
 
             if (d.eqsl || d.mqsl || d.lotw) {
                 addDivider();
-                addRow('eQSL',  d.eqsl);
-                addRow('Mail QSL', d.mqsl);
-                addRow('LoTW',  d.lotw);
+                addRow('eQSL',    yesNo(d.eqsl));
+                addRow('Mail QSL', yesNo(d.mqsl));
+                addRow('LoTW',    yesNo(d.lotw));
             }
 
             // ── Assemble card ────────────────────────────────────────────
             const imageHtml = imageUrl
-                ? `<img class="operator-image" id="op-img" src="${esc(imageUrl)}" alt="${esc(callsign)}" onerror="this.style.display='none';document.getElementById('op-placeholder').style.display='flex';" />`
+                ? `<img class="operator-image" id="op-img" src="${esc(imageUrl)}" alt="${esc(callsign)}"
+                       onerror="this.style.display='none';document.getElementById('op-placeholder').style.display='flex';"
+                       onclick="openPhotoModal(this.src)" />`
                   + `<div class="image-placeholder" id="op-placeholder" style="display:none;">📷</div>`
                 : `<div class="image-placeholder" id="op-placeholder">📷</div>`;
 
@@ -483,6 +559,37 @@
                 });
             }
         }
+
+        // ── Photo modal ──────────────────────────────────────────────────
+
+        const photoModal    = document.getElementById('photo-modal');
+        const photoModalImg = document.getElementById('photo-modal-img');
+        const photoModalClose = document.getElementById('photo-modal-close');
+
+        // Exposed as a plain function so the inline onclick in the img tag can call it.
+        window.openPhotoModal = function (src) {
+            photoModalImg.src = src;
+            photoModal.classList.add('open');
+        };
+
+        function closePhotoModal() {
+            photoModal.classList.remove('open');
+            photoModalImg.src = '';
+        }
+
+        photoModalClose.addEventListener('click', closePhotoModal);
+
+        // Click on the backdrop (outside the image) also closes the modal.
+        photoModal.addEventListener('click', (e) => {
+            if (e.target === photoModal) closePhotoModal();
+        });
+
+        // Escape key closes the modal.
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && photoModal.classList.contains('open')) {
+                closePhotoModal();
+            }
+        });
 
         // ── Event wiring ─────────────────────────────────────────────────
 

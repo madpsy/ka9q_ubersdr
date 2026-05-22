@@ -68,7 +68,7 @@ type QRZCallsign struct {
 	ATTN     string `xml:"attn"     json:"attn,omitempty"`
 
 	// Address
-	Addr1   string `xml:"addr1"   json:"addr1,omitempty"`
+	Addr1   string `xml:"addr1"   json:"-"` // street address — never serialised to the public API
 	Addr2   string `xml:"addr2"   json:"addr2,omitempty"`
 	State   string `xml:"state"   json:"state,omitempty"`
 	Zip     string `xml:"zip"     json:"zip,omitempty"`

@@ -2,18 +2,12 @@
     <!-- Frequency Selector -->
     <div class="ft8-frequency-selector">
         <select id="ft8-frequency-select" class="ft8-select-wide">
-            <option value="">-- Select FT8/FT4 Frequency --</option>
+            <option value="">-- Select FT8 Frequency --</option>
             <optgroup label="FT8 - Most Active">
                 <option value="7074000,usb">7.074 MHz USB (40m FT8)</option>
                 <option value="14074000,usb">14.074 MHz USB (20m FT8 - Primary)</option>
                 <option value="21074000,usb">21.074 MHz USB (15m FT8)</option>
                 <option value="28074000,usb">28.074 MHz USB (10m FT8)</option>
-            </optgroup>
-            <optgroup label="FT4 - Fast Mode">
-                <option value="7047500,usb">7.047.5 MHz USB (40m FT4)</option>
-                <option value="14080000,usb">14.080 MHz USB (20m FT4)</option>
-                <option value="21140000,usb">21.140 MHz USB (15m FT4)</option>
-                <option value="28180000,usb">28.180 MHz USB (10m FT4)</option>
             </optgroup>
             <optgroup label="Other FT8 Bands">
                 <option value="3573000,usb">3.573 MHz USB (80m FT8)</option>
@@ -45,14 +39,6 @@
 
     <!-- Controls Panel -->
     <div class="ft8-controls">
-        <div class="ft8-control-group">
-            <label for="ft8-protocol-select">Protocol:</label>
-            <select id="ft8-protocol-select" class="ft8-select">
-                <option value="FT8">FT8 (15s)</option>
-                <option value="FT4">FT4 (7.5s)</option>
-            </select>
-        </div>
-
         <div class="ft8-control-group">
             <label>
                 <input type="checkbox" id="ft8-show-cq-only">
@@ -125,11 +111,6 @@
             </thead>
             <tbody id="ft8-messages-tbody">
                 <!-- Messages will be dynamically added here -->
-                <tr id="ft8-no-messages-row" style="display: none;">
-                    <td colspan="11" style="text-align: center; padding: 20px; color: #ffa500; font-style: italic;">
-                        <strong>FT4 is currently under development</strong>
-                    </td>
-                </tr>
             </tbody>
         </table>
     </div>

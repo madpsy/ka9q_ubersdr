@@ -55,14 +55,8 @@ func NewFT8Extension(audioParams AudioExtensionParams, extensionParams map[strin
 	// Start with default config
 	config := DefaultFT8Config()
 
-	// Override with user parameters
-	if protocol, ok := extensionParams["protocol"].(string); ok {
-		if protocol == "FT4" {
-			config.Protocol = ProtocolFT4
-		} else {
-			config.Protocol = ProtocolFT8
-		}
-	}
+	// Protocol is always FT8
+	config.Protocol = ProtocolFT8
 
 	// min_score is always 0 (matches reference implementation)
 	// Frontend cannot override this parameter
@@ -86,13 +80,8 @@ func NewFT8Extension(audioParams AudioExtensionParams, extensionParams map[strin
 	// Create decoder
 	decoder := NewFT8Decoder(audioParams.SampleRate, config, receiverLocator, ctyDatabase)
 
-	protocolName := "FT8"
-	if config.Protocol == ProtocolFT4 {
-		protocolName = "FT4"
-	}
-
-	log.Printf("[FT8 Extension] Created %s decoder with sample rate: %d Hz, min_score: %d, max_candidates: %d",
-		protocolName, audioParams.SampleRate, config.MinScore, config.MaxCandidates)
+	log.Printf("[FT8 Extension] Created FT8 decoder with sample rate: %d Hz, min_score: %d, max_candidates: %d",
+		audioParams.SampleRate, config.MinScore, config.MaxCandidates)
 
 	return &FT8Extension{
 		decoder: decoder,

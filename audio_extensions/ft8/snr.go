@@ -134,11 +134,7 @@ func CalculateSNRFromSync(syncScore int) float32 {
 
 // GetTonesFromBits reconstructs the transmitted tone sequence from 174-bit codeword
 func GetTonesFromBits(codeword []uint8, protocol Protocol) []int {
-	if protocol == ProtocolFT8 {
-		return getTonesFromBitsFT8(codeword)
-	} else {
-		return getTonesFromBitsFT4(codeword)
-	}
+	return getTonesFromBitsFT8(codeword)
 }
 
 // getTonesFromBitsFT8 extracts 79 tones for FT8 from 174-bit codeword
@@ -169,44 +165,6 @@ func getTonesFromBitsFT8(codeword []uint8) []int {
 		// indx = codeword(i)*4 + codeword(i+1)*2 + codeword(i+2)
 		indx := int(codeword[i])*4 + int(codeword[i+1])*2 + int(codeword[i+2])
 		itone[k] = int(FT8_Gray_map[indx])
-		k++
-	}
-
-	return itone
-}
-
-// getTonesFromBitsFT4 extracts 105 tones for FT4 from 174-bit codeword
-func getTonesFromBitsFT4(codeword []uint8) []int {
-	itone := make([]int, FT4_NN) // 105 symbols
-
-	// FT4 structure: R Sa D29 Sb D29 Sc D29 Sd R
-	// R = ramp symbol (set to 0)
-	itone[0] = 0
-	itone[FT4_NN-1] = 0
-
-	// Insert Costas sync patterns (4 different patterns)
-	for i := 0; i < 4; i++ {
-		itone[1+i] = int(FT4_Costas_pattern[0][i])   // First sync
-		itone[34+i] = int(FT4_Costas_pattern[1][i])  // Second sync
-		itone[67+i] = int(FT4_Costas_pattern[2][i])  // Third sync
-		itone[100+i] = int(FT4_Costas_pattern[3][i]) // Fourth sync
-	}
-
-	// Insert data symbols (87 symbols, 2 bits each = 174 bits)
-	k := 5                        // Start after R + first sync
-	for j := 0; j < FT4_ND; j++ { // ND = 87 data symbols
-		i := 2 * j // Bit index (2 bits per symbol)
-
-		// Skip sync blocks
-		if j == 29 {
-			k += 4 // Skip second sync
-		} else if j == 58 {
-			k += 4 // Skip third sync
-		}
-
-		// Convert 2 bits to Gray-coded tone (0-3)
-		indx := int(codeword[i])*2 + int(codeword[i+1])
-		itone[k] = int(FT4_Gray_map[indx])
 		k++
 	}
 

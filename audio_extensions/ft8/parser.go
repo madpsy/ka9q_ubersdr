@@ -10,7 +10,7 @@ var (
 	// Callsign pattern (basic validation) - allows portable suffix like /P, /M, /6, etc.
 	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]+)?$`)
 
-	// Grid locator pattern (4 characters for FT8/FT4)
+	// Grid locator pattern (4 characters for FT8)
 	gridPattern = regexp.MustCompile(`^[A-R]{2}[0-9]{2}$`)
 
 	// Contest exchanges that appear after CQ
@@ -20,7 +20,7 @@ var (
 	}
 )
 
-// extractCallsignLocator extracts callsign and grid locator from FT8/FT4 message
+// extractCallsignLocator extracts callsign and grid locator from FT8 message
 // Uses position-based parsing to avoid ambiguity (some strings can be both callsign and grid)
 // Examples:
 //
@@ -122,7 +122,7 @@ func isValidCallsign(s string) bool {
 }
 
 // isValidGridLocator checks if a string looks like a valid Maidenhead grid locator
-// FT8/FT4 only support 4-character locators
+// FT8 only supports 4-character locators
 func isValidGridLocator(s string) bool {
 	if len(s) != 4 {
 		return false

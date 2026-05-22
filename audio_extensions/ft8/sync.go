@@ -9,7 +9,7 @@ import (
  * Finds candidate signals by detecting Costas sync patterns
  */
 
-// Candidate represents a potential FT8/FT4 signal
+// Candidate represents a potential FT8 signal
 type Candidate struct {
 	Score      int16 // Sync score (higher = better)
 	TimeOffset int16 // Index of time block
@@ -22,11 +22,8 @@ type Candidate struct {
 func FindCandidates(wf *Waterfall, maxCandidates int, minScore int) []Candidate {
 	candidates := make([]Candidate, 0, maxCandidates)
 
-	// Determine number of tones based on protocol
-	numTones := 8
-	if wf.Protocol == ProtocolFT4 {
-		numTones = 4
-	}
+	// FT8 uses 8 tones
+	const numTones = 8
 
 	// Search through time and frequency
 	// Note: time_offset can be negative to allow partial sync patterns at boundaries
@@ -37,13 +34,7 @@ func FindCandidates(wf *Waterfall, maxCandidates int, minScore int) []Candidate 
 			for timeOffset := -10; timeOffset < 20; timeOffset++ {
 				// Frequency offset must fit all tones within the waterfall
 				for freqOffset := 0; freqOffset+numTones-1 < wf.NumBins; freqOffset++ {
-					// Calculate sync score based on protocol
-					var score int
-					if wf.Protocol == ProtocolFT8 {
-						score = calculateFT8SyncScore(wf, timeOffset, freqOffset, timeSub, freqSub)
-					} else {
-						score = calculateFT4SyncScore(wf, timeOffset, freqOffset, timeSub, freqSub)
-					}
+					score := calculateFT8SyncScore(wf, timeOffset, freqOffset, timeSub, freqSub)
 
 					// Only consider candidates above minimum score
 					if score < minScore {
@@ -114,65 +105,6 @@ func calculateFT8SyncScore(wf *Waterfall, timeOffset, freqOffset, timeSub, freqS
 				numAverage++
 			}
 			if k+1 < FT8_LENGTH_SYNC && blockAbs+1 < wf.NumBlocks {
-				// Look one symbol forward in time
-				nextMag := int(getWaterfallMag(wf, blockAbs+1, freqOffset+sm, timeSub, freqSub))
-				score += expectedMag - nextMag
-				numAverage++
-			}
-		}
-	}
-
-	if numAverage > 0 {
-		return score / numAverage
-	}
-	return score
-}
-
-// calculateFT4SyncScore calculates sync score for FT4
-func calculateFT4SyncScore(wf *Waterfall, timeOffset, freqOffset, timeSub, freqSub int) int {
-	score := 0
-	numAverage := 0
-
-	// Compute average score over sync symbols (blocks 1-4, 34-37, 67-70, 100-103)
-	for m := 0; m < FT4_NUM_SYNC; m++ {
-		for k := 0; k < FT4_LENGTH_SYNC; k++ {
-			block := 1 + (FT4_SYNC_OFFSET * m) + k
-			blockAbs := timeOffset + block
-
-			// Check for time boundaries
-			if blockAbs < 0 {
-				continue
-			}
-			if blockAbs >= wf.NumBlocks {
-				break
-			}
-
-			// Expected tone for this sync symbol (FT4 has 4 different patterns)
-			sm := int(FT4_Costas_pattern[m][k])
-
-			// Get magnitude at expected tone
-			expectedMag := int(getWaterfallMag(wf, blockAbs, freqOffset+sm, timeSub, freqSub))
-
-			// Check only the neighbors of the expected symbol frequency- and time-wise
-			if sm > 0 {
-				// Look at one frequency bin lower
-				lowerMag := int(getWaterfallMag(wf, blockAbs, freqOffset+sm-1, timeSub, freqSub))
-				score += expectedMag - lowerMag
-				numAverage++
-			}
-			if sm < 3 {
-				// Look at one frequency bin higher
-				higherMag := int(getWaterfallMag(wf, blockAbs, freqOffset+sm+1, timeSub, freqSub))
-				score += expectedMag - higherMag
-				numAverage++
-			}
-			if k > 0 && blockAbs > 0 {
-				// Look one symbol back in time
-				prevMag := int(getWaterfallMag(wf, blockAbs-1, freqOffset+sm, timeSub, freqSub))
-				score += expectedMag - prevMag
-				numAverage++
-			}
-			if k+1 < FT4_LENGTH_SYNC && blockAbs+1 < wf.NumBlocks {
 				// Look one symbol forward in time
 				nextMag := int(getWaterfallMag(wf, blockAbs+1, freqOffset+sm, timeSub, freqSub))
 				score += expectedMag - nextMag

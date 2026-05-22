@@ -12,7 +12,7 @@ const (
 	MAXGRID4 = 32400   // 18*10*18*10
 )
 
-// MessageType represents all FT8/FT4 message types
+// MessageType represents all FT8 message types
 type MessageType int
 
 const (

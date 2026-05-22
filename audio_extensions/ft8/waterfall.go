@@ -13,15 +13,14 @@ import (
 
 // Waterfall represents the time-frequency power spectrum
 type Waterfall struct {
-	MaxBlocks   int      // Number of blocks (symbols) allocated
-	NumBlocks   int      // Number of blocks (symbols) stored
-	NumBins     int      // Number of FFT bins (in terms of tone spacing)
-	MinBin      int      // First FFT bin index (for frequency calculation)
-	TimeOSR     int      // Time oversampling rate
-	FreqOSR     int      // Frequency oversampling rate
-	Mag         []uint8  // FFT magnitudes [blocks][time_osr][freq_osr][num_bins]
-	BlockStride int      // Helper: time_osr * freq_osr * num_bins
-	Protocol    Protocol // FT8 or FT4
+	MaxBlocks   int     // Number of blocks (symbols) allocated
+	NumBlocks   int     // Number of blocks (symbols) stored
+	NumBins     int     // Number of FFT bins (in terms of tone spacing)
+	MinBin      int     // First FFT bin index (for frequency calculation)
+	TimeOSR     int     // Time oversampling rate
+	FreqOSR     int     // Frequency oversampling rate
+	Mag         []uint8 // FFT magnitudes [blocks][time_osr][freq_osr][num_bins]
+	BlockStride int     // Helper: time_osr * freq_osr * num_bins
 }
 
 // Monitor manages DSP processing and waterfall generation
@@ -51,8 +50,8 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 
 	// FFT size calculation
 	// NFFT = blockSize * freqOSR
-	// This gives the correct frequency resolution for both FT8 (6.25 Hz) and FT4 (20.833 Hz)
-	// based on their respective symbol periods (1/symbolPeriod = tone spacing)
+	// This gives the correct frequency resolution for FT8 (6.25 Hz bins)
+	// based on the symbol period (1/symbolPeriod = tone spacing)
 	nfft := blockSize * freqOSR
 
 	// Round up to next power of 2 for efficiency
@@ -79,7 +78,6 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 		FreqOSR:     freqOSR,
 		Mag:         make([]uint8, maxBlocks*timeOSR*freqOSR*numBins),
 		BlockStride: timeOSR * freqOSR * numBins,
-		Protocol:    protocol,
 	}
 
 	// Calculate normalization factor (applied to window like C reference)

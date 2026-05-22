@@ -19,7 +19,7 @@ const (
 	StateDecoding
 )
 
-// FT8Decoder is the main FT8/FT4 decoder
+// FT8Decoder is the main FT8 decoder
 type FT8Decoder struct {
 	sampleRate int
 	config     FT8Config
@@ -52,7 +52,7 @@ type FT8Decoder struct {
 	wg       sync.WaitGroup
 }
 
-// DecodeResult represents a decoded FT8/FT4 message
+// DecodeResult represents a decoded FT8 message
 type DecodeResult struct {
 	Timestamp      int64    `json:"timestamp"`             // Unix timestamp (seconds)
 	UTC            string   `json:"utc"`                   // UTC time string "HH:MM:SS"
@@ -67,7 +67,7 @@ type DecodeResult struct {
 	Country        string   `json:"country,omitempty"`     // Country name from CTY database
 	Continent      string   `json:"continent,omitempty"`   // Continent code (e.g., "EU", "NA")
 	Message        string   `json:"message"`               // Decoded message text
-	Protocol       string   `json:"protocol"`              // "FT8" or "FT4"
+	Protocol       string   `json:"protocol"`              // "FT8"
 	SlotNumber     uint64   `json:"slot_number"`           // Slot number since decoder start
 	Score          int      `json:"score"`                 // Sync score
 	CandidateCount int      `json:"candidate_count"`       // Total candidates found in this slot
@@ -75,7 +75,7 @@ type DecodeResult struct {
 	CRCFailures    int      `json:"crc_failures"`          // CRC check failures in this slot
 }
 
-// NewFT8Decoder creates a new FT8/FT4 decoder
+// NewFT8Decoder creates a new FT8 decoder
 func NewFT8Decoder(sampleRate int, config FT8Config, receiverLocator string, ctyDatabase interface{}) *FT8Decoder {
 	slotTime := config.Protocol.GetSlotTime()
 	samplesPerSlot := int(float64(sampleRate) * slotTime)
@@ -238,25 +238,12 @@ func (d *FT8Decoder) syncToSlot(gpsTimeNs int64) bool {
 	return true
 }
 
-// decode performs the actual FT8/FT4 decoding
+// decode performs the actual FT8 decoding
 func (d *FT8Decoder) decode() []DecodeResult {
 	wf := d.monitor.Waterfall
 
 	// Find candidates using Costas sync detection
 	candidates := FindCandidates(wf, d.config.MaxCandidates, d.config.MinScore)
-
-	// Debug logging for FT4 only
-	if d.config.Protocol == ProtocolFT4 {
-		log.Printf("[FT4 Debug] Found %d candidates (min_score=%d, num_blocks=%d, max_blocks=%d)",
-			len(candidates), d.config.MinScore, wf.NumBlocks, wf.MaxBlocks)
-		if len(candidates) > 0 {
-			log.Printf("[FT4 Debug] Top 5 candidate scores: ")
-			for i := 0; i < 5 && i < len(candidates); i++ {
-				log.Printf("  [%d] score=%d, time_offset=%d, freq_offset=%d",
-					i, candidates[i].Score, candidates[i].TimeOffset, candidates[i].FreqOffset)
-			}
-		}
-	}
 
 	results := make([]DecodeResult, 0)
 	decodedHashes := make(map[uint16]bool) // Prevent duplicate decodes
@@ -266,7 +253,7 @@ func (d *FT8Decoder) decode() []DecodeResult {
 	crcFailures := 0
 
 	// Process each candidate
-	for i, cand := range candidates {
+	for _, cand := range candidates {
 		// Attempt to decode this candidate
 		message, status, success := DecodeCandidate(wf, &cand, d.config.Protocol, d.config.LDPCIterations)
 
@@ -274,18 +261,8 @@ func (d *FT8Decoder) decode() []DecodeResult {
 			// Decoding failed (LDPC errors or CRC mismatch)
 			if status.LDPCErrors > 0 {
 				ldpcFailures++
-				// FT4 debug: log first 3 LDPC failures
-				if d.config.Protocol == ProtocolFT4 && i < 3 {
-					log.Printf("[FT4 Debug] Candidate %d: LDPC failed with %d errors (score=%d, freq=%.1f Hz)",
-						i, status.LDPCErrors, cand.Score, status.Frequency)
-				}
 			} else {
 				crcFailures++
-				// FT4 debug: log first 3 CRC failures
-				if d.config.Protocol == ProtocolFT4 && i < 3 {
-					log.Printf("[FT4 Debug] Candidate %d: CRC mismatch (extracted=%04X, calculated=%04X, score=%d, freq=%.1f Hz)",
-						i, status.CRCExtracted, status.CRCCalculated, cand.Score, status.Frequency)
-				}
 			}
 			continue
 		}

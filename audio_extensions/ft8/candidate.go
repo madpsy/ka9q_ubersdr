@@ -2,7 +2,7 @@ package ft8
 
 /*
  * Candidate Decoding
- * Decodes a single FT8/FT4 candidate using LDPC and CRC
+ * Decodes a single FT8 candidate using LDPC and CRC
  */
 
 // DecodeStatus contains the status of decoding steps
@@ -15,7 +15,7 @@ type DecodeStatus struct {
 	Codeword      []uint8 // 174-bit LDPC codeword (for SNR calculation)
 }
 
-// Message represents a decoded FT8/FT4 message
+// Message represents a decoded FT8 message
 type Message struct {
 	Payload [10]uint8 // 77-bit payload (10 bytes)
 	Hash    uint16    // Message hash (from CRC)
@@ -66,17 +66,9 @@ func DecodeCandidate(wf *Waterfall, cand *Candidate, protocol Protocol, maxItera
 		Hash: status.CRCCalculated,
 	}
 
-	// Handle FT4 XOR descrambling
-	if protocol == ProtocolFT4 {
-		// FT4: XOR with pseudorandom sequence
-		for i := 0; i < 10; i++ {
-			message.Payload[i] = a91[i] ^ FT4_XOR_sequence[i]
-		}
-	} else {
-		// FT8: use as-is
-		for i := 0; i < 10; i++ {
-			message.Payload[i] = a91[i]
-		}
+	// Copy payload as-is (FT8)
+	for i := 0; i < 10; i++ {
+		message.Payload[i] = a91[i]
 	}
 
 	return message, status, true

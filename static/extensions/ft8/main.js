@@ -1,12 +1,12 @@
-// FT8/FT4 Extension for ka9q UberSDR
-// Decodes FT8 and FT4 weak signal digital modes
-// Version: 1.0.0
+// FT8 Extension for ka9q UberSDR
+// Decodes FT8 weak signal digital mode
+// Version: 1.1.0
 
 class FT8Extension extends DecoderExtension {
     constructor() {
         console.log('FT8: Constructor called');
         super('ft8', {
-            displayName: 'FT8/FT4 Decoder',
+            displayName: 'FT8 Decoder',
             autoTune: false,
             requiresMode: 'usb',
             preferredBandwidth: 3000
@@ -58,40 +58,8 @@ class FT8Extension extends DecoderExtension {
     onInitialize() {
         console.log('FT8: onInitialize called');
         this.renderTemplate();
-        this.showImplementationNotice();
         this.waitForDOMAndSetupHandlers();
         console.log('FT8: onInitialize complete');
-    }
-
-    showImplementationNotice() {
-        // Create overlay
-        const overlay = document.createElement('div');
-        overlay.className = 'ft8-notice-overlay';
-        overlay.innerHTML = `
-            <div class="ft8-notice-overlay-content">
-                <div class="ft8-notice-overlay-title">
-                    ℹ️ Implementation Notice
-                </div>
-                <div class="ft8-notice-overlay-message">
-                    Only FT8 is currently implemented in this decoder.
-                    FT4 support is planned for a future release.
-                </div>
-                <button class="ft8-notice-overlay-button" id="ft8-notice-ok-btn">OK</button>
-            </div>
-        `;
-
-        // Add to body
-        document.body.appendChild(overlay);
-
-        // Setup OK button handler
-        const okBtn = document.getElementById('ft8-notice-ok-btn');
-        if (okBtn) {
-            okBtn.addEventListener('click', () => {
-                overlay.remove();
-            });
-        }
-
-        console.log('FT8: Implementation notice overlay displayed');
     }
 
     waitForDOMAndSetupHandlers() {
@@ -172,22 +140,6 @@ class FT8Extension extends DecoderExtension {
             exportBtn.addEventListener('click', () => this.exportMessages());
         }
 
-        // Protocol selector
-        const protocolSelect = document.getElementById('ft8-protocol-select');
-        if (protocolSelect) {
-            protocolSelect.value = this.config.protocol;
-            protocolSelect.addEventListener('change', (e) => {
-                this.config.protocol = e.target.value;
-                this.updateProtocolDisplay();
-                this.updateNoMessagesDisplay();
-                if (this.running) {
-                    // Restart with new protocol
-                    this.stop();
-                    setTimeout(() => this.start(), 100);
-                }
-            });
-        }
-
         // Min score is fixed at 10 (not user-configurable)
         this.config.min_score = 10;
 
@@ -258,11 +210,7 @@ class FT8Extension extends DecoderExtension {
             freqSelect.addEventListener('change', (e) => {
                 if (e.target.value) {
                     const [freq, mode] = e.target.value.split(',');
-                    // Detect protocol from the selected option text
-                    const selectedOption = e.target.options[e.target.selectedIndex];
-                    const optionText = selectedOption.text;
-                    const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
-                    this.tuneToFrequency(parseInt(freq), mode, protocol);
+                    this.tuneToFrequency(parseInt(freq), mode);
                     lastSelectedValue = e.target.value;
                 }
             });
@@ -277,10 +225,7 @@ class FT8Extension extends DecoderExtension {
                 // If clicking on the same option, trigger the change manually
                 if (e.target.value && e.target.value === lastSelectedValue) {
                     const [freq, mode] = e.target.value.split(',');
-                    const selectedOption = e.target.options[e.target.selectedIndex];
-                    const optionText = selectedOption.text;
-                    const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
-                    this.tuneToFrequency(parseInt(freq), mode, protocol);
+                    this.tuneToFrequency(parseInt(freq), mode);
                 }
             });
         }
@@ -290,9 +235,6 @@ class FT8Extension extends DecoderExtension {
 
         // Add click handlers to table headers for sorting
         this.setupTableSorting();
-
-        // Initialize no messages display
-        this.updateNoMessagesDisplay();
 
         console.log('FT8: Event handlers setup complete');
     }
@@ -617,9 +559,6 @@ class FT8Extension extends DecoderExtension {
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
 
-        // Hide the no messages row when adding a message
-        this.updateNoMessagesDisplay();
-
         const row = tbody.insertRow(0); // Insert at top
         
         // UTC time
@@ -756,12 +695,6 @@ class FT8Extension extends DecoderExtension {
         const tbody = document.getElementById('ft8-messages-tbody');
         if (tbody) {
             tbody.innerHTML = '';
-            // Re-add the no messages row
-            const noMessagesRow = document.createElement('tr');
-            noMessagesRow.id = 'ft8-no-messages-row';
-            noMessagesRow.style.display = 'none';
-            noMessagesRow.innerHTML = '<td colspan="11" style="text-align: center; padding: 20px; color: #ffa500; font-style: italic;"><strong>FT4 is currently under development</strong></td>';
-            tbody.appendChild(noMessagesRow);
         }
         
         // Clear spectrum markers cache
@@ -769,7 +702,6 @@ class FT8Extension extends DecoderExtension {
         this.lastCachedSlot = null;
         
         this.updateCounters();
-        this.updateNoMessagesDisplay();
     }
 
     filterMessages() {
@@ -816,8 +748,6 @@ class FT8Extension extends DecoderExtension {
             row.style.display = shouldShow ? '' : 'none';
         }
 
-        // Update the no messages display after filtering
-        this.updateNoMessagesDisplay();
     }
 
     exportMessages() {
@@ -886,33 +816,6 @@ class FT8Extension extends DecoderExtension {
         }
     }
 
-    updateNoMessagesDisplay() {
-        const tbody = document.getElementById('ft8-messages-tbody');
-        if (!tbody) return;
-
-        let noMessagesRow = document.getElementById('ft8-no-messages-row');
-
-        // Create the row if it doesn't exist
-        if (!noMessagesRow) {
-            noMessagesRow = document.createElement('tr');
-            noMessagesRow.id = 'ft8-no-messages-row';
-            noMessagesRow.innerHTML = '<td colspan="11" style="text-align: center; padding: 20px; color: #ffa500; font-style: italic;"><strong>FT4 is currently under development</strong></td>';
-            tbody.appendChild(noMessagesRow);
-        }
-
-        // Count visible messages (not filtered out)
-        const visibleMessages = Array.from(tbody.getElementsByTagName('tr'))
-            .filter(row => row.id !== 'ft8-no-messages-row' && row.style.display !== 'none');
-
-        // Show the "FT4 under development" message only if:
-        // 1. FT4 protocol is selected
-        // 2. There are no visible messages
-        const shouldShow = this.config.protocol === 'FT4' && visibleMessages.length === 0;
-        noMessagesRow.style.display = shouldShow ? '' : 'none';
-
-        console.log('FT8: updateNoMessagesDisplay - protocol:', this.config.protocol, 'visibleMessages:', visibleMessages.length, 'shouldShow:', shouldShow);
-    }
-
     updateProtocolDisplay() {
         const protocolDisplay = document.getElementById('ft8-protocol-display');
         if (protocolDisplay) {
@@ -926,7 +829,7 @@ class FT8Extension extends DecoderExtension {
             // Format frequency in MHz
             const freqMHz = (freq / 1000000).toFixed(3);
 
-            protocolDisplay.textContent = `${this.config.protocol} | ${freqMHz} MHz ${mode} | BW: ${bwTotal} Hz`;
+            protocolDisplay.textContent = `FT8 | ${freqMHz} MHz ${mode} | BW: ${bwTotal} Hz`;
         }
     }
 
@@ -990,19 +893,8 @@ class FT8Extension extends DecoderExtension {
         }
     }
 
-    tuneToFrequency(freq, mode, protocol) {
-        console.log(`FT8: Tuning to ${freq} Hz, mode ${mode}, protocol ${protocol}`);
-
-        // Set protocol dropdown if provided
-        if (protocol) {
-            const protocolSelect = document.getElementById('ft8-protocol-select');
-            if (protocolSelect && protocolSelect.value !== protocol) {
-                protocolSelect.value = protocol;
-                this.config.protocol = protocol;
-                this.updateProtocolDisplay();
-                this.updateNoMessagesDisplay();
-            }
-        }
+    tuneToFrequency(freq, mode) {
+        console.log(`FT8: Tuning to ${freq} Hz, mode ${mode}`);
 
         // Disable edge detection temporarily when changing frequency
         if (window.spectrumDisplay) {
@@ -1019,7 +911,7 @@ class FT8Extension extends DecoderExtension {
             window.setMode('usb');
         }
 
-        // Set bandwidth for FT8/FT4 (0 Hz low, 3200 Hz high)
+        // Set bandwidth for FT8 (0 Hz low, 3200 Hz high)
         const bandwidthLowSlider = document.getElementById('bandwidth-low');
         const bandwidthHighSlider = document.getElementById('bandwidth-high');
 
@@ -1084,8 +976,8 @@ class FT8Extension extends DecoderExtension {
 
         if (!progressBar || !progressText) return;
 
-        // Get cycle duration based on protocol
-        const cycleDuration = this.config.protocol === 'FT4' ? 7.5 : 15.0;
+        // FT8 cycle duration is 15 seconds
+        const cycleDuration = 15.0;
 
         // Get current time in seconds
         const now = new Date();
@@ -1185,7 +1077,7 @@ class FT8Extension extends DecoderExtension {
         }
 
         // Draw callsigns from latest matching odd/even cycle
-        // FT8/FT4 stations alternate between odd and even slots, so we want to show
+        // FT8 stations alternate between odd and even slots, so we want to show
         // callsigns from the previous cycle with the same parity (odd/even)
         if (this.currentSlot > 0) {
             // Only recalculate callsign positions if the slot has changed

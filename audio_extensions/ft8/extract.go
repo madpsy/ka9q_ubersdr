@@ -13,11 +13,7 @@ import (
 func ExtractLikelihood(wf *Waterfall, cand *Candidate, protocol Protocol) []float32 {
 	log174 := make([]float32, FTX_LDPC_N)
 
-	if protocol == ProtocolFT4 {
-		extractLikelihoodFT4(wf, cand, log174)
-	} else {
-		extractLikelihoodFT8(wf, cand, log174)
-	}
+	extractLikelihoodFT8(wf, cand, log174)
 
 	// Normalize the log-likelihood values
 	normalizeLikelihood(log174)
@@ -58,40 +54,6 @@ func extractLikelihoodFT8(wf *Waterfall, cand *Candidate, log174 []float32) {
 	}
 }
 
-// extractLikelihoodFT4 extracts likelihood for FT4 (87 data symbols, 2 bits each = 174 bits)
-func extractLikelihoodFT4(wf *Waterfall, cand *Candidate, log174 []float32) {
-	// Get pointer to first symbol of candidate
-	baseIdx := getCandidateIndex(wf, cand)
-
-	// Go over 87 data symbols, skipping Costas sync symbols and ramp symbols
-	// FT4 structure: R, 4 sync, 29 data, 4 sync, 29 data, 4 sync, 29 data, 4 sync, R
-	for k := 0; k < FT4_ND; k++ {
-		// Skip ramp and sync symbols
-		var symIdx int
-		if k < 29 {
-			symIdx = k + 5 // Skip R + 4 sync
-		} else if k < 58 {
-			symIdx = k + 9 // Skip R + 4 + 29 + 4 sync
-		} else {
-			symIdx = k + 13 // Skip R + 4 + 29 + 4 + 29 + 4 sync
-		}
-
-		bitIdx := 2 * k
-
-		// Check time boundaries
-		block := int(cand.TimeOffset) + symIdx
-		if block < 0 || block >= wf.NumBlocks {
-			// Out of bounds, set to zero
-			log174[bitIdx+0] = 0
-			log174[bitIdx+1] = 0
-		} else {
-			// Extract 2 bits from this symbol
-			magIdx := baseIdx + symIdx*wf.BlockStride
-			extractSymbolFT4(wf.Mag, magIdx, log174[bitIdx:bitIdx+2])
-		}
-	}
-}
-
 // extractSymbolFT8 extracts 3 soft bits from one FT8 symbol (8-FSK)
 func extractSymbolFT8(mag []uint8, idx int, logl []float32) {
 	// Get magnitudes for all 8 tones (Gray-coded)
@@ -116,26 +78,6 @@ func extractSymbolFT8(mag []uint8, idx int, logl []float32) {
 
 	// Bit 2 (LSB): tones 1,3,5,7 vs 0,2,4,6
 	logl[2] = max4(s2[1], s2[3], s2[5], s2[7]) - max4(s2[0], s2[2], s2[4], s2[6])
-}
-
-// extractSymbolFT4 extracts 2 soft bits from one FT4 symbol (4-FSK)
-func extractSymbolFT4(mag []uint8, idx int, logl []float32) {
-	// Get magnitudes for all 4 tones (Gray-coded)
-	s2 := make([]float32, 4)
-	for j := 0; j < 4; j++ {
-		grayIdx := FT4_Gray_map[j]
-		if idx+int(grayIdx) < len(mag) {
-			// Convert uint8 magnitude to float
-			s2[j] = float32(mag[idx+int(grayIdx)])*0.5 - 120.0
-		}
-	}
-
-	// Compute log-likelihood ratios for 2 bits
-	// Bit 0: tones 2,3 vs 0,1
-	logl[0] = max2(s2[2], s2[3]) - max2(s2[0], s2[1])
-
-	// Bit 1: tones 1,3 vs 0,2
-	logl[1] = max2(s2[1], s2[3]) - max2(s2[0], s2[2])
 }
 
 // normalizeLikelihood normalizes the log-likelihood distribution

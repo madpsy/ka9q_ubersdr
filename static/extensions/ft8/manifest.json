@@ -1,8 +1,8 @@
 {
   "name": "ft8",
-  "displayName": "FT8/FT4 Decoder",
+  "displayName": "FT8 Decoder",
   "version": "1.0.0",
-  "description": "FT8 and FT4 weak signal digital mode decoder",
+  "description": "FT8 weak signal digital mode decoder",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "📡",
@@ -15,12 +15,6 @@
     "template": "template.html"
   },
   "settings": {
-    "protocol": {
-      "type": "select",
-      "options": ["FT8", "FT4"],
-      "default": "FT8",
-      "description": "Protocol: FT8 (15s slots) or FT4 (7.5s slots)"
-    },
     "min_score": {
       "type": "number",
       "default": 10,

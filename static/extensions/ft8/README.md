@@ -1,26 +1,23 @@
-# FT8/FT4 Decoder Extension
+# FT8 Decoder Extension
 
-Web-based frontend for the FT8/FT4 weak signal digital mode decoder.
+Web-based frontend for the FT8 weak signal digital mode decoder.
 
 ## Features
 
-- **Dual Protocol Support**: FT8 (15-second slots) and FT4 (7.5-second slots)
 - **Real-time Decoding**: Displays decoded messages as they arrive
 - **GPS Time Synchronization**: Automatic slot alignment using GPS timestamps
 - **Message Filtering**: Show only CQ messages or all traffic
 - **Export Functionality**: Save decoded messages to CSV
-- **Quick Tune**: Pre-configured frequency list for common FT8/FT4 frequencies
+- **Quick Tune**: Pre-configured frequency list for common FT8 frequencies
 - **Color-coded SNR**: Visual indication of signal strength
 - **Auto-scroll**: Automatically show newest messages
 
 ## Usage
 
-1. **Select Frequency**: Use the Quick Tune dropdown to select a common FT8/FT4 frequency
+1. **Select Frequency**: Use the Quick Tune dropdown to select a common FT8 frequency
    - Primary FT8: 14.074 MHz USB (20m band)
-   - Primary FT4: 14.080 MHz USB (20m band)
 
 2. **Configure Settings**:
-   - **Protocol**: Choose FT8 (15s) or FT4 (7.5s)
    - **Min Score**: Minimum sync score (0-100, default 10)
    - **CQ Only**: Filter to show only CQ messages
    - **Auto-Clear**: Automatically remove old messages
@@ -51,23 +48,21 @@ Web-based frontend for the FT8/FT4 weak signal digital mode decoder.
 ## Common Frequencies
 
 ### FT8
+- **80m**: 3.573 MHz USB
 - **40m**: 7.074 MHz USB
+- **30m**: 10.136 MHz USB
 - **20m**: 14.074 MHz USB (most active)
+- **17m**: 18.100 MHz USB
 - **15m**: 21.074 MHz USB
+- **12m**: 24.915 MHz USB
 - **10m**: 28.074 MHz USB
 - **6m**: 50.313 MHz USB
-
-### FT4
-- **40m**: 7.047.5 MHz USB
-- **20m**: 14.080 MHz USB
-- **15m**: 21.140 MHz USB
-- **10m**: 28.180 MHz USB
 
 ## Technical Details
 
 - **Sample Rate**: 12 kHz
 - **Bandwidth**: 3 kHz (100-3100 Hz)
-- **Time Slots**: GPS-synchronized
+- **Time Slots**: GPS-synchronized, 15-second periods
 - **Decoding**: LDPC forward error correction with CRC verification
 - **Hash Table**: Automatic callsign storage and resolution
 
@@ -88,4 +83,5 @@ Web-based frontend for the FT8/FT4 weak signal digital mode decoder.
 
 ## Version
 
-1.0.0 - Initial release with full FT8/FT4 support
+1.1.0 - Removed non-functional FT4 references (FT4 requires a different decoding architecture)
+1.0.0 - Initial release with FT8 support

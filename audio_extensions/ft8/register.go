@@ -24,7 +24,7 @@ func Factory(audioParams AudioExtensionParams, extensionParams map[string]interf
 func Info() AudioExtensionInfo {
 	return AudioExtensionInfo{
 		Name:        "ft8",
-		Description: "FT8/FT4 digital mode decoder",
+		Description: "FT8 digital mode decoder",
 		Version:     "1.0.0",
 	}
 }

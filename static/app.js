@@ -12154,12 +12154,22 @@ function initializeVoiceActivityButton() {
 function initializeCallsignLookupButton() {
     const button = document.getElementById('callsign-lookup-button');
     if (!button) return;
+
+    let _lookupWindow = null;
+
     button.addEventListener('click', () => {
-        window.open(
-            'callsign_lookup.html',
-            'callsign_lookup',
-            'width=520,height=800,resizable=yes,scrollbars=yes'
-        );
+        const uuid = window.userSessionID || '';
+        const url = uuid
+            ? `callsign_lookup.html?uuid=${encodeURIComponent(uuid)}`
+            : 'callsign_lookup.html';
+
+        if (_lookupWindow && !_lookupWindow.closed) {
+            // Window already open — send UUID via postMessage so it updates without reload
+            _lookupWindow.postMessage({ type: 'callsign_lookup', uuid }, window.location.origin);
+            _lookupWindow.focus();
+        } else {
+            _lookupWindow = window.open(url, 'callsign_lookup', 'width=520,height=800,resizable=yes,scrollbars=yes');
+        }
     });
     console.log('[Callsign Lookup Button] Initialized');
 }

@@ -477,7 +477,7 @@
 
             try {
                 if (!currentUUID) {
-                    throw new Error('No session UUID available. Please open this page from the Digital Spots extension.');
+                    throw new Error('No session UUID available. Please open this page from the main receiver window.');
                 }
 
                 const apiUrl = `/api/lookup?callsign=${encodeURIComponent(base)}&uuid=${encodeURIComponent(currentUUID)}`;

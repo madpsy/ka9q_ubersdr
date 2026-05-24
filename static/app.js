@@ -2081,6 +2081,12 @@ async function fetchSiteDescription() {
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;
 
+            // Show callsign lookup button if the server has the lookup service enabled
+            const callsignLookupBtn = document.getElementById('callsign-lookup-button');
+            if (callsignLookupBtn) {
+                callsignLookupBtn.style.display = data.lookup_service === true ? '' : 'none';
+            }
+
             // Start WSPR prediction polling if WSPR is an available digital mode
             if (Array.isArray(data.digital_modes) && data.digital_modes.includes('WSPR')) {
                 if (typeof startWsprPredictionPolling === 'function') {
@@ -12143,6 +12149,22 @@ function initializeVoiceActivityButton() {
 }
 
 /**
+ * Initialize callsign lookup button — shown only when lookup_service is enabled
+ */
+function initializeCallsignLookupButton() {
+    const button = document.getElementById('callsign-lookup-button');
+    if (!button) return;
+    button.addEventListener('click', () => {
+        window.open(
+            'callsign_lookup.html',
+            'callsign_lookup',
+            'width=520,height=800,resizable=yes,scrollbars=yes'
+        );
+    });
+    console.log('[Callsign Lookup Button] Initialized');
+}
+
+/**
  * Initialize right-click handlers on band badges
  */
 function initializeBandBadgeRightClick() {
@@ -12173,11 +12195,13 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         initializeBandBadgeRightClick();
         initializeVoiceActivityButton();
+        initializeCallsignLookupButton();
     });
 } else {
     // DOM already loaded
     initializeBandBadgeRightClick();
     initializeVoiceActivityButton();
+    initializeCallsignLookupButton();
 }
 
 // Store reference to channels map window

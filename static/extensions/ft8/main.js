@@ -619,12 +619,15 @@ class FT8Extension extends DecoderExtension {
         // TX Callsign (normalized callsign used for CTY lookup)
         const cellTxCall = row.insertCell(8);
         if (message.tx_callsign && message.tx_callsign !== '-') {
-            const link = document.createElement('a');
-            link.href = `https://www.qrz.com/db/${message.tx_callsign}`;
-            link.textContent = message.tx_callsign;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            cellTxCall.appendChild(link);
+            const span = document.createElement('span');
+            span.textContent = message.tx_callsign;
+            span.style.cursor = 'pointer';
+            span.style.color = '#4a9eff';
+            span.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openCallsign(message.tx_callsign);
+            });
+            cellTxCall.appendChild(span);
         } else {
             cellTxCall.textContent = '-';
         }
@@ -994,6 +997,41 @@ class FT8Extension extends DecoderExtension {
 
         // Update text display
         progressText.textContent = cyclePosition.toFixed(1) + 's';
+    }
+
+    openCallsign(callsign) {
+        // Strip /P, /M, /QRP suffixes and prefix calls — pick the longest segment
+        const parts = callsign.split('/');
+        const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+
+        // If the server has the lookup service enabled, open our internal popup.
+        // window.instanceDescription is populated by app.js fetchSiteDescription().
+        const lookupEnabled = window.instanceDescription && window.instanceDescription.lookup_service === true;
+
+        if (lookupEnabled) {
+            const uuid = this.radio && this.radio.getSessionId ? this.radio.getSessionId() : '';
+            const popupUrl = `/callsign_lookup.html?callsign=${encodeURIComponent(baseCallsign)}&uuid=${encodeURIComponent(uuid)}`;
+
+            // Reuse the same named window so repeated clicks don't open many tabs.
+            // If the window is already open, postMessage updates it without a reload.
+            if (this._lookupWindow && !this._lookupWindow.closed) {
+                this._lookupWindow.postMessage(
+                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                    window.location.origin
+                );
+                this._lookupWindow.focus();
+            } else {
+                this._lookupWindow = window.open(
+                    popupUrl,
+                    'callsign_lookup',
+                    'width=520,height=800,resizable=yes,scrollbars=yes'
+                );
+            }
+        } else {
+            // Lookup service disabled — fall back to opening QRZ.com directly.
+            const url = `https://www.qrz.com/db/${encodeURIComponent(baseCallsign)}`;
+            window.open(url, '_blank');
+        }
     }
 
     onDetach() {

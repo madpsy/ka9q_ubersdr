@@ -493,18 +493,34 @@ toggle_addon_menu() {
     local current_state
     current_state=$(echo "$live_response" | jq -r --arg n "$SELECTED_ADDON" '.[] | select(.name == $n) | .enabled | tostring')
 
+    local addon_dir="$HOME/ubersdr/${SELECTED_ADDON}"
+
     echo ""
     if [[ "$current_state" == "true" ]]; then
-        read -rp "Addon '$SELECTED_ADDON' is currently ENABLED. Disable it? [y/N]: " confirm
+        read -rp "Addon '$SELECTED_ADDON' is currently ENABLED. Disable it (and stop its container)? [y/N]: " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Disabling '$SELECTED_ADDON'..."
             api_toggle_addon_proxy "$SELECTED_ADDON" false
+            local stop_script="$addon_dir/stop.sh"
+            if [[ -f "$stop_script" ]]; then
+                echo "Stopping container for '$SELECTED_ADDON'..."
+                bash "$stop_script"
+            else
+                echo "Warning: stop.sh not found at $stop_script — container not stopped." >&2
+            fi
         else
             echo "Cancelled."
         fi
     else
-        read -rp "Addon '$SELECTED_ADDON' is currently DISABLED. Enable it? [y/N]: " confirm
+        read -rp "Addon '$SELECTED_ADDON' is currently DISABLED. Enable it (and start its container)? [y/N]: " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            local start_script="$addon_dir/start.sh"
+            if [[ -f "$start_script" ]]; then
+                echo "Starting container for '$SELECTED_ADDON'..."
+                bash "$start_script"
+            else
+                echo "Warning: start.sh not found at $start_script — container not started." >&2
+            fi
             echo "Enabling '$SELECTED_ADDON'..."
             api_toggle_addon_proxy "$SELECTED_ADDON" true
         else

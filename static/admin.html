@@ -942,7 +942,7 @@
                             <div style="flex: 1; color: #1b5e20;">
                                 <strong>⚙️ Manage Addons</strong>
                                 <p style="margin: 5px 0 0 0; font-size: 13px;">Install, update, or remove addon containers. Opens a terminal window to run the addon manager.</p>
-                                <p style="margin: 5px 0 0 0; font-size: 13px;">⚠️ To fully stop an addon you need to click 'Manage Addons' and choose 'Delete and destroy an addon' — as unchecking <code>enabled</code> below disables the proxy but not the process itself.</p>
+                                <p style="margin: 5px 0 0 0; font-size: 13px;">⚠️ To fully stop an addon you need to click 'Manage Addons' and choose either 'Enable/disable an addon' or 'Delete and destroy an addon'.</p>
                             </div>
                             <button class="btn" onclick="openManageAddons()" style="background: #4caf50; color: white; font-weight: bold; white-space: nowrap;">
                                 ⚙️ Manage Addons
@@ -989,6 +989,10 @@
                                 <input type="checkbox" id="proxyFormEnabled" style="width:auto; margin:0; cursor:pointer;">
                                 Enabled
                             </label>
+                            <div style="margin-top:8px; padding:10px; background:#e3f2fd; border:1px solid #2196f3; border-radius:4px; color:#0d47a1; font-size:13px;">
+                                ℹ️ <strong>Note:</strong> This controls whether the proxy route is active and forwards requests to the addon backend.
+                                It does <strong>not</strong> start or stop the addon container itself — use the <strong>Manage Addons</strong> button for that.
+                            </div>
                         </div>
 
                         <div style="margin-bottom: 15px;">

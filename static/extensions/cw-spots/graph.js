@@ -614,7 +614,12 @@ class CWSpotsGraph {
 
     tuneToSpotClick(spot) {
         // Send message to parent window to tune the receiver
-        // If Lookup checkbox is checked, also update the lookup popup
+        // If Lookup checkbox is checked, also update the lookup popup.
+        // Pre-set _lastAutoLookupCallsign so that the frequency_changed event
+        // triggered by this tune does not fire a second lookup for the same callsign.
+        if (this.autoLookup) {
+            this._lastAutoLookupCallsign = spot.dx_call;
+        }
         if (window.opener && !window.opener.closed) {
             const type = this.autoLookup ? 'tune_to_spot_click' : 'tune_to_spot';
             window.opener.postMessage({ type, spot }, '*');

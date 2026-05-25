@@ -448,10 +448,17 @@ class DXClusterExtension extends DecoderExtension {
             continentCell.className = 'spot-continent';
             continentCell.textContent = spot.continent ? (this.continentNames[spot.continent] || spot.continent) : '';
 
-            // Spotter
+            // Spotter - clickable to open lookup popup
             const spotterCell = row.insertCell();
             spotterCell.className = 'spot-spotter';
-            spotterCell.textContent = spot.spotter;
+            const spotterSpan = document.createElement('span');
+            spotterSpan.className = 'spot-spotter-link';
+            spotterSpan.textContent = spot.spotter;
+            spotterSpan.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openQRZ(spot.spotter);
+            });
+            spotterCell.appendChild(spotterSpan);
 
             // Comment
             const commentCell = row.insertCell();

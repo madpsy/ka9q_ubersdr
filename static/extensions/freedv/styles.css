@@ -409,6 +409,16 @@
     gap: 4px;
 }
 
+.freedv-activity-callsign-link {
+    cursor: pointer;
+    color: inherit;
+    text-decoration: none;
+}
+
+.freedv-activity-callsign-link:hover {
+    text-decoration: underline;
+}
+
 /* RX-only badge */
 .freedv-activity-rxonly {
     font-size: 9px;

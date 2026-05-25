@@ -578,9 +578,31 @@ class FreeDVExtension extends DecoderExtension {
             const dialFreqHz = this.radio ? this.radio.getFrequency() : 0;
             const freqMatchToleranceHz = 100; // ±100 Hz
 
-            // [0] Callsign
+            // [0] Callsign — clickable span that opens the lookup popup
             const tdCall = cells[0];
-            tdCall.textContent = u.callsign || '—';
+            // Update or create the callsign span
+            let callSpan = tdCall.querySelector('.freedv-activity-callsign-link');
+            const callsignText = u.callsign || '—';
+            if (!callSpan) {
+                callSpan = document.createElement('span');
+                callSpan.className = 'freedv-activity-callsign-link';
+                callSpan.addEventListener('click', (e) => {
+                    e.stopPropagation(); // don't trigger the row's tune-to-freq handler
+                    if (u.callsign && u.callsign !== '—') {
+                        this.openCallsign(u.callsign);
+                    }
+                });
+                // Insert before any existing RX badge
+                const existingBadge = tdCall.querySelector('.freedv-activity-rxonly');
+                if (existingBadge) {
+                    tdCall.insertBefore(callSpan, existingBadge);
+                } else {
+                    tdCall.appendChild(callSpan);
+                }
+            }
+            if (callSpan.textContent !== callsignText) {
+                callSpan.textContent = callsignText;
+            }
             if (u.rx_only) {
                 let badge = tdCall.querySelector('.freedv-activity-rxonly');
                 if (!badge) {
@@ -1241,6 +1263,43 @@ class FreeDVExtension extends DecoderExtension {
     hideError() {
         const container = document.getElementById('freedv-error');
         if (container) container.style.display = 'none';
+    }
+
+    // ── Callsign lookup popup ─────────────────────────────────────────────────
+
+    openCallsign(callsign) {
+        // Strip /P, /M, /QRP suffixes and prefix calls — pick the longest segment
+        const parts = callsign.split('/');
+        const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+
+        // If the server has the lookup service enabled, open our internal popup.
+        // window.instanceDescription is populated by app.js fetchSiteDescription().
+        const lookupEnabled = window.instanceDescription && window.instanceDescription.lookup_service === true;
+
+        if (lookupEnabled) {
+            const uuid = this.radio && this.radio.getSessionId ? this.radio.getSessionId() : '';
+            const popupUrl = `/callsign_lookup.html?callsign=${encodeURIComponent(baseCallsign)}&uuid=${encodeURIComponent(uuid)}`;
+
+            // Reuse the same named window so repeated clicks don't open many tabs.
+            // If the window is already open, postMessage updates it without a reload.
+            if (this._lookupWindow && !this._lookupWindow.closed) {
+                this._lookupWindow.postMessage(
+                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                    window.location.origin
+                );
+                this._lookupWindow.focus();
+            } else {
+                this._lookupWindow = window.open(
+                    popupUrl,
+                    'callsign_lookup',
+                    'width=520,height=800,resizable=yes,scrollbars=yes'
+                );
+            }
+        } else {
+            // Lookup service disabled — fall back to opening QRZ.com directly.
+            const url = `https://www.qrz.com/db/${encodeURIComponent(baseCallsign)}`;
+            window.open(url, '_blank');
+        }
     }
 
     // ── Radio event overrides ─────────────────────────────────────────────────

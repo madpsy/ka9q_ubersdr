@@ -621,8 +621,7 @@ class FT8Extension extends DecoderExtension {
         if (message.tx_callsign && message.tx_callsign !== '-') {
             const span = document.createElement('span');
             span.textContent = message.tx_callsign;
-            span.style.cursor = 'pointer';
-            span.style.color = '#4a9eff';
+            span.className = 'ft8-callsign-link';
             span.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.openCallsign(message.tx_callsign);

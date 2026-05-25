@@ -420,6 +420,16 @@
 }
 
 /* CW Modal Table Column Styles */
+.country-spots-modal-table .modal-callsign-link {
+    cursor: pointer;
+    color: inherit;
+    text-decoration: none;
+}
+
+.country-spots-modal-table .modal-callsign-link:hover {
+    text-decoration: underline;
+}
+
 .country-spots-modal-table .modal-country {
     color: #17a2b8;
 }

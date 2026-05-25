@@ -460,6 +460,19 @@ class SpectrumDisplay {
                         // Tune to the DX spot
                         if (window.dxClusterExtensionInstance) {
                             window.dxClusterExtensionInstance.tuneToSpot(pos.spot);
+                            // If the lookup popup is already open, update it with this callsign
+                            const ext = window.dxClusterExtensionInstance;
+                            if (ext._lookupWindow && !ext._lookupWindow.closed) {
+                                const callsign = pos.spot.dx_call || '';
+                                const parts = callsign.split('/');
+                                const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+                                const uuid = ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
+                                ext._lookupWindow.postMessage(
+                                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                                    window.location.origin
+                                );
+                                ext._lookupWindow.focus();
+                            }
                         }
                         return;
                     }
@@ -479,6 +492,19 @@ class SpectrumDisplay {
                         // Tune to the CW spot
                         if (window.cwSpotsExtensionInstance) {
                             window.cwSpotsExtensionInstance.tuneToSpot(pos.spot);
+                            // If the lookup popup is already open, update it with this callsign
+                            const ext = window.cwSpotsExtensionInstance;
+                            if (ext._lookupWindow && !ext._lookupWindow.closed) {
+                                const callsign = pos.spot.dx_call || '';
+                                const parts = callsign.split('/');
+                                const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+                                const uuid = ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
+                                ext._lookupWindow.postMessage(
+                                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                                    window.location.origin
+                                );
+                                ext._lookupWindow.focus();
+                            }
                         }
                         return;
                     }

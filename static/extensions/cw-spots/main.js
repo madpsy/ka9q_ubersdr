@@ -1402,15 +1402,17 @@ class CWSpotsExtension extends DecoderExtension {
             uniqueSpots.forEach(spot => {
                 const row = document.createElement('tr');
 
-                // Callsign - clickable to tune radio
+                // Callsign - clickable to open lookup popup
                 const callsignCell = document.createElement('td');
                 callsignCell.className = 'modal-callsign';
-                callsignCell.textContent = spot.dx_call;
-                callsignCell.style.cursor = 'pointer';
-                callsignCell.addEventListener('click', (e) => {
+                const callsignSpan = document.createElement('span');
+                callsignSpan.className = 'modal-callsign-link';
+                callsignSpan.textContent = spot.dx_call;
+                callsignSpan.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.tuneToSpot(spot);
+                    this.openQRZ(spot.dx_call);
                 });
+                callsignCell.appendChild(callsignSpan);
                 row.appendChild(callsignCell);
 
                 // Country

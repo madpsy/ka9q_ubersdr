@@ -226,6 +226,16 @@
     color: #9C27B0;
 }
 
+.spot-spotter-link {
+    cursor: pointer;
+    color: inherit;
+    text-decoration: none;
+}
+
+.spot-spotter-link:hover {
+    text-decoration: underline;
+}
+
 .spot-comment {
     color: #e0e0e0;
     font-style: italic;

@@ -474,14 +474,14 @@
     white-space: nowrap;
 }
 
-.ft8-cell-tx-callsign a {
-    color: #e0e0e0 !important;
-    text-decoration: none !important;
+.ft8-callsign-link {
+    cursor: pointer;
+    color: inherit;
+    text-decoration: none;
 }
 
-.ft8-cell-tx-callsign a:hover {
-    color: #4a9eff !important;
-    text-decoration: none !important;
+.ft8-callsign-link:hover {
+    text-decoration: underline;
 }
 
 .ft8-cell-message {

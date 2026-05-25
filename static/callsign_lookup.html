@@ -424,7 +424,10 @@
         let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
 
         // In-memory cache of successful lookup results, keyed by normalised callsign.
-        // Lives only for the lifetime of this window — cleared automatically on close.
+        // Each entry is { data, cachedAt } where cachedAt is a Date.now() timestamp.
+        // Entries expire after LOOKUP_CACHE_TTL ms.  The cache lives only for the
+        // lifetime of this window — cleared automatically on close.
+        const LOOKUP_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in ms
         const lookupCache = new Map();
 
         // Read UUID from URL param (passed by the extension when opening the window)
@@ -461,9 +464,10 @@
             const base = normalise(callsign);
             if (!base) return;
 
-            // Fast path: callsign already in the in-memory cache — render instantly,
-            // no API call needed.
-            if (lookupCache.has(base)) {
+            // Fast path: callsign already in the in-memory cache and not yet expired —
+            // render instantly, no API call needed.
+            const cached = lookupCache.get(base);
+            if (cached && (Date.now() - cached.cachedAt) < LOOKUP_CACHE_TTL) {
                 input.value = base;
                 document.title = `Lookup: ${base}`;
                 const newUrl = new URL(window.location.href);
@@ -472,7 +476,7 @@
                 history.replaceState(null, '', newUrl.toString());
                 destroyMap();
                 const myGeneration = ++lookupGeneration;
-                renderResult(lookupCache.get(base), base, myGeneration);
+                renderResult(cached.data, base, myGeneration);
                 return;
             }
 
@@ -517,7 +521,7 @@
 
                 // Store in the in-memory cache so any future request for this callsign
                 // within this window session is served instantly without an API call.
-                lookupCache.set(base, data);
+                lookupCache.set(base, { data, cachedAt: Date.now() });
 
                 renderResult(data, base, myGeneration);
             } catch (err) {

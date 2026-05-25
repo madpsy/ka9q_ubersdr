@@ -465,25 +465,26 @@
             setTimeout(() => window.speechSynthesis.speak(utt), 50);
         }
 
+        // NATO phonetic alphabet + digit words for clear, fast callsign reading
+        const NATO = {
+            A:'Alpha', B:'Bravo', C:'Charlie', D:'Delta', E:'Echo',
+            F:'Foxtrot', G:'Golf', H:'Hotel', I:'India', J:'Juliet',
+            K:'Kilo', L:'Lima', M:'Mike', N:'November', O:'Oscar',
+            P:'Papa', Q:'Quebec', R:'Romeo', S:'Sierra', T:'Tango',
+            U:'Uniform', V:'Victor', W:'Whiskey', X:'X-ray', Y:'Yankee',
+            Z:'Zulu',
+            '0':'Zero', '1':'One', '2':'Two', '3':'Three', '4':'Four',
+            '5':'Five', '6':'Six', '7':'Seven', '8':'Eight', '9':'Niner'
+        };
+
         function speakCallsign(callsign) {
             if (!ttsEnabled || !ttsVoice) return;
-            // Queue each character as a separate utterance so the engine is forced
-            // to pronounce each one individually (space-separation is unreliable —
-            // the engine may merge adjacent letters into a word/abbreviation).
-            // All utterances are queued immediately after the initial cancel delay;
-            // the engine chains them via onend with zero added gap.
-            const chars = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('');
-            window.speechSynthesis.cancel();
-            setTimeout(() => {
-                chars.forEach(ch => {
-                    const utt  = new SpeechSynthesisUtterance(ch);
-                    utt.voice  = ttsVoice;
-                    utt.lang   = 'en-US';
-                    utt.rate   = 1.0;
-                    utt.volume = 1.0;
-                    window.speechSynthesis.speak(utt);
-                });
-            }, 50);
+            // Convert each character to its NATO phonetic word, then speak as a
+            // single utterance — fast (one engine call) and unambiguous.
+            // e.g. "LZ1VL" → "Lima Zulu One Victor Lima"
+            const words = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '')
+                .split('').map(ch => NATO[ch] || ch).join(' ');
+            ttsSpeak(words);
         }
 
         function showTTSUnsupportedModal() {

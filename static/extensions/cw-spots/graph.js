@@ -447,7 +447,7 @@ class CWSpotsGraph {
                 onClick: (event, elements) => {
                     if (elements.length > 0) {
                         const spot = elements[0].element.$context.raw.spot;
-                        this.tuneToSpot(spot);
+                        this.tuneToSpotClick(spot);
                     }
                 },
                 onHover: (event, elements) => {
@@ -543,13 +543,26 @@ class CWSpotsGraph {
     }
     
     tuneToSpot(spot) {
-        // Send message to parent window to tune the receiver
+        // Send message to parent window to tune the receiver (hover or auto-tune — no lookup)
         if (window.opener && !window.opener.closed) {
             window.opener.postMessage({
                 type: 'tune_to_spot',
                 spot: spot
             }, '*');
             console.log('CW Spots Graph: Tuning to', spot.dx_call, 'on', (spot.frequency / 1e6).toFixed(3), 'MHz');
+        } else {
+            console.warn('CW Spots Graph: Cannot tune - parent window not available');
+        }
+    }
+
+    tuneToSpotClick(spot) {
+        // Send message to parent window to tune AND update lookup popup (click only)
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({
+                type: 'tune_to_spot_click',
+                spot: spot
+            }, '*');
+            console.log('CW Spots Graph: Click-tuning to', spot.dx_call, 'on', (spot.frequency / 1e6).toFixed(3), 'MHz');
         } else {
             console.warn('CW Spots Graph: Cannot tune - parent window not available');
         }
@@ -609,7 +622,7 @@ class CWSpotsGraph {
         if (!latestSpotEl.onclick) {
             latestSpotEl.onclick = () => {
                 const spotData = JSON.parse(latestSpotEl.dataset.spot);
-                this.tuneToSpot(spotData);
+                this.tuneToSpotClick(spotData);
             };
         }
     }

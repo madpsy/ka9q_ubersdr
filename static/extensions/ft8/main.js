@@ -1025,6 +1025,7 @@ class FT8Extension extends DecoderExtension {
                     'callsign_lookup',
                     'width=520,height=800,resizable=yes,scrollbars=yes'
                 );
+                window._callsignLookupWindow = this._lookupWindow;
             }
         } else {
             // Lookup service disabled — fall back to opening QRZ.com directly.

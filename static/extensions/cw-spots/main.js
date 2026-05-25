@@ -771,6 +771,7 @@ class CWSpotsExtension extends DecoderExtension {
                     'callsign_lookup',
                     'width=520,height=800,resizable=yes,scrollbars=yes'
                 );
+                window._callsignLookupWindow = this._lookupWindow;
             }
         } else {
             // Lookup service disabled — fall back to opening QRZ.com directly.
@@ -2230,9 +2231,17 @@ class CWSpotsExtension extends DecoderExtension {
                 // Clear spots when requested from graph
                 this.clearSpots();
             } else if (event.data.type === 'tune_to_spot') {
-                // Tune to spot when clicked in graph window
+                // Tune to spot (hover or auto-tune from graph window — no lookup)
                 if (event.data.spot) {
                     this.tuneToSpot(event.data.spot);
+                }
+            } else if (event.data.type === 'tune_to_spot_click') {
+                // Tune to spot AND update lookup popup if already open (click only)
+                if (event.data.spot) {
+                    this.tuneToSpot(event.data.spot);
+                    if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
+                        this.openQRZ(event.data.spot.dx_call);
+                    }
                 }
             } else if (event.data.type === 'set_band_filter') {
                 // Graph window changed the band filter - sync extension's dropdown and re-filter

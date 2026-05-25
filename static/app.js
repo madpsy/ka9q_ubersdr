@@ -12169,6 +12169,7 @@ function initializeCallsignLookupButton() {
             _lookupWindow.focus();
         } else {
             _lookupWindow = window.open(url, 'callsign_lookup', 'width=520,height=800,resizable=yes,scrollbars=yes');
+            window._callsignLookupWindow = _lookupWindow;
         }
     });
     console.log('[Callsign Lookup Button] Initialized');

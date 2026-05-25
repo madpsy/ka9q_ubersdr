@@ -16,6 +16,8 @@ class CWSpotsGraph {
         this.hoverTune = true; // Tune when hovering over spots
         this.autoTune = false; // Auto-tune to new spots
         this.autoLookup = false; // Update lookup popup on click and frequency change
+        this.sessionUuid = ''; // UUID received from parent for lookup popup authentication
+        this._lookupWindow = null; // Reference to the lookup popup opened from this window
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
         this.currentFrequency = null; // Tuned frequency relayed from parent (Hz)
@@ -104,6 +106,10 @@ class CWSpotsGraph {
             case 'cw_spots_initial':
                 if (event.data.currentFrequency != null) {
                     this.currentFrequency = event.data.currentFrequency;
+                }
+                // Store UUID for lookup popup authentication
+                if (event.data.uuid != null) {
+                    this.sessionUuid = event.data.uuid;
                 }
                 // Enable/disable the Lookup checkbox based on server capability
                 if (event.data.lookupServiceAvailable != null) {
@@ -308,11 +314,20 @@ class CWSpotsGraph {
             this.autoTune = e.target.checked;
         });
 
-        // Lookup checkbox — open lookup window via parent when toggled on; control click/freq lookup
+        // Lookup checkbox — open lookup window directly (user gesture here); notify parent to get reference
         document.getElementById('lookup-checkbox').addEventListener('change', (e) => {
             this.autoLookup = e.target.checked;
-            if (this.autoLookup && window.opener && !window.opener.closed) {
-                window.opener.postMessage({ type: 'open_lookup_window' }, '*');
+            if (this.autoLookup) {
+                const url = `/callsign_lookup.html?uuid=${encodeURIComponent(this.sessionUuid)}`;
+                if (this._lookupWindow && !this._lookupWindow.closed) {
+                    this._lookupWindow.focus();
+                } else {
+                    this._lookupWindow = window.open(url, 'callsign_lookup', 'width=520,height=800,resizable=yes,scrollbars=yes');
+                    // Notify parent so it can probe the named window and store its own reference
+                    if (window.opener && !window.opener.closed) {
+                        window.opener.postMessage({ type: 'lookup_window_opened' }, '*');
+                    }
+                }
             }
         });
 

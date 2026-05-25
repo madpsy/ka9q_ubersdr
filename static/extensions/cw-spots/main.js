@@ -2225,7 +2225,8 @@ class CWSpotsExtension extends DecoderExtension {
                         type: 'cw_spots_initial',
                         data: this.spots,
                         bandFilter: this.bandFilter,
-                        lookupServiceAvailable: !!(window.instanceDescription && window.instanceDescription.lookup_service === true)
+                        lookupServiceAvailable: !!(window.instanceDescription && window.instanceDescription.lookup_service === true),
+                        uuid: this.radio.getSessionId ? this.radio.getSessionId() : ''
                     }, '*');
                 }
             } else if (event.data.type === 'clear_spots_from_graph') {
@@ -2244,20 +2245,12 @@ class CWSpotsExtension extends DecoderExtension {
                         this.openQRZ(event.data.spot.dx_call);
                     }
                 }
-            } else if (event.data.type === 'open_lookup_window') {
-                // Graph window's Lookup checkbox was toggled on — open the lookup popup
-                const lookupEnabled = window.instanceDescription && window.instanceDescription.lookup_service === true;
-                if (lookupEnabled) {
-                    if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
-                        window._callsignLookupWindow.focus();
-                    } else {
-                        const uuid = this.radio.getSessionId ? this.radio.getSessionId() : '';
-                        window._callsignLookupWindow = window.open(
-                            `/callsign_lookup.html?uuid=${encodeURIComponent(uuid)}`,
-                            'callsign_lookup',
-                            'width=520,height=800,resizable=yes,scrollbars=yes'
-                        );
-                    }
+            } else if (event.data.type === 'lookup_window_opened') {
+                // Graph window opened the lookup popup directly (user gesture there).
+                // Probe the named window to get our own reference without navigating it.
+                const ref = window.open('', 'callsign_lookup');
+                if (ref && !ref.closed) {
+                    window._callsignLookupWindow = ref;
                 }
             } else if (event.data.type === 'set_band_filter') {
                 // Graph window changed the band filter - sync extension's dropdown and re-filter
@@ -2529,7 +2522,8 @@ class CWSpotsExtension extends DecoderExtension {
                 data: this.spots,
                 bandFilter: this.bandFilter,
                 currentFrequency: this.currentTunedFrequency || null,
-                lookupServiceAvailable: !!(window.instanceDescription && window.instanceDescription.lookup_service === true)
+                lookupServiceAvailable: !!(window.instanceDescription && window.instanceDescription.lookup_service === true),
+                uuid: this.radio.getSessionId ? this.radio.getSessionId() : ''
             }, '*');
             // Also send explicit band filter sync as a separate message
             this.graphWindow.postMessage({

@@ -421,6 +421,7 @@
         let receiverLat      = null;   // from /api/description receiver.gps.lat
         let receiverLon      = null;
         let receiverCallsign = null;   // from /api/description receiver.callsign
+        let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
 
         // Read UUID from URL param (passed by the extension when opening the window)
         const urlParams = new URLSearchParams(window.location.search);
@@ -456,6 +457,10 @@
             const base = normalise(callsign);
             if (!base) return;
 
+            // Bump generation so any in-flight rAF callbacks from a previous lookup
+            // can detect they are stale and skip calling initMap.
+            const myGeneration = ++lookupGeneration;
+
             // Update input to show normalised callsign
             input.value = base;
 
@@ -488,7 +493,10 @@
                     throw new Error(data.error || `HTTP ${resp.status}`);
                 }
 
-                renderResult(data, base);
+                // Bail out if a newer lookup has already taken over
+                if (myGeneration !== lookupGeneration) return;
+
+                renderResult(data, base, myGeneration);
             } catch (err) {
                 resultArea.innerHTML = `<div class="state-msg error">⚠ ${esc(err.message)}</div>`;
             } finally {
@@ -647,7 +655,7 @@
 
         // ── Render ───────────────────────────────────────────────────────
 
-        function renderResult(d, callsign) {
+        function renderResult(d, callsign, generation) {
             // Build name string.
             // Prefer name_fmt (QRZ pre-formatted, e.g. 'Michael "Mike" Sauer').
             // Fallback: assemble from fname + "nickname" + name.
@@ -806,8 +814,12 @@
 
             // Initialise Leaflet map after DOM is updated
             if (hasLocation) {
-                // Use requestAnimationFrame to ensure the map div is laid out
+                // Use requestAnimationFrame to ensure the map div is laid out.
+                // Guard with the generation counter so a stale callback from a
+                // previous (slower) lookup does not try to re-initialise a map
+                // container that a newer lookup has already claimed.
                 requestAnimationFrame(() => {
+                    if (generation !== lookupGeneration) return;
                     initMap(d.lat, d.lon, callsign, d.country);
                     // If description hadn't loaded yet when renderResult ran, fill in now
                     const distEl = document.getElementById('rx-dist-display');

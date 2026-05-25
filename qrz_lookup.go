@@ -167,6 +167,14 @@ type QRZService struct {
 	// only one HTTP request is made to QRZ; the rest wait and share the result.
 	sf singleflight.Group
 
+	// authSf deduplicates concurrent session-refresh attempts.  When the QRZ
+	// session expires and multiple goroutines detect it simultaneously, only
+	// one re-authentication HTTP call is made; all others wait and share the
+	// new session key.  This is kept separate from sf so that a session refresh
+	// does not hold any callsign's singleflight key while the auth HTTP call is
+	// in flight.
+	authSf singleflight.Group
+
 	// fetchSem is a semaphore that caps the number of simultaneous outbound
 	// HTTP requests to QRZ.com.  A token is acquired by the singleflight
 	// leader just before the HTTP call and released immediately after,
@@ -474,9 +482,10 @@ func testQRZCredentials(username, password string) (subExp string, err error) {
 	return db.Session.SubExp, nil
 }
 
-// authenticate logs in to QRZ and stores the session key.
-// Must be called with s.mu held.
-func (s *QRZService) authenticate() error {
+// doAuthHTTP performs the QRZ login HTTP request and returns the new session
+// key and subscription expiry.  It does NOT touch any QRZService state and
+// must NOT be called with s.mu held, since it makes a network call.
+func (s *QRZService) doAuthHTTP() (key, subExp string, err error) {
 	params := url.Values{}
 	params.Set("username", s.cfg.Username)
 	params.Set("password", s.cfg.Password)
@@ -485,44 +494,65 @@ func (s *QRZService) authenticate() error {
 	apiURL := qrzAPIBase + "?" + params.Encode()
 	resp, err := s.httpClient.Get(apiURL)
 	if err != nil {
-		return fmt.Errorf("qrz: auth request failed: %w", err)
+		return "", "", fmt.Errorf("qrz: auth request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
-		return fmt.Errorf("qrz: reading auth response: %w", err)
+		return "", "", fmt.Errorf("qrz: reading auth response: %w", err)
 	}
 	body = qrzStripNamespace(body)
 
 	var db qrzDatabase
 	if err := xml.Unmarshal(body, &db); err != nil {
-		return fmt.Errorf("qrz: parsing auth response: %w", err)
+		return "", "", fmt.Errorf("qrz: parsing auth response: %w", err)
 	}
-
 	if db.Session == nil {
-		return fmt.Errorf("qrz: no Session element in auth response")
+		return "", "", fmt.Errorf("qrz: no Session element in auth response")
 	}
 	if db.Session.Error != "" {
-		return fmt.Errorf("qrz: auth error: %s", db.Session.Error)
+		return "", "", fmt.Errorf("qrz: auth error: %s", db.Session.Error)
 	}
 	if db.Session.Key == "" {
-		return fmt.Errorf("qrz: auth succeeded but no session key returned")
+		return "", "", fmt.Errorf("qrz: auth succeeded but no session key returned")
 	}
-
-	s.sessionKey = db.Session.Key
-	s.sessionExp = time.Now().Add(qrzSessionTTL)
-	log.Printf("QRZ: authenticated successfully (sub expires: %s)", db.Session.SubExp)
-	return nil
+	return db.Session.Key, db.Session.SubExp, nil
 }
 
-// ensureSession ensures a valid session key exists, authenticating if needed.
-// Must be called with s.mu held.
-func (s *QRZService) ensureSession() error {
-	if s.sessionKeyValid() {
-		return nil
-	}
-	return s.authenticate()
+// refreshSession obtains a fresh session key, deduplicating concurrent
+// refresh attempts via authSf so that only one HTTP auth call is made even
+// when many goroutines detect an expired session simultaneously.
+// It must NOT be called with s.mu held.
+func (s *QRZService) refreshSession() error {
+	_, err, _ := s.authSf.Do("__session__", func() (interface{}, error) {
+		// Re-check before making the network call: a concurrent goroutine may
+		// have already refreshed the session while we were waiting to enter
+		// authSf.Do.
+		s.mu.Lock()
+		valid := s.sessionKeyValid()
+		s.mu.Unlock()
+		if valid {
+			return nil, nil
+		}
+
+		// HTTP call is made WITHOUT holding s.mu so other goroutines can still
+		// read the (old) session key while the auth request is in flight.
+		newKey, subExp, err := s.doAuthHTTP()
+		if err != nil {
+			return nil, err
+		}
+
+		// Write the new session key under the lock.
+		s.mu.Lock()
+		s.sessionKey = newKey
+		s.sessionExp = time.Now().Add(qrzSessionTTL)
+		s.mu.Unlock()
+
+		log.Printf("QRZ: authenticated successfully (sub expires: %s)", subExp)
+		return nil, nil
+	})
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -530,13 +560,18 @@ func (s *QRZService) ensureSession() error {
 // ---------------------------------------------------------------------------
 
 // fetchWithRetry performs a callsign lookup, re-authenticating once if the
-// session has expired.
+// session has expired.  Session refresh is handled via authSf so that the
+// callsign's singleflight key is never held during the auth HTTP call —
+// preventing cached-callsign lookups from blocking behind a session refresh.
 func (s *QRZService) fetchWithRetry(call string) (*QRZCallsign, error) {
-	s.mu.Lock()
-	if err := s.ensureSession(); err != nil {
-		s.mu.Unlock()
+	// Ensure we have a valid session before the first fetch attempt.
+	// refreshSession uses authSf internally, so concurrent callers share one
+	// auth HTTP call rather than each making their own.
+	if err := s.refreshSession(); err != nil {
 		return nil, err
 	}
+
+	s.mu.Lock()
 	key := s.sessionKey
 	s.mu.Unlock()
 
@@ -546,13 +581,13 @@ func (s *QRZService) fetchWithRetry(call string) (*QRZCallsign, error) {
 	}
 
 	if sessionExpired {
-		// Re-authenticate and retry once
-		s.mu.Lock()
-		s.sessionKey = "" // force re-auth
-		if authErr := s.authenticate(); authErr != nil {
-			s.mu.Unlock()
+		// The session expired between our check and the actual API call.
+		// Force a refresh (authSf deduplicates concurrent attempts) and retry.
+		if authErr := s.refreshSession(); authErr != nil {
 			return nil, fmt.Errorf("qrz: re-auth after session timeout failed: %w", authErr)
 		}
+
+		s.mu.Lock()
 		key = s.sessionKey
 		s.mu.Unlock()
 

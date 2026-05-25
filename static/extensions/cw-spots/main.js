@@ -759,6 +759,13 @@ class CWSpotsExtension extends DecoderExtension {
 
             // Reuse the same named window so repeated clicks don't open many tabs.
             // If the window is already open, postMessage updates it without a reload.
+            // Also adopt a reference opened by the graph popup (stored in window._callsignLookupWindow)
+            // so we use postMessage rather than navigating the window to a new URL.
+            if (!this._lookupWindow || this._lookupWindow.closed) {
+                if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
+                    this._lookupWindow = window._callsignLookupWindow;
+                }
+            }
             if (this._lookupWindow && !this._lookupWindow.closed) {
                 this._lookupWindow.postMessage(
                     { type: 'callsign_lookup', callsign: baseCallsign, uuid },

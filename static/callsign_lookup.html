@@ -456,8 +456,6 @@
 
         function ttsSpeak(text) {
             window.speechSynthesis.cancel();
-            ttsQueue   = [];
-            ttsRunning = false;
             const utt  = new SpeechSynthesisUtterance(text);
             utt.voice  = ttsVoice;
             utt.lang   = 'en-US';
@@ -515,8 +513,6 @@
                 ttsEnabled = false;
                 if (ttsBtn) ttsBtn.classList.remove('active');
                 window.speechSynthesis.cancel();
-                ttsQueue   = [];
-                ttsRunning = false;
             }
         }
 

@@ -511,13 +511,14 @@
         const MORSE_FREQ = 500; // Hz
 
         function playMorse(callsign) {
-            // Web Audio API — works in all browsers, no Chrome/Edge restriction
-            if (!morseAudioCtx) {
-                morseAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            // Close any existing context to immediately cancel all scheduled oscillators
+            // from a previous (still-playing) morse sequence, preventing overlap.
+            if (morseAudioCtx) {
+                morseAudioCtx.close();
+                morseAudioCtx = null;
             }
+            morseAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const ctx = morseAudioCtx;
-            // Resume if suspended (browser autoplay policy)
-            if (ctx.state === 'suspended') ctx.resume();
 
             const chars = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('');
             let t = ctx.currentTime + 0.05; // small lead-in

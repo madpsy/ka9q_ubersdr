@@ -1404,6 +1404,14 @@ body {
 
 .bandwidth-controls .control-group input[type="range"] {
     width: 100%;
+    overflow: visible; /* Edge/Opera: allow thumb to paint outside the 6px track box */
+}
+
+/* Edge/Opera: -webkit-appearance:none disables auto thumb-centering in Blink.
+   Explicitly centre the 20px thumb on the 6px track: -(20-6)/2 = -7px.
+   Firefox uses ::-moz-range-thumb which auto-centres; no change needed there. */
+.bandwidth-controls .control-group input[type="range"]::-webkit-slider-thumb {
+    margin-top: -7px;
 }
 
 .squelch-controls {

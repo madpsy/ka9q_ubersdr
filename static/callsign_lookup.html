@@ -362,6 +362,40 @@
                 align-items: center;
             }
         }
+
+        /* ── TTS button ─────────────────────────────────────────────────── */
+        #tts-btn {
+            margin-left: auto;
+            padding: 7px 11px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #888;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+            line-height: 1;
+        }
+
+        #tts-btn:hover {
+            background: #333;
+            border-color: #555;
+        }
+
+        #tts-btn.active {
+            background: #1a4a1a;
+            border-color: #28a745;
+            color: #28a745;
+        }
+
+        #tts-btn.active:hover {
+            background: #1e5a1e;
+        }
+
+        #tts-btn.unsupported {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -371,6 +405,7 @@
         <label for="callsign-input">Callsign:</label>
         <input type="text" id="callsign-input" placeholder="e.g. W1AW" maxlength="20" autocomplete="off" spellcheck="false" />
         <button id="lookup-btn">Go</button>
+        <button id="tts-btn" title="Read callsign aloud&#10;Requires Chrome or Edge">📢</button>
     </div>
 
     <!-- ── Result area ─────────────────────────────────────────────────── -->
@@ -390,6 +425,132 @@
     <script>
     (function () {
         'use strict';
+
+        // ── TTS ──────────────────────────────────────────────────────────
+
+        let ttsEnabled  = false;
+        let ttsVoice    = null;
+        let ttsQueue    = [];
+        let ttsRunning  = false;
+
+        const INTER_LETTER_DELAY_MS = 120; // pause between each spoken character
+
+        function isChromiumBrowser() {
+            const ua = navigator.userAgent.toLowerCase();
+            return ua.includes('chrome/') || ua.includes('edg/') || ua.includes('edge/');
+        }
+
+        function initTTSVoice() {
+            if (!('speechSynthesis' in window)) return false;
+            const voices = window.speechSynthesis.getVoices();
+            const en = voices.filter(v => v.lang.startsWith('en'));
+            const quality = en.filter(v => {
+                const n = v.name.toLowerCase();
+                return n.includes('google') || n.includes('microsoft');
+            });
+            if (!quality.length) return false;
+            const googleUK   = quality.find(v => v.name === 'Google UK English Female');
+            const msUKOnline = quality.find(v => v.lang === 'en-GB' && v.name.toLowerCase().includes('microsoft') && v.name.toLowerCase().includes('online'));
+            const msUSOnline = quality.find(v => v.lang === 'en-US' && v.name.toLowerCase().includes('microsoft') && v.name.toLowerCase().includes('online'));
+            const msAny      = quality.find(v => v.name.toLowerCase().includes('microsoft'));
+            const anyGoogle  = quality.find(v => v.name.toLowerCase().includes('google'));
+            ttsVoice = googleUK || msUKOnline || msUSOnline || msAny || anyGoogle || quality[0];
+            return !!ttsVoice;
+        }
+
+        function ttsProcessQueue() {
+            if (ttsRunning || !ttsQueue.length) return;
+            ttsRunning = true;
+            const text = ttsQueue.shift();
+            const utt  = new SpeechSynthesisUtterance(text);
+            utt.voice  = ttsVoice;
+            utt.lang   = 'en-US';
+            utt.rate   = 0.9;
+            utt.volume = 1.0;
+            utt.onend = utt.onerror = () => {
+                ttsRunning = false;
+                if (ttsQueue.length) {
+                    setTimeout(ttsProcessQueue, INTER_LETTER_DELAY_MS);
+                }
+            };
+            window.speechSynthesis.speak(utt);
+        }
+
+        function speakCallsign(callsign) {
+            if (!ttsEnabled || !ttsVoice) return;
+            // Cancel any in-progress speech
+            window.speechSynthesis.cancel();
+            ttsQueue   = [];
+            ttsRunning = false;
+            // Queue each character individually for clear letter-by-letter reading
+            const chars = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('');
+            chars.forEach(ch => ttsQueue.push(ch));
+            setTimeout(ttsProcessQueue, 50); // small delay after cancel()
+        }
+
+        function showTTSUnsupportedModal() {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;';
+            overlay.innerHTML = `
+                <div style="background:#2a2a2a;color:#e0e0e0;padding:28px 32px;border-radius:10px;max-width:440px;font-family:inherit;box-shadow:0 4px 24px rgba(0,0,0,0.6);">
+                    <h2 style="margin:0 0 14px;color:#ff9800;font-size:20px;">⚠️ Browser Not Supported</h2>
+                    <p style="margin:0 0 10px;line-height:1.6;">Text-to-Speech requires <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> for high-quality voice support.</p>
+                    <p style="margin:0 0 20px;line-height:1.6;color:#aaa;font-size:13px;">Your current browser does not have the necessary Google or Microsoft English voices.</p>
+                    <div style="text-align:right;">
+                        <button id="tts-modal-ok" style="background:#4a9eff;color:#fff;border:none;padding:9px 22px;border-radius:5px;font-size:14px;font-weight:600;cursor:pointer;">OK</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            const close = () => document.body.removeChild(overlay);
+            overlay.querySelector('#tts-modal-ok').addEventListener('click', close);
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        }
+
+        function toggleTTS() {
+            const ttsBtn = document.getElementById('tts-btn');
+            if (!isChromiumBrowser()) {
+                showTTSUnsupportedModal();
+                return;
+            }
+            if (!ttsEnabled) {
+                // Voices may not be loaded yet — try to init
+                if (!ttsVoice) initTTSVoice();
+                if (!ttsVoice) {
+                    showTTSUnsupportedModal();
+                    return;
+                }
+                ttsEnabled = true;
+                if (ttsBtn) ttsBtn.classList.add('active');
+                // Announce that TTS is on
+                ttsQueue   = ['Announcements enabled'];
+                ttsRunning = false;
+                setTimeout(ttsProcessQueue, 50);
+            } else {
+                ttsEnabled = false;
+                if (ttsBtn) ttsBtn.classList.remove('active');
+                window.speechSynthesis.cancel();
+                ttsQueue   = [];
+                ttsRunning = false;
+            }
+        }
+
+        // Wire up TTS button
+        document.addEventListener('DOMContentLoaded', () => {
+            const ttsBtn = document.getElementById('tts-btn');
+            if (!ttsBtn) return;
+            if (!isChromiumBrowser()) {
+                ttsBtn.classList.add('unsupported');
+                ttsBtn.title = 'Text-to-Speech requires Chrome or Edge';
+            }
+            ttsBtn.addEventListener('click', toggleTTS);
+        });
+
+        // Pre-load voices when available (async in Chromium)
+        if (window.speechSynthesis && window.speechSynthesis.onvoiceschanged !== undefined) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                if (!ttsVoice) initTTSVoice();
+            };
+        }
 
         // ── Helpers ──────────────────────────────────────────────────────
 
@@ -838,6 +999,9 @@
                     if (cs) doLookup(cs);
                 });
             });
+
+            // Speak the callsign letter-by-letter if TTS is enabled
+            speakCallsign(callsign);
 
             // Initialise Leaflet map after DOM is updated
             if (hasLocation) {

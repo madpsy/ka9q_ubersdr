@@ -170,10 +170,22 @@ class SpectrumDisplay {
                     // Height-only change - just update CSS, don't touch canvas pixels
                     this.canvas.style.height = newHeight + 'px';
                     this.height = newHeight;
+                    // Invalidate overlay rect cache — the canvas top position in the viewport
+                    // may have changed when the window height changes (e.g. browser chrome
+                    // appearing/disappearing shifts the canvas vertically).
+                    this._overlayRectCache = null;
                     console.log(`Canvas height changed: ${oldHeight} -> ${this.height} CSS pixels (waterfall preserved)`);
                 }
             }, 250); // Debounce resize events
         });
+
+        // Invalidate overlay rect cache on scroll — the canvas is in normal document flow
+        // so its viewport-relative top position (getBoundingClientRect().top) changes
+        // whenever the page is scrolled.  The overlay div is position:fixed so it must
+        // be repositioned after every scroll to stay aligned with the canvas.
+        window.addEventListener('scroll', () => {
+            this._overlayRectCache = null;
+        }, { passive: true });
 
         // Create overlay div for cursor indicator (positioned above canvas)
         this.overlayDiv = document.createElement('div');
@@ -2827,12 +2839,13 @@ class SpectrumDisplay {
     }
 
     // Update overlay div position to match canvas position.
-    // The overlay is position:fixed so its coordinates only change on window resize
-    // or when the line-graph visibility toggles.  Calling getBoundingClientRect()
-    // every animation frame (60 fps) forces a synchronous layout reflow and was
-    // measured at ~344 ms per profiling window (12.5 % of total CPU).
-    // We cache the result in _overlayRectCache and only recompute when the cache
-    // is explicitly invalidated (resize handler, toggleLineGraphVisibility).
+    // The overlay is position:fixed (viewport-relative), but the canvas is in the
+    // normal document flow, so its viewport-relative top changes on resize AND on
+    // scroll.  Calling getBoundingClientRect() every animation frame (60 fps) forces
+    // a synchronous layout reflow and was measured at ~344 ms per profiling window
+    // (12.5 % of total CPU).  We cache the result in _overlayRectCache and only
+    // recompute when the cache is explicitly invalidated (resize handler, scroll
+    // handler, toggleLineGraphVisibility).
     updateOverlayPosition() {
         if (!this._overlayRectCache) {
             const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';

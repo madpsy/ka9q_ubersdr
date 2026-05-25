@@ -80,6 +80,7 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 		uuidToIP:             make(map[string]string),
 		uuidAudioSessions:    make(map[string]string),
 		uuidSpectrumSessions: make(map[string]string),
+		uuidAudioLastSeen:    make(map[string]time.Time),
 		userSessionBands:     make(map[string]map[string]bool),
 		userSessionModes:     make(map[string]map[string]bool),
 		rdnsCache:            make(map[string]string),

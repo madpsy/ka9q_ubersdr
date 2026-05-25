@@ -1261,6 +1261,34 @@ func (h *DXClusterWebSocketHandler) KickConnectionsByIP(ipOrCIDR string) int {
 	return len(connsToClose)
 }
 
+// KickConnectionsByUUID closes all active DX cluster WebSocket connections for the
+// given user session UUID. Returns the number of connections closed.
+func (h *DXClusterWebSocketHandler) KickConnectionsByUUID(userSessionID string) int {
+	if userSessionID == "" {
+		return 0
+	}
+
+	// Collect connections whose session ID matches the given UUID
+	h.connToSessionIDMu.RLock()
+	var connsToClose []*websocket.Conn
+	for conn, sid := range h.connToSessionID {
+		if sid == userSessionID {
+			connsToClose = append(connsToClose, conn)
+		}
+	}
+	h.connToSessionIDMu.RUnlock()
+
+	// Close each matching connection — the handleClient defer will clean up maps
+	for _, conn := range connsToClose {
+		conn.Close()
+	}
+
+	if len(connsToClose) > 0 {
+		log.Printf("DX Cluster WebSocket: Kicked %d connection(s) for UUID %s", len(connsToClose), userSessionID)
+	}
+	return len(connsToClose)
+}
+
 // AddDXBytes tracks bytes sent to a DX cluster connection for a given UserSessionID
 func (h *DXClusterWebSocketHandler) AddDXBytes(userSessionID string, bytes uint64) {
 	if userSessionID == "" {

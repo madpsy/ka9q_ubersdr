@@ -146,6 +146,7 @@ type SessionManager struct {
 	uuidToIP             map[string]string          // Map of user_session_id to bound IP address (for security)
 	uuidAudioSessions    map[string]string          // Map of user_session_id to audio session ID (enforces 1 audio per UUID)
 	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
+	uuidAudioLastSeen    map[string]time.Time       // Map of user_session_id to time when audio session last closed (or spectrum-only connect time)
 	userSessionBands     map[string]map[string]bool // Map of user_session_id to visited bands (cumulative across all sessions)
 	userSessionModes     map[string]map[string]bool // Map of user_session_id to visited modes (cumulative across all sessions)
 	rdnsCache            map[string]string          // Map of clientIP to resolved PTR hostname ("" = no record)
@@ -183,6 +184,7 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 		uuidToIP:             make(map[string]string),
 		uuidAudioSessions:    make(map[string]string),
 		uuidSpectrumSessions: make(map[string]string),
+		uuidAudioLastSeen:    make(map[string]time.Time),
 		userSessionBands:     make(map[string]map[string]bool),
 		userSessionModes:     make(map[string]map[string]bool),
 		rdnsCache:            make(map[string]string),
@@ -780,6 +782,14 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		sm.userSessionUUIDs[userSessionID]++
 		// Track spectrum session for this UUID
 		sm.uuidSpectrumSessions[userSessionID] = sessionID
+
+		// If this UUID has no audio session and no existing audio-last-seen timestamp,
+		// start the spectrum-only eviction timer now (UUID connected without audio).
+		if _, hasAudio := sm.uuidAudioSessions[userSessionID]; !hasAudio {
+			if _, exists := sm.uuidAudioLastSeen[userSessionID]; !exists {
+				sm.uuidAudioLastSeen[userSessionID] = time.Now()
+			}
+		}
 	}
 
 	// Track IP to UUID mapping
@@ -1523,6 +1533,8 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 				// Clean up UUID-level bands/modes maps when UUID is completely gone
 				delete(sm.userSessionBands, session.UserSessionID)
 				delete(sm.userSessionModes, session.UserSessionID)
+				// Clean up audio-last-seen tracker when UUID is fully gone
+				delete(sm.uuidAudioLastSeen, session.UserSessionID)
 			} else {
 				sm.userSessionUUIDs[session.UserSessionID]--
 			}
@@ -1536,6 +1548,9 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		} else {
 			if sm.uuidAudioSessions[session.UserSessionID] == sessionID {
 				delete(sm.uuidAudioSessions, session.UserSessionID)
+				// Record when audio last closed so cleanupSpectrumOnlySessions can
+				// evict the UUID if it remains spectrum-only for too long.
+				sm.uuidAudioLastSeen[session.UserSessionID] = time.Now()
 			}
 		}
 	}
@@ -1647,8 +1662,76 @@ func (sm *SessionManager) cleanupLoop() {
 
 	for range ticker.C {
 		sm.cleanupInactiveSessions()
+		sm.cleanupSpectrumOnlySessions()
 		sm.cleanupExpiredKickedUUIDs()
 		sm.cleanupOrphanedUserAgents()
+	}
+}
+
+// cleanupSpectrumOnlySessions kicks non-bypassed UUIDs that have a spectrum
+// session but no audio session, and have had no audio session for more than
+// 5 minutes. The timer starts either when the UUID first connects without
+// audio, or when its audio session closes. This frees slots consumed by users
+// who are only watching the waterfall (or DX cluster) without actually listening.
+// Bypassed IPs and bypass-password sessions are never evicted.
+func (sm *SessionManager) cleanupSpectrumOnlySessions() {
+	const spectrumOnlyTimeout = 5 * time.Minute
+
+	now := time.Now()
+	var toKick []string // UUIDs to kick
+
+	sm.mu.RLock()
+	for uuid, specSessionID := range sm.uuidSpectrumSessions {
+		// Skip if this UUID also has an active audio session
+		if _, hasAudio := sm.uuidAudioSessions[uuid]; hasAudio {
+			continue
+		}
+
+		// Skip if we have no record of when audio last closed (shouldn't happen,
+		// but be safe — the timer is set on spectrum-only connect or audio close).
+		audioLastSeen, hasRecord := sm.uuidAudioLastSeen[uuid]
+		if !hasRecord {
+			continue
+		}
+
+		specSession, ok := sm.sessions[specSessionID]
+		if !ok {
+			continue
+		}
+		specSession.mu.RLock()
+		clientIP := specSession.ClientIP
+		bypassPassword := specSession.BypassPassword
+		specSession.mu.RUnlock()
+
+		// Non-bypassed users only — operator IPs and bypass-password sessions
+		// are never subject to the spectrum-only eviction.
+		if sm.config.Server.IsIPTimeoutBypassed(clientIP, bypassPassword) {
+			continue
+		}
+
+		if now.Sub(audioLastSeen) > spectrumOnlyTimeout {
+			toKick = append(toKick, uuid)
+		}
+	}
+	sm.mu.RUnlock()
+
+	for _, uuid := range toKick {
+		log.Printf("Kicking spectrum-only user %s (no audio session for >%v)", uuid, spectrumOnlyTimeout)
+		if sm.prometheusMetrics != nil {
+			sm.prometheusMetrics.RecordIdleTimeoutKick("spectrum-only")
+		}
+		if _, err := sm.KickUserBySessionID(uuid); err != nil {
+			log.Printf("Error kicking spectrum-only user %s: %v", uuid, err)
+		}
+		// Also immediately close any open DX cluster WebSocket connection for this UUID,
+		// rather than leaving it open until the user reloads the page.
+		if sm.dxClusterWsHandler != nil {
+			if dxHandler, ok := sm.dxClusterWsHandler.(interface {
+				KickConnectionsByUUID(string) int
+			}); ok {
+				dxHandler.KickConnectionsByUUID(uuid)
+			}
+		}
 	}
 }
 

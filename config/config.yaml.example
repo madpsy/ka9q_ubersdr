@@ -167,6 +167,14 @@ server:
   # IPs in timeout_bypass_ips and users with a valid bypass_password are automatically exempt.
   # Set to 0 to disable (default).
   max_daily_time_per_ip: 0
+  # Spectrum-only session timeout in seconds.
+  # Kicks non-bypassed users who have a spectrum (waterfall) session but no audio
+  # session, and have had no audio session for this many seconds. The countdown
+  # starts when the user first connects without audio, or when their audio session
+  # closes. Bypassed IPs and bypass-password sessions are never evicted.
+  # Set to 0 to disable (users can watch the waterfall indefinitely without listening).
+  # Default: 60
+  spectrum_only_timeout: 60
   # Command rate limit per UUID (commands per second per channel)
   # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
   # Applies separately to audio and spectrum channels (e.g., 20 means 20 audio commands/sec + 20 spectrum commands/sec)

@@ -1669,13 +1669,21 @@ func (sm *SessionManager) cleanupLoop() {
 }
 
 // cleanupSpectrumOnlySessions kicks non-bypassed UUIDs that have a spectrum
-// session but no audio session, and have had no audio session for more than
-// 5 minutes. The timer starts either when the UUID first connects without
-// audio, or when its audio session closes. This frees slots consumed by users
-// who are only watching the waterfall (or DX cluster) without actually listening.
+// session but no audio session, and have had no audio session for longer than
+// the configured spectrum_only_timeout. The timer starts either when the UUID
+// first connects without audio, or when its audio session closes. This frees
+// slots consumed by users who are only watching the waterfall (or DX cluster)
+// without actually listening.
 // Bypassed IPs and bypass-password sessions are never evicted.
+// A configured value of 0 disables the feature entirely.
 func (sm *SessionManager) cleanupSpectrumOnlySessions() {
-	const spectrumOnlyTimeout = 5 * time.Minute
+	// Determine the effective timeout from config.
+	// 0 means disabled; fall back to 60 s when the field is absent/zero.
+	cfgSecs := sm.config.Server.SpectrumOnlyTimeout
+	if cfgSecs == 0 {
+		return // feature disabled
+	}
+	spectrumOnlyTimeout := time.Duration(cfgSecs) * time.Second
 
 	now := time.Now()
 	var toKick []string // UUIDs to kick

@@ -266,6 +266,7 @@ type ServerConfig struct {
 	MaxSessionTime                  int                  `yaml:"max_session_time"`         // Maximum time a session can exist in seconds (0 = unlimited)
 	MaxDailyTimePerIP               int                  `yaml:"max_daily_time_per_ip"`    // Maximum total connected time per IP per rolling 24-hour window in seconds (0 = unlimited)
 	MaxIdleTime                     int                  `yaml:"max_idle_time"`            // Maximum time a user can be idle in seconds (0 = unlimited)
+	SpectrumOnlyTimeout             int                  `yaml:"spectrum_only_timeout"`    // Seconds before a spectrum-only session (no audio) is kicked (0 = disabled, default: 60)
 	CmdRateLimit                    int                  `yaml:"cmd_rate_limit"`           // Commands per second per UUID per channel (0 = unlimited)
 	ConnRateLimit                   int                  `yaml:"conn_rate_limit"`          // WebSocket connections per second per IP (0 = unlimited)
 	SessionsPerMinute               int                  `yaml:"sessions_per_minute"`      // /connection endpoint requests per minute per IP (0 = unlimited)

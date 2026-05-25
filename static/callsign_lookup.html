@@ -467,11 +467,23 @@
 
         function speakCallsign(callsign) {
             if (!ttsEnabled || !ttsVoice) return;
-            // Space-separate each character so the TTS engine reads them individually
-            // in a single utterance — much faster than queuing separate utterances.
-            // e.g. "SV3IEG" → "S V 3 I E G"
-            const spaced = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('').join(' ');
-            ttsSpeak(spaced);
+            // Queue each character as a separate utterance so the engine is forced
+            // to pronounce each one individually (space-separation is unreliable —
+            // the engine may merge adjacent letters into a word/abbreviation).
+            // All utterances are queued immediately after the initial cancel delay;
+            // the engine chains them via onend with zero added gap.
+            const chars = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('');
+            window.speechSynthesis.cancel();
+            setTimeout(() => {
+                chars.forEach(ch => {
+                    const utt  = new SpeechSynthesisUtterance(ch);
+                    utt.voice  = ttsVoice;
+                    utt.lang   = 'en-US';
+                    utt.rate   = 1.0;
+                    utt.volume = 1.0;
+                    window.speechSynthesis.speak(utt);
+                });
+            }, 50);
         }
 
         function showTTSUnsupportedModal() {

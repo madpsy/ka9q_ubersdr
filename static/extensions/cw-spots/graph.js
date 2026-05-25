@@ -15,6 +15,7 @@ class CWSpotsGraph {
         this.showLabels = true; // Show callsign labels by default
         this.hoverTune = true; // Tune when hovering over spots
         this.autoTune = false; // Auto-tune to new spots
+        this.autoLookup = false; // Update lookup popup on click and frequency change
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
         this.currentFrequency = null; // Tuned frequency relayed from parent (Hz)
@@ -104,6 +105,17 @@ class CWSpotsGraph {
                 if (event.data.currentFrequency != null) {
                     this.currentFrequency = event.data.currentFrequency;
                 }
+                // Enable/disable the Lookup checkbox based on server capability
+                if (event.data.lookupServiceAvailable != null) {
+                    const lookupCheckbox = document.getElementById('lookup-checkbox');
+                    if (lookupCheckbox) {
+                        lookupCheckbox.disabled = !event.data.lookupServiceAvailable;
+                        if (!event.data.lookupServiceAvailable) {
+                            lookupCheckbox.checked = false;
+                            this.autoLookup = false;
+                        }
+                    }
+                }
                 this.loadInitialSpots(data, event.data.bandFilter);
                 this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
@@ -118,6 +130,14 @@ class CWSpotsGraph {
             case 'frequency_changed':
                 this.currentFrequency = event.data.frequency;
                 this.updateChart();
+                // Auto-lookup: if enabled and popup is open, find matching spot and look it up
+                if (this.autoLookup && this.currentFrequency != null) {
+                    const filtered = this.getFilteredSpots();
+                    const match = filtered.find(s => Math.abs(s.frequency - this.currentFrequency) <= 10);
+                    if (match && window.opener && !window.opener.closed) {
+                        window.opener.postMessage({ type: 'tune_to_spot_click', spot: match }, '*');
+                    }
+                }
                 break;
             case 'cw_spots_clear':
                 this.clearSpots();
@@ -288,6 +308,14 @@ class CWSpotsGraph {
             this.autoTune = e.target.checked;
         });
 
+        // Lookup checkbox — open lookup window via parent when toggled on; control click/freq lookup
+        document.getElementById('lookup-checkbox').addEventListener('change', (e) => {
+            this.autoLookup = e.target.checked;
+            if (this.autoLookup && window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'open_lookup_window' }, '*');
+            }
+        });
+
         // Fullscreen button
         document.getElementById('fullscreen-btn').addEventListener('click', () => {
             this.toggleFullscreen();
@@ -310,6 +338,11 @@ class CWSpotsGraph {
         const autoTuneCheckbox = document.getElementById('auto-tune-checkbox');
         if (autoTuneCheckbox) {
             this.autoTune = autoTuneCheckbox.checked;
+        }
+
+        const lookupCheckbox = document.getElementById('lookup-checkbox');
+        if (lookupCheckbox) {
+            this.autoLookup = lookupCheckbox.checked;
         }
     }
 
@@ -556,13 +589,12 @@ class CWSpotsGraph {
     }
 
     tuneToSpotClick(spot) {
-        // Send message to parent window to tune AND update lookup popup (click only)
+        // Send message to parent window to tune the receiver
+        // If Lookup checkbox is checked, also update the lookup popup
         if (window.opener && !window.opener.closed) {
-            window.opener.postMessage({
-                type: 'tune_to_spot_click',
-                spot: spot
-            }, '*');
-            console.log('CW Spots Graph: Click-tuning to', spot.dx_call, 'on', (spot.frequency / 1e6).toFixed(3), 'MHz');
+            const type = this.autoLookup ? 'tune_to_spot_click' : 'tune_to_spot';
+            window.opener.postMessage({ type, spot }, '*');
+            console.log('CW Spots Graph: Click-tuning to', spot.dx_call, 'on', (spot.frequency / 1e6).toFixed(3), 'MHz', this.autoLookup ? '(+lookup)' : '');
         } else {
             console.warn('CW Spots Graph: Cannot tune - parent window not available');
         }

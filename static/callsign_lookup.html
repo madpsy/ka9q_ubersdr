@@ -428,12 +428,8 @@
 
         // ── TTS ──────────────────────────────────────────────────────────
 
-        let ttsEnabled  = false;
-        let ttsVoice    = null;
-        let ttsQueue    = [];
-        let ttsRunning  = false;
-
-        const INTER_LETTER_DELAY_MS = 20; // pause between each spoken character
+        let ttsEnabled = false;
+        let ttsVoice   = null;
 
         function isChromiumBrowser() {
             const ua = navigator.userAgent.toLowerCase();
@@ -458,34 +454,26 @@
             return !!ttsVoice;
         }
 
-        function ttsProcessQueue() {
-            if (ttsRunning || !ttsQueue.length) return;
-            ttsRunning = true;
-            const text = ttsQueue.shift();
+        function ttsSpeak(text) {
+            window.speechSynthesis.cancel();
+            ttsQueue   = [];
+            ttsRunning = false;
             const utt  = new SpeechSynthesisUtterance(text);
             utt.voice  = ttsVoice;
             utt.lang   = 'en-US';
             utt.rate   = 1.0;
             utt.volume = 1.0;
-            utt.onend = utt.onerror = () => {
-                ttsRunning = false;
-                if (ttsQueue.length) {
-                    setTimeout(ttsProcessQueue, INTER_LETTER_DELAY_MS);
-                }
-            };
-            window.speechSynthesis.speak(utt);
+            // Small delay after cancel() to avoid Chromium's silent-drop bug
+            setTimeout(() => window.speechSynthesis.speak(utt), 50);
         }
 
         function speakCallsign(callsign) {
             if (!ttsEnabled || !ttsVoice) return;
-            // Cancel any in-progress speech
-            window.speechSynthesis.cancel();
-            ttsQueue   = [];
-            ttsRunning = false;
-            // Queue each character individually for clear letter-by-letter reading
-            const chars = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('');
-            chars.forEach(ch => ttsQueue.push(ch));
-            setTimeout(ttsProcessQueue, 50); // small delay after cancel()
+            // Space-separate each character so the TTS engine reads them individually
+            // in a single utterance — much faster than queuing separate utterances.
+            // e.g. "SV3IEG" → "S V 3 I E G"
+            const spaced = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('').join(' ');
+            ttsSpeak(spaced);
         }
 
         function showTTSUnsupportedModal() {
@@ -522,9 +510,7 @@
                 ttsEnabled = true;
                 if (ttsBtn) ttsBtn.classList.add('active');
                 // Announce that TTS is on
-                ttsQueue   = ['Announcements enabled'];
-                ttsRunning = false;
-                setTimeout(ttsProcessQueue, 50);
+                ttsSpeak('Announcements enabled');
             } else {
                 ttsEnabled = false;
                 if (ttsBtn) ttsBtn.classList.remove('active');

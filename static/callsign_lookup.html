@@ -433,7 +433,7 @@
         let ttsQueue    = [];
         let ttsRunning  = false;
 
-        const INTER_LETTER_DELAY_MS = 120; // pause between each spoken character
+        const INTER_LETTER_DELAY_MS = 20; // pause between each spoken character
 
         function isChromiumBrowser() {
             const ua = navigator.userAgent.toLowerCase();
@@ -465,7 +465,7 @@
             const utt  = new SpeechSynthesisUtterance(text);
             utt.voice  = ttsVoice;
             utt.lang   = 'en-US';
-            utt.rate   = 0.9;
+            utt.rate   = 1.0;
             utt.volume = 1.0;
             utt.onend = utt.onerror = () => {
                 ttsRunning = false;

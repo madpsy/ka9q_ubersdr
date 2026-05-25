@@ -62,12 +62,6 @@ type LookupServicesConfig struct {
 	// Default: "qrz"
 	Provider string `yaml:"provider"`
 
-	// BypassedOnly restricts the public /api/lookup endpoint to bypassed users only.
-	// When true, only users whose IP or password grants bypass privileges can call the endpoint.
-	// When false, any user with a valid session UUID may call it (subject to rate limiting).
-	// Default: false
-	BypassedOnly bool `yaml:"bypassed_only"`
-
 	// RateLimitPerMinute is the maximum number of lookup requests a single session UUID
 	// may make per minute via the public /api/lookup endpoint.
 	// Set to 0 to disable rate limiting (not recommended for public instances).

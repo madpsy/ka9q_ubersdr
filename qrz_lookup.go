@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // qrzAPIBase is the QRZ.com XML API endpoint.
@@ -140,6 +142,12 @@ type qrzCacheEntry struct {
 // QRZService
 // ---------------------------------------------------------------------------
 
+// qrzMaxConcurrentFetches is the maximum number of simultaneous outbound HTTP
+// requests that QRZService will make to the QRZ.com API at any one time.
+// singleflight already ensures at most one in-flight request per callsign, so
+// this cap applies across distinct callsigns.
+const qrzMaxConcurrentFetches = 5
+
 // QRZService provides callsign lookups via the QRZ.com XML Data API.
 // It manages session key lifecycle and caches results for 24 hours.
 // All public methods are safe for concurrent use.
@@ -154,6 +162,17 @@ type QRZService struct {
 	cacheMu sync.RWMutex
 	cache   map[string]*qrzCacheEntry // key: normalised uppercase callsign
 
+	// sf deduplicates concurrent in-flight lookups for the same callsign.
+	// When N goroutines all miss the cache for the same key simultaneously,
+	// only one HTTP request is made to QRZ; the rest wait and share the result.
+	sf singleflight.Group
+
+	// fetchSem is a semaphore that caps the number of simultaneous outbound
+	// HTTP requests to QRZ.com.  A token is acquired by the singleflight
+	// leader just before the HTTP call and released immediately after,
+	// so waiters sharing a flight never consume a slot.
+	fetchSem chan struct{}
+
 	httpClient *http.Client
 }
 
@@ -166,8 +185,10 @@ func NewQRZService(cfg QRZConfig, cacheMaxSize int) *QRZService {
 		cfg:          cfg,
 		cacheMaxSize: cacheMaxSize,
 		cache:        make(map[string]*qrzCacheEntry),
+		// sf is a zero-value singleflight.Group — no initialisation needed.
+		fetchSem: make(chan struct{}, qrzMaxConcurrentFetches),
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 5 * time.Second,
 		},
 	}
 }
@@ -243,32 +264,81 @@ func isAlphaOnly(s string) bool {
 // Public API
 // ---------------------------------------------------------------------------
 
+// lookupResult is the value type stored inside the singleflight group so that
+// both the callsign pointer and any error can be returned together.
+type lookupResult struct {
+	cs  *QRZCallsign
+	err error
+}
+
 // Lookup returns QRZ data for the given callsign.
 // The callsign is normalised before the cache is checked or the API is called.
 // Returns (nil, nil) when the callsign is not found in the QRZ database.
 // Returns a non-nil error only for network/auth failures.
+//
+// Concurrent calls for the same callsign that all miss the cache are
+// deduplicated via a singleflight group: exactly one HTTP request is made to
+// QRZ and the result is shared with all waiting callers.  The winning goroutine
+// writes the result to the cache; the others return the shared value directly
+// without a redundant cache write.
 func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	call := NormaliseCallsign(rawCallsign)
 	if call == "" {
 		return nil, fmt.Errorf("qrz: empty callsign after normalisation")
 	}
 
-	// Check cache first (read lock).
+	// Fast path: cache hit (shared read lock, no singleflight overhead).
 	// cacheGet returns (result, true) on hit (result may be nil = cached not-found),
 	// and (nil, false) on miss.
 	if cs, hit := s.cacheGet(call); hit {
 		return cs, nil
 	}
 
-	// Fetch from API
-	result, err := s.fetchWithRetry(call)
+	// Slow path: deduplicate concurrent misses for the same callsign.
+	//
+	// sf.Do blocks all callers with the same key until the first one completes.
+	// The closure is executed by exactly one goroutine ("the leader"); all
+	// others ("waiters") receive the same return value once the leader finishes.
+	//
+	// Safety notes:
+	//   • The returned *QRZCallsign is never mutated after creation, so sharing
+	//     the pointer across goroutines is safe.
+	//   • Only the leader writes to the cache (shared == false).  Waiters skip
+	//     the cache write to avoid redundant lock contention.
+	//   • If the leader's goroutine panics, singleflight re-panics in all
+	//     waiters — this is the correct behaviour for an unrecoverable error.
+	v, err, _ := s.sf.Do(call, func() (interface{}, error) {
+		// Re-check the cache inside the flight: a previous flight for this
+		// key may have just finished and populated the cache while we were
+		// waiting to enter sf.Do.
+		if cs, hit := s.cacheGet(call); hit {
+			return &lookupResult{cs: cs}, nil
+		}
+
+		// Acquire a semaphore slot before making the outbound HTTP request.
+		// This caps the total number of simultaneous QRZ API calls across all
+		// distinct callsigns.  The slot is released as soon as fetchWithRetry
+		// returns, before the result is written to the cache or returned to
+		// waiters — so the slot is held for the minimum possible time.
+		s.fetchSem <- struct{}{}
+		result, fetchErr := s.fetchWithRetry(call)
+		<-s.fetchSem
+
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+
+		// Cache the result (even nil = "not found") to avoid hammering the API.
+		// Only the leader reaches here; waiters share this cached value.
+		s.cachePut(call, result)
+		return &lookupResult{cs: result}, nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache the result (even nil = "not found") to avoid hammering the API
-	s.cachePut(call, result)
-	return result, nil
+	return v.(*lookupResult).cs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +434,44 @@ func (s *QRZService) sessionKeyValid() bool {
 // field.  Stripping it lets us use plain unqualified tags throughout.
 func qrzStripNamespace(b []byte) []byte {
 	return []byte(strings.ReplaceAll(string(b), ` xmlns="http://xmldata.qrz.com"`, ""))
+}
+
+// testQRZCredentials performs a one-shot QRZ login with the supplied credentials
+// and returns the subscription expiry string on success, or an error on failure.
+// It does NOT affect the global QRZService session state.
+func testQRZCredentials(username, password string) (subExp string, err error) {
+	params := url.Values{}
+	params.Set("username", username)
+	params.Set("password", password)
+	params.Set("agent", qrzUserAgent)
+
+	apiURL := qrzAPIBase + "?" + params.Encode()
+	resp, err := http.Get(apiURL) //nolint:gosec // URL is constructed from admin-supplied credentials
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	body = qrzStripNamespace(body)
+
+	var db qrzDatabase
+	if err := xml.Unmarshal(body, &db); err != nil {
+		return "", fmt.Errorf("parsing response: %w", err)
+	}
+	if db.Session == nil {
+		return "", fmt.Errorf("no Session element in response")
+	}
+	if db.Session.Error != "" {
+		return "", fmt.Errorf("%s", db.Session.Error)
+	}
+	if db.Session.Key == "" {
+		return "", fmt.Errorf("login succeeded but no session key returned")
+	}
+	return db.Session.SubExp, nil
 }
 
 // authenticate logs in to QRZ and stores the session key.

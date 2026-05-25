@@ -27,10 +27,9 @@ type lookupErrorResponse struct {
 // Behaviour:
 //  1. Reject if lookup services are disabled.
 //  2. Validate uuid — must correspond to an active audio session (not spectrum-only).
-//  3. If bypassed_only is set, reject non-bypassed sessions.
-//  4. Apply per-UUID rate limiting.
-//  5. Validate and normalise the callsign.
-//  6. Delegate to the active lookup provider and return JSON.
+//  3. Apply per-UUID rate limiting (bypassed users are exempt).
+//  4. Validate and normalise the callsign.
+//  5. Delegate to the active lookup provider and return JSON.
 func handleLookup(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -70,16 +69,9 @@ func handleLookup(
 		return
 	}
 
-	// ── 3. Bypass-only gate ───────────────────────────────────────────────────
-	if cfg.LookupServices.BypassedOnly {
-		if !sessions.IsUUIDBypassedByAnySession(rawUUID) {
-			writeJSON(w, http.StatusForbidden, lookupErrorResponse{Error: "lookup is restricted to privileged users"})
-			return
-		}
-	}
-
-	// ── 4. Rate limiting ──────────────────────────────────────────────────────
-	if rateLimiter != nil && !rateLimiter.AllowRequest(rawUUID) {
+	// ── 3. Rate limiting (bypassed users are exempt) ──────────────────────────
+	bypassed := sessions.IsUUIDBypassedByAnySession(rawUUID)
+	if !bypassed && rateLimiter != nil && !rateLimiter.AllowRequest(rawUUID) {
 		writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
 		return
 	}

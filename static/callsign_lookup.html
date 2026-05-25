@@ -597,7 +597,7 @@
             ).pad(0.15), { paddingTopLeft: [0, 60] });
         }
 
-        function initMap(lat, lon, callsign) {
+        function initMap(lat, lon, callsign, country) {
             currentSpotLat = lat;
             currentSpotLon = lon;
 
@@ -624,13 +624,14 @@
 
             // Build popup content — always include distance/bearing if receiver is known
             const db = calcDistanceBearing(lat, lon);
+            const countryLine = country ? `<br>${esc(country)}` : '';
             const popupExtra = db
                 ? `<br>${db.distKm.toLocaleString()} km &nbsp;|&nbsp; ${db.bearing}°`
                 : '';
 
             leafletMarker = L.marker([lat, lon], { icon })
                 .addTo(leafletMap)
-                .bindPopup(`<b>${esc(callsign)}</b>${popupExtra}`, {
+                .bindPopup(`<b>${esc(callsign)}</b>${countryLine}${popupExtra}`, {
                     autoPanPaddingTopLeft: L.point(10, 60)
                 })
                 .openPopup();
@@ -807,7 +808,7 @@
             if (hasLocation) {
                 // Use requestAnimationFrame to ensure the map div is laid out
                 requestAnimationFrame(() => {
-                    initMap(d.lat, d.lon, callsign);
+                    initMap(d.lat, d.lon, callsign, d.country);
                     // If description hadn't loaded yet when renderResult ran, fill in now
                     const distEl = document.getElementById('rx-dist-display');
                     if (distEl && distEl.textContent.trim() === '—') {

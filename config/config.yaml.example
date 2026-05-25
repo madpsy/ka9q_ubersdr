@@ -1806,6 +1806,7 @@ dsp:
 #   GET /api/lookup?callsign=W1AW&uuid=<user_session_id>
 #   Returns JSON with operator data from the configured provider.
 #   Requires a valid active session UUID (same UUID used by audio/spectrum WebSockets).
+#   Bypassed users (trusted IPs or bypass password) are exempt from rate limiting.
 #
 lookup_services:
   # Enable callsign lookup services (default: false)
@@ -1816,13 +1817,6 @@ lookup_services:
   # Currently available: "qrz"
   # Future providers will be added here as additional sub-sections.
   provider: "qrz"
-
-  # Restrict the /api/lookup endpoint to bypassed users only (default: false)
-  # When true, only users whose IP or bypass password grants bypass privileges
-  # can call the lookup endpoint. All other users receive 403 Forbidden.
-  # When false, any user with a valid active session UUID may call the endpoint.
-  # Useful for limiting API usage to trusted/authenticated users on public instances.
-  bypassed_only: false
 
   # Maximum lookup requests per session UUID per minute (default: 10)
   # Prevents a single user from hammering the lookup endpoint.

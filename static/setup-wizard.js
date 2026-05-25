@@ -8,6 +8,7 @@
     let formData = {};
     let map = null;
     let marker = null;
+    let lookupTestPassed = false; // tracks whether the lookup test has passed this session
 
     // DOM elements
     const prevBtn = document.getElementById('prevBtn');
@@ -44,6 +45,28 @@
         document.getElementById('decoderEnabled').addEventListener('change', function(e) {
             document.getElementById('decoderSettings').style.display = e.target.checked ? 'block' : 'none';
         });
+
+        // Toggle lookup settings section when enabled/disabled
+        document.getElementById('lookupEnabled').addEventListener('change', function(e) {
+            const show = e.target.value === 'true';
+            document.getElementById('lookupSettings').style.display = show ? 'block' : 'none';
+            // Reset test state when toggling
+            if (!show) {
+                lookupTestPassed = false;
+                document.getElementById('lookupTestResult').textContent = '';
+            }
+        });
+
+        // Reset test state when credentials change
+        ['lookupProvider', 'lookupUsername', 'lookupPassword'].forEach(function(id) {
+            document.getElementById(id).addEventListener('input', function() {
+                lookupTestPassed = false;
+                document.getElementById('lookupTestResult').textContent = '';
+            });
+        });
+
+        // Test lookup connection button
+        document.getElementById('testLookupBtn').addEventListener('click', testLookupConnection);
 
         // Ensure conditional sections are visible on load for checkboxes that are checked by default
         if (document.getElementById('dxclusterEnabled').checked) {
@@ -132,12 +155,65 @@
         }
     }
 
+    async function testLookupConnection() {
+        const provider  = document.getElementById('lookupProvider').value;
+        const username  = document.getElementById('lookupUsername').value.trim();
+        const password  = document.getElementById('lookupPassword').value.trim();
+        const resultEl  = document.getElementById('lookupTestResult');
+        const btn       = document.getElementById('testLookupBtn');
+
+        if (!username || !password) {
+            resultEl.style.color = '#c33';
+            resultEl.textContent = '✗ Username and password are required';
+            lookupTestPassed = false;
+            return;
+        }
+
+        btn.disabled = true;
+        resultEl.style.color = '#718096';
+        resultEl.textContent = 'Testing…';
+
+        try {
+            const resp = await fetch('/admin/lookup/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, username, password })
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                lookupTestPassed = true;
+                resultEl.style.color = '#155724';
+                resultEl.textContent = '✓ Connected' + (data.sub_exp ? ' (subscription expires: ' + data.sub_exp + ')' : '');
+            } else {
+                lookupTestPassed = false;
+                resultEl.style.color = '#c33';
+                resultEl.textContent = '✗ ' + (data.message || 'Test failed');
+            }
+        } catch (err) {
+            lookupTestPassed = false;
+            resultEl.style.color = '#c33';
+            resultEl.textContent = '✗ Request failed: ' + err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     function validateStep(step) {
         hideMessages();
         
         const stepElement = document.querySelector(`.wizard-step[data-step="${step}"]`);
         const requiredFields = stepElement.querySelectorAll('[required]');
         
+        // Step 3: block Next if lookup is enabled but test has not passed
+        if (step === 3) {
+            const lookupEnabled = document.getElementById('lookupEnabled').value === 'true';
+            if (lookupEnabled && !lookupTestPassed) {
+                showError('Please test the lookup service connection before continuing, or set Lookup Service to Disabled.');
+                document.getElementById('testLookupBtn').focus();
+                return false;
+            }
+        }
+
         // Step 1 specific validation
         if (step === 1) {
             // Validate callsign
@@ -327,6 +403,28 @@
                 if (config.eibi) {
                     setCheckboxValue('eibiEnabled', config.eibi.enabled);
                 }
+
+                // Pre-fill lookup service settings
+                if (config.lookup_services) {
+                    const ls = config.lookup_services;
+                    document.getElementById('lookupEnabled').value = ls.enabled ? 'true' : 'false';
+                    if (ls.provider) {
+                        setFieldValue('lookupProvider', ls.provider);
+                    }
+                    if (ls.qrz) {
+                        setFieldValue('lookupUsername', ls.qrz.username);
+                        // Do not pre-fill password for security; leave blank
+                    }
+                    // Show/hide settings section based on enabled state
+                    document.getElementById('lookupSettings').style.display = ls.enabled ? 'block' : 'none';
+                    // If already enabled and saved, treat as tested (credentials were valid before)
+                    if (ls.enabled) {
+                        lookupTestPassed = true;
+                        const resultEl = document.getElementById('lookupTestResult');
+                        resultEl.style.color = '#155724';
+                        resultEl.textContent = '✓ Previously configured';
+                    }
+                }
             }
 
             // Try to load decoder config
@@ -424,6 +522,18 @@
                 eibi: {
                     ...existingConfig.eibi,
                     enabled: formData.eibiEnabled
+                },
+                lookup_services: {
+                    ...existingConfig.lookup_services,
+                    enabled: formData.lookupEnabled === 'true',
+                    provider: formData.lookupProvider || 'qrz',
+                    qrz: {
+                        ...(existingConfig.lookup_services && existingConfig.lookup_services.qrz),
+                        username: formData.lookupUsername || '',
+                        password: formData.lookupPassword
+                            ? formData.lookupPassword
+                            : (existingConfig.lookup_services && existingConfig.lookup_services.qrz && existingConfig.lookup_services.qrz.password) || ''
+                    }
                 }
             };
 

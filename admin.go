@@ -7292,3 +7292,88 @@ func (ah *AdminHandler) HandleRevokeLoginSession(w http.ResponseWriter, r *http.
 		log.Printf("Error encoding revoke response: %v", err)
 	}
 }
+
+// HandleLookupTest handles POST /admin/lookup/test
+// Tests a callsign lookup provider by attempting authentication with the supplied credentials.
+// For QRZ, this performs a login-only check (obtains a session key) without performing a full callsign lookup.
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware).
+//
+// Request body (JSON):
+//
+//	{
+//	  "provider":  "qrz",       // required — which provider to test
+//	  "username":  "N0CALL",    // required — provider login username / callsign
+//	  "password":  "secret"     // required — provider login password
+//	}
+//
+// Response (JSON):
+//
+//	{"ok": true,  "provider": "qrz", "message": "authenticated successfully", "sub_exp": "..."}
+//	{"ok": false, "provider": "qrz", "message": "auth error: Invalid password"}
+func (ah *AdminHandler) HandleLookupTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if provider == "" {
+		http.Error(w, `"provider" is required`, http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Username) == "" {
+		http.Error(w, `"username" is required`, http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		http.Error(w, `"password" is required`, http.StatusBadRequest)
+		return
+	}
+
+	type testResult struct {
+		OK       bool   `json:"ok"`
+		Provider string `json:"provider"`
+		Message  string `json:"message"`
+		SubExp   string `json:"sub_exp,omitempty"`
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	switch provider {
+	case "qrz":
+		subExp, err := testQRZCredentials(req.Username, req.Password)
+		if err != nil {
+			w.WriteHeader(http.StatusOK) // always 200; ok=false signals failure
+			_ = json.NewEncoder(w).Encode(testResult{
+				OK:       false,
+				Provider: provider,
+				Message:  err.Error(),
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(testResult{
+			OK:       true,
+			Provider: provider,
+			Message:  "authenticated successfully",
+			SubExp:   subExp,
+		})
+
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(testResult{
+			OK:       false,
+			Provider: provider,
+			Message:  fmt.Sprintf("unknown provider %q; supported: qrz", provider),
+		})
+	}
+}

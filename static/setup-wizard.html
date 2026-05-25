@@ -578,6 +578,50 @@
                         <label for="eibiEnabled">Enable EiBi shortwave broadcast schedule</label>
                     </div>
                 </div>
+
+                <div style="margin-top: 30px; padding-top: 25px; border-top: 1px solid #e9ecef;">
+                    <h3 style="font-size: 18px; color: #2d3748; margin-bottom: 8px;">Callsign Lookup Service</h3>
+                    <p style="color: #718096; margin-bottom: 15px; line-height: 1.5;">When enabled, users can look up callsign information (name, QTH, grid, DXCC entity, LoTW status, etc.) directly from the radio interface. Requires a paid QRZ.com XML Data subscription.</p>
+
+                    <div class="form-group">
+                        <label for="lookupEnabled">Lookup Service</label>
+                        <select id="lookupEnabled" name="lookupEnabled">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <div class="help-text">Enable callsign lookups for all users with an active audio session</div>
+                    </div>
+
+                    <div id="lookupSettings" class="conditional-section" style="display: none;">
+                        <div class="form-group">
+                            <label for="lookupProvider">Lookup Provider</label>
+                            <select id="lookupProvider" name="lookupProvider">
+                                <option value="qrz">QRZ.com</option>
+                            </select>
+                            <div class="help-text">Currently only QRZ.com is supported (requires paid XML Data subscription)</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="lookupUsername">QRZ Username (Callsign)</label>
+                            <input type="text" id="lookupUsername" name="lookupUsername" placeholder="e.g., W1ABC">
+                            <div class="help-text">Your QRZ.com login callsign</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="lookupPassword">QRZ Password</label>
+                            <input type="password" id="lookupPassword" name="lookupPassword" placeholder="Your QRZ.com password">
+                            <div class="help-text">Your QRZ.com account password</div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-top: 5px;">
+                            <button type="button" class="btn btn-secondary" id="testLookupBtn" style="padding: 10px 20px; font-size: 13px;">
+                                Test Connection
+                            </button>
+                            <span id="lookupTestResult" style="font-size: 13px;"></span>
+                        </div>
+                        <div class="help-text" style="margin-top: 8px;">You must test and confirm the connection before continuing with lookup enabled.</div>
+                    </div>
+                </div>
             </div>
 
             <!-- Step 4: Digital Decoder -->

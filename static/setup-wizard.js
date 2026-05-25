@@ -413,7 +413,7 @@
                     }
                     if (ls.qrz) {
                         setFieldValue('lookupUsername', ls.qrz.username);
-                        // Do not pre-fill password for security; leave blank
+                        setFieldValue('lookupPassword', ls.qrz.password);
                     }
                     // Show/hide settings section based on enabled state
                     document.getElementById('lookupSettings').style.display = ls.enabled ? 'block' : 'none';

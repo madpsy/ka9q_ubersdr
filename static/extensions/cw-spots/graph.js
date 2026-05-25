@@ -18,6 +18,7 @@ class CWSpotsGraph {
         this.autoLookup = false; // Update lookup popup on click and frequency change
         this.sessionUuid = ''; // UUID received from parent for lookup popup authentication
         this._lookupWindow = null; // Reference to the lookup popup opened from this window
+        this._lastAutoLookupCallsign = null; // Track last auto-looked-up callsign to avoid repeated lookups
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
         this.currentFrequency = null; // Tuned frequency relayed from parent (Hz)
@@ -136,12 +137,17 @@ class CWSpotsGraph {
             case 'frequency_changed':
                 this.currentFrequency = event.data.frequency;
                 this.updateChart();
-                // Auto-lookup: if enabled and popup is open, find matching spot and look it up
+                // Auto-lookup: if enabled, find matching spot and look it up — but only when
+                // the matched callsign changes (debounce repeated lookups on same spot)
                 if (this.autoLookup && this.currentFrequency != null) {
                     const filtered = this.getFilteredSpots();
                     const match = filtered.find(s => Math.abs(s.frequency - this.currentFrequency) <= 10);
-                    if (match && window.opener && !window.opener.closed) {
-                        window.opener.postMessage({ type: 'tune_to_spot_click', spot: match }, '*');
+                    const matchCallsign = match ? match.dx_call : null;
+                    if (matchCallsign !== this._lastAutoLookupCallsign) {
+                        this._lastAutoLookupCallsign = matchCallsign;
+                        if (match && window.opener && !window.opener.closed) {
+                            window.opener.postMessage({ type: 'tune_to_spot_click', spot: match }, '*');
+                        }
                     }
                 }
                 break;
@@ -317,6 +323,9 @@ class CWSpotsGraph {
         // Lookup checkbox — open lookup window directly (user gesture here); notify parent to get reference
         document.getElementById('lookup-checkbox').addEventListener('change', (e) => {
             this.autoLookup = e.target.checked;
+            if (!this.autoLookup) {
+                this._lastAutoLookupCallsign = null; // Reset so next enable fires immediately
+            }
             if (this.autoLookup) {
                 const url = `/callsign_lookup.html?uuid=${encodeURIComponent(this.sessionUuid)}`;
                 if (this._lookupWindow && !this._lookupWindow.closed) {

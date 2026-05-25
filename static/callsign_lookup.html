@@ -382,14 +382,24 @@
             border-color: #555;
         }
 
-        #tts-btn.active {
+        #tts-btn.active-voice {
             background: #1a4a1a;
             border-color: #28a745;
             color: #28a745;
         }
 
-        #tts-btn.active:hover {
+        #tts-btn.active-voice:hover {
             background: #1e5a1e;
+        }
+
+        #tts-btn.active-morse {
+            background: #3a2a00;
+            border-color: #e6a817;
+            color: #e6a817;
+        }
+
+        #tts-btn.active-morse:hover {
+            background: #4a3600;
         }
 
         #tts-btn.unsupported {
@@ -426,10 +436,13 @@
     (function () {
         'use strict';
 
-        // ── TTS ──────────────────────────────────────────────────────────
+        // ── Announce mode: 'off' | 'voice' | 'morse' ─────────────────────
 
-        let ttsEnabled = false;
-        let ttsVoice   = null;
+        let announceMode = 'off';
+        let ttsVoice     = null;
+        let morseAudioCtx = null;
+
+        // ── Voice (NATO phonetic) ─────────────────────────────────────────
 
         function isChromiumBrowser() {
             const ua = navigator.userAgent.toLowerCase();
@@ -465,7 +478,7 @@
             setTimeout(() => window.speechSynthesis.speak(utt), 50);
         }
 
-        // NATO phonetic alphabet + digit words for clear, fast callsign reading
+        // NATO phonetic alphabet + digit words
         const NATO = {
             A:'Alpha', B:'Bravo', C:'Charlie', D:'Delta', E:'Echo',
             F:'Foxtrot', G:'Golf', H:'Hotel', I:'India', J:'Juliet',
@@ -477,14 +490,81 @@
             '5':'Five', '6':'Six', '7':'Seven', '8':'Eight', '9':'Niner'
         };
 
-        function speakCallsign(callsign) {
-            if (!ttsEnabled || !ttsVoice) return;
-            // Convert each character to its NATO phonetic word, then speak as a
-            // single utterance — fast (one engine call) and unambiguous.
-            // e.g. "LZ1VL" → "Lima Zulu One Victor Lima"
-            const words = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '')
-                .split('').map(ch => NATO[ch] || ch).join(' ');
-            ttsSpeak(words);
+        // ── Morse ─────────────────────────────────────────────────────────
+
+        // International Morse code lookup table
+        const MORSE = {
+            A:'.-',   B:'-...', C:'-.-.', D:'-..', E:'.',   F:'..-.',
+            G:'--.',  H:'....', I:'..',   J:'.---',K:'-.-', L:'.-..',
+            M:'--',   N:'-.',   O:'---',  P:'.--.', Q:'--.-',R:'.-.',
+            S:'...',  T:'-',    U:'..-',  V:'...-', W:'.--', X:'-..-',
+            Y:'-.--', Z:'--..',
+            '0':'-----','1':'.----','2':'..---','3':'...--','4':'....-',
+            '5':'.....','6':'-....','7':'--...','8':'---..','9':'----.'
+        };
+
+        // Timing at ~15 WPM: dot = 60 ms
+        const DOT  = 0.060; // seconds
+        const DASH = 0.180; // 3× dot
+        const ELEM_GAP = 0.060; // gap between elements within a character (1× dot)
+        const CHAR_GAP = 0.180; // gap between characters (3× dot)
+        const MORSE_FREQ = 500; // Hz
+
+        function playMorse(callsign) {
+            // Web Audio API — works in all browsers, no Chrome/Edge restriction
+            if (!morseAudioCtx) {
+                morseAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const ctx = morseAudioCtx;
+            // Resume if suspended (browser autoplay policy)
+            if (ctx.state === 'suspended') ctx.resume();
+
+            const chars = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '').split('');
+            let t = ctx.currentTime + 0.05; // small lead-in
+
+            chars.forEach((ch, ci) => {
+                const pattern = MORSE[ch];
+                if (!pattern) return;
+                pattern.split('').forEach((sym, si) => {
+                    const dur = sym === '.' ? DOT : DASH;
+                    // Oscillator on
+                    const osc  = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.value = MORSE_FREQ;
+                    // Tiny ramp to avoid clicks
+                    gain.gain.setValueAtTime(0, t);
+                    gain.gain.linearRampToValueAtTime(0.5, t + 0.005);
+                    gain.gain.setValueAtTime(0.5, t + dur - 0.005);
+                    gain.gain.linearRampToValueAtTime(0, t + dur);
+                    osc.start(t);
+                    osc.stop(t + dur);
+                    t += dur;
+                    // Inter-element gap (not after last element of a character)
+                    if (si < pattern.length - 1) t += ELEM_GAP;
+                });
+                // Inter-character gap (not after last character)
+                if (ci < chars.length - 1) t += CHAR_GAP;
+            });
+        }
+
+        // ── Announce mode cycling ─────────────────────────────────────────
+
+        function updateAnnounceButton() {
+            const btn = document.getElementById('tts-btn');
+            if (!btn) return;
+            btn.classList.remove('active-voice', 'active-morse');
+            if (announceMode === 'voice') {
+                btn.classList.add('active-voice');
+                btn.title = 'Voice announcements ON — click for Morse';
+            } else if (announceMode === 'morse') {
+                btn.classList.add('active-morse');
+                btn.title = 'Morse announcements ON — click to disable';
+            } else {
+                btn.title = 'Click for voice announcements';
+            }
         }
 
         function showTTSUnsupportedModal() {
@@ -493,8 +573,8 @@
             overlay.innerHTML = `
                 <div style="background:#2a2a2a;color:#e0e0e0;padding:28px 32px;border-radius:10px;max-width:440px;font-family:inherit;box-shadow:0 4px 24px rgba(0,0,0,0.6);">
                     <h2 style="margin:0 0 14px;color:#ff9800;font-size:20px;">⚠️ Browser Not Supported</h2>
-                    <p style="margin:0 0 10px;line-height:1.6;">Text-to-Speech requires <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> for high-quality voice support.</p>
-                    <p style="margin:0 0 20px;line-height:1.6;color:#aaa;font-size:13px;">Your current browser does not have the necessary Google or Microsoft English voices.</p>
+                    <p style="margin:0 0 10px;line-height:1.6;">Voice announcements require <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>.</p>
+                    <p style="margin:0 0 20px;line-height:1.6;color:#aaa;font-size:13px;">Your current browser does not have the necessary Google or Microsoft English voices. Morse mode works in all browsers.</p>
                     <div style="text-align:right;">
                         <button id="tts-modal-ok" style="background:#4a9eff;color:#fff;border:none;padding:9px 22px;border-radius:5px;font-size:14px;font-weight:600;cursor:pointer;">OK</button>
                     </div>
@@ -505,39 +585,52 @@
             overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
         }
 
-        function toggleTTS() {
-            const ttsBtn = document.getElementById('tts-btn');
-            if (!isChromiumBrowser()) {
-                showTTSUnsupportedModal();
-                return;
-            }
-            if (!ttsEnabled) {
-                // Voices may not be loaded yet — try to init
-                if (!ttsVoice) initTTSVoice();
-                if (!ttsVoice) {
-                    showTTSUnsupportedModal();
-                    return;
+        function cycleAnnounceMode() {
+            if (announceMode === 'off') {
+                // Try to go to voice first (Chrome/Edge only)
+                if (isChromiumBrowser()) {
+                    if (!ttsVoice) initTTSVoice();
+                    if (ttsVoice) {
+                        announceMode = 'voice';
+                        updateAnnounceButton();
+                        ttsSpeak('Voice announcements enabled');
+                        return;
+                    }
+                    // Chrome/Edge but no quality voice found — skip to morse
                 }
-                ttsEnabled = true;
-                if (ttsBtn) ttsBtn.classList.add('active');
-                // Announce that TTS is on
-                ttsSpeak('Announcements enabled');
-            } else {
-                ttsEnabled = false;
-                if (ttsBtn) ttsBtn.classList.remove('active');
+                // Non-Chromium or no voice: go straight to morse
+                announceMode = 'morse';
+                updateAnnounceButton();
+                playMorse('DE'); // short "DE" as a morse-on indicator
+            } else if (announceMode === 'voice') {
+                // voice → morse
                 window.speechSynthesis.cancel();
+                announceMode = 'morse';
+                updateAnnounceButton();
+                playMorse('DE');
+            } else {
+                // morse → off
+                announceMode = 'off';
+                updateAnnounceButton();
             }
         }
 
-        // Wire up TTS button
+        function announceCallsign(callsign) {
+            if (announceMode === 'voice' && ttsVoice) {
+                const words = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '')
+                    .split('').map(ch => NATO[ch] || ch).join(' ');
+                ttsSpeak(words);
+            } else if (announceMode === 'morse') {
+                playMorse(callsign);
+            }
+        }
+
+        // Wire up button
         document.addEventListener('DOMContentLoaded', () => {
             const ttsBtn = document.getElementById('tts-btn');
             if (!ttsBtn) return;
-            if (!isChromiumBrowser()) {
-                ttsBtn.classList.add('unsupported');
-                ttsBtn.title = 'Text-to-Speech requires Chrome or Edge';
-            }
-            ttsBtn.addEventListener('click', toggleTTS);
+            ttsBtn.title = 'Click for voice announcements';
+            ttsBtn.addEventListener('click', cycleAnnounceMode);
         });
 
         // Pre-load voices when available (async in Chromium)
@@ -995,8 +1088,8 @@
                 });
             });
 
-            // Speak the callsign letter-by-letter if TTS is enabled
-            speakCallsign(callsign);
+            // Announce the callsign (voice or morse) if enabled
+            announceCallsign(callsign);
 
             // Initialise Leaflet map after DOM is updated
             if (hasLocation) {

@@ -294,20 +294,38 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt install -y sudo cron ntpsec libfftw3-bin libwebsockets19t64 ssh tmux btop htop jq
 
-# Disable IPv6 to prevent Docker NAT issues with client IP detection
-# When IPv6 clients connect to IPv4-only Docker containers, the kernel performs
-# NAT translation which causes the container to see the Docker gateway IP instead
-# of the real client IP. Disabling IPv6 forces all connections to use IPv4.
+# Disable IPv6 on the external interface to prevent Docker NAT issues with client
+# IP detection. When IPv6 clients connect to IPv4-only Docker containers, the kernel
+# performs NAT translation which causes the container to see the Docker gateway IP
+# instead of the real client IP. Disabling IPv6 on the external interface forces all
+# inbound connections to use IPv4 while leaving Docker's internal bridge networking
+# (docker0, br-*) and ip6tables fully functional on the host.
+#
+# If IPv6 is already globally disabled (net.ipv6.conf.all.disable_ipv6) we leave it
+# alone - it achieves the same goal and changing it could break existing setups.
 echo "Configuring IPv6 settings..."
-if ! grep -q "^net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf; then
-    echo "Disabling IPv6 to ensure proper client IP detection in Docker containers..."
-    echo "net.ipv6.conf.all.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "net.ipv6.conf.default.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "net.ipv6.conf.lo.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-    sudo sysctl -p > /dev/null 2>&1
-    echo "IPv6 disabled successfully."
+if grep -q "^net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf; then
+    echo "IPv6 already globally disabled in sysctl.conf - leaving existing configuration."
 else
-    echo "IPv6 already disabled in sysctl.conf."
+    # Detect the default-route interface (the one Docker publishes ports on).
+    # Using a per-interface key avoids the kernel-wide override that
+    # net.ipv6.conf.all.disable_ipv6 applies, which breaks ip6tables on some
+    # boards (e.g. Rock 5 / aarch64).
+    DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5; exit}')
+
+    if [ -z "$DEFAULT_IFACE" ]; then
+        echo "Warning: Could not detect default network interface. Skipping IPv6 configuration."
+    else
+        SYSCTL_KEY="net.ipv6.conf.${DEFAULT_IFACE}.disable_ipv6"
+        if ! grep -q "^${SYSCTL_KEY}" /etc/sysctl.conf; then
+            echo "Disabling IPv6 on external interface $DEFAULT_IFACE for proper client IP detection..."
+            echo "${SYSCTL_KEY} = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+            sudo sysctl -w "${SYSCTL_KEY}=1" > /dev/null 2>&1
+            echo "IPv6 disabled on $DEFAULT_IFACE."
+        else
+            echo "IPv6 already disabled on $DEFAULT_IFACE in sysctl.conf."
+        fi
+    fi
 fi
 
 # Increase UDP receive buffer maximum to prevent packet loss at high IQ throughput.

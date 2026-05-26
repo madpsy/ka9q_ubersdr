@@ -69,6 +69,60 @@ else
     RED='' GREEN='' YELLOW='' CYAN='' BLUE='' MAGENTA='' BOLD='' DIM='' RESET=''
 fi
 
+# ── Architecture detection ────────────────────────────────────────────────────
+
+IS_ARM=false
+case "$(uname -m 2>/dev/null)" in
+    aarch64|armv7l|armv8l) IS_ARM=true ;;
+esac
+# Also detect via /proc/cpuinfo — ARM uses "CPU implementer" instead of "vendor_id"
+if grep -q 'CPU implementer' /proc/cpuinfo 2>/dev/null; then IS_ARM=true; fi
+
+# arm_cpu_part_name IMPLEMENTER PART
+# Returns a human-readable name for a known ARM CPU part code.
+arm_cpu_part_name() {
+    local impl="${1:-}" part="${2:-}"
+    case "${impl}:${part}" in
+        0x41:0xd03) echo "Cortex-A53" ;;
+        0x41:0xd04) echo "Cortex-A35" ;;
+        0x41:0xd05) echo "Cortex-A55" ;;
+        0x41:0xd06) echo "Cortex-A65" ;;
+        0x41:0xd07) echo "Cortex-A57" ;;
+        0x41:0xd08) echo "Cortex-A72" ;;
+        0x41:0xd09) echo "Cortex-A73" ;;
+        0x41:0xd0a) echo "Cortex-A75" ;;
+        0x41:0xd0b) echo "Cortex-A76" ;;
+        0x41:0xd0c) echo "Neoverse-N1" ;;
+        0x41:0xd0d) echo "Cortex-A77" ;;
+        0x41:0xd0e) echo "Cortex-A76AE" ;;
+        0x41:0xd40) echo "Neoverse-V1" ;;
+        0x41:0xd41) echo "Cortex-A78" ;;
+        0x41:0xd44) echo "Cortex-X1" ;;
+        0x41:0xd46) echo "Cortex-A510" ;;
+        0x41:0xd47) echo "Cortex-A710" ;;
+        0x41:0xd48) echo "Cortex-X2" ;;
+        0x41:0xd4d) echo "Cortex-A715" ;;
+        0x41:0xd4e) echo "Cortex-X3" ;;
+        0x51:0x800) echo "Kryo 2xx Gold (A73)" ;;
+        0x51:0x801) echo "Kryo 2xx Silver (A53)" ;;
+        0x51:0x803) echo "Kryo 3xx Silver" ;;
+        0x51:0x804) echo "Kryo 4xx Gold (A76)" ;;
+        0x51:0x805) echo "Kryo 4xx Silver (A55)" ;;
+        *) echo "Unknown (impl=${impl} part=${part})" ;;
+    esac
+}
+
+# arm_cluster_role NAME
+# Returns LITTLE, big, or prime based on known core names.
+arm_cluster_role() {
+    case "$1" in
+        *A53*|*A55*|*A35*|*A510*|"Kryo 2xx Silver"*|"Kryo 4xx Silver"*) echo "LITTLE" ;;
+        *A57*|*A72*|*A73*|*A75*|*A76*|*A77*|*A78*|*A710*|*A715*|"Kryo 2xx Gold"*|"Kryo 4xx Gold"*) echo "big" ;;
+        *X1*|*X2*|*X3*|*Neoverse*) echo "prime" ;;
+        *) echo "" ;;
+    esac
+}
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 header() {
@@ -121,137 +175,260 @@ L3_DOMAIN_COUNT=1
 section_cpu_model() {
     header "CPU Model & Topology"
 
-    local model
-    model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
-    model="${model:-unknown}"
-    kv "Model" "$model" "${BOLD}"
-
-    local vendor
-    vendor=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
-    vendor="${vendor:-unknown}"
-    kv "Vendor" "$vendor"
-
-    local sockets
-    sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l || true)
-    sockets=$(echo "$sockets" | tr -d '[:space:]')
-    [[ "$sockets" =~ ^[0-9]+$ ]] || sockets=0
-    if (( sockets == 0 )); then sockets=1; fi
-    kv "Sockets" "$sockets"
-
-    local cores_per_socket
-    cores_per_socket=$(grep 'cpu cores' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2- | tr -d ' ' || true)
-    cores_per_socket="${cores_per_socket:-?}"
-    kv "Physical cores/socket" "$cores_per_socket"
-
     local logical_cpus
     logical_cpus=$(nproc --all 2>/dev/null || grep -c '^processor' /proc/cpuinfo)
-    kv "Logical CPUs (total)" "$logical_cpus"
 
-    # Count unique physical cores via thread_siblings_list
-    declare -A _seen_phys_cores
-    for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
-        local sib_file="${cpu_dir}topology/thread_siblings_list"
-        [[ -f "$sib_file" ]] || continue
-        local sib
-        sib=$(cat "$sib_file")
-        _seen_phys_cores["$sib"]=1
-    done
-    local total_phys="${#_seen_phys_cores[@]}"
-    if [[ $total_phys -eq 0 ]]; then total_phys="$logical_cpus"; fi
-    kv "Physical cores (total)" "$total_phys"
+    if $IS_ARM; then
+        # ── ARM path ──────────────────────────────────────────────────────────
+        # On ARM, /proc/cpuinfo has per-core stanzas with "CPU implementer" and
+        # "CPU part" fields that identify the microarchitecture of each core.
+        # Group cores by (implementer, part) to detect big.LITTLE clusters.
 
-    local ht_status ht_colour
-    if (( logical_cpus > total_phys )); then
-        ht_status="ENABLED  (${logical_cpus} logical / ${total_phys} physical)"
+        # Hardware name (from device tree, more informative than "model name" on ARM)
+        local hw_name
+        hw_name=$(grep -m1 'Hardware' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
+        hw_name="${hw_name:-$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0' || echo "unknown")}"
+        kv "Hardware" "$hw_name" "${BOLD}"
 
-        # Warn only if radiod's pinned set has SPLIT HT pairs — i.e. one sibling
-        # pinned but not the other.  Pinning both siblings of a physical core is
-        # correct for a multi-threaded app like radiod (suggest-radiod-cpuset.sh
-        # intentionally includes all siblings).  Splitting a pair is bad because
-        # the OS can schedule unrelated tasks on the unpinned sibling, sharing the
-        # physical execution units with radiod.
-        local ht_split=false
-        local pinned_cpus=""
-        if command -v taskset &>/dev/null && [[ -n "$(pgrep -x radiod 2>/dev/null)" ]]; then
-            pinned_cpus=$(taskset -cp "$(pgrep -x radiod | head -1)" 2>/dev/null \
-                | grep -oP '(?<=affinity list: ).*' || echo "")
+        # SoC model name (same for all cores on ARM, but present on some kernels)
+        local model
+        model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
+        [[ -n "$model" ]] && kv "Model name" "$model"
+
+        kv "Architecture" "ARM ($(uname -m))"
+        kv "Logical CPUs (total)" "$logical_cpus"
+
+        # Parse per-core CPU part/implementer to identify clusters
+        # Build arrays: cpu_impl[N] and cpu_part[N] indexed by processor number
+        declare -A cpu_impl=() cpu_part=()
+        local cur_proc=""
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^processor[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+                cur_proc="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^CPU\ implementer[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) && -n "$cur_proc" ]]; then
+                cpu_impl["$cur_proc"]="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^CPU\ part[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) && -n "$cur_proc" ]]; then
+                cpu_part["$cur_proc"]="${BASH_REMATCH[1]}"
+            fi
+        done < /proc/cpuinfo
+
+        # Group CPUs by (implementer:part) cluster key
+        declare -A cluster_cpus=()   # key → space-separated CPU list
+        declare -A cluster_name=()   # key → human name
+        declare -A cluster_role=()   # key → LITTLE/big/prime
+        for cpu_n in "${!cpu_impl[@]}"; do
+            local impl="${cpu_impl[$cpu_n]}" part="${cpu_part[$cpu_n]:-}"
+            local ckey="${impl}:${part}"
+            cluster_cpus["$ckey"]+="${cpu_n} "
+            if [[ -z "${cluster_name[$ckey]:-}" ]]; then
+                cluster_name["$ckey"]=$(arm_cpu_part_name "$impl" "$part")
+                cluster_role["$ckey"]=$(arm_cluster_role "${cluster_name[$ckey]}")
+            fi
+        done
+
+        local cluster_count="${#cluster_cpus[@]}"
+        if (( cluster_count > 1 )); then
+            echo ""
+            printf "  ${BOLD}${CYAN}big.LITTLE / DynamIQ topology — %d cluster type(s) detected:${RESET}\n" "$cluster_count"
+            echo ""
+
+            # Sort clusters: LITTLE first, then big, then prime
+            local _role_order=("LITTLE" "big" "prime" "")
+            for _role in "${_role_order[@]}"; do
+                for ckey in "${!cluster_cpus[@]}"; do
+                    [[ "${cluster_role[$ckey]:-}" == "$_role" ]] || continue
+                    local _cpus="${cluster_cpus[$ckey]}"
+                    # Sort CPU numbers and build a compact range string
+                    local _sorted_cpus
+                    _sorted_cpus=$(echo "$_cpus" | tr ' ' '\n' | grep -v '^$' | sort -n | tr '\n' ' ' | sed 's/ $//')
+                    local _first _last _prev _range_str=""
+                    local _cpu_arr=()
+                    read -ra _cpu_arr <<< "$_sorted_cpus"
+                    _first="${_cpu_arr[0]}"; _last="${_cpu_arr[0]}"; _prev="${_cpu_arr[0]}"
+                    for (( _i=1; _i<${#_cpu_arr[@]}; _i++ )); do
+                        local _c="${_cpu_arr[$_i]}"
+                        if (( _c == _prev + 1 )); then
+                            _last="$_c"
+                        else
+                            [[ "$_first" == "$_last" ]] && _range_str+="${_first}," || _range_str+="${_first}-${_last},"
+                            _first="$_c"; _last="$_c"
+                        fi
+                        _prev="$_c"
+                    done
+                    [[ "$_first" == "$_last" ]] && _range_str+="${_first}" || _range_str+="${_first}-${_last}"
+
+                    # Per-cluster freq range (read from first CPU in cluster)
+                    local _fc="${_cpu_arr[0]}"
+                    local _fmin _fmax
+                    _fmin=$(sysread "/sys/devices/system/cpu/cpu${_fc}/cpufreq/cpuinfo_min_freq")
+                    _fmax=$(sysread "/sys/devices/system/cpu/cpu${_fc}/cpufreq/cpuinfo_max_freq")
+                    local _freq_str=""
+                    if [[ -n "$_fmin" && -n "$_fmax" ]]; then
+                        _freq_str="  $(( _fmin / 1000 ))–$(( _fmax / 1000 )) MHz"
+                    fi
+
+                    local _role_colour="$RESET"
+                    local _role_label="${cluster_role[$ckey]:-unknown}"
+                    case "$_role_label" in
+                        LITTLE) _role_colour="$DIM" ;;
+                        big)    _role_colour="$GREEN" ;;
+                        prime)  _role_colour="${BOLD}${GREEN}" ;;
+                    esac
+
+                    printf "  ${_role_colour}%-8s${RESET}  %-20s  CPUs=[%s]%s\n" \
+                        "$_role_label" "${cluster_name[$ckey]}" "$_range_str" "$_freq_str"
+                done
+            done
+            echo ""
+            info_line "Pin radiod to the 'big' or 'prime' cluster cores for best RT performance"
+        else
+            # Homogeneous ARM (e.g. all A53 or all A72)
+            local _only_key="${!cluster_cpus[*]}"
+            kv "CPU type" "${cluster_name[$_only_key]:-unknown}" "${BOLD}"
+            local _fmin _fmax
+            _fmin=$(sysread /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq)
+            _fmax=$(sysread /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
+            if [[ -n "$_fmin" && -n "$_fmax" ]]; then
+                kv "Freq range" "$(( _fmin / 1000 )) MHz – $(( _fmax / 1000 )) MHz"
+            fi
         fi
 
-        if [[ -n "$pinned_cpus" ]]; then
-            # Expand pinned CPU list
-            local pinned_expanded=()
-            IFS=',' read -ra _pp <<< "$pinned_cpus"
-            for _p in "${_pp[@]}"; do
-                if [[ "$_p" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                    for (( _n=${BASH_REMATCH[1]}; _n<=${BASH_REMATCH[2]}; _n++ )); do
-                        pinned_expanded+=("$_n")
-                    done
-                else
-                    pinned_expanded+=("$_p")
-                fi
-            done
+        # SMT check (ARM cores are almost always single-threaded, but SVE/SME may change this)
+        declare -A _seen_phys_cores_arm=()
+        for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
+            local sib_file="${cpu_dir}topology/thread_siblings_list"
+            [[ -f "$sib_file" ]] || continue
+            _seen_phys_cores_arm["$(cat "$sib_file")"]=1
+        done
+        local total_phys_arm="${#_seen_phys_cores_arm[@]}"
+        if [[ $total_phys_arm -eq 0 ]]; then total_phys_arm="$logical_cpus"; fi
+        if (( logical_cpus > total_phys_arm )); then
+            kv "SMT (Hyper-Threading)" "ENABLED (${logical_cpus} logical / ${total_phys_arm} physical)" "$YELLOW"
+        else
+            kv "SMT (Hyper-Threading)" "not present (${logical_cpus} cores, no SMT)" "$GREEN"
+        fi
 
-            # For each pinned CPU, check that ALL its HT siblings are also pinned.
-            # A split pair (one sibling pinned, others not) is the problem case.
-            for _cpu in "${pinned_expanded[@]}"; do
-                local _sib_file="/sys/devices/system/cpu/cpu${_cpu}/topology/thread_siblings_list"
-                [[ -f "$_sib_file" ]] || continue
-                local _sibs
-                _sibs=$(cat "$_sib_file")
-                if [[ "$_sibs" == *","* || "$_sibs" == *"-"* ]]; then
-                    IFS=',' read -ra _sib_parts <<< "$_sibs"
-                    for _s in "${_sib_parts[@]}"; do
-                        [[ "$_s" == "$_cpu" ]] && continue
-                        local _sib_found=false
-                        for _q in "${pinned_expanded[@]}"; do
-                            [[ "$_q" == "$_s" ]] && _sib_found=true && break
+    else
+        # ── x86 path (unchanged) ──────────────────────────────────────────────
+        local model
+        model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
+        model="${model:-unknown}"
+        kv "Model" "$model" "${BOLD}"
+
+        local vendor
+        vendor=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)
+        vendor="${vendor:-unknown}"
+        kv "Vendor" "$vendor"
+
+        local sockets
+        sockets=$(grep 'physical id' /proc/cpuinfo 2>/dev/null | sort -u | wc -l || true)
+        sockets=$(echo "$sockets" | tr -d '[:space:]')
+        [[ "$sockets" =~ ^[0-9]+$ ]] || sockets=0
+        if (( sockets == 0 )); then sockets=1; fi
+        kv "Sockets" "$sockets"
+
+        local cores_per_socket
+        cores_per_socket=$(grep 'cpu cores' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2- | tr -d ' ' || true)
+        cores_per_socket="${cores_per_socket:-?}"
+        kv "Physical cores/socket" "$cores_per_socket"
+
+        kv "Logical CPUs (total)" "$logical_cpus"
+
+        # Count unique physical cores via thread_siblings_list
+        declare -A _seen_phys_cores=()
+        for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/; do
+            local sib_file="${cpu_dir}topology/thread_siblings_list"
+            [[ -f "$sib_file" ]] || continue
+            local sib
+            sib=$(cat "$sib_file")
+            _seen_phys_cores["$sib"]=1
+        done
+        local total_phys="${#_seen_phys_cores[@]}"
+        if [[ $total_phys -eq 0 ]]; then total_phys="$logical_cpus"; fi
+        kv "Physical cores (total)" "$total_phys"
+
+        local ht_status ht_colour
+        if (( logical_cpus > total_phys )); then
+            ht_status="ENABLED  (${logical_cpus} logical / ${total_phys} physical)"
+
+            local ht_split=false
+            local pinned_cpus=""
+            if command -v taskset &>/dev/null && [[ -n "$(pgrep -x radiod 2>/dev/null)" ]]; then
+                pinned_cpus=$(taskset -cp "$(pgrep -x radiod | head -1)" 2>/dev/null \
+                    | grep -oP '(?<=affinity list: ).*' || echo "")
+            fi
+
+            if [[ -n "$pinned_cpus" ]]; then
+                local pinned_expanded=()
+                IFS=',' read -ra _pp <<< "$pinned_cpus"
+                for _p in "${_pp[@]}"; do
+                    if [[ "$_p" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                        for (( _n=${BASH_REMATCH[1]}; _n<=${BASH_REMATCH[2]}; _n++ )); do
+                            pinned_expanded+=("$_n")
                         done
-                        if ! $_sib_found; then
-                            ht_split=true
-                            break 2
-                        fi
-                    done
-                fi
-            done
+                    else
+                        pinned_expanded+=("$_p")
+                    fi
+                done
 
-            if $ht_split; then
-                ht_colour="$YELLOW"
-                echo ""
-                warn_line "Hyper-Threading is ON and some HT sibling pairs are split (one sibling pinned, one not)."
-                warn_line "Either pin all siblings of each physical core, or pin only one per core."
-                warn_line "Run suggest-radiod-cpuset.sh to get a consistent cpuset recommendation."
+                for _cpu in "${pinned_expanded[@]}"; do
+                    local _sib_file="/sys/devices/system/cpu/cpu${_cpu}/topology/thread_siblings_list"
+                    [[ -f "$_sib_file" ]] || continue
+                    local _sibs
+                    _sibs=$(cat "$_sib_file")
+                    if [[ "$_sibs" == *","* || "$_sibs" == *"-"* ]]; then
+                        IFS=',' read -ra _sib_parts <<< "$_sibs"
+                        for _s in "${_sib_parts[@]}"; do
+                            [[ "$_s" == "$_cpu" ]] && continue
+                            local _sib_found=false
+                            for _q in "${pinned_expanded[@]}"; do
+                                [[ "$_q" == "$_s" ]] && _sib_found=true && break
+                            done
+                            if ! $_sib_found; then
+                                ht_split=true
+                                break 2
+                            fi
+                        done
+                    fi
+                done
+
+                if $ht_split; then
+                    ht_colour="$YELLOW"
+                    echo ""
+                    warn_line "Hyper-Threading is ON and some HT sibling pairs are split (one sibling pinned, one not)."
+                    warn_line "Either pin all siblings of each physical core, or pin only one per core."
+                    warn_line "Run suggest-radiod-cpuset.sh to get a consistent cpuset recommendation."
+                else
+                    ht_colour="$GREEN"
+                    ok_line "Hyper-Threading is ON — pinned CPUs form complete physical core(s), no split pairs"
+                fi
             else
-                ht_colour="$GREEN"
-                ok_line "Hyper-Threading is ON — pinned CPUs form complete physical core(s), no split pairs"
+                if (( L3_DOMAIN_COUNT > 1 )); then
+                    ht_colour="$YELLOW"
+                    echo ""
+                    warn_line "Hyper-Threading is ON and ${L3_DOMAIN_COUNT} L3 cache domains detected."
+                    warn_line "Pin radiod to dedicated physical core(s) within one L3 domain for best RT performance."
+                else
+                    ht_colour="$YELLOW"
+                fi
             fi
         else
-            # radiod not running or not pinned — advise pinning when multiple L3 domains exist
-            # (e.g. AMD Ryzen with multiple CCDs, or multi-socket systems)
-            if (( L3_DOMAIN_COUNT > 1 )); then
-                ht_colour="$YELLOW"
-                echo ""
-                warn_line "Hyper-Threading is ON and ${L3_DOMAIN_COUNT} L3 cache domains detected."
-                warn_line "Pin radiod to dedicated physical core(s) within one L3 domain for best RT performance."
-            else
-                ht_colour="$YELLOW"
-            fi
+            ht_status="disabled (${logical_cpus} logical = ${total_phys} physical)"
+            ht_colour="$GREEN"
         fi
-    else
-        ht_status="disabled (${logical_cpus} logical = ${total_phys} physical)"
-        ht_colour="$GREEN"
-    fi
-    kv "Hyper-Threading" "$ht_status" "$ht_colour"
+        kv "Hyper-Threading" "$ht_status" "$ht_colour"
 
-    local ucode
-    ucode=$(grep -m1 'microcode' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | tr -d ' ' || true)
-    ucode="${ucode:-unknown}"
-    kv "Microcode revision" "$ucode"
+        local ucode
+        ucode=$(grep -m1 'microcode' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | tr -d ' ' || true)
+        ucode="${ucode:-unknown}"
+        kv "Microcode revision" "$ucode"
 
-    local min_mhz max_mhz
-    min_mhz=$(sysread /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq)
-    max_mhz=$(sysread /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
-    if [[ -n "$min_mhz" && -n "$max_mhz" ]]; then
-        kv "Freq range" "$(( min_mhz / 1000 )) MHz – $(( max_mhz / 1000 )) MHz"
+        local min_mhz max_mhz
+        min_mhz=$(sysread /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq)
+        max_mhz=$(sysread /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
+        if [[ -n "$min_mhz" && -n "$max_mhz" ]]; then
+            kv "Freq range" "$(( min_mhz / 1000 )) MHz – $(( max_mhz / 1000 )) MHz"
+        fi
     fi
 }
 
@@ -260,74 +437,144 @@ section_cpu_model() {
 section_cpu_flags() {
     header "CPU Feature Flags (SDR-relevant)"
 
-    local flags
-    flags=$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | cut -d: -f2- || true)
-    flags="${flags:-}"
+    if $IS_ARM; then
+        # ── ARM path: read "Features" field ───────────────────────────────────
+        # ARM /proc/cpuinfo uses "Features" (not "flags").
+        # On big.LITTLE, different clusters may expose different feature sets;
+        # read all unique feature lines and union them.
+        local features=""
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^Features[[:space:]]*:[[:space:]]*(.*) ]]; then
+                features+=" ${BASH_REMATCH[1]}"
+            fi
+        done < /proc/cpuinfo
 
-    # flag → description
-    declare -A flag_desc
-    flag_desc[avx512f]="AVX-512F (512-bit SIMD)"
-    flag_desc[avx512bw]="AVX-512BW (byte/word ops)"
-    flag_desc[avx512dq]="AVX-512DQ (dword/qword ops)"
-    flag_desc[avx2]="AVX2 (256-bit SIMD)"
-    flag_desc[avx]="AVX (128-bit SIMD)"
-    flag_desc[fma]="FMA (fused multiply-add)"
-    flag_desc[sse4_2]="SSE 4.2"
-    flag_desc[sse4_1]="SSE 4.1"
-    flag_desc[ssse3]="SSSE3"
-    flag_desc[bmi2]="BMI2 (bit manipulation)"
-    flag_desc[popcnt]="POPCNT"
-    flag_desc[aes]="AES-NI (hardware AES)"
-    flag_desc[nonstop_tsc]="Non-stop TSC (stable clock)"
-    flag_desc[constant_tsc]="Constant TSC"
-    flag_desc[tsc_deadline_timer]="TSC deadline timer"
-    flag_desc[rdtscp]="RDTSCP (precise timing)"
-    flag_desc[hypervisor]="Hypervisor (running in VM)"
+        # ARM feature → description (SDR-relevant)
+        declare -A arm_flag_desc
+        arm_flag_desc[asimd]="ASIMD / NEON (128-bit SIMD) — primary DSP path"
+        arm_flag_desc[asimdhp]="ASIMD half-precision (fp16)"
+        arm_flag_desc[asimddp]="ASIMD dot-product (int8 GEMM)"
+        arm_flag_desc[sve]="SVE (Scalable Vector Extension)"
+        arm_flag_desc[sve2]="SVE2 (extended scalable vectors)"
+        arm_flag_desc[fphp]="FP half-precision"
+        arm_flag_desc[dcpop]="DC PoP (cache persistence)"
+        arm_flag_desc[aes]="AES hardware acceleration"
+        arm_flag_desc[sha1]="SHA-1 hardware"
+        arm_flag_desc[sha2]="SHA-256 hardware"
+        arm_flag_desc[crc32]="CRC32 hardware"
+        arm_flag_desc[atomics]="LSE atomics (ARMv8.1)"
+        arm_flag_desc[cpuid]="CPUID accessible from EL0"
 
-    local ordered=(avx512f avx512bw avx512dq avx2 avx fma sse4_2 sse4_1 ssse3 bmi2 popcnt aes nonstop_tsc constant_tsc tsc_deadline_timer rdtscp hypervisor)
+        local arm_ordered=(asimd asimdhp asimddp sve sve2 fphp aes sha1 sha2 crc32 atomics dcpop cpuid)
 
-    local has_avx2=false has_fma=false
-    for flag in "${ordered[@]}"; do
-        local name="${flag_desc[$flag]}"
-        if echo " $flags " | grep -qw "$flag"; then
-            [[ "$flag" == "avx2" ]] && has_avx2=true
-            [[ "$flag" == "fma"  ]] && has_fma=true
-            if [[ "$flag" == "hypervisor" ]]; then
-                printf "  ${YELLOW}✓${RESET}  %-40s ${YELLOW}← running inside VM/container!${RESET}\n" "$name"
-            else
+        local has_asimd=false has_sve=false
+        for flag in "${arm_ordered[@]}"; do
+            local name="${arm_flag_desc[$flag]}"
+            if echo " $features " | grep -qw "$flag"; then
+                [[ "$flag" == "asimd" ]] && has_asimd=true
+                [[ "$flag" == "sve"   ]] && has_sve=true
                 printf "  ${GREEN}✓${RESET}  %s\n" "$name"
+            else
+                # Only call out absent flags that matter for SDR
+                if [[ "$flag" == "asimd" ]]; then
+                    printf "  ${RED}✗${RESET}  %-50s ${RED}← NEON absent — DSP will be scalar!${RESET}\n" "$name"
+                fi
             fi
-        else
-            # Only call out absent flags that matter for SDR
-            if [[ "$flag" == "avx2" || "$flag" == "fma" ]]; then
-                printf "  ${YELLOW}✗${RESET}  %-40s ${YELLOW}← not present; may limit DSP throughput${RESET}\n" "$name"
-            fi
-        fi
-    done
+        done
 
-    echo ""
-    if $has_avx2 && $has_fma; then
-        ok_line "AVX2 + FMA present — optimal for ka9q-radio DSP kernels"
-    elif $has_avx2; then
-        ok_line "AVX2 present (no FMA) — good SIMD support"
-    else
-        warn_line "No AVX2 — ka9q-radio DSP will fall back to SSE2/scalar paths"
-    fi
-
-    # Check if radiod binary uses AVX2/FMA instructions
-    local radiod_bin
-    radiod_bin=$(command -v radiod 2>/dev/null \
-        || find /usr/local/bin /usr/bin /opt -maxdepth 4 -name radiod -type f 2>/dev/null | head -1 \
-        || echo "")
-    if [[ -n "$radiod_bin" ]]; then
         echo ""
-        if command -v objdump &>/dev/null && objdump -d "$radiod_bin" 2>/dev/null | grep -qiE '\bvfmadd|\bvperm|\bymm'; then
-            ok_line "radiod binary (${radiod_bin}) contains AVX2/FMA instructions"
+        if $has_sve; then
+            ok_line "SVE + ASIMD/NEON present — optimal ARM SIMD for ka9q-radio DSP"
+        elif $has_asimd; then
+            ok_line "ASIMD/NEON present — good ARM SIMD support for ka9q-radio DSP"
         else
-            info_line "radiod binary (${radiod_bin}) — AVX2/FMA not detected (SSE-only or stripped binary)"
+            warn_line "No ASIMD/NEON detected — DSP will run in scalar mode (very slow)"
         fi
+
+        # Check if radiod binary uses NEON/ASIMD instructions
+        local radiod_bin
+        radiod_bin=$(command -v radiod 2>/dev/null \
+            || find /usr/local/bin /usr/bin /opt -maxdepth 4 -name radiod -type f 2>/dev/null | head -1 \
+            || echo "")
+        if [[ -n "$radiod_bin" ]]; then
+            echo ""
+            if command -v objdump &>/dev/null && objdump -d "$radiod_bin" 2>/dev/null | grep -qiE '\bfmla|\bfmul|\bfadd|\bvld1|\bvst1|\bvmla'; then
+                ok_line "radiod binary (${radiod_bin}) contains NEON/ASIMD instructions"
+            else
+                info_line "radiod binary (${radiod_bin}) — NEON/ASIMD not detected (scalar or stripped binary)"
+            fi
+        else
+            info_line "radiod binary not found in PATH or common locations"
+        fi
+
     else
-        info_line "radiod binary not found in PATH or common locations"
+        # ── x86 path (unchanged) ──────────────────────────────────────────────
+        local flags
+        flags=$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | cut -d: -f2- || true)
+        flags="${flags:-}"
+
+        declare -A flag_desc
+        flag_desc[avx512f]="AVX-512F (512-bit SIMD)"
+        flag_desc[avx512bw]="AVX-512BW (byte/word ops)"
+        flag_desc[avx512dq]="AVX-512DQ (dword/qword ops)"
+        flag_desc[avx2]="AVX2 (256-bit SIMD)"
+        flag_desc[avx]="AVX (128-bit SIMD)"
+        flag_desc[fma]="FMA (fused multiply-add)"
+        flag_desc[sse4_2]="SSE 4.2"
+        flag_desc[sse4_1]="SSE 4.1"
+        flag_desc[ssse3]="SSSE3"
+        flag_desc[bmi2]="BMI2 (bit manipulation)"
+        flag_desc[popcnt]="POPCNT"
+        flag_desc[aes]="AES-NI (hardware AES)"
+        flag_desc[nonstop_tsc]="Non-stop TSC (stable clock)"
+        flag_desc[constant_tsc]="Constant TSC"
+        flag_desc[tsc_deadline_timer]="TSC deadline timer"
+        flag_desc[rdtscp]="RDTSCP (precise timing)"
+        flag_desc[hypervisor]="Hypervisor (running in VM)"
+
+        local ordered=(avx512f avx512bw avx512dq avx2 avx fma sse4_2 sse4_1 ssse3 bmi2 popcnt aes nonstop_tsc constant_tsc tsc_deadline_timer rdtscp hypervisor)
+
+        local has_avx2=false has_fma=false
+        for flag in "${ordered[@]}"; do
+            local name="${flag_desc[$flag]}"
+            if echo " $flags " | grep -qw "$flag"; then
+                [[ "$flag" == "avx2" ]] && has_avx2=true
+                [[ "$flag" == "fma"  ]] && has_fma=true
+                if [[ "$flag" == "hypervisor" ]]; then
+                    printf "  ${YELLOW}✓${RESET}  %-40s ${YELLOW}← running inside VM/container!${RESET}\n" "$name"
+                else
+                    printf "  ${GREEN}✓${RESET}  %s\n" "$name"
+                fi
+            else
+                if [[ "$flag" == "avx2" || "$flag" == "fma" ]]; then
+                    printf "  ${YELLOW}✗${RESET}  %-40s ${YELLOW}← not present; may limit DSP throughput${RESET}\n" "$name"
+                fi
+            fi
+        done
+
+        echo ""
+        if $has_avx2 && $has_fma; then
+            ok_line "AVX2 + FMA present — optimal for ka9q-radio DSP kernels"
+        elif $has_avx2; then
+            ok_line "AVX2 present (no FMA) — good SIMD support"
+        else
+            warn_line "No AVX2 — ka9q-radio DSP will fall back to SSE2/scalar paths"
+        fi
+
+        local radiod_bin
+        radiod_bin=$(command -v radiod 2>/dev/null \
+            || find /usr/local/bin /usr/bin /opt -maxdepth 4 -name radiod -type f 2>/dev/null | head -1 \
+            || echo "")
+        if [[ -n "$radiod_bin" ]]; then
+            echo ""
+            if command -v objdump &>/dev/null && objdump -d "$radiod_bin" 2>/dev/null | grep -qiE '\bvfmadd|\bvperm|\bymm'; then
+                ok_line "radiod binary (${radiod_bin}) contains AVX2/FMA instructions"
+            else
+                info_line "radiod binary (${radiod_bin}) — AVX2/FMA not detected (SSE-only or stripped binary)"
+            fi
+        else
+            info_line "radiod binary not found in PATH or common locations"
+        fi
     fi
 }
 
@@ -336,45 +583,68 @@ section_cpu_flags() {
 section_cache() {
     header "Cache Topology"
 
-    local cache_dir="/sys/devices/system/cpu/cpu0/cache"
-    if [[ ! -d "$cache_dir" ]]; then
+    local any_cache_dir
+    any_cache_dir=$(ls -d /sys/devices/system/cpu/cpu0/cache 2>/dev/null || echo "")
+    if [[ -z "$any_cache_dir" ]]; then
         info_line "Cache sysfs not available"
         return
     fi
 
-    declare -A _seen_cache_entries
+    # Iterate ALL CPUs and deduplicate by (level, type, shared_cpu_list) so that
+    # on big.LITTLE systems we show one row per unique cache instance rather than
+    # only cpu0's caches.  The dedup key is "L<level><type>:<shared_cpu_list>".
+    declare -A _seen_cache_keys=()   # key → "size:line_size" (first seen wins)
 
-    for idx_dir in "${cache_dir}"/index*/; do
-        [[ -d "$idx_dir" ]] || continue
-        local level type size shared_cpu_list line_size
-        level=$(sysread "${idx_dir}level")
-        type=$(sysread "${idx_dir}type")
-        size=$(sysread "${idx_dir}size")
-        shared_cpu_list=$(sysread "${idx_dir}shared_cpu_list")
-        line_size=$(sysread "${idx_dir}coherency_line_size")
+    for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/cache/; do
+        [[ -d "$cpu_dir" ]] || continue
+        for idx_dir in "${cpu_dir}"index*/; do
+            [[ -d "$idx_dir" ]] || continue
+            local level type size shared_cpu_list line_size
+            level=$(sysread "${idx_dir}level")
+            type=$(sysread "${idx_dir}type")
+            size=$(sysread "${idx_dir}size")
+            shared_cpu_list=$(sysread "${idx_dir}shared_cpu_list")
+            line_size=$(sysread "${idx_dir}coherency_line_size")
 
-        local type_short
-        case "$type" in
-            Instruction) type_short="I" ;;
-            Data)        type_short="D" ;;
-            Unified)     type_short="U" ;;
-            *)           type_short="?" ;;
-        esac
+            local type_short
+            case "$type" in
+                Instruction) type_short="I" ;;
+                Data)        type_short="D" ;;
+                Unified)     type_short="U" ;;
+                *)           type_short="?" ;;
+            esac
 
-        local label="L${level}${type_short}"
+            local dedup_key="L${level}${type_short}:${shared_cpu_list}"
+            [[ -n "${_seen_cache_keys[$dedup_key]:-}" ]] && continue
+            _seen_cache_keys["$dedup_key"]="${size}:${line_size}"
+        done
+    done 2>/dev/null || true
+
+    # Print sorted by level then type
+    local _sorted_keys
+    _sorted_keys=$(printf '%s\n' "${!_seen_cache_keys[@]}" | sort -t: -k1,1V -k2,2)
+    while IFS= read -r dedup_key; do
+        [[ -z "$dedup_key" ]] && continue
+        local label="${dedup_key%%:*}"
+        local shared_cpu_list="${dedup_key#*:}"
+        local val="${_seen_cache_keys[$dedup_key]}"
+        local size="${val%%:*}"
+        local line_size="${val#*:}"
+        local level="${label:1:1}"
+
         local colour="$RESET"
         [[ "$level" == "3" ]] && colour="${CYAN}${BOLD}"
         [[ "$level" == "1" ]] && colour="$DIM"
 
         printf "  ${colour}%-8s${RESET}  size=%-8s  line=%3s B  shared_cpus=[%s]\n" \
             "$label" "$size" "$line_size" "$shared_cpu_list"
-    done
+    done <<< "$_sorted_keys"
 
     # Count unique L3 instances across all CPUs and export as L3_DOMAIN_COUNT.
     # This is the authoritative topology boundary for pinning/isolation advice —
     # more accurate than NUMA node count (e.g. AMD Ryzen with multiple CCDs has
     # multiple L3 domains on a single NUMA node).
-    declare -A _seen_l3
+    declare -A _seen_l3=()
     local l3_total_kb=0 l3_count=0
     for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*/cache/; do
         for idx_dir in "${cpu_dir}"index*/; do
@@ -469,41 +739,139 @@ section_numa() {
 section_governor() {
     header "CPU Frequency Governor & Turbo"
 
-    declare -A gov_cpus=()
-    for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-        [[ -f "$gov_file" ]] || continue
-        local cpu_n gov
-        cpu_n=$(basename "$(dirname "$(dirname "$gov_file")")")
-        gov=$(cat "$gov_file" 2>/dev/null || echo "unknown")
-        gov_cpus["$gov"]+="${cpu_n} "
+    # On big.LITTLE systems the kernel exposes one cpufreq policy per cluster
+    # (e.g. policy0 = A55 cores 0-3, policy4 = A76 cores 4-7).
+    # Iterate policies first; fall back to per-CPU governor files if no policies exist.
+
+    local any_gov_found=false
+    local perf_gov_on_big=false   # true if big/prime cluster has performance governor
+    local any_non_perf=false
+
+    # ── Per-policy display (ARM big.LITTLE and modern x86 both use this) ──────
+    local policy_dirs=()
+    for pd in /sys/devices/system/cpu/cpufreq/policy*/; do
+        [[ -d "$pd" ]] && policy_dirs+=("$pd")
     done
 
-    if [[ ${#gov_cpus[@]} -eq 0 ]]; then
-        info_line "cpufreq sysfs not available (container or no cpufreq driver)"
-    else
-        for gov in "${!gov_cpus[@]}"; do
+    if [[ ${#policy_dirs[@]} -gt 0 ]]; then
+        any_gov_found=true
+        printf "  ${BOLD}%-12s  %-14s  %-12s  %-14s  %s${RESET}\n" \
+            "Policy" "CPUs" "Governor" "Freq range" "Cluster"
+        printf "  %s\n" "$(printf '%.0s─' {1..75})"
+
+        for pd in "${policy_dirs[@]}"; do
+            local pol_name gov cpulist fmin fmax cur_freq cluster_label=""
+            pol_name=$(basename "$pd")
+            gov=$(cat "${pd}scaling_governor" 2>/dev/null || echo "unknown")
+            cpulist=$(cat "${pd}related_cpus" 2>/dev/null || cat "${pd}affected_cpus" 2>/dev/null || echo "?")
+            fmin=$(cat "${pd}cpuinfo_min_freq" 2>/dev/null || echo "")
+            fmax=$(cat "${pd}cpuinfo_max_freq" 2>/dev/null || echo "")
+            cur_freq=$(cat "${pd}scaling_cur_freq" 2>/dev/null || echo "")
+
+            local freq_str=""
+            if [[ -n "$fmin" && -n "$fmax" ]]; then
+                freq_str="$(( fmin/1000 ))–$(( fmax/1000 )) MHz"
+            fi
+
+            # On ARM: identify cluster type from the first CPU in this policy
+            if $IS_ARM; then
+                local first_cpu
+                first_cpu=$(echo "$cpulist" | tr ' ' '\n' | grep -v '^$' | head -1)
+                if [[ -n "$first_cpu" ]]; then
+                    local impl part
+                    impl=$(awk "/^processor[[:space:]]*:[[:space:]]*${first_cpu}$/,/^$/{if(/CPU implementer/){print \$NF;exit}}" /proc/cpuinfo 2>/dev/null || echo "")
+                    part=$(awk "/^processor[[:space:]]*:[[:space:]]*${first_cpu}$/,/^$/{if(/CPU part/){print \$NF;exit}}" /proc/cpuinfo 2>/dev/null || echo "")
+                    if [[ -n "$impl" && -n "$part" ]]; then
+                        local cname
+                        cname=$(arm_cpu_part_name "$impl" "$part")
+                        local crole
+                        crole=$(arm_cluster_role "$cname")
+                        cluster_label="${cname} (${crole:-?})"
+                        [[ "$crole" == "big" || "$crole" == "prime" ]] && \
+                            [[ "$gov" == "performance" ]] && perf_gov_on_big=true
+                    fi
+                fi
+            fi
+
             local colour note
             case "$gov" in
-                performance) colour="$GREEN";  note=" ← ideal for real-time SDR" ;;
-                powersave)   colour="$YELLOW"; note=" ← may throttle under load" ;;
-                ondemand)    colour="$YELLOW"; note=" ← ramp-up latency can cause sample drops" ;;
-                schedutil)   colour="$YELLOW"; note=" ← better than ondemand, still has latency" ;;
+                performance) colour="$GREEN";  note="" ;;
+                powersave)   colour="$YELLOW"; note=" ← may throttle" ;;
+                ondemand)    colour="$YELLOW"; note=" ← ramp-up latency" ;;
+                schedutil)   colour="$YELLOW"; note=" ← latency possible" ;;
                 *)           colour="$RESET";  note="" ;;
             esac
-            printf "  ${BOLD}${colour}%-14s${RESET}  CPUs: %s${colour}%s${RESET}\n" \
-                "$gov" "${gov_cpus[$gov]}" "$note"
+            [[ "$gov" != "performance" ]] && any_non_perf=true
+
+            local cur_str=""
+            [[ -n "$cur_freq" ]] && cur_str=" (now $(( cur_freq/1000 )) MHz)"
+
+            printf "  %-12s  %-14s  ${colour}%-12s${RESET}  %-14s  %s%s%s\n" \
+                "$pol_name" "[$cpulist]" "$gov" "$freq_str" \
+                "$cluster_label" "$cur_str" "${colour}${note}${RESET}"
         done
-        echo ""
-        if [[ -n "${gov_cpus[performance]:-}" ]]; then
-            ok_line "performance governor active"
+
+    else
+        # Fallback: no policy dirs — group by governor across all CPUs
+        declare -A gov_cpus=()
+        for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            [[ -f "$gov_file" ]] || continue
+            local cpu_n gov
+            cpu_n=$(basename "$(dirname "$(dirname "$gov_file")")")
+            gov=$(cat "$gov_file" 2>/dev/null || echo "unknown")
+            gov_cpus["$gov"]+="${cpu_n} "
+        done
+
+        if [[ ${#gov_cpus[@]} -eq 0 ]]; then
+            info_line "cpufreq sysfs not available (container or no cpufreq driver)"
         else
-            warn_line "CPU governor is not 'performance' — use 'Manage CPU Governor' in UberSDR Admin to fix"
-            info_line "Note: 'performance' keeps the CPU at max frequency, reducing frequency-scaling latency."
-            info_line "      Trade-off: higher idle power consumption and increased heat output."
+            any_gov_found=true
+            for gov in "${!gov_cpus[@]}"; do
+                local colour note
+                case "$gov" in
+                    performance) colour="$GREEN";  note=" ← ideal for real-time SDR" ;;
+                    powersave)   colour="$YELLOW"; note=" ← may throttle under load" ;;
+                    ondemand)    colour="$YELLOW"; note=" ← ramp-up latency can cause sample drops" ;;
+                    schedutil)   colour="$YELLOW"; note=" ← better than ondemand, still has latency" ;;
+                    *)           colour="$RESET";  note="" ;;
+                esac
+                [[ "$gov" != "performance" ]] && any_non_perf=true
+                printf "  ${BOLD}${colour}%-14s${RESET}  CPUs: %s${colour}%s${RESET}\n" \
+                    "$gov" "${gov_cpus[$gov]}" "$note"
+            done
         fi
     fi
 
-    # Turbo / boost
+    if $any_gov_found; then
+        echo ""
+        if $IS_ARM && [[ ${#policy_dirs[@]} -gt 1 ]]; then
+            # big.LITTLE: the important thing is that the big/prime cluster is on performance.
+            # LITTLE cores on schedutil/powersave is acceptable (they handle background work).
+            if $perf_gov_on_big; then
+                ok_line "big/prime cluster governor: performance — optimal for RT SDR threads"
+                if $any_non_perf; then
+                    info_line "LITTLE cluster on non-performance governor is acceptable (background tasks only)"
+                    info_line "Pin radiod to the big/prime cluster CPUs to ensure it always runs at full speed"
+                fi
+            elif ! $any_non_perf; then
+                ok_line "All clusters on performance governor"
+            else
+                warn_line "big/prime cluster is NOT on performance governor — RT threads may be throttled"
+                warn_line "Use 'Manage CPU Governor' in UberSDR Admin, or:"
+                info_line "  echo performance | sudo tee /sys/devices/system/cpu/cpufreq/policy*/scaling_governor"
+            fi
+        else
+            if ! $any_non_perf; then
+                ok_line "performance governor active on all CPUs"
+            else
+                warn_line "CPU governor is not 'performance' — use 'Manage CPU Governor' in UberSDR Admin to fix"
+                info_line "Note: 'performance' keeps the CPU at max frequency, reducing frequency-scaling latency."
+                info_line "      Trade-off: higher idle power consumption and increased heat output."
+            fi
+        fi
+    fi
+
+    # Turbo / boost (x86 only; ARM uses boost via cpufreq policy max freq)
     echo ""
     local intel_no_turbo="/sys/devices/system/cpu/intel_pstate/no_turbo"
     local boost_file="/sys/devices/system/cpu/cpufreq/boost"
@@ -519,29 +887,8 @@ section_governor() {
         local boost
         boost=$(cat "$boost_file")
         [[ "$boost" == "1" ]] && ok_line "CPU Boost: ENABLED" || warn_line "CPU Boost: DISABLED"
-    else
+    elif ! $IS_ARM; then
         info_line "Turbo/boost status: not detectable via sysfs"
-    fi
-
-    # Current per-core frequencies
-    echo ""
-    local freqs=()
-    for freq_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
-        [[ -f "$freq_file" ]] || continue
-        local f
-        f=$(cat "$freq_file" 2>/dev/null || echo "0")
-        freqs+=("$(( f / 1000 ))")
-    done
-    if [[ ${#freqs[@]} -gt 0 ]]; then
-        local min_f max_f sum_f=0
-        min_f="${freqs[0]}"; max_f="${freqs[0]}"
-        for f in "${freqs[@]}"; do
-            (( f < min_f )) && min_f=$f || true
-            (( f > max_f )) && max_f=$f || true
-            (( sum_f += f )) || true
-        done
-        local avg_f=$(( sum_f / ${#freqs[@]} ))
-        kv "Current freq (min/avg/max)" "${min_f} / ${avg_f} / ${max_f} MHz"
     fi
 }
 
@@ -868,8 +1215,79 @@ section_affinity() {
             RADIOD_PINNED_CPU_COUNT="${#expanded_pinned[@]}"
         fi
 
+        # ── ARM: show cluster type for each pinned CPU ────────────────────────
+        if $IS_ARM; then
+            # Parse /proc/cpuinfo once for implementer+part per processor
+            declare -A _aff_impl=() _aff_part=()
+            local _aff_cur_proc=""
+            while IFS= read -r _aff_line; do
+                if [[ "$_aff_line" =~ ^processor[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+                    _aff_cur_proc="${BASH_REMATCH[1]}"
+                elif [[ "$_aff_line" =~ ^CPU\ implementer[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) && -n "$_aff_cur_proc" ]]; then
+                    _aff_impl["$_aff_cur_proc"]="${BASH_REMATCH[1]}"
+                elif [[ "$_aff_line" =~ ^CPU\ part[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) && -n "$_aff_cur_proc" ]]; then
+                    _aff_part["$_aff_cur_proc"]="${BASH_REMATCH[1]}"
+                fi
+            done < /proc/cpuinfo
+
+            # Build per-CPU cluster info for the pinned set
+            declare -A _aff_seen_roles=()
+            local _aff_cluster_lines=""
+            local _aff_any_role=false
+            for _aff_cpu in "${_real_pinned[@]}"; do
+                local _aff_cimpl="${_aff_impl[$_aff_cpu]:-}"
+                local _aff_cpart="${_aff_part[$_aff_cpu]:-}"
+                local _aff_cname="" _aff_crole=""
+                if [[ -n "$_aff_cimpl" && -n "$_aff_cpart" ]]; then
+                    _aff_cname=$(arm_cpu_part_name "$_aff_cimpl" "$_aff_cpart")
+                    _aff_crole=$(arm_cluster_role "$_aff_cname")
+                fi
+                local _aff_gov=""
+                _aff_gov=$(cat "/sys/devices/system/cpu/cpu${_aff_cpu}/cpufreq/scaling_governor" 2>/dev/null || echo "?")
+                local _aff_cur_mhz="?"
+                local _aff_cur_khz
+                _aff_cur_khz=$(cat "/sys/devices/system/cpu/cpu${_aff_cpu}/cpufreq/scaling_cur_freq" 2>/dev/null || echo "0")
+                [[ "$_aff_cur_khz" =~ ^[0-9]+$ ]] && _aff_cur_mhz=$(( _aff_cur_khz / 1000 ))
+                local _aff_max_mhz="?"
+                local _aff_max_khz
+                _aff_max_khz=$(cat "/sys/devices/system/cpu/cpu${_aff_cpu}/cpufreq/cpuinfo_max_freq" 2>/dev/null || echo "0")
+                [[ "$_aff_max_khz" =~ ^[0-9]+$ ]] && _aff_max_mhz=$(( _aff_max_khz / 1000 ))
+                local _aff_role_str=""
+                if [[ -n "$_aff_crole" ]]; then
+                    _aff_role_str="${_aff_crole}(${_aff_cname})"
+                    _aff_seen_roles["$_aff_crole"]=1
+                    _aff_any_role=true
+                elif [[ -n "$_aff_cname" ]]; then
+                    _aff_role_str="$_aff_cname"
+                    _aff_any_role=true
+                fi
+                _aff_cluster_lines+=$(printf "    cpu%-3s  %-28s  gov=%-12s  cur=%4s MHz  max=%4s MHz\n" \
+                    "$_aff_cpu" "$_aff_role_str" "$_aff_gov" "$_aff_cur_mhz" "$_aff_max_mhz")
+                _aff_cluster_lines+=$'\n'
+            done
+
+            if $_aff_any_role; then
+                echo "  Pinned CPU cluster breakdown:"
+                echo "$_aff_cluster_lines"
+                # Warn if pinned to LITTLE cores only on a heterogeneous system
+                local _aff_role_count=0
+                for _r in "${!_aff_seen_roles[@]}"; do (( _aff_role_count++ )) || true; done
+                if (( _aff_role_count == 1 )); then
+                    local _only_role="${!_aff_seen_roles[*]}"
+                    if [[ "$_only_role" == "LITTLE" ]]; then
+                        warn_line "radiod is pinned to LITTLE cores only — consider big/prime cores for better real-time performance"
+                        info_line "Run: ./suggest-radiod-cpuset.sh --cluster big --apply"
+                    elif [[ "$_only_role" == "big" || "$_only_role" == "prime" ]]; then
+                        ok_line "radiod is pinned to ${_only_role} cores — optimal for real-time SDR"
+                    fi
+                elif (( _aff_role_count > 1 )); then
+                    warn_line "radiod is pinned across mixed cluster types (${!_aff_seen_roles[*]}) — consider pinning to one cluster type"
+                fi
+            fi
+        fi
+
         # Check which NUMA nodes these CPUs belong to
-        declare -A pinned_numa_nodes
+        declare -A pinned_numa_nodes=()
         for cpu_n in "${_real_pinned[@]}"; do
             local node_file="/sys/devices/system/cpu/cpu${cpu_n}/node"
             # node symlink or node0..nodeN dirs
@@ -891,7 +1309,7 @@ section_affinity() {
         fi
 
         # Check whether pinned CPUs span multiple L3 cache domains
-        declare -A _pinned_l3_domains
+        declare -A _pinned_l3_domains=()
         for cpu_n in "${_real_pinned[@]}"; do
             local _cache_base="/sys/devices/system/cpu/cpu${cpu_n}/cache"
             [[ -d "$_cache_base" ]] || continue
@@ -915,7 +1333,7 @@ section_affinity() {
         fi
 
         # Check if pinned CPUs include HT siblings (warn)
-        declare -A _ht_check
+        declare -A _ht_check=()
         local ht_mixed=false
         for cpu_n in "${_real_pinned[@]}"; do
             local sib_file="/sys/devices/system/cpu/cpu${cpu_n}/topology/thread_siblings_list"
@@ -990,7 +1408,7 @@ section_threads() {
     local threads_off_core=()   # "TID:name:cpu#" entries
 
     # We need two samples to get accurate CPU% per thread
-    declare -A t1_utime t1_stime t1_total
+    declare -A t1_utime=() t1_stime=() t1_total=()
     local sys_hz
     sys_hz=$(getconf CLK_TCK 2>/dev/null || echo "100")
 
@@ -1343,7 +1761,7 @@ section_cpu_load() {
     header "System CPU Load (0.5 s sample)"
 
     # Sample /proc/stat twice
-    declare -A idle1 total1 idle2 total2
+    declare -A idle1=() total1=() idle2=() total2=()
 
     while IFS= read -r line; do
         [[ "$line" =~ ^cpu([0-9]+)[[:space:]]+(.*) ]] || continue
@@ -1561,21 +1979,54 @@ section_summary() {
     local issues=0
 
     # Governor check
+    # On ARM big.LITTLE: only require the big/prime cluster to be on performance.
+    # LITTLE cores on schedutil/powersave is acceptable.
     local bad_gov=false
-    for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-        [[ -f "$gov_file" ]] || continue
-        local g
-        g=$(cat "$gov_file" 2>/dev/null || echo "")
-        [[ "$g" != "performance" ]] && bad_gov=true && break
-    done
+    if $IS_ARM; then
+        # Check each cpufreq policy; flag as bad only if a big/prime cluster is not on performance
+        local _found_big_policy=false
+        for pd in /sys/devices/system/cpu/cpufreq/policy*/; do
+            [[ -d "$pd" ]] || continue
+            local _pg _pcpus _first_cpu _impl _part _cname _crole
+            _pg=$(cat "${pd}scaling_governor" 2>/dev/null || echo "")
+            _pcpus=$(cat "${pd}related_cpus" 2>/dev/null || cat "${pd}affected_cpus" 2>/dev/null || echo "")
+            _first_cpu=$(echo "$_pcpus" | tr ' ' '\n' | grep -v '^$' | head -1)
+            if [[ -n "$_first_cpu" ]]; then
+                _impl=$(awk "/^processor[[:space:]]*:[[:space:]]*${_first_cpu}$/,/^$/{if(/CPU implementer/){print \$NF;exit}}" /proc/cpuinfo 2>/dev/null || echo "")
+                _part=$(awk "/^processor[[:space:]]*:[[:space:]]*${_first_cpu}$/,/^$/{if(/CPU part/){print \$NF;exit}}" /proc/cpuinfo 2>/dev/null || echo "")
+                _cname=$(arm_cpu_part_name "$_impl" "$_part")
+                _crole=$(arm_cluster_role "$_cname")
+                if [[ "$_crole" == "big" || "$_crole" == "prime" ]]; then
+                    _found_big_policy=true
+                    [[ "$_pg" != "performance" ]] && bad_gov=true
+                fi
+            fi
+        done
+        # If we couldn't identify clusters, fall back to checking all policies
+        if ! $_found_big_policy; then
+            for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+                [[ -f "$gov_file" ]] || continue
+                local g
+                g=$(cat "$gov_file" 2>/dev/null || echo "")
+                [[ "$g" != "performance" ]] && bad_gov=true && break
+            done
+        fi
+    else
+        for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            [[ -f "$gov_file" ]] || continue
+            local g
+            g=$(cat "$gov_file" 2>/dev/null || echo "")
+            [[ "$g" != "performance" ]] && bad_gov=true && break
+        done
+    fi
     if $bad_gov; then
-        warn_line "CPU governor is not 'performance'"
+        warn_line "CPU governor is not 'performance' on the big/prime cluster"
         echo "    Fix: use 'Manage CPU Governor' in UberSDR Admin"
         info_line "Note: 'performance' eliminates frequency-scaling latency at the cost of higher power use and heat."
         info_line "      Consider the trade-off if running on low-power or fanless hardware."
         (( issues++ )) || true
     else
-        ok_line "CPU governor: performance"
+        ok_line "CPU governor: performance (big/prime cluster)"
     fi
 
     # radiod running
@@ -1638,7 +2089,7 @@ section_summary() {
             ok_line "radiod pinned to CPUs: ${RADIOD_PINNED_CPUS}"
 
             # L3 domain check on the real pinned set
-            declare -A _sum_l3_domains
+            declare -A _sum_l3_domains=()
             IFS=',' read -ra _sum_parts <<< "$RADIOD_PINNED_CPUS"
             for _sp in "${_sum_parts[@]}"; do
                 local _sum_cpus=()
@@ -1686,12 +2137,21 @@ section_summary() {
         fi
     fi
 
-    # AVX2
-    if grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | grep -qw 'avx2'; then
-        ok_line "AVX2 SIMD instructions available"
+    # SIMD capability check (arch-aware)
+    if $IS_ARM; then
+        if grep 'Features' /proc/cpuinfo 2>/dev/null | grep -qw 'asimd'; then
+            ok_line "ASIMD/NEON SIMD instructions available (ARM equivalent of SSE/AVX)"
+        else
+            warn_line "No ASIMD/NEON detected — DSP will run in scalar mode (very slow)"
+            (( issues++ )) || true
+        fi
     else
-        warn_line "No AVX2 — DSP performance may be limited"
-        (( issues++ )) || true
+        if grep -m1 '^flags' /proc/cpuinfo 2>/dev/null | grep -qw 'avx2'; then
+            ok_line "AVX2 SIMD instructions available"
+        else
+            warn_line "No AVX2 — DSP performance may be limited"
+            (( issues++ )) || true
+        fi
     fi
 
     # Turbo

@@ -1,9 +1,123 @@
 #!/bin/bash
 
+# generate_wisdom.sh - FFTW wisdom generator for UberSDR / radiod
+#
+# FFTW wisdom encodes the fastest FFT plan for a specific CPU microarchitecture.
+# On ARM big.LITTLE / DynamIQ systems (e.g. Rock 5 / RK3588) the LITTLE cores
+# (Cortex-A55) and big cores (Cortex-A76) have different pipeline widths, cache
+# sizes, and SIMD throughput.  Wisdom generated on an A55 core is WRONG for
+# radiod if radiod runs on A76 cores — FFTW will use a suboptimal plan.
+#
+# This script detects ARM big.LITTLE topology, reads the Docker cpuset for the
+# ka9q-radio service, and runs fftwf-wisdom pinned to the same CPU(s) that
+# radiod will use via taskset.  On x86 or homogeneous ARM the pinning is skipped.
+
 # Exit on error
 set -e
 
-# Parse command line arguments
+# ── ARM architecture detection & helpers ─────────────────────────────────────
+
+IS_ARM=false
+case "$(uname -m 2>/dev/null)" in
+    aarch64|armv7l|armv8l) IS_ARM=true ;;
+esac
+if grep -q 'CPU implementer' /proc/cpuinfo 2>/dev/null; then IS_ARM=true; fi
+
+# arm_cpu_part_name IMPLEMENTER PART → human name
+arm_cpu_part_name() {
+    local impl="${1:-}" part="${2:-}"
+    case "${impl}:${part}" in
+        0x41:0xd03) echo "Cortex-A53" ;;
+        0x41:0xd04) echo "Cortex-A35" ;;
+        0x41:0xd05) echo "Cortex-A55" ;;
+        0x41:0xd06) echo "Cortex-A65" ;;
+        0x41:0xd07) echo "Cortex-A57" ;;
+        0x41:0xd08) echo "Cortex-A72" ;;
+        0x41:0xd09) echo "Cortex-A73" ;;
+        0x41:0xd0a) echo "Cortex-A75" ;;
+        0x41:0xd0b) echo "Cortex-A76" ;;
+        0x41:0xd0c) echo "Neoverse-N1" ;;
+        0x41:0xd0d) echo "Cortex-A77" ;;
+        0x41:0xd41) echo "Cortex-A78" ;;
+        0x41:0xd44) echo "Cortex-X1" ;;
+        0x41:0xd46) echo "Cortex-A510" ;;
+        0x41:0xd47) echo "Cortex-A710" ;;
+        0x41:0xd48) echo "Cortex-X2" ;;
+        0x41:0xd4d) echo "Cortex-A715" ;;
+        0x41:0xd4e) echo "Cortex-X3" ;;
+        0x51:0x800) echo "Kryo 2xx Gold" ;;
+        0x51:0x801) echo "Kryo 2xx Silver" ;;
+        0x51:0x803) echo "Kryo 3xx Silver" ;;
+        0x51:0x804) echo "Kryo 4xx Gold" ;;
+        0x51:0x805) echo "Kryo 4xx Silver" ;;
+        *) echo "Unknown (impl=${impl} part=${part})" ;;
+    esac
+}
+
+# arm_cluster_role NAME → LITTLE | big | prime | ""
+arm_cluster_role() {
+    case "$1" in
+        *A53*|*A55*|*A35*|*A510*|*"Kryo 2xx Silver"*|*"Kryo 3xx Silver"*|*"Kryo 4xx Silver"*) echo "LITTLE" ;;
+        *A57*|*A72*|*A73*|*A75*|*A76*|*A77*|*A78*|*A710*|*A715*|*"Kryo 2xx Gold"*|*"Kryo 4xx Gold"*) echo "big" ;;
+        *X1*|*X2*|*X3*|*Neoverse*) echo "prime" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Detect whether this ARM system has heterogeneous clusters
+arm_is_heterogeneous() {
+    $IS_ARM || return 1
+    local _seen_roles=""
+    local _cur_proc="" _impl="" _part=""
+    while IFS= read -r _line; do
+        if [[ "$_line" =~ ^processor[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+            _cur_proc="${BASH_REMATCH[1]}"
+        elif [[ "$_line" =~ ^CPU\ implementer[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) ]]; then
+            _impl="${BASH_REMATCH[1]}"
+        elif [[ "$_line" =~ ^CPU\ part[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) ]]; then
+            _part="${BASH_REMATCH[1]}"
+            if [[ -n "$_impl" && -n "$_part" ]]; then
+                local _cname _crole
+                _cname=$(arm_cpu_part_name "$_impl" "$_part")
+                _crole=$(arm_cluster_role "$_cname")
+                if [[ -n "$_crole" && "$_seen_roles" != *"$_crole"* ]]; then
+                    _seen_roles+=" $_crole"
+                fi
+            fi
+        fi
+    done < /proc/cpuinfo
+    # Heterogeneous if more than one distinct role found
+    local _count
+    _count=$(echo "$_seen_roles" | wc -w)
+    (( _count > 1 ))
+}
+
+# Get the CPU name for a given logical CPU number
+cpu_name_for() {
+    local _cpu="$1"
+    local _impl="" _part="" _cur_proc="" _found=false
+    while IFS= read -r _line; do
+        if [[ "$_line" =~ ^processor[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+            _cur_proc="${BASH_REMATCH[1]}"
+        elif [[ "$_line" =~ ^CPU\ implementer[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) ]]; then
+            _impl="${BASH_REMATCH[1]}"
+        elif [[ "$_line" =~ ^CPU\ part[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) ]]; then
+            _part="${BASH_REMATCH[1]}"
+            if [[ "$_cur_proc" == "$_cpu" ]]; then
+                _found=true
+                break
+            fi
+        fi
+    done < /proc/cpuinfo
+    if $_found && [[ -n "$_impl" && -n "$_part" ]]; then
+        arm_cpu_part_name "$_impl" "$_part"
+    else
+        echo "unknown"
+    fi
+}
+
+# ── Parse command line arguments ─────────────────────────────────────────────
+
 MAX_RATE=0
 for arg in "$@"; do
     case $arg in
@@ -16,6 +130,8 @@ done
 
 echo "=== UberSDR FFTW Wisdom Generator ==="
 echo
+
+# ── Dependency checks ─────────────────────────────────────────────────────────
 
 # Check if tmux is installed
 if ! command -v tmux &> /dev/null; then
@@ -31,15 +147,176 @@ if ! sudo which fftwf-wisdom &> /dev/null; then
     exit 1
 fi
 
+# ── ARM big.LITTLE: determine which CPUs to pin wisdom generation to ──────────
+#
+# FFTW wisdom is CPU-microarchitecture-specific.  On big.LITTLE systems,
+# wisdom generated on LITTLE cores (e.g. Cortex-A55) will produce a suboptimal
+# FFT plan when radiod runs on big cores (e.g. Cortex-A76), because the two
+# core types have different pipeline widths, SIMD throughput, and cache sizes.
+#
+# We read the Docker cpuset for ka9q-radio from docker-compose.yml and pin
+# fftwf-wisdom to those same CPUs via taskset.
+
+TASKSET_PREFIX=""
+WISDOM_CPU_DESC=""
+
+if $IS_ARM && arm_is_heterogeneous; then
+    echo "  Detected ARM big.LITTLE / DynamIQ system."
+    echo
+
+    # Find docker-compose.yml
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    COMPOSE_FILE=""
+    for _candidate in \
+        "${SCRIPT_DIR}/docker-compose.yml" \
+        "$HOME/ubersdr/docker-compose.yml" \
+        "/opt/ubersdr/docker-compose.yml"; do
+        if [[ -f "$_candidate" ]]; then
+            COMPOSE_FILE="$_candidate"
+            break
+        fi
+    done
+
+    RADIOD_CPUSET=""
+    if [[ -n "$COMPOSE_FILE" ]]; then
+        # Extract cpuset from ka9q-radio service block.
+        # Uses sed-based extraction for portability (mawk doesn't support
+        # match() with a capture-group array argument).
+        RADIOD_CPUSET=$(awk '
+            /^  ka9q-radio:[[:space:]]*(#.*)?$/ { in_block=1; next }
+            in_block && /^  [^[:space:]#]/ { in_block=0 }
+            in_block && /^[[:space:]]+cpuset:/ { print; exit }
+        ' "$COMPOSE_FILE" 2>/dev/null \
+        | sed 's/.*cpuset:[[:space:]]*"\?\([^"#[:space:]]*\)"\?.*/\1/' \
+        | tr -d '[:space:]' \
+        || echo "")
+    fi
+
+    if [[ -n "$RADIOD_CPUSET" ]]; then
+        # Identify the cluster type of the first CPU in the cpuset
+        _first_cpu="${RADIOD_CPUSET%%,*}"
+        _first_cpu="${_first_cpu%%-*}"   # handle range like "4-7"
+        _cname=$(cpu_name_for "$_first_cpu")
+        _crole=$(arm_cluster_role "$_cname")
+
+        echo "  ┌─────────────────────────────────────────────────────────────────┐"
+        echo "  │  ⚠  FFTW WISDOM MUST MATCH THE CPU TYPE RADIOD RUNS ON          │"
+        echo "  ├─────────────────────────────────────────────────────────────────┤"
+        echo "  │  FFTW wisdom encodes the fastest FFT plan for a specific CPU.   │"
+        echo "  │  On big.LITTLE systems, wisdom from LITTLE cores is WRONG for   │"
+        echo "  │  radiod if it runs on big cores (different SIMD/cache/pipeline).│"
+        echo "  └─────────────────────────────────────────────────────────────────┘"
+        echo
+        echo "  Docker cpuset for ka9q-radio: ${RADIOD_CPUSET}"
+        if [[ -n "$_crole" ]]; then
+            echo "  Cluster type: ${_crole} (${_cname})"
+        fi
+        echo
+        echo "  fftwf-wisdom will be pinned to CPU(s) ${RADIOD_CPUSET} via taskset"
+        echo "  to ensure the wisdom matches the microarchitecture radiod uses."
+        echo
+
+        TASKSET_PREFIX="taskset -c ${RADIOD_CPUSET}"
+        WISDOM_CPU_DESC=" [pinned to CPUs ${RADIOD_CPUSET} / ${_crole}(${_cname})]"
+
+    else
+        # No cpuset found — build cluster map and ask user which type to use
+        echo "  ┌─────────────────────────────────────────────────────────────────┐"
+        echo "  │  ⚠  No CPU pinning configured for radiod                        │"
+        echo "  ├─────────────────────────────────────────────────────────────────┤"
+        echo "  │  FFTW wisdom is CPU-microarchitecture-specific.                 │"
+        echo "  │  On big.LITTLE systems, wisdom from LITTLE cores is WRONG for   │"
+        echo "  │  radiod if it runs on big cores (different SIMD/cache/pipeline).│"
+        echo "  │                                                                  │"
+        echo "  │  Please choose which cluster type to generate wisdom for.       │"
+        echo "  └─────────────────────────────────────────────────────────────────┘"
+        echo
+
+        # Build cluster → CPU list map from /proc/cpuinfo
+        declare -A _wis_cluster_cpus=()
+        declare -A _wis_cluster_name=()
+        _wis_cur_proc="" _wis_impl="" _wis_part=""
+        while IFS= read -r _wis_line; do
+            if [[ "$_wis_line" =~ ^processor[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+                _wis_cur_proc="${BASH_REMATCH[1]}"
+                _wis_impl=""
+                _wis_part=""
+            elif [[ "$_wis_line" =~ ^CPU\ implementer[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) ]]; then
+                _wis_impl="${BASH_REMATCH[1]}"
+            elif [[ "$_wis_line" =~ ^CPU\ part[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) ]]; then
+                _wis_part="${BASH_REMATCH[1]}"
+                if [[ -n "$_wis_cur_proc" && -n "$_wis_impl" && -n "$_wis_part" ]]; then
+                    _wn=$(arm_cpu_part_name "$_wis_impl" "$_wis_part")
+                    _wr=$(arm_cluster_role "$_wn")
+                    if [[ -n "$_wr" ]]; then
+                        _wis_cluster_cpus["$_wr"]+="${_wis_cur_proc} "
+                        _wis_cluster_name["$_wr"]="$_wn"
+                    fi
+                fi
+            fi
+        done < /proc/cpuinfo
+
+        # Show available clusters
+        echo "  Available CPU clusters on this system:"
+        echo ""
+        _wis_avail_roles=()
+        for _wr in LITTLE big prime; do
+            [[ -z "${_wis_cluster_cpus[$_wr]:-}" ]] && continue
+            _wis_cpu_csv=$(echo "${_wis_cluster_cpus[$_wr]}" | tr ' ' ',' | sed 's/,$//')
+            _wis_cname="${_wis_cluster_name[$_wr]}"
+            _rec=""
+            [[ "$_wr" == "big" || "$_wr" == "prime" ]] && _rec="  ← recommended for radiod"
+            printf "    %-8s  %-20s  CPUs=[%s]%s\n" "$_wr" "$_wis_cname" "$_wis_cpu_csv" "$_rec"
+            _wis_avail_roles+=("${_wr,,}")
+        done
+        echo ""
+
+        # Default: big, then prime, then LITTLE
+        _wis_default="little"
+        [[ -n "${_wis_cluster_cpus[big]:-}" ]]   && _wis_default="big"
+        [[ -z "${_wis_cluster_cpus[big]:-}" && -n "${_wis_cluster_cpus[prime]:-}" ]] && _wis_default="prime"
+
+        _wis_roles_str=$(IFS='/'; echo "${_wis_avail_roles[*]}")
+
+        _chosen_role=""
+        while true; do
+            read -p "  Which cluster type should wisdom be generated for? [${_wis_roles_str}] (default: ${_wis_default}): " -r _wis_input
+            _wis_input="${_wis_input:-${_wis_default}}"
+            case "${_wis_input,,}" in
+                little) _chosen_role="LITTLE"; break ;;
+                big)    _chosen_role="big";    break ;;
+                prime)  _chosen_role="prime";  break ;;
+                *) echo "  Please enter one of: ${_wis_roles_str}" ;;
+            esac
+        done
+        echo
+
+        # Pick the first CPU of the chosen cluster for taskset
+        _chosen_first=$(echo "${_wis_cluster_cpus[$_chosen_role]}" | awk '{print $1}')
+        _chosen_cname="${_wis_cluster_name[$_chosen_role]:-}"
+
+        echo "  Wisdom will be generated on CPU ${_chosen_first} (${_chosen_role}: ${_chosen_cname})"
+        echo "  (using taskset -c ${_chosen_first} to pin fftwf-wisdom to this core type)"
+        echo
+
+        TASKSET_PREFIX="taskset -c ${_chosen_first}"
+        WISDOM_CPU_DESC=" [pinned to CPU ${_chosen_first} / ${_chosen_role}(${_chosen_cname})]"
+    fi
+fi
+
+# ── Wisdom file and session setup ─────────────────────────────────────────────
+
 WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
 SESSION_NAME="generate-wisdom"
 
-# Check if session already exists
+# If session already exists, re-attach to it (wisdom generation still running)
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-    echo "Error: tmux session '$SESSION_NAME' already exists."
-    echo "Attach to it with: tmux attach -t $SESSION_NAME"
-    echo "Or kill it first with: tmux kill-session -t $SESSION_NAME"
-    exit 1
+    echo "Tmux session '$SESSION_NAME' already exists — attaching to it..."
+    echo "(Wisdom generation is already in progress)"
+    echo
+    sleep 1
+    tmux attach -t "$SESSION_NAME"
+    exit 0
 fi
 
 # Check if wisdom file already exists and ask user if they want to continue
@@ -50,12 +327,12 @@ if sudo test -f "$WISDOM_FILE"; then
     read -p "Do you want to continue and regenerate it? (y/N): " -n 1 -r
     echo
     echo
-    
+
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Wisdom generation cancelled."
         exit 0
     fi
-    
+
     # Backup existing wisdom file
     BACKUP_FILE="${WISDOM_FILE}.backup"
     echo "Moving existing wisdom file to ${BACKUP_FILE}..."
@@ -92,6 +369,9 @@ fi
 
 echo
 echo "Creating tmux session '$SESSION_NAME' and starting FFTW Wisdom generation..."
+if [[ -n "$WISDOM_CPU_DESC" ]]; then
+    echo "CPU pinning${WISDOM_CPU_DESC}"
+fi
 echo "This will take some time. Be patient!"
 echo
 echo "To attach to the session and monitor progress:"
@@ -101,9 +381,11 @@ echo "To detach from the session (without stopping it):"
 echo "  Press Ctrl+B, then D"
 echo
 
+# Build the fftwf-wisdom command, optionally prefixed with taskset
+FFTWF_CMD="sudo ${TASKSET_PREFIX:+${TASKSET_PREFIX} }fftwf-wisdom -v -T 1 -o '${WISDOM_FILE}' ${FFT_SIZES}"
+
 # Create tmux session and run the wisdom generation command
-tmux new-session -d -s "$SESSION_NAME" -n 'Generate Wisdom' "sudo fftwf-wisdom -v -T 1 -o '$WISDOM_FILE' \
-    $FFT_SIZES && \
+tmux new-session -d -s "$SESSION_NAME" -n 'Generate Wisdom' "${FFTWF_CMD} && \
     echo && \
     echo && \
     echo && \

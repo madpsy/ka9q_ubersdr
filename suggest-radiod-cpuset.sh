@@ -10,30 +10,86 @@
 #      thread_siblings_list (the authoritative source of HT pairs)
 #   2. Map each core to its L3 cache domain via the cache sysfs hierarchy
 #      (falls back to NUMA node when L3 sysfs is unavailable)
-#   3. Select N cores from the largest L3 domain first (lowest CPU number
+#   3. On ARM big.LITTLE systems, identify cluster type (LITTLE/big/prime) for
+#      each core via CPU part codes in /proc/cpuinfo.  By default, big/prime
+#      cores are preferred; use --cluster to override.
+#   4. Select N cores from the preferred cluster/L3 domain (lowest CPU number
 #      order), spilling into other domains only if more cores are needed.
 #      Current idle% is not used.
 #
 # Usage:
-#   ./suggest-radiod-cpuset.sh [--cores N] [--quiet] [--apply [--compose-file <path>]] [--remove]
+#   ./suggest-radiod-cpuset.sh [--cores N] [--cluster auto|big|little|prime] [--quiet]
+#                              [--apply [--compose-file <path>]] [--remove]
 #
 # Options:
-#   --cores N           Number of physical cores to assign (default: 1)
-#   --quiet             Output only the cpuset string, e.g. "0,4"
-#   --apply             Write the recommended cpuset into the docker-compose file
-#   --remove            Remove cpuset from docker-compose and nohz_full/rcu_nocbs from grub
-#   --compose-file PATH Path to docker-compose file (default: docker-compose.yml
-#                       in the same directory as this script)
+#   --cores N               Number of physical cores to assign (default: 1)
+#   --cluster TYPE          ARM big.LITTLE cluster preference: auto (default),
+#                           big, little, or prime.  Ignored on x86.
+#   --quiet                 Output only the cpuset string, e.g. "0,4"
+#   --apply                 Write the recommended cpuset into the docker-compose file
+#   --remove                Remove cpuset from docker-compose and nohz_full/rcu_nocbs from grub
+#   --compose-file PATH     Path to docker-compose file (default: docker-compose.yml
+#                           in the same directory as this script)
 #
 # Examples:
 #   ./suggest-radiod-cpuset.sh
 #   ./suggest-radiod-cpuset.sh --cores 2
+#   ./suggest-radiod-cpuset.sh --cores 2 --cluster big
 #   ./suggest-radiod-cpuset.sh --cores 2 --apply --compose-file ~/ubersdr/docker-compose.yml
 #   ./suggest-radiod-cpuset.sh --quiet --cores 1
 #   ./suggest-radiod-cpuset.sh --remove
 #   ./suggest-radiod-cpuset.sh --remove --compose-file ~/ubersdr/docker-compose.yml
 
 set -euo pipefail
+
+# ── ARM architecture detection & helpers ─────────────────────────────────────
+
+IS_ARM=false
+case "$(uname -m 2>/dev/null)" in
+    aarch64|armv7l|armv8l) IS_ARM=true ;;
+esac
+if grep -q 'CPU implementer' /proc/cpuinfo 2>/dev/null; then IS_ARM=true; fi
+
+# arm_cpu_part_name IMPLEMENTER PART → human name
+arm_cpu_part_name() {
+    local impl="${1:-}" part="${2:-}"
+    case "${impl}:${part}" in
+        0x41:0xd03) echo "Cortex-A53" ;;
+        0x41:0xd04) echo "Cortex-A35" ;;
+        0x41:0xd05) echo "Cortex-A55" ;;
+        0x41:0xd06) echo "Cortex-A65" ;;
+        0x41:0xd07) echo "Cortex-A57" ;;
+        0x41:0xd08) echo "Cortex-A72" ;;
+        0x41:0xd09) echo "Cortex-A73" ;;
+        0x41:0xd0a) echo "Cortex-A75" ;;
+        0x41:0xd0b) echo "Cortex-A76" ;;
+        0x41:0xd0c) echo "Neoverse-N1" ;;
+        0x41:0xd0d) echo "Cortex-A77" ;;
+        0x41:0xd41) echo "Cortex-A78" ;;
+        0x41:0xd44) echo "Cortex-X1" ;;
+        0x41:0xd46) echo "Cortex-A510" ;;
+        0x41:0xd47) echo "Cortex-A710" ;;
+        0x41:0xd48) echo "Cortex-X2" ;;
+        0x41:0xd4d) echo "Cortex-A715" ;;
+        0x41:0xd4e) echo "Cortex-X3" ;;
+        0x51:0x800) echo "Kryo 2xx Gold" ;;
+        0x51:0x801) echo "Kryo 2xx Silver" ;;
+        0x51:0x803) echo "Kryo 3xx Silver" ;;
+        0x51:0x804) echo "Kryo 4xx Gold" ;;
+        0x51:0x805) echo "Kryo 4xx Silver" ;;
+        *) echo "Unknown (impl=${impl} part=${part})" ;;
+    esac
+}
+
+# arm_cluster_role NAME → LITTLE | big | prime | ""
+arm_cluster_role() {
+    case "$1" in
+        *A53*|*A55*|*A35*|*A510*|*"Kryo 2xx Silver"*|*"Kryo 3xx Silver"*|*"Kryo 4xx Silver"*) echo "LITTLE" ;;
+        *A57*|*A72*|*A73*|*A75*|*A76*|*A77*|*A78*|*A710*|*A715*|*"Kryo 2xx Gold"*|*"Kryo 4xx Gold"*) echo "big" ;;
+        *X1*|*X2*|*X3*|*Neoverse*) echo "prime" ;;
+        *) echo "" ;;
+    esac
+}
 
 # ── tmux session launcher (no-args / interactive mode) ───────────────────────
 # When launched via GoTTY (?arg=) with no arguments the script runs
@@ -82,6 +138,8 @@ REMOVE=false
 SKIP_GRUB=false   # true when user explicitly declines docker-compose apply
 NUM_CORES=1
 NUM_CORES_SET=false   # true when --cores was explicitly passed
+CLUSTER_PREF="auto"   # auto | big | little | prime  (ARM big.LITTLE only)
+CLUSTER_PREF_SET=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 INTERACTIVE=false
@@ -101,6 +159,13 @@ while [[ $# -gt 0 ]]; do
             [[ -n "${2:-}" ]] || { echo "ERROR: --cores requires a number argument" >&2; exit 1; }
             [[ "$2" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --cores must be a positive integer" >&2; exit 1; }
             NUM_CORES="$2"; NUM_CORES_SET=true; shift 2 ;;
+        --cluster)
+            [[ -n "${2:-}" ]] || { echo "ERROR: --cluster requires a value (auto|big|little|prime)" >&2; exit 1; }
+            case "${2,,}" in
+                auto|big|little|prime) CLUSTER_PREF="${2,,}"; CLUSTER_PREF_SET=true ;;
+                *) echo "ERROR: --cluster must be one of: auto big little prime" >&2; exit 1 ;;
+            esac
+            shift 2 ;;
         --compose-file)
             [[ -n "${2:-}" ]] || { echo "ERROR: --compose-file requires a path argument" >&2; exit 1; }
             COMPOSE_FILE="$2"; shift 2 ;;
@@ -108,7 +173,7 @@ while [[ $# -gt 0 ]]; do
             sed -n '2,/^set -/p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *)
-            echo "Usage: $0 [--cores N] [--quiet] [--apply [--compose-file <path>]] [--remove]" >&2
+            echo "Usage: $0 [--cores N] [--cluster auto|big|little|prime] [--quiet] [--apply [--compose-file <path>]] [--remove]" >&2
             exit 1 ;;
     esac
 done
@@ -433,6 +498,56 @@ for core_key in "${core_list[@]}"; do
     core_l3_domain["$core_key"]="$l3_domain"
 done
 
+# ── 2b. ARM cluster metadata ──────────────────────────────────────────────────
+# On ARM big.LITTLE, identify the microarchitecture type of each physical core
+# by reading CPU implementer + CPU part from /proc/cpuinfo.
+# Populates:
+#   core_cluster_name[core_key] → e.g. "Cortex-A55"
+#   core_cluster_role[core_key] → "LITTLE" | "big" | "prime" | ""
+# Also builds:
+#   arm_roles_present            → space-separated unique roles found
+#   arm_cluster_cores[role]      → space-separated core_keys for each role
+
+declare -A core_cluster_name core_cluster_role arm_cluster_cores
+arm_roles_present=""
+ARM_IS_HETEROGENEOUS=false
+
+if $IS_ARM; then
+    # Parse /proc/cpuinfo once into per-processor arrays
+    declare -A _proc_impl _proc_part
+    _cur_proc=""
+    while IFS= read -r _line; do
+        if [[ "$_line" =~ ^processor[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+            _cur_proc="${BASH_REMATCH[1]}"
+        elif [[ "$_line" =~ ^CPU\ implementer[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) && -n "$_cur_proc" ]]; then
+            _proc_impl["$_cur_proc"]="${BASH_REMATCH[1]}"
+        elif [[ "$_line" =~ ^CPU\ part[[:space:]]*:[[:space:]]*(0x[0-9a-fA-F]+) && -n "$_cur_proc" ]]; then
+            _proc_part["$_cur_proc"]="${BASH_REMATCH[1]}"
+        fi
+    done < /proc/cpuinfo
+
+    declare -A _seen_roles
+    for core_key in "${core_list[@]}"; do
+        first_cpu="${core_key%%,*}"
+        _impl="${_proc_impl[$first_cpu]:-}"
+        _part="${_proc_part[$first_cpu]:-}"
+        _cname=$(arm_cpu_part_name "$_impl" "$_part")
+        _crole=$(arm_cluster_role "$_cname")
+        core_cluster_name["$core_key"]="$_cname"
+        core_cluster_role["$core_key"]="$_crole"
+        arm_cluster_cores["${_crole:-unknown}"]+="${core_key} "
+        if [[ -n "$_crole" && -z "${_seen_roles[$_crole]:-}" ]]; then
+            _seen_roles["$_crole"]=1
+            arm_roles_present+="${_crole} "
+        fi
+    done
+
+    # Detect heterogeneous topology: more than one distinct role
+    _role_count=0
+    for _r in "${!_seen_roles[@]}"; do (( _role_count++ )) || true; done
+    (( _role_count > 1 )) && ARM_IS_HETEROGENEOUS=true || true
+fi
+
 # ── Compute default core count and run interactive prompt ─────────────────────
 # Default is always 1 physical core.  On a Hyper-Threaded system that means
 # 1 physical core + its HT sibling (both logical CPUs), which is the minimum
@@ -475,6 +590,56 @@ if $INTERACTIVE; then
 
     echo "Detected ${TOTAL_PHYSICAL} physical core(s) across ${#_pre_domain_count[@]} L3 cache domain(s)."
     echo ""
+
+    # ── ARM big.LITTLE: show cluster topology and ask which type to use ───────
+    if $IS_ARM && $ARM_IS_HETEROGENEOUS && ! $CLUSTER_PREF_SET; then
+        echo "  This is an ARM big.LITTLE / DynamIQ system with heterogeneous core types:"
+        echo ""
+        for _role in LITTLE big prime; do
+            _ck_list="${arm_cluster_cores[$_role]:-}"
+            [[ -z "$_ck_list" ]] && continue
+            _role_cpus=()
+            for _rck in $_ck_list; do
+                IFS=',' read -ra _rck_cpus <<< "$_rck"
+                _role_cpus+=("${_rck_cpus[@]}")
+            done
+            IFS=$'\n' _role_cpus_sorted=($(printf '%s\n' "${_role_cpus[@]}" | sort -n)); unset IFS
+            _role_cpu_str=$(IFS=','; echo "${_role_cpus_sorted[*]}")
+            _first_rck=$(echo "$_ck_list" | awk '{print $1}')
+            _rname="${core_cluster_name[$_first_rck]:-unknown}"
+            _rcore_count=$(echo "$_ck_list" | wc -w)
+            printf "    %-8s  %-20s  %d core(s)  CPUs=[%s]\n" \
+                "$_role" "$_rname" "$_rcore_count" "$_role_cpu_str"
+        done
+        echo ""
+        echo "  For real-time SDR (radiod), the 'big' or 'prime' cores are strongly recommended."
+        echo "  They have higher IPC, larger caches, and higher clock speeds than LITTLE cores."
+        echo ""
+
+        _avail_roles=()
+        for _role in LITTLE big prime; do
+            [[ -n "${arm_cluster_cores[$_role]:-}" ]] && _avail_roles+=("${_role,,}")
+        done
+        _roles_str=$(IFS='/'; echo "${_avail_roles[*]}")
+
+        _default_cluster="big"
+        [[ -z "${arm_cluster_cores[big]:-}" && -n "${arm_cluster_cores[prime]:-}" ]] && _default_cluster="prime"
+        [[ -z "${arm_cluster_cores[big]:-}" && -z "${arm_cluster_cores[prime]:-}" ]] && _default_cluster="little"
+
+        while true; do
+            read -rp "Which cluster type do you want to assign to radiod? [${_roles_str}] (default: ${_default_cluster}): " _cluster_input
+            _cluster_input="${_cluster_input:-${_default_cluster}}"
+            case "${_cluster_input,,}" in
+                little|big|prime|auto)
+                    CLUSTER_PREF="${_cluster_input,,}"
+                    CLUSTER_PREF_SET=true
+                    break ;;
+                *)
+                    echo "  Please enter one of: ${_roles_str}" ;;
+            esac
+        done
+        echo ""
+    fi
 
     # Explain what "1 core" means on this specific system
     if $_ht_present; then
@@ -533,6 +698,26 @@ if $INTERACTIVE; then
     # Max physical cores such that (cores × logical_per_core) ≤ half_logical
     _max_cores_by_half=$(( _half_logical / _lcpus_per_core ))
     (( _max_cores_by_half < 1 )) && _max_cores_by_half=1
+
+    # On ARM big.LITTLE, also cap by the number of cores in the chosen cluster
+    if $IS_ARM && $ARM_IS_HETEROGENEOUS && [[ "$CLUSTER_PREF" != "auto" ]]; then
+        case "$CLUSTER_PREF" in
+            little) _cluster_role_key="LITTLE" ;;
+            big)    _cluster_role_key="big" ;;
+            prime)  _cluster_role_key="prime" ;;
+            *)      _cluster_role_key="" ;;
+        esac
+        if [[ -n "$_cluster_role_key" ]]; then
+            _cluster_core_list="${arm_cluster_cores[$_cluster_role_key]:-}"
+            _cluster_core_count=$(echo "$_cluster_core_list" | wc -w)
+            if (( _cluster_core_count > 0 && _recommended_cores > _cluster_core_count )); then
+                _recommended_cores=$_cluster_core_count
+            fi
+            if (( _cluster_core_count > 0 && _max_cores_by_half > _cluster_core_count )); then
+                _max_cores_by_half=$_cluster_core_count
+            fi
+        fi
+    fi
 
     _capped=false
     if (( _recommended_cores > _max_cores_by_half )); then
@@ -604,40 +789,39 @@ if $INTERACTIVE; then
     echo ""
 fi
 
-# ── 3. Select N physical cores, preferring a single L3 domain ────────────────
+# ── 3. Select N physical cores ────────────────────────────────────────────────
 #
 # Strategy (topology-only — current idle% is not used):
-#   1. Count how many cores each L3 domain contains.
-#   2. Pick the domain with the most cores (ties broken by lowest first-CPU
-#      number, i.e. the "first" domain in physical order).
-#   3. Fill the selection from that domain (lowest CPU number first),
-#      then spill into other domains only if more cores are needed.
+#   On ARM big.LITTLE with --cluster (or auto-detected preference):
+#     1. Filter core_list to only cores matching the requested cluster role.
+#     2. If not enough cores in that cluster, spill into other clusters
+#        (big → prime → LITTLE order for auto; reverse for little preference).
+#   On x86 / homogeneous ARM:
+#     1. Count how many cores each L3 domain contains.
+#     2. Pick the domain with the most cores (ties broken by lowest first-CPU).
+#     3. Fill from that domain, spilling into others only if needed.
+#   In all cases, within a cluster/domain, cores are selected lowest-CPU first.
 
-# Tally cores per L3 domain
-declare -A _domain_count _domain_first_cpu
-for core_key in "${core_list[@]}"; do
-    dom="${core_l3_domain[$core_key]}"
-    _domain_count["$dom"]=$(( ${_domain_count[$dom]:-0} + 1 ))
-    first_cpu="${core_key%%,*}"
-    # Track the lowest first-CPU number seen in this domain (for tiebreaking)
-    if [[ -z "${_domain_first_cpu[$dom]:-}" ]] || (( first_cpu < _domain_first_cpu[$dom] )); then
-        _domain_first_cpu["$dom"]="$first_cpu"
-    fi
-done
-
-# Pick the preferred L3 domain: most cores; tiebreak by lowest first-CPU number
-preferred_domain=""
-best_cnt=0
-best_first_cpu=999999
-for dom in "${!_domain_count[@]}"; do
-    cnt="${_domain_count[$dom]}"
-    fc="${_domain_first_cpu[$dom]}"
-    if (( cnt > best_cnt )) || { (( cnt == best_cnt )) && (( fc < best_first_cpu )); }; then
-        preferred_domain="$dom"
-        best_cnt="$cnt"
-        best_first_cpu="$fc"
-    fi
-done
+# Resolve effective cluster preference for ARM
+# "auto" on a heterogeneous ARM system → prefer big, then prime, then LITTLE
+_effective_cluster_role=""
+if $IS_ARM && $ARM_IS_HETEROGENEOUS; then
+    case "$CLUSTER_PREF" in
+        little) _effective_cluster_role="LITTLE" ;;
+        big)    _effective_cluster_role="big" ;;
+        prime)  _effective_cluster_role="prime" ;;
+        auto)
+            # Prefer big, then prime, then LITTLE
+            if [[ -n "${arm_cluster_cores[big]:-}" ]]; then
+                _effective_cluster_role="big"
+            elif [[ -n "${arm_cluster_cores[prime]:-}" ]]; then
+                _effective_cluster_role="prime"
+            else
+                _effective_cluster_role="LITTLE"
+            fi
+            ;;
+    esac
+fi
 
 # Sort core_list by lowest first-CPU number (stable, deterministic order)
 declare -a sorted_cores
@@ -647,27 +831,69 @@ for core_key in "${core_list[@]}"; do
 done
 IFS=$'\n' sorted_cores=($(printf '%s\n' "${sorted_cores[@]}" | sort -n)); unset IFS
 
-# Build the final cpuset: preferred domain first, then others
+# Build candidate lists: preferred cluster first, then others
+declare -a _preferred_cores _other_cores
+
+if [[ -n "$_effective_cluster_role" ]]; then
+    # ARM big.LITTLE: split by cluster role
+    # "other" order: for big preference → prime then LITTLE; for LITTLE → big then prime
+    for entry in "${sorted_cores[@]}"; do
+        core_key="${entry#* }"
+        _crole="${core_cluster_role[$core_key]:-}"
+        if [[ "$_crole" == "$_effective_cluster_role" ]]; then
+            _preferred_cores+=("$core_key")
+        else
+            _other_cores+=("$core_key")
+        fi
+    done
+else
+    # x86 / homogeneous ARM: split by L3 domain
+    declare -A _domain_count _domain_first_cpu
+    for core_key in "${core_list[@]}"; do
+        dom="${core_l3_domain[$core_key]}"
+        _domain_count["$dom"]=$(( ${_domain_count[$dom]:-0} + 1 ))
+        first_cpu="${core_key%%,*}"
+        if [[ -z "${_domain_first_cpu[$dom]:-}" ]] || (( first_cpu < _domain_first_cpu[$dom] )); then
+            _domain_first_cpu["$dom"]="$first_cpu"
+        fi
+    done
+
+    preferred_domain=""
+    best_cnt=0
+    best_first_cpu=999999
+    for dom in "${!_domain_count[@]}"; do
+        cnt="${_domain_count[$dom]}"
+        fc="${_domain_first_cpu[$dom]}"
+        if (( cnt > best_cnt )) || { (( cnt == best_cnt )) && (( fc < best_first_cpu )); }; then
+            preferred_domain="$dom"
+            best_cnt="$cnt"
+            best_first_cpu="$fc"
+        fi
+    done
+
+    for entry in "${sorted_cores[@]}"; do
+        core_key="${entry#* }"
+        dom="${core_l3_domain[$core_key]}"
+        if [[ "$dom" == "$preferred_domain" ]]; then
+            _preferred_cores+=("$core_key")
+        else
+            _other_cores+=("$core_key")
+        fi
+    done
+fi
+
+# Build the final cpuset: preferred first, then others
 selected_cores=()
 selected_cpus=()
-declare -a _deferred_cores   # cores from non-preferred domains
 
-for entry in "${sorted_cores[@]}"; do
-    core_key="${entry#* }"
-    dom="${core_l3_domain[$core_key]}"
-    if [[ "$dom" == "$preferred_domain" ]]; then
-        if (( ${#selected_cores[@]} < NUM_CORES )); then
-            selected_cores+=("$core_key")
-            IFS=',' read -ra cpus <<< "$core_key"
-            selected_cpus+=("${cpus[@]}")
-        fi
-    else
-        _deferred_cores+=("$core_key")
-    fi
+for core_key in "${_preferred_cores[@]}"; do
+    (( ${#selected_cores[@]} >= NUM_CORES )) && break
+    selected_cores+=("$core_key")
+    IFS=',' read -ra cpus <<< "$core_key"
+    selected_cpus+=("${cpus[@]}")
 done
 
-# Fill remaining slots from deferred (non-preferred-domain) cores if needed
-for core_key in "${_deferred_cores[@]}"; do
+for core_key in "${_other_cores[@]}"; do
     (( ${#selected_cores[@]} >= NUM_CORES )) && break
     selected_cores+=("$core_key")
     IFS=',' read -ra cpus <<< "$core_key"
@@ -720,13 +946,29 @@ else
     else
         core_desc="${NUM_CORES} physical cores"
     fi
-    echo "  Suggested cpuset for radiod (${core_desc}): ${best_cpuset}"
+
+    # Build a cluster label for the suggestion line (ARM only)
+    _sel_cluster_label=""
+    if $IS_ARM && $ARM_IS_HETEROGENEOUS && [[ -n "$_effective_cluster_role" ]]; then
+        # Get the name of the first selected core's cluster
+        _first_sel="${selected_cores[0]:-}"
+        if [[ -n "$_first_sel" ]]; then
+            _sel_cname="${core_cluster_name[$_first_sel]:-}"
+            _sel_cluster_label=" [${_effective_cluster_role} cluster: ${_sel_cname}]"
+        fi
+    fi
+
+    echo "  Suggested cpuset for radiod (${core_desc})${_sel_cluster_label}: ${best_cpuset}"
     echo ""
 
-    # Show which physical cores were selected and their logical CPUs + L3 domain
+    # Show which physical cores were selected and their logical CPUs + L3 domain + cluster
     for core_key in "${selected_cores[@]}"; do
         dom="${core_l3_domain[$core_key]}"
-        echo "  Physical core [${core_key}]  L3=[${dom}]  ← selected"
+        _cname="${core_cluster_name[$core_key]:-}"
+        _crole="${core_cluster_role[$core_key]:-}"
+        _cluster_str=""
+        [[ -n "$_cname" ]] && _cluster_str="  cluster=${_crole}(${_cname})"
+        echo "  Physical core [${core_key}]  L3=[${dom}]${_cluster_str}  ← selected"
     done
     echo ""
 
@@ -765,7 +1007,11 @@ else
         IFS=',' read -ra cpus <<< "$core_key"
         cpu_display=$(IFS='+'; echo "CPU ${cpus[*]}" | sed 's/+/ + CPU /g')
         dom="${core_l3_domain[$core_key]}"
-        printf "    %-30s  L3=[%s]%s\n" "$cpu_display" "$dom" "$selected_marker"
+        _cname="${core_cluster_name[$core_key]:-}"
+        _crole="${core_cluster_role[$core_key]:-}"
+        _cluster_col=""
+        [[ -n "$_cname" ]] && _cluster_col="  ${_crole}(${_cname})"
+        printf "    %-30s  L3=[%-12s]%s%s\n" "$cpu_display" "$dom" "$_cluster_col" "$selected_marker"
     done
     echo ""
 fi

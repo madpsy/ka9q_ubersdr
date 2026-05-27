@@ -138,9 +138,9 @@
     }
 
     async function nextStep() {
-        // Step 5 is the "Generate Wisdom" screen — "Finish Setup" triggers the restart countdown
+        // Step 5 is the "Generate Wisdom" screen — "Finish Setup" saves config then restarts
         if (currentStep === totalSteps) {
-            showRestartCountdown();
+            await saveConfiguration();
             return;
         }
 
@@ -152,13 +152,9 @@
         // Collect data from current step
         collectStepData(currentStep);
 
-        if (currentStep < 4) {
-            currentStep++;
-            updateUI();
-        } else if (currentStep === 4) {
-            // Step 4 is the last data-entry step — save config, then advance to step 5
-            await saveConfiguration();
-        }
+        // All steps 1–4 just advance to the next step
+        currentStep++;
+        updateUI();
     }
 
     async function testLookupConnection() {
@@ -643,11 +639,14 @@
                 throw new Error('Failed to mark wizard as complete');
             }
 
-            // Success! Advance to the Generate Wisdom step
+            // Success! Show restart countdown
             hideLoading();
-            currentStep = 5;
-            updateUI();
-            showSuccess('Configuration saved successfully! The server will restart shortly.');
+            showSuccess('Configuration saved successfully! Server is restarting...');
+
+            // Show restart countdown and redirect
+            setTimeout(() => {
+                showRestartCountdown();
+            }, 500);
 
         } catch (error) {
             hideLoading();

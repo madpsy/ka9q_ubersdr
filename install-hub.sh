@@ -3,6 +3,17 @@
 # Exit on error
 set -e
 
+# Refuse to run as root — this script uses sudo internally and relies on
+# $SUDO_USER / $USER to identify the real user for home directory setup.
+# Running directly as root breaks that detection and would install files
+# into /root instead of the intended user's home directory.
+if [ "$EUID" -eq 0 ] && [ -z "$SUDO_USER" ]; then
+    echo "Error: Do not run this script as root."
+    echo "Run it as your normal user — it will prompt for sudo when needed:"
+    echo "  bash install-hub.sh"
+    exit 1
+fi
+
 # Determine the actual user (works in both interactive and cron contexts)
 if [ -n "$SUDO_USER" ]; then
     # Script was called with sudo

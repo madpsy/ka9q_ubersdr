@@ -654,6 +654,10 @@ echo "Fetching radiod-cpu-info.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/radiod-cpu-info.sh -o "$ACTUAL_HOME/ubersdr/radiod-cpu-info.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/radiod-cpu-info.sh"
 
+echo "Fetching get-cpu.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/get-cpu.sh -o "$ACTUAL_HOME/ubersdr/get-cpu.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/get-cpu.sh"
+
 echo "Fetching check_time.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/check_time.sh -o "$ACTUAL_HOME/ubersdr/check_time.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/check_time.sh"

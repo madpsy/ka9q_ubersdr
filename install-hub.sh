@@ -7,7 +7,7 @@ set -e
 # $SUDO_USER / $USER to identify the real user for home directory setup.
 # Running directly as root breaks that detection and would install files
 # into /root instead of the intended user's home directory.
-if [ "$EUID" -eq 0 ] && [ -z "$SUDO_USER" ]; then
+if [ "$EUID" -eq 0 ]; then
     echo "Error: Do not run this script as root."
     echo "Run it as your normal user — it will prompt for sudo when needed:"
     echo "  bash install-hub.sh"

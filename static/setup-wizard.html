@@ -421,6 +421,10 @@
                 <div class="progress-step-circle">4</div>
                 <div class="progress-step-label">Decoder</div>
             </div>
+            <div class="progress-step" data-step="5">
+                <div class="progress-step-circle">5</div>
+                <div class="progress-step-label">Generate Wisdom</div>
+            </div>
         </div>
 
         <div class="wizard-content">
@@ -688,6 +692,34 @@
                             <label for="js8Enabled">JS8</label>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Step 5: Generate Wisdom -->
+            <div class="wizard-step" data-step="5">
+                <h2 class="step-title">✨ Generate Wisdom</h2>
+                <p class="step-description">
+                    Your configuration has been saved and the server is restarting. While you wait, you can run the
+                    <strong>Generate Wisdom</strong> script to pre-compute FFT wisdom files for your hardware.
+                    This significantly improves DSP startup performance and is recommended for all new installations.
+                </p>
+
+                <div style="background: #f0f4ff; border: 1px solid #667eea; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="font-size: 16px; color: #2d3748; margin-bottom: 10px;">What does this do?</h3>
+                    <p style="color: #4a5568; font-size: 14px; line-height: 1.6; margin-bottom: 0;">
+                        The script runs <code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;font-size:13px;">~/ubersdr/generate_wisdom.sh</code>
+                        which uses FFTW to measure and store the optimal FFT algorithm for your CPU.
+                        This is a one-time process that can take a few minutes. The terminal window will close automatically when it finishes.
+                    </p>
+                </div>
+
+                <div style="text-align: center; padding: 10px 0 20px;">
+                    <button class="btn" onclick="openGenerateWisdom()" style="background: #805ad5; color: white; font-weight: bold; font-size: 16px; padding: 14px 36px;">
+                        ✨ Generate Wisdom
+                    </button>
+                    <p style="color: #718096; font-size: 13px; margin-top: 12px;">
+                        Opens a terminal window — you can run this now or skip and do it later from the Admin panel.
+                    </p>
                 </div>
             </div>
 

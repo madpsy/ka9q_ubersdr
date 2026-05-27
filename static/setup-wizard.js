@@ -4,7 +4,7 @@
 
     // State management
     let currentStep = 1;
-    const totalSteps = 4;
+    const totalSteps = 5;
     let formData = {};
     let map = null;
     let marker = null;
@@ -120,8 +120,10 @@
         // Update button visibility and text
         prevBtn.style.visibility = currentStep === 1 ? 'hidden' : 'visible';
         
-        if (currentStep === totalSteps) {
+        if (currentStep === 4) {
             nextBtn.textContent = 'Complete Setup';
+        } else if (currentStep === totalSteps) {
+            nextBtn.textContent = 'Finish Setup →';
         } else {
             nextBtn.textContent = 'Next →';
         }
@@ -138,6 +140,12 @@
     }
 
     async function nextStep() {
+        // Step 5 is the "Generate Wisdom" screen — "Finish Setup" triggers the restart countdown
+        if (currentStep === totalSteps) {
+            showRestartCountdown();
+            return;
+        }
+
         // Validate current step
         if (!validateStep(currentStep)) {
             return;
@@ -146,11 +154,11 @@
         // Collect data from current step
         collectStepData(currentStep);
 
-        if (currentStep < totalSteps) {
+        if (currentStep < 4) {
             currentStep++;
             updateUI();
-        } else {
-            // Final step - save configuration
+        } else if (currentStep === 4) {
+            // Step 4 is the last data-entry step — save config, then advance to step 5
             await saveConfiguration();
         }
     }
@@ -637,14 +645,11 @@
                 throw new Error('Failed to mark wizard as complete');
             }
 
-            // Success! Show restart countdown
+            // Success! Advance to the Generate Wisdom step
             hideLoading();
-            showSuccess('Configuration saved successfully! Server is restarting...');
-            
-            // Show restart countdown and redirect
-            setTimeout(() => {
-                showRestartCountdown();
-            }, 500);
+            currentStep = 5;
+            updateUI();
+            showSuccess('Configuration saved successfully! The server will restart shortly.');
 
         } catch (error) {
             hideLoading();
@@ -973,6 +978,20 @@
         }
 
         return false;
+    }
+
+    // Open Generate Wisdom script in popup window (mirrors admin.html behaviour)
+    function openGenerateWisdom() {
+        const terminalPath = '/terminal';
+        const command = '~/ubersdr/generate_wisdom.sh';
+        const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+        const width = 1000;
+        const height = 700;
+        const left = (screen.width - width) / 2;
+        const top = (screen.height - height) / 2;
+        window.open(url, 'generate_wisdom_' + Date.now(),
+            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
     }
 
     // Initialize when DOM is ready

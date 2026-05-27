@@ -523,14 +523,27 @@ if [[ -n "$CPU_HASH" ]]; then
     fi
 
     if $USE_PRECOMPUTED; then
+        # Back up any existing wisdom before overwriting
+        if sudo test -f "$WISDOM_FILE"; then
+            echo "  Backing up existing wisdom to ${WISDOM_FILE}.backup..."
+            sudo cp "$WISDOM_FILE" "${WISDOM_FILE}.backup"
+        fi
+        # Install atomically: cp to a temp file on the same filesystem, then mv
+        _precomp_tmp="${WISDOM_FILE}.tmp"
         echo "  Installing precomputed wisdom to ${WISDOM_FILE}..."
-        sudo cp "$_wisdom_body" "$WISDOM_FILE"
-        echo "  Done!"
-        echo
-        echo "  Please restart the application using the red \"Save & Restart Radiod\" button"
-        echo "  at the bottom of the \"Radiod\" tab in the admin interface."
-        rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
-        exit 0
+        if sudo cp "$_wisdom_body" "$_precomp_tmp" && sudo mv -f "$_precomp_tmp" "$WISDOM_FILE"; then
+            echo "  Done!"
+            echo
+            echo "  Please restart the application using the red \"Save & Restart Radiod\" button"
+            echo "  at the bottom of the \"Radiod\" tab in the admin interface."
+            rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+            exit 0
+        else
+            sudo rm -f "$_precomp_tmp"
+            echo "  ERROR: Failed to install precomputed wisdom." >&2
+            rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+            exit 1
+        fi
     fi
 
     rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"

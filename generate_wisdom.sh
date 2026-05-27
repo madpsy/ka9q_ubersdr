@@ -335,9 +335,11 @@ if [ $UPLOAD_ONLY -eq 1 ]; then
     if "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" && \
        sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && \
        sudo chmod 644 "$_wisdom_tmp" 2>/dev/null; then
+        _sha256=$(sha256sum "$_wisdom_tmp" | awk '{print $1}')
         _up=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
             -F "meta=<${_meta_file};type=application/json" \
             -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
+            -F "sha256=${_sha256}" \
             "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null)
         case "$_up" in
             201) echo "✓ Wisdom uploaded to the community catalog" ;;
@@ -383,9 +385,11 @@ if sudo test -f "$WISDOM_FILE"; then
         if "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" && \
            sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && \
            sudo chmod 644 "$_wisdom_tmp" 2>/dev/null; then
+            _sha256=$(sha256sum "$_wisdom_tmp" | awk '{print $1}')
             _up=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
                 -F "meta=<${_meta_file};type=application/json" \
                 -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
+                -F "sha256=${_sha256}" \
                 "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null)
             case "$_up" in
                 201) echo "  ✓ Wisdom uploaded to the community catalog" ;;
@@ -592,9 +596,11 @@ UPLOAD_CMD="_uuid=\$(bash '${SCRIPT_DIR}/get-uuid.sh' 2>/dev/null) && \
     bash '${SCRIPT_DIR}/get-cpu.sh' --json 2>/dev/null > \"\${_meta_file}\" && \
     sudo cp '${WISDOM_FILE}' \"\${_wisdom_tmp}\" 2>/dev/null && \
     sudo chmod 644 \"\${_wisdom_tmp}\" 2>/dev/null && \
+    _sha256=\$(sha256sum \"\${_wisdom_tmp}\" | awk '{print \$1}') && \
     _up=\$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
         -F \"meta=<\${_meta_file};type=application/json\" \
         -F \"wisdom=@\${_wisdom_tmp};type=application/octet-stream\" \
+        -F \"sha256=\${_sha256}\" \
         \"https://instances.ubersdr.org/api/fftw-wisdom/\${_uuid}\" 2>/dev/null); \
     rm -f \"\${_meta_file}\" \"\${_wisdom_tmp}\"; \
     case \"\${_up}\" in \

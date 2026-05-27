@@ -625,6 +625,10 @@ echo "Fetching get-password.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/get-password.sh -o "$ACTUAL_HOME/ubersdr/get-password.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/get-password.sh"
 
+echo "Fetching get-uuid.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/get-uuid.sh -o "$ACTUAL_HOME/ubersdr/get-uuid.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/get-uuid.sh"
+
 echo "Fetching set-password.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/set-password.sh -o "$ACTUAL_HOME/ubersdr/set-password.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/set-password.sh"

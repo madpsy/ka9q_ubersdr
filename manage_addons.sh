@@ -541,12 +541,14 @@ get_admin_password() {
     fi
     local password
     password=$(sudo awk '
-        /^admin:/             { in_admin=1; next }
+        /^admin:/              { in_admin=1; next }
         in_admin && /^[^ \t]/ { in_admin=0 }
         in_admin && /[ \t]password:/ {
-            match($0, /password: *"?([^"#]*)"?/, arr)
-            gsub(/[[:space:]]+$/, "", arr[1])
-            print arr[1]
+            val = $0
+            sub(/^[^:]*:[[:space:]]*/, "", val)
+            gsub(/^"|"$/, "", val)
+            gsub(/[[:space:]#].*$/, "", val)
+            print val
             exit
         }
     ' "$config_path")

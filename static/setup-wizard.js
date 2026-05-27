@@ -9,6 +9,7 @@
     let map = null;
     let marker = null;
     let lookupTestPassed = false; // tracks whether the lookup test has passed this session
+    let wisdomLaunched = false;   // tracks whether Generate Wisdom has been clicked on step 5
 
     // DOM elements
     const prevBtn = document.getElementById('prevBtn');
@@ -122,8 +123,11 @@
         
         if (currentStep === totalSteps) {
             nextBtn.textContent = 'Finish Setup →';
+            // Disable until the user has clicked Generate Wisdom
+            nextBtn.disabled = !wisdomLaunched;
         } else {
             nextBtn.textContent = 'Next →';
+            nextBtn.disabled = false;
         }
 
         // Hide messages when changing steps
@@ -978,7 +982,8 @@
     }
 
     // Open Generate Wisdom script in popup window (mirrors admin.html behaviour)
-    function openGenerateWisdom() {
+    // Exposed on window so the inline onclick attribute in the HTML can reach it
+    window.openGenerateWisdom = function openGenerateWisdom() {
         const terminalPath = '/terminal';
         const command = '~/ubersdr/generate_wisdom.sh';
         const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
@@ -989,7 +994,11 @@
         const top = (screen.height - height) / 2;
         window.open(url, 'generate_wisdom_' + Date.now(),
             `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
-    }
+
+        // Unlock the Finish Setup button now that the script has been launched
+        wisdomLaunched = true;
+        nextBtn.disabled = false;
+    };
 
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {

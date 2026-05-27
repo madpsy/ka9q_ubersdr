@@ -699,17 +699,19 @@
             <div class="wizard-step" data-step="5">
                 <h2 class="step-title">✨ Generate Wisdom</h2>
                 <p class="step-description">
-                    Your configuration has been saved and the server is restarting. While you wait, you can run the
-                    <strong>Generate Wisdom</strong> script to pre-compute FFT wisdom files for your hardware.
-                    This significantly improves DSP startup performance and is recommended for all new installations.
+                    Optionally pre-compute FFT wisdom files for your hardware before finishing setup.
+                    This is recommended for all new installations and significantly improves DSP startup performance.
                 </p>
 
                 <div style="background: #f0f4ff; border: 1px solid #667eea; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
                     <h3 style="font-size: 16px; color: #2d3748; margin-bottom: 10px;">What does this do?</h3>
-                    <p style="color: #4a5568; font-size: 14px; line-height: 1.6; margin-bottom: 0;">
+                    <p style="color: #4a5568; font-size: 14px; line-height: 1.6; margin-bottom: 10px;">
                         The script runs <code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;font-size:13px;">~/ubersdr/generate_wisdom.sh</code>
                         which uses FFTW to measure and store the optimal FFT algorithm for your CPU.
                         This is a one-time process that can take a few minutes. The terminal window will close automatically when it finishes.
+                    </p>
+                    <p style="color: #4a5568; font-size: 14px; line-height: 1.6; margin-bottom: 0;">
+                        If your CPU matches one in the community wisdom library, the script will automatically download a pre-computed wisdom file instead — saving you the time of generating one locally.
                     </p>
                 </div>
 
@@ -718,7 +720,7 @@
                         ✨ Generate Wisdom
                     </button>
                     <p style="color: #718096; font-size: 13px; margin-top: 12px;">
-                        Opens a terminal window — you can run this now or skip and do it later from the Admin panel.
+                        Click the button above to open a terminal window and run the script. Once launched, click <strong>Finish Setup →</strong> to complete the wizard.
                     </p>
                 </div>
             </div>

@@ -700,6 +700,12 @@ else
     echo "Warning: Failed to download benchmark binary. Skipping."
 fi
 
+# Attempt to upload any existing FFTW wisdom to the community catalog before
+# restarting containers. Non-interactive, non-fatal — errors are fully ignored.
+if [ -x "$ACTUAL_HOME/ubersdr/generate_wisdom.sh" ]; then
+    bash "$ACTUAL_HOME/ubersdr/generate_wisdom.sh" --upload-only 2>/dev/null || true
+fi
+
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)
 #OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
 #WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"

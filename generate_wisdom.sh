@@ -119,10 +119,15 @@ cpu_name_for() {
 # ── Parse command line arguments ─────────────────────────────────────────────
 
 MAX_RATE=0
+UPLOAD_ONLY=0
 for arg in "$@"; do
     case $arg in
         --max-rate)
             MAX_RATE=1
+            shift
+            ;;
+        --upload-only)
+            UPLOAD_ONLY=1
             shift
             ;;
     esac
@@ -316,6 +321,38 @@ fi
 
 WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
 SESSION_NAME="generate-wisdom"
+
+# ── --upload-only: upload existing wisdom and exit, no interactivity ──────────
+
+if [ $UPLOAD_ONLY -eq 1 ]; then
+    if ! sudo test -f "$WISDOM_FILE"; then
+        echo "No wisdom file found at ${WISDOM_FILE} — nothing to upload." >&2
+        exit 1
+    fi
+    _uuid=$("${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || { echo "Could not get instance UUID." >&2; exit 1; }
+    _meta_file=$(mktemp)
+    _wisdom_tmp=$(mktemp)
+    if "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" && \
+       sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && \
+       sudo chmod 644 "$_wisdom_tmp" 2>/dev/null; then
+        _up=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -F "meta=<${_meta_file};type=application/json" \
+            -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
+            "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null)
+        case "$_up" in
+            201) echo "✓ Wisdom uploaded to the community catalog" ;;
+            409) echo "ℹ Wisdom already exists for this CPU in the catalog" ;;
+            401) echo "ℹ Could not upload wisdom (instance not yet registered)" ;;
+            *)   echo "Upload failed (HTTP ${_up})" >&2; rm -f "$_meta_file" "$_wisdom_tmp"; exit 1 ;;
+        esac
+    else
+        echo "Failed to prepare wisdom for upload." >&2
+        rm -f "$_meta_file" "$_wisdom_tmp"
+        exit 1
+    fi
+    rm -f "$_meta_file" "$_wisdom_tmp"
+    exit 0
+fi
 
 # If session already exists, re-attach to it (wisdom generation still running)
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then

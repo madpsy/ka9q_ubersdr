@@ -41,6 +41,10 @@ class DigitalSpotsMap {
         this.globeSpinning = false; // Whether auto-spin is active
         this.globeSpinInterval = null; // Auto-spin animation frame ID
         this.globeUserInteracting = false; // True while user is dragging
+        // Spin speed step: 0=stopped, 1=slow, 2=med, 3=fast
+        this.globeSpinStep = 0;
+        this.globeSpinSpeeds = [0, 0.08, 0.20, 0.50]; // degrees per frame
+        this.globeSpinLabels = ['Spin', 'Slow', 'Med', 'Fast'];
         this.globeTooltipEl = null; // Tooltip DOM element for globe hover
         this.globeRefreshTimer = null; // Debounce timer for globe point refresh
 
@@ -683,8 +687,9 @@ class DigitalSpotsMap {
             if (!this.globe) {
                 this.initGlobe();
             } else {
-                // Globe already exists — refresh data and restart spin
+                // Globe already exists — refresh data and restart spin at slow speed
                 this.refreshGlobePoints();
+                this.globeSpinStep = 1;
                 this.startGlobeSpin();
             }
         } else {
@@ -859,11 +864,12 @@ class DigitalSpotsMap {
             });
         }
 
-        // Wire spin toggle button
+        // Wire spin toggle button — cycles: Stopped → Slow → Med → Fast → Stopped
         const spinBtn = document.getElementById('globe-spin-btn');
         if (spinBtn) {
             spinBtn.addEventListener('click', () => {
-                if (this.globeSpinning) {
+                this.globeSpinStep = (this.globeSpinStep + 1) % 4;
+                if (this.globeSpinStep === 0) {
                     this.stopGlobeSpin();
                 } else {
                     this.startGlobeSpin();
@@ -871,22 +877,28 @@ class DigitalSpotsMap {
             });
         }
 
-        // Start auto-spin
+        // Start auto-spin at slow speed (step 1)
+        this.globeSpinStep = 1;
         this.startGlobeSpin();
 
         console.log('[Globe] Initialised with', spotsArray.length, 'spots');
     }
 
     startGlobeSpin() {
-        if (this.globeSpinning || !this.globe) return;
+        if (!this.globe) return;
+        // Cancel any existing animation loop before starting a new one
+        if (this.globeSpinInterval) {
+            cancelAnimationFrame(this.globeSpinInterval);
+            this.globeSpinInterval = null;
+        }
         this.globeSpinning = true;
         this._updateSpinBtn();
 
-        const spinSpeed = 0.08; // degrees per frame (~5°/sec at 60fps)
+        const speed = this.globeSpinSpeeds[this.globeSpinStep] || 0.08;
         const spin = () => {
             if (!this.globeSpinning || this.globeUserInteracting) return;
             const pov = this.globe.pointOfView();
-            this.globe.pointOfView({ lat: pov.lat, lng: pov.lng + spinSpeed, altitude: pov.altitude }, 0);
+            this.globe.pointOfView({ lat: pov.lat, lng: pov.lng + speed, altitude: pov.altitude }, 0);
             this.globeSpinInterval = requestAnimationFrame(spin);
         };
         this.globeSpinInterval = requestAnimationFrame(spin);
@@ -894,6 +906,7 @@ class DigitalSpotsMap {
 
     stopGlobeSpin() {
         this.globeSpinning = false;
+        this.globeSpinStep = 0;
         if (this.globeSpinInterval) {
             cancelAnimationFrame(this.globeSpinInterval);
             this.globeSpinInterval = null;
@@ -905,9 +918,10 @@ class DigitalSpotsMap {
         const btn = document.getElementById('globe-spin-btn');
         if (!btn) return;
         if (this.globeSpinning) {
-            btn.textContent = '\u23F8 Spin';
+            const label = this.globeSpinLabels[this.globeSpinStep] || 'Spin';
+            btn.textContent = '\u23F8 ' + label;
             btn.classList.add('spin-active');
-            btn.title = 'Stop globe spin';
+            btn.title = 'Click to change spin speed (current: ' + label + ')';
         } else {
             btn.textContent = '\u27F3 Spin';
             btn.classList.remove('spin-active');

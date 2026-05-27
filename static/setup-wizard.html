@@ -699,8 +699,8 @@
             <div class="wizard-step" data-step="5">
                 <h2 class="step-title">✨ Generate Wisdom</h2>
                 <p class="step-description">
-                    Pre-compute FFT wisdom files for your hardware before finishing setup.
-                    This is required for all new installations and significantly improves FFT performance.
+                    Pre-compute FFT wisdom file for your hardware before finishing setup.
+                    This is required for all new installations and can significantly improve FFT performance.
                 </p>
 
                 <div style="background: #f0f4ff; border: 1px solid #667eea; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
@@ -708,7 +708,7 @@
                     <p style="color: #4a5568; font-size: 14px; line-height: 1.6; margin-bottom: 10px;">
                         The script runs <code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;font-size:13px;">~/ubersdr/generate_wisdom.sh</code>
                         which uses FFTW to measure and store the optimal FFT algorithm for your CPU.
-                        This is a one-time process that can take a few minutes. The terminal window will close automatically when it finishes.
+                        This is a one-time process that can take from a few minutes to a few hours. The terminal window will close automatically when it finishes.
                     </p>
                     <p style="color: #4a5568; font-size: 14px; line-height: 1.6; margin-bottom: 0;">
                         If your CPU matches one in the community wisdom library, the script will automatically download a pre-computed wisdom file instead — saving you the time of generating one locally.

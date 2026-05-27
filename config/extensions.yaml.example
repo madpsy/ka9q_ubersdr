@@ -3,16 +3,34 @@
 # Each extension must have a corresponding directory in static/extensions/
 
 extensions:
-  # Stats Monitor - displays signal statistics and metrics
-  - stats
+  # FlexControl - control the SDR with a FlexControl USB controller (Web Serial API)
+  - flexcontrol
 
-  # Radio Sync - syncs the SDR <-> Radio via serial CAT
-  - radio-sync
+  # FSK/RTTY Decoder - FSK/RTTY decoder supporting ITA2 (Baudot), ASCII, and CCIR476 (SITOR-B) modes
+  - fsk
+
+  # FT8 Decoder - FT8 weak signal digital mode decoder
+  - ft8
 
   # MIDI Control - control the SDR with a USB MIDI controller (DJ controller, knob box, etc.)
   # Uses the Web MIDI API directly in the browser — no server required
   # Requires Chrome or Edge (Firefox does not support Web MIDI API)
   - midi-control
+
+  # CW Decoder - Morse code decoder powered by ggmorse, auto-detects pitch and speed
+  - morse
+
+  # NAVTEX Decoder - NAVTEX FSK decoder for maritime communications
+  - navtex
+
+  # Radio Sync - syncs the SDR <-> Radio via serial CAT
+  - radio-sync
+
+  # SSTV Decoder - Slow Scan Television decoder supporting 47 modes
+  - sstv
+
+  # WEFAX Decoder - Weather Fax decoder for receiving weather charts and satellite images
+  - wefax
 
 # Default extension to load automatically (optional)
 # Set to the slug of an extension from the list above, or leave empty/commented for none

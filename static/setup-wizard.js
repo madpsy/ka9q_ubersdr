@@ -120,9 +120,7 @@
         // Update button visibility and text
         prevBtn.style.visibility = currentStep === 1 ? 'hidden' : 'visible';
         
-        if (currentStep === 4) {
-            nextBtn.textContent = 'Complete Setup';
-        } else if (currentStep === totalSteps) {
+        if (currentStep === totalSteps) {
             nextBtn.textContent = 'Finish Setup →';
         } else {
             nextBtn.textContent = 'Next →';

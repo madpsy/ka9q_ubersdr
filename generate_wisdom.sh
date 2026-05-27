@@ -401,10 +401,11 @@ if sudo test -f "$WISDOM_FILE"; then
         exit 0
     fi
 
-    # Backup existing wisdom file
+    # Backup existing wisdom file (copy, not move — keep original in place
+    # so it remains usable if generation subsequently fails)
     BACKUP_FILE="${WISDOM_FILE}.backup"
-    echo "Moving existing wisdom file to ${BACKUP_FILE}..."
-    sudo mv "$WISDOM_FILE" "$BACKUP_FILE"
+    echo "Copying existing wisdom file to ${BACKUP_FILE}..."
+    sudo cp "$WISDOM_FILE" "$BACKUP_FILE"
     echo "Backup created at ${BACKUP_FILE}"
     echo
 fi
@@ -537,6 +538,10 @@ fi
 
 # ── Local generation ──────────────────────────────────────────────────────────
 
+# Clean up any stale temp file left by a previous interrupted run
+WISDOM_TMP="${WISDOM_FILE}.tmp"
+sudo rm -f "$WISDOM_TMP" 2>/dev/null || true
+
 #FFT_SIZES="rof1620000 rof810000 cob162000 cob81000 cob40500 cob32400 \
 #    cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
 #    cob1200 cob960 cob810 cob800 cob600 cob480 cob405 cob400 cob320 cob300 cob205 cob200 cob160 cob85 cob45 cob15"
@@ -577,8 +582,13 @@ echo "To detach from the session (without stopping it):"
 echo "  Press Ctrl+B, then D"
 echo
 
-# Build the fftwf-wisdom command, optionally prefixed with taskset
-FFTWF_CMD="sudo ${TASKSET_PREFIX:+${TASKSET_PREFIX} }fftwf-wisdom -v -T 1 -o '${WISDOM_FILE}' ${FFT_SIZES}"
+# Build the fftwf-wisdom command, optionally prefixed with taskset.
+# Write to a temp file first; only mv into place atomically on success.
+# If fftwf-wisdom fails, the temp file is removed and the original wisdom
+# file (or its backup) is left untouched.
+FFTWF_CMD="sudo ${TASKSET_PREFIX:+${TASKSET_PREFIX} }fftwf-wisdom -v -T 1 -o '${WISDOM_TMP}' ${FFT_SIZES} \
+    && sudo mv -f '${WISDOM_TMP}' '${WISDOM_FILE}' \
+    || { sudo rm -f '${WISDOM_TMP}'; echo 'ERROR: Wisdom generation failed — temp file removed, original wisdom untouched.'; exit 1; }"
 
 # Build the post-generation upload snippet.
 # SCRIPT_DIR and WISDOM_FILE are expanded now (before tmux starts) so they

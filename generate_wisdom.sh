@@ -338,20 +338,25 @@ if sudo test -f "$WISDOM_FILE"; then
 
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Wisdom generation cancelled."
-        # Silently attempt to upload the existing wisdom to the community catalog.
-        # All output and errors are suppressed — this is purely fire-and-forget.
-        {
-            _uuid=$("${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || exit 0
-            _meta_file=$(mktemp)
-            _wisdom_tmp=$(mktemp)
-            "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" || { rm -f "$_meta_file" "$_wisdom_tmp"; exit 0; }
-            sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && sudo chmod 644 "$_wisdom_tmp" 2>/dev/null || { rm -f "$_meta_file" "$_wisdom_tmp"; exit 0; }
-            curl -sS -o /dev/null -X POST \
+        # Attempt to upload the existing wisdom to the community catalog.
+        # Errors are ignored — this is best-effort.
+        _uuid=$("${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || { exit 0; }
+        _meta_file=$(mktemp)
+        _wisdom_tmp=$(mktemp)
+        if "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" && \
+           sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && \
+           sudo chmod 644 "$_wisdom_tmp" 2>/dev/null; then
+            _up=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
                 -F "meta=<${_meta_file};type=application/json" \
                 -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
-                "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null
-            rm -f "$_meta_file" "$_wisdom_tmp"
-        } &>/dev/null &
+                "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null)
+            case "$_up" in
+                201) echo "  ✓ Wisdom uploaded to the community catalog" ;;
+                409) echo "  ℹ Wisdom already exists for this CPU in the catalog" ;;
+                401) echo "  ℹ Could not upload wisdom (instance not yet registered)" ;;
+            esac
+        fi
+        rm -f "$_meta_file" "$_wisdom_tmp"
         exit 0
     fi
 

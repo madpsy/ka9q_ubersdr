@@ -725,6 +725,16 @@ if $INTERACTIVE; then
         _capped=true
     fi
 
+    # On ARM, enforce a minimum of 2 physical cores regardless of user count.
+    # ARM cores (even big/prime) have lower single-thread IPC than x86 server
+    # cores, and radiod's FFT + demodulation threads benefit from at least 2
+    # cores to avoid head-of-line blocking on a single core.
+    _arm_min_applied=false
+    if $IS_ARM && (( _recommended_cores < 2 )) && (( _max_cores_by_half >= 2 )); then
+        _recommended_cores=2
+        _arm_min_applied=true
+    fi
+
     # Build a human-readable explanation of the recommendation
     if (( _expected_users <= 50 )); then
         echo "  With ${_expected_users} concurrent user(s) (≤ 50), we recommend ${_recommended_cores} physical core(s)."
@@ -737,6 +747,11 @@ if $INTERACTIVE; then
     if $_ht_present; then
         _logical_for_rec=$(( _recommended_cores * _lcpus_per_core ))
         echo "  (${_recommended_cores} physical core(s) = ${_logical_for_rec} logical CPU(s) on this HT system)"
+    fi
+    if $_arm_min_applied; then
+        echo ""
+        echo -e "\033[0;36m  ℹ  ARM minimum applied: recommending 2 physical core(s) (ARM cores benefit\033[0m"
+        echo -e "\033[0;36m     from at least 2 cores to avoid head-of-line blocking on radiod's threads).\033[0m"
     fi
     if $_capped; then
         echo ""

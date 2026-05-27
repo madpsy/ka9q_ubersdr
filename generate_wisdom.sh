@@ -131,6 +131,10 @@ done
 echo "=== UberSDR FFTW Wisdom Generator ==="
 echo
 
+# ── Script directory (used for sibling script references) ─────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ── Dependency checks ─────────────────────────────────────────────────────────
 
 # Check if tmux is installed
@@ -146,6 +150,11 @@ if ! sudo which fftwf-wisdom &> /dev/null; then
     echo "  sudo apt install -y libfftw3-bin"
     exit 1
 fi
+
+# ── Compute CPU hash for wisdom catalog lookup ────────────────────────────────
+
+CPU_HASH=$("${SCRIPT_DIR}/get-cpu.sh" --hash-only 2>/dev/null || true)
+CPU_NAME=$("${SCRIPT_DIR}/get-cpu.sh" 2>/dev/null | grep -i 'CPU Name' | sed 's/.*:[[:space:]]*//' | xargs || true)
 
 # ── ARM big.LITTLE: determine which CPUs to pin wisdom generation to ──────────
 #
@@ -165,7 +174,6 @@ if $IS_ARM && arm_is_heterogeneous; then
     echo
 
     # Find docker-compose.yml
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     COMPOSE_FILE=""
     for _candidate in \
         "${SCRIPT_DIR}/docker-compose.yml" \
@@ -330,6 +338,20 @@ if sudo test -f "$WISDOM_FILE"; then
 
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Wisdom generation cancelled."
+        # Silently attempt to upload the existing wisdom to the community catalog.
+        # All output and errors are suppressed — this is purely fire-and-forget.
+        {
+            _uuid=$("${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || exit 0
+            _meta_file=$(mktemp)
+            _wisdom_tmp=$(mktemp)
+            "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" || { rm -f "$_meta_file" "$_wisdom_tmp"; exit 0; }
+            sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && sudo chmod 644 "$_wisdom_tmp" 2>/dev/null || { rm -f "$_meta_file" "$_wisdom_tmp"; exit 0; }
+            curl -sS -o /dev/null -X POST \
+                -F "meta=<${_meta_file};type=application/json" \
+                -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
+                "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null
+            rm -f "$_meta_file" "$_wisdom_tmp"
+        } &>/dev/null &
         exit 0
     fi
 
@@ -340,6 +362,134 @@ if sudo test -f "$WISDOM_FILE"; then
     echo "Backup created at ${BACKUP_FILE}"
     echo
 fi
+
+# ── Try to download precomputed wisdom from the catalog ───────────────────────
+#
+# The catalog is keyed by CPU hash (8-char SHA-256 prefix of the cpu_key).
+# If a precomputed wisdom is available, the user is offered the choice to use
+# it (saving several hours of local generation) or generate their own.
+#
+# Error handling:
+#   • curl errors (network/timeout) → inform user, ask if they want to generate
+#   • HTTP 404                      → no wisdom for this CPU, ask to generate
+#   • HTTP 200 + checksum mismatch  → integrity failure, ask to generate
+#   • HTTP 200 + checksum OK        → offer precomputed wisdom to user
+
+USE_PRECOMPUTED=false
+
+if [[ -n "$CPU_HASH" ]]; then
+    WISDOM_URL="https://instances.ubersdr.org/api/fftw-wisdom/${CPU_HASH}"
+
+    _wisdom_body=$(mktemp)
+    _wisdom_headers=$(mktemp)
+    _wisdom_err=$(mktemp)
+
+    echo "  Checking for precomputed FFTW wisdom for your CPU..."
+    if [[ -n "$CPU_NAME" ]]; then
+        echo "    CPU:  ${CPU_NAME}"
+    fi
+    echo "    Hash: ${CPU_HASH}"
+    echo
+
+    HTTP_STATUS=$(curl -sS --max-time 15 \
+        --write-out "%{http_code}" \
+        --dump-header "$_wisdom_headers" \
+        --output "$_wisdom_body" \
+        "$WISDOM_URL" 2>"$_wisdom_err"); CURL_EXIT=$?; true
+
+    _ask_generate_own() {
+        # $1 = informational message to show before the prompt
+        echo "$1"
+        echo "     Local generation can take several hours."
+        echo
+        read -p "  Do you want to generate your own FFTW wisdom? (Y/n): " -n 1 -r
+        echo
+        echo
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            echo "  Wisdom generation cancelled."
+            rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+            exit 0
+        fi
+    }
+
+    if [[ $CURL_EXIT -ne 0 ]]; then
+        _ask_generate_own "  ℹ  Could not reach the wisdom server (network error or timeout).
+     You could try again later if you have connectivity issues."
+    elif [[ "$HTTP_STATUS" == "404" ]]; then
+        _ask_generate_own "  ℹ  No precomputed wisdom is available for your CPU (hash: ${CPU_HASH})."
+    elif [[ "$HTTP_STATUS" == "200" ]]; then
+        # Verify integrity using X-Wisdom-SHA256 header, falling back to ETag
+        EXPECTED_SHA=$(grep -i '^x-wisdom-sha256:' "$_wisdom_headers" | tr -d '\r' | awk '{print $2}')
+        if [[ -z "$EXPECTED_SHA" ]]; then
+            EXPECTED_SHA=$(grep -i '^etag:' "$_wisdom_headers" | tr -d '\r' | awk '{print $2}' | tr -d '"')
+        fi
+
+        if [[ -n "$EXPECTED_SHA" ]]; then
+            ACTUAL_SHA=$(sha256sum "$_wisdom_body" | awk '{print $1}')
+            if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+                _ask_generate_own "  ⚠  Downloaded wisdom failed integrity check (checksum mismatch).
+     The file may be corrupt or tampered with."
+            else
+                # Checksum OK — offer precomputed wisdom to user
+                echo "  ✓  Precomputed FFTW wisdom found for your CPU!"
+                if [[ -n "$CPU_NAME" ]]; then
+                    echo "       CPU:    ${CPU_NAME}"
+                fi
+                echo "       Hash:   ${CPU_HASH}"
+                echo "       Source: ${WISDOM_URL}"
+                echo
+                echo "  Using precomputed wisdom saves several hours of generation time."
+                echo "  The wisdom was generated on an identical CPU microarchitecture."
+                echo
+                read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
+                echo
+                if [[ "$_choice" == "2" ]]; then
+                    echo "  Proceeding with local generation..."
+                    echo
+                else
+                    USE_PRECOMPUTED=true
+                fi
+            fi
+        else
+            # No checksum header — accept without verification
+            echo "  ✓  Precomputed FFTW wisdom found for your CPU!"
+            if [[ -n "$CPU_NAME" ]]; then
+                echo "       CPU:    ${CPU_NAME}"
+            fi
+            echo "       Hash:   ${CPU_HASH}"
+            echo "       Source: ${WISDOM_URL}"
+            echo
+            echo "  Using precomputed wisdom saves several hours of generation time."
+            echo "  The wisdom was generated on an identical CPU microarchitecture."
+            echo
+            read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
+            echo
+            if [[ "$_choice" == "2" ]]; then
+                echo "  Proceeding with local generation..."
+                echo
+            else
+                USE_PRECOMPUTED=true
+            fi
+        fi
+    else
+        _ask_generate_own "  ℹ  Wisdom server returned an unexpected response (HTTP ${HTTP_STATUS})."
+    fi
+
+    if $USE_PRECOMPUTED; then
+        echo "  Installing precomputed wisdom to ${WISDOM_FILE}..."
+        sudo cp "$_wisdom_body" "$WISDOM_FILE"
+        echo "  Done!"
+        echo
+        echo "  Please restart the application using the red \"Save & Restart Radiod\" button"
+        echo "  at the bottom of the \"Radiod\" tab in the admin interface."
+        rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+        exit 0
+    fi
+
+    rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+fi
+
+# ── Local generation ──────────────────────────────────────────────────────────
 
 #FFT_SIZES="rof1620000 rof810000 cob162000 cob81000 cob40500 cob32400 \
 #    cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
@@ -384,12 +534,41 @@ echo
 # Build the fftwf-wisdom command, optionally prefixed with taskset
 FFTWF_CMD="sudo ${TASKSET_PREFIX:+${TASKSET_PREFIX} }fftwf-wisdom -v -T 1 -o '${WISDOM_FILE}' ${FFT_SIZES}"
 
+# Build the post-generation upload snippet.
+# SCRIPT_DIR and WISDOM_FILE are expanded now (before tmux starts) so they
+# resolve correctly inside the tmux session shell.
+# Errors are fully ignored — the upload is best-effort / fire-and-forget.
+#
+# Notes:
+#   • The wisdom file is in a root-owned Docker volume, so it must be copied
+#     to a user-readable temp file via sudo before curl can read it.
+#   • meta uses curl's '<file' syntax (reads file content as field value,
+#     no filename in Content-Disposition) so the server sees a plain JSON field.
+UPLOAD_CMD="_uuid=\$(bash '${SCRIPT_DIR}/get-uuid.sh' 2>/dev/null) && \
+    _meta_file=\$(mktemp) && \
+    _wisdom_tmp=\$(mktemp) && \
+    bash '${SCRIPT_DIR}/get-cpu.sh' --json 2>/dev/null > \"\${_meta_file}\" && \
+    sudo cp '${WISDOM_FILE}' \"\${_wisdom_tmp}\" 2>/dev/null && \
+    sudo chmod 644 \"\${_wisdom_tmp}\" 2>/dev/null && \
+    _up=\$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+        -F \"meta=<\${_meta_file};type=application/json\" \
+        -F \"wisdom=@\${_wisdom_tmp};type=application/octet-stream\" \
+        \"https://instances.ubersdr.org/api/fftw-wisdom/\${_uuid}\" 2>/dev/null); \
+    rm -f \"\${_meta_file}\" \"\${_wisdom_tmp}\"; \
+    case \"\${_up}\" in \
+        201) echo '  ✓ Wisdom uploaded to the community catalog' ;; \
+        409) echo '  ℹ Wisdom already exists for this CPU in the catalog' ;; \
+        401) echo '  ℹ Could not upload wisdom (instance not yet registered)' ;; \
+    esac"
+
 # Create tmux session and run the wisdom generation command
 tmux new-session -d -s "$SESSION_NAME" -n 'Generate Wisdom' "${FFTWF_CMD} && \
     echo && \
     echo && \
     echo && \
     echo '=== FFTW Wisdom generation completed successfully! ===' && \
+    echo && \
+    eval \"${UPLOAD_CMD}\" ; \
     echo && \
     echo 'Please restart the application using the red \"Save & Restart Radiod\" button' && \
     echo 'at the bottom of the \"Radiod\" tab in the admin interface.' && \

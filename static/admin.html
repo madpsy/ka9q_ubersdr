@@ -14930,12 +14930,6 @@ const tooltipLine2 = timeStr;
         }
 
         async function saveRadiodConfig(restart = false) {
-            // Check if editing is enabled
-            if (!radiodEditingEnabled) {
-                showAlert('Please click "I Have No Fear" to enable editing before saving', 'error');
-                return;
-            }
-
             // Check for warnings before saving
             if (!checkRadiodWarningsBeforeSave(restart)) {
                 // Warnings detected, modal will be shown
@@ -14999,12 +14993,6 @@ const tooltipLine2 = timeStr;
         }
 
         async function saveRadiodConfigAndRestart() {
-            // Check if editing is enabled
-            if (!radiodEditingEnabled) {
-                showAlert('Please click "I Have No Fear" to enable editing before saving', 'error');
-                return;
-            }
-
             if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to save the radiod configuration and restart the server?')) {
                 return;
             }

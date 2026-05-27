@@ -728,9 +728,13 @@ if $INTERACTIVE; then
     # On ARM, enforce a minimum of 2 physical cores regardless of user count.
     # ARM cores have lower single-thread IPC than x86 cores, so radiod needs
     # at least 2 cores to keep up with the DSP workload on ARM hardware.
+    # The tier calculation already gives 2 for ≤50 users, but we set the flag
+    # unconditionally on ARM so the user always sees the explanation.
     _arm_min_applied=false
-    if $IS_ARM && (( _recommended_cores < 2 )) && (( _max_cores_by_half >= 2 )); then
-        _recommended_cores=2
+    if $IS_ARM && (( _max_cores_by_half >= 2 )); then
+        if (( _recommended_cores < 2 )); then
+            _recommended_cores=2
+        fi
         _arm_min_applied=true
     fi
 
@@ -749,9 +753,9 @@ if $INTERACTIVE; then
     fi
     if $_arm_min_applied; then
         echo ""
-        echo -e "\033[0;36m  ℹ  ARM minimum applied: recommending 2 physical core(s) — ARM cores have\033[0m"
-        echo -e "\033[0;36m     lower single-thread IPC than x86, so at least 2 cores are needed to\033[0m"
-        echo -e "\033[0;36m     keep up with radiod's DSP workload on ARM hardware.\033[0m"
+        echo -e "\033[0;36m  ℹ  ARM note: minimum 2 physical core(s) recommended — ARM cores have lower\033[0m"
+        echo -e "\033[0;36m     single-thread IPC than x86, so radiod needs at least 2 cores to keep up\033[0m"
+        echo -e "\033[0;36m     with its DSP workload on ARM hardware.\033[0m"
     fi
     if $_capped; then
         echo ""

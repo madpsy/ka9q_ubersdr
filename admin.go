@@ -4476,6 +4476,11 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 	// Additional Go runtime stats
 	stats["ubersdr_goroutines"] = runtime.NumGoroutine()
 
+	// Get CPU model and physical core count
+	cpuModel, cpuPhysicalCores := getCPUInfo()
+	stats["cpu_model"] = cpuModel
+	stats["cpu_physical_cores"] = cpuPhysicalCores
+
 	// Execute uptime
 	uptimeCmd := exec.Command("uptime")
 	if uptimeOutput, err := uptimeCmd.CombinedOutput(); err == nil {

@@ -15197,17 +15197,14 @@ const tooltipLine2 = timeStr;
                 container.appendChild(sectionDiv);
             });
 
-            // Add CPU temperature section if available
-            if (stats.cpu_temperature) {
-                const cpuTempSection = document.createElement('div');
-                cpuTempSection.className = 'config-section';
+            // Add CPU info section (model + temperature)
+            if (stats.cpu_model || stats.cpu_temperature) {
+                const cpuSection = document.createElement('div');
+                cpuSection.className = 'config-section';
 
-                const cpuTempTitle = document.createElement('h3');
-                cpuTempTitle.textContent = '🌡️ CPU Temperature';
-                cpuTempSection.appendChild(cpuTempTitle);
-
-                const tempC = stats.cpu_temperature.celsius;
-                const driver = stats.cpu_temperature.driver;
+                const cpuTitle = document.createElement('h3');
+                cpuTitle.textContent = '🖥️ CPU';
+                cpuSection.appendChild(cpuTitle);
 
                 const pre = document.createElement('pre');
                 pre.style.background = '#fff';
@@ -15220,9 +15217,18 @@ const tooltipLine2 = timeStr;
                 pre.style.whiteSpace = 'pre-wrap';
                 pre.style.wordWrap = 'break-word';
                 pre.style.margin = '0';
-                pre.textContent = `${Math.round(tempC)} °C  (driver: ${driver})`;
-                cpuTempSection.appendChild(pre);
-                container.appendChild(cpuTempSection);
+
+                const model = stats.cpu_model || 'Unknown';
+                const cores = stats.cpu_physical_cores ? ` (${stats.cpu_physical_cores} cores)` : '';
+                let cpuText = `${model}${cores}`;
+                if (stats.cpu_temperature) {
+                    const tempC = stats.cpu_temperature.celsius;
+                    const driver = stats.cpu_temperature.driver;
+                    cpuText += `\n${Math.round(tempC)} °C  (driver: ${driver})`;
+                }
+                pre.textContent = cpuText;
+                cpuSection.appendChild(pre);
+                container.appendChild(cpuSection);
             }
 
             // Add network configuration section if available

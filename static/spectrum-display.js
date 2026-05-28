@@ -5635,10 +5635,14 @@ class SpectrumDisplay {
         this.ctx.fillRect(0, 0, this.width, this.height);
 
         // Resize the bandwidth lines overlay canvas to match the new full height
-        // so the dashed low/high bandwidth marker lines extend through the whole waterfall
+        // so the dashed low/high bandwidth marker lines extend through the whole waterfall.
+        // IMPORTANT: resizing a canvas resets its drawing buffer and invalidates any
+        // previously obtained context — re-acquire bandwidthLinesCtx after the resize.
         if (this.bandwidthLinesCanvas) {
             this.bandwidthLinesCanvas.height = this.fullHeight;
             this.bandwidthLinesCanvas.style.height = this.fullHeight + 'px';
+            // Re-acquire context — the old reference is dead after a canvas resize
+            this.bandwidthLinesCtx = this.bandwidthLinesCanvas.getContext('2d', { alpha: true });
         }
 
         // Reset waterfall state so it starts fresh at the new size
@@ -5647,6 +5651,13 @@ class SpectrumDisplay {
         this.waterfallStartTime = null;
         this.gpuScrollOffset = 0;
         this.gpuNextWriteRow = 0;
+
+        // Invalidate the cursor cache so drawTunedFrequencyCursor() re-runs
+        // drawTunedFrequencyCursorOnly() → drawBandwidthLines() at the new height.
+        // Without this the cache hit-check (lastCursorTunedFreq etc.) would skip the
+        // redraw because none of those values changed during a height-only resize.
+        this.cursorCache = null;
+        this.lastCursorTunedFreq = null;
 
         // Force redraw of bandwidth lines at new height
         if (this.totalBandwidth && this.centerFreq) {

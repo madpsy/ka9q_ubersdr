@@ -264,6 +264,25 @@ server:
   # Example: bypass_password: "my-secret-bypass-password-123"
   bypass_password: ""
 
+  # Restrict access to bypassed users only (default: false)
+  # When true, only users with a valid bypass_password (or a trusted IP in
+  # timeout_bypass_ips) are allowed to connect. All other users are rejected
+  # with a "requires a password" message, which triggers the password prompt
+  # in the browser UI — the same UI shown when all slots are full.
+  #
+  # Use cases:
+  #   - Private/invite-only receiver: share bypass_password with trusted users
+  #   - Restrict to local network only: add your LAN CIDR to timeout_bypass_ips
+  #     and leave bypass_password empty
+  #
+  # Notes:
+  #   - If both bypass_password and timeout_bypass_ips are unconfigured (or only
+  #     contain localhost), all public connections will be rejected. The admin
+  #     interface remains accessible regardless of this setting.
+  #   - A warning is logged at startup if this is enabled with no bypass method set.
+  #   - Default: false (open access)
+  bypassed_users_only: false
+
   # Public IQ modes configuration
   # Controls which wide IQ modes can be accessed without bypass authentication
   # By default, all wide IQ modes (iq48-iq384) require bypass (IP or password)

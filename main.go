@@ -534,6 +534,12 @@ func main() {
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
 	log.Printf("Server listen: %s", config.Server.Listen)
 	log.Printf("Max sessions: %d", config.Server.MaxSessions)
+	if config.Server.BypassedUsersOnly {
+		log.Printf("WARNING: bypassed_users_only is enabled — only bypassed IPs or bypass_password users can connect")
+		if config.Server.BypassPassword == "" && len(config.Server.TimeoutBypassIPs) == 0 {
+			log.Printf("WARNING: bypassed_users_only is enabled but no bypass_password or timeout_bypass_ips are configured — all public connections will be rejected")
+		}
+	}
 
 	// Initialize log receiver on port 6925 with 1000 entry rolling window
 	if err := InitLogReceiver(6925, 1000); err != nil {
@@ -2748,6 +2754,17 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 
 	// Check if this IP is bypassed (or valid password provided) - bypassed IPs skip rate limiting
 	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password)
+
+	// If bypassed_users_only is enabled, reject non-bypassed users immediately.
+	// This triggers the password prompt in the browser UI (same as when all slots are full).
+	if sessions.config.Server.BypassedUsersOnly && !isBypassed {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(ConnectionCheckResponse{
+			Allowed: false,
+			Reason:  "This receiver requires a password to access",
+		})
+		return
+	}
 
 	// Check rate limit (10 requests per minute per IP by default) - skip for bypassed IPs
 	if !isBypassed && !rateLimiter.AllowRequest(clientIP) {

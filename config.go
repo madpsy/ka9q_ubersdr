@@ -269,6 +269,7 @@ type ServerConfig struct {
 	TrustedProxyIPs                 []string             `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
 	TrustedContainers               []string             `yaml:"trusted_containers"`       // Docker container names to resolve and trust as proxies
 	BypassPassword                  string               `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
+	BypassedUsersOnly               bool                 `yaml:"bypassed_users_only"`      // Only allow bypassed users (IP or password) to connect (default: false)
 	PublicIQModes                   map[string]bool      `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
 	EnableCORS                      bool                 `yaml:"enable_cors"`
 	EnableKiwiSDR                   bool                 `yaml:"enable_kiwisdr"`                      // Enable KiwiSDR protocol compatibility server (default: false)

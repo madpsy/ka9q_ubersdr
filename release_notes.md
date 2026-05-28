@@ -4,7 +4,7 @@
 
 ### New Features
 - Added **QRZ.com Lookup** via a Lookup Service. Requires QRZ.com account. Users with XML Subscription get a lot more data to see but works without
-- Added **Wisdom Library** when a Wisdom file is generated successfully it gets uploaded to a library. This can then be fetched by anyone with an identical CPU, saving the generation time. Especially useful on ARM devices where it can take several hours
+- Added **Wisdom Library** when a Wisdom file is generated successfully it gets uploaded to a library. This can then be fetched by anyone with an identical CPU, saving the generation time. Especially useful on ARM devices and slower x86 where it can take several hours
 - Added **Waterfall Resize** which allows you to drag the waterfall to make it taller or shorter using the grab handle underneath the control section
 
 ### Bug Fixes

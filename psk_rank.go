@@ -78,6 +78,17 @@ const (
 var (
 	reReportResult  = regexp.MustCompile(`(?s)var reportResult = (\{.*?\});`)
 	reCountryResult = regexp.MustCompile(`(?s)var countryResult = (\{.*?\});`)
+
+	// reSoftwareSummary matches a summary row in the #software_in_use HTML table.
+	// Group 1 = canonical software name (text inside the <a> tag).
+	// Example: <tr class="summary" onclick="toggledisplay(162)"><td ...><a ...>UberSDR</a>
+	reSoftwareSummary = regexp.MustCompile(`(?i)<tr\s+class="summary"[^>]*>.*?<a\b[^>]*>([^<]+)</a>`)
+
+	// reSoftwareDetail matches a detail row in the #software_in_use HTML table.
+	// The table uses HTML4-style unclosed <td> tags, one row per line.
+	// Group 1 = full software string (name + optional version), group 2 = comma-separated callsign list.
+	// Lenient pattern — returns empty map gracefully if the HTML structure changes.
+	reSoftwareDetail = regexp.MustCompile(`(?i)<tr\s+class="detail\d+">\s*<td[^>]*>\s*([^<]+?)\s*<td[^>]*>[^<]*<td[^>]*>\s*([^<\n]+?)\s*$`)
 )
 
 // PSKMonitorEntry is one row inside a band's array in reportResult / countryResult.
@@ -125,13 +136,137 @@ func computeCallsignRank(src PSKMonitorsByBand, callsign string) map[string]PSKB
 	return out
 }
 
+// PSKSoftwareEntry holds a canonical software name and an optional version
+// string for a single software entry from the #software_in_use table.
+//
+// Name is the canonical group name from the summary row (e.g. "UberSDR").
+// Version is the version suffix stripped from the detail string
+// (e.g. "0.1.50" for "UberSDR 0.1.50").  Version is empty when the detail
+// string equals the summary name exactly (e.g. "UberSDR WSPR").
+type PSKSoftwareEntry struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
 // PSKRankData holds the parsed content of one fetch from pskreporter.
 type PSKRankData struct {
-	FetchedAt     time.Time         `json:"fetched_at"`
-	FetchedMs     int64             `json:"fetched_ms"`
-	ReportResult  PSKMonitorsByBand `json:"report_result"`  // by report count
-	CountryResult PSKMonitorsByBand `json:"country_result"` // by distinct countries
-	Error         string            `json:"error,omitempty"`
+	FetchedAt     time.Time                     `json:"fetched_at"`
+	FetchedMs     int64                         `json:"fetched_ms"`
+	ReportResult  PSKMonitorsByBand             `json:"report_result"`             // by report count
+	CountryResult PSKMonitorsByBand             `json:"country_result"`            // by distinct countries
+	SoftwareInUse map[string][]PSKSoftwareEntry `json:"software_in_use,omitempty"` // UPPER callsign → []PSKSoftwareEntry
+	Error         string                        `json:"error,omitempty"`
+}
+
+// PSKMonitorEntryWithSoftware is PSKMonitorEntry enriched with the software
+// list from the #software_in_use table.  Used only in API responses — the
+// in-memory cache still uses the leaner PSKMonitorEntry.
+type PSKMonitorEntryWithSoftware struct {
+	Callsign string             `json:"callsign"`
+	Day      int                `json:"day"`
+	Week     int                `json:"week"`
+	Software []PSKSoftwareEntry `json:"software,omitempty"` // omitted when unknown
+}
+
+// PSKMonitorsByBandEnriched is the enriched variant of PSKMonitorsByBand used
+// in API responses when software data is available.
+type PSKMonitorsByBandEnriched map[string][]PSKMonitorEntryWithSoftware
+
+// enrichWithSoftware annotates every entry in src with the software list from
+// sw (keyed by upper-case callsign).  Entries with no software match have a
+// nil Software slice, which is omitted from JSON output via omitempty.
+func enrichWithSoftware(src PSKMonitorsByBand, sw map[string][]PSKSoftwareEntry) PSKMonitorsByBandEnriched {
+	out := make(PSKMonitorsByBandEnriched, len(src))
+	for band, entries := range src {
+		enriched := make([]PSKMonitorEntryWithSoftware, len(entries))
+		for i, e := range entries {
+			enriched[i] = PSKMonitorEntryWithSoftware{
+				Callsign: e.Callsign,
+				Day:      e.Day,
+				Week:     e.Week,
+				Software: sw[strings.ToUpper(e.Callsign)], // nil if not found → omitted
+			}
+		}
+		out[band] = enriched
+	}
+	return out
+}
+
+// parseSoftwareInUse extracts a map of UPPER-CASE callsign → []PSKSoftwareEntry
+// from the #software_in_use HTML table in the PSKReporter stats page.
+//
+// The table uses a two-level structure:
+//   - Summary rows carry the canonical software name (e.g. "UberSDR").
+//   - Detail rows carry the full string (e.g. "UberSDR 0.1.50") and a
+//     comma-separated list of callsigns.
+//
+// The version is extracted by stripping the current summary name as a prefix
+// from the detail string.  If the detail string equals the summary name
+// exactly (e.g. "UberSDR WSPR"), Version is left empty.
+//
+// A callsign may appear under multiple software groups (e.g. a station running
+// both UberSDR and a WSPR reporter).  All entries are collected and deduplicated.
+//
+// Returns a non-nil empty map if the section is absent or unparseable — callers
+// should treat a missing entry as "unknown", never as an error.
+func parseSoftwareInUse(html []byte) map[string][]PSKSoftwareEntry {
+	out := make(map[string][]PSKSoftwareEntry)
+
+	// Process the HTML line-by-line so we can track the current summary group.
+	currentName := ""
+	for _, line := range strings.Split(string(html), "\n") {
+		// Check for a summary row first — updates the current group name.
+		if sm := reSoftwareSummary.FindStringSubmatch(line); sm != nil {
+			currentName = strings.TrimSpace(sm[1])
+			continue
+		}
+		// Check for a detail row — only meaningful when we have a group name.
+		if currentName == "" {
+			continue
+		}
+		dm := reSoftwareDetail.FindStringSubmatch(line)
+		if dm == nil {
+			continue
+		}
+		fullStr := strings.TrimSpace(dm[1])
+		csField := strings.TrimSpace(dm[2])
+		if fullStr == "" || csField == "" {
+			continue
+		}
+
+		// Extract version by stripping the summary name prefix.
+		version := ""
+		if strings.EqualFold(fullStr, currentName) {
+			// Detail string equals the group name — no version (e.g. "UberSDR WSPR").
+			version = ""
+		} else if rest, ok := strings.CutPrefix(fullStr, currentName); ok {
+			version = strings.TrimSpace(rest)
+		} else {
+			// Prefix doesn't match — use the full string as the version fallback.
+			version = fullStr
+		}
+
+		entry := PSKSoftwareEntry{Name: currentName, Version: version}
+
+		for _, cs := range strings.Split(csField, ",") {
+			cs = strings.ToUpper(strings.TrimSpace(cs))
+			if cs == "" {
+				continue
+			}
+			// Append only if not already present (dedup within same callsign).
+			already := false
+			for _, existing := range out[cs] {
+				if existing == entry {
+					already = true
+					break
+				}
+			}
+			if !already {
+				out[cs] = append(out[cs], entry)
+			}
+		}
+	}
+	return out
 }
 
 // PSKRankFetcher fetches and caches the PSKReporter leaderboard data.
@@ -293,6 +428,7 @@ func (f *PSKRankFetcher) fetch() *PSKRankData {
 // parsePSKStats extracts reportResult and countryResult from the HTML page body.
 // It tolerates non-array values in the JSON objects (e.g. "dummy":0) by
 // unmarshalling into a raw map first and skipping non-array entries.
+// Software-in-use data is parsed on a best-effort basis and never causes failure.
 func parsePSKStats(html []byte, d *PSKRankData) error {
 	m := reReportResult.FindSubmatch(html)
 	if m == nil {
@@ -313,6 +449,13 @@ func parsePSKStats(html []byte, d *PSKRankData) error {
 		return fmt.Errorf("parse countryResult JSON: %w", err)
 	}
 	d.CountryResult = parsePSKMonitorsByBand(rawCountry)
+
+	// Best-effort: parse the #software_in_use HTML table.
+	// Failure to parse (e.g. if PSKReporter changes the page structure) is
+	// non-fatal — the leaderboard works fine without software annotations.
+	d.SoftwareInUse = parseSoftwareInUse(html)
+	log.Printf("[PSKRank] parsed %d callsign→software mappings from #software_in_use",
+		len(d.SoftwareInUse))
 
 	return nil
 }
@@ -459,17 +602,23 @@ func (ah *AdminHandler) HandlePSKRank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// No callsign filter — return the full leaderboard (with optional band filter).
-	applyFilters := func(src PSKMonitorsByBand) PSKMonitorsByBand {
-		return filterPSKByBand(src, band)
+	// No callsign filter — return the full leaderboard (with optional band filter),
+	// enriched with software-in-use data where available.
+	sw := cached.SoftwareInUse
+	if sw == nil {
+		sw = map[string][]PSKSoftwareEntry{}
+	}
+
+	applyFilters := func(src PSKMonitorsByBand) PSKMonitorsByBandEnriched {
+		return enrichWithSoftware(filterPSKByBand(src, band), sw)
 	}
 
 	type pskRankResponse struct {
-		FetchedAt     time.Time         `json:"fetched_at"`
-		FetchedMs     int64             `json:"fetched_ms"`
-		ReportResult  PSKMonitorsByBand `json:"report_result,omitempty"`
-		CountryResult PSKMonitorsByBand `json:"country_result,omitempty"`
-		Error         string            `json:"error,omitempty"`
+		FetchedAt     time.Time                 `json:"fetched_at"`
+		FetchedMs     int64                     `json:"fetched_ms"`
+		ReportResult  PSKMonitorsByBandEnriched `json:"report_result,omitempty"`
+		CountryResult PSKMonitorsByBandEnriched `json:"country_result,omitempty"`
+		Error         string                    `json:"error,omitempty"`
 	}
 
 	out := pskRankResponse{

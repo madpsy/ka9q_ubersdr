@@ -328,6 +328,12 @@
             (src[band] || []).forEach(entry => {
                 if (!callsignMap[entry.callsign]) callsignMap[entry.callsign] = {};
                 callsignMap[entry.callsign][band] = { day: entry.day, week: entry.week };
+                // Capture software from the first band entry seen for this callsign.
+                // The server attaches the same software array to every band entry for
+                // a given callsign, so any one of them is sufficient.
+                if (entry.software && !callsignMap[entry.callsign]._software) {
+                    callsignMap[entry.callsign]._software = entry.software; // string[]
+                }
             });
         });
         // Also include any callsigns that appear in "All" but not in any specific band
@@ -339,7 +345,13 @@
         // Build flat rows with totals — use the pre-computed "All" band for totalDay/totalWeek
         let rows = Object.entries(callsignMap).map(([callsign, bands]) => {
             const allEntry = allBandMap[callsign] || { day: 0, week: 0 };
-            return { callsign, bands, totalDay: allEntry.day, totalWeek: allEntry.week };
+            return {
+                callsign,
+                bands,
+                totalDay:  allEntry.day,
+                totalWeek: allEntry.week,
+                software:  bands._software || [],  // string[] from #software_in_use
+            };
         });
 
         // Sort
@@ -412,6 +424,8 @@
             } else {
                 rowBg = 'cursor:pointer;';
             }
+            const isUberSDR = row.software && row.software.some(sw => sw.name.startsWith('UberSDR'));
+            const csSuffix = isUberSDR ? ' 📡' : '';
             const csExtra = isOwn ? ' ⭐' : '';
             const rankStyle = isOwn
                 ? 'padding:5px 8px;text-align:right;font-weight:700;color:#e65100;font-size:12px;'
@@ -429,11 +443,18 @@
                 return `<td style="${cellStyle}" title="${_esc(b)} week: ${cell.week.toLocaleString()}">${cell.day.toLocaleString()}</td>`;
             }).join('');
 
+            // Build software tooltip for the callsign cell (hover).
+            // Each entry is {name, version} — show "Name Version" (or just "Name" if no version).
+            const swTitle = row.software && row.software.length > 0
+                ? '💻 ' + row.software.map(sw => sw.version ? sw.name + ' ' + sw.version : sw.name).join(' / ')
+                : '';
+            const csTitleAttr = swTitle ? ` title="${_esc(swTitle)}"` : '';
+
             // Encode callsign for use in onclick attribute
             const csEsc = _esc(row.callsign).replace(/'/g, '&#39;');
             return `<tr style="${rowBg}" onclick="pskRankRowClicked('${csEsc}')" title="Click to select/deselect for comparison">
                 <td style="${rankStyle}">${row.rank}</td>
-                <td style="padding:5px 8px;font-weight:600;white-space:nowrap;">${_esc(row.callsign)}${csExtra}${isSelected ? ' 🔵' : ''}</td>
+                <td style="padding:5px 8px;font-weight:600;white-space:nowrap;"${csTitleAttr}>${_esc(row.callsign)}${csSuffix}${csExtra}${isSelected ? ' 🔵' : ''}</td>
                 <td style="padding:5px 8px;text-align:right;font-weight:600;color:#1b5e20;">${row.totalDay.toLocaleString()}</td>
                 <td style="padding:5px 8px;text-align:right;color:#555;">${row.totalWeek.toLocaleString()}</td>
                 ${bandCells}

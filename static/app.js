@@ -1880,7 +1880,7 @@ window.submitBypassPassword = async function() {
 document.addEventListener('DOMContentLoaded', () => {
     const passwordInput = document.getElementById('bypass-password-input');
     if (passwordInput) {
-        passwordInput.addEventListener('keypress', (e) => {
+        passwordInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 window.submitBypassPassword();
@@ -1890,7 +1890,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const modalInput = document.getElementById('password-modal-input');
     if (modalInput) {
-        modalInput.addEventListener('keypress', (e) => {
+        modalInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 submitPasswordModal();

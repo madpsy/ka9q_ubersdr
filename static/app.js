@@ -8901,25 +8901,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ─── Waterfall drag-resize ────────────────────────────────────────────────────
-// Allows the user to drag the handle below the RF spectrum panel to make the
-// waterfall taller (minimum 300 px).  Height is persisted in localStorage.
+// Allows the user to drag the handle below the RF spectrum panel to resize the
+// waterfall. Minimum height is context-dependent:
+//   - Spectrum visible (split mode): 1px — waterfall can collapse to nothing
+//   - Spectrum hidden (non-split):  300px — can't go below spectrum section height
+// Height is persisted in localStorage.
 (function initWaterfallResize() {
     const handle = document.getElementById('waterfall-resize-handle');
     if (!handle) return;
 
     const WATERFALL_HEIGHT_KEY = 'waterfallHeight';
-    const MIN_HEIGHT = 300;
+    const DEFAULT_HEIGHT = 300; // used for dblclick reset
+
+    // Helper: returns the current minimum allowed waterfall height based on mode.
+    function getMinHeight() {
+        const lgCanvas = document.getElementById('spectrum-line-graph-canvas');
+        const lineGraphVisible = lgCanvas && lgCanvas.style.display !== 'none';
+        return lineGraphVisible ? 1 : 300;
+    }
 
     // Helper: apply a height value to both the SpectrumDisplay instance and the
     // CSS custom property that drives the container height.
+    // setWaterfallHeight() handles its own context-dependent clamping, so we
+    // pass the raw value and let it decide the floor.
     function applyHeight(h) {
-        const clamped = Math.max(MIN_HEIGHT, Math.round(h));
         if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
-            window.spectrumDisplay.setWaterfallHeight(clamped);
+            window.spectrumDisplay.setWaterfallHeight(h);
         } else {
-            // spectrumDisplay not yet ready — just set the CSS variable so the
-            // container renders at the right size; setWaterfallHeight will be
-            // called again once the instance exists.
+            // spectrumDisplay not yet ready — apply a CSS-only preview using the
+            // same context-dependent minimum.
+            const minH = getMinHeight();
+            const clamped = Math.max(minH, Math.round(h));
             const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
                 document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
             const containerH = lineGraphVisible ? 300 + clamped : clamped;
@@ -8931,7 +8943,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Restore saved height on page load (before spectrumDisplay is constructed
     // the CSS variable still needs to be set so the container doesn't flash).
     const saved = parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10);
-    if (saved >= MIN_HEIGHT) {
+    if (saved >= 1) {
         const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
             document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
         const containerH = lineGraphVisible ? 300 + saved : saved;
@@ -8939,10 +8951,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.documentElement.style.setProperty('--waterfall-height', saved + 'px');
     }
 
-    // Double-click resets to default
+    // Double-click resets to default (300px)
     handle.addEventListener('dblclick', () => {
         localStorage.removeItem(WATERFALL_HEIGHT_KEY);
-        applyHeight(MIN_HEIGHT);
+        applyHeight(DEFAULT_HEIGHT);
     });
 
     // ── Mouse drag ──────────────────────────────────────────────────────────
@@ -8956,7 +8968,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         dragStartY = e.clientY;
         dragStartHeight = window.spectrumDisplay
             ? window.spectrumDisplay.waterfallHeight
-            : (parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10) || MIN_HEIGHT);
+            : (parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10) || DEFAULT_HEIGHT);
         handle.classList.add('dragging');
         document.body.style.cursor = 'ns-resize';
         document.body.style.userSelect = 'none';
@@ -8987,7 +8999,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         dragStartY = e.touches[0].clientY;
         dragStartHeight = window.spectrumDisplay
             ? window.spectrumDisplay.waterfallHeight
-            : (parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10) || MIN_HEIGHT);
+            : (parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10) || DEFAULT_HEIGHT);
         handle.classList.add('dragging');
     }, { passive: false });
 

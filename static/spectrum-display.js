@@ -218,12 +218,12 @@ class SpectrumDisplay {
         // Create bandwidth lines overlay canvas (positioned over main canvas)
         this.bandwidthLinesCanvas = document.createElement('canvas');
         this.bandwidthLinesCanvas.width = this.width;
-        this.bandwidthLinesCanvas.height = 600;
+        this.bandwidthLinesCanvas.height = this.fullHeight;
         this.bandwidthLinesCanvas.style.position = 'absolute';
         this.bandwidthLinesCanvas.style.top = '0';
         this.bandwidthLinesCanvas.style.left = '0';
         this.bandwidthLinesCanvas.style.width = this.width + 'px';
-        this.bandwidthLinesCanvas.style.height = '600px';
+        this.bandwidthLinesCanvas.style.height = this.fullHeight + 'px';
         this.bandwidthLinesCanvas.style.pointerEvents = 'none'; // Allow clicks to pass through
         this.bandwidthLinesCanvas.style.zIndex = '10'; // Above waterfall but below cursor overlay
         this.bandwidthLinesCtx = this.bandwidthLinesCanvas.getContext('2d', { alpha: true });
@@ -723,8 +723,8 @@ class SpectrumDisplay {
                 this.lineGraphCanvas.style.height = '300px';
             }
 
-            this.bandwidthLinesCanvas.height = 600;
-            this.bandwidthLinesCanvas.style.height = '600px';
+            this.bandwidthLinesCanvas.height = this.fullHeight;
+            this.bandwidthLinesCanvas.style.height = this.fullHeight + 'px';
 
             this.overlayDiv.style.position = 'absolute';
             this.overlayDiv.style.top = '0';
@@ -3408,10 +3408,10 @@ class SpectrumDisplay {
         this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
 
         // Split mode: draw on line graph (from 70px where graph starts) and waterfall
-        // Line graph is 300px tall, waterfall is 300px tall
-        // Total height needed: 600px (to cover both)
+        // Line graph is 300px tall, waterfall is variable height
+        // Total height needed: fullHeight (to cover both)
         const startY = 70; // Start where line graph drawing area begins (after bookmarks + freq scale)
-        const height = 600; // Cover both line graph and waterfall
+        const height = this.fullHeight; // Cover both line graph and waterfall
 
         // Draw the bandwidth lines on the overlay canvas
         this.bandwidthLinesCtx.save();
@@ -5495,6 +5495,10 @@ class SpectrumDisplay {
             // Restore waterfall to split mode position (below line graph)
             this.canvas.classList.add('split-view');
 
+            // Update CSS container height: spectrum (300px) + waterfall
+            document.documentElement.style.setProperty('--spectrum-container-height', this.fullHeight + 'px');
+            document.documentElement.style.setProperty('--waterfall-height', this.waterfallHeight + 'px');
+
             // Save current waterfall content before resize
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = this.canvas.width;
@@ -5530,6 +5534,10 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.display = 'none';
             // Move waterfall to full height mode
             this.canvas.classList.remove('split-view');
+
+            // Update CSS container height: waterfall fills full height (no spectrum above)
+            document.documentElement.style.setProperty('--spectrum-container-height', this.fullHeight + 'px');
+            document.documentElement.style.setProperty('--waterfall-height', this.waterfallHeight + 'px');
 
             // Save current waterfall content before resize
             const tempCanvas = document.createElement('canvas');
@@ -5581,9 +5589,14 @@ class SpectrumDisplay {
     }
 
     // Set waterfall height (called by drag-resize UI in app.js)
-    // h: desired waterfall height in px (clamped to min 300)
+    // Minimum is context-dependent:
+    //   split mode (spectrum visible): 1px — waterfall can collapse to nothing
+    //   non-split mode (spectrum hidden): 300px — can't go below spectrum section height
     setWaterfallHeight(h) {
-        const newH = Math.max(300, Math.round(h));
+        const lineGraphVisible = this.lineGraphCanvas &&
+            this.lineGraphCanvas.style.display !== 'none';
+        const minH = lineGraphVisible ? 1 : 300;
+        const newH = Math.max(minH, Math.round(h));
         if (newH === this.waterfallHeight) return;
 
         this.waterfallHeight = newH;
@@ -5595,10 +5608,7 @@ class SpectrumDisplay {
         document.documentElement.style.setProperty('--spectrum-container-height', this.fullHeight + 'px');
         document.documentElement.style.setProperty('--waterfall-height', newH + 'px');
 
-        // Re-apply sizing for the current display mode
-        const lineGraphVisible = this.lineGraphCanvas &&
-            this.lineGraphCanvas.style.display !== 'none';
-
+        // Re-apply sizing for the current display mode (lineGraphVisible already computed above)
         if (lineGraphVisible) {
             // Split mode: waterfall sits below the fixed 300px line graph
             this.canvas.height = newH;
@@ -5621,12 +5631,24 @@ class SpectrumDisplay {
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, this.width, this.height);
 
+        // Resize the bandwidth lines overlay canvas to match the new full height
+        // so the dashed low/high bandwidth marker lines extend through the whole waterfall
+        if (this.bandwidthLinesCanvas) {
+            this.bandwidthLinesCanvas.height = this.fullHeight;
+            this.bandwidthLinesCanvas.style.height = this.fullHeight + 'px';
+        }
+
         // Reset waterfall state so it starts fresh at the new size
         this.waterfallImageData = null;
         this.waterfallLineCount = 0;
         this.waterfallStartTime = null;
         this.gpuScrollOffset = 0;
         this.gpuNextWriteRow = 0;
+
+        // Force redraw of bandwidth lines at new height
+        if (this.totalBandwidth && this.centerFreq) {
+            this.drawTunedFrequencyCursor();
+        }
 
         console.log(`[setWaterfallHeight] waterfall=${newH}px, full=${this.fullHeight}px, splitMode=${lineGraphVisible}`);
     }

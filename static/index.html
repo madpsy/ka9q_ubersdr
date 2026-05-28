@@ -6,6 +6,18 @@
     <meta name="description" content="UberSDR is a powerful, web-based SDR platform for amateur radio enthusiasts, providing real-time access to the entire HF spectrum and multi-band WSJT-X skimming. Support for third party software via SoapySDR as well as a native desktop client. Based on the affordable RX-888 MKII and generic PC hardware. Powered by ka9q-radio.">
     <title>UberSDR - Web SDR Receiver</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Set waterfall height CSS variable immediately from localStorage to avoid layout flash -->
+    <script>
+        (function() {
+            var h = parseInt(localStorage.getItem('waterfallHeight'), 10);
+            if (h >= 1) {
+                // We don't know yet if spectrum (line graph) is enabled, so use fullHeight = 300 + h
+                // as the container height. toggleLineGraphVisibility will correct it if needed.
+                document.documentElement.style.setProperty('--spectrum-container-height', (300 + h) + 'px');
+                document.documentElement.style.setProperty('--waterfall-height', h + 'px');
+            }
+        })();
+    </script>
     <!-- Opus decoder for handling Opus-compressed audio -->
     <script src="opus-decoder.min.js"></script>
     <!-- JSZip for creating ZIP files -->

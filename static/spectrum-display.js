@@ -5132,6 +5132,12 @@ class SpectrumDisplay {
                 this.bandwidthIndicatorColor = key;
                 localStorage.setItem('bandwidthIndicatorColor', key);
                 this.contextMenu.style.display = 'none';
+                // Invalidate cursor cache so the new colour renders immediately.
+                // Without this, drawTunedFrequencyCursor() reuses the cached bitmap
+                // (none of the five cache-key values changed) and the old colour persists
+                // until the next zoom or frequency change busts the cache naturally.
+                this.cursorCache = null;
+                this.lastCursorTunedFreq = null;
                 // Force redraw so the new colour is visible immediately
                 if (this.spectrumData && this.spectrumData.length > 0) {
                     this.draw();

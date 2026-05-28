@@ -5608,7 +5608,10 @@ class SpectrumDisplay {
         document.documentElement.style.setProperty('--spectrum-container-height', this.fullHeight + 'px');
         document.documentElement.style.setProperty('--waterfall-height', newH + 'px');
 
-        // Re-apply sizing for the current display mode (lineGraphVisible already computed above)
+        // Determine current display mode
+        const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+
+        // Re-apply sizing for the current display mode
         if (lineGraphVisible) {
             // Split mode: waterfall sits below the fixed 300px line graph
             this.canvas.height = newH;

@@ -8821,6 +8821,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Expose for idle detector
         window.spectrumDisplay = spectrumDisplay;
 
+        // Restore saved waterfall height (the IIFE already set the CSS variable;
+        // now that the instance exists we can apply it properly to the canvas).
+        {
+            const _savedH = parseInt(localStorage.getItem('waterfallHeight'), 10);
+            if (_savedH >= 300) {
+                spectrumDisplay.setWaterfallHeight(_savedH);
+            }
+        }
+
         // Connect to spectrum WebSocket
         spectrumDisplay.connect();
 
@@ -8890,6 +8899,115 @@ document.addEventListener('DOMContentLoaded', async () => {
         log('Failed to initialize spectrum display: ' + err.message, 'error');
     }
 });
+
+// ─── Waterfall drag-resize ────────────────────────────────────────────────────
+// Allows the user to drag the handle below the RF spectrum panel to make the
+// waterfall taller (minimum 300 px).  Height is persisted in localStorage.
+(function initWaterfallResize() {
+    const handle = document.getElementById('waterfall-resize-handle');
+    if (!handle) return;
+
+    const WATERFALL_HEIGHT_KEY = 'waterfallHeight';
+    const MIN_HEIGHT = 300;
+
+    // Helper: apply a height value to both the SpectrumDisplay instance and the
+    // CSS custom property that drives the container height.
+    function applyHeight(h) {
+        const clamped = Math.max(MIN_HEIGHT, Math.round(h));
+        if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+            window.spectrumDisplay.setWaterfallHeight(clamped);
+        } else {
+            // spectrumDisplay not yet ready — just set the CSS variable so the
+            // container renders at the right size; setWaterfallHeight will be
+            // called again once the instance exists.
+            const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
+                document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
+            const containerH = lineGraphVisible ? 300 + clamped : clamped;
+            document.documentElement.style.setProperty('--spectrum-container-height', containerH + 'px');
+            document.documentElement.style.setProperty('--waterfall-height', clamped + 'px');
+        }
+    }
+
+    // Restore saved height on page load (before spectrumDisplay is constructed
+    // the CSS variable still needs to be set so the container doesn't flash).
+    const saved = parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10);
+    if (saved >= MIN_HEIGHT) {
+        const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
+            document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
+        const containerH = lineGraphVisible ? 300 + saved : saved;
+        document.documentElement.style.setProperty('--spectrum-container-height', containerH + 'px');
+        document.documentElement.style.setProperty('--waterfall-height', saved + 'px');
+    }
+
+    // Double-click resets to default
+    handle.addEventListener('dblclick', () => {
+        localStorage.removeItem(WATERFALL_HEIGHT_KEY);
+        applyHeight(MIN_HEIGHT);
+    });
+
+    // ── Mouse drag ──────────────────────────────────────────────────────────
+    let dragStartY = 0;
+    let dragStartHeight = 0;
+    let isDragging = false;
+
+    handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isDragging = true;
+        dragStartY = e.clientY;
+        dragStartHeight = window.spectrumDisplay
+            ? window.spectrumDisplay.waterfallHeight
+            : (parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10) || MIN_HEIGHT);
+        handle.classList.add('dragging');
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = e.clientY - dragStartY;
+        applyHeight(dragStartHeight + delta);
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        // Persist final height
+        if (window.spectrumDisplay) {
+            localStorage.setItem(WATERFALL_HEIGHT_KEY, String(window.spectrumDisplay.waterfallHeight));
+        }
+    });
+
+    // ── Touch drag ──────────────────────────────────────────────────────────
+    handle.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        isDragging = true;
+        dragStartY = e.touches[0].clientY;
+        dragStartHeight = window.spectrumDisplay
+            ? window.spectrumDisplay.waterfallHeight
+            : (parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10) || MIN_HEIGHT);
+        handle.classList.add('dragging');
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        const delta = e.touches[0].clientY - dragStartY;
+        applyHeight(dragStartHeight + delta);
+    }, { passive: false });
+
+    document.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        handle.classList.remove('dragging');
+        if (window.spectrumDisplay) {
+            localStorage.setItem(WATERFALL_HEIGHT_KEY, String(window.spectrumDisplay.waterfallHeight));
+        }
+    });
+})();
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Update spectrum cursor to show current frequency
 function updateSpectrumCursor() {

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -209,15 +210,15 @@ func enrichWithSoftware(src PSKMonitorsByBand, sw map[string][]PSKSoftwareEntry)
 //
 // Returns a non-nil empty map if the section is absent or unparseable — callers
 // should treat a missing entry as "unknown", never as an error.
-func parseSoftwareInUse(html []byte) map[string][]PSKSoftwareEntry {
+func parseSoftwareInUse(body []byte) map[string][]PSKSoftwareEntry {
 	out := make(map[string][]PSKSoftwareEntry)
 
 	// Process the HTML line-by-line so we can track the current summary group.
 	currentName := ""
-	for _, line := range strings.Split(string(html), "\n") {
+	for _, line := range strings.Split(string(body), "\n") {
 		// Check for a summary row first — updates the current group name.
 		if sm := reSoftwareSummary.FindStringSubmatch(line); sm != nil {
-			currentName = strings.TrimSpace(sm[1])
+			currentName = html.UnescapeString(strings.TrimSpace(string(sm[1])))
 			continue
 		}
 		// Check for a detail row — only meaningful when we have a group name.
@@ -228,7 +229,7 @@ func parseSoftwareInUse(html []byte) map[string][]PSKSoftwareEntry {
 		if dm == nil {
 			continue
 		}
-		fullStr := strings.TrimSpace(dm[1])
+		fullStr := html.UnescapeString(strings.TrimSpace(string(dm[1])))
 		csField := strings.TrimSpace(dm[2])
 		if fullStr == "" || csField == "" {
 			continue

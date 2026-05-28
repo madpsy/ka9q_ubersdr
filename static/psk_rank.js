@@ -393,10 +393,14 @@
             ? new Date(data.fetched_at).toISOString().replace('T', ' ').substring(0, 19) + ' UTC'
             : '—';
         const tableLabel = _currentTable === 'countries' ? 'countries reported' : 'reception reports';
+        const isUberSDRRow = r => r.software && r.software.some(sw => sw.name.startsWith('UberSDR'));
+        const uberSdrCount = rows.filter(isUberSDRRow).length;
+        const uberSdrTop10 = rows.slice(0, 10).filter(isUberSDRRow).length;
         _setStatus(
             'Fetched ' + fetchedAt + ' (' + (data.fetched_ms || 0) + ' ms) · ' +
             rows.length + ' reporters · sorted by 24h ' + tableLabel +
-            (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : '')
+            (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : ''),
+            uberSdrCount, uberSdrTop10
         );
 
         if (rows.length === 0) {
@@ -514,9 +518,23 @@
     }
 
     // ── DOM helpers ──────────────────────────────────────────────────────────
-    function _setStatus(msg) {
+    function _setStatus(msg, uberSdrCount, uberSdrTop10) {
         const el = document.getElementById('pskRankStatus');
-        if (el) el.textContent = msg;
+        if (!el) return;
+        if (uberSdrCount !== undefined && uberSdrCount > 0) {
+            el.style.display = 'flex';
+            el.style.justifyContent = 'space-between';
+            el.style.alignItems = 'center';
+            const top10Str = uberSdrTop10 > 0 ? ', ' + uberSdrTop10 + ' in top 10' : '';
+            el.innerHTML =
+                '<span>' + _esc(msg) + '</span>' +
+                '<span style="white-space:nowrap;color:#555;">📡 ' + uberSdrCount + ' UberSDR reporter' + (uberSdrCount !== 1 ? 's' : '') + top10Str + '</span>';
+        } else {
+            el.style.display = '';
+            el.style.justifyContent = '';
+            el.style.alignItems = '';
+            el.textContent = msg;
+        }
     }
 
     function _setTableContent(html) {

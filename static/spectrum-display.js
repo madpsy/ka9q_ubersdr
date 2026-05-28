@@ -59,9 +59,13 @@ class SpectrumDisplay {
         this.gpuScrollOffset = 0;     // fractional pixel offset (0 .. waterfallHeight)
         this.gpuNextWriteRow = 0;     // ring-buffer write pointer (canvas row index)
 
-        // Waterfall height (user-resizable, persisted in localStorage)
+        // Waterfall height (user-resizable, persisted in localStorage).
+        // Minimum is 1px — the waterfall can be collapsed to nothing in any mode.
+        // Double-click on the handle resets to the default 300px.
         const savedWaterfallHeight = parseInt(localStorage.getItem('waterfallHeight'), 10);
-        this.waterfallHeight = (savedWaterfallHeight >= 300) ? savedWaterfallHeight : 300;
+        this.waterfallHeight = (Number.isFinite(savedWaterfallHeight) && savedWaterfallHeight >= 1)
+            ? savedWaterfallHeight
+            : 300;
         this.fullHeight = 300 + this.waterfallHeight; // spectrum line graph (300) + waterfall
 
         // Spectrum sync setting (controlled by user preference)
@@ -5589,14 +5593,10 @@ class SpectrumDisplay {
     }
 
     // Set waterfall height (called by drag-resize UI in app.js)
-    // Minimum is context-dependent:
-    //   split mode (spectrum visible): 1px — waterfall can collapse to nothing
-    //   non-split mode (spectrum hidden): 300px — can't go below spectrum section height
+    // Minimum is 1px — the waterfall can be collapsed to nothing in any mode.
+    // Double-click on the handle resets to the default 300px.
     setWaterfallHeight(h) {
-        const lineGraphVisible = this.lineGraphCanvas &&
-            this.lineGraphCanvas.style.display !== 'none';
-        const minH = lineGraphVisible ? 1 : 300;
-        const newH = Math.max(minH, Math.round(h));
+        const newH = Math.max(1, Math.round(h));
         if (newH === this.waterfallHeight) return;
 
         this.waterfallHeight = newH;

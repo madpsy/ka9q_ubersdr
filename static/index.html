@@ -10,9 +10,7 @@
     <script>
         (function() {
             var h = parseInt(localStorage.getItem('waterfallHeight'), 10);
-            if (h >= 1) {
-                // We don't know yet if spectrum (line graph) is enabled, so use fullHeight = 300 + h
-                // as the container height. toggleLineGraphVisibility will correct it if needed.
+            if (Number.isFinite(h) && h >= 1) {
                 document.documentElement.style.setProperty('--spectrum-container-height', (300 + h) + 'px');
                 document.documentElement.style.setProperty('--waterfall-height', h + 'px');
             }

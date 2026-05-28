@@ -8902,36 +8902,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ─── Waterfall drag-resize ────────────────────────────────────────────────────
 // Allows the user to drag the handle below the RF spectrum panel to resize the
-// waterfall. Minimum height is context-dependent:
-//   - Spectrum visible (split mode): 1px — waterfall can collapse to nothing
-//   - Spectrum hidden (non-split):  300px — can't go below spectrum section height
-// Height is persisted in localStorage.
+// waterfall. Minimum is 1px (waterfall can be collapsed to nothing in any mode).
+// Double-click resets to the default 300px. Height is persisted in localStorage.
 (function initWaterfallResize() {
     const handle = document.getElementById('waterfall-resize-handle');
     if (!handle) return;
 
     const WATERFALL_HEIGHT_KEY = 'waterfallHeight';
     const DEFAULT_HEIGHT = 300; // used for dblclick reset
-
-    // Helper: returns the current minimum allowed waterfall height based on mode.
-    function getMinHeight() {
-        const lgCanvas = document.getElementById('spectrum-line-graph-canvas');
-        const lineGraphVisible = lgCanvas && lgCanvas.style.display !== 'none';
-        return lineGraphVisible ? 1 : 300;
-    }
+    const MIN_HEIGHT = 1;
 
     // Helper: apply a height value to both the SpectrumDisplay instance and the
     // CSS custom property that drives the container height.
-    // setWaterfallHeight() handles its own context-dependent clamping, so we
-    // pass the raw value and let it decide the floor.
     function applyHeight(h) {
         if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
             window.spectrumDisplay.setWaterfallHeight(h);
         } else {
-            // spectrumDisplay not yet ready — apply a CSS-only preview using the
-            // same context-dependent minimum.
-            const minH = getMinHeight();
-            const clamped = Math.max(minH, Math.round(h));
+            // spectrumDisplay not yet ready — apply a CSS-only preview.
+            const clamped = Math.max(MIN_HEIGHT, Math.round(h));
             const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
                 document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
             const containerH = lineGraphVisible ? 300 + clamped : clamped;

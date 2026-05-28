@@ -527,8 +527,8 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 		status.WriteString(fmt.Sprintf("name=%s\n", strings.Join(nameParts, ", ")))
 	}
 
-	// Hardware info — verbatim copy of real KiwiSDR 2 v1.837 sdr_hw value
-	status.WriteString("sdr_hw=KiwiSDR 2 v1.837 ⁣ 📡 GPS ⁣ ⏳🚫 Limits\n")
+	// Hardware info — verbatim copy of real KiwiSDR 2 v1.840 sdr_hw value
+	status.WriteString("sdr_hw=KiwiSDR 2 v1.840 ⁣ 📡 GPS ⁣ ⏳🚫 Limits\n")
 
 	// Admin email (use kiwisdr_public_email if set, otherwise fall back to admin email)
 	publicEmail := kwsh.config.Server.KiwiSDRPublicEmail
@@ -586,7 +586,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	}
 
 	// Software version — must match KiwiSDR format for directory compatibility
-	status.WriteString("sw_version=KiwiSDR_v1.837\n")
+	status.WriteString("sw_version=KiwiSDR_v1.840\n")
 
 	// Antenna info
 	if kwsh.config.Admin.Antenna != "" {
@@ -1661,7 +1661,7 @@ func (kc *kiwiConn) sendInitMessages() {
 	kc.sendMsg("badp", "0")
 
 	// Version and hardware info
-	versionMsg := fmt.Sprintf("version_maj=1 version_min=826 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
+	versionMsg := fmt.Sprintf("version_maj=1 version_min=840 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
 	kc.sendMsg("", versionMsg)
 
 	// Send configuration to both SND and W/F connections

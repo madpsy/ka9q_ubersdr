@@ -394,13 +394,13 @@
             : '—';
         const tableLabel = _currentTable === 'countries' ? 'countries reported' : 'reception reports';
         const isUberSDRRow = r => r.software && r.software.some(sw => sw.name.startsWith('UberSDR'));
-        const uberSdrCount = rows.filter(isUberSDRRow).length;
+        const uberSdrTotal = data.ubersdr_count || 0;  // from #software_in_use — all UberSDR reporters
         const uberSdrTop10 = rows.slice(0, 10).filter(isUberSDRRow).length;
         _setStatus(
             'Fetched ' + fetchedAt + ' (' + (data.fetched_ms || 0) + ' ms) · ' +
             rows.length + ' reporters · sorted by 24h ' + tableLabel +
             (_selectedCallsigns.size > 0 ? ' · ' + _selectedCallsigns.size + ' selected' : ''),
-            uberSdrCount, uberSdrTop10
+            uberSdrTotal, uberSdrTop10
         );
 
         if (rows.length === 0) {

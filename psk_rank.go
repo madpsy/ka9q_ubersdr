@@ -614,18 +614,31 @@ func (ah *AdminHandler) HandlePSKRank(w http.ResponseWriter, r *http.Request) {
 		return enrichWithSoftware(filterPSKByBand(src, band), sw)
 	}
 
+	// Count unique callsigns that have at least one UberSDR software entry.
+	uberSdrTotal := 0
+	for _, entries := range sw {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name, "UberSDR") {
+				uberSdrTotal++
+				break // count each callsign once
+			}
+		}
+	}
+
 	type pskRankResponse struct {
 		FetchedAt     time.Time                 `json:"fetched_at"`
 		FetchedMs     int64                     `json:"fetched_ms"`
 		ReportResult  PSKMonitorsByBandEnriched `json:"report_result,omitempty"`
 		CountryResult PSKMonitorsByBandEnriched `json:"country_result,omitempty"`
+		UberSDRCount  int                       `json:"ubersdr_count,omitempty"` // total UberSDR reporters from #software_in_use
 		Error         string                    `json:"error,omitempty"`
 	}
 
 	out := pskRankResponse{
-		FetchedAt: cached.FetchedAt,
-		FetchedMs: cached.FetchedMs,
-		Error:     cached.Error,
+		FetchedAt:    cached.FetchedAt,
+		FetchedMs:    cached.FetchedMs,
+		Error:        cached.Error,
+		UberSDRCount: uberSdrTotal,
 	}
 
 	switch table {

@@ -2950,7 +2950,10 @@
             <div class="modal-content" style="max-width: 860px; max-height: 85vh; display: flex; flex-direction: column;">
                 <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center;">
                     <h3 id="widgetCodeModalTitle" style="margin:0; font-size:16px;">Widget Source Code</h3>
-                    <button onclick="closeWidgetCodeModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <button id="widgetCodeCopyBtn" onclick="copyWidgetCode()" title="Copy code to clipboard" style="background:none;border:none;cursor:pointer;color:#fff;line-height:1;font-size:17px;padding:2px 4px;opacity:0.85;" aria-label="Copy to clipboard">📋</button>
+                        <button onclick="closeWidgetCodeModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                    </div>
                 </div>
                 <div class="modal-body" style="flex:1; overflow:auto; padding:0;">
                     <pre id="widgetCodeContent" style="margin:0; padding:16px; font-size:12px; line-height:1.5; background:#1e1e1e; color:#d4d4d4; white-space:pre-wrap; word-break:break-all; min-height:200px; font-family:'Courier New',Courier,monospace;"><em style="color:#888;">Loading…</em></pre>
@@ -9203,12 +9206,24 @@ function resetStationIdColor() {
                     </div>
                     <div style="display:grid;grid-template-columns:1fr;gap:5px;width:100%;">
                         ${isEnabled
-                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Disable</button>`
-                            : `<button class="btn" onclick="promptEnableOrClone('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}',${isMine});" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            ? `<button class="btn btn-danger" data-action="disable" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;">Disable</button>`
+                            : `<button class="btn" data-action="enable" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
-                        <button class="btn btn-secondary" onclick="cloneCommunityWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}','${escapeHtml(w.description||'').replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="Clone to My Widgets and open editor">Clone</button>
-                        <button class="btn btn-secondary" onclick="viewWidgetCode('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="View widget source code">View Code</button>
+                        <button class="btn btn-secondary" data-action="clone" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="Clone to My Widgets and open editor">Clone</button>
+                        <button class="btn btn-secondary" data-action="viewcode" style="font-size:11px;padding:4px 10px;width:100%;box-sizing:border-box;margin-left:0;" title="View widget source code">View Code</button>
                     </div>`;
+
+                // Attach event listeners using the widget data directly — avoids inline onclick
+                // string injection which breaks when name/description contain newlines or quotes.
+                const disableBtn  = card.querySelector('[data-action="disable"]');
+                const enableBtn   = card.querySelector('[data-action="enable"]');
+                const cloneBtn    = card.querySelector('[data-action="clone"]');
+                const viewCodeBtn = card.querySelector('[data-action="viewcode"]');
+                if (disableBtn)  disableBtn.addEventListener('click', () => disableWidget(w.widget_id));
+                if (enableBtn)   enableBtn.addEventListener('click',  () => promptEnableOrClone(w.widget_id, w.name, w.description || '', isMine));
+                if (cloneBtn)    cloneBtn.addEventListener('click',   () => cloneCommunityWidget(w.widget_id, w.name, w.description || ''));
+                if (viewCodeBtn) viewCodeBtn.addEventListener('click', () => viewWidgetCode(w.widget_id, w.name));
+
                 grid.appendChild(card);
             });
             container.appendChild(grid);
@@ -9256,6 +9271,21 @@ function resetStationIdColor() {
 
         function closeWidgetCodeModal() {
             document.getElementById('widgetCodeModal').style.display = 'none';
+        }
+
+        async function copyWidgetCode() {
+            const content = document.getElementById('widgetCodeContent');
+            const btn     = document.getElementById('widgetCodeCopyBtn');
+            const text    = content.textContent || '';
+            try {
+                await navigator.clipboard.writeText(text);
+                btn.textContent = '✅';
+                btn.title = 'Copied!';
+                setTimeout(() => { btn.textContent = '📋'; btn.title = 'Copy code to clipboard'; }, 2000);
+            } catch (e) {
+                btn.textContent = '❌';
+                setTimeout(() => { btn.textContent = '📋'; btn.title = 'Copy code to clipboard'; }, 2000);
+            }
         }
 
         // ── Widget Version History ────────────────────────────────────────────

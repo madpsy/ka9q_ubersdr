@@ -8,7 +8,7 @@
 - Added **Waterfall Resize** which allows you to drag the waterfall to make it taller or shorter using the grab handle underneath the control section
 
 ### Bug Fixes
-- Various UI niggles such as changing bandwidth marker colour didn't take affect until zooming
+- Various UI niggles such as changing bandwidth marker colour didn't take affect until zoom/tune change
 
 ## Version 0.1.50 - Latest Stable
 

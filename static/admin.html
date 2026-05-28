@@ -9063,13 +9063,27 @@ function resetStationIdColor() {
                     </div>
                     <div style="display:flex;gap:6px;flex-shrink:0;">
                         ${isEnabled
-                            ? `<button class="btn btn-danger" onclick="disableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">Disable</button>`
-                            : `<button class="btn" onclick="enableWidget('${w.widget_id}')" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
+                            ? `<button class="btn btn-danger" data-action="disable" style="font-size:12px;padding:5px 10px;">Disable</button>`
+                            : `<button class="btn" data-action="enable" style="font-size:12px;padding:5px 10px;"${enabledWidgetIDs.length >= 10 ? ' disabled title="Maximum 10 widgets enabled"' : ''}>Enable</button>`
                         }
-                        <button class="btn btn-secondary" onclick="openEditWidgetEditor('${w.widget_id}')" style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
-                        <button class="btn btn-secondary" onclick="openWidgetHistory('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;margin-left:0;" title="View version history">🕐 History</button>
-                        <button class="btn btn-danger"    onclick="deleteWidget('${w.widget_id}','${escapeHtml(w.name).replace(/'/g,"\\'")}');" style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
+                        <button class="btn btn-secondary" data-action="edit"    style="font-size:12px;padding:5px 10px;">\u270F\uFE0F Edit</button>
+                        <button class="btn btn-secondary" data-action="history" style="font-size:12px;padding:5px 10px;margin-left:0;" title="View version history">🕐 History</button>
+                        <button class="btn btn-danger"    data-action="delete"  style="font-size:12px;padding:5px 10px;">\uD83D\uDDD1\uFE0F</button>
                     </div>`;
+
+                // Attach listeners using raw JS values — avoids inline onclick string injection
+                // which crashes when widget names contain newlines or other special characters.
+                const myDisableBtn  = row.querySelector('[data-action="disable"]');
+                const myEnableBtn   = row.querySelector('[data-action="enable"]');
+                const myEditBtn     = row.querySelector('[data-action="edit"]');
+                const myHistoryBtn  = row.querySelector('[data-action="history"]');
+                const myDeleteBtn   = row.querySelector('[data-action="delete"]');
+                if (myDisableBtn)  myDisableBtn.addEventListener('click',  () => disableWidget(w.widget_id));
+                if (myEnableBtn)   myEnableBtn.addEventListener('click',   () => enableWidget(w.widget_id));
+                if (myEditBtn)     myEditBtn.addEventListener('click',     () => openEditWidgetEditor(w.widget_id));
+                if (myHistoryBtn)  myHistoryBtn.addEventListener('click',  () => openWidgetHistory(w.widget_id, w.name));
+                if (myDeleteBtn)   myDeleteBtn.addEventListener('click',   () => deleteWidget(w.widget_id, w.name));
+
                 container.appendChild(row);
             });
         }

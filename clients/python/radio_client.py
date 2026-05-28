@@ -2593,6 +2593,10 @@ Examples:
   # Output raw PCM to stdout with custom bandwidth (CLI mode)
   %(prog)s --no-gui -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm
 
+  # Pipe stdout to aplay (use plughw: not hw: so ALSA handles format/channel/rate conversion)
+  %(prog)s --no-gui -H localhost -p 8080 -o stdout --frequency 7049450 --mode usb -b 2700:250 \
+    | aplay -f S16_LE -r 12000 -c 1 -D plughw:11,0
+
   # Stream audio to UDP endpoint with default (127.0.0.1:8888)
   %(prog)s --no-gui -f 14074000 -m usb -o udp
 

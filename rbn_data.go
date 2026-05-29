@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// rbnCallsignRe matches valid callsign query parameters: 1–10 alphanumeric characters.
-var rbnCallsignRe = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
+// rbnCallsignRe matches valid callsign query parameters: 1–15 alphanumeric characters or hyphens.
+var rbnCallsignRe = regexp.MustCompile(`^[A-Z0-9-]{1,15}$`)
 
 // rbnCommentDateRe extracts a YYYY-MM-DD date from a CSV comment line such as:
 //
@@ -642,9 +642,9 @@ func (ah *AdminHandler) HandleRBNData(w http.ResponseWriter, r *http.Request) {
 
 	callsign := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("callsign")))
 
-	// Validate callsign: alphanumeric only, max 10 characters
+	// Validate callsign: alphanumeric and hyphens only, max 15 characters
 	if callsign != "" && !rbnCallsignRe.MatchString(callsign) {
-		http.Error(w, "invalid callsign: must be 1–10 alphanumeric characters", http.StatusBadRequest)
+		http.Error(w, "invalid callsign: must be 1–15 alphanumeric characters or hyphens", http.StatusBadRequest)
 		return
 	}
 

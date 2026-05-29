@@ -3088,6 +3088,23 @@ input[type="range"]::-moz-range-thumb {
     background: rgba(255, 255, 255, 0.6);
 }
 
+/* On touch devices expand the invisible hit area to ~48px without changing the
+   visual bar size or affecting the layout of neighbouring elements.
+   ::after is used because ::before is already the visual grip dots.
+   Only applied on coarse-pointer (touch) devices so desktop is unaffected.
+   Expands 20px upward (into the bottom of the waterfall — no buttons there)
+   and 20px downward (into the hidden badge containers — also no buttons). */
+@media (pointer: coarse) {
+    .waterfall-resize-handle::after {
+        content: '';
+        position: absolute;
+        top: -20px;
+        bottom: -20px;
+        left: 0;
+        right: 0;
+    }
+}
+
 /* ── Vertical zoom slider ─────────────────────────────────────────────────── */
 /* Hidden by default (desktop uses the Min/−/+/Max buttons); shown on narrow screens.
    A normal horizontal range input rotated -90deg — the most reliable cross-browser

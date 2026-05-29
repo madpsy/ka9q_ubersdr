@@ -1732,7 +1732,6 @@ class SpectrumDisplay {
 
                 // Keep zoom slider in sync with server-reported zoom level
                 if (typeof window.updateZoomSlider === 'function') {
-                    console.log(`[ZoomSlider] server config arrived: binBW=${this.binBandwidth?.toFixed(1)}, binCount=${this.binCount}`);
                     window.updateZoomSlider();
                 }
 
@@ -4185,9 +4184,9 @@ class SpectrumDisplay {
 
                     // Optimistically update zoom slider immediately (corrected when config arrives)
                     if (typeof window.updateZoomSlider === 'function') {
+                        if (typeof window.clearZoomSliderSource === 'function') window.clearZoomSliderSource();
                         const _prev = this.binBandwidth;
                         this.binBandwidth = newBinBandwidth;
-                        console.log(`[ZoomSlider] optimistic update (pinch zoomIn): binBW ${_prev?.toFixed(1)} → ${newBinBandwidth?.toFixed(1)}`);
                         window.updateZoomSlider();
                         this.binBandwidth = _prev;
                     }
@@ -4889,9 +4888,9 @@ class SpectrumDisplay {
 
         // Optimistically update zoom slider immediately (corrected when config arrives)
         if (typeof window.updateZoomSlider === 'function') {
+            if (typeof window.clearZoomSliderSource === 'function') window.clearZoomSliderSource();
             const _prev = this.binBandwidth;
             this.binBandwidth = newBinBandwidth;
-            console.log(`[ZoomSlider] optimistic update (zoomIn): binBW ${_prev?.toFixed(1)} → ${newBinBandwidth?.toFixed(1)}`);
             window.updateZoomSlider();
             this.binBandwidth = _prev;
         }
@@ -4926,9 +4925,9 @@ class SpectrumDisplay {
             this.resetZoom();
             // Optimistically move slider to 0
             if (typeof window.updateZoomSlider === 'function') {
+                if (typeof window.clearZoomSliderSource === 'function') window.clearZoomSliderSource();
                 const _prev = this.binBandwidth;
                 this.binBandwidth = this.initialBinBandwidth;
-                console.log(`[ZoomSlider] optimistic update (zoomOut→reset): binBW ${_prev?.toFixed(1)} → ${this.initialBinBandwidth?.toFixed(1)}`);
                 window.updateZoomSlider();
                 this.binBandwidth = _prev;
             }
@@ -4964,9 +4963,9 @@ class SpectrumDisplay {
 
         // Optimistically update zoom slider immediately (corrected when config arrives)
         if (typeof window.updateZoomSlider === 'function') {
+            if (typeof window.clearZoomSliderSource === 'function') window.clearZoomSliderSource();
             const _prev = this.binBandwidth;
             this.binBandwidth = newBinBandwidth;
-            console.log(`[ZoomSlider] optimistic update (zoomOut): binBW ${_prev?.toFixed(1)} → ${newBinBandwidth?.toFixed(1)}`);
             window.updateZoomSlider();
             this.binBandwidth = _prev;
         }

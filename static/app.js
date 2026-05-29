@@ -9258,12 +9258,15 @@ function spectrumMaxZoom() {
 // #spectrum-vzoom-slider on narrow screens.
 const ZOOM_SLIDER_MAX = 14; // retained for updateZoomSlider() math
 
-// Drag guard: prevents updateZoomSlider() from snapping the slider back to the
-// server-reported position while the user is actively dragging.
-let _zoomSliderDragging = false;
+// Source tag: tracks who last initiated a zoom change.
+// 'slider' — the user moved the slider; updateZoomSlider() must not overwrite
+//            the slider value because the server's quantised echo is irrelevant.
+// null     — zoom came from scroll, pinch, keyboard, or page load; the slider
+//            should follow the server's reported zoom level.
+let _zoomSource = null;
 
 function spectrumZoomSliderDragStart() {
-    _zoomSliderDragging = true;
+    _zoomSource = 'slider';
 }
 
 function spectrumZoomSliderDragEnd(sliderEl) {
@@ -9271,20 +9274,11 @@ function spectrumZoomSliderDragEnd(sliderEl) {
     // so the server always receives the value the user landed on even if the
     // last oninput event was dropped by ZOOM_THROTTLE_MS.
     if (sliderEl) {
-        console.log(`[ZoomSlider] dragEnd: final position=${sliderEl.value}, resetting throttle and sending`);
         lastZoomTime = 0; // reset throttle so the call goes through immediately
         spectrumZoomSlider(sliderEl.value, sliderEl);
     }
-
-    // Keep the drag guard alive long enough for the server's config reply to
-    // arrive and be ignored.  Without this delay, updateZoomSlider() fires
-    // ~20–200 ms after touchend and snaps the slider back to the server's
-    // (potentially stale) zoom level.
-    console.log(`[ZoomSlider] dragEnd: guard stays ON for 300ms`);
-    setTimeout(() => {
-        console.log(`[ZoomSlider] dragEnd: guard cleared (300ms elapsed)`);
-        _zoomSliderDragging = false;
-    }, 300);
+    // _zoomSource stays 'slider' — cleared only when a non-slider zoom action
+    // (scroll, pinch, keyboard) fires, which is the correct time to re-sync.
 }
 
 /**
@@ -9295,6 +9289,9 @@ function spectrumZoomSliderDragEnd(sliderEl) {
  */
 function spectrumZoomSlider(position, sliderEl) {
     position = parseInt(position, 10);
+    // Mark zoom as slider-initiated so updateZoomSlider() won't overwrite the
+    // slider value when the server's quantised config echo arrives.
+    _zoomSource = 'slider';
 
     // Use the calling element's max if provided (most accurate — reflects dynamic updates).
     // Fall back to the vertical slider, then the legacy horizontal slider, then the constant.
@@ -9374,7 +9371,6 @@ function spectrumZoomSlider(position, sliderEl) {
             ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
         const currentStep = curBwSteps + curBinCountSteps;
 
-        console.log(`[ZoomSlider] deep-zoom path: position=${position}, currentStep=${currentStep}, direction=${position > currentStep ? 'zoomIn' : 'zoomOut'}, binBW=${spectrumDisplay.binBandwidth?.toFixed(1)}, targetBinBW=${targetBinBandwidth.toFixed(1)}, safeBW=${currentSafeBW}`);
         if (position > currentStep) {
             spectrumDisplay.zoomIn();
         } else {
@@ -9383,8 +9379,6 @@ function spectrumZoomSlider(position, sliderEl) {
         updateURL();
         return;
     }
-
-    console.log(`[ZoomSlider] normal path: position=${position}, targetBinBW=${targetBinBandwidth.toFixed(1)}, currentBinBW=${spectrumDisplay.binBandwidth?.toFixed(1)}`);
 
     // Normal zoom zone: send target binBandwidth directly.
     const freqInput = document.getElementById('frequency');
@@ -9415,7 +9409,8 @@ function spectrumZoomSlider(position, sliderEl) {
  * Updates the slider thumb to reflect the current zoom level.
  * Also dynamically updates slider.max based on the actual minimum binBandwidth
  * observed from the server (so the slider always reaches its end at true max zoom).
- * Skipped while the user is actively dragging the slider.
+ * Skipped when _zoomSource === 'slider' — the slider owns its own position and
+ * the server's quantised echo must not overwrite what the user dragged to.
  */
 function updateZoomSlider() {
     if (!spectrumDisplay) return;
@@ -9423,9 +9418,6 @@ function updateZoomSlider() {
     const initial = spectrumDisplay.initialBinBandwidth;
     const current = spectrumDisplay.binBandwidth;
     const currentBinCount = spectrumDisplay.binCount;
-    const defaultBinCount = spectrumDisplay.config && spectrumDisplay.config.defaultBinCount
-        ? spectrumDisplay.config.defaultBinCount
-        : currentBinCount; // fallback: track max seen bin count
 
     if (!initial || !current) return;
 
@@ -9455,22 +9447,18 @@ function updateZoomSlider() {
 
     // Helper: apply computed step to a slider element (horizontal or vertical).
     // Always updates max (so the slider range is correct during drag).
-    // Only updates value when not dragging (prevents snap-back fighting the user).
+    // Only updates value when _zoomSource !== 'slider' — if the user moved the
+    // slider, the server's quantised echo must not overwrite their position.
     function applyToSlider(el) {
         if (!el) return;
         if (dynamicMax > 0 && parseInt(el.max) !== dynamicMax) {
             el.max = dynamicMax;
         }
-        if (_zoomSliderDragging) {
-            console.log(`[ZoomSlider] updateZoomSlider: BLOCKED by drag guard (server step=${totalStep}, current slider=${el.value})`);
-            return; // don't overwrite value while user is dragging
-        }
+        if (_zoomSource === 'slider') return; // slider owns its own position
         const sliderMax = parseInt(el.max) || ZOOM_SLIDER_MAX;
-        const newVal = (current >= initial && binCountSteps === 0) ? 0 : Math.max(0, Math.min(sliderMax, totalStep));
-        if (parseInt(el.value) !== newVal) {
-            console.log(`[ZoomSlider] updateZoomSlider: WRITING slider ${el.id} from ${el.value} → ${newVal} (server step=${totalStep}, bwSteps=${bwSteps}, binCountSteps=${binCountSteps})`);
-        }
-        el.value = newVal;
+        el.value = (current >= initial && binCountSteps === 0)
+            ? 0
+            : Math.max(0, Math.min(sliderMax, totalStep));
     }
 
     // Sync both the (legacy) horizontal slider and the new vertical slider
@@ -9483,6 +9471,9 @@ window.updateZoomSlider = updateZoomSlider;
 window.spectrumZoomSliderDragStart = spectrumZoomSliderDragStart;
 window.spectrumZoomSliderDragEnd = spectrumZoomSliderDragEnd;
 window.spectrumZoomSlider = spectrumZoomSlider;
+// Called by non-slider zoom paths (scroll wheel, pinch, keyboard shortcuts) so
+// that updateZoomSlider() resumes tracking the server's reported zoom level.
+window.clearZoomSliderSource = function() { _zoomSource = null; };
 
 function spectrumCenterFrequency() {
     if (!spectrumDisplay) return;

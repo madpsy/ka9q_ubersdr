@@ -98,6 +98,35 @@ class ChatDisplay:
         self.load_saved_username()
         self.load_saved_zoom_preference()
 
+    def _update_spacer_height(self, event=None):
+        """Resize the top spacer so messages stay bottom-anchored.
+
+        The spacer is a Frame embedded at position 1.0 in the Text widget.
+        Its height is set to (widget_height - content_height), clamped to >= 0,
+        so that when there are few messages they appear at the bottom.
+        """
+        try:
+            widget = self.messages_text
+            widget_height = widget.winfo_height()
+
+            # Measure the height of all real content (everything after the spacer line).
+            # bbox returns (x, y, width, height) for a given index; we use the last char.
+            last_bbox = widget.bbox(tk.END)
+            if last_bbox is None:
+                return
+            content_bottom = last_bbox[1] + last_bbox[3]  # y + height of last line
+
+            # The spacer itself occupies some height — exclude it from content measurement.
+            # We approximate content height as everything below the spacer newline.
+            spacer_height = max(0, widget_height - content_bottom)
+
+            # Only update if the height actually changed (avoids infinite Configure loops)
+            current_height = self._spacer_frame.winfo_height()
+            if abs(current_height - spacer_height) > 1:
+                self._spacer_frame.config(height=spacer_height, width=1)
+        except Exception:
+            pass
+
 # Add this helper function at the class level (after __init__)
     def _get_emoji_font(self):
         """Get appropriate emoji font for the current platform"""
@@ -153,6 +182,19 @@ class ChatDisplay:
         self.messages_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         left_frame.columnconfigure(0, weight=1)
         left_frame.rowconfigure(1, weight=1)
+
+        # Insert a spacer at the top so messages are bottom-anchored.
+        # The spacer is a zero-width window that expands to fill available vertical space.
+        # As real messages are added the spacer shrinks naturally because the text widget
+        # grows its content from the top; we keep the spacer at index 1.0 and always
+        # scroll to the end so the latest message is visible at the bottom.
+        self._spacer_frame = tk.Frame(self.messages_text, bg='#1a1a1a')
+        self.messages_text.config(state='normal')
+        self.messages_text.window_create('1.0', window=self._spacer_frame, stretch=True)
+        self.messages_text.insert('1.0 + 1 chars', '\n')
+        self.messages_text.config(state='disabled')
+        # Bind resize events so the spacer height tracks the widget height
+        self.messages_text.bind('<Configure>', self._update_spacer_height)
 
         # Configure text tags for styling
         self.messages_text.tag_config('username', foreground='#4a9eff', font=('TkDefaultFont', 9, 'bold'))
@@ -870,6 +912,7 @@ class ChatDisplay:
 
         self.messages_text.config(state='disabled')
         self.messages_text.see(tk.END)
+        self.window.after_idle(self._update_spacer_height)
 
     def _insert_text_with_links(self, text: str):
         """Insert text with URLs and frequency patterns converted to clickable links"""
@@ -954,6 +997,7 @@ class ChatDisplay:
         self.messages_text.insert(tk.END, f"{message}\n", 'system')
         self.messages_text.config(state='disabled')
         self.messages_text.see(tk.END)
+        self.window.after_idle(self._update_spacer_height)
 
     def add_error_message(self, message: str):
         """Add an error message to the display"""
@@ -961,6 +1005,7 @@ class ChatDisplay:
         self.messages_text.insert(tk.END, f"Error: {message}\n", 'error')
         self.messages_text.config(state='disabled')
         self.messages_text.see(tk.END)
+        self.window.after_idle(self._update_spacer_height)
 
     def update_active_users(self, data: dict):
         """Update the active users list"""

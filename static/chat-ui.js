@@ -647,6 +647,9 @@ class ChatUI {
                 background: rgba(30, 30, 30, 0.6);
                 color: #ddd;
                 font-size: 12px;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-end;
             }
 
             .chat-message {

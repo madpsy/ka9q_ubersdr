@@ -85,6 +85,7 @@ type InstanceReport struct {
 	Spectrogram                bool                     `json:"spectrogram"`                  // Whether wideband spectrogram recording is enabled
 	DSP                        map[string]interface{}   `json:"dsp"`                          // DSP noise reduction insert info (enabled + allowed filter names)
 	Addons                     []string                 `json:"addons"`                       // Names of enabled addon proxies
+	EnabledWidgets             []string                 `json:"enabled_widgets,omitempty"`    // UUIDs of enabled collector widgets (omitted when none)
 	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
 	SSBGridSquares             []WSPRGridSquareEntry    `json:"ssb_grid_squares,omitempty"`   // WSPR-derived grid-square map overlay data (omitted when unavailable)
 	PSKReporterRank            *PSKCallsignRank         `json:"pskreporter_rank,omitempty"`   // PSKReporter leaderboard rank for this callsign (omitted when unavailable)
@@ -660,6 +661,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
 		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
+		EnabledWidgets:             ir.config.Server.EnabledWidgets,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 	}
@@ -1046,6 +1048,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
 		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
+		EnabledWidgets:             ir.config.Server.EnabledWidgets,
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,

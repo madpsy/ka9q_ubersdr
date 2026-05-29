@@ -9266,8 +9266,20 @@ function spectrumZoomSliderDragStart() {
     _zoomSliderDragging = true;
 }
 
-function spectrumZoomSliderDragEnd() {
-    _zoomSliderDragging = false;
+function spectrumZoomSliderDragEnd(sliderEl) {
+    // Unconditionally send the final slider position, bypassing the throttle,
+    // so the server always receives the value the user landed on even if the
+    // last oninput event was dropped by ZOOM_THROTTLE_MS.
+    if (sliderEl) {
+        lastZoomTime = 0; // reset throttle so the call goes through immediately
+        spectrumZoomSlider(sliderEl.value, sliderEl);
+    }
+
+    // Keep the drag guard alive long enough for the server's config reply to
+    // arrive and be ignored.  Without this delay, updateZoomSlider() fires
+    // ~20–200 ms after touchend and snaps the slider back to the server's
+    // (potentially stale) zoom level.
+    setTimeout(() => { _zoomSliderDragging = false; }, 300);
 }
 
 /**

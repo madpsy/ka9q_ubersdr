@@ -9271,6 +9271,7 @@ function spectrumZoomSliderDragEnd(sliderEl) {
     // so the server always receives the value the user landed on even if the
     // last oninput event was dropped by ZOOM_THROTTLE_MS.
     if (sliderEl) {
+        console.log(`[ZoomSlider] dragEnd: final position=${sliderEl.value}, resetting throttle and sending`);
         lastZoomTime = 0; // reset throttle so the call goes through immediately
         spectrumZoomSlider(sliderEl.value, sliderEl);
     }
@@ -9279,7 +9280,11 @@ function spectrumZoomSliderDragEnd(sliderEl) {
     // arrive and be ignored.  Without this delay, updateZoomSlider() fires
     // ~20–200 ms after touchend and snaps the slider back to the server's
     // (potentially stale) zoom level.
-    setTimeout(() => { _zoomSliderDragging = false; }, 300);
+    console.log(`[ZoomSlider] dragEnd: guard stays ON for 300ms`);
+    setTimeout(() => {
+        console.log(`[ZoomSlider] dragEnd: guard cleared (300ms elapsed)`);
+        _zoomSliderDragging = false;
+    }, 300);
 }
 
 /**
@@ -9369,6 +9374,7 @@ function spectrumZoomSlider(position, sliderEl) {
             ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
         const currentStep = curBwSteps + curBinCountSteps;
 
+        console.log(`[ZoomSlider] deep-zoom path: position=${position}, currentStep=${currentStep}, direction=${position > currentStep ? 'zoomIn' : 'zoomOut'}, binBW=${spectrumDisplay.binBandwidth?.toFixed(1)}, targetBinBW=${targetBinBandwidth.toFixed(1)}, safeBW=${currentSafeBW}`);
         if (position > currentStep) {
             spectrumDisplay.zoomIn();
         } else {
@@ -9377,6 +9383,8 @@ function spectrumZoomSlider(position, sliderEl) {
         updateURL();
         return;
     }
+
+    console.log(`[ZoomSlider] normal path: position=${position}, targetBinBW=${targetBinBandwidth.toFixed(1)}, currentBinBW=${spectrumDisplay.binBandwidth?.toFixed(1)}`);
 
     // Normal zoom zone: send target binBandwidth directly.
     const freqInput = document.getElementById('frequency');
@@ -9453,13 +9461,16 @@ function updateZoomSlider() {
         if (dynamicMax > 0 && parseInt(el.max) !== dynamicMax) {
             el.max = dynamicMax;
         }
-        if (_zoomSliderDragging) return; // don't overwrite value while user is dragging
-        const sliderMax = parseInt(el.max) || ZOOM_SLIDER_MAX;
-        if (current >= initial && binCountSteps === 0) {
-            el.value = 0;
-        } else {
-            el.value = Math.max(0, Math.min(sliderMax, totalStep));
+        if (_zoomSliderDragging) {
+            console.log(`[ZoomSlider] updateZoomSlider: BLOCKED by drag guard (server step=${totalStep}, current slider=${el.value})`);
+            return; // don't overwrite value while user is dragging
         }
+        const sliderMax = parseInt(el.max) || ZOOM_SLIDER_MAX;
+        const newVal = (current >= initial && binCountSteps === 0) ? 0 : Math.max(0, Math.min(sliderMax, totalStep));
+        if (parseInt(el.value) !== newVal) {
+            console.log(`[ZoomSlider] updateZoomSlider: WRITING slider ${el.id} from ${el.value} → ${newVal} (server step=${totalStep}, bwSteps=${bwSteps}, binCountSteps=${binCountSteps})`);
+        }
+        el.value = newVal;
     }
 
     // Sync both the (legacy) horizontal slider and the new vertical slider

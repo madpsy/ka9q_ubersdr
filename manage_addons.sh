@@ -910,6 +910,11 @@ edit_compose_menu() {
     done
 
     local compose_file="$HOME/ubersdr/${SELECTED_ADDON}/docker-compose.yml"
+    local backup_file="${compose_file}.bak"
+    echo ""
+    echo "Backing up $compose_file to ${backup_file}..."
+    cp "$compose_file" "$backup_file"
+    echo "Backup saved."
     echo ""
     echo "Opening $compose_file in nano..."
     nano "$compose_file"

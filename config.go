@@ -252,6 +252,13 @@ type RadiodConfig struct {
 }
 
 // ServerConfig contains web server settings
+// RemoteControlConfig enables an opt-in postMessage API that lets allowlisted
+// opener windows retune the current session in place (see static/remote-control.js).
+type RemoteControlConfig struct {
+	Enabled        bool     `yaml:"enabled"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
 type ServerConfig struct {
 	Listen                          string               `yaml:"listen"`
 	MaxSessions                     int                  `yaml:"max_sessions"`
@@ -290,6 +297,7 @@ type ServerConfig struct {
 	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
 	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in index.html (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
+	RemoteControl                   RemoteControlConfig  `yaml:"remote_control"`                      // Opt-in postMessage remote-tune API (static/remote-control.js)
 	EnabledWidgets                  []string             `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
 	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
 	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)

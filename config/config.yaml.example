@@ -466,6 +466,15 @@ server:
   #
   custom_head_html: ""
 
+  # Remote-tune API (opt-in). Lets allowlisted opener windows (e.g. a companion
+  # panadapter/pointer app) retune THIS session in place via window.postMessage —
+  # no page reload, so the audio-start gate is not re-prompted. Drives only the
+  # current tab's window.radioAPI; does not affect the server-side session model.
+  # See static/remote-control.js. Only the listed origins may control the session.
+  remote_control:
+    enabled: false
+    allowed_origins: []   # e.g. ["https://omnisdr.example"]
+
   # Custom HTML injection before </body> in index.html
   # Use this for visible content that needs the DOM: banners, popups, Google Ads display unit <div>s,
   # or any script that calls document.getElementById / document.body.appendChild.

@@ -1565,6 +1565,12 @@
     <script type="module" src="local-bookmarks-ui.js"></script>
     
     <script type="module" src="app.js"></script>
+    {{if .RemoteControlEnabled}}
+    <!-- Remote-tune API bridge (opt-in: server remote_control.enabled). Lets allowlisted
+         opener windows retune this session in place via postMessage. -->
+    <script>window.__ubersdrRemoteControl = { enabled: true, allowedOrigins: {{.RemoteControlOrigins}} };</script>
+    <script src="remote-control.js"></script>
+    {{end}}
 
     <!-- RM Noise AI Denoising Modal -->
     <div id="rmnoise-modal" class="rmnoise-modal-overlay" style="display:none;">

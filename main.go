@@ -2927,14 +2927,22 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 
 // handleIndexPage serves the index.html template with custom HTML injection
 func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm *WidgetManager) {
+	rcOrigins, _ := json.Marshal(config.Server.RemoteControl.AllowedOrigins)
+	if len(rcOrigins) == 0 || string(rcOrigins) == "null" {
+		rcOrigins = []byte("[]")
+	}
 	data := struct {
-		CustomHeadHTML template.HTML
-		CustomBodyHTML template.HTML
-		WidgetsHTML    template.HTML
+		CustomHeadHTML       template.HTML
+		CustomBodyHTML       template.HTML
+		WidgetsHTML          template.HTML
+		RemoteControlEnabled bool
+		RemoteControlOrigins template.JS
 	}{
-		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
-		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
-		WidgetsHTML:    wm.AssembleHTML(config.Server.EnabledWidgets),
+		CustomHeadHTML:       template.HTML(config.Server.CustomHeadHTML),
+		CustomBodyHTML:       template.HTML(config.Server.CustomBodyHTML),
+		WidgetsHTML:          wm.AssembleHTML(config.Server.EnabledWidgets),
+		RemoteControlEnabled: config.Server.RemoteControl.Enabled,
+		RemoteControlOrigins: template.JS(rcOrigins),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>UberSDR</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ── Status Bar ─────────────────────────────────────────────────────── -->
+  <header id="status-bar">
+    <div id="status-dot" class="dot dot-grey"></div>
+    <span id="status-label">Disconnected</span>
+    <div id="status-right">
+      <span id="users-label"></span>
+      <span id="throughput-label"></span>
+      <button id="help-btn" class="btn btn-icon" title="API Help">?</button>
+      <button id="connect-btn" class="btn btn-primary">Connect</button>
+    </div>
+  </header>
+
+  <!-- ── Main Scrollable Content ───────────────────────────────────────── -->
+  <main id="main-content">
+
+    <!-- Instance Card -->
+    <section class="card" id="card-instance">
+      <div class="card-header" data-toggle="card-instance-body">
+        <span class="card-title">📡 Instance</span>
+        <span class="card-chevron">▼</span>
+      </div>
+      <div class="card-body" id="card-instance-body">
+        <div class="form-row">
+          <label>URL</label>
+          <div class="input-row">
+            <input type="url" id="url-entry" placeholder="http://ubersdr.local:8080" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+            <button id="web-btn" class="btn btn-icon" title="Open in browser">🌐</button>
+            <button id="save-profile-btn" class="btn btn-icon" title="Save profile">💾</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Password</label>
+          <input type="password" id="password-entry" placeholder="(optional)" autocomplete="current-password">
+        </div>
+        <div class="form-row btn-row">
+          <button id="browse-btn" class="btn btn-secondary">🔍 Browse…</button>
+          <button id="profiles-btn" class="btn btn-secondary">📋 Profiles…</button>
+        </div>
+        <div class="form-row" id="station-row" style="display:none">
+          <label>Instance</label>
+          <span id="station-label" class="station-label"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Frequency Card -->
+    <section class="card" id="card-frequency">
+      <div class="card-header" data-toggle="card-frequency-body">
+        <span class="card-title">📻 Frequency</span>
+        <span class="card-chevron">▼</span>
+      </div>
+      <div class="card-body" id="card-frequency-body">
+        <!-- Frequency row -->
+        <div class="freq-row">
+          <label class="freq-label">kHz</label>
+          <input type="number" id="freq-entry" class="freq-input" step="0.001" min="10" max="30000">
+          <button id="freq-apply-btn" class="btn btn-icon" title="Apply">✓</button>
+          <button id="freq-down-btn" class="btn btn-icon step-btn">◀</button>
+          <select id="step-select" class="step-select">
+            <option value="1">1 Hz</option>
+            <option value="10">10 Hz</option>
+            <option value="100">100 Hz</option>
+            <option value="500">500 Hz</option>
+            <option value="1000" selected>1 kHz</option>
+            <option value="10000">10 kHz</option>
+            <option value="100000">100 kHz</option>
+            <option value="1000000">1 MHz</option>
+          </select>
+          <button id="freq-up-btn" class="btn btn-icon step-btn">▶</button>
+        </div>
+
+        <!-- Mode + Bandwidth row -->
+        <div class="mode-bw-row">
+          <label>Mode</label>
+          <select id="mode-select" class="mode-select">
+            <option value="usb">USB</option>
+            <option value="lsb">LSB</option>
+            <option value="am">AM</option>
+            <option value="sam">SAM</option>
+            <option value="fm">FM</option>
+            <option value="cwu">CWU</option>
+            <option value="cwl">CWL</option>
+            <option value="iq">IQ</option>
+          </select>
+          <label class="bw-label">BW</label>
+          <span id="bw-value-label" class="bw-value">2700 Hz</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="bw-slider" class="slider" min="0" max="5000" step="50" value="2700">
+        </div>
+
+        <!-- Bookmark search combobox -->
+        <div class="form-row">
+          <label>Bookmark</label>
+          <div class="bm-combo" id="bm-combo">
+            <input type="search" id="bm-input" class="bm-input" placeholder="Search bookmarks…" autocomplete="off" disabled>
+            <ul id="bm-list" class="bm-list" role="listbox" aria-label="Bookmarks"></ul>
+          </div>
+        </div>
+
+        <!-- AGC row (USB/LSB only) -->
+        <div id="agc-row" class="agc-row" style="display:none">
+          <div class="agc-col">
+            <label>Hang <span id="agc-hang-label" class="param-value">1.1 s</span></label>
+            <input type="range" id="agc-hang-slider" class="slider" min="0" max="10" step="0.1" value="1.1">
+          </div>
+          <div class="agc-col">
+            <label>Recovery <span id="agc-recovery-label" class="param-value">20 dB/s</span></label>
+            <input type="range" id="agc-recovery-slider" class="slider" min="1" max="100" step="1" value="20">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Audio Card -->
+    <section class="card" id="card-audio">
+      <div class="card-header" data-toggle="card-audio-body">
+        <span class="card-title">🔊 Audio</span>
+        <span class="card-chevron">▼</span>
+      </div>
+      <div class="card-body" id="card-audio-body">
+        <div class="form-row">
+          <label>Device</label>
+          <div class="input-row">
+            <select id="device-select" class="flex-select"></select>
+            <button id="refresh-devices-btn" class="btn btn-icon" title="Refresh devices">🔄</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Format</label>
+          <div class="radio-group" id="format-group">
+            <label class="radio-label">
+              <input type="radio" name="format" value="opus" checked> Compressed
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="format" value="pcm-zstd"> Uncompressed
+            </label>
+          </div>
+        </div>
+        <div class="volume-row">
+          <button id="mute-btn" class="btn btn-icon mute-btn" title="Mute">🔊</button>
+          <input type="range" id="volume-slider" class="slider flex-slider" min="0" max="100" step="1" value="80">
+          <select id="channel-select" class="channel-select">
+            <option value="both">L+R</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <button id="webaudio-btn" class="btn btn-secondary" style="width:100%">🎧 Browser Audio</button>
+        </div>
+
+        <!-- Signal meters -->
+        <div class="meters" id="signal-meters">
+          <div class="meter-row">
+            <span class="meter-label">Signal</span>
+            <div class="meter-bar-wrap">
+              <div class="meter-bar" id="signal-bar"></div>
+            </div>
+            <span class="meter-value" id="signal-value">—</span>
+            <span class="meter-unit">dBFS</span>
+          </div>
+          <div class="meter-row">
+            <span class="meter-label">SNR</span>
+            <div class="meter-bar-wrap">
+              <div class="meter-bar" id="snr-bar"></div>
+            </div>
+            <span class="meter-value" id="snr-value">—</span>
+            <span class="meter-unit">dB</span>
+          </div>
+          <div class="meter-row">
+            <span class="meter-label">Audio</span>
+            <div class="meter-bar-wrap">
+              <div class="meter-bar" id="audio-bar"></div>
+            </div>
+            <span class="meter-value" id="audio-value">—</span>
+            <span class="meter-unit">dBFS</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Noise Reduction Card -->
+    <section class="card" id="card-dsp">
+      <div class="card-header" data-toggle="card-dsp-body">
+        <span class="card-title">🎛 Noise Reduction</span>
+        <span class="card-chevron">▼</span>
+      </div>
+      <div class="card-body" id="card-dsp-body">
+        <div class="dsp-controls">
+          <label class="checkbox-label">
+            <input type="checkbox" id="dsp-enable-check" disabled>
+            Enable noise reduction
+          </label>
+          <div class="dsp-filter-row">
+            <select id="dsp-filter-select" class="flex-select" disabled>
+              <option value="">Select filter…</option>
+            </select>
+            <button id="dsp-config-btn" class="btn btn-secondary" disabled>Config</button>
+            <button id="dsp-apply-btn" class="btn btn-secondary" disabled>Apply</button>
+          </div>
+        </div>
+        <div id="dsp-status-label" class="status-text">Not available on this instance</div>
+      </div>
+    </section>
+
+    <!-- FLRig Card -->
+    <section class="card" id="card-flrig">
+      <div class="card-header" data-toggle="card-flrig-body">
+        <span class="card-title">📡 FLRig Sync</span>
+        <span class="card-chevron">▼</span>
+      </div>
+      <div class="card-body" id="card-flrig-body">
+        <label class="checkbox-label">
+          <input type="checkbox" id="flrig-enabled-check">
+          Enable FLRig sync
+        </label>
+        <div class="form-row">
+          <label>Host</label>
+          <input type="text" id="flrig-host-entry" value="127.0.0.1" placeholder="127.0.0.1">
+        </div>
+        <div class="form-row">
+          <label>Port</label>
+          <input type="number" id="flrig-port-entry" value="12345" min="1" max="65535">
+        </div>
+        <div class="form-row">
+          <label>Direction</label>
+          <div class="radio-group" id="flrig-dir-group">
+            <label class="radio-label"><input type="radio" name="flrig-dir" value="rig-to-sdr"> Rig→SDR</label>
+            <label class="radio-label"><input type="radio" name="flrig-dir" value="sdr-to-rig"> SDR→Rig</label>
+            <label class="radio-label"><input type="radio" name="flrig-dir" value="both" checked> Both</label>
+          </div>
+        </div>
+        <div class="form-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="flrig-ptt-mute-check" checked>
+            Mute during TX
+          </label>
+        </div>
+        <div class="flrig-status-row">
+          <div id="flrig-dot" class="dot dot-grey"></div>
+          <span id="flrig-status-label" class="flex-label">Disabled</span>
+          <span id="flrig-ptt-badge" class="ptt-badge ptt-rx">RX</span>
+          <button id="flrig-apply-btn" class="btn btn-secondary">Apply</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sinks Card -->
+    <section class="card" id="card-sinks">
+      <div class="card-header" data-toggle="card-sinks-body">
+        <span class="card-title">📤 Output Sinks</span>
+        <span class="card-chevron">▼</span>
+      </div>
+      <div class="card-body" id="card-sinks-body">
+        <div class="form-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="stdout-check">
+            stdout PCM
+          </label>
+        </div>
+        <div class="form-row">
+          <label>UDP sink</label>
+          <div class="input-row">
+            <input type="text" id="udp-address-entry" placeholder="127.0.0.1:5005">
+            <button id="udp-add-btn" class="btn btn-secondary">Add</button>
+          </div>
+        </div>
+        <ul id="udp-sinks-list" class="sinks-list"></ul>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Modals ─────────────────────────────────────────────────────────── -->
+
+  <!-- Browse Instances Modal -->
+  <div id="modal-browse" class="modal" role="dialog" aria-modal="true" aria-label="Browse Instances" style="display:none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2>Browse Instances</h2>
+        <button class="modal-close" data-close="modal-browse">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="search" id="browse-search" placeholder="Search callsign, name or URL…" autocomplete="off">
+        <ul id="instances-list" class="instances-list"></ul>
+      </div>
+      <div class="modal-footer">
+        <button id="browse-connect-btn" class="btn btn-primary" disabled>Connect</button>
+        <button class="btn btn-secondary" data-close="modal-browse">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profiles Modal -->
+  <div id="modal-profiles" class="modal" role="dialog" aria-modal="true" aria-label="Profiles" style="display:none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2>Profiles</h2>
+        <button class="modal-close" data-close="modal-profiles">✕</button>
+      </div>
+      <div class="modal-body">
+        <ul id="profiles-list" class="profiles-list"></ul>
+      </div>
+      <div class="modal-footer">
+        <button id="profile-load-btn" class="btn btn-primary" disabled>Load &amp; Connect</button>
+        <button id="profile-delete-btn" class="btn btn-danger" disabled>Delete</button>
+        <button class="btn btn-secondary" data-close="modal-profiles">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Profile Modal -->
+  <div id="modal-save-profile" class="modal" role="dialog" aria-modal="true" aria-label="Save Profile" style="display:none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <h2>Save Profile</h2>
+        <button class="modal-close" data-close="modal-save-profile">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="save-profile-name" placeholder="Profile name…" autocomplete="off">
+      </div>
+      <div class="modal-footer">
+        <button id="save-profile-confirm-btn" class="btn btn-primary">Save</button>
+        <button class="btn btn-secondary" data-close="modal-save-profile">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DSP Config Modal -->
+  <div id="modal-dsp-config" class="modal" role="dialog" aria-modal="true" aria-label="Filter Parameters" style="display:none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 id="dsp-config-title">Filter Parameters</h2>
+        <button class="modal-close" data-close="modal-dsp-config">✕</button>
+      </div>
+      <div class="modal-body" id="dsp-config-body">
+        <!-- Populated dynamically -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="modal-dsp-config">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help / API Reference Modal -->
+  <div id="modal-help" class="modal" role="dialog" aria-modal="true" aria-label="API Reference" style="display:none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-dialog-wide">
+      <div class="modal-header">
+        <h2>API Reference</h2>
+        <button class="btn btn-icon modal-close" data-close="modal-help">✕</button>
+      </div>
+      <div class="modal-body modal-body-scroll">
+        <div id="help-content" class="md-body">Loading…</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="modal-help">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm Modal (generic) -->
+  <div id="modal-confirm" class="modal" role="dialog" aria-modal="true" style="display:none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <h2 id="confirm-title">Confirm</h2>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-message"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="confirm-ok-btn" class="btn btn-primary">OK</button>
+        <button id="confirm-cancel-btn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="api.js"></script>
+  <script src="signal.js"></script>
+  <script src="tune.js"></script>
+  <script src="agc.js"></script>
+  <script src="audio.js"></script>
+  <script src="webaudio.js"></script>
+  <script src="bookmarks.js"></script>
+  <script src="dsp.js"></script>
+  <script src="flrig.js"></script>
+  <script src="connection.js"></script>
+  <script src="profiles.js"></script>
+  <script src="sinks.js"></script>
+  <script src="help.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -2,8 +2,12 @@ package main
 
 import (
 	_ "embed"
+	"encoding/json"
+	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,6 +140,58 @@ func formatFreqKHz(hz int) string {
 }
 
 func main() {
+	// ── CLI flags ─────────────────────────────────────────────────────────────
+	// Parsed before the Fyne app is created so they work even when no display
+	// is available (e.g. running under a service or in a headless pipeline).
+	flagStdout := flag.Bool("stdout", false,
+		"Write raw decoded PCM to stdout (LE int16; sample rate/channels printed to stderr)")
+	flagUDPOut := flag.String("udp-out", "",
+		"Send raw decoded PCM as UDP datagrams to host:port (e.g. 127.0.0.1:5005)")
+	flagNoAPI := flag.Bool("no-api", false,
+		"Disable the REST API server (enabled by default on 0.0.0.0:9770)")
+	flagAPIPort := flag.Int("api-port", 9770,
+		"REST API server port (default 9770)")
+	flagAPIBind := flag.String("api-bind", "0.0.0.0",
+		"REST API server bind address (default 0.0.0.0)")
+	flag.Parse()
+
+	// Build the StreamSink from the flags.  Both --stdout and --udp-out may be
+	// specified simultaneously; in that case a MultiSink fans out to both.
+	var activeSinks []StreamSink
+	if *flagStdout {
+		activeSinks = append(activeSinks, NewStdoutSink())
+	}
+	if *flagUDPOut != "" {
+		udpSink, err := NewUDPSink(*flagUDPOut)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ubersdr-audio: --udp-out: %v\n", err)
+			os.Exit(1)
+		}
+		activeSinks = append(activeSinks, udpSink)
+	}
+	// APISinkManager handles runtime-added sinks (via REST API).
+	// CLI-flag sinks are wrapped alongside it in a MultiSink.
+	apiSinkMgr := NewAPISinkManager()
+
+	// AudioWSBroker fans out decoded PCM frames to WebSocket clients
+	// connected to GET /api/v1/audio/stream.
+	audioWSBroker := NewAudioWSBroker()
+
+	var sink StreamSink
+	if len(activeSinks) == 0 {
+		// Only the API sink manager and WebSocket broker (may be empty at startup).
+		sink = NewMultiSink(apiSinkMgr, audioWSBroker)
+	} else {
+		// Fan out to CLI sinks, the API sink manager, and the WebSocket broker.
+		sink = NewMultiSink(append(activeSinks, apiSinkMgr, audioWSBroker)...)
+	}
+
+	// SSE broker for /api/v1/signal/stream.
+	sseBroker := NewSSEBroker()
+
+	// AppState — shared mutable state between GUI and REST API.
+	appState := NewAppState()
+
 	// Raise process priority so the Go IOCP network poller thread is scheduled
 	// promptly by Windows. Without this, Windows can starve the poller for several
 	// seconds when the process is in the background, causing ReadMessage to block
@@ -149,6 +205,7 @@ func main() {
 	w := a.NewWindow("UberSDR - Disconnected")
 
 	client := NewRadioClient()
+	client.Sink = sink
 
 	// Start mDNS discovery in background (best-effort)
 	mdns, _ := NewMDNSDiscovery()
@@ -282,8 +339,8 @@ func main() {
 	// AGC sliders — only shown for USB/LSB modes.
 	// Defaults match share/presets.conf: hang-time = 1.1 s, recovery-rate = 20 dB/s.
 	const (
-		agcHangTimeDefault   = 1.1
-		agcRecoveryDefault   = 20.0
+		agcHangTimeDefault = 1.1
+		agcRecoveryDefault = 20.0
 	)
 	agcHangSlider := widget.NewSlider(0.0, 10.0)
 	agcHangSlider.Step = 0.1
@@ -297,12 +354,18 @@ func main() {
 
 	// sendAGC sends the current AGC slider values to the server.
 	sendAGC := func() {
+		ht := agcHangSlider.Value
+		rr := agcRecoverySlider.Value
+		appState.Mu.Lock()
+		appState.AGCHangTime = ht
+		appState.AGCRecoveryRate = rr
+		appState.Mu.Unlock()
 		if client.State() != StateConnected {
 			return
 		}
-		ht := float32(agcHangSlider.Value)
-		rr := float32(agcRecoverySlider.Value)
-		_ = client.SendSetAGC(&ht, &rr)
+		htf := float32(ht)
+		rrf := float32(rr)
+		_ = client.SendSetAGC(&htf, &rrf)
 	}
 
 	agcHangSlider.OnChanged = func(v float64) {
@@ -369,8 +432,25 @@ func main() {
 		w.SetTitle("UberSDR - " + strings.Join(parts, " "))
 	}
 
+	// suppressTune is set true while the API tune handler is programmatically
+	// updating widgets to prevent the OnChanged feedback loop.
+	suppressTune := false
+
 	// ── sendTune — sends a tune command if already connected ─────────────────
 	sendTune := func() {
+		// If the API handler is updating widgets, skip the feedback send.
+		if suppressTune {
+			return
+		}
+
+		// Always sync AppState so the web UI poll sees current values.
+		appState.Mu.Lock()
+		appState.CurrentFreq = currentFreq
+		appState.CurrentMode = currentMode
+		appState.CurrentBW = bwSlider.Value
+		appState.StepIndex = stepSelect.SelectedIndex()
+		appState.Mu.Unlock()
+
 		if client.State() != StateConnected {
 			return
 		}
@@ -562,6 +642,9 @@ func main() {
 				currentMode = "usb"
 				prefs.SetString(prefKeyMode, currentMode)
 				modeSelect.SetSelected("USB")
+				appState.Mu.Lock()
+				appState.CurrentMode = currentMode
+				appState.Mu.Unlock()
 			}
 		}
 
@@ -609,6 +692,9 @@ func main() {
 					}
 					client.Format = FormatPCMZstd
 					prefs.SetString(prefKeyFormat, "Uncompressed")
+					appState.Mu.Lock()
+					appState.Format = "pcm-zstd"
+					appState.Mu.Unlock()
 					if client.State() == StateConnected {
 						formatSwitching = true
 						client.Disconnect()
@@ -626,6 +712,9 @@ func main() {
 		// Compressed selected.
 		client.Format = FormatOpus
 		prefs.SetString(prefKeyFormat, "Compressed")
+		appState.Mu.Lock()
+		appState.Format = "opus"
+		appState.Mu.Unlock()
 		// If already connected, reconnect with the new format.
 		// Set formatSwitching so OnStateChange doesn't clear stationLabel.
 		if client.State() == StateConnected {
@@ -655,6 +744,9 @@ func main() {
 		}
 		audioDeviceMu.RUnlock()
 		prefs.SetString(prefKeyDevice, devID)
+		appState.Mu.Lock()
+		appState.DeviceID = devID
+		appState.Mu.Unlock()
 
 		if client.State() != StateConnected {
 			return
@@ -714,6 +806,9 @@ func main() {
 		premuteVolume = v
 		client.SetVolume(v / 100.0)
 		prefs.SetFloat(prefKeyVolume, v)
+		appState.Mu.Lock()
+		appState.Volume = v
+		appState.Mu.Unlock()
 	}
 
 	// muteBtn toggles mute; icon switches between speaker and muted-speaker.
@@ -731,19 +826,29 @@ func main() {
 			muteBtn.SetIcon(theme.VolumeUpIcon())
 			volumeSlider.Enable()
 		}
+		appState.Mu.Lock()
+		appState.Muted = muted
+		appState.Mu.Unlock()
 	}
 
 	savedChannel := prefs.StringWithFallback(prefKeyChannel, "Left & Right")
 	channelSelect := widget.NewSelect([]string{"Left & Right", "Left", "Right"}, func(selected string) {
 		prefs.SetString(prefKeyChannel, selected)
+		var ch string
 		switch selected {
 		case "Left":
 			client.SetChannelMode(ChannelModeLeft)
+			ch = "left"
 		case "Right":
 			client.SetChannelMode(ChannelModeRight)
+			ch = "right"
 		default:
 			client.SetChannelMode(ChannelModeBoth)
+			ch = "both"
 		}
+		appState.Mu.Lock()
+		appState.ChannelMode = ch
+		appState.Mu.Unlock()
 	})
 	channelSelect.SetSelected(savedChannel)
 
@@ -859,6 +964,11 @@ func main() {
 			}
 			// Build station info line.
 			activeCallsign = desc.Receiver.Callsign
+			appState.Mu.Lock()
+			appState.ActiveCallsign = desc.Receiver.Callsign
+			appState.ActiveName = desc.Receiver.Name
+			appState.ActiveLocation = desc.Receiver.Location
+			appState.Mu.Unlock()
 			parts := []string{}
 			if desc.Receiver.Callsign != "" {
 				parts = append(parts, desc.Receiver.Callsign)
@@ -1013,6 +1123,29 @@ func main() {
 		// has already fired and these values are the final ones.
 		activeProfileName = p.Name
 		activeCallsign = p.Callsign
+
+		// Sync AppState so the web UI poll reflects the loaded profile values.
+		fmtStr := "opus"
+		if p.Format == "Uncompressed" {
+			fmtStr = "pcm-zstd"
+		}
+		chStr := "both"
+		switch p.Channel {
+		case "Left":
+			chStr = "left"
+		case "Right":
+			chStr = "right"
+		}
+		appState.Mu.Lock()
+		appState.CurrentFreq = currentFreq
+		appState.CurrentMode = currentMode
+		appState.CurrentBW = p.Bandwidth
+		appState.StepIndex = p.StepIndex
+		appState.Volume = p.Volume
+		appState.ChannelMode = chStr
+		appState.Format = fmtStr
+		appState.DeviceID = p.DeviceID
+		appState.Mu.Unlock()
 	}
 
 	// ── profileConnectAndClose — applies a profile and reconnects ─────────────
@@ -1482,6 +1615,134 @@ func main() {
 
 	browseBtn := widget.NewButtonWithIcon("Browse…", theme.SearchIcon(), openBrowseDialog)
 	profilesBtn := widget.NewButtonWithIcon("Profiles…", theme.ListIcon(), openProfilesDialog)
+
+	// ── Bookmark dropdown ─────────────────────────────────────────────────────
+	// bookmarkData holds the full bookmark structs so OnChanged can tune directly.
+	type bookmarkEntry struct {
+		Name          string
+		Frequency     uint64
+		Mode          string
+		BandwidthLow  *int
+		BandwidthHigh *int
+	}
+	var bookmarkData []bookmarkEntry
+
+	bookmarkSelect := widget.NewSelect([]string{"— Bookmarks —"}, nil)
+	bookmarkSelect.PlaceHolder = "— Bookmarks —"
+	bookmarkSelect.Disable()
+
+	// applyBookmark tunes to the bookmark matching the selected label.
+	applyBookmark := func(label string) {
+		if label == "" || label == "— Bookmarks —" {
+			return
+		}
+		var bm *bookmarkEntry
+		for i := range bookmarkData {
+			if bookmarkData[i].Name == label {
+				bm = &bookmarkData[i]
+				break
+			}
+		}
+		if bm == nil {
+			return
+		}
+
+		hz := clampFreq(int(bm.Frequency))
+		currentFreq = hz
+		prefs.SetInt(prefKeyFreq, hz)
+		freqEntry.SetText(formatFreqKHz(hz))
+
+		mk := strings.ToLower(bm.Mode)
+		for _, lbl := range modeSelect.Options {
+			if modeKey(lbl) == mk {
+				modeInitDone = false
+				modeSelect.SetSelected(lbl)
+				modeInitDone = true
+				currentMode = mk
+				prefs.SetString(prefKeyMode, mk)
+				bwSlider.Max = bwSliderMax(currentMode)
+				if bm.BandwidthLow == nil || bm.BandwidthHigh == nil {
+					bwSlider.Value = bwDefaultSlider(currentMode)
+				}
+				bwSlider.Refresh()
+				bwValueLabel.SetText(fmt.Sprintf("%.0f Hz", bwSlider.Value))
+				break
+			}
+		}
+
+		lo, hi := bwToLoHi(currentMode, bwSlider.Value)
+		if bm.BandwidthLow != nil {
+			lo = *bm.BandwidthLow
+		}
+		if bm.BandwidthHigh != nil {
+			hi = *bm.BandwidthHigh
+		}
+
+		appState.Mu.Lock()
+		appState.CurrentFreq = hz
+		appState.CurrentMode = currentMode
+		appState.CurrentBW = bwSlider.Value
+		appState.Mu.Unlock()
+
+		if client.State() == StateConnected {
+			client.Frequency = hz
+			client.Mode = currentMode
+			client.BandwidthLow = lo
+			client.BandwidthHigh = hi
+			_ = client.Tune(hz, currentMode, lo, hi)
+			updateWindowTitle()
+			flrigSync.PushSDRState(hz, currentMode)
+		}
+
+	}
+
+	bookmarkSelect.OnChanged = applyBookmark
+
+	// fetchBookmarks fetches bookmarks from the connected server and populates the dropdown.
+	fetchBookmarks := func() {
+		if client.State() != StateConnected || client.BaseURL == "" {
+			bookmarkSelect.Options = []string{}
+			bookmarkSelect.Disable()
+			bookmarkData = nil
+			return
+		}
+		go func() {
+			bookmarkURL := strings.TrimRight(client.BaseURL, "/") + "/api/bookmarks"
+			resp, err := (&http.Client{Timeout: 8 * time.Second}).Get(bookmarkURL)
+			if err != nil || resp.StatusCode != 200 {
+				return
+			}
+			defer resp.Body.Close()
+
+			var raw []struct {
+				Name          string `json:"name"`
+				Frequency     uint64 `json:"frequency"`
+				Mode          string `json:"mode"`
+				BandwidthLow  *int   `json:"bandwidth_low"`
+				BandwidthHigh *int   `json:"bandwidth_high"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil || len(raw) == 0 {
+				return
+			}
+
+			entries := make([]bookmarkEntry, len(raw))
+			labels := make([]string, len(raw))
+			for i, r := range raw {
+				entries[i] = bookmarkEntry{
+					Name:          r.Name,
+					Frequency:     r.Frequency,
+					Mode:          r.Mode,
+					BandwidthLow:  r.BandwidthLow,
+					BandwidthHigh: r.BandwidthHigh,
+				}
+				labels[i] = r.Name
+			}
+			bookmarkData = entries
+			bookmarkSelect.Options = labels
+			bookmarkSelect.Enable()
+			bookmarkSelect.Refresh()
+		}()
+	}
 
 	// ── saveProfileDialog — prompt for a name and save the current settings ──
 	saveProfileDialog := func() {
@@ -1997,6 +2258,9 @@ func main() {
 		// Do NOT touch dspFilterSelect.Options — the list is already correct
 		// from /api/description.
 		dspFilters = resp.Filters
+		appState.Mu.Lock()
+		appState.DSPFilters = resp.Filters
+		appState.Mu.Unlock()
 		updateDSPUI()
 		// If the user clicked Config before the filter list was available,
 		// open the window now that we have the metadata.
@@ -2022,6 +2286,12 @@ func main() {
 		suppressDSPChange = false
 		// Sync dspEnabled to server-confirmed state (in case it differs).
 		dspEnabled = enabled
+		appState.Mu.Lock()
+		appState.DSPEnabled = enabled
+		if enabled && filter != "" {
+			appState.DSPFilter = filter
+		}
+		appState.Mu.Unlock()
 		updateDSPUI()
 	}
 
@@ -2069,6 +2339,8 @@ func main() {
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
 			statusDot.SetColor(dotColorGreen)
+			// Fetch bookmarks from the connected server and populate the dropdown.
+			fetchBookmarks()
 			// Request DSP filter list from server (response arrives via OnDSPFilters callback).
 			// Only request if DSP is available on this server (known from /api/description).
 			if dspAvailable {
@@ -2092,6 +2364,10 @@ func main() {
 			// unlike /api/description which always returns the globally configured value.
 			stopSessionTimer()
 			sessionMaxSecs = client.ConnMaxSessionTime()
+			sessionConnectedAt := time.Now()
+			appState.Mu.Lock()
+			appState.SessionConnectedAt = sessionConnectedAt
+			appState.Mu.Unlock()
 			if sessionMaxSecs > 0 {
 				sessionTimerStop = make(chan struct{})
 				stopCh := sessionTimerStop
@@ -2136,6 +2412,9 @@ func main() {
 			updateDSPUI()
 			rebuildModeOptions(lastAllowedIQModes)
 			stopSessionTimer()
+			bookmarkSelect.Options = []string{}
+			bookmarkSelect.Disable()
+			bookmarkData = nil
 			w.SetTitle("UberSDR - Disconnected")
 			statusDot.SetColor(dotColorRed)
 			txt := "Error"
@@ -2171,6 +2450,9 @@ func main() {
 			updateDSPUI()
 			rebuildModeOptions(lastAllowedIQModes)
 			stopSessionTimer()
+			bookmarkSelect.Options = []string{}
+			bookmarkSelect.Disable()
+			bookmarkData = nil
 			w.SetTitle("UberSDR - Disconnected")
 			statusDot.SetColor(dotColorRed)
 			statusLabel.SetText("Disconnected")
@@ -2184,6 +2466,30 @@ func main() {
 			}
 		}
 		connectBtn.Refresh()
+		// Sync AppState connection metadata so the REST API /status reflects
+		// the current state without needing to re-read widget values.
+		appState.Mu.Lock()
+		appState.ActiveCallsign = activeCallsign
+		// activeCallsign is the only field we have here; name/location are
+		// populated in doConnect/profileConnectAndClose via the stationLabel parts.
+		// We leave them as-is so they persist across reconnects to the same instance.
+		appState.SessionMaxSecs = sessionMaxSecs
+		appState.ConnMaxClients = connMaxClients
+		appState.DSPAvailable = dspAvailable
+		appState.DSPEnabled = dspEnabled
+		if state != StateConnected {
+			// Clear signal readings and session timer on disconnect.
+			appState.SignalBasebandDBFS = -999
+			appState.SignalNoiseDensityDBFS = -999
+			appState.SignalSNRDB = -999
+			appState.SignalAudioDBFS = -999
+			appState.SignalUpdatedAt = nil
+			appState.SessionConnectedAt = time.Time{} // zero = not set
+		}
+		appState.Mu.Unlock()
+		if state != StateConnected {
+			sseBroker.PublishNoData()
+		}
 	}
 
 	client.OnSignalQuality = func(basebandPower, noiseDensity float32) {
@@ -2203,10 +2509,26 @@ func main() {
 		} else {
 			snrBar.SetNoData()
 		}
+		// Update AppState signal readings (used by REST API /signal endpoint).
+		// Audio level arrives separately via OnAudioLevel; we read the last
+		// known value from AppState to keep the SSE event complete.
+		appState.Mu.RLock()
+		lastAudio := appState.SignalAudioDBFS
+		appState.Mu.RUnlock()
+		appState.UpdateSignal(basebandPower, noiseDensity, lastAudio)
+		// Publish to SSE broker.
+		bb, nd, snr, audio, at := appState.SignalSnapshot()
+		sseBroker.PublishSignal(bb, nd, snr, audio, at)
 	}
 
 	client.OnAudioLevel = func(dBFS float32) {
 		audioBar.SetValue(float64(dBFS))
+		// Update AppState audio level.
+		appState.Mu.RLock()
+		bb := appState.SignalBasebandDBFS
+		nd := appState.SignalNoiseDensityDBFS
+		appState.Mu.RUnlock()
+		appState.UpdateSignal(bb, nd, dBFS)
 	}
 
 	connectBtn.OnTapped = func() {
@@ -2386,6 +2708,9 @@ func main() {
 				client.SetVolume(volumeBeforePTT / 100.0)
 			}
 		}
+		appState.Mu.Lock()
+		appState.FlrigPTTActive = active
+		appState.Mu.Unlock()
 	}
 
 	flrigSync.OnFreqMode = func(hz int, sdrMode string) {
@@ -2421,18 +2746,10 @@ func main() {
 		}
 
 		// Tune the SDR to the new frequency/mode from flrig.
-		// sendTune calls PushSDRState, but FlrigSync's echo prevention
-		// (lastSdrFreq/lastSdrMode already stamped in poll()) will suppress
-		// the round-trip push back to flrig.
-		if client.State() == StateConnected {
-			lo, hi := bwToLoHi(currentMode, bwSlider.Value)
-			client.Frequency = currentFreq
-			client.Mode = currentMode
-			client.BandwidthLow = lo
-			client.BandwidthHigh = hi
-			_ = client.Tune(currentFreq, currentMode, lo, hi)
-			updateWindowTitle()
-		}
+		// sendTune also syncs AppState so the web UI poll sees the new values.
+		// FlrigSync's echo prevention (lastSdrFreq/lastSdrMode already stamped
+		// in poll()) will suppress the round-trip PushSDRState back to flrig.
+		sendTune()
 	}
 
 	// Build flrig UI widgets now that the callbacks are wired.
@@ -2489,6 +2806,92 @@ func main() {
 	// Start the flrig background goroutines.
 	flrigSync.Start()
 
+	// ── Wire AppState widget references and callbacks ─────────────────────────
+	// All widgets are now fully constructed; populate the AppState so HTTP
+	// handlers can read/write them.
+	appState.Mu.Lock()
+	appState.CurrentFreq = currentFreq
+	appState.CurrentMode = currentMode
+	appState.CurrentBW = bwSlider.Value
+	appState.StepIndex = stepSelect.SelectedIndex()
+	appState.Volume = volumeSlider.Value
+	switch savedChannel {
+	case "Left":
+		appState.ChannelMode = "left"
+	case "Right":
+		appState.ChannelMode = "right"
+	default:
+		appState.ChannelMode = "both"
+	}
+	if savedFormat == "Uncompressed" {
+		appState.Format = "pcm-zstd"
+	} else {
+		appState.Format = "opus"
+	}
+	appState.DeviceID = prefs.String(prefKeyDevice)
+	appState.AGCHangTime = agcHangSlider.Value
+	appState.AGCRecoveryRate = agcRecoverySlider.Value
+	appState.FlrigEnabled = flrigEnabledSaved
+	appState.FlrigHost = flrigHostSaved
+	appState.FlrigPort = flrigPortSaved
+	appState.FlrigDirection = flrigDirSaved
+	appState.FlrigPTTMute = flrigPTTMuteSaved
+	// Widget references.
+	appState.FreqEntry = freqEntry
+	appState.ModeSelect = modeSelect
+	appState.BWSlider = bwSlider
+	appState.BWValueLabel = bwValueLabel
+	appState.VolumeSlider = volumeSlider
+	appState.ChannelSelect = channelSelect
+	appState.FormatGroup = formatGroup
+	appState.DeviceSelect = deviceSelect
+	appState.AGCHangSlider = agcHangSlider
+	appState.AGCHangLabel = agcHangLabel
+	appState.AGCRecSlider = agcRecoverySlider
+	appState.AGCRecLabel = agcRecoveryLabel
+	appState.DSPEnableCheck = dspEnableCheck
+	appState.DSPFilterSel = dspFilterSelect
+	appState.URLEntry = urlEntry
+	appState.PasswordEntry = passwordEntry
+	appState.StepSelect = stepSelect
+	appState.MuteBtn = muteBtn
+	appState.FlrigPTTMuteChk = flrigPTTMuteCheck
+	appState.FlrigEnabledChk = flrigEnabledCheck
+	appState.FlrigHostEnt = flrigHostEntry
+	appState.FlrigPortEnt = flrigPortEntry
+	appState.FlrigDirSel = flrigDirSelect
+	appState.SuppressFormatChange = &suppressFormatChange
+	appState.SuppressTune = &suppressTune
+	// Callbacks into main() logic.
+	appState.DoConnect = doConnect
+	appState.DoDisconnect = func() {
+		userDisconnected = true
+		client.Disconnect()
+	}
+	appState.DoApplyFlrigConfig = applyFlrigConfig
+	appState.DoProfileConnectByName = func(name string) error {
+		p, ok := LoadProfile(prefs, name)
+		if !ok {
+			return fmt.Errorf("profile %q not found", name)
+		}
+		applyProfile(p)
+		profileConnectAndClose(nil)
+		return nil
+	}
+	appState.Mu.Unlock()
+
+	// ── Start REST API server (disabled only if --no-api is set) ──────────────
+	var apiServer *APIServer
+	if !*flagNoAPI {
+		apiServer = NewAPIServer(appState, client, flrigSync, mdns, prefs, sseBroker, apiSinkMgr, audioWSBroker)
+		addr := fmt.Sprintf("%s:%d", *flagAPIBind, *flagAPIPort)
+		if err := apiServer.Start(addr); err != nil {
+			fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API listening on http://%s/api/v1/\n", addr)
+		}
+	}
+
 	// Throughput label — updated every second while connected.
 	throughputLabel := widget.NewLabel("")
 
@@ -2500,10 +2903,29 @@ func main() {
 		statusLabel,
 	)
 
+	// ── Open Browser button (only when API is enabled) ────────────────────────
+	var instanceCardTitle fyne.CanvasObject
+	if !*flagNoAPI {
+		openBrowserBtn := widget.NewButton("Open Browser", func() {
+			u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", *flagAPIPort))
+			if err == nil {
+				_ = a.OpenURL(u)
+			}
+		})
+		instanceCardTitle = container.NewBorder(nil, nil,
+			widget.NewRichTextFromMarkdown("**Instance**"),
+			openBrowserBtn,
+		)
+	} else {
+		instanceCardTitle = widget.NewRichTextFromMarkdown("**Instance**")
+	}
+
 	// Main scrollable body
 	body := container.NewVBox(
-		widget.NewCard("Instance", "", serverGrid),
-		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid, agcRow)),
+		widget.NewCard("", "", container.NewVBox(instanceCardTitle, serverGrid)),
+		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid, agcRow,
+			container.NewBorder(nil, nil, widget.NewLabel("Bookmark"), nil, bookmarkSelect),
+		)),
 		widget.NewCard("Audio", "", audioBox),
 		widget.NewCard("Noise Reduction", "", dspBox),
 		widget.NewCard("FLRig Sync", "", flrigBox),
@@ -2525,6 +2947,12 @@ func main() {
 		if mdns != nil {
 			mdns.Stop()
 		}
+		if apiServer != nil {
+			apiServer.Stop()
+		}
+		if sink != nil {
+			sink.Close()
+		}
 		cleanupOpusDLL()
 	})
 
@@ -2536,6 +2964,10 @@ func main() {
 		for range ticker.C {
 			if client.State() == StateConnected {
 				bps := client.BytesReceivedAndReset()
+				// Cache throughput in AppState for /status endpoint.
+				appState.Mu.Lock()
+				appState.ThroughputBPS = bps
+				appState.Mu.Unlock()
 				var txt string
 				switch {
 				case bps >= 1_000_000:
@@ -2552,6 +2984,10 @@ func main() {
 				if statsTick >= 10 {
 					statsTick = 0
 					if active, err := client.FetchStats(); err == nil {
+						// Cache active users in AppState for /status endpoint.
+						appState.Mu.Lock()
+						appState.ActiveUsers = active
+						appState.Mu.Unlock()
 						max := connMaxClients
 						if max > 0 {
 							usersLabel.SetText(fmt.Sprintf("%d/%d users", active, max))
@@ -2561,6 +2997,10 @@ func main() {
 					}
 				}
 			} else {
+				appState.Mu.Lock()
+				appState.ThroughputBPS = 0
+				appState.ActiveUsers = -1
+				appState.Mu.Unlock()
 				throughputLabel.SetText("")
 				usersLabel.SetText("")
 				statsTick = 0

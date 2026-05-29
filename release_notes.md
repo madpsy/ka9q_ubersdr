@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 - Various UI niggles such as changing bandwidth marker colour didn't take affect until zoom/tune change
+- RBN Statistics did not allow for hyphen in callsign for lookups
 
 ## Version 0.1.50 - Latest Stable
 

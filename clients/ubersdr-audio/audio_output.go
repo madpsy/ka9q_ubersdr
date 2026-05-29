@@ -112,13 +112,18 @@ func (r *pcmRingReader) Close() {
 	}
 }
 
-// FireAfterDelay fires fn in a goroutine after the given delay.
-// Used by both backends to delay bar callbacks to match playback time.
+// FireAfterDelay fires fn after the given delay using time.AfterFunc.
+// This avoids spawning a new goroutine per audio chunk; time.AfterFunc
+// uses the runtime timer heap instead of a dedicated goroutine.
+// The delay is clamped to 2 s to prevent runaway accumulation.
 func FireAfterDelay(delay time.Duration, fn func()) {
-	go func() {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		fn()
-	}()
+	const maxDelay = 2 * time.Second
+	if delay <= 0 {
+		go fn()
+		return
+	}
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+	time.AfterFunc(delay, fn)
 }

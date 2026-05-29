@@ -872,6 +872,61 @@ show_logs_menu() {
     echo ""
 }
 
+# Edit the docker-compose.yml for an installed addon, then restart it automatically
+edit_compose_menu() {
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        if is_known_addon "$name" && is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
+    done < <(get_addon_names)
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo ""
+        echo "No known installed addons found."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    printf "  %-4s  %-20s\n" "No." "NAME"
+    printf "  %-4s  %-20s\n" "---" "----"
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        printf "  %-4s  %-20s\n" "$i." "$name"
+        (( i++ )) || true
+    done
+    printf "  %-4s  %-20s\n" "0." "Back"
+    echo ""
+
+    while true; do
+        read -rp "Select addon to edit [0-${#ADDON_NAMES[@]}]: " choice
+        [[ "$choice" == "0" ]] && return 0
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ADDON_NAMES[@]} )); then
+            SELECTED_ADDON="${ADDON_NAMES[$((choice - 1))]}"
+            break
+        fi
+        echo "Invalid selection."
+    done
+
+    local compose_file="$HOME/ubersdr/${SELECTED_ADDON}/docker-compose.yml"
+    echo ""
+    echo "Opening $compose_file in nano..."
+    nano "$compose_file"
+
+    echo ""
+    echo "Restarting '$SELECTED_ADDON'..."
+    local restart_script="$HOME/ubersdr/${SELECTED_ADDON}/restart.sh"
+    if [[ -f "$restart_script" ]]; then
+        bash "$restart_script"
+    else
+        echo "Warning: restart.sh not found at $restart_script — using docker compose directly..." >&2
+        docker compose -f "$compose_file" restart
+    fi
+    echo "Done."
+    echo ""
+}
+
 # Main menu
 main_menu() {
     while true; do
@@ -890,9 +945,10 @@ main_menu() {
         echo "  9) Show addon logs"
         echo " 10) Show addon disk space"
         echo " 11) Delete and destroy an addon"
-        echo " 12) Exit"
+        echo " 12) Edit Docker Compose file"
+        echo " 13) Exit"
         echo ""
-        read -rp "Select an option [1-12]: " opt
+        read -rp "Select an option [1-13]: " opt
         echo ""
 
         case "$opt" in
@@ -942,11 +998,14 @@ main_menu() {
                 delete_addon_menu
                 ;;
             12)
+                edit_compose_menu
+                ;;
+            13)
                 echo "Goodbye."
                 exit 0
                 ;;
             *)
-                echo "Invalid option. Please choose 1-12."
+                echo "Invalid option. Please choose 1-13."
                 ;;
         esac
     done

@@ -106,9 +106,9 @@ type DSPFiltersResponse struct {
 
 // AGCSetRequest is sent over the WebSocket to update AGC parameters.
 type AGCSetRequest struct {
-	Type         string   `json:"type"` // "set_agc"
-	AgcHangTime  *float32 `json:"agcHangTime,omitempty"`
-	AgcRecovery  *float32 `json:"agcRecoveryRate,omitempty"`
+	Type        string   `json:"type"` // "set_agc"
+	AgcHangTime *float32 `json:"agcHangTime,omitempty"`
+	AgcRecovery *float32 `json:"agcRecoveryRate,omitempty"`
 }
 
 // DSPSetRequest is sent over the WebSocket to enable/disable the DSP insert.
@@ -212,6 +212,11 @@ type RadioClient struct {
 	BandwidthHigh int
 	Format        AudioFormat
 	DeviceID      string // WASAPI device ID; "" = system default
+
+	// Sink, if non-nil, receives raw decoded PCM frames before any volume,
+	// mute, or channel-routing is applied.  Safe to set before Connect();
+	// must not be changed while connected.
+	Sink StreamSink
 
 	// Runtime state
 	userSessionID      string
@@ -1004,6 +1009,13 @@ func rmsDBFS(pcmLE []byte) float32 {
 // onChunkStart callback at the moment the audio is actually played, so the
 // bars stay in sync with what the user hears.
 func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, basebandPower, noiseDensity float32) {
+	// Tap: deliver raw decoded PCM to the StreamSink (if configured) before
+	// any volume, mute, or channel-routing is applied.  The sink receives
+	// exactly what came off the wire after Opus/PCM decoding — unmodified.
+	if c.Sink != nil {
+		c.Sink.WritePCM(pcmLE, sampleRate, channels)
+	}
+
 	// Build the metadata that travels with this chunk through the ring buffer.
 	meta := ChunkMeta{
 		BasebandPower: basebandPower,

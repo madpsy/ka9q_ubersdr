@@ -189,3 +189,16 @@ ui:
         label: "300ms"
       - value: "500"
         label: "500ms (Most stable)"
+
+  # Origins allowed to send postMessage commands to this SDR (cross-origin iframes/popups).
+  # Enables external pages (e.g. a DX cluster or logging application) to control the SDR's
+  # frequency and mode via the browser postMessage API when embedded in an <iframe> or popup.
+  # Each entry must be a full origin: scheme + host (+ optional port), with no trailing slash
+  # or path component. Only http:// and https:// are accepted; wildcards are not supported.
+  # Leave empty (or omit entirely) to allow same-origin control only.
+  # Example:
+  # allowed_postmessage_origins:
+  #   - "https://my-cluster.example.com"
+  #   - "https://other-trusted-site.net"
+  #   - "http://localhost:8080"
+  allowed_postmessage_origins: []

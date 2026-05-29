@@ -620,24 +620,25 @@ type UIBoolSetting struct {
 //	                                                        original hardcoded palette exactly when absent/empty.
 //	                                                        Keys: page_bg, panel_dark, panel_mid, accent, accent_end, text_light
 type UIConfig struct {
-	SignalMeterMode         UISelectSetting   `yaml:"signal_meter_mode"          json:"signal_meter_mode"`
-	SMeterMode              UISelectSetting   `yaml:"smeter_mode"                json:"smeter_mode"`
-	SMeterChartsVisible     UIBoolSetting     `yaml:"smeter_charts_visible"      json:"smeter_charts_visible"`
-	Palette                 UISelectSetting   `yaml:"palette"                    json:"palette"`
-	Contrast                UIRangeSetting    `yaml:"contrast"                   json:"contrast"`
-	VUMeterStyle            UISelectSetting   `yaml:"vu_meter_style"             json:"vu_meter_style"`
-	GPUScroll               UIBoolSetting     `yaml:"gpu_scroll"                 json:"gpu_scroll"`
-	Smoothing               UIBoolSetting     `yaml:"smoothing"                  json:"smoothing"`
-	PeakHold                UIBoolSetting     `yaml:"peak_hold"                  json:"peak_hold"`
-	LineGraph               UIBoolSetting     `yaml:"line_graph"                 json:"line_graph"`
-	BandwidthIndicatorColor UISelectSetting   `yaml:"bandwidth_indicator_color"  json:"bandwidth_indicator_color"`
-	MobileTuningMode        UISelectSetting   `yaml:"mobile_tuning_mode"         json:"mobile_tuning_mode"`
-	DefaultBuffer           UISelectSetting   `yaml:"default_buffer"             json:"default_buffer"`
-	SpectrumBgOpacity       float64           `yaml:"spectrum_bg_opacity"        json:"spectrum_bg_opacity"`
-	BandColorIntensity      float64           `yaml:"band_color_intensity"       json:"band_color_intensity"`
-	StationIdOverlay        bool              `yaml:"station_id_overlay"         json:"station_id_overlay"`
-	StationIdColor          string            `yaml:"station_id_color"           json:"station_id_color"`
-	Theme                   map[string]string `yaml:"theme"                      json:"theme"`
+	SignalMeterMode           UISelectSetting   `yaml:"signal_meter_mode"          json:"signal_meter_mode"`
+	SMeterMode                UISelectSetting   `yaml:"smeter_mode"                json:"smeter_mode"`
+	SMeterChartsVisible       UIBoolSetting     `yaml:"smeter_charts_visible"      json:"smeter_charts_visible"`
+	Palette                   UISelectSetting   `yaml:"palette"                    json:"palette"`
+	Contrast                  UIRangeSetting    `yaml:"contrast"                   json:"contrast"`
+	VUMeterStyle              UISelectSetting   `yaml:"vu_meter_style"             json:"vu_meter_style"`
+	GPUScroll                 UIBoolSetting     `yaml:"gpu_scroll"                 json:"gpu_scroll"`
+	Smoothing                 UIBoolSetting     `yaml:"smoothing"                  json:"smoothing"`
+	PeakHold                  UIBoolSetting     `yaml:"peak_hold"                  json:"peak_hold"`
+	LineGraph                 UIBoolSetting     `yaml:"line_graph"                 json:"line_graph"`
+	BandwidthIndicatorColor   UISelectSetting   `yaml:"bandwidth_indicator_color"  json:"bandwidth_indicator_color"`
+	MobileTuningMode          UISelectSetting   `yaml:"mobile_tuning_mode"         json:"mobile_tuning_mode"`
+	DefaultBuffer             UISelectSetting   `yaml:"default_buffer"             json:"default_buffer"`
+	SpectrumBgOpacity         float64           `yaml:"spectrum_bg_opacity"        json:"spectrum_bg_opacity"`
+	BandColorIntensity        float64           `yaml:"band_color_intensity"       json:"band_color_intensity"`
+	StationIdOverlay          bool              `yaml:"station_id_overlay"              json:"station_id_overlay"`
+	StationIdColor            string            `yaml:"station_id_color"                json:"station_id_color"`
+	Theme                     map[string]string `yaml:"theme"                           json:"theme"`
+	AllowedPostMessageOrigins []string          `yaml:"allowed_postmessage_origins"     json:"allowed_postmessage_origins"`
 }
 
 // LoadConfig loads configuration from a YAML file

@@ -1452,7 +1452,7 @@
                                 </span>
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" maxlength="10" pattern="[A-Za-z0-9]*" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'').toUpperCase()" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
+                                <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" maxlength="15" pattern="[A-Za-z0-9-]*" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" oninput="this.value=this.value.replace(/[^A-Za-z0-9-]/g,'').toUpperCase()" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
                                 <button class="btn" onclick="lookupRBNCallsign()" style="background: #3f51b5; color: white; font-size: 13px; padding: 5px 12px;">🔍 Look Up</button>
                                 <button class="btn" id="rbnRefreshBtn" onclick="refreshRBNData()" style="background: #5c6bc0; color: white; font-size: 13px; padding: 5px 12px;">🔄 Refresh</button>
                                 <button class="btn" onclick="openRBNStatsModal()" style="background: #283593; color: white; font-size: 13px; padding: 5px 12px;">📊 All Statistics</button>
@@ -2253,6 +2253,42 @@
                             </div>
                         </div>
 
+                        <!-- Cross-Origin postMessage Control -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔗 Cross-Origin postMessage Control</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Allow external pages (e.g. a DX cluster or logging application) to control this SDR's
+                                frequency and mode via the browser <code>postMessage</code> API — for example when embedded
+                                in an <code>&lt;iframe&gt;</code> or opened as a popup window.<br><br>
+                                Enter one origin per line in the format <strong>https://example.com</strong>
+                                (scheme&nbsp;+&nbsp;host, no trailing slash, no path). Leave empty to allow
+                                same-origin control only.
+                                This is a server-wide setting; users cannot override it individually.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 8px;">
+                                <label for="ui-postmessage-origins" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Allowed origins <span style="font-weight: 400; color: #888;">(one per line)</span>
+                                </label>
+                                <textarea id="ui-postmessage-origins"
+                                          rows="4"
+                                          placeholder="https://my-cluster.example.com&#10;https://other-trusted-site.net&#10;http://localhost:8080"
+                                          style="width: 100%; max-width: 500px; padding: 8px 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; font-family: monospace; resize: vertical; box-sizing: border-box;"
+                                          oninput="validatePostMessageOrigins()"></textarea>
+                                <div id="ui-postmessage-origins-error"
+                                     style="display: none; margin-top: 5px; font-size: 12px; color: #dc3545; max-width: 500px;"></div>
+                            </div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                <div style="font-size: 12px; color: #888;">
+                                    Each entry must be <code>http://</code> or <code>https://</code> followed by a hostname — no wildcards, paths, or trailing slashes.
+                                </div>
+                                <button class="btn btn-secondary"
+                                        onclick="document.getElementById('postMessageExampleModal').style.display='flex'"
+                                        style="font-size: 12px; padding: 5px 12px; flex-shrink: 0;">
+                                    📖 View integration example
+                                </button>
+                            </div>
+                        </div>
+
                     </div>
 
                     <div id="uiConfigLoading" class="loading">
@@ -2796,6 +2832,114 @@
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- postMessage Integration Example Modal -->
+        <div id="postMessageExampleModal" class="modal">
+            <div class="modal-content" style="max-width: 780px; max-height: 88vh; display: flex; flex-direction: column;">
+                <div class="modal-header">
+                    <h2>🔗 postMessage Integration Example</h2>
+                    <button class="modal-close" onclick="document.getElementById('postMessageExampleModal').style.display='none'">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y: auto; padding: 20px; font-size: 13px; line-height: 1.6;">
+
+                    <p style="margin: 0 0 14px 0; color: #444;">
+                        Once you have added your external page's origin to the allowlist and saved, that page can
+                        control this SDR's frequency, mode, and bandwidth using the browser
+                        <code>postMessage</code> API. Below are copy-paste examples.
+                    </p>
+
+                    <!-- Supported commands table -->
+                    <h4 style="margin: 0 0 8px 0; color: #333;">Supported commands</h4>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px;">
+                        <thead>
+                            <tr style="background: #f0f4ff;">
+                                <th style="text-align: left; padding: 6px 10px; border: 1px solid #dee2e6;">command</th>
+                                <th style="text-align: left; padding: 6px 10px; border: 1px solid #dee2e6;">params</th>
+                                <th style="text-align: left; padding: 6px 10px; border: 1px solid #dee2e6;">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>setFrequency</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>{ frequency: &lt;Hz&gt; }</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;">Tune to a frequency in Hz</td></tr>
+                            <tr style="background:#fafafa;"><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>setMode</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>{ mode: &lt;string&gt; }</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;">Set demodulation mode (e.g. <code>"usb"</code>, <code>"lsb"</code>, <code>"am"</code>, <code>"cw"</code>)</td></tr>
+                            <tr><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>setBandwidth</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>{ low: &lt;Hz&gt;, high: &lt;Hz&gt; }</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;">Set receive bandwidth (e.g. low: -1500, high: 1500)</td></tr>
+                            <tr style="background:#fafafa;"><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>adjustFrequency</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>{ deltaHz: &lt;Hz&gt; }</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;">Shift frequency by a relative amount</td></tr>
+                            <tr><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><code>getState</code></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;"><em>none</em></td><td style="padding: 5px 10px; border: 1px solid #dee2e6;">Request current frequency, mode, and bandwidth (reply sent back)</td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- iframe example -->
+                    <h4 style="margin: 0 0 8px 0; color: #333;">Example 1 — SDR embedded in an &lt;iframe&gt;</h4>
+                    <pre style="background: #1e1e1e; color: #d4d4d4; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 0 0 20px 0; white-space: pre;">&lt;!-- Your external page --&gt;
+&lt;iframe id="sdr" src="https://your-sdr.example.com" width="1200" height="700"&gt;&lt;/iframe&gt;
+
+&lt;script&gt;
+const SDR_ORIGIN = 'https://your-sdr.example.com';
+const frame = document.getElementById('sdr');
+
+// Tune to 14.225 MHz USB when the iframe has loaded
+frame.addEventListener('load', () => {
+    frame.contentWindow.postMessage(
+        { command: 'setFrequency', params: { frequency: 14225000 } },
+        SDR_ORIGIN
+    );
+    frame.contentWindow.postMessage(
+        { command: 'setMode', params: { mode: 'usb' } },
+        SDR_ORIGIN
+    );
+});
+
+// Listen for acknowledgements and state replies
+window.addEventListener('message', (event) => {
+    if (event.origin !== SDR_ORIGIN) return;
+    console.log('SDR reply:', event.data);
+});
+&lt;/script&gt;</pre>
+
+                    <!-- popup example -->
+                    <h4 style="margin: 0 0 8px 0; color: #333;">Example 2 — SDR opened as a popup window</h4>
+                    <pre style="background: #1e1e1e; color: #d4d4d4; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 0 0 20px 0; white-space: pre;">const SDR_ORIGIN = 'https://your-sdr.example.com';
+let sdrWindow = null;
+
+function openSDR() {
+    sdrWindow = window.open(SDR_ORIGIN, 'UberSDR', 'width=1400,height=800');
+}
+
+function tuneSDR(frequencyHz, mode) {
+    if (!sdrWindow || sdrWindow.closed) return;
+    sdrWindow.postMessage(
+        { command: 'setFrequency', params: { frequency: frequencyHz } },
+        SDR_ORIGIN
+    );
+    sdrWindow.postMessage(
+        { command: 'setMode', params: { mode: mode } },
+        SDR_ORIGIN
+    );
+}
+
+// Example: tune to a DX cluster spot
+tuneSDR(14074000, 'usb');  // FT8 on 20 m</pre>
+
+                    <!-- getState example -->
+                    <h4 style="margin: 0 0 8px 0; color: #333;">Example 3 — Query current state</h4>
+                    <pre style="background: #1e1e1e; color: #d4d4d4; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 0 0 8px 0; white-space: pre;">// Ask the SDR what it is currently tuned to
+frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN);
+
+// The SDR replies with:
+// { command: 'state', state: { frequency: 14225000, mode: 'usb',
+//                              bandwidthLow: -1500, bandwidthHigh: 1500 } }</pre>
+
+                    <div class="alert alert-warning" style="margin-top: 16px; font-size: 12px;">
+                        ⚠️ <strong>Remember:</strong> the origin you add to the allowlist must exactly match the
+                        scheme, host, and port of the external page — e.g. <code>https://example.com</code>
+                        (not <code>https://example.com/</code> or <code>https://www.example.com</code>).
+                    </div>
+
+                </div>
+                <div style="padding: 12px 20px; border-top: 1px solid #dee2e6; text-align: right;">
+                    <button class="btn btn-secondary" onclick="document.getElementById('postMessageExampleModal').style.display='none'">Close</button>
                 </div>
             </div>
         </div>
@@ -8440,6 +8584,14 @@
                 if (stationIdColorEl) stationIdColorEl.value = stationIdCol;
                 if (stationIdHexEl)   stationIdHexEl.value   = stationIdCol;
 
+                // postMessage allowed origins
+                const pmOriginsEl = document.getElementById('ui-postmessage-origins');
+                if (pmOriginsEl) {
+                    const origins = Array.isArray(ui.allowed_postmessage_origins)
+                        ? ui.allowed_postmessage_origins : [];
+                    pmOriginsEl.value = origins.join('\n');
+                }
+
                 // Spectrum background image preview
                 const previewWrap = document.getElementById('spectrumBgPreviewWrap');
                 const previewImg  = document.getElementById('spectrumBgPreview');
@@ -8630,6 +8782,35 @@
                 ? ctPicker.value : CONTROL_TEXT_DEFAULT;
             return result;
         }
+/**
+ * Validate the postMessage origins textarea.
+ * Returns true if all non-empty lines are valid http/https origins.
+ * Shows an inline error listing the bad lines; clears it when all are valid.
+ */
+function validatePostMessageOrigins() {
+    const ta  = document.getElementById('ui-postmessage-origins');
+    const err = document.getElementById('ui-postmessage-origins-error');
+    if (!ta || !err) return true;
+
+    const originRE = /^https?:\/\/[a-zA-Z0-9._-]+(:[0-9]{1,5})?$/;
+    const lines = ta.value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+    const bad   = lines.filter(s => !originRE.test(s));
+
+    if (bad.length > 0) {
+        ta.style.borderColor = '#dc3545';
+        err.style.display    = 'block';
+        err.textContent      = 'Invalid ' + (bad.length === 1 ? 'entry' : 'entries') + ': ' +
+                               bad.map(s => '"' + s + '"').join(', ') +
+                               '. Each line must be a full origin, e.g. https://example.com';
+        return false;
+    }
+
+    ta.style.borderColor = '';
+    err.style.display    = 'none';
+    err.textContent      = '';
+    return true;
+}
+
 /** Sync hex text input from the station ID colour picker (oninput on picker). */
 function syncStationIdHexFromPicker() {
     const picker = document.getElementById('ui-station-id-color');
@@ -8724,6 +8905,12 @@ function resetStationIdColor() {
                 return;
             }
 
+            // Validate postMessage origins before saving
+            if (!validatePostMessageOrigins()) {
+                showAlert('Please fix the invalid origins in the Cross-Origin postMessage Control section before saving.', 'error');
+                return;
+            }
+
             // Build the full UIConfig structure to send back.
             // Include available[] arrays so the server writes them back to ui.yaml.
             const body = {
@@ -8803,7 +8990,14 @@ function resetStationIdColor() {
                             {value:'500', label:'500ms (Most stable)'}
                         ]};
                     })(),
-                    theme: collectThemeColors()
+                    theme: collectThemeColors(),
+                    allowed_postmessage_origins: (() => {
+                        const el = document.getElementById('ui-postmessage-origins');
+                        if (!el || !el.value.trim()) return [];
+                        return el.value.split('\n')
+                            .map(s => s.trim())
+                            .filter(s => s.length > 0);
+                    })()
                 }
             };
 

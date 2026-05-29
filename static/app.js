@@ -12025,10 +12025,12 @@ window.addEventListener('message', (event) => {
         return;
     }
 
-    // Security Check 1: Verify origin matches our domain
+    // Security Check 1: Verify origin matches our domain or the server-configured allowlist.
+    // window.serverUIConfig is populated at startup from /api/ui-config before any message
+    // could arrive, so the spread is always safe.
     const allowedOrigins = [
-        window.location.origin,  // Same origin
-        // Add additional trusted origins here if needed
+        window.location.origin,  // Same origin always allowed
+        ...((window.serverUIConfig && window.serverUIConfig.allowed_postmessage_origins) || []),
     ];
     
     if (!allowedOrigins.includes(event.origin)) {
@@ -12036,9 +12038,11 @@ window.addEventListener('message', (event) => {
         return;
     }
     
-    // Security Check 2: Verify source is our authorized popup (if we have one tracked)
-    // Allow messages if we don't have a tracked popup yet, or if it matches
-    if (controlPopup && event.source !== controlPopup) {
+    // Security Check 2: Verify source is our authorized popup (if we have one tracked).
+    // Cross-origin callers (iframes / external popups) have no pre-opened controlPopup to
+    // match against, so we skip this check for them — origin validation above is sufficient.
+    const isCrossOrigin = event.origin !== window.location.origin;
+    if (!isCrossOrigin && controlPopup && event.source !== controlPopup) {
         console.warn('[Popup Control] Rejected message from unauthorized window');
         return;
     }

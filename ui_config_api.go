@@ -36,6 +36,14 @@ func isValidHexColor(s string) bool {
 	return hexColorRE.MatchString(s)
 }
 
+// validOriginRE matches a full HTTP/HTTPS origin: scheme://host or scheme://host:port.
+// No wildcards, no paths, no trailing slash.
+var validOriginRE = regexp.MustCompile(`^https?://[a-zA-Z0-9._-]+(:[0-9]{1,5})?$`)
+
+func isValidOrigin(s string) bool {
+	return validOriginRE.MatchString(s)
+}
+
 // handleUIConfig serves the UI configuration defaults to the public frontend.
 // This is a public endpoint — no authentication required.
 // It returns only the scalar default values (not the full available options list),
@@ -121,26 +129,38 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		}
 	}
 
+	// Build sanitised postMessage allowlist: drop any entry that isn't a valid http/https origin.
+	// This prevents a misconfigured ui.yaml from serving garbage to the frontend.
+	allowedPMOrigins := make([]string, 0)
+	for _, o := range config.UI.AllowedPostMessageOrigins {
+		if isValidOrigin(o) {
+			allowedPMOrigins = append(allowedPMOrigins, o)
+		} else {
+			log.Printf("ui-config: ignoring invalid postmessage origin %q (must be scheme://host[:port])", o)
+		}
+	}
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"signal_meter_mode":         config.UI.SignalMeterMode.Default,
-		"smeter_mode":               config.UI.SMeterMode.Default,
-		"smeter_charts_visible":     config.UI.SMeterChartsVisible.Default,
-		"palette":                   config.UI.Palette.Default,
-		"contrast":                  config.UI.Contrast.Default,
-		"vu_meter_style":            config.UI.VUMeterStyle.Default,
-		"gpu_scroll":                config.UI.GPUScroll.Default,
-		"smoothing":                 config.UI.Smoothing.Default,
-		"peak_hold":                 config.UI.PeakHold.Default,
-		"line_graph":                config.UI.LineGraph.Default,
-		"bandwidth_indicator_color": bwColor,
-		"mobile_tuning_mode":        mobileTuningMode,
-		"default_buffer":            defaultBuffer,
-		"spectrum_bg_image":         bgImageURL,
-		"spectrum_bg_opacity":       opacity,
-		"band_color_intensity":      bandColorIntensity,
-		"station_id_overlay":        config.UI.StationIdOverlay,
-		"station_id_color":          stationIdColor,
-		"theme":                     effectiveTheme,
+		"signal_meter_mode":           config.UI.SignalMeterMode.Default,
+		"smeter_mode":                 config.UI.SMeterMode.Default,
+		"smeter_charts_visible":       config.UI.SMeterChartsVisible.Default,
+		"palette":                     config.UI.Palette.Default,
+		"contrast":                    config.UI.Contrast.Default,
+		"vu_meter_style":              config.UI.VUMeterStyle.Default,
+		"gpu_scroll":                  config.UI.GPUScroll.Default,
+		"smoothing":                   config.UI.Smoothing.Default,
+		"peak_hold":                   config.UI.PeakHold.Default,
+		"line_graph":                  config.UI.LineGraph.Default,
+		"bandwidth_indicator_color":   bwColor,
+		"mobile_tuning_mode":          mobileTuningMode,
+		"default_buffer":              defaultBuffer,
+		"spectrum_bg_image":           bgImageURL,
+		"spectrum_bg_opacity":         opacity,
+		"band_color_intensity":        bandColorIntensity,
+		"station_id_overlay":          config.UI.StationIdOverlay,
+		"station_id_color":            stationIdColor,
+		"theme":                       effectiveTheme,
+		"allowed_postmessage_origins": allowedPMOrigins,
 	}); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
 	}

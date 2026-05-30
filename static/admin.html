@@ -9213,10 +9213,12 @@ function resetStationIdColor() {
 
         // ── Widgets ───────────────────────────────────────────────────────────────
 
-        let allCommunityWidgets = [];   // cache for client-side search filtering
-        let enabledWidgetIDs = [];      // current enabled list (ordered)
-        let myWidgetIDs = new Set();    // widget_ids owned by this instance
-        let widgetEnabledByCount = {};  // widget_id → number of instances that have it enabled (from with-instances data)
+        let allCommunityWidgets = [];      // cache for client-side search filtering
+        let enabledWidgetIDs = [];         // current enabled list (ordered)
+        let myWidgetIDs = new Set();       // widget_ids owned by this instance
+        let widgetEnabledByCount = {};     // widget_id → total number of instances that have it enabled (inc. self)
+        let widgetEnabledByOtherCount = {}; // widget_id → count excluding our own instance (used for warning modals)
+        let myInstanceUUID = null;         // our own public_uuid from /api/description
 
         async function switchWidgetSubTab(tab) {
             const myBtn      = document.getElementById('widgetSubTabMyBtn');
@@ -9290,7 +9292,7 @@ function resetStationIdColor() {
                     <div style="flex:1;min-width:0;">
                         <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
-                        <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${w.is_public && widgetEnabledByCount[w.widget_id] > 0 ? ` \u00b7 \uD83D\uDC65 ${widgetEnabledByCount[w.widget_id]} instance${widgetEnabledByCount[w.widget_id] === 1 ? '' : 's'}` : ''}</div>
+                        <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${(() => { const total = widgetEnabledByCount[w.widget_id] || 0; if (!total) return ''; const communityEntry = allCommunityWidgets.find(c => c.widget_id === w.widget_id); const selfIncluded = communityEntry && myInstanceUUID && (communityEntry.enabled_by || []).some(inst => inst.public_uuid === myInstanceUUID); return ` \u00b7 \uD83D\uDC65 ${total} instance${total === 1 ? '' : 's'}${selfIncluded ? ' (inc. this instance)' : ''}`; })()}</div>
                     </div>
                     <div style="display:flex;gap:6px;flex-shrink:0;">
                         ${isEnabled
@@ -9377,15 +9379,29 @@ function resetStationIdColor() {
             const container = document.getElementById('communityWidgetsList');
             container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading\u2026</p></div>';
             try {
+                // Fetch our own public_uuid if not yet known (unauthenticated public endpoint)
+                if (!myInstanceUUID) {
+                    try {
+                        const descResp = await fetch('/api/description');
+                        if (descResp.ok) {
+                            const desc = await descResp.json();
+                            myInstanceUUID = desc.public_uuid || null;
+                        }
+                    } catch (_) {}
+                }
                 const resp = await authenticatedFetch('/admin/widgets/public-with-instances');
                 if (!resp) return;
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
                 allCommunityWidgets = data.widgets || [];
-                // Build enabled-by count map for use in My Widgets tab
+                // Build enabled-by count maps for use in My Widgets tab and warning modals
                 widgetEnabledByCount = {};
+                widgetEnabledByOtherCount = {};
                 allCommunityWidgets.forEach(w => {
-                    widgetEnabledByCount[w.widget_id] = (w.enabled_by || []).length;
+                    const all   = (w.enabled_by || []);
+                    const other = all.filter(inst => inst.public_uuid !== myInstanceUUID);
+                    widgetEnabledByCount[w.widget_id]      = all.length;
+                    widgetEnabledByOtherCount[w.widget_id] = other.length;
                 });
                 renderCommunityWidgets(allCommunityWidgets);
             } catch (e) {
@@ -9440,12 +9456,16 @@ function resetStationIdColor() {
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
                 const isMine    = myWidgetIDs.has(w.widget_id);
                 const enabledBy = w.enabled_by || [];
-                const enabledByBadges = enabledBy.map(inst =>
-                    `<a href="${escapeHtml(inst.public_url)}" target="_blank" rel="noopener"
-                        title="${escapeHtml(inst.name)}"
-                        style="display:inline-block;padding:1px 7px;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;border-radius:10px;font-size:10px;font-weight:600;text-decoration:none;white-space:nowrap;"
-                    >${escapeHtml(inst.callsign)}</a>`
-                ).join(' ');
+                const enabledByBadges = enabledBy.map(inst => {
+                    const isSelf = myInstanceUUID && inst.public_uuid === myInstanceUUID;
+                    const bg     = isSelf ? '#e8eaf6' : '#e8f5e9';
+                    const color  = isSelf ? '#283593' : '#2e7d32';
+                    const border = isSelf ? '#9fa8da' : '#a5d6a7';
+                    return `<a href="${escapeHtml(inst.public_url)}" target="_blank" rel="noopener"
+                        title="${escapeHtml(inst.name)}${isSelf ? ' (this instance)' : ''}"
+                        style="display:inline-block;padding:1px 7px;background:${bg};color:${color};border:1px solid ${border};border-radius:10px;font-size:10px;font-weight:600;text-decoration:none;white-space:nowrap;"
+                    >${escapeHtml(inst.callsign)}${isSelf ? ' ★' : ''}</a>`;
+                }).join(' ');
                 const enabledByRow = enabledByBadges
                     ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
                            <span style="font-size:10px;color:#888;flex-shrink:0;">Used by:</span>
@@ -9824,9 +9844,9 @@ function resetStationIdColor() {
         function onWidgetPublicCheckboxChange() {
             const cb       = document.getElementById('widgetEditorPublic');
             const widgetID = document.getElementById('widgetEditorID').value.trim();
-            // Only intercept when unchecking a saved public widget that other instances use
+            // Only intercept when unchecking a saved public widget that OTHER instances use
             if (!cb.checked && widgetID) {
-                const count = widgetEnabledByCount[widgetID] || 0;
+                const count = widgetEnabledByOtherCount[widgetID] || 0;
                 if (count > 0) {
                     // Revert the uncheck visually until the user confirms
                     cb.checked = true;
@@ -9930,11 +9950,11 @@ function resetStationIdColor() {
         function deleteWidget(widgetID, name) {
             _pendingDeleteWidgetID   = widgetID;
             _pendingDeleteWidgetName = name;
-            const count    = widgetEnabledByCount[widgetID] || 0;
-            const msgEl    = document.getElementById('widgetDeleteWarningMsg');
-            const inUseEl  = document.getElementById('widgetDeleteWarningInUse');
-            if (count > 0) {
-                msgEl.textContent = `"${name}" is currently enabled on ${count} instance${count === 1 ? '' : 's'}. Deleting it cannot be undone.`;
+            const otherCount = widgetEnabledByOtherCount[widgetID] || 0;
+            const msgEl      = document.getElementById('widgetDeleteWarningMsg');
+            const inUseEl    = document.getElementById('widgetDeleteWarningInUse');
+            if (otherCount > 0) {
+                msgEl.textContent = `"${name}" is currently enabled on ${otherCount} other instance${otherCount === 1 ? '' : 's'}. Deleting it cannot be undone.`;
                 inUseEl.style.display = 'block';
             } else {
                 msgEl.textContent = `Delete widget "${name}"? This cannot be undone.`;

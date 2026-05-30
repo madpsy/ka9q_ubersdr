@@ -16,7 +16,7 @@ let signalDataInterval = null; // Interval for collecting signal data
 const MAX_RECORDING_TIME_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 
 // WAV recording state
-let wavScriptProcessor = null;
+let wavWorkletNode = null;
 let wavPcmChunks = []; // Array of Float32Array buffers
 let wavSampleRate = 48000;
 let wavNumChannels = 1;
@@ -177,28 +177,42 @@ async function startWebmRecording() {
 }
 
 /**
- * Start WAV/PCM recording via ScriptProcessorNode
+ * Start WAV/PCM recording via AudioWorklet (runs on audio rendering thread,
+ * immune to main-thread jank that causes crackles with ScriptProcessorNode).
  */
 async function startWavRecording() {
     wavPcmChunks = [];
     wavSampleRate = window.audioContext.sampleRate;
-
-    // ScriptProcessorNode is deprecated but universally supported and sufficient here.
-    // AudioWorklet would require a separate .js file served from the same origin.
-    const bufferSize = 4096;
     wavNumChannels = 1; // mono — matches the SDR audio output
-    wavScriptProcessor = window.audioContext.createScriptProcessor(bufferSize, wavNumChannels, wavNumChannels);
 
-    wavScriptProcessor.onaudioprocess = (event) => {
-        if (!isRecording) return;
-        // Copy the input buffer (Float32Array is a view — must be cloned)
-        const inputData = event.inputBuffer.getChannelData(0);
-        wavPcmChunks.push(new Float32Array(inputData));
+    // Load the worklet module if not already loaded
+    try {
+        await window.audioContext.audioWorklet.addModule('pcm-recorder-worklet.js');
+    } catch (e) {
+        // Module may already be registered — ignore "already exists" errors
+        if (!e.message || !e.message.includes('already')) {
+            throw e;
+        }
+    }
+
+    wavWorkletNode = new AudioWorkletNode(window.audioContext, 'pcm-recorder-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1]
+    });
+
+    // Receive PCM chunks from the audio thread
+    wavWorkletNode.port.onmessage = (event) => {
+        if (event.data.samples) {
+            wavPcmChunks.push(event.data.samples);
+        }
     };
 
-    window.recorderGainNode.connect(wavScriptProcessor);
-    // Connect to destination to keep the graph alive (silent output is fine)
-    wavScriptProcessor.connect(window.audioContext.destination);
+    wavWorkletNode.port.postMessage({ command: 'start' });
+
+    window.recorderGainNode.connect(wavWorkletNode);
+    // Connect to destination to keep the graph alive
+    wavWorkletNode.connect(window.audioContext.destination);
 }
 
 /**
@@ -243,9 +257,10 @@ function stopWebmRecording() {
  * Stop WAV recording
  */
 function stopWavRecording() {
-    if (wavScriptProcessor) {
-        wavScriptProcessor.disconnect();
-        wavScriptProcessor = null;
+    if (wavWorkletNode) {
+        wavWorkletNode.port.postMessage({ command: 'stop' });
+        wavWorkletNode.disconnect();
+        wavWorkletNode = null;
     }
     console.log('WAV recording stopped, PCM chunks:', wavPcmChunks.length);
 }
@@ -294,8 +309,11 @@ function updateRecordingTime(elapsed) {
 }
 
 /**
- * Encode collected PCM chunks into a WAV ArrayBuffer
- * Format: 16-bit PCM, mono, at the audio context sample rate
+ * Encode collected PCM chunks into a WAV ArrayBuffer.
+ * Format: 16-bit signed PCM, mono, at the audio context sample rate.
+ * Note: the source audio has already been Opus-decoded by the browser, so this
+ * is an uncompressed capture of the decoded output — no additional generation
+ * loss, but the original Opus decode is still lossy.
  */
 function encodeWav(pcmChunks, sampleRate, numChannels) {
     // Flatten all Float32Array chunks into one

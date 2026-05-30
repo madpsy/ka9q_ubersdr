@@ -30,11 +30,24 @@ function getSelectedFormat() {
 }
 
 /**
- * Initialize the audio recorder
+ * Initialize the audio recorder.
+ * Disables the WAV option if AudioWorklet is unavailable (requires secure context / HTTPS).
  */
 function initializeRecorder() {
-    // Recorder will be initialized when recording starts
     console.log('Audio recorder module loaded');
+
+    if (!window.isSecureContext) {
+        const wavRadio = document.getElementById('recorder-format-wav');
+        const wavLabel = wavRadio ? wavRadio.parentElement : null;
+        if (wavRadio) {
+            wavRadio.disabled = true;
+        }
+        if (wavLabel) {
+            wavLabel.title = 'WAV recording requires HTTPS';
+            wavLabel.style.opacity = '0.4';
+            wavLabel.style.cursor = 'not-allowed';
+        }
+    }
 }
 
 /**
@@ -571,6 +584,9 @@ function updateRecorderUI() {
         // Lock format toggle during recording
         if (formatToggle) {
             formatToggle.querySelectorAll('input[type="radio"]').forEach(r => {
+                const isWav = r.value === 'wav';
+                // WAV on insecure context is already disabled/styled by initializeRecorder
+                if (isWav && !window.isSecureContext) return;
                 r.disabled = true;
                 r.parentElement.style.opacity = '0.45';
                 r.parentElement.style.cursor = 'default';
@@ -589,8 +605,11 @@ function updateRecorderUI() {
             statusText.textContent = hasData ? 'Ready' : 'Stopped';
         }
         // Unlock format toggle when not recording
+        // (WAV stays disabled on non-secure contexts — set by initializeRecorder)
         if (formatToggle) {
             formatToggle.querySelectorAll('input[type="radio"]').forEach(r => {
+                const isWav = r.value === 'wav';
+                if (isWav && !window.isSecureContext) return; // keep disabled
                 r.disabled = false;
                 r.parentElement.style.opacity = '';
                 r.parentElement.style.cursor = 'pointer';

@@ -2391,7 +2391,7 @@
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
                                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #555;">
-                                        <input type="checkbox" id="widgetEditorPublic" onchange="updateWidgetPublicOverlay()">
+                                        <input type="checkbox" id="widgetEditorPublic" onchange="onWidgetPublicCheckboxChange()">
                                         Make public (visible to community)
                                     </label>
                                 </div>
@@ -3161,6 +3161,42 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 </div>
                 <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;flex-shrink:0;">
                     <button class="btn btn-secondary" onclick="closeWidgetEnableChoiceModal()" style="margin-left:0;">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Widget Delete Warning Modal -->
+        <div id="widgetDeleteWarningModal" class="modal">
+            <div class="modal-content" style="max-width:480px;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;font-size:16px;">🗑️ Delete Widget?</h3>
+                    <button onclick="closeWidgetDeleteWarningModal(false)" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <p id="widgetDeleteWarningMsg" style="margin:0 0 12px 0;font-size:14px;color:#444;line-height:1.6;"></p>
+                    <p id="widgetDeleteWarningInUse" style="margin:0;font-size:13px;color:#b71c1c;font-weight:600;display:none;">This widget will stop working on any instances that currently have it enabled.</p>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;">
+                    <button class="btn btn-secondary" onclick="closeWidgetDeleteWarningModal(false)" style="margin-left:0;">Cancel</button>
+                    <button class="btn btn-danger" onclick="closeWidgetDeleteWarningModal(true)">Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Widget Make-Private Warning Modal -->
+        <div id="widgetMakePrivateModal" class="modal">
+            <div class="modal-content" style="max-width:480px;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;font-size:16px;">⚠️ Make Widget Private?</h3>
+                    <button onclick="closeWidgetMakePrivateModal(false)" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <p id="widgetMakePrivateMsg" style="margin:0 0 16px 0;font-size:14px;color:#444;line-height:1.6;"></p>
+                    <p style="margin:0;font-size:13px;color:#b71c1c;font-weight:600;">This widget will stop working on any instances that currently have it enabled.</p>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;">
+                    <button class="btn btn-secondary" onclick="closeWidgetMakePrivateModal(false)" style="margin-left:0;">Cancel</button>
+                    <button class="btn btn-danger" onclick="closeWidgetMakePrivateModal(true)">Yes, make private</button>
                 </div>
             </div>
         </div>
@@ -9180,6 +9216,7 @@ function resetStationIdColor() {
         let allCommunityWidgets = [];   // cache for client-side search filtering
         let enabledWidgetIDs = [];      // current enabled list (ordered)
         let myWidgetIDs = new Set();    // widget_ids owned by this instance
+        let widgetEnabledByCount = {};  // widget_id → number of instances that have it enabled (from with-instances data)
 
         async function switchWidgetSubTab(tab) {
             const myBtn      = document.getElementById('widgetSubTabMyBtn');
@@ -9253,7 +9290,7 @@ function resetStationIdColor() {
                     <div style="flex:1;min-width:0;">
                         <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
-                        <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}</div>
+                        <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${w.is_public && widgetEnabledByCount[w.widget_id] > 0 ? ` \u00b7 \uD83D\uDC65 ${widgetEnabledByCount[w.widget_id]} instance${widgetEnabledByCount[w.widget_id] === 1 ? '' : 's'}` : ''}</div>
                     </div>
                     <div style="display:flex;gap:6px;flex-shrink:0;">
                         ${isEnabled
@@ -9340,11 +9377,16 @@ function resetStationIdColor() {
             const container = document.getElementById('communityWidgetsList');
             container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading\u2026</p></div>';
             try {
-                const resp = await authenticatedFetch('/admin/widgets/public');
+                const resp = await authenticatedFetch('/admin/widgets/public-with-instances');
                 if (!resp) return;
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
                 allCommunityWidgets = data.widgets || [];
+                // Build enabled-by count map for use in My Widgets tab
+                widgetEnabledByCount = {};
+                allCommunityWidgets.forEach(w => {
+                    widgetEnabledByCount[w.widget_id] = (w.enabled_by || []).length;
+                });
                 renderCommunityWidgets(allCommunityWidgets);
             } catch (e) {
                 container.innerHTML = `<div style="color:#c62828;font-size:13px;">Error: ${escapeHtml(e.message)}</div>`;
@@ -9397,20 +9439,36 @@ function resetStationIdColor() {
             pageWidgets.forEach(w => {
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
                 const isMine    = myWidgetIDs.has(w.widget_id);
+                const enabledBy = w.enabled_by || [];
+                const enabledByBadges = enabledBy.map(inst =>
+                    `<a href="${escapeHtml(inst.public_url)}" target="_blank" rel="noopener"
+                        title="${escapeHtml(inst.name)}"
+                        style="display:inline-block;padding:1px 7px;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;border-radius:10px;font-size:10px;font-weight:600;text-decoration:none;white-space:nowrap;"
+                    >${escapeHtml(inst.callsign)}</a>`
+                ).join(' ');
+                const enabledByRow = enabledByBadges
+                    ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                           <span style="font-size:10px;color:#888;flex-shrink:0;">Used by:</span>
+                           ${enabledByBadges}
+                       </div>`
+                    : '';
                 const card = document.createElement('div');
                 card.id = `community-row-${w.widget_id}`;
                 card.style.cssText = `display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:12px 14px;background:${isMine ? '#f0f4ff' : '#fff'};border-radius:8px;border:1px solid ${isMine ? '#9fa8da' : '#e0e0e0'};box-shadow:0 1px 3px rgba(0,0,0,.06);`;
                 card.innerHTML = `
-                    <div style="flex:1;min-width:0;margin-bottom:10px;">
+                    <div style="flex:1;min-width:0;margin-bottom:6px;">
                         <div style="font-weight:600;font-size:13px;color:#283593;margin-bottom:4px;line-height:1.3;">
                             ${isEnabled ? '<span title="Currently enabled" style="font-size:12px;margin-right:3px;">⭐</span>' : ''}${escapeHtml(w.name)}
                         </div>
-                        ${w.description ? `<div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.4;">${escapeHtml(w.description)}</div>` : ''}
+                        ${w.description ? `<div style="font-size:11px;color:#555;line-height:1.4;">${escapeHtml(w.description)}</div>` : ''}
+                    </div>
+                    <div style="min-width:0;margin-bottom:10px;">
                         <div style="font-size:10px;color:#888;line-height:1.4;">
                             by <strong style="color:#3f51b5;">${w.instance_id ? `<a href="https://instances.ubersdr.org/?uuid=${encodeURIComponent(w.instance_id)}" target="_blank" rel="noopener" style="color:#3f51b5;text-decoration:underline;">${escapeHtml(w.callsign || w.instance_id)}</a>` : escapeHtml(w.callsign || 'unknown')}</strong>
                             &middot; v${w.version}
                             ${isMine ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                         </div>
+                        ${enabledByRow}
                     </div>
                     <div style="display:grid;grid-template-columns:1fr;gap:5px;width:100%;">
                         ${isEnabled
@@ -9763,6 +9821,32 @@ function resetStationIdColor() {
                 : 'Open in CodeMirror editor';
         }
 
+        function onWidgetPublicCheckboxChange() {
+            const cb       = document.getElementById('widgetEditorPublic');
+            const widgetID = document.getElementById('widgetEditorID').value.trim();
+            // Only intercept when unchecking a saved public widget that other instances use
+            if (!cb.checked && widgetID) {
+                const count = widgetEnabledByCount[widgetID] || 0;
+                if (count > 0) {
+                    // Revert the uncheck visually until the user confirms
+                    cb.checked = true;
+                    const msg = document.getElementById('widgetMakePrivateMsg');
+                    msg.textContent = `This widget is currently enabled on ${count} other instance${count === 1 ? '' : 's'}.`;
+                    document.getElementById('widgetMakePrivateModal').style.display = 'flex';
+                    return;
+                }
+            }
+            updateWidgetPublicOverlay();
+        }
+
+        function closeWidgetMakePrivateModal(confirmed) {
+            document.getElementById('widgetMakePrivateModal').style.display = 'none';
+            if (confirmed) {
+                document.getElementById('widgetEditorPublic').checked = false;
+                updateWidgetPublicOverlay();
+            }
+        }
+
         function openWidgetHtmlInCmEditor() {
             const ta = document.getElementById('widgetEditorHTML');
             openCmEditorModal(ta, null, 'Widget HTML Content', function(v) {
@@ -9840,8 +9924,32 @@ function resetStationIdColor() {
             }
         }
 
-        async function deleteWidget(widgetID, name) {
-            if (!confirm(`Delete widget "${name}"? This cannot be undone.`)) return;
+        let _pendingDeleteWidgetID   = null;
+        let _pendingDeleteWidgetName = null;
+
+        function deleteWidget(widgetID, name) {
+            _pendingDeleteWidgetID   = widgetID;
+            _pendingDeleteWidgetName = name;
+            const count    = widgetEnabledByCount[widgetID] || 0;
+            const msgEl    = document.getElementById('widgetDeleteWarningMsg');
+            const inUseEl  = document.getElementById('widgetDeleteWarningInUse');
+            if (count > 0) {
+                msgEl.textContent = `"${name}" is currently enabled on ${count} instance${count === 1 ? '' : 's'}. Deleting it cannot be undone.`;
+                inUseEl.style.display = 'block';
+            } else {
+                msgEl.textContent = `Delete widget "${name}"? This cannot be undone.`;
+                inUseEl.style.display = 'none';
+            }
+            document.getElementById('widgetDeleteWarningModal').style.display = 'flex';
+        }
+
+        async function closeWidgetDeleteWarningModal(confirmed) {
+            document.getElementById('widgetDeleteWarningModal').style.display = 'none';
+            if (!confirmed) { _pendingDeleteWidgetID = null; _pendingDeleteWidgetName = null; return; }
+            const widgetID = _pendingDeleteWidgetID;
+            const name     = _pendingDeleteWidgetName;
+            _pendingDeleteWidgetID   = null;
+            _pendingDeleteWidgetName = null;
             try {
                 const resp = await authenticatedFetch('/admin/widgets/delete', {
                     method: 'POST',

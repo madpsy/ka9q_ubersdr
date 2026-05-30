@@ -2387,6 +2387,7 @@ func main() {
 	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))
 	http.HandleFunc("/admin/widgets/mine", adminHandler.AuthMiddleware(widgetManager.HandleMine))
 	http.HandleFunc("/admin/widgets/public", adminHandler.AuthMiddleware(widgetManager.HandlePublic))
+	http.HandleFunc("/admin/widgets/public-with-instances", adminHandler.AuthMiddleware(widgetManager.HandlePublicWithInstances))
 	http.HandleFunc("/admin/widgets/create", adminHandler.AuthMiddleware(widgetManager.HandleCreate))
 	http.HandleFunc("/admin/widgets/update", adminHandler.AuthMiddleware(widgetManager.HandleUpdate))
 	http.HandleFunc("/admin/widgets/delete", adminHandler.AuthMiddleware(widgetManager.HandleDelete))

@@ -555,6 +555,23 @@ func (wm *WidgetManager) HandlePublic(w http.ResponseWriter, r *http.Request) {
 	wm.proxyWidgetList(w, path, false)
 }
 
+// HandlePublicWithInstances proxies GET /admin/widgets/public-with-instances
+// → collector GET /api/widgets/with-instances, which includes an enabled_by
+// array on each widget listing which instances have it enabled.
+// Supports ?instance_id= and ?callsign= query params forwarded as-is.
+// Normalises the response into {"widgets": [...]}.
+func (wm *WidgetManager) HandlePublicWithInstances(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := "/api/widgets/with-instances"
+	if q := r.URL.RawQuery; q != "" {
+		path += "?" + q
+	}
+	wm.proxyWidgetList(w, path, false)
+}
+
 // proxyWidgetList fetches a widget list from the collector, normalises the
 // response (array OR string-keyed object) into {"widgets": [...]}, and writes
 // it to w.  This handles collector implementations that return objects like

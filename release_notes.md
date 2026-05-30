@@ -1,17 +1,18 @@
-# Latest Stable - 0.1.50 - 20th May 2026
+# Latest Stable - 0.1.51 - 20th May 2026
 
-## Version 0.1.51 - Testing
+## Version 0.1.51 - Latest Stable
 
 ### New Features
-- Added **QRZ.com Lookup** via a Lookup Service. Requires QRZ.com account. Users with XML Subscription get a lot more data to see but works without
+- Added **QRZ.com Lookup** via a Lookup Service. Requires QRZ.com account. Users with XML Subscription get a lot more data but works without
 - Added **Wisdom Library** when a Wisdom file is generated successfully it gets uploaded to a library. This can then be fetched by anyone with an identical CPU, saving the generation time. Especially useful on ARM devices and slower x86 where it can take several hours
 - Added **Waterfall Resize** which allows you to drag the waterfall to make it taller or shorter using the grab handle underneath the control section
+- Added **WAV Record** in the Web UI - for compatibility only - the source is still Opus (HTTPS required due to AudioWorklet)
 
 ### Bug Fixes
 - Various UI niggles such as changing bandwidth marker colour didn't take affect until zoom/tune change
 - RBN Statistics did not allow for hyphen in callsign for lookups
 
-## Version 0.1.50 - Latest Stable
+## Version 0.1.50
 
 ### New Features
 - Added **PSKr/WSPR/RBN Historical Stats** to visualise the station's spot counts and rank inc. space weather (stats_history.html)

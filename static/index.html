@@ -1135,9 +1135,21 @@
                 <button class="modal-close" onclick="closeRecorderModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="recorder-status">
-                    <div class="recorder-status-indicator" id="recorder-status-indicator"></div>
-                    <span id="recorder-status-text">Stopped</span>
+                <div class="recorder-status" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="recorder-status-indicator" id="recorder-status-indicator"></div>
+                        <span id="recorder-status-text">Stopped</span>
+                    </div>
+                    <div id="recorder-format-toggle" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #cdd6e0;">
+                        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                            <input type="radio" name="recorder-format" id="recorder-format-webm" value="webm" checked style="cursor: pointer;">
+                            WebM
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                            <input type="radio" name="recorder-format" id="recorder-format-wav" value="wav" style="cursor: pointer;">
+                            WAV
+                        </label>
+                    </div>
                 </div>
                 <div class="recorder-time">
                     <span id="recording-time">00:00</span>
@@ -1160,7 +1172,7 @@
                 </div>
                 <div class="recorder-info">
                     <p><strong>Note:</strong> Recording captures the processed audio output including all active filters and effects.</p>
-                    <p>Recordings are saved in WebM format with Opus codec.</p>
+                    <p><strong>WebM</strong> (Opus codec) — small file, lossy compression. <strong>WAV</strong> — lossless PCM, larger file.</p>
                 </div>
             </div>
         </div>

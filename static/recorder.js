@@ -1,6 +1,7 @@
 /**
  * Audio Recorder Module
  * Handles recording of the current audio stream with download capability
+ * Supports WebM/Opus (compressed) and PCM WAV (lossless) formats
  */
 
 let audioRecorder = null;
@@ -13,6 +14,20 @@ let recordingMetadata = {};
 let signalDataLog = []; // Array to store signal measurements
 let signalDataInterval = null; // Interval for collecting signal data
 const MAX_RECORDING_TIME_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+// WAV recording state
+let wavScriptProcessor = null;
+let wavPcmChunks = []; // Array of Float32Array buffers
+let wavSampleRate = 48000;
+let wavNumChannels = 1;
+
+/**
+ * Get the currently selected recording format ('webm' or 'wav')
+ */
+function getSelectedFormat() {
+    const wavRadio = document.getElementById('recorder-format-wav');
+    return (wavRadio && wavRadio.checked) ? 'wav' : 'webm';
+}
 
 /**
  * Initialize the audio recorder
@@ -49,6 +64,7 @@ function closeRecorderModal() {
         
         // Clear any existing recording
         recordedChunks = [];
+        wavPcmChunks = [];
         recordingStartTime = null;
         recordingEndTime = null;
         recordingMetadata = {};
@@ -84,42 +100,20 @@ async function startRecording() {
             bandwidthHigh: window.currentBandwidthHigh || 0
         };
 
-        // Create a MediaStreamDestination to capture the audio
-        const dest = window.audioContext.createMediaStreamDestination();
-        
         // Create a gain node to tap into the audio stream
-        // This will be connected in the audio chain in app.js
         if (!window.recorderGainNode) {
             window.recorderGainNode = window.audioContext.createGain();
             window.recorderGainNode.gain.value = 1.0; // Unity gain (no change to audio)
         }
-        
-        // Connect the recorder gain node to MediaStreamDestination for recording
-        // NOTE: Do NOT connect to audioContext.destination here - app.js handles that
-        // to avoid dual connection which would double the audio volume
-        window.recorderGainNode.connect(dest);
 
-        // Create MediaRecorder
-        const options = { mimeType: 'audio/webm;codecs=opus' };
-        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-            options.mimeType = 'audio/webm';
+        const format = getSelectedFormat();
+
+        if (format === 'wav') {
+            await startWavRecording();
+        } else {
+            await startWebmRecording();
         }
-        
-        audioRecorder = new MediaRecorder(dest.stream, options);
-        recordedChunks = [];
 
-        audioRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                recordedChunks.push(event.data);
-            }
-        };
-
-        audioRecorder.onstop = () => {
-            recordingEndTime = Date.now();
-            console.log('Recording stopped, chunks:', recordedChunks.length);
-        };
-
-        audioRecorder.start(1000); // Collect data every second
         isRecording = true;
         recordingStartTime = Date.now();
         recordingEndTime = null;
@@ -146,7 +140,7 @@ async function startRecording() {
         startRecordingTimer();
         
         updateRecorderUI();
-        console.log('Recording started');
+        console.log(`Recording started (format: ${format})`);
     } catch (error) {
         console.error('Error starting recording:', error);
         alert('Failed to start recording: ' + error.message);
@@ -154,23 +148,106 @@ async function startRecording() {
 }
 
 /**
+ * Start WebM/Opus recording via MediaRecorder
+ */
+async function startWebmRecording() {
+    const dest = window.audioContext.createMediaStreamDestination();
+    window.recorderGainNode.connect(dest);
+
+    const options = { mimeType: 'audio/webm;codecs=opus' };
+    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'audio/webm';
+    }
+
+    audioRecorder = new MediaRecorder(dest.stream, options);
+    recordedChunks = [];
+
+    audioRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+            recordedChunks.push(event.data);
+        }
+    };
+
+    audioRecorder.onstop = () => {
+        recordingEndTime = Date.now();
+        console.log('WebM recording stopped, chunks:', recordedChunks.length);
+    };
+
+    audioRecorder.start(1000); // Collect data every second
+}
+
+/**
+ * Start WAV/PCM recording via ScriptProcessorNode
+ */
+async function startWavRecording() {
+    wavPcmChunks = [];
+    wavSampleRate = window.audioContext.sampleRate;
+
+    // ScriptProcessorNode is deprecated but universally supported and sufficient here.
+    // AudioWorklet would require a separate .js file served from the same origin.
+    const bufferSize = 4096;
+    wavNumChannels = 1; // mono — matches the SDR audio output
+    wavScriptProcessor = window.audioContext.createScriptProcessor(bufferSize, wavNumChannels, wavNumChannels);
+
+    wavScriptProcessor.onaudioprocess = (event) => {
+        if (!isRecording) return;
+        // Copy the input buffer (Float32Array is a view — must be cloned)
+        const inputData = event.inputBuffer.getChannelData(0);
+        wavPcmChunks.push(new Float32Array(inputData));
+    };
+
+    window.recorderGainNode.connect(wavScriptProcessor);
+    // Connect to destination to keep the graph alive (silent output is fine)
+    wavScriptProcessor.connect(window.audioContext.destination);
+}
+
+/**
  * Stop recording audio
  */
 function stopRecording() {
-    if (audioRecorder && isRecording) {
-        audioRecorder.stop();
-        isRecording = false;
-        
-        // Stop signal data collection
-        if (signalDataInterval) {
-            clearInterval(signalDataInterval);
-            signalDataInterval = null;
-        }
-        
-        stopRecordingTimer();
-        updateRecorderUI();
-        console.log('Recording stopped');
+    if (!isRecording) return;
+
+    isRecording = false;
+    recordingEndTime = Date.now();
+
+    const format = getSelectedFormat();
+
+    if (format === 'wav') {
+        stopWavRecording();
+    } else {
+        stopWebmRecording();
     }
+
+    // Stop signal data collection
+    if (signalDataInterval) {
+        clearInterval(signalDataInterval);
+        signalDataInterval = null;
+    }
+
+    stopRecordingTimer();
+    updateRecorderUI();
+    console.log('Recording stopped');
+}
+
+/**
+ * Stop WebM recording
+ */
+function stopWebmRecording() {
+    if (audioRecorder) {
+        audioRecorder.stop();
+        audioRecorder = null;
+    }
+}
+
+/**
+ * Stop WAV recording
+ */
+function stopWavRecording() {
+    if (wavScriptProcessor) {
+        wavScriptProcessor.disconnect();
+        wavScriptProcessor = null;
+    }
+    console.log('WAV recording stopped, PCM chunks:', wavPcmChunks.length);
 }
 
 /**
@@ -217,10 +294,80 @@ function updateRecordingTime(elapsed) {
 }
 
 /**
+ * Encode collected PCM chunks into a WAV ArrayBuffer
+ * Format: 16-bit PCM, mono, at the audio context sample rate
+ */
+function encodeWav(pcmChunks, sampleRate, numChannels) {
+    // Flatten all Float32Array chunks into one
+    let totalSamples = 0;
+    for (const chunk of pcmChunks) {
+        totalSamples += chunk.length;
+    }
+
+    const pcmData = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const chunk of pcmChunks) {
+        pcmData.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    // Convert float32 [-1, 1] to int16 [-32768, 32767]
+    const int16Data = new Int16Array(totalSamples);
+    for (let i = 0; i < totalSamples; i++) {
+        const s = Math.max(-1, Math.min(1, pcmData[i]));
+        int16Data[i] = s < 0 ? s * 32768 : s * 32767;
+    }
+
+    const byteRate = sampleRate * numChannels * 2; // 2 bytes per int16 sample
+    const blockAlign = numChannels * 2;
+    const dataSize = int16Data.byteLength;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    // RIFF chunk descriptor
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(view, 8, 'WAVE');
+
+    // fmt sub-chunk
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);          // Subchunk1Size (16 for PCM)
+    view.setUint16(20, 1, true);           // AudioFormat (1 = PCM)
+    view.setUint16(22, numChannels, true); // NumChannels
+    view.setUint32(24, sampleRate, true);  // SampleRate
+    view.setUint32(28, byteRate, true);    // ByteRate
+    view.setUint16(32, blockAlign, true);  // BlockAlign
+    view.setUint16(34, 16, true);          // BitsPerSample
+
+    // data sub-chunk
+    writeString(view, 36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    // Write PCM samples
+    const dataView = new Uint8Array(buffer, 44);
+    const int16Bytes = new Uint8Array(int16Data.buffer);
+    dataView.set(int16Bytes);
+
+    return buffer;
+}
+
+/**
+ * Helper: write an ASCII string into a DataView at a given offset
+ */
+function writeString(view, offset, str) {
+    for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+    }
+}
+
+/**
  * Download the recorded audio as a ZIP file with metadata
  */
 async function downloadRecording() {
-    if (recordedChunks.length === 0) {
+    const format = getSelectedFormat();
+    const hasData = format === 'wav' ? wavPcmChunks.length > 0 : recordedChunks.length > 0;
+
+    if (!hasData) {
         alert('No recording available to download');
         return;
     }
@@ -231,15 +378,28 @@ async function downloadRecording() {
             throw new Error('JSZip library not loaded');
         }
 
-        // Create audio blob
-        const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-        
         // Calculate duration
         const durationMs = recordingEndTime ? (recordingEndTime - recordingStartTime) : 0;
         const durationSec = Math.floor(durationMs / 1000);
         const minutes = Math.floor(durationSec / 60);
         const seconds = durationSec % 60;
         const durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+        // Build audio blob / buffer
+        let audioData;
+        let audioExt;
+        let formatLine;
+
+        if (format === 'wav') {
+            const wavBuffer = encodeWav(wavPcmChunks, wavSampleRate, wavNumChannels);
+            audioData = new Blob([wavBuffer], { type: 'audio/wav' });
+            audioExt = 'wav';
+            formatLine = `Container: WAV\nCodec: PCM (16-bit signed, little-endian)\nSample Rate: ${wavSampleRate} Hz\nChannels: ${wavNumChannels}`;
+        } else {
+            audioData = new Blob(recordedChunks, { type: 'audio/webm' });
+            audioExt = 'webm';
+            formatLine = `Container: WebM\nCodec: Opus\nSample Rate: ${window.audioContext ? window.audioContext.sampleRate : 'Unknown'} Hz`;
+        }
         
         // Get instance information from global window.instanceDescription
         let instanceInfo = '';
@@ -289,9 +449,7 @@ Bandwidth High: ${recordingMetadata.bandwidthHigh} Hz
 
 Recording Format:
 ----------------
-Container: WebM
-Codec: Opus
-Sample Rate: ${window.audioContext ? window.audioContext.sampleRate : 'Unknown'} Hz
+${formatLine}
 
 Generated by UberSDR Web Client
 `;
@@ -310,7 +468,7 @@ Generated by UberSDR Web Client
         const baseFilename = `sdr-recording-${timestamp}`;
         
         // Add files to ZIP
-        zip.file(`${baseFilename}.webm`, audioBlob);
+        zip.file(`${baseFilename}.${audioExt}`, audioData);
         zip.file(`${baseFilename}.txt`, metadata);
         zip.file(`${baseFilename}-signal.csv`, signalDataCSV);
         
@@ -333,7 +491,7 @@ Generated by UberSDR Web Client
             URL.revokeObjectURL(url);
         }, 100);
         
-        console.log('Recording downloaded as ZIP with metadata');
+        console.log(`Recording downloaded as ZIP (format: ${audioExt})`);
     } catch (error) {
         console.error('Error creating ZIP file:', error);
         alert('Failed to create ZIP file: ' + error.message);
@@ -357,6 +515,7 @@ function clearRecording() {
     }
     
     recordedChunks = [];
+    wavPcmChunks = [];
     recordingStartTime = null;
     recordingEndTime = null;
     recordingMetadata = {};
@@ -376,6 +535,10 @@ function updateRecorderUI() {
     const clearBtn = document.getElementById('recorder-clear-btn');
     const statusIndicator = document.getElementById('recorder-status-indicator');
     const statusText = document.getElementById('recorder-status-text');
+    const formatToggle = document.getElementById('recorder-format-toggle');
+
+    const format = getSelectedFormat();
+    const hasData = format === 'wav' ? wavPcmChunks.length > 0 : recordedChunks.length > 0;
 
     if (isRecording) {
         if (startBtn) startBtn.disabled = true;
@@ -387,17 +550,33 @@ function updateRecorderUI() {
             statusIndicator.classList.remove('stopped');
         }
         if (statusText) statusText.textContent = 'Recording...';
+        // Lock format toggle during recording
+        if (formatToggle) {
+            formatToggle.querySelectorAll('input[type="radio"]').forEach(r => {
+                r.disabled = true;
+                r.parentElement.style.opacity = '0.45';
+                r.parentElement.style.cursor = 'default';
+            });
+        }
     } else {
         if (startBtn) startBtn.disabled = false;
         if (stopBtn) stopBtn.disabled = true;
-        if (downloadBtn) downloadBtn.disabled = recordedChunks.length === 0;
-        if (clearBtn) clearBtn.disabled = recordedChunks.length === 0;
+        if (downloadBtn) downloadBtn.disabled = !hasData;
+        if (clearBtn) clearBtn.disabled = !hasData;
         if (statusIndicator) {
             statusIndicator.classList.remove('recording');
             statusIndicator.classList.add('stopped');
         }
         if (statusText) {
-            statusText.textContent = recordedChunks.length > 0 ? 'Ready' : 'Stopped';
+            statusText.textContent = hasData ? 'Ready' : 'Stopped';
+        }
+        // Unlock format toggle when not recording
+        if (formatToggle) {
+            formatToggle.querySelectorAll('input[type="radio"]').forEach(r => {
+                r.disabled = false;
+                r.parentElement.style.opacity = '';
+                r.parentElement.style.cursor = 'pointer';
+            });
         }
     }
 }

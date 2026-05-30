@@ -757,6 +757,9 @@ if [ -f "$INSTALLED_MARKER" ]; then
             echo "Warning: docker compose down failed after 3 attempts. Proceeding with up anyway..."
         fi
 
+        echo "Pruning dangling Docker images..."
+        sudo docker image prune -f || true
+
         # Start Docker containers without setting password, retry up to 3 times
         echo "Starting UberSDR containers..."
         UP_SUCCESS=0
@@ -801,7 +804,10 @@ else
     # Clean up any existing containers and network (allow failures)
     echo "Stopping any existing containers..."
     sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down 2>/dev/null || true
-    
+
+    echo "Pruning dangling Docker images..."
+    sudo docker image prune -f || true
+
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."
     export ADMIN_PASSWORD="$password"

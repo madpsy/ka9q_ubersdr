@@ -1182,8 +1182,8 @@ class ChatUI {
         // Trigger validation immediately if there's a pre-filled value
         if (usernameInput.value) {
             validateUsername({ target: usernameInput });
-            // Set cursor to end of pre-filled username
-            usernameInput.setSelectionRange(usernameInput.value.length, usernameInput.value.length);
+            // Select all text so typing immediately replaces the placeholder username
+            usernameInput.select();
         }
 
         // Join button
@@ -1659,8 +1659,8 @@ class ChatUI {
                     const usernameInput = document.getElementById('chat-username-input');
                     if (usernameInput) {
                         usernameInput.focus();
-                        // Move cursor to end of text
-                        usernameInput.setSelectionRange(usernameInput.value.length, usernameInput.value.length);
+                        // Select all text so typing immediately replaces the placeholder username
+                        usernameInput.select();
                     }
                 }
             }, 50);
@@ -1852,8 +1852,8 @@ class ChatUI {
         const event = new Event('input', { bubbles: true });
         usernameInput.dispatchEvent(event);
 
-        // Move cursor to end of text
-        usernameInput.setSelectionRange(usernameInput.value.length, usernameInput.value.length);
+        // Select all text so typing immediately replaces the placeholder username
+        usernameInput.select();
 
         // Clear username from chat object
         this.chat.username = null;

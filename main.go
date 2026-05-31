@@ -2447,6 +2447,11 @@ func main() {
 			handleIndexPage(w, r, config, widgetManager)
 			return
 		}
+		// Serve PWA manifest dynamically so the app name includes the callsign
+		if r.URL.Path == "/site.webmanifest" {
+			handleManifest(w, r, config)
+			return
+		}
 		// Serve other static files
 		fs := http.FileServer(http.Dir("static"))
 		fs.ServeHTTP(w, r)
@@ -2924,6 +2929,42 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// handleManifest serves the PWA web app manifest dynamically so the app name
+// includes the operator's callsign (e.g. "UberSDR (G0ABC)").
+func handleManifest(w http.ResponseWriter, r *http.Request, config *Config) {
+	appName := "UberSDR"
+	if cs := strings.ToUpper(strings.TrimSpace(config.Admin.Callsign)); cs != "" {
+		appName = fmt.Sprintf("UberSDR (%s)", cs)
+	}
+
+	manifest := map[string]any{
+		"name":             appName,
+		"short_name":       "UberSDR",
+		"description":      "Web-based SDR platform for amateur radio enthusiasts with real-time HF spectrum access.",
+		"start_url":        "/",
+		"scope":            "/",
+		"display":          "standalone",
+		"orientation":      "any",
+		"background_color": "#2c3e50",
+		"theme_color":      "#2c3e50",
+		"icons": []map[string]string{
+			{"src": "/images/favicon-16x16.png", "sizes": "16x16", "type": "image/png"},
+			{"src": "/images/favicon-32x32.png", "sizes": "32x32", "type": "image/png"},
+			{"src": "/images/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+			{"src": "/images/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+			{"src": "/images/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+		},
+		"categories": []string{"utilities", "entertainment"},
+		"lang":       "en",
+	}
+
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	if err := json.NewEncoder(w).Encode(manifest); err != nil {
+		log.Printf("Error encoding manifest: %v", err)
+	}
 }
 
 // handleIndexPage serves the index.html template with custom HTML injection

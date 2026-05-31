@@ -1324,8 +1324,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
                 const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
 
-                if (_isApple) {
-                    // ── Apple: MediaStreamDestination bridge (unchanged) ──────────────
+                if (_isApple || _mediaSessionNeedsBridge) {
+                    // ── Apple / Firefox: MediaStreamDestination bridge ────────────────
+                    // _isApple: iOS/macOS Safari — bridge works perfectly.
+                    // _mediaSessionNeedsBridge: Firefox (lacks AudioContext.setSinkId) —
+                    //   also needs the bridge; HTTP stream path not used on Firefox.
                     if (_mediaSessionNeedsBridge && !mediaElement && audioContext) {
                         try {
                             const dest = audioContext.createMediaStreamDestination();
@@ -1365,14 +1368,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Non-Apple: pause/resume the <audio src> HTTP stream element.
                 navigator.mediaSession.setActionHandler('play', () => {
                     if (isMuted) toggleMute();
-                    if (_isApple) mediaElement?.play().catch(() => {});
+                    if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
                     else _httpAudioElement?.play().catch(() => {});
                     navigator.mediaSession.playbackState = 'playing';
                     console.log('[MediaSession] play action — unmuted');
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
                     if (!isMuted) toggleMute();
-                    if (_isApple) mediaElement?.pause();
+                    if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
                     else _httpAudioElement?.pause();
                     navigator.mediaSession.playbackState = 'paused';
                     console.log('[MediaSession] pause action — muted');
@@ -1390,12 +1393,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // AudioContext exists at this point (created on WebSocket connect).
             await applyAudioSink();
 
-            // Non-Apple: the HTTP stream is started by setMediaSessionEnabled() when
-            // the user enables media session via the audio settings checkbox.
-            // If media session was already enabled before startAudio() (e.g. from a
-            // previous session), attempt it here — the WebSocket session exists at
-            // this point since setMode() has already been called above.
-            if (!_isApple && mediaSessionEnabled && 'mediaSession' in navigator) {
+            // Chrome/Edge only (not Apple, not Firefox): the HTTP stream is started by
+            // setMediaSessionEnabled() when the user enables media session via the
+            // audio settings checkbox.  If media session was already enabled before
+            // startAudio() (e.g. from a previous session), attempt it here.
+            if (!_isApple && !_mediaSessionNeedsBridge && mediaSessionEnabled && 'mediaSession' in navigator) {
                 await _ensureHttpAudioStream();
             }
         };
@@ -4040,11 +4042,11 @@ function playAudioBuffer(buffer) {
         _mediaSessionActivated = true;
         updateMediaSession();
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-        if (_isApple) {
-            // Ensure the bridge element is still playing (Safari/Firefox only).
+        if (_isApple || _mediaSessionNeedsBridge) {
+            // Apple / Firefox: ensure the bridge element is still playing.
             if (mediaElement && !isMuted) mediaElement.play().catch(() => {});
         } else {
-            // Non-Apple: ensure HTTP stream is running now that WebSocket audio is flowing.
+            // Chrome/Edge: ensure HTTP stream is running now that WebSocket audio is flowing.
             // _ensureHttpAudioStream() is a no-op if already active.
             _ensureHttpAudioStream().catch(() => {});
         }
@@ -5718,15 +5720,15 @@ function toggleMute() {
     // Keep Media Session playback state in sync with mute
     if ('mediaSession' in navigator && _mediaSessionActivated) {
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-        if (_isApple) {
-            // Apple: pause/resume the MediaStreamDestination bridge element
+        if (_isApple || _mediaSessionNeedsBridge) {
+            // Apple / Firefox: pause/resume the MediaStreamDestination bridge element
             if (isMuted) {
                 mediaElement?.pause();
             } else {
                 mediaElement?.play().catch(() => {});
             }
         } else {
-            // Non-Apple: pause/resume the HTTP stream element
+            // Chrome/Edge: pause/resume the HTTP stream element
             if (isMuted) {
                 _httpAudioElement?.pause();
             } else {
@@ -10867,8 +10869,8 @@ async function setMediaSessionEnabled(enabled) {
         }
 
         try {
-            if (_isApple) {
-                // ── Apple: MediaStreamDestination bridge (unchanged) ──────────
+            if (_isApple || _mediaSessionNeedsBridge) {
+                // ── Apple / Firefox: MediaStreamDestination bridge ────────────
                 if (_mediaSessionNeedsBridge && !mediaElement) {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._mediaStreamDest = dest;
@@ -10881,7 +10883,7 @@ async function setMediaSessionEnabled(enabled) {
                     console.log('[MediaSession] Audio bridge created and playing');
                 }
             } else {
-                // ── Non-Apple: HTTP Ogg/Opus stream ──────────────────────────
+                // ── Chrome/Edge: MSE HTTP stream ──────────────────────────────
                 // Requires an active WebSocket audio session — if not ready yet,
                 // _ensureHttpAudioStream() will be retried in playAudioBuffer().
                 await _ensureHttpAudioStream();
@@ -10899,13 +10901,13 @@ async function setMediaSessionEnabled(enabled) {
             try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
             navigator.mediaSession.setActionHandler('play', () => {
                 if (isMuted) toggleMute();
-                if (_isApple) mediaElement?.play().catch(() => {});
+                if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
                 else _httpAudioElement?.play().catch(() => {});
                 navigator.mediaSession.playbackState = 'playing';
             });
             navigator.mediaSession.setActionHandler('pause', () => {
                 if (!isMuted) toggleMute();
-                if (_isApple) mediaElement?.pause();
+                if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
                 else _httpAudioElement?.pause();
                 navigator.mediaSession.playbackState = 'paused';
             });

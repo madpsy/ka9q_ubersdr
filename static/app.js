@@ -3813,17 +3813,17 @@ function playAudioBuffer(buffer) {
         return;
     }
 
-    // On first real audio buffer, (re-)activate the Media Session so Android Chrome
-    // shows the notification. Chrome requires audio to actually be flowing through the
-    // <audio> element before it registers a media session — setting metadata at bridge
-    // creation time (before audio flows) is not enough.
-    if (!_mediaSessionActivated && mediaElement && 'mediaSession' in navigator) {
+    // On first real audio buffer, (re-)activate the Media Session.
+    // On Safari/Firefox: mediaElement exists (bridge path) — re-confirm metadata now
+    //   that audio is actually flowing (Chrome required this; Safari benefits too).
+    // On Chrome/Android: no mediaElement, but mediaSessionEnabled is true — metadata
+    //   was already set in startAudio(), just show the indicator and mark activated.
+    if (!_mediaSessionActivated && mediaSessionEnabled && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateMediaSession();
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-        // Ensure the media element is playing (may have been paused by the OS),
-        // but only if not intentionally muted via MediaSession pause.
-        if (!isMuted) mediaElement.play().catch(() => {});
+        // Ensure the bridge element is still playing (Safari/Firefox only).
+        if (mediaElement && !isMuted) mediaElement.play().catch(() => {});
         console.log('[MediaSession] Activated with real audio flowing');
         // Show MediaSession indicator in the audio buffer display
         const mediaSessionIndicator = document.getElementById('media-session-indicator');

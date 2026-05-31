@@ -279,114 +279,22 @@ let _httpMediaSource = null;          // MediaSource object for MSE path
  * Must be called from a user-gesture handler so audio.play() is allowed.
  * Safe to call multiple times — returns immediately if already active.
  */
+/**
+ * Create (or reuse) the hidden <audio src="/audio/stream?session=..."> element
+ * that anchors the Android Chrome lock-screen media widget.
+ *
+ * Uses a direct <audio src> element — simple and reliable.
+ * The AudioContext is muted once the element confirms it is playing,
+ * so the user hears the HTTP stream (which the <audio> element handles).
+ *
+ * Must be called from a user-gesture handler so audio.play() is allowed.
+ * Safe to call multiple times — returns immediately if already active.
+ */
 async function _ensureHttpAudioStream() {
     if (_httpAudioElement) return; // already active
 
     const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
-    const mime = 'audio/webm; codecs=opus';
-    const mseSupported = window.MediaSource && MediaSource.isTypeSupported(mime);
 
-    // ── MSE path (Chrome/Edge/Android) ───────────────────────────────────────
-    if (mseSupported) {
-        try {
-            const ms = new MediaSource();
-            _httpMediaSource = ms;
-
-            const el = document.createElement('audio');
-            el.setAttribute('playsinline', '');
-            el.style.display = 'none';
-            el.src = URL.createObjectURL(ms);
-            document.body.appendChild(el);
-            _httpAudioElement = el;
-
-            // Mute AudioContext once the element is confirmed playing
-            el.addEventListener('playing', () => {
-                console.log('[MediaSession] MSE audio stream playing — muting AudioContext output');
-                _muteAudioContextForHttpStream();
-            }, { once: true });
-
-            el.addEventListener('error', (e) => {
-                console.error('[MediaSession] MSE audio element error:', el.error?.code, el.error?.message);
-                _onHttpAudioStreamEnded();
-            });
-
-            // Wait for MediaSource to open, then set up SourceBuffer and fetch
-            await new Promise((resolve, reject) => {
-                ms.addEventListener('sourceopen', resolve, { once: true });
-                ms.addEventListener('error', reject, { once: true });
-                setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 5000);
-            });
-
-            const sb = ms.addSourceBuffer(mime);
-            sb.mode = 'sequence'; // live streaming — ignore timestamps, play in order
-
-            // Start fetch with AbortController for clean teardown
-            _httpFetchAbortController = new AbortController();
-            const response = await fetch(url, { signal: _httpFetchAbortController.signal });
-
-            if (!response.ok) {
-                if (response.status === 409) {
-                    // Another stream is still active on the server (stale session from
-                    // a previous page load).  Clean up and retry after a short delay —
-                    // the server will clear the old session when its connection drops.
-                    console.warn('[MediaSession] HTTP 409 — stale server session, retrying in 1s');
-                    _destroyHttpAudioStream();
-                    setTimeout(() => _ensureHttpAudioStream(), 1000);
-                    return;
-                }
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            await el.play();
-            console.log('[MediaSession] MSE audio stream play() resolved');
-
-            // Pump stream chunks into SourceBuffer
-            const reader = response.body.getReader();
-            const pump = async () => {
-                try {
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) { _onHttpAudioStreamEnded(); return; }
-                        if (!_httpAudioElement) return; // torn down
-
-                        // Wait for SourceBuffer to finish any pending update
-                        if (sb.updating) {
-                            await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
-                        }
-                        if (!_httpAudioElement) return; // torn down during wait
-
-                        sb.appendBuffer(value);
-
-                        // Trim buffer to keep latency low — keep max 1 second
-                        await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
-                        if (sb.buffered.length > 0 && !sb.updating) {
-                            const end = sb.buffered.end(0);
-                            const start = sb.buffered.start(0);
-                            if (end - start > 1.0) {
-                                try { sb.remove(start, end - 0.5); } catch (_) {}
-                            }
-                        }
-                    }
-                } catch (e) {
-                    if (e.name !== 'AbortError') {
-                        console.error('[MediaSession] MSE pump error:', e.message);
-                        _onHttpAudioStreamEnded();
-                    }
-                }
-            };
-            pump();
-            return; // MSE path succeeded
-        } catch (e) {
-            console.error('[MediaSession] MSE setup failed:', e.message);
-            _destroyHttpAudioStream();
-            return; // Don't fall through to direct src — MSE is supported, this was a transient error
-        }
-    }
-
-    // ── Fallback: direct <audio src> (browsers without MSE support) ──────────
-    // Higher latency (~6s) but still provides the lock screen anchor.
-    // Only reached when MSE is genuinely not supported (not on fetch errors).
-    console.log('[MediaSession] Using direct <audio src> (MSE not available)');
     try {
         const el = document.createElement('audio');
         el.setAttribute('playsinline', '');
@@ -434,15 +342,18 @@ function _destroyHttpAudioStream() {
         } catch (_) {}
         _httpMediaSource = null;
     }
-    // Remove the audio element
+    // Remove the audio element.
+    // Set src='' BEFORE pause() to avoid "play() interrupted by pause()" errors
+    // when teardown happens while play() is still pending.
     if (_httpAudioElement) {
-        _httpAudioElement.removeEventListener('ended', _onHttpAudioStreamEnded);
-        _httpAudioElement.removeEventListener('error', _onHttpAudioStreamEnded);
-        _httpAudioElement.removeEventListener('abort', _onHttpAudioStreamEnded);
-        _httpAudioElement.pause();
-        _httpAudioElement.src = '';
-        if (_httpAudioElement.parentNode) _httpAudioElement.parentNode.removeChild(_httpAudioElement);
-        _httpAudioElement = null;
+        const el = _httpAudioElement;
+        _httpAudioElement = null; // null first to prevent re-entrant calls
+        el.removeEventListener('ended', _onHttpAudioStreamEnded);
+        el.removeEventListener('error', _onHttpAudioStreamEnded);
+        el.removeEventListener('abort', _onHttpAudioStreamEnded);
+        el.src = ''; // stops any pending play() cleanly
+        try { el.load(); } catch (_) {} // reset media element state
+        if (el.parentNode) el.parentNode.removeChild(el);
     }
     _unmuteAudioContextForHttpStream();
 }
@@ -1380,16 +1291,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 //   Play button in Control Centre.
                 // Non-Apple: pause/resume the <audio src> HTTP stream element.
                 navigator.mediaSession.setActionHandler('play', () => {
-                    if (isMuted) toggleMute();
+                    if (isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
                     if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
-                    else _httpAudioElement?.play().catch(() => {});
                     navigator.mediaSession.playbackState = 'playing';
                     console.log('[MediaSession] play action — unmuted');
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
-                    if (!isMuted) toggleMute();
+                    if (!isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
                     if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
-                    else _httpAudioElement?.pause();
                     navigator.mediaSession.playbackState = 'paused';
                     console.log('[MediaSession] pause action — muted');
                 });
@@ -5741,11 +5650,11 @@ function toggleMute() {
                 mediaElement?.play().catch(() => {});
             }
         } else {
-            // Chrome/Edge: pause/resume the HTTP stream element
-            if (isMuted) {
-                _httpAudioElement?.pause();
-            } else {
-                _httpAudioElement?.play().catch(() => {});
+            // Chrome/Edge: use volume to mute/unmute the HTTP stream element.
+            // Do NOT pause() — keeping the element playing maintains the Android
+            // lock-screen widget.  Volume=0 silences it without pausing.
+            if (_httpAudioElement) {
+                _httpAudioElement.volume = isMuted ? 0 : 1;
             }
         }
     }
@@ -10913,15 +10822,13 @@ async function setMediaSessionEnabled(enabled) {
             try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
             try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
             navigator.mediaSession.setActionHandler('play', () => {
-                if (isMuted) toggleMute();
+                if (isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
                 if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
-                else _httpAudioElement?.play().catch(() => {});
                 navigator.mediaSession.playbackState = 'playing';
             });
             navigator.mediaSession.setActionHandler('pause', () => {
-                if (!isMuted) toggleMute();
+                if (!isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
                 if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
-                else _httpAudioElement?.pause();
                 navigator.mediaSession.playbackState = 'paused';
             });
             log('Media Session enabled — lock-screen controls active');

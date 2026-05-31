@@ -3630,9 +3630,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 				countries := computeCallsignRank(cached.CountryResult, callsign)
 				if len(reports) > 0 || len(countries) > 0 {
 					response["pskreporter_rank"] = PSKCallsignRank{
-						LastUpdated: cached.FetchedAt,
-						Reports:     reports,
-						Countries:   countries,
+						LastUpdated:      cached.FetchedAt,
+						ReporterCallsign: callsign,
+						Reports:          reports,
+						Countries:        countries,
 					}
 				}
 			}

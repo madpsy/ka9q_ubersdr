@@ -209,6 +209,8 @@ func (s *APIServer) putTune(w http.ResponseWriter, r *http.Request) {
 		} else {
 			_ = s.client.Tune(currentFreq, currentMode, s.client.BandwidthLow, s.client.BandwidthHigh)
 		}
+		// Push SDR→rig (debounced; no-op if flrig disabled or direction is rig-to-sdr).
+		s.flrig.PushSDRState(currentFreq, currentMode)
 	}
 
 	stepHz := 0

@@ -2881,14 +2881,54 @@ func main() {
 	appState.Mu.Unlock()
 
 	// ── Start REST API server (disabled only if --no-api is set) ──────────────
+	//
+	// Port selection:
+	//   • If the user explicitly passed --api-port, use that port exactly and
+	//     fail hard if it is already in use.
+	//   • Otherwise (default port 9770), auto-increment up to port 9870 so that
+	//     multiple copies of the app can run side-by-side without manual config.
 	var apiServer *APIServer
+	var apiActualPort int // the port we actually bound to (used by Open Browser)
 	if !*flagNoAPI {
 		apiServer = NewAPIServer(appState, client, flrigSync, mdns, prefs, sseBroker, apiSinkMgr, audioWSBroker)
-		addr := fmt.Sprintf("%s:%d", *flagAPIBind, *flagAPIPort)
-		if err := apiServer.Start(addr); err != nil {
-			fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API: %v\n", err)
+
+		// Detect whether --api-port was explicitly provided by the user.
+		apiPortExplicit := false
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "api-port" {
+				apiPortExplicit = true
+			}
+		})
+
+		const maxPortIncrement = 100
+		startPort := *flagAPIPort
+		var boundAddr string
+		var startErr error
+		for i := 0; i <= maxPortIncrement; i++ {
+			tryPort := startPort + i
+			addr := fmt.Sprintf("%s:%d", *flagAPIBind, tryPort)
+			var err error
+			boundAddr, err = apiServer.Start(addr)
+			if err == nil {
+				apiActualPort = tryPort
+				break
+			}
+			startErr = err
+			// If the port was explicitly specified, don't try any others.
+			if apiPortExplicit {
+				break
+			}
+		}
+		if apiActualPort == 0 {
+			if apiPortExplicit {
+				fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API: could not bind to port %d: %v\n",
+					startPort, startErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API: could not bind to any port in %d–%d: %v\n",
+					startPort, startPort+maxPortIncrement, startErr)
+			}
 		} else {
-			fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API listening on http://%s/api/v1/\n", addr)
+			fmt.Fprintf(os.Stderr, "ubersdr-audio: REST API listening on http://%s/api/v1/\n", boundAddr)
 		}
 	}
 
@@ -2905,9 +2945,9 @@ func main() {
 
 	// ── Open Browser button (only when API is enabled) ────────────────────────
 	var instanceCardTitle fyne.CanvasObject
-	if !*flagNoAPI {
+	if !*flagNoAPI && apiActualPort != 0 {
 		openBrowserBtn := widget.NewButton("Open Browser", func() {
-			u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", *flagAPIPort))
+			u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", apiActualPort))
 			if err == nil {
 				_ = a.OpenURL(u)
 			}

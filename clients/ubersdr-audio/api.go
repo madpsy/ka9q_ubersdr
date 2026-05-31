@@ -65,21 +65,23 @@ func NewAPIServer(
 }
 
 // Start registers all routes and begins listening on addr (e.g. "127.0.0.1:9770").
-func (s *APIServer) Start(addr string) error {
+// It returns the actual address that was bound (useful when the port was chosen
+// automatically via auto-increment).
+func (s *APIServer) Start(addr string) (string, error) {
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("API server: listen %s: %w", addr, err)
+	}
+
 	s.httpServer = &http.Server{
-		Addr:         addr,
+		Addr:         ln.Addr().String(),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 0, // 0 = no timeout (SSE streams are long-lived)
 		IdleTimeout:  120 * time.Second,
-	}
-
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("API server: listen %s: %w", addr, err)
 	}
 
 	go func() {
@@ -88,7 +90,7 @@ func (s *APIServer) Start(addr string) error {
 		}
 	}()
 
-	return nil
+	return ln.Addr().String(), nil
 }
 
 // Stop gracefully shuts down the HTTP server.

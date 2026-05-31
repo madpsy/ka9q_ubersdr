@@ -1,14 +1,19 @@
 package main
 
-// audio_http_stream.go — HTTP Ogg/Opus audio stream endpoint.
+// audio_http_stream.go — HTTP WebM/Opus audio stream endpoint.
 //
-// GET /audio/stream?session=<userSessionID>[&password=<bypass>]
+// GET /audio/stream?session=<userSessionID>
 //
-// Streams the session's audio as a continuous Ogg/Opus HTTP response so that
+// Streams the session's audio as a continuous WebM/Opus HTTP response so that
 // a hidden <audio src="/audio/stream?session=..."> element can play it.
 // Android Chrome requires a URL-based <audio> element to show the lock-screen
 // / notification media widget; a pure AudioContext + navigator.mediaSession
 // metadata is not sufficient.
+//
+// WebM is used instead of Ogg because:
+//   - Chrome/Android buffers WebM streams with much lower latency (~200ms vs ~3s)
+//   - WebM is designed for streaming; Ogg was designed for files
+//   - The WebM container is simpler to implement for audio-only Opus
 //
 // Design:
 //   - Only activates when a binary WebSocket audio session already exists for
@@ -27,136 +32,177 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log"
 	"net/http"
 )
 
-// oggCRCTable is the lookup table for the Ogg CRC-32 checksum.
+// ── WebM/Opus muxer ──────────────────────────────────────────────────────────
 //
-// Ogg uses a non-standard CRC-32 with polynomial 0x04c11db7 in the
-// NORMAL (non-reflected, MSB-first) form.  This is NOT the same as
-// IEEE CRC-32 (which uses the reflected form 0xedb88320).
-// The table is pre-computed to match the libogg reference implementation.
-var oggCRCTable [256]uint32
-
-func init() {
-	for i := 0; i < 256; i++ {
-		r := uint32(i) << 24
-		for j := 0; j < 8; j++ {
-			if r&0x80000000 != 0 {
-				r = (r << 1) ^ 0x04c11db7
-			} else {
-				r <<= 1
-			}
-		}
-		oggCRCTable[i] = r
-	}
-}
-
-// oggChecksum computes the Ogg CRC-32 checksum over data.
-// The CRC field in the page header must be zeroed before calling this.
-func oggChecksum(data []byte) uint32 {
-	var crc uint32
-	for _, b := range data {
-		crc = (crc << 8) ^ oggCRCTable[byte(crc>>24)^b]
-	}
-	return crc
-}
-
-// writeOggPage writes a single Ogg page to w.
+// WebM is a subset of Matroska (MKV).  For audio-only Opus streaming we need:
+//   1. EBML header
+//   2. Segment element (unknown size — live streaming)
+//   3. SeekHead (optional, omitted for simplicity)
+//   4. Info element (timecode scale, muxing app)
+//   5. Tracks element (one audio track, Opus codec)
+//   6. Cluster elements (one per ~100ms, containing SimpleBlock frames)
 //
-//	serialNo  — stream serial number (arbitrary, must be consistent)
-//	seqNo     — page sequence number (0, 1, 2, …)
-//	granulePos — granule position (sample count for Opus; 0 for header pages)
-//	headerType — 0x00 normal, 0x02 first page (BOS), 0x04 last page (EOS)
-//	data       — the page payload (must fit in one page, ≤ 65025 bytes)
-func writeOggPage(w http.ResponseWriter, serialNo, seqNo uint32, granulePos uint64, headerType byte, data []byte) error {
-	// Build segment table: each segment is up to 255 bytes.
-	// For simplicity we use one lace value per 255-byte chunk.
-	segments := []byte{}
-	remaining := len(data)
-	for remaining > 0 {
-		seg := remaining
-		if seg > 255 {
-			seg = 255
-		}
-		segments = append(segments, byte(seg))
-		remaining -= seg
-	}
-	// A lace value of 255 means "continued in next segment"; a value < 255
-	// terminates the packet.  If the last segment is exactly 255 we need an
-	// extra 0-byte terminator.
-	if len(data) > 0 && len(data)%255 == 0 {
-		segments = append(segments, 0)
-	}
+// EBML encoding: variable-length integers (VINT) and element IDs.
 
-	// Ogg page header (27 bytes fixed + segment table)
-	header := make([]byte, 27+len(segments))
-	copy(header[0:4], []byte("OggS"))                       // capture pattern
-	header[4] = 0                                           // stream structure version
-	header[5] = headerType                                  // header type
-	binary.LittleEndian.PutUint64(header[6:14], granulePos) // granule position
-	binary.LittleEndian.PutUint32(header[14:18], serialNo)  // stream serial number
-	binary.LittleEndian.PutUint32(header[18:22], seqNo)     // page sequence number
-	binary.LittleEndian.PutUint32(header[22:26], 0)         // CRC (filled below)
-	header[26] = byte(len(segments))                        // number of page segments
-	copy(header[27:], segments)
-
-	// Compute CRC over header + data (CRC field itself is zero during computation).
-	// oggChecksum implements the libogg CRC-32 (polynomial 0x04c11db7, normal form).
-	combined := make([]byte, len(header)+len(data))
-	copy(combined, header)
-	copy(combined[len(header):], data)
-	binary.LittleEndian.PutUint32(header[22:26], oggChecksum(combined))
-
-	// Write header then data
-	if _, err := w.Write(header); err != nil {
-		return err
+// ebmlVINT encodes n as an EBML variable-length integer.
+func ebmlVINT(n uint64) []byte {
+	switch {
+	case n < 0x7f:
+		return []byte{byte(n | 0x80)}
+	case n < 0x3fff:
+		return []byte{byte((n >> 8) | 0x40), byte(n)}
+	case n < 0x1fffff:
+		return []byte{byte((n >> 16) | 0x20), byte(n >> 8), byte(n)}
+	case n < 0x0fffffff:
+		return []byte{byte((n >> 24) | 0x10), byte(n >> 16), byte(n >> 8), byte(n)}
+	default:
+		// 8-byte VINT for unknown size (0x01 + 7 bytes of 0xFF = unknown)
+		return []byte{0x01, byte(n >> 48), byte(n >> 40), byte(n >> 32), byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)}
 	}
-	if len(data) > 0 {
-		if _, err := w.Write(data); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-// buildOpusHead builds the OpusHead identification header packet.
-// https://wiki.xiph.org/OggOpus#ID_Header
-//
-// The "input sample rate" field is informational only — it tells the decoder
-// what rate the original PCM was at before Opus encoding.  Opus always
-// operates internally at 48 kHz.  We set it to 48000 for maximum
-// compatibility with browsers and media players.
-func buildOpusHead(channels int) []byte {
-	h := make([]byte, 19)
-	copy(h[0:8], []byte("OpusHead"))
-	h[8] = 1                                       // version
-	h[9] = byte(channels)                          // channel count
-	binary.LittleEndian.PutUint16(h[10:12], 0)     // pre-skip (0 = no skip)
-	binary.LittleEndian.PutUint32(h[12:16], 48000) // input sample rate (always 48000 for Opus)
-	binary.LittleEndian.PutUint16(h[16:18], 0)     // output gain (Q7.8, 0 = unity)
-	h[18] = 0                                      // channel mapping family 0 (mono/stereo)
-	return h
+// ebmlID returns the raw bytes for a known EBML element ID.
+// IDs are already encoded (leading bits set per EBML spec).
+func ebmlElem(id []byte, data []byte) []byte {
+	out := make([]byte, 0, len(id)+8+len(data))
+	out = append(out, id...)
+	out = append(out, ebmlVINT(uint64(len(data)))...)
+	out = append(out, data...)
+	return out
 }
 
-// buildOpusTags builds the OpusTags comment header packet.
-// https://wiki.xiph.org/OggOpus#Comment_Header
-func buildOpusTags() []byte {
-	vendor := "UberSDR"
-	t := make([]byte, 8+4+len(vendor)+4)
-	copy(t[0:8], []byte("OpusTags"))
-	binary.LittleEndian.PutUint32(t[8:12], uint32(len(vendor)))
-	copy(t[12:12+len(vendor)], vendor)
-	binary.LittleEndian.PutUint32(t[12+len(vendor):], 0) // user comment list length = 0
-	return t
+// ebmlUint encodes an unsigned integer as EBML uint (big-endian, minimal bytes).
+func ebmlUint(v uint64) []byte {
+	switch {
+	case v < 0x100:
+		return []byte{byte(v)}
+	case v < 0x10000:
+		return []byte{byte(v >> 8), byte(v)}
+	case v < 0x1000000:
+		return []byte{byte(v >> 16), byte(v >> 8), byte(v)}
+	case v < 0x100000000:
+		return []byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}
+	default:
+		return []byte{byte(v >> 56), byte(v >> 48), byte(v >> 40), byte(v >> 32), byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}
+	}
+}
+
+// buildWebMHeader builds the EBML + Segment + Info + Tracks header for a
+// WebM/Opus audio-only live stream.
+func buildWebMHeader(sampleRate int, channels int) []byte {
+	// ── EBML header ──────────────────────────────────────────────────────────
+	ebmlHeader := ebmlElem([]byte{0x1A, 0x45, 0xDF, 0xA3}, concat(
+		ebmlElem([]byte{0x42, 0x86}, []byte{0x01}),   // EBMLVersion = 1
+		ebmlElem([]byte{0x42, 0xF7}, []byte{0x01}),   // EBMLReadVersion = 1
+		ebmlElem([]byte{0x42, 0xF2}, []byte{0x04}),   // EBMLMaxIDLength = 4
+		ebmlElem([]byte{0x42, 0xF3}, []byte{0x08}),   // EBMLMaxSizeLength = 8
+		ebmlElem([]byte{0x42, 0x82}, []byte("webm")), // DocType = "webm"
+		ebmlElem([]byte{0x42, 0x87}, []byte{0x04}),   // DocTypeVersion = 4
+		ebmlElem([]byte{0x42, 0x85}, []byte{0x02}),   // DocTypeReadVersion = 2
+	))
+
+	// ── Segment (unknown size — live streaming) ───────────────────────────────
+	// Size = 0x01 followed by 7 bytes of 0xFF = unknown/streaming size
+	segmentID := []byte{0x18, 0x53, 0x80, 0x67}
+	unknownSize := []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+
+	// ── Info ─────────────────────────────────────────────────────────────────
+	// TimestampScale = 1000000 (1ms per timecode unit)
+	info := ebmlElem([]byte{0x15, 0x49, 0xA9, 0x66}, concat(
+		ebmlElem([]byte{0x2A, 0xD7, 0xB1}, ebmlUint(1000000)), // TimestampScale = 1ms
+		ebmlElem([]byte{0x4D, 0x80}, []byte("UberSDR")),       // MuxingApp
+		ebmlElem([]byte{0x57, 0x41}, []byte("UberSDR")),       // WritingApp
+	))
+
+	// ── Opus codec private data (OpusHead) ───────────────────────────────────
+	// Required by WebM Opus spec: https://www.webmproject.org/vp9/mp4/#opus-codec-private
+	opusHead := make([]byte, 19)
+	copy(opusHead[0:8], "OpusHead")
+	opusHead[8] = 1                                       // version
+	opusHead[9] = byte(channels)                          // channels
+	binary.LittleEndian.PutUint16(opusHead[10:12], 0)     // pre-skip
+	binary.LittleEndian.PutUint32(opusHead[12:16], 48000) // input sample rate (always 48000)
+	binary.LittleEndian.PutUint16(opusHead[16:18], 0)     // output gain
+	opusHead[18] = 0                                      // channel mapping family
+
+	// Sampling frequency as 4-byte big-endian float32 (48000.0)
+	sfBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(sfBytes, 0x47BB8000) // 48000.0 as IEEE 754
+
+	// ── Audio track ──────────────────────────────────────────────────────────
+	audioSettings := ebmlElem([]byte{0xE1}, concat(
+		ebmlElem([]byte{0xB5}, sfBytes),                    // SamplingFrequency = 48000.0
+		ebmlElem([]byte{0x9F}, ebmlUint(uint64(channels))), // Channels
+	))
+
+	track := ebmlElem([]byte{0xAE}, concat(
+		ebmlElem([]byte{0xD7}, ebmlUint(1)),       // TrackNumber = 1
+		ebmlElem([]byte{0x73, 0xC5}, ebmlUint(1)), // TrackUID = 1
+		ebmlElem([]byte{0x83}, ebmlUint(2)),       // TrackType = 2 (audio)
+		ebmlElem([]byte{0x86}, []byte("A_OPUS")),  // CodecID = "A_OPUS"
+		ebmlElem([]byte{0x63, 0xA2}, opusHead),    // CodecPrivate = OpusHead
+		ebmlElem([]byte{0x56, 0xAA}, ebmlUint(0)), // CodecDelay = 0
+		ebmlElem([]byte{0x56, 0xBB}, ebmlUint(0)), // SeekPreRoll = 80000000 ns (80ms) — use 0 for live
+		audioSettings,
+	))
+
+	tracks := ebmlElem([]byte{0x16, 0x54, 0xAE, 0x6B}, track)
+
+	// Assemble: EBML header + Segment ID + unknown size + Info + Tracks
+	out := make([]byte, 0, 512)
+	out = append(out, ebmlHeader...)
+	out = append(out, segmentID...)
+	out = append(out, unknownSize...)
+	out = append(out, info...)
+	out = append(out, tracks...)
+	return out
+}
+
+// writeWebMCluster writes a WebM Cluster containing one SimpleBlock (one Opus frame).
+// timecodeMs is the cluster timestamp in milliseconds.
+// opusData is the raw Opus frame bytes.
+func writeWebMCluster(w http.ResponseWriter, timecodeMs uint64, opusData []byte) error {
+	// SimpleBlock: track number (VINT) + relative timecode (int16 BE) + flags + data
+	// Relative timecode within cluster = 0 (one frame per cluster)
+	trackVINT := ebmlVINT(1) // track 1
+	simpleBlock := make([]byte, len(trackVINT)+2+1+len(opusData))
+	copy(simpleBlock, trackVINT)
+	binary.BigEndian.PutUint16(simpleBlock[len(trackVINT):], 0) // relative timecode = 0
+	simpleBlock[len(trackVINT)+2] = 0x80                        // flags: keyframe
+	copy(simpleBlock[len(trackVINT)+3:], opusData)
+
+	simpleBlockElem := ebmlElem([]byte{0xA3}, simpleBlock)
+
+	// Cluster timecode
+	timecodeElem := ebmlElem([]byte{0xE7}, ebmlUint(timecodeMs))
+
+	// Cluster element
+	clusterData := concat(timecodeElem, simpleBlockElem)
+	cluster := ebmlElem([]byte{0x1F, 0x43, 0xB6, 0x75}, clusterData)
+
+	_, err := w.Write(cluster)
+	return err
+}
+
+// concat concatenates byte slices.
+func concat(slices ...[]byte) []byte {
+	total := 0
+	for _, s := range slices {
+		total += len(s)
+	}
+	out := make([]byte, 0, total)
+	for _, s := range slices {
+		out = append(out, s...)
+	}
+	return out
 }
 
 // HandleAudioStream serves GET /audio/stream?session=<userSessionID>.
-//
-// It is registered in main.go and receives the global SessionManager and
-// Config so it can look up the session and create an Opus encoder with the
-// configured bitrate/complexity.
 func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// ── 1. Extract and validate the user session ID ───────────────────────
@@ -166,7 +212,7 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 			return
 		}
 
-		// ── 2. Security checks (same as WebSocket handler) ────────────────────
+		// ── 2. Security checks ────────────────────────────────────────────────
 		clientIP := getClientIP(r)
 
 		if sessions.IsUUIDKicked(userSessionID) {
@@ -189,7 +235,6 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 			return
 		}
 
-		// Find the actual session object
 		session := sessions.findAudioSessionByUserID(userSessionID)
 		if session == nil || session.AudioChan == nil {
 			http.Error(w, "Audio session not ready", http.StatusServiceUnavailable)
@@ -208,7 +253,7 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 
 		sampleRate := session.SampleRate
 		if sampleRate == 0 {
-			sampleRate = 12000 // safe default
+			sampleRate = 12000
 		}
 		channels := session.Channels
 		if channels == 0 {
@@ -226,7 +271,6 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		httpChan := make(chan AudioPacket, 20)
 		session.httpAudioMu.Lock()
 		if session.httpAudioChan != nil {
-			// Another HTTP stream is already active — reject this one.
 			session.httpAudioMu.Unlock()
 			http.Error(w, "Audio stream already active for this session", http.StatusConflict)
 			return
@@ -234,11 +278,8 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		session.httpAudioChan = httpChan
 		session.httpAudioMu.Unlock()
 
-		// Ensure cleanup on any exit path.
 		defer func() {
 			session.httpAudioMu.Lock()
-			// Only nil the pointer if it still points to our channel (not a
-			// replacement from a later request).
 			if session.httpAudioChan == httpChan {
 				session.httpAudioChan = nil
 			}
@@ -247,80 +288,58 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		}()
 
 		// ── 6. Write HTTP response headers ────────────────────────────────────
-		w.Header().Set("Content-Type", "audio/ogg; codecs=opus")
+		w.Header().Set("Content-Type", "audio/webm; codecs=opus")
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// Disable proxy/CDN buffering so the browser receives audio data
-		// immediately rather than waiting for the proxy buffer to fill.
-		// X-Accel-Buffering: no — nginx/Caddy
-		// X-Accel-Buffering is respected by Caddy's reverse_proxy directive.
 		w.Header().Set("X-Accel-Buffering", "no")
-		// Allow cross-origin requests (e.g. from a PWA served on the same origin
-		// but accessed via a different port during development).
+		w.Header().Set("icy-br", fmt.Sprintf("%d", bitrate/1000))
+		w.Header().Set("icy-name", "UberSDR Live")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 
 		flusher, canFlush := w.(http.Flusher)
 
-		// ── 7. Write Ogg/Opus stream headers ─────────────────────────────────
-		const serialNo = 0x55424552 // "UBER" as a serial number
-
-		// BOS page: OpusHead
-		if err := writeOggPage(w, serialNo, 0, 0, 0x02, buildOpusHead(channels)); err != nil {
-			return
-		}
-		// Comment page: OpusTags
-		if err := writeOggPage(w, serialNo, 1, 0, 0x00, buildOpusTags()); err != nil {
+		// ── 7. Write WebM stream header ───────────────────────────────────────
+		header := buildWebMHeader(sampleRate, channels)
+		if _, err := w.Write(header); err != nil {
 			return
 		}
 		if canFlush {
 			flusher.Flush()
 		}
 
-		log.Printf("[AudioStream] HTTP Ogg/Opus stream started for %s (%d Hz, %d ch, %d bps)",
+		log.Printf("[AudioStream] HTTP WebM/Opus stream started for %s (%d Hz, %d ch, %d bps)",
 			userSessionID, sampleRate, channels, bitrate)
 
 		// ── 8. Stream audio packets ───────────────────────────────────────────
-		var seqNo uint32 = 2      // pages 0 and 1 used for headers
-		var granulePos uint64 = 0 // cumulative sample count
+		// Timecode in milliseconds (WebM uses 1ms resolution with TimestampScale=1000000)
+		var timecodeMs uint64
 
 		for {
 			select {
 			case <-r.Context().Done():
-				// Client disconnected.
 				return
-
 			case <-session.Done:
-				// Session destroyed (user disconnected WebSocket, kicked, etc.)
 				return
-
 			case pkt, ok := <-httpChan:
 				if !ok {
-					// Channel closed — shouldn't happen (we never close it), but safe.
 					return
 				}
 
-				// Encode PCM → Opus
 				opusData, err := enc.EncodeBinary(pkt.PCMData)
 				if err != nil || len(opusData) == 0 {
 					continue
 				}
 
-				// Advance granule position.
-				// Ogg/Opus REQUIRES granule positions in 48 kHz samples regardless
-				// of the actual input sample rate.  Convert from the session sample
-				// rate to 48 kHz.
-				// PCMData is big-endian int16 (2 bytes per sample per channel).
-				samplesAtInputRate := uint64(len(pkt.PCMData)) / uint64(2*channels)
-				// Scale to 48 kHz (Opus internal rate)
-				samplesAt48k := samplesAtInputRate * 48000 / uint64(sampleRate)
-				granulePos += samplesAt48k
-
-				// Write Ogg data page
-				if err := writeOggPage(w, serialNo, seqNo, granulePos, 0x00, opusData); err != nil {
+				if err := writeWebMCluster(w, timecodeMs, opusData); err != nil {
 					return
 				}
-				seqNo++
+
+				// Advance timecode by frame duration in ms
+				// PCMData is big-endian int16 (2 bytes per sample per channel)
+				samplesAtInputRate := uint64(len(pkt.PCMData)) / uint64(2*channels)
+				durationMs := samplesAtInputRate * 1000 / uint64(sampleRate)
+				timecodeMs += durationMs
 
 				if canFlush {
 					flusher.Flush()
@@ -332,7 +351,6 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 
 // findAudioSessionByUserID finds the non-spectrum audio session for a given
 // userSessionID.  Returns nil if not found.
-// This mirrors the same lookup in audio_extension_manager.go.
 func (sm *SessionManager) findAudioSessionByUserID(userSessionID string) *Session {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

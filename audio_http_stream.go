@@ -123,15 +123,20 @@ func writeOggPage(w http.ResponseWriter, serialNo, seqNo uint32, granulePos uint
 
 // buildOpusHead builds the OpusHead identification header packet.
 // https://wiki.xiph.org/OggOpus#ID_Header
-func buildOpusHead(sampleRate int, channels int) []byte {
+//
+// The "input sample rate" field is informational only — it tells the decoder
+// what rate the original PCM was at before Opus encoding.  Opus always
+// operates internally at 48 kHz.  We set it to 48000 for maximum
+// compatibility with browsers and media players.
+func buildOpusHead(channels int) []byte {
 	h := make([]byte, 19)
 	copy(h[0:8], []byte("OpusHead"))
-	h[8] = 1                                                    // version
-	h[9] = byte(channels)                                       // channel count
-	binary.LittleEndian.PutUint16(h[10:12], 0)                  // pre-skip (0 = no skip)
-	binary.LittleEndian.PutUint32(h[12:16], uint32(sampleRate)) // input sample rate
-	binary.LittleEndian.PutUint16(h[16:18], 0)                  // output gain (Q7.8, 0 = unity)
-	h[18] = 0                                                   // channel mapping family 0 (mono/stereo)
+	h[8] = 1                                       // version
+	h[9] = byte(channels)                          // channel count
+	binary.LittleEndian.PutUint16(h[10:12], 0)     // pre-skip (0 = no skip)
+	binary.LittleEndian.PutUint32(h[12:16], 48000) // input sample rate (always 48000 for Opus)
+	binary.LittleEndian.PutUint16(h[16:18], 0)     // output gain (Q7.8, 0 = unity)
+	h[18] = 0                                      // channel mapping family 0 (mono/stereo)
 	return h
 }
 
@@ -245,6 +250,11 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		w.Header().Set("Content-Type", "audio/ogg; codecs=opus")
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// Disable proxy/CDN buffering so the browser receives audio data
+		// immediately rather than waiting for the proxy buffer to fill.
+		// X-Accel-Buffering: no — nginx/Caddy
+		// X-Accel-Buffering is respected by Caddy's reverse_proxy directive.
+		w.Header().Set("X-Accel-Buffering", "no")
 		// Allow cross-origin requests (e.g. from a PWA served on the same origin
 		// but accessed via a different port during development).
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -256,7 +266,7 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		const serialNo = 0x55424552 // "UBER" as a serial number
 
 		// BOS page: OpusHead
-		if err := writeOggPage(w, serialNo, 0, 0, 0x02, buildOpusHead(sampleRate, channels)); err != nil {
+		if err := writeOggPage(w, serialNo, 0, 0, 0x02, buildOpusHead(channels)); err != nil {
 			return
 		}
 		// Comment page: OpusTags
@@ -296,10 +306,15 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 					continue
 				}
 
-				// Advance granule position by the number of PCM samples in this packet.
+				// Advance granule position.
+				// Ogg/Opus REQUIRES granule positions in 48 kHz samples regardless
+				// of the actual input sample rate.  Convert from the session sample
+				// rate to 48 kHz.
 				// PCMData is big-endian int16 (2 bytes per sample per channel).
-				samplesInPacket := uint64(len(pkt.PCMData)) / uint64(2*channels)
-				granulePos += samplesInPacket
+				samplesAtInputRate := uint64(len(pkt.PCMData)) / uint64(2*channels)
+				// Scale to 48 kHz (Opus internal rate)
+				samplesAt48k := samplesAtInputRate * 48000 / uint64(sampleRate)
+				granulePos += samplesAt48k
 
 				// Write Ogg data page
 				if err := writeOggPage(w, serialNo, seqNo, granulePos, 0x00, opusData); err != nil {

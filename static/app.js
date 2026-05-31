@@ -1241,12 +1241,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (audioContext) audioContext._mediaStreamDest = null;
                         }
                     }
-                } else {
-                    // ── Non-Apple: HTTP Ogg/Opus stream ──────────────────────────────
-                    // The WebSocket must be connected before the HTTP stream can start
-                    // (the server requires an active audio session).  We attempt it here
-                    // and also retry in playAudioBuffer() once real audio is flowing.
-                    await _ensureHttpAudioStream();
                 }
 
                 // All platforms: set metadata and action handlers.
@@ -1292,6 +1286,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // HTMLMediaElement.play() call is blocked by autoplay policy until here.
             // AudioContext exists at this point (created on WebSocket connect).
             await applyAudioSink();
+
+            // Non-Apple: the HTTP stream is started by setMediaSessionEnabled() when
+            // the user enables media session via the audio settings checkbox.
+            // If media session was already enabled before startAudio() (e.g. from a
+            // previous session), attempt it here — the WebSocket session exists at
+            // this point since setMode() has already been called above.
+            if (!_isApple && mediaSessionEnabled && 'mediaSession' in navigator) {
+                await _ensureHttpAudioStream();
+            }
         };
 
         audioStartButton.addEventListener('click', startAudio);

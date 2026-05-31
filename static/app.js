@@ -1329,18 +1329,52 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
 
                 // Map play/pause to mute/unmute (can't truly pause a live stream).
-                // toggleMute() handles _httpAudioElement.volume for Chrome and
-                // mediaElement pause/resume for Apple/Firefox.
+                //
+                // IMPORTANT: On Chrome (non-Apple, non-bridge), do NOT call toggleMute()
+                // from these handlers.  Chrome fires 'pause' and 'play' MediaSession
+                // actions automatically whenever the <audio> element transitions between
+                // buffering states (waiting → playing).  toggleMute() resets nextPlayTime
+                // which causes the AudioContext scheduler to reschedule, which Chrome
+                // detects as another state change, firing another action — a CPU-100%
+                // feedback loop that lasts until the element stabilises into steady play.
+                //
+                // Instead, directly set _httpAudioElement.volume (silences the HTTP
+                // stream without touching the AudioContext scheduler) and sync isMuted
+                // state + UI without the nextPlayTime side-effect.
                 navigator.mediaSession.setActionHandler('play', () => {
                     console.log('[MediaSession] play action');
-                    if (isMuted) toggleMute();
-                    if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
+                    if (_isApple || _mediaSessionNeedsBridge) {
+                        // Bridge path: toggleMute() is safe — no spurious actions fired.
+                        if (isMuted) toggleMute();
+                        mediaElement?.play().catch(() => {});
+                    } else {
+                        // Chrome HTTP stream path: control volume directly.
+                        if (_httpAudioElement) _httpAudioElement.volume = 1;
+                        if (isMuted) {
+                            isMuted = false;
+                            const btn = document.getElementById('mute-btn');
+                            if (btn) btn.textContent = '🔊 Mute';
+                            if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
+                        }
+                    }
                     navigator.mediaSession.playbackState = 'playing';
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
                     console.log('[MediaSession] pause action');
-                    if (!isMuted) toggleMute();
-                    if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
+                    if (_isApple || _mediaSessionNeedsBridge) {
+                        // Bridge path: toggleMute() is safe.
+                        if (!isMuted) toggleMute();
+                        mediaElement?.pause();
+                    } else {
+                        // Chrome HTTP stream path: control volume directly.
+                        if (_httpAudioElement) _httpAudioElement.volume = 0;
+                        if (!isMuted) {
+                            isMuted = true;
+                            const btn = document.getElementById('mute-btn');
+                            if (btn) btn.textContent = '🔇 Unmute';
+                            if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
+                        }
+                    }
                     navigator.mediaSession.playbackState = 'paused';
                 });
                 console.log('[MediaSession] Action handlers registered');
@@ -10866,16 +10900,37 @@ async function setMediaSessionEnabled(enabled) {
             try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
             try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
             // Map play/pause to mute/unmute (can't truly pause a live stream).
-            // toggleMute() handles _httpAudioElement.volume for Chrome and
-            // mediaElement pause/resume for Apple/Firefox.
+            // On Chrome (non-Apple, non-bridge): do NOT call toggleMute() — Chrome fires
+            // these actions during <audio> buffering transitions (waiting→playing), and
+            // toggleMute() resets nextPlayTime causing a CPU-100% feedback loop.
             navigator.mediaSession.setActionHandler('play', () => {
-                if (isMuted) toggleMute();
-                if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
+                if (_isApple || _mediaSessionNeedsBridge) {
+                    if (isMuted) toggleMute();
+                    mediaElement?.play().catch(() => {});
+                } else {
+                    if (_httpAudioElement) _httpAudioElement.volume = 1;
+                    if (isMuted) {
+                        isMuted = false;
+                        const btn = document.getElementById('mute-btn');
+                        if (btn) btn.textContent = '🔊 Mute';
+                        if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
+                    }
+                }
                 navigator.mediaSession.playbackState = 'playing';
             });
             navigator.mediaSession.setActionHandler('pause', () => {
-                if (!isMuted) toggleMute();
-                if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
+                if (_isApple || _mediaSessionNeedsBridge) {
+                    if (!isMuted) toggleMute();
+                    mediaElement?.pause();
+                } else {
+                    if (_httpAudioElement) _httpAudioElement.volume = 0;
+                    if (!isMuted) {
+                        isMuted = true;
+                        const btn = document.getElementById('mute-btn');
+                        if (btn) btn.textContent = '🔇 Unmute';
+                        if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
+                    }
+                }
                 navigator.mediaSession.playbackState = 'paused';
             });
             log('Media Session enabled — lock-screen controls active');

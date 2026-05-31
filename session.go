@@ -131,6 +131,15 @@ type Session struct {
 	dspLastStarted  time.Time         // wall-clock time of the last successful DSP insert start (rate-limit)
 	dspFilter       string            // name of the active filter, e.g. "nr4" (empty when disabled)
 	dspActiveParams map[string]string // merged init + runtime params for the active filter (nil when disabled)
+
+	// HTTP audio stream tap (for Android Chrome lock-screen / media notification).
+	// Non-nil when GET /audio/stream is active for this session.
+	// streamAudio() forwards audio packets here instead of the WebSocket binary
+	// connection when this is set.  Signal-quality packets continue over WebSocket.
+	// Protected by httpAudioMu.  The channel is NEVER closed — only the pointer
+	// is set to nil on teardown, avoiding any send-on-closed-channel panic.
+	httpAudioChan chan AudioPacket
+	httpAudioMu   sync.Mutex
 }
 
 // SessionManager manages all active sessions

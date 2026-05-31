@@ -2436,6 +2436,12 @@ func main() {
 	}
 	log.Printf("Parsed index.html template successfully")
 
+	// HTTP Ogg/Opus audio stream for Android Chrome lock-screen media widget.
+	// Only activates when media session is enabled (opt-in) and a binary WebSocket
+	// audio session already exists for the given user_session_id.
+	// Apple devices use the existing MediaStreamDestination bridge instead.
+	http.HandleFunc("/audio/stream", HandleAudioStream(sessions, config))
+
 	// Handle /ads.txt endpoint
 	http.HandleFunc("/ads.txt", func(w http.ResponseWriter, r *http.Request) {
 		handleAdsTxt(w, r, config)

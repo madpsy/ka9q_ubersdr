@@ -1635,6 +1635,26 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// Track when we receive real audio (to know when squelch is open)
 			lastAudioTime = time.Now()
 
+			// HTTP audio stream tap: if an HTTP /audio/stream consumer is active for
+			// this session, forward the packet there instead of encoding it for the
+			// WebSocket binary connection.  Signal-quality packets (signalUpdateTicker
+			// path above) always go over WebSocket regardless.
+			// Non-blocking send: if the HTTP consumer is slow or gone, fall through
+			// to the normal WebSocket path so audio is never silently dropped.
+			session.httpAudioMu.Lock()
+			hc := session.httpAudioChan
+			session.httpAudioMu.Unlock()
+			if hc != nil {
+				select {
+				case hc <- audioPacket:
+					// Forwarded to HTTP stream — skip WebSocket audio encoding.
+					continue
+				default:
+					// HTTP consumer is slow or the channel is full — fall through
+					// to the WebSocket path so the client still hears audio.
+				}
+			}
+
 			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 

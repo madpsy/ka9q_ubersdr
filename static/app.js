@@ -252,6 +252,100 @@ let mediaSessionEnabled = _isApple
     ? localStorage.getItem('mediaSessionEnabled') !== 'false'  // Apple:  default ON
     : localStorage.getItem('mediaSessionEnabled') === 'true';  // Others: default OFF
 
+// HTTP audio stream element — used on non-Apple Chrome/Edge/Android to give
+// Android Chrome the native <audio src="url"> element it needs for the lock-screen
+// / notification media widget.  Only created when mediaSessionEnabled is true and
+// the user is not on Apple (Apple uses the MediaStreamDestination bridge instead).
+// The AudioContext output gain is muted to 0 while this element is active so audio
+// is not played twice — the <audio> element handles playback.
+let _httpAudioElement = null;
+let _httpAudioGainNode = null; // GainNode set to 0 while HTTP stream is active
+
+/**
+ * Create (or reuse) the hidden <audio src="/audio/stream?session=..."> element
+ * that anchors the Android Chrome lock-screen media widget.
+ * Must be called from a user-gesture handler so audio.play() is allowed.
+ * Safe to call multiple times — returns immediately if already created.
+ */
+async function _ensureHttpAudioStream() {
+    if (_httpAudioElement) return; // already active
+    try {
+        const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
+        _httpAudioElement = document.createElement('audio');
+        _httpAudioElement.setAttribute('playsinline', '');
+        _httpAudioElement.style.display = 'none';
+        _httpAudioElement.src = url;
+        document.body.appendChild(_httpAudioElement);
+
+        // When the HTTP stream tears down (server closed, network drop, etc.),
+        // unmute the AudioContext so the WebSocket audio path resumes audibly.
+        _httpAudioElement.addEventListener('ended', _onHttpAudioStreamEnded);
+        _httpAudioElement.addEventListener('error', _onHttpAudioStreamEnded);
+        _httpAudioElement.addEventListener('abort', _onHttpAudioStreamEnded);
+
+        await _httpAudioElement.play();
+        console.log('[MediaSession] HTTP audio stream element created and playing');
+
+        // Mute the AudioContext output — the <audio> element handles playback.
+        // We still need the AudioContext running for spectrum/waterfall/VU meter.
+        _muteAudioContextForHttpStream();
+    } catch (e) {
+        console.error('[MediaSession] Could not start HTTP audio stream:', e.message);
+        _destroyHttpAudioStream();
+    }
+}
+
+/** Called when the HTTP audio stream ends or errors — restore AudioContext audio. */
+function _onHttpAudioStreamEnded() {
+    console.log('[MediaSession] HTTP audio stream ended — restoring AudioContext audio');
+    _destroyHttpAudioStream();
+    // AudioContext audio is automatically restored by _destroyHttpAudioStream
+}
+
+/** Tear down the HTTP audio stream element and restore AudioContext output. */
+function _destroyHttpAudioStream() {
+    if (_httpAudioElement) {
+        _httpAudioElement.removeEventListener('ended', _onHttpAudioStreamEnded);
+        _httpAudioElement.removeEventListener('error', _onHttpAudioStreamEnded);
+        _httpAudioElement.removeEventListener('abort', _onHttpAudioStreamEnded);
+        _httpAudioElement.pause();
+        _httpAudioElement.src = '';
+        if (_httpAudioElement.parentNode) _httpAudioElement.parentNode.removeChild(_httpAudioElement);
+        _httpAudioElement = null;
+    }
+    _unmuteAudioContextForHttpStream();
+}
+
+/**
+ * Mute the AudioContext output by inserting a zero-gain node.
+ * The AudioContext continues running for visualizations; only the audible
+ * output is silenced because the <audio> element handles playback.
+ */
+function _muteAudioContextForHttpStream() {
+    if (!audioContext) return;
+    if (_httpAudioGainNode) return; // already muted
+    try {
+        _httpAudioGainNode = audioContext.createGain();
+        _httpAudioGainNode.gain.value = 0;
+        // We can't easily intercept the existing audio graph here, so we use
+        // a simpler approach: set a flag that playAudioBuffer() checks to route
+        // the final output through this zero-gain node.
+        audioContext._httpStreamMuted = true;
+        console.log('[MediaSession] AudioContext output muted (HTTP stream active)');
+    } catch (e) {
+        console.warn('[MediaSession] Could not mute AudioContext:', e.message);
+    }
+}
+
+/** Restore AudioContext output after HTTP stream tears down. */
+function _unmuteAudioContextForHttpStream() {
+    if (audioContext) {
+        audioContext._httpStreamMuted = false;
+    }
+    _httpAudioGainNode = null;
+    console.log('[MediaSession] AudioContext output restored (HTTP stream inactive)');
+}
+
 // Mobile device detection — used for UI display (device emoji)
 const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
                   navigator.maxTouchPoints > 1;
@@ -1080,24 +1174,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // MediaSession + Background Audio Bridge (unified approach for ALL devices).
-            // VERSION: 2026-04-28-v2 - Creates AudioContext in startAudio if needed
+            // MediaSession audio anchor — platform-specific approach:
             //
-            // Modern iOS (17+) and Android require the MediaSession to be attached to an
-            // <audio> element that's actually playing real audio — a silent MP3 trick no
-            // longer works reliably. We create a MediaStreamDestination, connect our real
-            // audio to it, and use that stream as the srcObject for a hidden <audio> element.
-            // This element then becomes the MediaSession anchor.
+            // Apple (iOS/macOS Safari):
+            //   MediaStreamDestination → <audio srcObject> bridge.  Works perfectly,
+            //   keeps AudioContext alive when backgrounded, lock-screen controls appear.
+            //   DO NOT CHANGE — this path is proven and must remain untouched.
             //
-            // Benefits:
-            // - iOS: Keeps AudioContext alive when backgrounded
-            // - Android: MediaSession notification appears because real audio is flowing
-            // - Desktop: Lock-screen controls work on Safari/Chrome
+            // Non-Apple (Android Chrome, desktop Chrome/Edge/Firefox):
+            //   HTTP Ogg/Opus stream → <audio src="/audio/stream?session=..."> element.
+            //   Android Chrome requires a URL-based <audio> element for the lock-screen
+            //   / notification media widget.  The MediaStreamDestination bridge causes
+            //   clock-mismatch stutter AND still doesn't show the lock-screen widget on
+            //   Android Chrome.  The HTTP stream solves both problems:
+            //   - No stutter (AudioContext output muted; <audio> element handles playback)
+            //   - Lock-screen widget appears (native <audio src> element playing)
+            //   - Same bandwidth (audio bytes travel once — over HTTP instead of WebSocket)
+            //   - WebSocket continues carrying signal-quality data unchanged
             //
             // MUST be inside a user-gesture handler so audio.play() is allowed.
             console.log('[MediaSession] Checking conditions:', {
                 hasMediaSession: 'mediaSession' in navigator,
+                isApple: _isApple,
                 mediaElementExists: !!mediaElement,
+                httpAudioElementExists: !!_httpAudioElement,
                 audioContextExists: !!audioContext,
                 audioContextState: audioContext?.state
             });
@@ -1106,32 +1206,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
                 const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
 
-                // Safari / Firefox need a MediaStreamDestination → <audio> bridge because
-                // they lack AudioContext.setSinkId.  Chrome / Edge (including Android Chrome)
-                // have setSinkId and do NOT need the bridge — adding one causes a
-                // clock-mismatch stutter on Android.  BBC Sounds / ToucanPlayer confirms
-                // that metadata alone (no <audio> element) is sufficient on Chrome/Android.
-                if (_mediaSessionNeedsBridge && !mediaElement && audioContext) {
-                    try {
-                        const dest = audioContext.createMediaStreamDestination();
-                        audioContext._mediaStreamDest = dest;
-                        mediaElement = document.createElement('audio');
-                        mediaElement.setAttribute('playsinline', '');
-                        mediaElement.style.display = 'none';
-                        mediaElement.srcObject = dest.stream;
-                        document.body.appendChild(mediaElement);
-                        console.log('[MediaSession] Created audio bridge element, attempting to play...');
-                        await mediaElement.play();
-                        console.log('[MediaSession] Audio bridge created and playing');
-                    } catch (e) {
-                        console.error('[MediaSession] Could not create audio bridge:', e.message, e);
-                        mediaElement = null;
-                        if (audioContext) audioContext._mediaStreamDest = null;
+                if (_isApple) {
+                    // ── Apple: MediaStreamDestination bridge (unchanged) ──────────────
+                    if (_mediaSessionNeedsBridge && !mediaElement && audioContext) {
+                        try {
+                            const dest = audioContext.createMediaStreamDestination();
+                            audioContext._mediaStreamDest = dest;
+                            mediaElement = document.createElement('audio');
+                            mediaElement.setAttribute('playsinline', '');
+                            mediaElement.style.display = 'none';
+                            mediaElement.srcObject = dest.stream;
+                            document.body.appendChild(mediaElement);
+                            console.log('[MediaSession] Created audio bridge element, attempting to play...');
+                            await mediaElement.play();
+                            console.log('[MediaSession] Audio bridge created and playing');
+                        } catch (e) {
+                            console.error('[MediaSession] Could not create audio bridge:', e.message, e);
+                            mediaElement = null;
+                            if (audioContext) audioContext._mediaStreamDest = null;
+                        }
                     }
+                } else {
+                    // ── Non-Apple: HTTP Ogg/Opus stream ──────────────────────────────
+                    // The WebSocket must be connected before the HTTP stream can start
+                    // (the server requires an active audio session).  We attempt it here
+                    // and also retry in playAudioBuffer() once real audio is flowing.
+                    await _ensureHttpAudioStream();
                 }
 
                 // All platforms: set metadata and action handlers.
-                // On Chrome/Android this is all that is needed — no <audio> element required.
                 updateMediaSession();
                 navigator.mediaSession.playbackState = 'playing';
                 console.log('[MediaSession] Metadata set, playbackState = playing');
@@ -1145,27 +1248,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Map play/pause to mute/unmute (can't truly pause a live stream).
                 //
-                // Safari requires the <audio> element to be actually paused before it will
-                // show a Play button and fire the 'play' action handler. Simply setting
-                // playbackState = 'paused' without pausing the element is ignored by Safari.
-                //
-                // The live MediaStream re-fires the element 'play' event after pause(), but
-                // that is an element event — NOT the MediaSession 'play' action handler.
-                // The action handler is only fired by genuine user interaction, so we can
-                // safely use it for unmute without any race condition.
+                // Apple/Safari: pause the <audio srcObject> element so Safari shows the
+                //   Play button in Control Centre.
+                // Non-Apple: pause/resume the <audio src> HTTP stream element.
                 navigator.mediaSession.setActionHandler('play', () => {
                     if (isMuted) toggleMute();
-                    mediaElement?.play().catch(() => {});
+                    if (_isApple) mediaElement?.play().catch(() => {});
+                    else _httpAudioElement?.play().catch(() => {});
                     navigator.mediaSession.playbackState = 'playing';
                     console.log('[MediaSession] play action — unmuted');
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
                     if (!isMuted) toggleMute();
-                    // Pause the element so Safari shows the Play button.
-                    // The live MediaStream will re-fire the element 'play' event, but
-                    // that does NOT trigger the 'play' action handler — only user
-                    // interaction does. So the mute state is safe.
-                    mediaElement?.pause();
+                    if (_isApple) mediaElement?.pause();
+                    else _httpAudioElement?.pause();
                     navigator.mediaSession.playbackState = 'paused';
                     console.log('[MediaSession] pause action — muted');
                 });
@@ -3816,16 +3912,21 @@ function playAudioBuffer(buffer) {
     }
 
     // On first real audio buffer, (re-)activate the Media Session.
-    // On Safari/Firefox: mediaElement exists (bridge path) — re-confirm metadata now
-    //   that audio is actually flowing (Chrome required this; Safari benefits too).
-    // On Chrome/Android: no mediaElement, but mediaSessionEnabled is true — metadata
-    //   was already set in startAudio(), just show the indicator and mark activated.
+    // Apple:     mediaElement exists (bridge path) — re-confirm metadata now that audio flows.
+    // Non-Apple: retry HTTP stream if it wasn't ready in startAudio() (WebSocket may not
+    //            have been connected yet when startAudio() ran).
     if (!_mediaSessionActivated && mediaSessionEnabled && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateMediaSession();
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-        // Ensure the bridge element is still playing (Safari/Firefox only).
-        if (mediaElement && !isMuted) mediaElement.play().catch(() => {});
+        if (_isApple) {
+            // Ensure the bridge element is still playing (Safari/Firefox only).
+            if (mediaElement && !isMuted) mediaElement.play().catch(() => {});
+        } else {
+            // Non-Apple: ensure HTTP stream is running now that WebSocket audio is flowing.
+            // _ensureHttpAudioStream() is a no-op if already active.
+            _ensureHttpAudioStream().catch(() => {});
+        }
         console.log('[MediaSession] Activated with real audio flowing');
         // Show MediaSession indicator in the audio buffer display
         const mediaSessionIndicator = document.getElementById('media-session-indicator');
@@ -4045,9 +4146,17 @@ function playAudioBuffer(buffer) {
         nextNode.connect(postFilterAnalyser);
     }
 
-    // Step 7: Gain node for volume/mute control
+    // Step 7: Gain node for volume/mute control.
+    // When the HTTP audio stream is active (non-Apple, mediaSession enabled), the
+    // <audio src> element handles playback — mute the AudioContext output to 0 so
+    // audio is not played twice.  Visualizations (spectrum/waterfall/VU meter) still
+    // work because they tap the signal before this gain node.
     const gainNode = audioContext.createGain();
-    gainNode.gain.value = isMuted ? 0 : currentVolume;
+    if (audioContext._httpStreamMuted) {
+        gainNode.gain.value = 0; // HTTP stream active — silence AudioContext output
+    } else {
+        gainNode.gain.value = isMuted ? 0 : currentVolume;
+    }
     nextNode.connect(gainNode);
 
     // Step 8: Tap other analysers for clipping detection AFTER volume/mute
@@ -4164,11 +4273,15 @@ function playAudioBuffer(buffer) {
     if (audioSinkElement && audioSinkElement.paused) {
         audioSinkElement.play().catch(() => {});
     }
-    // MediaSession bridge: ensure element is still playing (OS may pause on interruption).
+    // Apple MediaSession bridge: ensure element is still playing (OS may pause on interruption).
     // Do NOT resume if isMuted — the pause handler deliberately paused the element so
     // Safari shows the Play button in Control Centre. Resuming here would undo that.
     if (mediaElement && mediaElement.paused && !isMuted) {
         mediaElement.play().catch(() => {});
+    }
+    // Non-Apple HTTP stream: ensure element is still playing (OS may pause on interruption).
+    if (_httpAudioElement && _httpAudioElement.paused && !isMuted) {
+        _httpAudioElement.play().catch(() => {});
     }
 
     // Buffer management using configurable threshold
@@ -5484,10 +5597,20 @@ function toggleMute() {
     // Keep Media Session playback state in sync with mute
     if ('mediaSession' in navigator && _mediaSessionActivated) {
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-        if (isMuted) {
-            mediaElement?.pause();
+        if (_isApple) {
+            // Apple: pause/resume the MediaStreamDestination bridge element
+            if (isMuted) {
+                mediaElement?.pause();
+            } else {
+                mediaElement?.play().catch(() => {});
+            }
         } else {
-            mediaElement?.play().catch(() => {});
+            // Non-Apple: pause/resume the HTTP stream element
+            if (isMuted) {
+                _httpAudioElement?.pause();
+            } else {
+                _httpAudioElement?.play().catch(() => {});
+            }
         }
     }
 }
@@ -10590,7 +10713,7 @@ async function setMediaSessionEnabled(enabled) {
     localStorage.setItem('mediaSessionEnabled', enabled ? 'true' : 'false');
 
     if (!enabled) {
-        // ── Tear down the bridge ──────────────────────────────────────────────
+        // ── Tear down Apple bridge (if active) ───────────────────────────────
         if (mediaElement) {
             mediaElement.pause();
             mediaElement.srcObject = null;
@@ -10600,6 +10723,8 @@ async function setMediaSessionEnabled(enabled) {
         if (audioContext) {
             audioContext._mediaStreamDest = null;
         }
+        // ── Tear down non-Apple HTTP stream (if active) ───────────────────────
+        _destroyHttpAudioStream();
         _mediaSessionActivated = false;
         // Hide the MediaSession indicator
         const indicator = document.getElementById('media-session-indicator');
@@ -10621,19 +10746,24 @@ async function setMediaSessionEnabled(enabled) {
         }
 
         try {
-            // Safari / Firefox: create the MediaStreamDestination bridge.
-            // Chrome / Edge (including Android): skip the bridge — metadata alone
-            // is sufficient and the bridge causes stutter on Android Chrome.
-            if (_mediaSessionNeedsBridge && !mediaElement) {
-                const dest = audioContext.createMediaStreamDestination();
-                audioContext._mediaStreamDest = dest;
-                mediaElement = document.createElement('audio');
-                mediaElement.setAttribute('playsinline', '');
-                mediaElement.style.display = 'none';
-                mediaElement.srcObject = dest.stream;
-                document.body.appendChild(mediaElement);
-                await mediaElement.play();
-                console.log('[MediaSession] Audio bridge created and playing');
+            if (_isApple) {
+                // ── Apple: MediaStreamDestination bridge (unchanged) ──────────
+                if (_mediaSessionNeedsBridge && !mediaElement) {
+                    const dest = audioContext.createMediaStreamDestination();
+                    audioContext._mediaStreamDest = dest;
+                    mediaElement = document.createElement('audio');
+                    mediaElement.setAttribute('playsinline', '');
+                    mediaElement.style.display = 'none';
+                    mediaElement.srcObject = dest.stream;
+                    document.body.appendChild(mediaElement);
+                    await mediaElement.play();
+                    console.log('[MediaSession] Audio bridge created and playing');
+                }
+            } else {
+                // ── Non-Apple: HTTP Ogg/Opus stream ──────────────────────────
+                // Requires an active WebSocket audio session — if not ready yet,
+                // _ensureHttpAudioStream() will be retried in playAudioBuffer().
+                await _ensureHttpAudioStream();
             }
 
             // All platforms: metadata + action handlers
@@ -10648,12 +10778,14 @@ async function setMediaSessionEnabled(enabled) {
             try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
             navigator.mediaSession.setActionHandler('play', () => {
                 if (isMuted) toggleMute();
-                mediaElement?.play().catch(() => {});
+                if (_isApple) mediaElement?.play().catch(() => {});
+                else _httpAudioElement?.play().catch(() => {});
                 navigator.mediaSession.playbackState = 'playing';
             });
             navigator.mediaSession.setActionHandler('pause', () => {
                 if (!isMuted) toggleMute();
-                mediaElement?.pause();
+                if (_isApple) mediaElement?.pause();
+                else _httpAudioElement?.pause();
                 navigator.mediaSession.playbackState = 'paused';
             });
             log('Media Session enabled — lock-screen controls active');
@@ -10661,6 +10793,7 @@ async function setMediaSessionEnabled(enabled) {
             console.error('[MediaSession] Failed to enable:', e.message);
             mediaElement = null;
             if (audioContext) audioContext._mediaStreamDest = null;
+            _destroyHttpAudioStream();
             log('Media Session could not be enabled: ' + e.message, 'error');
         }
     }

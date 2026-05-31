@@ -326,11 +326,11 @@ async function _ensureHttpAudioStream() {
             console.log('[MediaSession] Direct audio stream playing — muting AudioContext output');
             _httpStreamPlaying = true;
             _muteAudioContextForHttpStream();
-            // Now that the element is stably playing, it is safe to set playbackState.
-            // Setting it earlier (while 'waiting') causes Chrome to fire the 'pause'
-            // MediaSession action, creating a CPU-100% feedback loop.
+            // Now that the element is stably playing, it is safe to set metadata and
+            // playbackState.  updateMediaSession() was a no-op while _httpStreamPlaying
+            // was false (Chrome buffering guard) — call it now to push metadata + state.
             if ('mediaSession' in navigator && mediaSessionEnabled) {
-                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+                updateMediaSession();
             }
         }, { once: true });
 
@@ -375,8 +375,13 @@ function _destroyHttpAudioStream() {
         try { el.load(); } catch (_) {} // reset media element state
         if (el.parentNode) el.parentNode.removeChild(el);
     }
-    // Reset the playing flag — the element is gone.
+    // Reset the playing flag and metadata dedup cache.
+    // The dedup cache must be cleared so that when the stream restarts and
+    // updateMediaSession() is called from the 'playing' handler, it will
+    // unconditionally push fresh metadata to Chrome (not skip due to cache hit).
     _httpStreamPlaying = false;
+    _lastMediaSessionTitle  = null;
+    _lastMediaSessionArtist = null;
     // Tell the server to immediately resume WebSocket audio.  Without this,
     // the server keeps httpAudioChan non-nil until the HTTP connection times
     // out, so no audio arrives over the WebSocket.  Fire-and-forget — we don't
@@ -901,12 +906,23 @@ function updatePageTitle() {
 let _lastMediaSessionTitle = null;
 let _lastMediaSessionArtist = null;
 function updateMediaSession() {
-    // Only skip if the API is absent.
-    // On Safari/Firefox: mediaElement exists (bridge path) — metadata is set via the bridge.
-    // On Chrome/Android: mediaElement is null (no bridge needed) — metadata is set directly.
-    // Do NOT gate on !mediaElement — that would silently prevent metadata from being set
-    // on Chrome/Android, which is exactly why the lock screen widget never appeared.
     if (!('mediaSession' in navigator)) return;
+
+    // On Chrome/Edge with the HTTP stream path, do NOT touch MediaSession at all
+    // until the <audio> element has fired 'playing' (i.e. _httpStreamPlaying = true).
+    //
+    // Chrome re-fetches all artwork URLs on every waiting→playing transition of the
+    // associated <audio> element — regardless of whether metadata was reassigned from
+    // JS.  Setting navigator.mediaSession.metadata before the element is stably playing
+    // causes Chrome to fetch icons hundreds of times and flicker the media controls
+    // for the entire buffering phase.  The same mechanism also triggers the CPU-100%
+    // feedback loop via spurious 'pause'/'play' MediaSession actions.
+    //
+    // Apple/Firefox use the MediaStreamDestination bridge — no <audio src> element,
+    // no buffering phase, safe to set metadata immediately.
+    if (!_isApple && !_mediaSessionNeedsBridge && _httpAudioElement && !_httpStreamPlaying) {
+        return; // Chrome buffering — stay silent until 'playing' fires
+    }
 
     const freqInput = document.getElementById('frequency');
     const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
@@ -919,8 +935,7 @@ function updateMediaSession() {
 
     // Only replace the MediaMetadata object when the content actually changes.
     // Chrome fetches all artwork URLs every time metadata is replaced — even if
-    // the URLs are identical — causing hundreds of redundant icon/manifest fetches
-    // and media-control flicker during the initial buffering phase.
+    // the URLs are identical.
     if (newTitle !== _lastMediaSessionTitle || newArtist !== _lastMediaSessionArtist) {
         _lastMediaSessionTitle  = newTitle;
         _lastMediaSessionArtist = newArtist;
@@ -933,8 +948,6 @@ function updateMediaSession() {
             artist: newArtist,
             album:  'Live SDR',
             artwork: [
-                // apple-touch-icon fills the full canvas (no transparent padding) so iOS lock screen
-                // shows no white edges. android-chrome variants kept as fallback for other sizes.
                 { src: `${_artworkBase}/images/apple-touch-icon.png`, sizes: '180x180', type: 'image/png' },
                 { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' },
                 { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' }
@@ -946,7 +959,7 @@ function updateMediaSession() {
     // On Chrome, setting it while the <audio> element is in 'waiting' state causes
     // Chrome to fire the 'pause' MediaSession action, creating a feedback loop.
     // For Apple/Firefox (bridge path), _httpStreamPlaying is always false so we
-    // use the mediaElement check instead.
+    // use the mediaElement/!_httpAudioElement check instead.
     if (_httpStreamPlaying || _isApple || _mediaSessionNeedsBridge || !_httpAudioElement) {
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
     }

@@ -284,9 +284,10 @@ async function _ensureHttpAudioStream() {
 
     const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
     const mime = 'audio/webm; codecs=opus';
+    const mseSupported = window.MediaSource && MediaSource.isTypeSupported(mime);
 
     // ── MSE path (Chrome/Edge/Android) ───────────────────────────────────────
-    if (window.MediaSource && MediaSource.isTypeSupported(mime)) {
+    if (mseSupported) {
         try {
             const ms = new MediaSource();
             _httpMediaSource = ms;
@@ -313,7 +314,6 @@ async function _ensureHttpAudioStream() {
             await new Promise((resolve, reject) => {
                 ms.addEventListener('sourceopen', resolve, { once: true });
                 ms.addEventListener('error', reject, { once: true });
-                // Timeout if sourceopen never fires
                 setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 5000);
             });
 
@@ -323,7 +323,19 @@ async function _ensureHttpAudioStream() {
             // Start fetch with AbortController for clean teardown
             _httpFetchAbortController = new AbortController();
             const response = await fetch(url, { signal: _httpFetchAbortController.signal });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            if (!response.ok) {
+                if (response.status === 409) {
+                    // Another stream is still active on the server (stale session from
+                    // a previous page load).  Clean up and retry after a short delay —
+                    // the server will clear the old session when its connection drops.
+                    console.warn('[MediaSession] HTTP 409 — stale server session, retrying in 1s');
+                    _destroyHttpAudioStream();
+                    setTimeout(() => _ensureHttpAudioStream(), 1000);
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
 
             await el.play();
             console.log('[MediaSession] MSE audio stream play() resolved');
@@ -346,7 +358,6 @@ async function _ensureHttpAudioStream() {
                         sb.appendBuffer(value);
 
                         // Trim buffer to keep latency low — keep max 1 second
-                        // Wait for appendBuffer to complete before trimming
                         await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
                         if (sb.buffered.length > 0 && !sb.updating) {
                             const end = sb.buffered.end(0);
@@ -366,13 +377,15 @@ async function _ensureHttpAudioStream() {
             pump();
             return; // MSE path succeeded
         } catch (e) {
-            console.error('[MediaSession] MSE setup failed:', e.message, '— falling back to direct src');
-            _destroyHttpAudioStream(); // clean up partial MSE state
+            console.error('[MediaSession] MSE setup failed:', e.message);
+            _destroyHttpAudioStream();
+            return; // Don't fall through to direct src — MSE is supported, this was a transient error
         }
     }
 
-    // ── Fallback: direct <audio src> (Firefox, older browsers) ───────────────
+    // ── Fallback: direct <audio src> (browsers without MSE support) ──────────
     // Higher latency (~6s) but still provides the lock screen anchor.
+    // Only reached when MSE is genuinely not supported (not on fetch errors).
     console.log('[MediaSession] Using direct <audio src> (MSE not available)');
     try {
         const el = document.createElement('audio');

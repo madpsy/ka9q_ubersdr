@@ -268,12 +268,14 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		}
 
 		// ── 5. Set up the HTTP audio channel on the session ───────────────────
+		// If a previous HTTP stream is still active (e.g. stale connection from a
+		// prior page load), forcibly replace it.  The old goroutine will exit when
+		// its r.Context() is cancelled (client already disconnected), and its defer
+		// will be a no-op because httpAudioChan != its own httpChan.
 		httpChan := make(chan AudioPacket, 20)
 		session.httpAudioMu.Lock()
 		if session.httpAudioChan != nil {
-			session.httpAudioMu.Unlock()
-			http.Error(w, "Audio stream already active for this session", http.StatusConflict)
-			return
+			log.Printf("[AudioStream] Replacing stale HTTP stream for %s", userSessionID)
 		}
 		session.httpAudioChan = httpChan
 		session.httpAudioMu.Unlock()

@@ -80,32 +80,39 @@ type AppState struct {
 	FlrigPTTMute   bool
 	FlrigPTTActive bool
 
+	// ── Settings ──────────────────────────────────────────────────────────────
+	// BrowserAutoConnect: when true, opening a browser tab (SSE subscriber
+	// count 0→1) auto-connects to the last-used SDR instance, and closing all
+	// tabs (count N→0) auto-disconnects.
+	BrowserAutoConnect bool
+
 	// ── Fyne widget references ────────────────────────────────────────────────
 	// Held so HTTP handlers can update the GUI in sync with state changes.
 	// All Fyne Set* methods are goroutine-safe.
-	FreqEntry       *widget.Entry
-	ModeSelect      *widget.Select
-	BWSlider        *widget.Slider
-	BWValueLabel    *widget.Label
-	VolumeSlider    *widget.Slider
-	MuteBtn         *widget.Button
-	ChannelSelect   *widget.Select
-	FormatGroup     *widget.RadioGroup
-	DeviceSelect    *widget.Select
-	AGCHangSlider   *widget.Slider
-	AGCHangLabel    *widget.Label
-	AGCRecSlider    *widget.Slider
-	AGCRecLabel     *widget.Label
-	DSPEnableCheck  *widget.Check
-	DSPFilterSel    *widget.Select
-	URLEntry        *widget.Entry
-	PasswordEntry   *widget.Entry
-	StepSelect      *widget.Select
-	FlrigPTTMuteChk *widget.Check      // flrigPTTMuteCheck widget
-	FlrigEnabledChk *widget.Check      // flrigEnabledCheck widget
-	FlrigHostEnt    *widget.Entry      // flrigHostEntry widget
-	FlrigPortEnt    *widget.Entry      // flrigPortEntry widget
-	FlrigDirSel     *widget.RadioGroup // flrigDirSelect widget
+	FreqEntry             *widget.Entry
+	ModeSelect            *widget.Select
+	BWSlider              *widget.Slider
+	BWValueLabel          *widget.Label
+	VolumeSlider          *widget.Slider
+	MuteBtn               *widget.Button
+	ChannelSelect         *widget.Select
+	FormatGroup           *widget.RadioGroup
+	DeviceSelect          *widget.Select
+	AGCHangSlider         *widget.Slider
+	AGCHangLabel          *widget.Label
+	AGCRecSlider          *widget.Slider
+	AGCRecLabel           *widget.Label
+	DSPEnableCheck        *widget.Check
+	DSPFilterSel          *widget.Select
+	URLEntry              *widget.Entry
+	PasswordEntry         *widget.Entry
+	StepSelect            *widget.Select
+	FlrigPTTMuteChk       *widget.Check      // flrigPTTMuteCheck widget
+	FlrigEnabledChk       *widget.Check      // flrigEnabledCheck widget
+	FlrigHostEnt          *widget.Entry      // flrigHostEntry widget
+	FlrigPortEnt          *widget.Entry      // flrigPortEntry widget
+	FlrigDirSel           *widget.RadioGroup // flrigDirSelect widget
+	BrowserAutoConnectChk *widget.Check      // browserAutoConnectCheck widget
 	// SuppressFormatChange is set true while the API handler is programmatically
 	// changing the format radio group to prevent the OnChanged feedback loop.
 	SuppressFormatChange *bool
@@ -114,16 +121,54 @@ type AppState struct {
 	// from calling sendTune() with stale local variables.
 	SuppressTune *bool
 
+	// ── Recording ─────────────────────────────────────────────────────────────
+	RecordingMgr *RecordingManager
+
+	// RecordBtn is the Fyne record/stop toggle button.
+	// Held so the auto-stop timer callback can reset its label/icon.
+	RecordBtn *widget.Button
+
+	// RecordStatusLabel is the status text label in the Recording card.
+	// Held so API-triggered start/stop can update it.
+	RecordStatusLabel *widget.Label
+
+	// RecordFormatGroup is the format radio widget in the Recording card.
+	// Held so API-triggered start can sync the selected format to the GUI.
+	RecordFormatGroup *widget.RadioGroup
+
+	// RecordTimerStop is closed to stop the live elapsed-time ticker goroutine.
+	// A new channel is created each time recording starts; closing it stops the ticker.
+	RecordTimerStop chan struct{}
+
 	// ── Callbacks into main() logic ───────────────────────────────────────────
 	// These are set by main() after all closures are defined, allowing HTTP
 	// handlers to trigger the same actions as GUI button presses.
-	DoConnect              func()
-	DoDisconnect           func()
+
+	// DismissBrowseDialog, if non-nil, hides the currently-open Browse Instances
+	// dialog.  Set when the dialog opens, cleared when it closes.  Called by
+	// OnStateChange when a connection is established so the dialog auto-dismisses
+	// whether the connect was triggered from the GUI or the REST API.
+	DismissBrowseDialog func()
+
+	DoConnect    func()
+	DoDisconnect func()
+	// DoReconnect disconnects (suppressing auto-reconnect) then reconnects.
+	// Used by the API when switching instances while already connected.
+	DoReconnect            func()
 	DoTune                 func()
 	DoApplyFreqEntry       func()
 	DoProfileConnectByName func(name string) error
 	DoSendAGC              func()
 	DoApplyFlrigConfig     func()
+	// DoStartRecording is called by the API handler to start a recording and
+	// update the GUI button.  The format argument is "pcm" or "opus".
+	// This callback is intentionally a no-op wrapper — the actual recording
+	// start is done by the API handler directly on RecordingMgr; this callback
+	// only updates the GUI button state.
+	DoStartRecording func(format string)
+	// DoStopRecording is called by the API handler to stop a recording and
+	// update the GUI button.
+	DoStopRecording func()
 }
 
 // NewAppState creates an AppState with sensible defaults matching the GUI
@@ -149,6 +194,7 @@ func NewAppState() *AppState {
 		SignalNoiseDensityDBFS: -999,
 		SignalSNRDB:            -999,
 		SignalAudioDBFS:        -999,
+		BrowserAutoConnect:     true, // default enabled; overridden from prefs in main()
 	}
 }
 

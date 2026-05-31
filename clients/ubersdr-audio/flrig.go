@@ -86,6 +86,13 @@ type FlrigSync struct {
 	connected bool
 	lastPtt   bool
 
+	// skipFirstRigToSDR is set true by tryConnect() and cleared after the first
+	// poll cycle.  While true, the rig→SDR OnFreqMode callback is suppressed so
+	// that the SDR's saved preferences (mode, frequency) are not overwritten by
+	// whatever the rig happens to be set to at the moment of connection.
+	// After the first poll the normal bidirectional logic resumes.
+	skipFirstRigToSDR bool
+
 	// Echo prevention (same logic as background.js).
 	lastFlrigFreq    int       // last freq READ from flrig; 0 = unknown
 	lastFlrigMode    string    // last mode READ from flrig; "" = unknown
@@ -340,10 +347,14 @@ func (f *FlrigSync) tryConnect() {
 	}
 
 	// Reset echo-prevention state on (re)connect so the first poll always syncs.
+	// Set skipFirstRigToSDR so the first poll does not overwrite the SDR's saved
+	// mode/frequency with whatever the rig currently reports.  The SDR's state
+	// will be pushed to the rig via the normal sendTune/PushSDRState path instead.
 	f.mu.Lock()
 	f.connected = true
 	f.lastFlrigFreq = 0
 	f.lastFlrigMode = ""
+	f.skipFirstRigToSDR = true
 	f.mu.Unlock()
 
 	if f.OnStatus != nil {
@@ -394,9 +405,22 @@ func (f *FlrigSync) poll() error {
 			return nil
 		}
 
+		// On the very first poll after (re)connect, skip the rig→SDR push so
+		// the SDR's saved preferences are not overwritten by the rig's current
+		// state.  We still update lastFlrigFreq/Mode so subsequent polls can
+		// detect real changes.
+		f.mu.Lock()
+		skipFirst := f.skipFirstRigToSDR
+		if skipFirst {
+			f.skipFirstRigToSDR = false
+		}
+		f.mu.Unlock()
+
 		freqChanged := lastFlrigFreq == 0 || freq != lastFlrigFreq
 		modeChanged := modeRaw != "" && modeRaw != lastFlrigMode
 
+		// Always update the cached last-seen values so the next poll can detect
+		// genuine changes, but only fire OnFreqMode if this is not the first poll.
 		if freqChanged {
 			f.mu.Lock()
 			f.lastFlrigFreq = freq
@@ -406,6 +430,9 @@ func (f *FlrigSync) poll() error {
 			f.mu.Lock()
 			f.lastFlrigMode = modeRaw
 			f.mu.Unlock()
+		}
+		if skipFirst {
+			return nil
 		}
 
 		if (freqChanged || modeChanged) && f.OnFreqMode != nil {

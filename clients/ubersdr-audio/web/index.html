@@ -47,240 +47,326 @@
         <div class="form-row btn-row">
           <button id="browse-btn" class="btn btn-secondary">🔍 Browse…</button>
           <button id="profiles-btn" class="btn btn-secondary">📋 Profiles…</button>
-        </div>
-        <div class="form-row" id="station-row" style="display:none">
-          <label>Instance</label>
-          <span id="station-label" class="station-label"></span>
-        </div>
-      </div>
-    </section>
-
-    <!-- Frequency Card -->
-    <section class="card" id="card-frequency">
-      <div class="card-header" data-toggle="card-frequency-body">
-        <span class="card-title">📻 Frequency</span>
-        <span class="card-chevron">▼</span>
-      </div>
-      <div class="card-body" id="card-frequency-body">
-        <!-- Frequency row -->
-        <div class="freq-row">
-          <label class="freq-label">kHz</label>
-          <input type="number" id="freq-entry" class="freq-input" step="0.001" min="10" max="30000">
-          <button id="freq-apply-btn" class="btn btn-icon" title="Apply">✓</button>
-          <button id="freq-down-btn" class="btn btn-icon step-btn">◀</button>
-          <select id="step-select" class="step-select">
-            <option value="1">1 Hz</option>
-            <option value="10">10 Hz</option>
-            <option value="100">100 Hz</option>
-            <option value="500">500 Hz</option>
-            <option value="1000" selected>1 kHz</option>
-            <option value="10000">10 kHz</option>
-            <option value="100000">100 kHz</option>
-            <option value="1000000">1 MHz</option>
-          </select>
-          <button id="freq-up-btn" class="btn btn-icon step-btn">▶</button>
-        </div>
-
-        <!-- Mode + Bandwidth row -->
-        <div class="mode-bw-row">
-          <label>Mode</label>
-          <select id="mode-select" class="mode-select">
-            <option value="usb">USB</option>
-            <option value="lsb">LSB</option>
-            <option value="am">AM</option>
-            <option value="sam">SAM</option>
-            <option value="fm">FM</option>
-            <option value="cwu">CWU</option>
-            <option value="cwl">CWL</option>
-            <option value="iq">IQ</option>
-          </select>
-          <label class="bw-label">BW</label>
-          <span id="bw-value-label" class="bw-value">2700 Hz</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="bw-slider" class="slider" min="0" max="5000" step="50" value="2700">
-        </div>
-
-        <!-- Bookmark search combobox -->
-        <div class="form-row">
-          <label>Bookmark</label>
-          <div class="bm-combo" id="bm-combo">
-            <input type="search" id="bm-input" class="bm-input" placeholder="Search bookmarks…" autocomplete="off" disabled>
-            <ul id="bm-list" class="bm-list" role="listbox" aria-label="Bookmarks"></ul>
-          </div>
-        </div>
-
-        <!-- AGC row (USB/LSB only) -->
-        <div id="agc-row" class="agc-row" style="display:none">
-          <div class="agc-col">
-            <label>Hang <span id="agc-hang-label" class="param-value">1.1 s</span></label>
-            <input type="range" id="agc-hang-slider" class="slider" min="0" max="10" step="0.1" value="1.1">
-          </div>
-          <div class="agc-col">
-            <label>Recovery <span id="agc-recovery-label" class="param-value">20 dB/s</span></label>
-            <input type="range" id="agc-recovery-slider" class="slider" min="1" max="100" step="1" value="20">
-          </div>
+          <span id="station-row" class="station-label station-label-inline" style="display:none">
+            <span id="station-label"></span>
+          </span>
         </div>
       </div>
     </section>
 
-    <!-- Audio Card -->
-    <section class="card" id="card-audio">
-      <div class="card-header" data-toggle="card-audio-body">
-        <span class="card-title">🔊 Audio</span>
-        <span class="card-chevron">▼</span>
-      </div>
-      <div class="card-body" id="card-audio-body">
-        <div class="form-row">
-          <label>Device</label>
-          <div class="input-row">
-            <select id="device-select" class="flex-select"></select>
-            <button id="refresh-devices-btn" class="btn btn-icon" title="Refresh devices">🔄</button>
+    <!-- Two-column wrapper: left = Frequency, Noise Reduction, Settings;
+                             right = Audio, FLRig Sync, Output Sinks -->
+    <div class="card-columns">
+
+      <!-- Left column -->
+      <div class="card-col">
+
+        <!-- Frequency Card -->
+        <section class="card" id="card-frequency">
+          <div class="card-header" data-toggle="card-frequency-body">
+            <span class="card-title">📻 Frequency</span>
+            <span class="card-chevron">▼</span>
           </div>
-        </div>
-        <div class="form-row">
-          <label>Format</label>
-          <div class="radio-group" id="format-group">
-            <label class="radio-label">
-              <input type="radio" name="format" value="opus" checked> Compressed
+          <div class="card-body" id="card-frequency-body">
+            <!-- Frequency row -->
+            <div class="freq-row">
+              <label class="freq-label">kHz</label>
+              <input type="number" id="freq-entry" class="freq-input" step="0.001" min="10" max="30000">
+              <button id="freq-apply-btn" class="btn btn-icon" title="Apply">✓</button>
+              <button id="freq-down-btn" class="btn btn-icon step-btn">◀</button>
+              <select id="step-select" class="step-select">
+                <option value="1">1 Hz</option>
+                <option value="10">10 Hz</option>
+                <option value="100">100 Hz</option>
+                <option value="500">500 Hz</option>
+                <option value="1000" selected>1 kHz</option>
+                <option value="9000">9 kHz</option>
+                <option value="10000">10 kHz</option>
+                <option value="100000">100 kHz</option>
+                <option value="1000000">1 MHz</option>
+              </select>
+              <button id="freq-up-btn" class="btn btn-icon step-btn">▶</button>
+            </div>
+
+            <!-- Mode + Bandwidth row -->
+            <div class="mode-bw-row">
+              <label>Mode</label>
+              <select id="mode-select" class="mode-select">
+                <option value="usb">USB</option>
+                <option value="lsb">LSB</option>
+                <option value="am">AM</option>
+                <option value="sam">SAM</option>
+                <option value="fm">FM</option>
+                <option value="cwu">CWU</option>
+                <option value="cwl">CWL</option>
+                <option value="iq">IQ</option>
+              </select>
+              <label class="bw-label">BW</label>
+              <span id="bw-value-label" class="bw-value">2700 Hz</span>
+            </div>
+            <div class="slider-row">
+              <input type="range" id="bw-slider" class="slider" min="0" max="5000" step="50" value="2700">
+            </div>
+
+            <!-- Bookmark search combobox -->
+            <div class="form-row">
+              <label>Bookmark</label>
+              <div class="bm-combo" id="bm-combo">
+                <input type="search" id="bm-input" class="bm-input" placeholder="Search bookmarks…" autocomplete="off" disabled>
+                <ul id="bm-list" class="bm-list" role="listbox" aria-label="Bookmarks"></ul>
+              </div>
+            </div>
+
+            <!-- AGC row (USB/LSB only) -->
+            <div id="agc-row" class="agc-row" style="display:none">
+              <div class="agc-col">
+                <label>Hang <span id="agc-hang-label" class="param-value">1.1 s</span></label>
+                <input type="range" id="agc-hang-slider" class="slider" min="0" max="10" step="0.1" value="1.1">
+              </div>
+              <div class="agc-col">
+                <label>Recovery <span id="agc-recovery-label" class="param-value">20 dB/s</span></label>
+                <input type="range" id="agc-recovery-slider" class="slider" min="1" max="100" step="1" value="20">
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Noise Reduction Card -->
+        <section class="card" id="card-dsp">
+          <div class="card-header" data-toggle="card-dsp-body">
+            <span class="card-title">🎛 Noise Reduction</span>
+            <span class="card-chevron">▼</span>
+          </div>
+          <div class="card-body" id="card-dsp-body">
+            <div class="dsp-controls">
+              <label class="checkbox-label">
+                <input type="checkbox" id="dsp-enable-check" disabled>
+                Enable noise reduction
+              </label>
+              <div class="dsp-filter-row">
+                <select id="dsp-filter-select" class="flex-select" disabled>
+                  <option value="">Select filter…</option>
+                </select>
+                <button id="dsp-config-btn" class="btn btn-secondary" disabled>Config</button>
+                <button id="dsp-apply-btn" class="btn btn-secondary" disabled>Apply</button>
+              </div>
+            </div>
+            <div id="dsp-status-label" class="status-text">Not available on this instance</div>
+          </div>
+        </section>
+
+        <!-- Settings Card -->
+        <section class="card" id="card-settings">
+          <div class="card-header" data-toggle="card-settings-body">
+            <span class="card-title">⚙️ Settings</span>
+            <span class="card-chevron">▼</span>
+          </div>
+          <div class="card-body" id="card-settings-body">
+            <div class="form-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="settings-auto-connect-check" checked>
+                Auto-connect when browser opens
+              </label>
+            </div>
+            <div class="status-text" style="margin-top:4px;font-size:0.85em;color:var(--text-muted,#888)">
+              When enabled, opening this page connects to the last-used SDR instance
+              and closing all tabs disconnects automatically.
+            </div>
+          </div>
+        </section>
+
+        <!-- Recording Card -->
+        <section class="card" id="card-record">
+          <div class="card-header" data-toggle="card-record-body">
+            <span class="card-title">⏺ Recording</span>
+            <span class="card-chevron">▼</span>
+          </div>
+          <div class="card-body" id="card-record-body">
+
+            <!-- Format selector -->
+            <div class="form-row">
+              <label>Format</label>
+              <div class="radio-group" id="record-format-group">
+                <label class="radio-label">
+                  <input type="radio" name="record-format" id="record-format-opus" value="opus" checked>
+                  Opus (OGG)
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="record-format" id="record-format-pcm" value="pcm">
+                  PCM (WAV)
+                </label>
+              </div>
+            </div>
+
+            <!-- Start / Stop buttons + status -->
+            <div class="form-row btn-row">
+              <button id="record-start-btn" class="btn btn-primary">⏺ Record</button>
+              <button id="record-stop-btn"  class="btn btn-danger"  disabled>⏹ Stop</button>
+              <span id="record-status" class="status-text">Idle</span>
+            </div>
+
+            <!-- Live timer (shown while recording) -->
+            <div class="form-row" id="record-timer-row">
+              <span id="record-timer" class="status-text" style="display:none;font-variant-numeric:tabular-nums"></span>
+            </div>
+
+            <!-- Ready-for-download row (shown when state == "ready") -->
+            <div class="form-row" id="record-ready-row" style="display:none">
+              <div style="flex:1;min-width:0">
+                <div class="status-text" id="record-filename" style="word-break:break-all"></div>
+                <div class="status-text" id="record-size" style="color:var(--text-muted,#888);font-size:0.85em"></div>
+              </div>
+              <div class="input-row" style="flex-shrink:0">
+                <button id="record-download-btn" class="btn btn-primary">⬇ Download</button>
+                <button id="record-delete-btn"   class="btn btn-danger">🗑 Delete</button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </div><!-- /card-col left -->
+
+      <!-- Right column -->
+      <div class="card-col">
+
+        <!-- Audio Card -->
+        <section class="card" id="card-audio">
+          <div class="card-header" data-toggle="card-audio-body">
+            <span class="card-title">🔊 Audio</span>
+            <span class="card-chevron">▼</span>
+          </div>
+          <div class="card-body" id="card-audio-body">
+            <div class="form-row">
+              <label>Device</label>
+              <div class="input-row">
+                <select id="device-select" class="flex-select"></select>
+                <button id="refresh-devices-btn" class="btn btn-icon" title="Refresh devices">🔄</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Format</label>
+              <div class="radio-group" id="format-group">
+                <label class="radio-label">
+                  <input type="radio" name="format" value="opus" checked> Compressed
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="format" value="pcm-zstd"> Uncompressed
+                </label>
+              </div>
+            </div>
+            <div class="volume-row">
+              <button id="mute-btn" class="btn btn-icon mute-btn" title="Mute">🔊</button>
+              <input type="range" id="volume-slider" class="slider flex-slider" min="0" max="100" step="1" value="80">
+              <select id="channel-select" class="channel-select">
+                <option value="both">L+R</option>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <button id="webaudio-btn" class="btn btn-secondary" style="width:100%">🎧 Browser Audio</button>
+            </div>
+
+            <!-- Signal meters -->
+            <div class="meters" id="signal-meters">
+              <div class="meter-row">
+                <span class="meter-label">Signal</span>
+                <div class="meter-bar-wrap">
+                  <div class="meter-bar" id="signal-bar"></div>
+                </div>
+                <span class="meter-value" id="signal-value">—</span>
+                <span class="meter-unit">dBFS</span>
+              </div>
+              <div class="meter-row">
+                <span class="meter-label">SNR</span>
+                <div class="meter-bar-wrap">
+                  <div class="meter-bar" id="snr-bar"></div>
+                </div>
+                <span class="meter-value" id="snr-value">—</span>
+                <span class="meter-unit">dB</span>
+              </div>
+              <div class="meter-row">
+                <span class="meter-label">Audio</span>
+                <div class="meter-bar-wrap">
+                  <div class="meter-bar" id="audio-bar"></div>
+                </div>
+                <span class="meter-value" id="audio-value">—</span>
+                <span class="meter-unit">dBFS</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- FLRig Card -->
+        <section class="card" id="card-flrig">
+          <div class="card-header" data-toggle="card-flrig-body">
+            <span class="card-title">📡 FLRig Sync</span>
+            <span class="card-chevron">▼</span>
+          </div>
+          <div class="card-body" id="card-flrig-body">
+            <label class="checkbox-label">
+              <input type="checkbox" id="flrig-enabled-check">
+              Enable FLRig sync
             </label>
-            <label class="radio-label">
-              <input type="radio" name="format" value="pcm-zstd"> Uncompressed
-            </label>
-          </div>
-        </div>
-        <div class="volume-row">
-          <button id="mute-btn" class="btn btn-icon mute-btn" title="Mute">🔊</button>
-          <input type="range" id="volume-slider" class="slider flex-slider" min="0" max="100" step="1" value="80">
-          <select id="channel-select" class="channel-select">
-            <option value="both">L+R</option>
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <button id="webaudio-btn" class="btn btn-secondary" style="width:100%">🎧 Browser Audio</button>
-        </div>
-
-        <!-- Signal meters -->
-        <div class="meters" id="signal-meters">
-          <div class="meter-row">
-            <span class="meter-label">Signal</span>
-            <div class="meter-bar-wrap">
-              <div class="meter-bar" id="signal-bar"></div>
+            <div class="form-row">
+              <label>Host</label>
+              <input type="text" id="flrig-host-entry" value="127.0.0.1" placeholder="127.0.0.1">
             </div>
-            <span class="meter-value" id="signal-value">—</span>
-            <span class="meter-unit">dBFS</span>
-          </div>
-          <div class="meter-row">
-            <span class="meter-label">SNR</span>
-            <div class="meter-bar-wrap">
-              <div class="meter-bar" id="snr-bar"></div>
+            <div class="form-row">
+              <label>Port</label>
+              <input type="number" id="flrig-port-entry" value="12345" min="1" max="65535">
             </div>
-            <span class="meter-value" id="snr-value">—</span>
-            <span class="meter-unit">dB</span>
-          </div>
-          <div class="meter-row">
-            <span class="meter-label">Audio</span>
-            <div class="meter-bar-wrap">
-              <div class="meter-bar" id="audio-bar"></div>
+            <div class="form-row">
+              <label>Direction</label>
+              <div class="radio-group" id="flrig-dir-group">
+                <label class="radio-label"><input type="radio" name="flrig-dir" value="rig-to-sdr"> Rig→SDR</label>
+                <label class="radio-label"><input type="radio" name="flrig-dir" value="sdr-to-rig"> SDR→Rig</label>
+                <label class="radio-label"><input type="radio" name="flrig-dir" value="both" checked> Both</label>
+              </div>
             </div>
-            <span class="meter-value" id="audio-value">—</span>
-            <span class="meter-unit">dBFS</span>
+            <div class="form-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="flrig-ptt-mute-check" checked>
+                Mute during TX
+              </label>
+            </div>
+            <div class="flrig-status-row">
+              <div id="flrig-dot" class="dot dot-grey"></div>
+              <span id="flrig-status-label" class="flex-label">Disabled</span>
+              <span id="flrig-ptt-badge" class="ptt-badge ptt-rx">RX</span>
+              <button id="flrig-apply-btn" class="btn btn-secondary">Apply</button>
+            </div>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <!-- Noise Reduction Card -->
-    <section class="card" id="card-dsp">
-      <div class="card-header" data-toggle="card-dsp-body">
-        <span class="card-title">🎛 Noise Reduction</span>
-        <span class="card-chevron">▼</span>
-      </div>
-      <div class="card-body" id="card-dsp-body">
-        <div class="dsp-controls">
-          <label class="checkbox-label">
-            <input type="checkbox" id="dsp-enable-check" disabled>
-            Enable noise reduction
-          </label>
-          <div class="dsp-filter-row">
-            <select id="dsp-filter-select" class="flex-select" disabled>
-              <option value="">Select filter…</option>
-            </select>
-            <button id="dsp-config-btn" class="btn btn-secondary" disabled>Config</button>
-            <button id="dsp-apply-btn" class="btn btn-secondary" disabled>Apply</button>
+        <!-- Output Sinks Card -->
+        <section class="card" id="card-sinks">
+          <div class="card-header" data-toggle="card-sinks-body">
+            <span class="card-title">📤 Output Sinks</span>
+            <span class="card-chevron">▼</span>
           </div>
-        </div>
-        <div id="dsp-status-label" class="status-text">Not available on this instance</div>
-      </div>
-    </section>
+          <div class="card-body" id="card-sinks-body">
+            <div class="form-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="stdout-check">
+                stdout PCM
+              </label>
+            </div>
+            <div class="form-row">
+              <label>UDP sink</label>
+              <div class="input-row">
+                <input type="text" id="udp-address-entry" placeholder="127.0.0.1:5005">
+                <button id="udp-add-btn" class="btn btn-secondary">Add</button>
+              </div>
+            </div>
+            <ul id="udp-sinks-list" class="sinks-list"></ul>
+          </div>
+        </section>
 
-    <!-- FLRig Card -->
-    <section class="card" id="card-flrig">
-      <div class="card-header" data-toggle="card-flrig-body">
-        <span class="card-title">📡 FLRig Sync</span>
-        <span class="card-chevron">▼</span>
-      </div>
-      <div class="card-body" id="card-flrig-body">
-        <label class="checkbox-label">
-          <input type="checkbox" id="flrig-enabled-check">
-          Enable FLRig sync
-        </label>
-        <div class="form-row">
-          <label>Host</label>
-          <input type="text" id="flrig-host-entry" value="127.0.0.1" placeholder="127.0.0.1">
-        </div>
-        <div class="form-row">
-          <label>Port</label>
-          <input type="number" id="flrig-port-entry" value="12345" min="1" max="65535">
-        </div>
-        <div class="form-row">
-          <label>Direction</label>
-          <div class="radio-group" id="flrig-dir-group">
-            <label class="radio-label"><input type="radio" name="flrig-dir" value="rig-to-sdr"> Rig→SDR</label>
-            <label class="radio-label"><input type="radio" name="flrig-dir" value="sdr-to-rig"> SDR→Rig</label>
-            <label class="radio-label"><input type="radio" name="flrig-dir" value="both" checked> Both</label>
-          </div>
-        </div>
-        <div class="form-row">
-          <label class="checkbox-label">
-            <input type="checkbox" id="flrig-ptt-mute-check" checked>
-            Mute during TX
-          </label>
-        </div>
-        <div class="flrig-status-row">
-          <div id="flrig-dot" class="dot dot-grey"></div>
-          <span id="flrig-status-label" class="flex-label">Disabled</span>
-          <span id="flrig-ptt-badge" class="ptt-badge ptt-rx">RX</span>
-          <button id="flrig-apply-btn" class="btn btn-secondary">Apply</button>
-        </div>
-      </div>
-    </section>
+      </div><!-- /card-col right -->
 
-    <!-- Sinks Card -->
-    <section class="card" id="card-sinks">
-      <div class="card-header" data-toggle="card-sinks-body">
-        <span class="card-title">📤 Output Sinks</span>
-        <span class="card-chevron">▼</span>
-      </div>
-      <div class="card-body" id="card-sinks-body">
-        <div class="form-row">
-          <label class="checkbox-label">
-            <input type="checkbox" id="stdout-check">
-            stdout PCM
-          </label>
-        </div>
-        <div class="form-row">
-          <label>UDP sink</label>
-          <div class="input-row">
-            <input type="text" id="udp-address-entry" placeholder="127.0.0.1:5005">
-            <button id="udp-add-btn" class="btn btn-secondary">Add</button>
-          </div>
-        </div>
-        <ul id="udp-sinks-list" class="sinks-list"></ul>
-      </div>
-    </section>
+    </div><!-- /card-columns -->
 
   </main>
 
@@ -403,9 +489,11 @@
   <script src="bookmarks.js"></script>
   <script src="dsp.js"></script>
   <script src="flrig.js"></script>
+  <script src="settings.js"></script>
   <script src="connection.js"></script>
   <script src="profiles.js"></script>
   <script src="sinks.js"></script>
+  <script src="record.js"></script>
   <script src="help.js"></script>
   <script src="app.js"></script>
 </body>

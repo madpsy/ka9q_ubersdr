@@ -110,6 +110,10 @@ const API = (() => {
     /** Returns an EventSource for /api/v1/signal/stream */
     signalStream: () => new EventSource(`${V1}/signal/stream`),
 
+    // ── Settings ─────────────────────────────────────────────────────────────
+    getSettings: ()     => get('/settings'),
+    putSettings: (body) => put('/settings', body),
+
     // ── FLRig ────────────────────────────────────────────────────────────────
     getFlrig:  ()     => get('/flrig'),
     putFlrig:  (body) => put('/flrig', body),
@@ -127,5 +131,13 @@ const API = (() => {
     disableStdout:  ()        => del('/sinks/stdout'),
     addUDPSink:     (address) => post('/sinks/udp', { address }),
     removeUDPSink:  (address) => del(`/sinks/udp/${encodeURIComponent(address)}`),
+
+    // ── Recording ────────────────────────────────────────────────────────────
+    getRecord:      ()       => get('/record'),
+    startRecord:    (format) => post('/record/start', format ? { format } : {}),
+    stopRecord:     ()       => post('/record/stop'),
+    deleteRecord:   ()       => del('/record'),
+    /** Returns the URL to download the last completed recording. */
+    recordDownloadURL: ()    => `${V1}/record/download`,
   };
 })();

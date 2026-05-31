@@ -3,7 +3,7 @@
  *
  * Responsibilities:
  *  - Initialise all modules
- *  - Poll /api/v1/status every 2 s and fan out to all modules
+ *  - Poll /api/v1/status every 1 s and fan out to all modules
  *  - Provide shared modal helpers (App.openModal, App.closeModal, App.confirm)
  *  - Wire card collapse/expand behaviour
  *  - Wire generic modal close buttons
@@ -11,7 +11,7 @@
 
 const App = (() => {
   // ── Poll interval ─────────────────────────────────────────────────────────
-  const POLL_MS = 2000;
+  const POLL_MS = 1000;
   let _pollTimer = null;
   let _lastState = null;
 
@@ -57,20 +57,33 @@ const App = (() => {
     // FLRig
     if (s.flrig) FLRig.applySnapshot(s.flrig);
 
+    // Settings
+    if (s.settings) Settings.applySnapshot(s.settings);
+
     // Sinks
     if (s.sinks) Sinks.applySnapshot(s.sinks);
+
+    // Recording
+    if (s.record) Record.applySnapshot(s.record);
 
     // Signal (snapshot only — live updates come from SSE)
     if (s.signal) Signal.applySnapshot(s.signal);
 
-    // Bookmarks — fetch on first connect, clear on disconnect
+    // Bookmarks — fetch on first connect, retry while empty, clear on disconnect
     if (_lastState === 'connected' && prevState !== 'connected') {
       Signal.startSSE();
       Bookmarks.onConnected();
+      WebAudio.onConnectionChange(true);
+    } else if (_lastState === 'connected') {
+      // Retry bookmark fetch on every poll tick while connected but empty
+      // (handles the auto-connect race where the first fetch fires before the
+      // SDR proxy connection is ready).
+      Bookmarks.retryIfEmpty();
     }
     if (_lastState !== 'connected' && prevState === 'connected') {
       Signal.setNoData();
       Bookmarks.onDisconnected();
+      WebAudio.onConnectionChange(false);
     }
   }
 
@@ -220,9 +233,11 @@ const App = (() => {
     Bookmarks.init();
     DSP.init();
     FLRig.init();
+    Settings.init();
     Connection.init();
     Profiles.init();
     Sinks.init();
+    Record.init();
 
     // Start polling
     startPolling();

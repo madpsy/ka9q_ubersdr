@@ -19,6 +19,7 @@ const Bookmarks = (() => {
   let _activeIdx    = -1;   // keyboard-highlighted index in _filtered
   let _selectedName = '';   // name of the last tuned bookmark
   let _open         = false;
+  let _fetching     = false; // guard against concurrent fetches
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function escHtml(s) {
@@ -141,14 +142,18 @@ const Bookmarks = (() => {
 
   // ── Fetch and populate ────────────────────────────────────────────────────
   async function fetchAndPopulate() {
+    if (_fetching) return; // prevent concurrent fetches
     const inp = input();
     if (!inp) return;
 
+    _fetching = true;
     try {
       const data = await API.getBookmarks();
       _bookmarks = Array.isArray(data) ? data : [];
     } catch (e) {
       _bookmarks = [];
+    } finally {
+      _fetching = false;
     }
 
     if (_bookmarks.length > 0) {
@@ -163,6 +168,15 @@ const Bookmarks = (() => {
   // ── Public API ────────────────────────────────────────────────────────────
   function onConnected() {
     fetchAndPopulate();
+  }
+
+  // retryIfEmpty re-fetches bookmarks when connected but the previous fetch
+  // failed (e.g. due to a race with auto-connect).  Called from the status
+  // poll on every connected tick while _bookmarks is still empty.
+  function retryIfEmpty() {
+    if (_bookmarks.length === 0) {
+      fetchAndPopulate();
+    }
   }
 
   function onDisconnected() {
@@ -250,5 +264,5 @@ const Bookmarks = (() => {
     document.getElementById('main-content')?.addEventListener('scroll', reposition, { passive: true });
   }
 
-  return { init, onConnected, onDisconnected };
+  return { init, onConnected, onDisconnected, retryIfEmpty };
 })();

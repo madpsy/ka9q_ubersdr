@@ -145,6 +145,8 @@ const Tune = (() => {
     if (typeof Audio !== 'undefined') Audio.onModeChange(_mode);
     // Notify DSP
     if (typeof DSP !== 'undefined') DSP.onModeChange(_mode);
+    // Notify Record — Opus is disabled in IQ modes
+    if (typeof Record !== 'undefined') Record.onModeChange(_mode);
   }
 
   function updateBWLabel() {
@@ -246,6 +248,7 @@ const Tune = (() => {
       if (typeof AGC !== 'undefined') AGC.onModeChange(_mode);
       if (typeof Audio !== 'undefined') Audio.onModeChange(_mode);
       if (typeof DSP !== 'undefined') DSP.onModeChange(_mode);
+      if (typeof Record !== 'undefined') Record.onModeChange(_mode);
 
       sendTune();
     });

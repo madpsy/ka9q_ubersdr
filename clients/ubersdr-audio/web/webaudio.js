@@ -17,12 +17,13 @@
  */
 
 const WebAudio = (() => {
-  let _ws         = null;
-  let _ctx        = null;   // AudioContext
-  let _nextTime   = 0;      // next scheduled playback time (AudioContext clock)
-  let _sampleRate = 48000;
-  let _channels   = 2;
-  let _active     = false;
+  let _ws          = null;
+  let _ctx         = null;   // AudioContext
+  let _nextTime    = 0;      // next scheduled playback time (AudioContext clock)
+  let _sampleRate  = 48000;
+  let _channels    = 2;
+  let _active      = false;
+  let _connected   = false;  // SDR instance connection state
 
   // How far ahead to schedule (seconds).  Larger = more latency but fewer glitches.
   const SCHEDULE_AHEAD = 0.1;
@@ -68,6 +69,7 @@ const WebAudio = (() => {
 
   async function start() {
     if (_active) return;
+    if (!_connected) return;  // refuse to start when SDR is disconnected
 
     // AudioContext must be created/resumed inside a user gesture.
     if (!_ctx) {
@@ -149,13 +151,33 @@ const WebAudio = (() => {
       btn.classList.remove('btn-danger');
       btn.classList.add('btn-secondary');
     }
+    btn.disabled = !_connected && !active;
+  }
+
+  // ── Connection state ──────────────────────────────────────────────────────
+  /**
+   * Called by app.js whenever the SDR connection state changes.
+   * @param {boolean} connected  true = connected, false = disconnected/error
+   */
+  function onConnectionChange(connected) {
+    _connected = connected;
+    if (!connected && _active) {
+      // Auto-stop browser audio when the SDR instance disconnects.
+      stop();
+    }
+    // Enable/disable the button to reflect whether audio is available.
+    const btn = document.getElementById('webaudio-btn');
+    if (btn) btn.disabled = !connected && !_active;
   }
 
   function init() {
     document.getElementById('webaudio-btn')?.addEventListener('click', () => {
       if (_active) stop(); else start();
     });
+    // Start disabled until we receive a connected state from the poll.
+    const btn = document.getElementById('webaudio-btn');
+    if (btn) btn.disabled = true;
   }
 
-  return { init, start, stop, isActive };
+  return { init, start, stop, isActive, onConnectionChange };
 })();

@@ -11,6 +11,7 @@ UberSDRAudio                              # API on by default: 0.0.0.0:9770
 UberSDRAudio --api-port 9771             # custom port
 UberSDRAudio --api-bind 127.0.0.1       # restrict to loopback only
 UberSDRAudio --no-api                    # disable the API entirely
+UberSDRAudio --record-dir /tmp/sdr       # directory for recording files (default: system temp dir)
 ```
 
 > **Security note:** The API has no authentication.  Bind to `127.0.0.1`
@@ -119,6 +120,14 @@ authoritative source of truth for any polling client.
   "sinks": {
     "stdout": false,
     "udp": ["127.0.0.1:5005"]
+  },
+  "settings": {
+    "browser_auto_connect": true
+  },
+  "record": {
+    "state": "idle",
+    "format": "",
+    "max_duration_secs": 3600
   }
 }
 ```
@@ -129,6 +138,8 @@ authoritative source of truth for any polling client.
 - `signal.*`: `-999.0` when no data is available (IQ mode, or not yet received)
 - `tune.bandwidth_hz`: the slider value (symmetric for AM/FM, upper edge for USB/CWU, etc.)
 - `tune.bandwidth_low` / `tune.bandwidth_high`: the actual values sent to the server
+- `settings.browser_auto_connect`: mirrors `GET /api/v1/settings`; included here for convenience
+- `record`: mirrors `GET /api/v1/record`; included here for convenience (see §13)
 
 ---
 
@@ -282,6 +293,39 @@ from the server's `/api/description` endpoint.
 **Errors:**
 - `503` — not currently connected to an instance
 - `503` — connected but the server's `/api/description` could not be fetched
+
+---
+
+## 3a. Bookmarks (proxy)
+
+### `GET /api/v1/bookmarks`
+
+Proxies `GET /api/bookmarks` from the currently connected SDR server.
+Passes through any query parameters the caller provides (e.g. `center`,
+`width`, `limit`).
+
+**Query parameters** (all optional, forwarded verbatim to the server):
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `center` | integer | Centre frequency in Hz |
+| `width` | integer | Frequency window width in Hz |
+| `limit` | integer | Maximum number of bookmarks to return |
+
+**Response `200`:** raw JSON array from the server, e.g.:
+```json
+[
+  { "frequency": 14200000, "mode": "usb", "label": "14 MHz SSB" },
+  { "frequency": 7074000,  "mode": "usb", "label": "FT8" }
+]
+```
+
+The exact shape of each bookmark object is defined by the connected SDR
+server; this endpoint passes the response through without modification.
+
+**Errors:**
+- `503` — not connected to an SDR server
+- `502` — server returned an error or invalid JSON for `/api/bookmarks`
 
 ---
 
@@ -826,7 +870,46 @@ changed.  Changes take effect immediately (same as clicking Apply in the GUI).
 
 ---
 
-## 10. Profiles
+## 10. Settings
+
+### `GET /api/v1/settings`
+
+Returns the current application settings.
+
+**Response `200`:**
+```json
+{
+  "browser_auto_connect": true
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `browser_auto_connect` | bool | When `true`, opening the web UI auto-connects to the last-used SDR instance and closing all browser tabs auto-disconnects. |
+
+---
+
+### `PUT /api/v1/settings`
+
+Update one or more settings.  All fields are optional; only provided fields are changed.
+Changes are persisted immediately (survive app restart).
+
+**Request body:**
+```json
+{
+  "browser_auto_connect": false
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `browser_auto_connect` | bool | Enable/disable browser auto-connect behaviour. |
+
+**Response `200`:** the updated settings (same shape as `GET /settings`).
+
+---
+
+## 11. Profiles
 
 ### `GET /api/v1/profiles`
 
@@ -909,7 +992,7 @@ in the GUI.
 
 ---
 
-## 11. Output Sinks
+## 12. Output Sinks
 
 These endpoints allow adding and removing PCM output sinks at runtime,
 complementing the `--stdout` and `--udp-out` CLI flags.
@@ -977,6 +1060,166 @@ Remove a UDP PCM sink.  `address` in the path should be URL-encoded
 
 ---
 
+## 13. Recording
+
+Record the decoded audio to a file on the host.  The recording is written to
+the directory specified by `--record-dir` (default: system temp dir).
+
+Filenames are generated automatically:
+```
+ubersdr-YYYYMMDD-HHMMSS-<freq>kHz-<mode>.<ext>
+```
+e.g. `ubersdr-20260531-143000-14200kHz-usb.ogg`
+
+**Recording state machine:**
+
+```
+idle ──POST /record/start──► recording ──POST /record/stop──► ready
+                                 │                               │
+                             auto-stop (60 min)          POST /record/start
+                                 │                         (deletes old file)
+                                 └──────────────────────────────►│
+                                                              recording
+```
+
+- `idle` — no recording in progress, no file available
+- `recording` — actively recording; file is being written
+- `ready` — recording stopped; file is available for download
+
+**Auto-stop:** recordings are automatically stopped after **60 minutes**.
+The file is properly finalised (WAV header rewritten / OGG EOS page written).
+
+**Disconnect auto-stop:** if the SDR instance disconnects while recording,
+the recording is automatically stopped and finalised.
+
+---
+
+### `GET /api/v1/record`
+
+Get the current recording status.
+
+**Response `200` — idle:**
+```json
+{
+  "state": "idle",
+  "format": "",
+  "max_duration_secs": 3600
+}
+```
+
+**Response `200` — recording:**
+```json
+{
+  "state": "recording",
+  "format": "opus",
+  "max_duration_secs": 3600,
+  "filename": "ubersdr-20260531-143000-14200kHz-usb.ogg",
+  "size_bytes": 245760,
+  "started_at": "2026-05-31T14:30:00Z",
+  "elapsed_secs": 42.3,
+  "remaining_secs": 3557.7
+}
+```
+
+**Response `200` — ready:**
+```json
+{
+  "state": "ready",
+  "format": "opus",
+  "max_duration_secs": 3600,
+  "filename": "ubersdr-20260531-143000-14200kHz-usb.ogg",
+  "size_bytes": 1048576,
+  "started_at": "2026-05-31T14:30:00Z",
+  "elapsed_secs": 120.0,
+  "stopped_at": "2026-05-31T14:32:00Z",
+  "duration_secs": 120.0,
+  "auto_stopped": false
+}
+```
+
+| Field | Type | Present when | Notes |
+|---|---|---|---|
+| `state` | string | always | `"idle"`, `"recording"`, `"ready"` |
+| `format` | string | always | `"pcm"`, `"opus"`, or `""` when idle |
+| `max_duration_secs` | integer | always | Always `3600` (60 minutes) |
+| `filename` | string | state ≠ idle | Base filename only (no path) |
+| `size_bytes` | integer | state ≠ idle | Current file size in bytes |
+| `started_at` | string | state ≠ idle | ISO-8601 timestamp |
+| `elapsed_secs` | float | state ≠ idle | Seconds elapsed since start |
+| `remaining_secs` | float | state = recording | Seconds until auto-stop |
+| `stopped_at` | string | state = ready | ISO-8601 timestamp |
+| `duration_secs` | float | state = ready | Total recording duration |
+| `auto_stopped` | bool | state = ready | `true` if stopped by the 60-min timer or disconnect |
+
+---
+
+### `POST /api/v1/record/start`
+
+Start a new recording.  If a completed recording already exists it is deleted
+first.
+
+**Request body** (all fields optional):
+```json
+{ "format": "opus" }
+```
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `format` | string | matches current transport format | `"pcm"` (WAV) or `"opus"` (OGG/Opus) |
+
+- If `format` is omitted, the recording format matches the current transport
+  format: `"opus"` when the audio format is `"opus"`, otherwise `"pcm"`.
+- On platforms where libopus is unavailable (non-Linux, non-Windows), `"opus"`
+  silently falls back to `"pcm"`.
+
+**Response `200`:** recording status (same shape as `GET /record` with `state: "recording"`).
+
+**Errors:**
+- `409` — already recording (response includes `elapsed_secs` and `remaining_secs`)
+- `422` — `format` not `"pcm"` or `"opus"`
+- `500` — could not create the recording file (e.g. disk full, bad directory)
+
+---
+
+### `POST /api/v1/record/stop`
+
+Stop the active recording and finalise the file.
+
+**Request body:** none
+
+**Response `200`:** recording status (same shape as `GET /record` with `state: "ready"`).
+
+**Errors:**
+- `409` — not currently recording
+
+---
+
+### `GET /api/v1/record/download`
+
+Download the last completed recording file.
+
+**Response `200`:**
+- `Content-Type: audio/ogg` (Opus) or `audio/wav` (PCM)
+- `Content-Disposition: attachment; filename="ubersdr-…ogg"`
+- Body: raw file bytes
+
+**Errors:**
+- `404` — no completed recording available (state is `idle` or `recording`)
+- `404` — file not found on disk (deleted externally)
+
+---
+
+### `DELETE /api/v1/record`
+
+Delete the completed recording file and reset state to `idle`.
+
+**Response `200`:** `{"deleted": true}`
+
+**Errors:**
+- `404` — no completed recording to delete (state is `idle` or `recording`)
+
+---
+
 ## PCM stream format (stdout / UDP)
 
 All PCM sinks output:
@@ -1002,7 +1245,7 @@ ubersdr-audio: stdout PCM stream: 48000 Hz, 2 channel(s), signed 16-bit little-e
 
 | File | Purpose |
 |---|---|
-| `api.go` | HTTP server setup, flag parsing (`--no-api`, `--api-port`, `--api-bind`), route registration |
+| `api.go` | HTTP server setup, flag parsing (`--no-api`, `--api-port`, `--api-bind`, `--record-dir`), route registration |
 | `api_handlers_connection.go` | `GET /status`, `POST /connect`, `POST /disconnect`, `GET /instances`, `POST /instances/connect` |
 | `api_handlers_instance.go` | `GET /instance` — live fetch of connected server's `/api/description` |
 | `api_handlers_tune.go` | `GET /tune`, `PUT /tune` |
@@ -1012,9 +1255,16 @@ ubersdr-audio: stdout PCM stream: 48000 Hz, 2 channel(s), signed 16-bit little-e
 | `api_handlers_dsp.go` | `GET /dsp`, `PUT /dsp`, `PATCH /dsp/params`, `GET /dsp/filters` |
 | `api_handlers_signal.go` | `GET /signal` |
 | `api_handlers_flrig.go` | `GET /flrig`, `PUT /flrig` |
+| `api_handlers_settings.go` | `GET /settings`, `PUT /settings` |
 | `api_handlers_profiles.go` | `GET /profiles`, `GET /profiles/{name}`, `PUT /profiles/{name}`, `DELETE /profiles/{name}`, `POST /profiles/{name}/load` |
+| `api_handlers_bookmarks.go` | `GET /bookmarks` — proxy to connected server's `/api/bookmarks` |
 | `api_handlers_sinks.go` | `GET /sinks`, `POST /sinks/stdout`, `DELETE /sinks/stdout`, `POST /sinks/udp`, `DELETE /sinks/udp/{address}` |
-| `api_sse.go` | SSE broker for `/signal/stream` — fan-out to connected clients |
+| `api_handlers_record.go` | `GET /record`, `POST /record/start`, `POST /record/stop`, `GET /record/download`, `DELETE /record` |
+| `recording_manager.go` | `RecordingManager` (implements `StreamSink`), WAV writer, OGG/Opus writer, 60-min auto-stop |
+| `opus_encoder_linux.go` | CGo libopus encoder (Linux) |
+| `opus_encoder_windows.go` | DLL-based Opus encoder (Windows) |
+| `opus_encoder_other.go` | Stub — falls back to WAV on unsupported platforms |
+| `api_sse.go` | SSE broker for `/signal/stream` — fan-out to connected clients; `OnCountChange` callback drives browser auto-connect |
 | `app_state.go` | `AppState` struct — shared mutable state between GUI and API |
 
 The `AppState` struct holds all values currently stored as local variables

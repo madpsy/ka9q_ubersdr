@@ -29,14 +29,15 @@ var webFS embed.FS
 
 // APIServer holds the HTTP server and all dependencies needed by handlers.
 type APIServer struct {
-	state   *AppState
-	client  *RadioClient
-	flrig   *FlrigSync
-	mdns    *MDNSDiscovery
-	prefs   fyne.Preferences
-	broker  *SSEBroker
-	sinkMgr *APISinkManager
-	audioWS *AudioWSBroker
+	state        *AppState
+	client       *RadioClient
+	flrig        *FlrigSync
+	mdns         *MDNSDiscovery
+	prefs        fyne.Preferences
+	broker       *SSEBroker
+	sinkMgr      *APISinkManager
+	audioWS      *AudioWSBroker
+	recordingMgr *RecordingManager
 
 	httpServer *http.Server
 }
@@ -51,16 +52,18 @@ func NewAPIServer(
 	broker *SSEBroker,
 	sinkMgr *APISinkManager,
 	audioWS *AudioWSBroker,
+	recordingMgr *RecordingManager,
 ) *APIServer {
 	return &APIServer{
-		state:   state,
-		client:  client,
-		flrig:   flrig,
-		mdns:    mdns,
-		prefs:   prefs,
-		broker:  broker,
-		sinkMgr: sinkMgr,
-		audioWS: audioWS,
+		state:        state,
+		client:       client,
+		flrig:        flrig,
+		mdns:         mdns,
+		prefs:        prefs,
+		broker:       broker,
+		sinkMgr:      sinkMgr,
+		audioWS:      audioWS,
+		recordingMgr: recordingMgr,
 	}
 }
 
@@ -146,6 +149,9 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/signal", s.handleSignal)
 	mux.HandleFunc("/api/v1/signal/stream", s.broker.ServeHTTP)
 
+	// Settings
+	mux.HandleFunc("/api/v1/settings", s.handleSettings)
+
 	// FLRig
 	mux.HandleFunc("/api/v1/flrig", s.handleFlrig)
 
@@ -158,6 +164,12 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/sinks/stdout", s.handleSinksStdout)
 	mux.HandleFunc("/api/v1/sinks/udp", s.handleSinksUDP)
 	mux.HandleFunc("/api/v1/sinks/udp/", s.handleSinksUDPDelete) // DELETE /sinks/udp/{address}
+
+	// Recording
+	mux.HandleFunc("/api/v1/record", s.handleRecord)
+	mux.HandleFunc("/api/v1/record/start", s.handleRecordStart)
+	mux.HandleFunc("/api/v1/record/stop", s.handleRecordStop)
+	mux.HandleFunc("/api/v1/record/download", s.handleRecordDownload)
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────

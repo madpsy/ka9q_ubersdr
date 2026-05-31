@@ -4,7 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="description" content="UberSDR is a powerful, web-based SDR platform for amateur radio enthusiasts, providing real-time access to the entire HF spectrum and multi-band WSJT-X skimming. Support for third party software via SoapySDR as well as a native desktop client. Based on the affordable RX-888 MKII and generic PC hardware. Powered by ka9q-radio.">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="UberSDR">
     <title>UberSDR - Web SDR Receiver</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
     <link rel="stylesheet" href="style.css">
     <!-- Set waterfall height CSS variable immediately from localStorage to avoid layout flash -->
     <script>
@@ -1682,5 +1691,20 @@
     </div>
     {{.CustomBodyHTML}}
     {{.WidgetsHTML}}
+
+    <!-- PWA Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(function (reg) {
+                        console.log('[SW] Registered, scope:', reg.scope);
+                    })
+                    .catch(function (err) {
+                        console.warn('[SW] Registration failed:', err);
+                    });
+            });
+        }
+    </script>
 </body>
 </html>

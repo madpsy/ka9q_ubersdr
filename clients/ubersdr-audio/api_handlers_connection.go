@@ -65,6 +65,7 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	sigSNR := st.SignalSNRDB
 	sigAudio := st.SignalAudioDBFS
 	sigAt := st.SignalUpdatedAt
+	browserAutoConnect := st.BrowserAutoConnect
 	st.Mu.RUnlock()
 
 	connState := s.client.State()
@@ -109,6 +110,9 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if allowedIQ == nil {
 		allowedIQ = []string{}
 	}
+
+	// Recording.
+	recStatus := s.recordingMgr.Status()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"connection": map[string]any{
@@ -171,6 +175,10 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"stdout": stdoutActive,
 			"udp":    udpAddrs,
 		},
+		"settings": map[string]any{
+			"browser_auto_connect": browserAutoConnect,
+		},
+		"record": recordStatusJSON(recStatus),
 	})
 }
 
@@ -217,7 +225,9 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		s.state.PasswordEntry.SetText(body.Password)
 	}
 
-	if s.state.DoConnect != nil {
+	if s.state.DoReconnect != nil {
+		go disconnectThenConnect(s.client, s.state.DoDisconnect, s.state.DoReconnect)
+	} else if s.state.DoConnect != nil {
 		go s.state.DoConnect()
 	}
 
@@ -368,16 +378,37 @@ func (s *APIServer) handleInstancesConnect(w http.ResponseWriter, r *http.Reques
 		s.state.PasswordEntry.SetText(body.Password)
 	}
 
-	if s.state.DoConnect != nil {
-		go func() {
-			// Brief pause to let the widget updates settle.
-			time.Sleep(50 * time.Millisecond)
-			s.state.DoConnect()
-		}()
+	if s.state.DoReconnect != nil {
+		go disconnectThenConnect(s.client, s.state.DoDisconnect, s.state.DoReconnect)
+	} else if s.state.DoConnect != nil {
+		go s.state.DoConnect()
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"state": "connecting",
 		"url":   rawURL,
 	})
+}
+
+// disconnectThenConnect disconnects the client if it is currently connected or
+// connecting, waits for the state to settle, then calls doReconnect.
+// doDisconnect sets userDisconnected=true and calls client.Disconnect() to
+// suppress the OnStateChange auto-reconnect timer.
+// doReconnect sets userDisconnected=false and calls doConnect(), mirroring the
+// Fyne connect button's default branch.
+func disconnectThenConnect(c *RadioClient, doDisconnect func(), doReconnect func()) {
+	if st := c.State(); st == StateConnected || st == StateConnecting {
+		if doDisconnect != nil {
+			doDisconnect()
+		}
+		// Poll until the client reaches a terminal state (up to 2 s).
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+			if st := c.State(); st == StateDisconnected || st == StateError {
+				break
+			}
+		}
+	}
+	doReconnect()
 }

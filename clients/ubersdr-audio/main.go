@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -30,6 +31,10 @@ const (
 	prefKeyFlrigPort      = "flrig_port"
 	prefKeyFlrigDirection = "flrig_direction"
 	prefKeyFlrigPTTMute   = "flrig_ptt_mute"
+
+	// prefKeyBrowserAutoConnect mirrors the constant in api_handlers_settings.go.
+	// Defined here so main() can load it from prefs at startup.
+	prefKeyBrowserAutoConnectMain = "browser_auto_connect"
 )
 
 //go:embed ubersdr.ico
@@ -105,7 +110,7 @@ func bwToLoHi(mode string, val float64) (lo, hi int) {
 func modeKey(label string) string { return strings.ToLower(label) }
 
 // freqSteps are in Hz; displayed labels are in kHz.
-var freqSteps = []int{1, 10, 100, 500, 1_000, 10_000, 100_000, 1_000_000}
+var freqSteps = []int{1, 10, 100, 500, 1_000, 9_000, 10_000, 100_000, 1_000_000}
 
 const (
 	freqMinHz = 10_000     // 10 kHz
@@ -153,7 +158,13 @@ func main() {
 		"REST API server port (default 9770)")
 	flagAPIBind := flag.String("api-bind", "0.0.0.0",
 		"REST API server bind address (default 0.0.0.0)")
+	flagRecordDir := flag.String("record-dir", os.TempDir(),
+		"Directory where audio recordings are saved (default: system temp dir)")
+	flagDebug := flag.Bool("debug", false,
+		"Print debug info (freq/mode/bandwidth load and save points) to stderr")
 	flag.Parse()
+
+	debugMode = *flagDebug
 
 	// Build the StreamSink from the flags.  Both --stdout and --udp-out may be
 	// specified simultaneously; in that case a MultiSink fans out to both.
@@ -177,13 +188,17 @@ func main() {
 	// connected to GET /api/v1/audio/stream.
 	audioWSBroker := NewAudioWSBroker()
 
+	// RecordingManager — wired into the MultiSink so it receives every decoded
+	// PCM frame.  It is a near-zero-cost no-op when not actively recording.
+	recordingMgr := NewRecordingManager(*flagRecordDir)
+
 	var sink StreamSink
 	if len(activeSinks) == 0 {
-		// Only the API sink manager and WebSocket broker (may be empty at startup).
-		sink = NewMultiSink(apiSinkMgr, audioWSBroker)
+		// Only the API sink manager, WebSocket broker, and recording manager.
+		sink = NewMultiSink(apiSinkMgr, audioWSBroker, recordingMgr)
 	} else {
-		// Fan out to CLI sinks, the API sink manager, and the WebSocket broker.
-		sink = NewMultiSink(append(activeSinks, apiSinkMgr, audioWSBroker)...)
+		// Fan out to CLI sinks, the API sink manager, WebSocket broker, and recording manager.
+		sink = NewMultiSink(append(activeSinks, apiSinkMgr, audioWSBroker, recordingMgr)...)
 	}
 
 	// SSE broker for /api/v1/signal/stream.
@@ -231,6 +246,7 @@ func main() {
 	// ── State ────────────────────────────────────────────────────────────────
 	currentMode := prefs.StringWithFallback(prefKeyMode, "usb")
 	currentFreq := prefs.IntWithFallback(prefKeyFreq, 14_200_000) // Hz
+	dbg("PREFS LOAD: freq=%d mode=%q", currentFreq, currentMode)
 
 	// Session timer state — updated when /api/description is fetched.
 	sessionMaxSecs := 0 // 0 = unlimited
@@ -317,7 +333,7 @@ func main() {
 	freqEntry := widget.NewEntry()
 	freqEntry.SetText(formatFreqKHz(currentFreq))
 
-	stepSelect := widget.NewSelect([]string{"1 Hz", "10 Hz", "100 Hz", "500 Hz", "1 kHz", "10 kHz", "100 kHz", "1 MHz"}, nil)
+	stepSelect := widget.NewSelect([]string{"1 Hz", "10 Hz", "100 Hz", "500 Hz", "1 kHz", "9 kHz", "10 kHz", "100 kHz", "1 MHz"}, nil)
 	stepSelect.SetSelectedIndex(prefs.IntWithFallback(prefKeyStep, 4))
 	stepSelect.OnChanged = func(_ string) { prefs.SetInt(prefKeyStep, stepSelect.SelectedIndex()) }
 
@@ -331,6 +347,7 @@ func main() {
 
 	// Bandwidth slider — range and default depend on mode.
 	savedBW := prefs.FloatWithFallback(prefKeyBW, bwDefaultSlider(currentMode))
+	dbg("PREFS LOAD: savedBW=%.0f (default would be %.0f)", savedBW, bwDefaultSlider(currentMode))
 	bwSlider := widget.NewSlider(0, bwSliderMax(currentMode))
 	bwSlider.Step = 50
 	bwSlider.Value = savedBW
@@ -452,6 +469,7 @@ func main() {
 		appState.Mu.Unlock()
 
 		if client.State() != StateConnected {
+			dbg("SEND_TUNE: skipped (not connected) freq=%d mode=%q bw=%.0f", currentFreq, currentMode, bwSlider.Value)
 			return
 		}
 		lo, hi := bwToLoHi(currentMode, bwSlider.Value)
@@ -463,6 +481,7 @@ func main() {
 		client.Mode = currentMode
 		client.BandwidthLow = lo
 		client.BandwidthHigh = hi
+		dbg("SEND_TUNE: freq=%d mode=%q bwSlider=%.0f lo=%d hi=%d", currentFreq, currentMode, bwSlider.Value, lo, hi)
 		if err := client.Tune(currentFreq, currentMode, lo, hi); err != nil {
 			statusDot.SetColor(dotColorRed)
 			statusLabel.SetText("Tune error: " + err.Error())
@@ -537,14 +556,63 @@ func main() {
 	var formatGroup *widget.RadioGroup
 	suppressFormatChange := false
 
-	modeInitDone := false
+	// modeInitDone gates the BW reset in modeSelect.OnChanged: when false the
+	// saved BW is preserved; when true a mode change resets BW to the mode default.
+	// It must be an atomic so that Fyne's async UI-goroutine callbacks see the
+	// write made on the main goroutine (plain bool is not safe across goroutines).
+	var modeInitDone atomic.Bool
+	// modeOnChangedCount counts how many times modeSelect.OnChanged has fired.
+	// The first call is the legitimate synchronous one from SetSelected; any
+	// subsequent call while !modeInitDone is a spurious Fyne async duplicate.
+	var modeOnChangedCount atomic.Int32
+	// modeExpected holds the mode key we most recently asked the widget to show
+	// via a programmatic SetSelected call.  Any OnChanged callback that carries a
+	// value other than modeExpected while modeInitDone is false is a stale async
+	// delivery from a *previous* SetSelected and must be discarded.
+	// Stored as an atomic string (pointer) so it is visible across goroutines.
+	var modeExpectedPtr atomic.Pointer[string]
+	setModeExpected := func(key string) { modeExpectedPtr.Store(&key) }
+	getModeExpected := func() string {
+		if p := modeExpectedPtr.Load(); p != nil {
+			return *p
+		}
+		return ""
+	}
+	// Initialise to the saved mode so the startup SetSelected is not rejected.
+	setModeExpected(currentMode)
+
 	modeSelect := widget.NewSelect(modeLabels, func(selected string) {
+		callNum := modeOnChangedCount.Add(1)
+		initDone := modeInitDone.Load()
 		prevMode := currentMode
+		// Guard 1: while modeInitDone is false (i.e. we are inside a programmatic
+		// SetSelected call), only the first synchronous callback is legitimate.
+		// Any subsequent call is a spurious async duplicate from Fyne's event loop.
+		if !initDone && callNum > 1 {
+			dbg("MODE CHANGED: spurious async callback suppressed callNum=%d selected=%q prevMode=%q", callNum, selected, prevMode)
+			return
+		}
+		// Guard 2: while modeInitDone is false, reject any callback whose value
+		// does not match the mode we most recently asked the widget to show.
+		// This catches stale async deliveries from a *previous* SetSelected call
+		// that arrive after modeOnChangedCount was reset to 0 for a new call —
+		// they have callNum=1 and initDone=false but carry the old widget value.
+		if !initDone && modeKey(selected) != getModeExpected() {
+			dbg("MODE CHANGED: stale async delivery suppressed callNum=%d selected=%q expected=%q", callNum, selected, getModeExpected())
+			return
+		}
+		// Guard 3: once initDone is true, a callback whose value already matches
+		// currentMode carries no new information (spurious Refresh() re-delivery).
+		if initDone && modeKey(selected) == currentMode {
+			dbg("MODE CHANGED: no-op re-delivery suppressed callNum=%d selected=%q currentMode=%q", callNum, selected, currentMode)
+			return
+		}
 		currentMode = modeKey(selected)
 		prefs.SetString(prefKeyMode, currentMode)
+		dbg("MODE CHANGED: callNum=%d selected=%q key=%q prevMode=%q modeInitDone=%v bwSlider=%.0f", callNum, selected, currentMode, prevMode, initDone, bwSlider.Value)
 		newMax := bwSliderMax(currentMode)
 		bwSlider.Max = newMax
-		if modeInitDone {
+		if initDone {
 			// User changed the mode — reset BW to a sensible default for that mode.
 			bwSlider.Value = bwDefaultSlider(currentMode)
 			prefs.SetFloat(prefKeyBW, bwSlider.Value)
@@ -560,7 +628,7 @@ func main() {
 		// prevMode != currentMode guards against spurious reconnects when
 		// rebuildModeOptions calls SetSelected to sync the dropdown to an already-active
 		// wide IQ mode (e.g. after loading a profile and connecting).
-		needsReconnect := modeInitDone && prevMode != currentMode &&
+		needsReconnect := initDone && prevMode != currentMode &&
 			client.State() == StateConnected &&
 			(isIQMode(currentMode) || isIQMode(prevMode))
 		if needsReconnect {
@@ -591,14 +659,21 @@ func main() {
 			client.ReconnectWS()
 			return
 		}
-		if modeInitDone && isSSBMode(currentMode) {
+		if initDone && isSSBMode(currentMode) {
 			resetAGCSliders()
 		}
 		sendTune()
 		updateAGCVisibility()
 	})
+	// modeInitDone is an atomic.Bool so writes are visible to Fyne's async UI
+	// goroutine.  Keep it false during SetSelected so the synchronous OnChanged
+	// preserves savedBW (the !initDone branch).  Any spurious async duplicate
+	// callback is suppressed by the modeKey(selected)==prevMode guard above.
+	// Set true after SetSelected returns so subsequent user interactions reset BW.
+	dbg("STARTUP: calling modeSelect.SetSelected(%q) bwSlider=%.0f", savedModeLabel, bwSlider.Value)
 	modeSelect.SetSelected(savedModeLabel)
-	modeInitDone = true
+	modeInitDone.Store(true)
+	dbg("STARTUP: after SetSelected modeInitDone=true currentMode=%q bwSlider=%.0f", currentMode, bwSlider.Value)
 	// Set initial AGC row visibility based on the saved mode.
 	updateAGCVisibility()
 
@@ -622,9 +697,37 @@ func main() {
 			}
 		}
 		modeSelect.Options = opts
+
+		// Re-assert the current selection BEFORE calling Refresh().
+		//
+		// Fyne's Select widget can lose track of the selected item when Options
+		// is replaced (the internal selected-index may no longer point at the
+		// right label).  Calling Refresh() in that state causes Fyne to post an
+		// async OnChanged callback with whatever value the widget now thinks is
+		// selected — which may be the widget's old default ("LSB") rather than
+		// the user's saved mode ("SAM").
+		//
+		// We call SetSelected with modeInitDone still TRUE so that:
+		//   • The synchronous OnChanged fired by SetSelected is caught by Guard 2
+		//     (modeKey(selected)==currentMode → no-op) and does nothing.
+		//   • We do NOT reset modeOnChangedCount, which would open a window where
+		//     a pending async callback from a previous SetSelected could arrive
+		//     with callNum=1 and modeInitDone=false and bypass both guards.
+		//
+		// Wide-IQ and unavailable-mode cases are handled in the block below.
+		if !isWideIQMode(currentMode) && !iqModeSwitching {
+			for _, lbl := range opts {
+				if modeKey(lbl) == currentMode {
+					setModeExpected(currentMode) // keep modeExpectedPtr current
+					modeSelect.SetSelected(lbl)  // Guard 3 absorbs the OnChanged (initDone=true, same value)
+					break
+				}
+			}
+		}
+
 		modeSelect.Refresh()
 
-		// Sync the dropdown selection to currentMode for any mode in the options list.
+		// Sync the dropdown selection to currentMode for wide IQ modes.
 		// This is needed when a profile sets currentMode to a wide IQ mode (e.g. "iq96")
 		// before the option exists in the list; once rebuildModeOptions adds it, we
 		// must call SetSelected so the dropdown reflects the actual mode.
@@ -634,14 +737,22 @@ func main() {
 			for _, lbl := range opts {
 				if modeKey(lbl) == currentMode {
 					stillAvailable = true
-					modeSelect.SetSelected(lbl) // sync dropdown to currentMode
+					setModeExpected(currentMode) // keep modeExpectedPtr current
+					modeSelect.SetSelected(lbl)  // Guard 3 absorbs the OnChanged (initDone=true, same value)
 					break
 				}
 			}
 			if !stillAvailable {
 				currentMode = "usb"
 				prefs.SetString(prefKeyMode, currentMode)
+				// currentMode is now "usb" so Guard 2 won't fire; use the
+				// modeInitDone=false guard to prevent a BW reset on this
+				// programmatic fallback-to-USB.
+				modeInitDone.Store(false)
+				modeOnChangedCount.Store(0)
+				setModeExpected("usb") // Guard 2: reject stale async callbacks carrying old value
 				modeSelect.SetSelected("USB")
+				modeInitDone.Store(true)
 				appState.Mu.Lock()
 				appState.CurrentMode = currentMode
 				appState.Mu.Unlock()
@@ -879,9 +990,19 @@ func main() {
 			// so they don't show stale values from the previous non-IQ mode.
 			signalBar.SetNoData()
 			snrBar.SetNoData()
+			// IQ recording must be PCM — Opus re-encoding of raw IQ is meaningless.
+			// Switch the recording format to PCM and disable the Opus option.
+			if appState.RecordFormatGroup != nil {
+				appState.RecordFormatGroup.SetSelected("PCM (WAV)")
+				appState.RecordFormatGroup.Disable()
+			}
 		} else {
 			formatGroup.Enable()
 			channelSelect.Enable()
+			// Re-enable the recording format selector when leaving IQ mode.
+			if appState.RecordFormatGroup != nil && !recordingMgr.IsRecording() {
+				appState.RecordFormatGroup.Enable()
+			}
 		}
 		// Wide IQ modes use server-preset bandwidth; disable the BW slider.
 		if isWideIQMode(currentMode) {
@@ -952,6 +1073,7 @@ func main() {
 				for _, lbl := range modeLabels {
 					if strings.ToLower(lbl) == mk {
 						currentMode = mk
+						setModeExpected(mk) // Guard 2: reject stale async callbacks carrying old value
 						modeSelect.SetSelected(lbl)
 						newMax := bwSliderMax(currentMode)
 						bwSlider.Max = newMax
@@ -1015,6 +1137,8 @@ func main() {
 		}
 		audioDeviceMu.RUnlock()
 		client.SetVolume(volumeSlider.Value / 100.0)
+		dbg("DO_CONNECT: freq=%d mode=%q bwLow=%d bwHigh=%d bwSlider=%.0f applyServerDefaults=%v",
+			hz, currentMode, lo, hi, bwSlider.Value, rawURL != prefs.StringWithFallback(prefKeyURL, ""))
 		client.Connect()
 	}
 
@@ -1068,7 +1192,9 @@ func main() {
 		// saved bandwidth value afterwards.
 		// Search modeSelect.Options (not just modeLabels) so that wide IQ modes
 		// like IQ96 that are only added after /connection are also found.
-		modeInitDone = false
+		modeInitDone.Store(false)
+		modeOnChangedCount.Store(0)
+		setModeExpected(p.Mode) // Guard 2: reject stale async callbacks carrying old value
 		for _, lbl := range modeSelect.Options {
 			if modeKey(lbl) == p.Mode {
 				modeSelect.SetSelected(lbl)
@@ -1076,7 +1202,7 @@ func main() {
 			}
 		}
 		currentMode = p.Mode
-		modeInitDone = true
+		modeInitDone.Store(true)
 
 		// Bandwidth
 		bwSlider.Max = bwSliderMax(currentMode)
@@ -1598,6 +1724,8 @@ func main() {
 				"Cancel",
 				dlgContent,
 				func(ok bool) {
+					// Clear the dismiss callback when the dialog closes normally.
+					appState.DismissBrowseDialog = nil
 					if !ok || selectedFilteredIdx < 0 || selectedFilteredIdx >= len(filtered) {
 						return
 					}
@@ -1606,6 +1734,9 @@ func main() {
 				w,
 			)
 			dlgRef = dlg
+			// Register dismiss callback so OnStateChange (and the REST API connect
+			// path) can close this dialog when a connection is established.
+			appState.DismissBrowseDialog = func() { dlg.Hide() }
 			dlg.Resize(fyne.NewSize(520, 420))
 			dlg.Show()
 			// Focus the search entry so the user can type immediately.
@@ -1655,9 +1786,11 @@ func main() {
 		mk := strings.ToLower(bm.Mode)
 		for _, lbl := range modeSelect.Options {
 			if modeKey(lbl) == mk {
-				modeInitDone = false
+				modeInitDone.Store(false)
+				modeOnChangedCount.Store(0)
+				setModeExpected(mk) // Guard 2: reject stale async callbacks carrying old value
 				modeSelect.SetSelected(lbl)
-				modeInitDone = true
+				modeInitDone.Store(true)
 				currentMode = mk
 				prefs.SetString(prefKeyMode, mk)
 				bwSlider.Max = bwSliderMax(currentMode)
@@ -2332,6 +2465,12 @@ func main() {
 	client.OnStateChange = func(state ConnectionState, msg string) {
 		switch state {
 		case StateConnected:
+			// Dismiss the Browse Instances dialog if it is still open (e.g. the
+			// user connected via the REST API while the dialog was showing).
+			if appState.DismissBrowseDialog != nil {
+				appState.DismissBrowseDialog()
+				appState.DismissBrowseDialog = nil
+			}
 			iqModeSwitching = false // IQ mode reconnect completed successfully
 			lastAllowedIQModes = client.AllowedIQModes()
 			rebuildModeOptions(lastAllowedIQModes)
@@ -2489,6 +2628,25 @@ func main() {
 		appState.Mu.Unlock()
 		if state != StateConnected {
 			sseBroker.PublishNoData()
+			// Stop any active recording so the file is properly finalised.
+			if recordingMgr.IsRecording() {
+				// Stop the live timer goroutine first.
+				if appState.RecordTimerStop != nil {
+					close(appState.RecordTimerStop)
+					appState.RecordTimerStop = nil
+				}
+				if err := recordingMgr.Stop(); err == nil {
+					if appState.RecordBtn != nil {
+						appState.RecordBtn.SetText("⏺ Record")
+						appState.RecordBtn.Importance = widget.MediumImportance
+						appState.RecordBtn.Refresh()
+					}
+					if appState.RecordStatusLabel != nil {
+						st := recordingMgr.Status()
+						appState.RecordStatusLabel.SetText(fmt.Sprintf("Saved: %s (%.0f s, disconnected)", st.Filename, st.ElapsedSecs))
+					}
+				}
+			}
 		}
 	}
 
@@ -2732,9 +2890,11 @@ func main() {
 			prefs.SetString(prefKeyMode, sdrMode)
 			for _, lbl := range modeLabels {
 				if modeKey(lbl) == sdrMode {
-					modeInitDone = false
+					modeInitDone.Store(false)
+					modeOnChangedCount.Store(0)
+					setModeExpected(sdrMode) // Guard 2: reject stale async callbacks carrying old value
 					modeSelect.SetSelected(lbl)
-					modeInitDone = true
+					modeInitDone.Store(true)
 					newMax := bwSliderMax(currentMode)
 					bwSlider.Max = newMax
 					bwSlider.Value = bwDefaultSlider(currentMode)
@@ -2836,6 +2996,7 @@ func main() {
 	appState.FlrigPort = flrigPortSaved
 	appState.FlrigDirection = flrigDirSaved
 	appState.FlrigPTTMute = flrigPTTMuteSaved
+	appState.BrowserAutoConnect = prefs.BoolWithFallback(prefKeyBrowserAutoConnectMain, true)
 	// Widget references.
 	appState.FreqEntry = freqEntry
 	appState.ModeSelect = modeSelect
@@ -2860,6 +3021,7 @@ func main() {
 	appState.FlrigHostEnt = flrigHostEntry
 	appState.FlrigPortEnt = flrigPortEntry
 	appState.FlrigDirSel = flrigDirSelect
+	// BrowserAutoConnectChk is set below after the checkbox is created.
 	appState.SuppressFormatChange = &suppressFormatChange
 	appState.SuppressTune = &suppressTune
 	// Callbacks into main() logic.
@@ -2867,6 +3029,10 @@ func main() {
 	appState.DoDisconnect = func() {
 		userDisconnected = true
 		client.Disconnect()
+	}
+	appState.DoReconnect = func() {
+		userDisconnected = false
+		doConnect()
 	}
 	appState.DoApplyFlrigConfig = applyFlrigConfig
 	appState.DoProfileConnectByName = func(name string) error {
@@ -2877,6 +3043,100 @@ func main() {
 		applyProfile(p)
 		profileConnectAndClose(nil)
 		return nil
+	}
+	// Recording manager wiring.
+	appState.RecordingMgr = recordingMgr
+
+	// startRecordTimer launches a goroutine that updates the status label every
+	// second with elapsed / remaining time.  It replaces any existing timer.
+	startRecordTimer := func() {
+		// Stop any previous timer.
+		if appState.RecordTimerStop != nil {
+			close(appState.RecordTimerStop)
+		}
+		stop := make(chan struct{})
+		appState.RecordTimerStop = stop
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					st := recordingMgr.Status()
+					if st.State != RecordingActive {
+						return
+					}
+					elapsed := st.ElapsedSecs
+					remaining := st.RemainingSecs
+					em := int(elapsed) / 60
+					es := int(elapsed) % 60
+					rm := int(remaining) / 60
+					rs := int(remaining) % 60
+					txt := fmt.Sprintf("Recording… %d:%02d / −%d:%02d", em, es, rm, rs)
+					if appState.RecordStatusLabel != nil {
+						appState.RecordStatusLabel.SetText(txt)
+					}
+				}
+			}
+		}()
+	}
+
+	// stopRecordTimer stops the live timer goroutine.
+	stopRecordTimer := func() {
+		if appState.RecordTimerStop != nil {
+			close(appState.RecordTimerStop)
+			appState.RecordTimerStop = nil
+		}
+	}
+
+	// DoStartRecording: called by the API handler to update the GUI button and start the timer.
+	appState.DoStartRecording = func(format string) {
+		if appState.RecordBtn != nil {
+			appState.RecordBtn.SetText("⏹ Stop Recording")
+			appState.RecordBtn.Importance = widget.DangerImportance
+			appState.RecordBtn.Refresh()
+		}
+		if appState.RecordStatusLabel != nil {
+			appState.RecordStatusLabel.SetText("Recording…")
+		}
+		// Sync the format radio to match what was actually started.
+		if appState.RecordFormatGroup != nil {
+			switch format {
+			case "pcm":
+				appState.RecordFormatGroup.SetSelected("PCM (WAV)")
+			default:
+				appState.RecordFormatGroup.SetSelected("Opus (OGG)")
+			}
+		}
+		startRecordTimer()
+	}
+	// DoStopRecording: called by the API handler to reset the GUI button and stop the timer.
+	appState.DoStopRecording = func() {
+		stopRecordTimer()
+		if appState.RecordBtn != nil {
+			appState.RecordBtn.SetText("⏺ Record")
+			appState.RecordBtn.Importance = widget.MediumImportance
+			appState.RecordBtn.Refresh()
+		}
+		if appState.RecordStatusLabel != nil {
+			st := recordingMgr.Status()
+			appState.RecordStatusLabel.SetText(fmt.Sprintf("Saved: %s (%.0f s)", st.Filename, st.ElapsedSecs))
+		}
+	}
+	// onAutoStop: called by the 60-minute timer to reset the GUI button and stop the timer.
+	recordingMgr.onAutoStop = func() {
+		stopRecordTimer()
+		if appState.RecordBtn != nil {
+			appState.RecordBtn.SetText("⏺ Record")
+			appState.RecordBtn.Importance = widget.MediumImportance
+			appState.RecordBtn.Refresh()
+		}
+		if appState.RecordStatusLabel != nil {
+			st := recordingMgr.Status()
+			appState.RecordStatusLabel.SetText(fmt.Sprintf("Saved: %s (%.0f s, auto-stopped)", st.Filename, st.ElapsedSecs))
+		}
 	}
 	appState.Mu.Unlock()
 
@@ -2890,7 +3150,7 @@ func main() {
 	var apiServer *APIServer
 	var apiActualPort int // the port we actually bound to (used by Open Browser)
 	if !*flagNoAPI {
-		apiServer = NewAPIServer(appState, client, flrigSync, mdns, prefs, sseBroker, apiSinkMgr, audioWSBroker)
+		apiServer = NewAPIServer(appState, client, flrigSync, mdns, prefs, sseBroker, apiSinkMgr, audioWSBroker, recordingMgr)
 
 		// Detect whether --api-port was explicitly provided by the user.
 		apiPortExplicit := false
@@ -2943,7 +3203,7 @@ func main() {
 		statusLabel,
 	)
 
-	// ── Open Browser button (only when API is enabled) ────────────────────────
+	// ── Open Browser button + auto-connect checkbox (only when API is enabled) ─
 	var instanceCardTitle fyne.CanvasObject
 	if !*flagNoAPI && apiActualPort != 0 {
 		openBrowserBtn := widget.NewButton("Open Browser", func() {
@@ -2952,13 +3212,135 @@ func main() {
 				_ = a.OpenURL(u)
 			}
 		})
+
+		// "Auto-connect" checkbox — persisted to prefs, default enabled.
+		browserAutoConnectCheck := widget.NewCheck("Auto-connect browser", func(checked bool) {
+			prefs.SetBool(prefKeyBrowserAutoConnectMain, checked)
+			appState.Mu.Lock()
+			appState.BrowserAutoConnect = checked
+			appState.Mu.Unlock()
+		})
+		browserAutoConnectCheck.SetChecked(prefs.BoolWithFallback(prefKeyBrowserAutoConnectMain, true))
+		appState.Mu.Lock()
+		appState.BrowserAutoConnectChk = browserAutoConnectCheck
+		appState.Mu.Unlock()
+
+		// Wire SSE subscriber-count callback: 0→1 = auto-connect; N→0 = auto-disconnect.
+		//
+		// OnCountChange fires from an arbitrary goroutine (the SSE broker).
+		// doConnect() is safe to call from a goroutine (same pattern as the HTTP
+		// /connect handler which calls go s.state.DoConnect()).
+		//
+		// The count=0 action is debounced by 500 ms to absorb brief SSE reconnects:
+		// the browser's EventSource auto-reconnects after errors, which causes a
+		// transient 0→1 cycle.  Without the debounce this would disconnect then
+		// reconnect the SDR on every transient SSE drop.  500 ms is enough to
+		// absorb the reconnect gap (typically <50 ms on localhost) while still
+		// feeling near-instant to the user when they genuinely close all tabs.
+		var sseDisconnectTimer *time.Timer
+		var sseDisconnectMu sync.Mutex
+		sseBroker.OnCountChange = func(count int) {
+			appState.Mu.RLock()
+			bac := appState.BrowserAutoConnect
+			appState.Mu.RUnlock()
+			if !bac {
+				return
+			}
+			if count >= 1 {
+				// At least one browser tab is open — cancel any pending disconnect.
+				sseDisconnectMu.Lock()
+				if sseDisconnectTimer != nil {
+					sseDisconnectTimer.Stop()
+					sseDisconnectTimer = nil
+				}
+				sseDisconnectMu.Unlock()
+				// Connect only on the 0→1 transition (first tab).
+				if count == 1 {
+					if client.State() == StateDisconnected || client.State() == StateError {
+						go doConnect()
+					}
+				}
+			} else {
+				// count == 0: all tabs closed — debounce before disconnecting.
+				sseDisconnectMu.Lock()
+				if sseDisconnectTimer == nil {
+					sseDisconnectTimer = time.AfterFunc(500*time.Millisecond, func() {
+						sseDisconnectMu.Lock()
+						sseDisconnectTimer = nil
+						sseDisconnectMu.Unlock()
+						// Only disconnect if still no SSE subscribers.
+						if sseBroker.SubscriberCount() == 0 {
+							if client.State() == StateConnected || client.State() == StateConnecting {
+								userDisconnected = true
+								client.Disconnect()
+							}
+						}
+					})
+				}
+				sseDisconnectMu.Unlock()
+			}
+		}
+
 		instanceCardTitle = container.NewBorder(nil, nil,
 			widget.NewRichTextFromMarkdown("**Instance**"),
-			openBrowserBtn,
+			container.NewHBox(browserAutoConnectCheck, openBrowserBtn),
 		)
 	} else {
 		instanceCardTitle = widget.NewRichTextFromMarkdown("**Instance**")
 	}
+
+	// ── Recording card ────────────────────────────────────────────────────────
+	// Format selector (PCM / Opus) and Record/Stop toggle button.
+	recordFormatGroup := widget.NewRadioGroup([]string{"Opus (OGG)", "PCM (WAV)"}, nil)
+	recordFormatGroup.SetSelected("Opus (OGG)")
+	recordFormatGroup.Horizontal = true
+
+	recordStatusLabel := widget.NewLabel("Idle")
+	recordStatusLabel.Wrapping = fyne.TextWrapWord
+
+	recordBtn := widget.NewButton("⏺ Record", nil)
+	appState.RecordBtn = recordBtn
+	appState.RecordStatusLabel = recordStatusLabel
+	appState.RecordFormatGroup = recordFormatGroup
+
+	recordBtn.OnTapped = func() {
+		if recordingMgr.IsRecording() {
+			// Stop recording.
+			stopRecordTimer()
+			if err := recordingMgr.Stop(); err == nil {
+				recordBtn.SetText("⏺ Record")
+				recordBtn.Importance = widget.MediumImportance
+				recordBtn.Refresh()
+				st := recordingMgr.Status()
+				recordStatusLabel.SetText(fmt.Sprintf("Saved: %s (%.0f s)", st.Filename, st.ElapsedSecs))
+			}
+		} else {
+			// Start recording.
+			recFmt := "opus"
+			if recordFormatGroup.Selected == "PCM (WAV)" {
+				recFmt = "pcm"
+			}
+			appState.Mu.RLock()
+			freq := appState.CurrentFreq
+			mode := appState.CurrentMode
+			appState.Mu.RUnlock()
+			freqStr := fmt.Sprintf("%dkHz", freq/1000)
+			if err := recordingMgr.Start(recFmt, freqStr, mode); err == nil {
+				recordBtn.SetText("⏹ Stop Recording")
+				recordBtn.Importance = widget.DangerImportance
+				recordBtn.Refresh()
+				recordStatusLabel.SetText("Recording…")
+				startRecordTimer()
+			}
+		}
+	}
+
+	recordBox := container.NewVBox(
+		container.New(layout.NewFormLayout(),
+			widget.NewLabel("Format"), recordFormatGroup,
+		),
+		container.NewBorder(nil, nil, nil, recordBtn, recordStatusLabel),
+	)
 
 	// Main scrollable body
 	body := container.NewVBox(
@@ -2969,6 +3351,7 @@ func main() {
 		widget.NewCard("Audio", "", audioBox),
 		widget.NewCard("Noise Reduction", "", dspBox),
 		widget.NewCard("FLRig Sync", "", flrigBox),
+		widget.NewCard("Recording", "", recordBox),
 	)
 
 	// Full window: scrollable body + fixed status bar at bottom

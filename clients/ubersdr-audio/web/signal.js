@@ -20,11 +20,26 @@ const Signal = (() => {
   let _es = null;          // EventSource
   let _pollTimer = null;   // fallback poll interval
 
-  /** Map a value in [min,max] to a percentage 0–100. */
-  function toPercent(val, min, max) {
-    if (val <= NO_DATA + 1) return 0;
-    const pct = ((val - min) / (max - min)) * 100;
-    return Math.max(0, Math.min(100, pct));
+  /** Map a value in [min,max] to a 0–1 fraction, clamped. */
+  function toFrac(val, min, max) {
+    return Math.max(0, Math.min(1, (val - min) / (max - min)));
+  }
+
+  /**
+   * Compute bar fill colour matching the Fyne barColour() function:
+   * frac 0→0.5: red(220,0,0) → yellow(220,200,0)
+   * frac 0.5→1: yellow(220,200,0) → green(0,200,0)
+   */
+  function barColour(frac) {
+    let r, g;
+    if (frac < 0.5) {
+      r = 220;
+      g = Math.round(frac * 2 * 200);
+    } else {
+      g = 200;
+      r = Math.round((1 - (frac - 0.5) * 2) * 220);
+    }
+    return `rgb(${r},${g},0)`;
   }
 
   /** Update a single meter bar and value label. */
@@ -36,10 +51,13 @@ const Signal = (() => {
 
     if (val <= NO_DATA + 1) {
       bar.style.width = '0%';
+      bar.style.backgroundColor = '';
       lbl.textContent = '—';
       lbl.style.color = '';
     } else {
-      bar.style.width = toPercent(val, cfg.min, cfg.max) + '%';
+      const frac = toFrac(val, cfg.min, cfg.max);
+      bar.style.width = (frac * 100) + '%';
+      bar.style.backgroundColor = barColour(frac);
       lbl.textContent = val.toFixed(1);
       lbl.style.color = '';
     }

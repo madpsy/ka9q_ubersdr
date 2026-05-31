@@ -75,6 +75,11 @@ const Connection = (() => {
         stopReconnectTimer();
         setDot('green');
         _userDisconnected = false;
+        // Auto-dismiss the browse dialog if it was open when the connection
+        // was established (e.g. connected via the Fyne GUI or another browser tab).
+        if (prev !== 'connected') {
+          App.closeModal('modal-browse');
+        }
 
         // Sync URL entry from server (always keep it up to date while connected)
         if (conn.url) {
@@ -339,9 +344,15 @@ const Connection = (() => {
       `;
 
       li.addEventListener('click', () => {
+        // Update selection without rebuilding the list (rebuilding destroys the
+        // element before dblclick can fire on it).
+        const list2 = document.getElementById('instances-list');
+        list2?.querySelectorAll('.instance-item').forEach((el, i) => {
+          el.classList.toggle('selected', i === filtIdx);
+        });
         _selectedIdx = filtIdx;
-        renderInstanceList();
         updateBrowseConnectBtn();
+        document.getElementById('browse-search')?.focus();
       });
 
       li.addEventListener('dblclick', () => {
@@ -424,6 +435,29 @@ const Connection = (() => {
 
     // Browse modal connect button
     document.getElementById('browse-connect-btn')?.addEventListener('click', connectSelectedInstance);
+
+    // Browse search — keyboard navigation
+    document.getElementById('browse-search')?.addEventListener('keydown', e => {
+      if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
+      e.preventDefault();
+      if (e.key === 'Enter') {
+        if (_selectedIdx >= 0) connectSelectedInstance();
+        return;
+      }
+      const len = _filteredIdx.length;
+      if (len === 0) return;
+      if (e.key === 'ArrowDown') {
+        _selectedIdx = _selectedIdx < len - 1 ? _selectedIdx + 1 : 0;
+      } else {
+        _selectedIdx = _selectedIdx > 0 ? _selectedIdx - 1 : len - 1;
+      }
+      renderInstanceList();
+      updateBrowseConnectBtn();
+      // Scroll selected item into view
+      const list = document.getElementById('instances-list');
+      const sel = list?.querySelector('.instance-item.selected');
+      sel?.scrollIntoView({ block: 'nearest' });
+    });
 
     // Browse search
     document.getElementById('browse-search')?.addEventListener('input', e => {

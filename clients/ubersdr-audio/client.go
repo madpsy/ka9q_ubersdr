@@ -858,7 +858,8 @@ func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 }
 
 // handleJSON processes a text (JSON) WebSocket frame from the server.
-// Currently handles DSP-related responses; other message types are silently ignored.
+// Handled types: pong, status, error, dsp_filters, dsp_status.
+// Unknown types are logged (when --debug) and silently ignored.
 func (c *RadioClient) handleJSON(data []byte) {
 	var msg struct {
 		Type string `json:"type"`
@@ -866,7 +867,15 @@ func (c *RadioClient) handleJSON(data []byte) {
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
+	dbg("HANDLE_JSON: type=%q raw=%s", msg.Type, data)
 	switch msg.Type {
+	case "pong":
+		// Keepalive response — nothing to do.
+	case "status":
+		// Server sends this after tune commands to confirm the applied state.
+		// Currently informational only; the client trusts its own sent values.
+	case "error":
+		// Server-side error message — logged via dbg above; no action needed.
 	case "dsp_filters":
 		// The server wraps the payload in an "info" field:
 		// {"type":"dsp_filters","info":{"available":true,"filters":[...]}}
@@ -898,6 +907,8 @@ func (c *RadioClient) handleJSON(data []byte) {
 		if cb := c.OnDSPStatus; cb != nil {
 			cb(enabled, filter)
 		}
+	default:
+		dbg("HANDLE_JSON: unhandled type=%q", msg.Type)
 	}
 }
 

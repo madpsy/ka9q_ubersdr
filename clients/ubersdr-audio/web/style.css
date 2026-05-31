@@ -389,7 +389,7 @@ input:disabled, select:disabled, button:disabled {
   font-size: 1.1rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: left;
   padding: 8px 8px;
 }
 
@@ -491,6 +491,13 @@ input:disabled, select:disabled, button:disabled {
   cursor: pointer;
 }
 
+.radio-label:has(input:disabled),
+.radio-label.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ── Checkbox ─────────────────────────────────────────────────────────────── */
 .checkbox-label {
   display: flex;
@@ -543,8 +550,8 @@ input:disabled, select:disabled, button:disabled {
   height: 100%;
   width: 0%;
   border-radius: 4px;
-  background: linear-gradient(90deg, var(--green) 0%, var(--orange) 70%, var(--red) 100%);
-  transition: width 0.1s linear;
+  background-color: var(--green); /* overridden dynamically by signal.js */
+  transition: width 0.15s linear, background-color 0.15s linear;
 }
 
 .meter-value {
@@ -641,6 +648,17 @@ input:disabled, select:disabled, button:disabled {
   font-size: 0.88rem;
   color: var(--accent);
   flex: 1;
+}
+
+/* When the station label lives inside the btn-row, push it to the far right */
+.station-label-inline {
+  margin-left: auto;
+  flex: 0 1 auto;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 /* ── Modals ───────────────────────────────────────────────────────────────── */
@@ -850,6 +868,29 @@ input[type="search"] {
 @media (min-width: 640px) {
   #main-content { padding: 16px; }
   .freq-input { font-size: 1.3rem; }
+}
+
+/* ── Two-column layout on wide screens ────────────────────────────────────── */
+.card-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  #main-content { max-width: 1200px; }
+  .card-columns {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .card-col { flex: 1; }
 }
 
 /* ── Utility ──────────────────────────────────────────────────────────────── */

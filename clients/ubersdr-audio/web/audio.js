@@ -32,8 +32,12 @@ const Audio = (() => {
 
   function setFormatUI(fmt, disabled) {
     for (const r of formatGroup()) {
-      r.checked   = (r.value === fmt);
-      r.disabled  = disabled;
+      r.checked  = (r.value === fmt);
+      r.disabled = disabled;
+      // Toggle .disabled on the parent label for CSS styling fallback
+      // (browsers that don't support :has() will use this class).
+      const lbl = r.closest('.radio-label');
+      if (lbl) lbl.classList.toggle('disabled', disabled);
     }
   }
 

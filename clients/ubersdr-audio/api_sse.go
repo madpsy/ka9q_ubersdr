@@ -42,6 +42,12 @@ var noDataEvent = SSESignalEvent{
 type SSEBroker struct {
 	mu          sync.Mutex
 	subscribers map[chan SSESignalEvent]struct{}
+
+	// OnCountChange is called (from a goroutine) whenever the number of active
+	// SSE subscribers changes.  The argument is the new count.  It is called
+	// with the broker mutex NOT held, so it is safe to call back into the
+	// broker.  May be nil.
+	OnCountChange func(count int)
 }
 
 // NewSSEBroker creates a new SSEBroker.
@@ -57,7 +63,12 @@ func (b *SSEBroker) subscribe() chan SSESignalEvent {
 	ch := make(chan SSESignalEvent, 4)
 	b.mu.Lock()
 	b.subscribers[ch] = struct{}{}
+	count := len(b.subscribers)
+	cb := b.OnCountChange
 	b.mu.Unlock()
+	if cb != nil {
+		go cb(count)
+	}
 	return ch
 }
 
@@ -65,7 +76,19 @@ func (b *SSEBroker) subscribe() chan SSESignalEvent {
 func (b *SSEBroker) unsubscribe(ch chan SSESignalEvent) {
 	b.mu.Lock()
 	delete(b.subscribers, ch)
+	count := len(b.subscribers)
+	cb := b.OnCountChange
 	b.mu.Unlock()
+	if cb != nil {
+		go cb(count)
+	}
+}
+
+// SubscriberCount returns the current number of active SSE subscribers.
+func (b *SSEBroker) SubscriberCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subscribers)
 }
 
 // Publish sends an event to all subscribers.  Drops the event for any

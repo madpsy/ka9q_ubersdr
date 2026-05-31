@@ -303,11 +303,19 @@ async function _ensureHttpAudioStream() {
         document.body.appendChild(el);
         _httpAudioElement = el;
 
-        el.addEventListener('ended', _onHttpAudioStreamEnded);
-        el.addEventListener('error', (e) => {
+        // Store the error handler as a named property so _destroyHttpAudioStream()
+        // can remove it with the correct reference (anonymous functions cannot be
+        // removed via removeEventListener).
+        el._errorHandler = (e) => {
+            // Ignore the spurious MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) that Chrome
+            // fires when _destroyHttpAudioStream() sets el.src = '' to stop playback.
+            // That is an intentional teardown, not a real error.
+            if (el.error?.code === 4) return;
             console.error('[MediaSession] Direct audio stream error:', el.error?.code, el.error?.message);
             _onHttpAudioStreamEnded();
-        });
+        };
+        el.addEventListener('ended', _onHttpAudioStreamEnded);
+        el.addEventListener('error', el._errorHandler);
         el.addEventListener('abort', _onHttpAudioStreamEnded);
         el.addEventListener('playing', () => {
             console.log('[MediaSession] Direct audio stream playing — muting AudioContext output');
@@ -349,9 +357,9 @@ function _destroyHttpAudioStream() {
         const el = _httpAudioElement;
         _httpAudioElement = null; // null first to prevent re-entrant calls
         el.removeEventListener('ended', _onHttpAudioStreamEnded);
-        el.removeEventListener('error', _onHttpAudioStreamEnded);
+        el.removeEventListener('error', el._errorHandler || _onHttpAudioStreamEnded);
         el.removeEventListener('abort', _onHttpAudioStreamEnded);
-        el.src = ''; // stops any pending play() cleanly
+        el.src = ''; // stops any pending play() cleanly — fires error code 4 (ignored by _errorHandler)
         try { el.load(); } catch (_) {} // reset media element state
         if (el.parentNode) el.parentNode.removeChild(el);
     }

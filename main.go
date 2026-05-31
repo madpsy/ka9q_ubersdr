@@ -2935,13 +2935,15 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 // includes the operator's callsign (e.g. "UberSDR (G0ABC)").
 func handleManifest(w http.ResponseWriter, r *http.Request, config *Config) {
 	appName := "UberSDR"
+	shortName := "UberSDR"
 	if cs := strings.ToUpper(strings.TrimSpace(config.Admin.Callsign)); cs != "" {
 		appName = fmt.Sprintf("UberSDR (%s)", cs)
+		shortName = cs
 	}
 
 	manifest := map[string]any{
 		"name":             appName,
-		"short_name":       "UberSDR",
+		"short_name":       shortName,
 		"description":      "Web-based SDR platform for amateur radio enthusiasts with real-time HF spectrum access.",
 		"start_url":        "/",
 		"scope":            "/",

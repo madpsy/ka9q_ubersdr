@@ -259,53 +259,144 @@ let mediaSessionEnabled = _isApple
 // The AudioContext output gain is muted to 0 while this element is active so audio
 // is not played twice — the <audio> element handles playback.
 let _httpAudioElement = null;
-let _httpAudioGainNode = null; // GainNode set to 0 while HTTP stream is active
+let _httpAudioGainNode = null;       // GainNode set to 0 while HTTP stream is active
+let _httpFetchAbortController = null; // AbortController for the MSE fetch() reader
+let _httpMediaSource = null;          // MediaSource object for MSE path
 
 /**
- * Create (or reuse) the hidden <audio src="/audio/stream?session=..."> element
- * that anchors the Android Chrome lock-screen media widget.
+ * Start the MSE-based HTTP audio stream for non-Apple devices.
+ *
+ * Uses Media Source Extensions (MSE) to feed the WebM/Opus HTTP stream
+ * directly into a SourceBuffer, bypassing the browser's aggressive
+ * pre-buffering heuristics.  This achieves ~200ms latency instead of ~6s.
+ *
+ * The <audio> element plays the stream (lock-screen anchor for Android Chrome).
+ * The AudioContext is muted while MSE is active — the <audio> element handles
+ * all audible output.
+ *
+ * Falls back to direct <audio src> if MSE is not supported.
+ *
  * Must be called from a user-gesture handler so audio.play() is allowed.
  * Safe to call multiple times — returns immediately if already active.
- *
- * Muting of the AudioContext is deferred until the 'playing' event fires,
- * confirming the browser is actually decoding and outputting audio from the
- * HTTP stream.  This prevents a silent gap if the stream errors immediately.
  */
 async function _ensureHttpAudioStream() {
     if (_httpAudioElement) return; // already active
+
+    const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
+    const mime = 'audio/webm; codecs=opus';
+
+    // ── MSE path (Chrome/Edge/Android) ───────────────────────────────────────
+    if (window.MediaSource && MediaSource.isTypeSupported(mime)) {
+        try {
+            const ms = new MediaSource();
+            _httpMediaSource = ms;
+
+            const el = document.createElement('audio');
+            el.setAttribute('playsinline', '');
+            el.style.display = 'none';
+            el.src = URL.createObjectURL(ms);
+            document.body.appendChild(el);
+            _httpAudioElement = el;
+
+            // Mute AudioContext once the element is confirmed playing
+            el.addEventListener('playing', () => {
+                console.log('[MediaSession] MSE audio stream playing — muting AudioContext output');
+                _muteAudioContextForHttpStream();
+            }, { once: true });
+
+            el.addEventListener('error', (e) => {
+                console.error('[MediaSession] MSE audio element error:', el.error?.code, el.error?.message);
+                _onHttpAudioStreamEnded();
+            });
+
+            // Wait for MediaSource to open, then set up SourceBuffer and fetch
+            await new Promise((resolve, reject) => {
+                ms.addEventListener('sourceopen', resolve, { once: true });
+                ms.addEventListener('error', reject, { once: true });
+                // Timeout if sourceopen never fires
+                setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 5000);
+            });
+
+            const sb = ms.addSourceBuffer(mime);
+            sb.mode = 'sequence'; // live streaming — ignore timestamps, play in order
+
+            // Start fetch with AbortController for clean teardown
+            _httpFetchAbortController = new AbortController();
+            const response = await fetch(url, { signal: _httpFetchAbortController.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            await el.play();
+            console.log('[MediaSession] MSE audio stream play() resolved');
+
+            // Pump stream chunks into SourceBuffer
+            const reader = response.body.getReader();
+            const pump = async () => {
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) { _onHttpAudioStreamEnded(); return; }
+                        if (!_httpAudioElement) return; // torn down
+
+                        // Wait for SourceBuffer to finish any pending update
+                        if (sb.updating) {
+                            await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
+                        }
+                        if (!_httpAudioElement) return; // torn down during wait
+
+                        sb.appendBuffer(value);
+
+                        // Trim buffer to keep latency low — keep max 1 second
+                        // Wait for appendBuffer to complete before trimming
+                        await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
+                        if (sb.buffered.length > 0 && !sb.updating) {
+                            const end = sb.buffered.end(0);
+                            const start = sb.buffered.start(0);
+                            if (end - start > 1.0) {
+                                try { sb.remove(start, end - 0.5); } catch (_) {}
+                            }
+                        }
+                    }
+                } catch (e) {
+                    if (e.name !== 'AbortError') {
+                        console.error('[MediaSession] MSE pump error:', e.message);
+                        _onHttpAudioStreamEnded();
+                    }
+                }
+            };
+            pump();
+            return; // MSE path succeeded
+        } catch (e) {
+            console.error('[MediaSession] MSE setup failed:', e.message, '— falling back to direct src');
+            _destroyHttpAudioStream(); // clean up partial MSE state
+        }
+    }
+
+    // ── Fallback: direct <audio src> (Firefox, older browsers) ───────────────
+    // Higher latency (~6s) but still provides the lock screen anchor.
+    console.log('[MediaSession] Using direct <audio src> (MSE not available)');
     try {
-        const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
         const el = document.createElement('audio');
         el.setAttribute('playsinline', '');
         el.style.display = 'none';
         el.src = url;
         document.body.appendChild(el);
+        _httpAudioElement = el;
 
-        // When the HTTP stream tears down (server closed, network drop, etc.),
-        // unmute the AudioContext so the WebSocket audio path resumes audibly.
         el.addEventListener('ended', _onHttpAudioStreamEnded);
         el.addEventListener('error', (e) => {
-            console.error('[MediaSession] HTTP audio stream error:', el.error?.code, el.error?.message, e);
+            console.error('[MediaSession] Direct audio stream error:', el.error?.code, el.error?.message);
             _onHttpAudioStreamEnded();
         });
         el.addEventListener('abort', _onHttpAudioStreamEnded);
-
-        // Only mute the AudioContext once the browser confirms it is actually
-        // playing audio from the HTTP stream.  If the stream errors before
-        // 'playing' fires, the AudioContext remains unmuted and audio continues
-        // over the WebSocket path.
         el.addEventListener('playing', () => {
-            console.log('[MediaSession] HTTP audio stream playing — muting AudioContext output');
+            console.log('[MediaSession] Direct audio stream playing — muting AudioContext output');
             _muteAudioContextForHttpStream();
         }, { once: true });
 
-        // Assign before play() so the error handler can reference it
-        _httpAudioElement = el;
-
         await el.play();
-        console.log('[MediaSession] HTTP audio stream element play() resolved');
+        console.log('[MediaSession] Direct audio stream play() resolved');
     } catch (e) {
-        console.error('[MediaSession] Could not start HTTP audio stream:', e.message);
+        console.error('[MediaSession] Could not start audio stream:', e.message);
         _destroyHttpAudioStream();
     }
 }
@@ -314,11 +405,23 @@ async function _ensureHttpAudioStream() {
 function _onHttpAudioStreamEnded() {
     console.log('[MediaSession] HTTP audio stream ended — restoring AudioContext audio');
     _destroyHttpAudioStream();
-    // AudioContext audio is automatically restored by _destroyHttpAudioStream
 }
 
-/** Tear down the HTTP audio stream element and restore AudioContext output. */
+/** Tear down the HTTP audio stream (MSE or direct) and restore AudioContext output. */
 function _destroyHttpAudioStream() {
+    // Abort the fetch reader (MSE path)
+    if (_httpFetchAbortController) {
+        _httpFetchAbortController.abort();
+        _httpFetchAbortController = null;
+    }
+    // Close the MediaSource (MSE path)
+    if (_httpMediaSource) {
+        try {
+            if (_httpMediaSource.readyState === 'open') _httpMediaSource.endOfStream();
+        } catch (_) {}
+        _httpMediaSource = null;
+    }
+    // Remove the audio element
     if (_httpAudioElement) {
         _httpAudioElement.removeEventListener('ended', _onHttpAudioStreamEnded);
         _httpAudioElement.removeEventListener('error', _onHttpAudioStreamEnded);

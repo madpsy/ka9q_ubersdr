@@ -1632,28 +1632,38 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				continue
 			}
 
-			// Track when we receive real audio (to know when squelch is open)
-			lastAudioTime = time.Now()
-
 			// HTTP audio stream tap: if an HTTP /audio/stream consumer is active for
 			// this session, forward the packet there instead of encoding it for the
-			// WebSocket binary connection.  Signal-quality packets (signalUpdateTicker
-			// path above) always go over WebSocket regardless.
+			// WebSocket binary connection.
 			// Non-blocking send: if the HTTP consumer is slow or gone, fall through
 			// to the normal WebSocket path so audio is never silently dropped.
+			//
+			// IMPORTANT: do NOT update lastAudioTime when forwarding to HTTP.
+			// The signalUpdateTicker fires when timeSinceAudio > 200ms and sends
+			// signal-quality data over WebSocket.  If we update lastAudioTime here,
+			// the ticker never fires and the frontend loses S-meter / SNR data.
+			// By leaving lastAudioTime unchanged, the ticker continues to send
+			// signal-quality packets over WebSocket at 10 Hz even while audio
+			// flows over the HTTP stream.
 			session.httpAudioMu.Lock()
 			hc := session.httpAudioChan
 			session.httpAudioMu.Unlock()
 			if hc != nil {
 				select {
 				case hc <- audioPacket:
-					// Forwarded to HTTP stream — skip WebSocket audio encoding.
+					// Forwarded to HTTP stream — skip WebSocket audio encoding
+					// and skip updating lastAudioTime so the ticker keeps sending
+					// signal-quality packets over WebSocket.
 					continue
 				default:
 					// HTTP consumer is slow or the channel is full — fall through
-					// to the WebSocket path so the client still hears audio.
+					// to the normal WebSocket path so the client still hears audio.
 				}
 			}
+
+			// Track when we receive real audio (to know when squelch is open).
+			// Only reached when NOT forwarding to HTTP stream.
+			lastAudioTime = time.Now()
 
 			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"

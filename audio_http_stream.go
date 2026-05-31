@@ -27,14 +27,41 @@ package main
 
 import (
 	"encoding/binary"
-	"hash/crc32"
 	"log"
 	"net/http"
 )
 
-// oggCRC32Table is the CRC-32 lookup table used by the Ogg container format.
-// Ogg uses a non-standard polynomial (0x04c11db7, reflected as 0xedb88320).
-var oggCRC32Table = crc32.MakeTable(0x04c11db7)
+// oggCRCTable is the lookup table for the Ogg CRC-32 checksum.
+//
+// Ogg uses a non-standard CRC-32 with polynomial 0x04c11db7 in the
+// NORMAL (non-reflected, MSB-first) form.  This is NOT the same as
+// IEEE CRC-32 (which uses the reflected form 0xedb88320).
+// The table is pre-computed to match the libogg reference implementation.
+var oggCRCTable [256]uint32
+
+func init() {
+	for i := 0; i < 256; i++ {
+		r := uint32(i) << 24
+		for j := 0; j < 8; j++ {
+			if r&0x80000000 != 0 {
+				r = (r << 1) ^ 0x04c11db7
+			} else {
+				r <<= 1
+			}
+		}
+		oggCRCTable[i] = r
+	}
+}
+
+// oggChecksum computes the Ogg CRC-32 checksum over data.
+// The CRC field in the page header must be zeroed before calling this.
+func oggChecksum(data []byte) uint32 {
+	var crc uint32
+	for _, b := range data {
+		crc = (crc << 8) ^ oggCRCTable[byte(crc>>24)^b]
+	}
+	return crc
+}
 
 // writeOggPage writes a single Ogg page to w.
 //
@@ -75,11 +102,12 @@ func writeOggPage(w http.ResponseWriter, serialNo, seqNo uint32, granulePos uint
 	header[26] = byte(len(segments))                        // number of page segments
 	copy(header[27:], segments)
 
-	// Compute CRC over header + data (CRC field itself is zero during computation)
-	crc := crc32.New(oggCRC32Table)
-	crc.Write(header)
-	crc.Write(data)
-	binary.LittleEndian.PutUint32(header[22:26], crc.Sum32())
+	// Compute CRC over header + data (CRC field itself is zero during computation).
+	// oggChecksum implements the libogg CRC-32 (polynomial 0x04c11db7, normal form).
+	combined := make([]byte, len(header)+len(data))
+	copy(combined, header)
+	copy(combined[len(header):], data)
+	binary.LittleEndian.PutUint32(header[22:26], oggChecksum(combined))
 
 	// Write header then data
 	if _, err := w.Write(header); err != nil {

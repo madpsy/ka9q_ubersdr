@@ -265,30 +265,45 @@ let _httpAudioGainNode = null; // GainNode set to 0 while HTTP stream is active
  * Create (or reuse) the hidden <audio src="/audio/stream?session=..."> element
  * that anchors the Android Chrome lock-screen media widget.
  * Must be called from a user-gesture handler so audio.play() is allowed.
- * Safe to call multiple times — returns immediately if already created.
+ * Safe to call multiple times — returns immediately if already active.
+ *
+ * Muting of the AudioContext is deferred until the 'playing' event fires,
+ * confirming the browser is actually decoding and outputting audio from the
+ * HTTP stream.  This prevents a silent gap if the stream errors immediately.
  */
 async function _ensureHttpAudioStream() {
     if (_httpAudioElement) return; // already active
     try {
         const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
-        _httpAudioElement = document.createElement('audio');
-        _httpAudioElement.setAttribute('playsinline', '');
-        _httpAudioElement.style.display = 'none';
-        _httpAudioElement.src = url;
-        document.body.appendChild(_httpAudioElement);
+        const el = document.createElement('audio');
+        el.setAttribute('playsinline', '');
+        el.style.display = 'none';
+        el.src = url;
+        document.body.appendChild(el);
 
         // When the HTTP stream tears down (server closed, network drop, etc.),
         // unmute the AudioContext so the WebSocket audio path resumes audibly.
-        _httpAudioElement.addEventListener('ended', _onHttpAudioStreamEnded);
-        _httpAudioElement.addEventListener('error', _onHttpAudioStreamEnded);
-        _httpAudioElement.addEventListener('abort', _onHttpAudioStreamEnded);
+        el.addEventListener('ended', _onHttpAudioStreamEnded);
+        el.addEventListener('error', (e) => {
+            console.error('[MediaSession] HTTP audio stream error:', el.error?.code, el.error?.message, e);
+            _onHttpAudioStreamEnded();
+        });
+        el.addEventListener('abort', _onHttpAudioStreamEnded);
 
-        await _httpAudioElement.play();
-        console.log('[MediaSession] HTTP audio stream element created and playing');
+        // Only mute the AudioContext once the browser confirms it is actually
+        // playing audio from the HTTP stream.  If the stream errors before
+        // 'playing' fires, the AudioContext remains unmuted and audio continues
+        // over the WebSocket path.
+        el.addEventListener('playing', () => {
+            console.log('[MediaSession] HTTP audio stream playing — muting AudioContext output');
+            _muteAudioContextForHttpStream();
+        }, { once: true });
 
-        // Mute the AudioContext output — the <audio> element handles playback.
-        // We still need the AudioContext running for spectrum/waterfall/VU meter.
-        _muteAudioContextForHttpStream();
+        // Assign before play() so the error handler can reference it
+        _httpAudioElement = el;
+
+        await el.play();
+        console.log('[MediaSession] HTTP audio stream element play() resolved');
     } catch (e) {
         console.error('[MediaSession] Could not start HTTP audio stream:', e.message);
         _destroyHttpAudioStream();

@@ -351,6 +351,36 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 	}
 }
 
+// HandleStopAudioStream serves DELETE /audio/stream?session=<userSessionID>.
+//
+// Called by the client when it intentionally tears down the HTTP audio stream
+// (e.g. the user disables MediaSession).  Immediately nils httpAudioChan so
+// streamAudio() resumes sending audio over the WebSocket without waiting for
+// the HTTP connection to time out on its own.
+func HandleStopAudioStream(sessions *SessionManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		userSessionID := r.URL.Query().Get("session")
+		if !isValidUUID(userSessionID) {
+			http.Error(w, "Missing or invalid session parameter", http.StatusBadRequest)
+			return
+		}
+		session := sessions.findAudioSessionByUserID(userSessionID)
+		if session == nil {
+			w.WriteHeader(http.StatusNoContent) // already gone — that's fine
+			return
+		}
+		session.httpAudioMu.Lock()
+		session.httpAudioChan = nil
+		session.httpAudioMu.Unlock()
+		log.Printf("[AudioStream] HTTP stream stopped by client for %s — WebSocket audio resumed", userSessionID)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // findAudioSessionByUserID finds the non-spectrum audio session for a given
 // userSessionID.  Returns nil if not found.
 func (sm *SessionManager) findAudioSessionByUserID(userSessionID string) *Session {

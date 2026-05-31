@@ -363,6 +363,16 @@ function _destroyHttpAudioStream() {
         try { el.load(); } catch (_) {} // reset media element state
         if (el.parentNode) el.parentNode.removeChild(el);
     }
+    // Tell the server to immediately resume WebSocket audio.  Without this,
+    // the server keeps httpAudioChan non-nil until the HTTP connection times
+    // out, so no audio arrives over the WebSocket.  Fire-and-forget — we don't
+    // need to wait for the response.
+    if (userSessionID) {
+        fetch(`/audio/stream?session=${encodeURIComponent(userSessionID)}`, {
+            method: 'DELETE',
+            keepalive: true,
+        }).catch(() => {}); // ignore errors — server may already have closed the stream
+    }
     _unmuteAudioContextForHttpStream();
 }
 
@@ -391,7 +401,18 @@ function _muteAudioContextForHttpStream() {
 function _unmuteAudioContextForHttpStream() {
     if (audioContext) {
         audioContext._httpStreamMuted = false;
+        // Chrome may suspend the AudioContext when the <audio> element that was
+        // driving media playback is removed.  Resume it explicitly so that
+        // playAudioBuffer() can schedule and play buffers immediately.
+        if (audioContext.state === 'suspended') {
+            audioContext.resume().catch(() => {});
+        }
     }
+    // Reset the audio scheduler so the next buffer plays immediately rather than
+    // waiting for a stale nextPlayTime that accumulated while the AudioContext was
+    // muted (gain=0) or suspended during HTTP stream playback.
+    nextPlayTime = 0;
+    window.nextPlayTime = 0;
     _httpAudioGainNode = null;
     console.log('[MediaSession] AudioContext output restored (HTTP stream inactive)');
 }
@@ -863,6 +884,8 @@ function updatePageTitle() {
 
 // Update mobile lock-screen / Control Centre media metadata (iOS and Android).
 // Called whenever frequency or mode changes so the lock screen stays current.
+let _lastMediaSessionTitle = null;
+let _lastMediaSessionArtist = null;
 function updateMediaSession() {
     // Only skip if the API is absent.
     // On Safari/Firefox: mediaElement exists (bridge path) — metadata is set via the bridge.
@@ -877,21 +900,33 @@ function updateMediaSession() {
     const modeStr = currentMode ? currentMode.toUpperCase() : '';
     const callsign = window.instanceDescription?.receiver?.callsign || '';
 
-    // Use absolute URLs for artwork — Android Chrome fails to load root-relative paths
-    // when the page is served behind a reverse proxy or on a non-standard port.
-    const _artworkBase = window.location.origin;
-    navigator.mediaSession.metadata = new MediaMetadata({
-        title:  callsign ? `UberSDR — ${callsign}` : 'UberSDR',
-        artist: [freqMHz, modeStr].filter(Boolean).join(' '),
-        album:  'Live SDR',
-        artwork: [
-            // apple-touch-icon fills the full canvas (no transparent padding) so iOS lock screen
-            // shows no white edges. android-chrome variants kept as fallback for other sizes.
-            { src: `${_artworkBase}/images/apple-touch-icon.png`, sizes: '180x180', type: 'image/png' },
-            { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' },
-            { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' }
-        ]
-    });
+    const newTitle  = callsign ? `UberSDR — ${callsign}` : 'UberSDR';
+    const newArtist = [freqMHz, modeStr].filter(Boolean).join(' ');
+
+    // Only replace the MediaMetadata object when the content actually changes.
+    // Chrome fetches all artwork URLs every time metadata is replaced — even if
+    // the URLs are identical — causing hundreds of redundant icon/manifest fetches
+    // and media-control flicker during the initial buffering phase.
+    if (newTitle !== _lastMediaSessionTitle || newArtist !== _lastMediaSessionArtist) {
+        _lastMediaSessionTitle  = newTitle;
+        _lastMediaSessionArtist = newArtist;
+
+        // Use absolute URLs for artwork — Android Chrome fails to load root-relative paths
+        // when the page is served behind a reverse proxy or on a non-standard port.
+        const _artworkBase = window.location.origin;
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title:  newTitle,
+            artist: newArtist,
+            album:  'Live SDR',
+            artwork: [
+                // apple-touch-icon fills the full canvas (no transparent padding) so iOS lock screen
+                // shows no white edges. android-chrome variants kept as fallback for other sizes.
+                { src: `${_artworkBase}/images/apple-touch-icon.png`, sizes: '180x180', type: 'image/png' },
+                { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' },
+                { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' }
+            ]
+        });
+    }
 
     // Explicitly set playback state so Android Chrome shows the media notification
     navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
@@ -1294,21 +1329,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
 
                 // Map play/pause to mute/unmute (can't truly pause a live stream).
-                //
-                // Apple/Safari: pause the <audio srcObject> element so Safari shows the
-                //   Play button in Control Centre.
-                // Non-Apple: pause/resume the <audio src> HTTP stream element.
+                // toggleMute() handles _httpAudioElement.volume for Chrome and
+                // mediaElement pause/resume for Apple/Firefox.
                 navigator.mediaSession.setActionHandler('play', () => {
-                    if (isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
+                    console.log('[MediaSession] play action');
+                    if (isMuted) toggleMute();
                     if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
                     navigator.mediaSession.playbackState = 'playing';
-                    console.log('[MediaSession] play action — unmuted');
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
-                    if (!isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
+                    console.log('[MediaSession] pause action');
+                    if (!isMuted) toggleMute();
                     if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
                     navigator.mediaSession.playbackState = 'paused';
-                    console.log('[MediaSession] pause action — muted');
                 });
                 console.log('[MediaSession] Action handlers registered');
             }
@@ -10782,7 +10815,10 @@ async function setMediaSessionEnabled(enabled) {
         // Hide the MediaSession indicator
         const indicator = document.getElementById('media-session-indicator');
         if (indicator) indicator.style.display = 'none';
-        // Clear MediaSession metadata so the OS removes the notification
+        // Clear MediaSession metadata so the OS removes the notification.
+        // Also reset the dedup cache so re-enabling forces a fresh metadata set.
+        _lastMediaSessionTitle  = null;
+        _lastMediaSessionArtist = null;
         if ('mediaSession' in navigator) {
             try { navigator.mediaSession.metadata = null; } catch (_) {}
             try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
@@ -10829,13 +10865,16 @@ async function setMediaSessionEnabled(enabled) {
             navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
             try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
             try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
+            // Map play/pause to mute/unmute (can't truly pause a live stream).
+            // toggleMute() handles _httpAudioElement.volume for Chrome and
+            // mediaElement pause/resume for Apple/Firefox.
             navigator.mediaSession.setActionHandler('play', () => {
-                if (isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
+                if (isMuted) toggleMute();
                 if (_isApple || _mediaSessionNeedsBridge) mediaElement?.play().catch(() => {});
                 navigator.mediaSession.playbackState = 'playing';
             });
             navigator.mediaSession.setActionHandler('pause', () => {
-                if (!isMuted) toggleMute(); // toggleMute handles volume for HTTP stream
+                if (!isMuted) toggleMute();
                 if (_isApple || _mediaSessionNeedsBridge) mediaElement?.pause();
                 navigator.mediaSession.playbackState = 'paused';
             });

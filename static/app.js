@@ -720,10 +720,12 @@ function updatePageTitle() {
 // Update mobile lock-screen / Control Centre media metadata (iOS and Android).
 // Called whenever frequency or mode changes so the lock screen stays current.
 function updateMediaSession() {
-    // Only skip if the API is absent or the media element hasn't been created yet.
-    // The mediaElement carries real audio via MediaStreamDestination, which is what
-    // both iOS and Android require for reliable MediaSession registration.
-    if (!('mediaSession' in navigator) || !mediaElement) return;
+    // Only skip if the API is absent.
+    // On Safari/Firefox: mediaElement exists (bridge path) — metadata is set via the bridge.
+    // On Chrome/Android: mediaElement is null (no bridge needed) — metadata is set directly.
+    // Do NOT gate on !mediaElement — that would silently prevent metadata from being set
+    // on Chrome/Android, which is exactly why the lock screen widget never appeared.
+    if (!('mediaSession' in navigator)) return;
 
     const freqInput = document.getElementById('frequency');
     const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;

@@ -241,11 +241,8 @@ let _mediaSessionActivated = false; // True once Media Session metadata has been
 // therefore need the MediaStreamDestination → <audio> bridge for MediaSession.
 // Chrome / Edge (desktop + Android) have setSinkId and do NOT need the bridge;
 // adding one causes a clock-mismatch stutter on Android Chrome.
-// TESTING: force bridge on ALL platforms to check if stutter is still present
-// with the current exclusive routing (audio goes ONLY to _mediaStreamDest, not
-// to audioContext.destination too).  Revert to the setSinkId check after testing.
-const _mediaSessionNeedsBridge = true; // typeof AudioContext !== 'undefined' &&
-    // typeof AudioContext.prototype.setSinkId !== 'function';
+const _mediaSessionNeedsBridge = typeof AudioContext !== 'undefined' &&
+    typeof AudioContext.prototype.setSinkId !== 'function';
 
 // Apple device detection — used only for the MediaSession default.
 // Apple:     default ON  (opt-out)  — works perfectly, no stutter.

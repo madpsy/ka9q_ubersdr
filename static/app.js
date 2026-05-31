@@ -918,10 +918,16 @@ function updateMediaSession() {
     // for the entire buffering phase.  The same mechanism also triggers the CPU-100%
     // feedback loop via spurious 'pause'/'play' MediaSession actions.
     //
+    // This guard applies whenever mediaSessionEnabled is true on the Chrome path —
+    // even if _httpAudioElement is currently null (stream failed and will be retried).
+    // The previous guard checked `_httpAudioElement && !_httpStreamPlaying` which
+    // allowed metadata to be set when the first play() attempt failed (element null),
+    // causing Chrome to re-fetch artwork during the retry buffering phase.
+    //
     // Apple/Firefox use the MediaStreamDestination bridge — no <audio src> element,
     // no buffering phase, safe to set metadata immediately.
-    if (!_isApple && !_mediaSessionNeedsBridge && _httpAudioElement && !_httpStreamPlaying) {
-        return; // Chrome buffering — stay silent until 'playing' fires
+    if (!_isApple && !_mediaSessionNeedsBridge && mediaSessionEnabled && !_httpStreamPlaying) {
+        return; // Chrome path — stay silent until HTTP stream is stably playing
     }
 
     const freqInput = document.getElementById('frequency');

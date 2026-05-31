@@ -262,6 +262,11 @@ let _httpAudioElement = null;
 let _httpAudioGainNode = null;       // GainNode set to 0 while HTTP stream is active
 let _httpFetchAbortController = null; // AbortController for the MSE fetch() reader
 let _httpMediaSource = null;          // MediaSource object for MSE path
+// True once the <audio> element has fired 'playing' (buffering complete).
+// Used to gate playbackState assignments on Chrome — setting playbackState='playing'
+// while the element is still in 'waiting' state causes Chrome to fire the 'pause'
+// MediaSession action, which triggers 'play', which triggers 'pause'... CPU-100% loop.
+let _httpStreamPlaying = false;
 
 /**
  * Start the MSE-based HTTP audio stream for non-Apple devices.
@@ -319,7 +324,14 @@ async function _ensureHttpAudioStream() {
         el.addEventListener('abort', _onHttpAudioStreamEnded);
         el.addEventListener('playing', () => {
             console.log('[MediaSession] Direct audio stream playing — muting AudioContext output');
+            _httpStreamPlaying = true;
             _muteAudioContextForHttpStream();
+            // Now that the element is stably playing, it is safe to set playbackState.
+            // Setting it earlier (while 'waiting') causes Chrome to fire the 'pause'
+            // MediaSession action, creating a CPU-100% feedback loop.
+            if ('mediaSession' in navigator && mediaSessionEnabled) {
+                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+            }
         }, { once: true });
 
         await el.play();
@@ -363,6 +375,8 @@ function _destroyHttpAudioStream() {
         try { el.load(); } catch (_) {} // reset media element state
         if (el.parentNode) el.parentNode.removeChild(el);
     }
+    // Reset the playing flag — the element is gone.
+    _httpStreamPlaying = false;
     // Tell the server to immediately resume WebSocket audio.  Without this,
     // the server keeps httpAudioChan non-nil until the HTTP connection times
     // out, so no audio arrives over the WebSocket.  Fire-and-forget — we don't
@@ -928,8 +942,14 @@ function updateMediaSession() {
         });
     }
 
-    // Explicitly set playback state so Android Chrome shows the media notification
-    navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+    // Only set playbackState once the HTTP stream is stably playing.
+    // On Chrome, setting it while the <audio> element is in 'waiting' state causes
+    // Chrome to fire the 'pause' MediaSession action, creating a feedback loop.
+    // For Apple/Firefox (bridge path), _httpStreamPlaying is always false so we
+    // use the mediaElement check instead.
+    if (_httpStreamPlaying || _isApple || _mediaSessionNeedsBridge || !_httpAudioElement) {
+        navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+    }
 }
 
 // Legacy alias for backward compatibility
@@ -1318,8 +1338,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // All platforms: set metadata and action handlers.
                 updateMediaSession();
-                navigator.mediaSession.playbackState = 'playing';
-                console.log('[MediaSession] Metadata set, playbackState = playing');
+                // Do NOT set playbackState='playing' here on Chrome HTTP stream path.
+                // The <audio> element is still buffering ('waiting') at this point.
+                // Setting playbackState while the element is in 'waiting' causes Chrome
+                // to fire the 'pause' MediaSession action → our handler fires → sets
+                // 'playing' → Chrome fires 'pause' again → CPU-100% feedback loop.
+                // playbackState is set in the 'playing' event handler instead.
+                if (_isApple || _mediaSessionNeedsBridge) {
+                    navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+                }
+                console.log('[MediaSession] Metadata set');
 
                 // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step
                 navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
@@ -1356,8 +1384,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (btn) btn.textContent = '🔊 Mute';
                             if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
                         }
+                        // Only update playbackState once stream is playing — not during buffering.
+                        if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
                     }
-                    navigator.mediaSession.playbackState = 'playing';
+                    if (_isApple || _mediaSessionNeedsBridge) {
+                        navigator.mediaSession.playbackState = 'playing';
+                    }
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
                     console.log('[MediaSession] pause action');
@@ -1365,6 +1397,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Bridge path: toggleMute() is safe.
                         if (!isMuted) toggleMute();
                         mediaElement?.pause();
+                        navigator.mediaSession.playbackState = 'paused';
                     } else {
                         // Chrome HTTP stream path: control volume directly.
                         if (_httpAudioElement) _httpAudioElement.volume = 0;
@@ -1374,8 +1407,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (btn) btn.textContent = '🔇 Unmute';
                             if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                         }
+                        // Only update playbackState once stream is playing — not during buffering.
+                        if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'paused';
                     }
-                    navigator.mediaSession.playbackState = 'paused';
                 });
                 console.log('[MediaSession] Action handlers registered');
             }
@@ -4038,7 +4072,10 @@ function playAudioBuffer(buffer) {
     if (!_mediaSessionActivated && mediaSessionEnabled && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateMediaSession();
-        navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        // Gate playbackState on Chrome — only safe after 'playing' fires on _httpAudioElement.
+        if (_isApple || _mediaSessionNeedsBridge || _httpStreamPlaying) {
+            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        }
         if (_isApple || _mediaSessionNeedsBridge) {
             // Apple / Firefox: ensure the bridge element is still playing.
             if (mediaElement && !isMuted) mediaElement.play().catch(() => {});
@@ -5716,9 +5753,9 @@ function toggleMute() {
 
     // Keep Media Session playback state in sync with mute
     if ('mediaSession' in navigator && _mediaSessionActivated) {
-        navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
         if (_isApple || _mediaSessionNeedsBridge) {
             // Apple / Firefox: pause/resume the MediaStreamDestination bridge element
+            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
             if (isMuted) {
                 mediaElement?.pause();
             } else {
@@ -5730,6 +5767,11 @@ function toggleMute() {
             // lock-screen widget.  Volume=0 silences it without pausing.
             if (_httpAudioElement) {
                 _httpAudioElement.volume = isMuted ? 0 : 1;
+            }
+            // Only update playbackState once the stream is stably playing;
+            // setting it during buffering triggers Chrome's reconciliation loop.
+            if (_httpStreamPlaying) {
+                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
             }
         }
     }
@@ -10891,7 +10933,13 @@ async function setMediaSessionEnabled(enabled) {
 
             // All platforms: metadata + action handlers
             updateMediaSession();
-            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+            // Only set playbackState immediately on Apple/bridge paths.
+            // On Chrome the HTTP stream may still be buffering; setting 'playing'
+            // now would trigger Chrome's reconciliation loop (CPU 100%).
+            // _httpStreamPlaying is set once the 'playing' event fires on the element.
+            if (_isApple || _mediaSessionNeedsBridge || _httpStreamPlaying) {
+                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+            }
 
             const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
             const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
@@ -10907,6 +10955,7 @@ async function setMediaSessionEnabled(enabled) {
                 if (_isApple || _mediaSessionNeedsBridge) {
                     if (isMuted) toggleMute();
                     mediaElement?.play().catch(() => {});
+                    navigator.mediaSession.playbackState = 'playing';
                 } else {
                     if (_httpAudioElement) _httpAudioElement.volume = 1;
                     if (isMuted) {
@@ -10915,13 +10964,16 @@ async function setMediaSessionEnabled(enabled) {
                         if (btn) btn.textContent = '🔊 Mute';
                         if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
                     }
+                    // Only update playbackState once the stream is stably playing;
+                    // setting it during buffering restarts Chrome's reconciliation loop.
+                    if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
                 }
-                navigator.mediaSession.playbackState = 'playing';
             });
             navigator.mediaSession.setActionHandler('pause', () => {
                 if (_isApple || _mediaSessionNeedsBridge) {
                     if (!isMuted) toggleMute();
                     mediaElement?.pause();
+                    navigator.mediaSession.playbackState = 'paused';
                 } else {
                     if (_httpAudioElement) _httpAudioElement.volume = 0;
                     if (!isMuted) {
@@ -10930,8 +10982,9 @@ async function setMediaSessionEnabled(enabled) {
                         if (btn) btn.textContent = '🔇 Unmute';
                         if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                     }
+                    // Only update playbackState once the stream is stably playing.
+                    if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'paused';
                 }
-                navigator.mediaSession.playbackState = 'paused';
             });
             log('Media Session enabled — lock-screen controls active');
         } catch (e) {

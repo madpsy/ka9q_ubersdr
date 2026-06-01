@@ -273,6 +273,11 @@ const _isMobileChrome = /Android/i.test(navigator.userAgent) &&
 //    No bridge, no HTTP stream.  Chrome shows media controls in the
 //    toolbar because the AudioContext is producing audio.  Audio
 //    routes directly to audioContext.destination as normal.
+//    IMPORTANT: never set playbackState='paused' on Chrome — Chrome
+//    dismisses the media controls widget when paused.  Mute is
+//    handled by keeping the audio pipeline running at gain=0 (the
+//    AudioContext keeps producing silent audio, so Chrome keeps the
+//    controls visible).
 //
 const _useMediaSessionBridge = _isApple || _mediaSessionNeedsBridge;
 let mediaSessionEnabled = _isApple
@@ -1766,11 +1771,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 // state + UI without the nextPlayTime side-effect.
                 navigator.mediaSession.setActionHandler('play', () => {
                     console.log('[MediaSession] play action');
-                    if (!_isMobileChrome) {
-                        // Bridge path + desktop Chrome: toggleMute() is safe — no spurious actions.
+                    if (_useMediaSessionBridge) {
+                        // Bridge path (Apple/Firefox): toggleMute() is safe.
                         if (isMuted) toggleMute();
                         if (mediaElement) mediaElement.play().catch(() => {});
-                    } else {
+                    } else if (_isMobileChrome) {
                         // Android Chrome HTTP stream path: control volume directly.
                         if (_httpAudioElement) _httpAudioElement.volume = 1;
                         if (isMuted) {
@@ -1779,23 +1784,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (btn) btn.textContent = '🔊 Mute';
                             if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
                         }
-                        // Only update playbackState once stream is playing — not during buffering.
                         if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
-                    }
-                    if (!_isMobileChrome) {
+                    } else {
+                        // Desktop Chrome (metadata-only): toggleMute() is safe here.
+                        if (isMuted) toggleMute();
                         navigator.mediaSession.playbackState = 'playing';
                     }
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
                     console.log('[MediaSession] pause action');
-                    if (!_isMobileChrome) {
-                        // Bridge path + desktop Chrome: toggleMute() is safe.
+                    if (_useMediaSessionBridge) {
+                        // Bridge path (Apple/Firefox): toggleMute() is safe, these
+                        // browsers keep media controls visible even when paused.
                         if (!isMuted) toggleMute();
                         if (mediaElement) mediaElement.pause();
                         navigator.mediaSession.playbackState = 'paused';
-                    } else {
+                    } else if (_isMobileChrome) {
                         // Android Chrome HTTP stream path: control volume directly.
-                        // NEVER set playbackState='paused' on Android Chrome — the
+                        // NEVER set playbackState='paused' on Chrome — the
                         // lock-screen widget disappears shortly after entering paused
                         // state.  Keep it 'playing' and only control volume.
                         if (_httpAudioElement) {
@@ -1809,9 +1815,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (btn) btn.textContent = '🔇 Unmute';
                             if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                         }
-                        // Do NOT set playbackState='paused' — widget disappears on Android.
-                        // The widget will still show the pause button because the <audio>
-                        // element is playing; tapping it again triggers the 'play' action.
+                    } else {
+                        // Desktop Chrome (metadata-only): toggleMute() keeps the
+                        // audio pipeline running at gain=0 (no nextPlayTime reset).
+                        // Never set 'paused' — Chrome dismisses the widget.
+                        if (!isMuted) toggleMute();
+                        navigator.mediaSession.playbackState = 'playing';
                     }
                 });
                 console.log('[MediaSession] Action handlers registered');
@@ -4476,14 +4485,15 @@ function playAudioBuffer(buffer) {
         _mediaSessionActivated = true;
         updateMediaSession();
         // Gate playbackState — only safe after 'playing' fires on _httpAudioElement (Android Chrome).
-        // Bridge path + desktop Chrome: always safe to set immediately.
-        if (!_isMobileChrome || _httpStreamPlaying) {
-            // On Android Chrome, never set 'paused' — widget disappears.
-            if (_isMobileChrome) {
-                navigator.mediaSession.playbackState = 'playing';
-            } else {
-                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-            }
+        // Bridge path: can use 'paused'. Chrome (desktop + mobile): always 'playing'.
+        if (_useMediaSessionBridge) {
+            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        } else if (_isMobileChrome) {
+            // Android Chrome: only set once stream is stably playing.
+            if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
+        } else {
+            // Desktop Chrome: always 'playing' — Chrome dismisses controls on 'paused'.
+            navigator.mediaSession.playbackState = 'playing';
         }
         if (_useMediaSessionBridge) {
             // Bridge path (Apple/Firefox): ensure the bridge element is still playing.
@@ -6145,12 +6155,21 @@ function toggleMute() {
     const btn = document.getElementById('mute-btn');
     btn.textContent = isMuted ? '🔇 Unmute' : '🔊 Mute';
 
-    // When muting, reset the audio buffer to provide instant mute response
-    if (isMuted && audioContext) {
+    // When muting, reset the audio buffer to provide instant mute response.
+    // EXCEPTION: when MediaSession is active on Chrome (desktop or mobile),
+    // do NOT reset nextPlayTime — the audio pipeline must keep scheduling
+    // buffers at gain=0 so Chrome continues to see an active AudioContext
+    // and keeps the media controls visible.  playAudioBuffer() already
+    // applies gain=0 when isMuted is true, so silence is guaranteed.
+    const _isChrome = !_useMediaSessionBridge;  // Chrome (desktop or mobile)
+    const keepPipelineRunning = _isChrome && mediaSessionEnabled && _mediaSessionActivated;
+    if (isMuted && audioContext && !keepPipelineRunning) {
         const currentTime = audioContext.currentTime;
         nextPlayTime = currentTime;
         window.nextPlayTime = nextPlayTime;
         log('Muted (buffer flushed for instant response)');
+    } else if (isMuted) {
+        log('Muted (pipeline kept running for media controls)');
     } else {
         log('Unmuted');
     }
@@ -6162,28 +6181,33 @@ function toggleMute() {
 
     // Keep Media Session playback state in sync with mute
     if ('mediaSession' in navigator && _mediaSessionActivated) {
-        if (!_isMobileChrome) {
-            // Bridge path + desktop Chrome: pause/resume the MediaStreamDestination bridge element
+        if (_useMediaSessionBridge) {
+            // Bridge path (Apple/Firefox): pause/resume the bridge element.
+            // These browsers keep media controls visible even when paused.
             navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
             if (isMuted) {
                 mediaElement?.pause();
             } else {
                 mediaElement?.play().catch(() => {});
             }
-        } else {
+        } else if (_isMobileChrome) {
             // Android Chrome: use volume to mute/unmute the HTTP stream element.
             // Do NOT pause() — keeping the element playing maintains the Android
             // lock-screen widget.  Volume=0 silences it without pausing.
             if (_httpAudioElement) {
                 _httpAudioElement.volume = isMuted ? 0 : 1;
             }
-            // Only update playbackState once the stream is stably playing;
-            // setting it during buffering triggers Chrome's reconciliation loop.
-            // On Android Chrome, never set 'paused' — widget disappears.
+            // Never set 'paused' on Chrome — widget disappears.
             // Always report 'playing'; mute is handled via volume=0.
             if (_httpStreamPlaying) {
                 navigator.mediaSession.playbackState = 'playing';
             }
+        } else {
+            // Desktop Chrome (metadata-only): never set 'paused' — Chrome
+            // dismisses the media controls widget when playbackState is 'paused'
+            // AND the AudioContext stops producing audio.  Keep it 'playing'
+            // and let the gain=0 in playAudioBuffer() handle silence.
+            navigator.mediaSession.playbackState = 'playing';
         }
     }
 }
@@ -11410,12 +11434,12 @@ async function setMediaSessionEnabled(enabled) {
             // fires these actions during <audio> buffering transitions (waiting→playing),
             // and toggleMute() resets nextPlayTime causing a CPU-100% feedback loop.
             navigator.mediaSession.setActionHandler('play', () => {
-                if (!_isMobileChrome) {
-                    // Bridge path + desktop Chrome: toggleMute() is safe.
+                if (_useMediaSessionBridge) {
+                    // Bridge path (Apple/Firefox): toggleMute() is safe.
                     if (isMuted) toggleMute();
                     if (mediaElement) mediaElement.play().catch(() => {});
                     navigator.mediaSession.playbackState = 'playing';
-                } else {
+                } else if (_isMobileChrome) {
                     if (_httpAudioElement) _httpAudioElement.volume = 1;
                     if (isMuted) {
                         isMuted = false;
@@ -11426,15 +11450,20 @@ async function setMediaSessionEnabled(enabled) {
                     // Only update playbackState once the stream is stably playing;
                     // setting it during buffering restarts Chrome's reconciliation loop.
                     if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
+                } else {
+                    // Desktop Chrome (metadata-only): toggleMute() is safe here.
+                    if (isMuted) toggleMute();
+                    navigator.mediaSession.playbackState = 'playing';
                 }
             });
             navigator.mediaSession.setActionHandler('pause', () => {
-                if (!_isMobileChrome) {
-                    // Bridge path + desktop Chrome: toggleMute() is safe.
+                if (_useMediaSessionBridge) {
+                    // Bridge path (Apple/Firefox): toggleMute() is safe, these
+                    // browsers keep media controls visible even when paused.
                     if (!isMuted) toggleMute();
                     if (mediaElement) mediaElement.pause();
                     navigator.mediaSession.playbackState = 'paused';
-                } else {
+                } else if (_isMobileChrome) {
                     // Android Chrome: NEVER set playbackState='paused' — the
                     // lock-screen widget disappears shortly after.  Keep it
                     // 'playing' and only control volume.
@@ -11448,6 +11477,12 @@ async function setMediaSessionEnabled(enabled) {
                         if (btn) btn.textContent = '🔇 Unmute';
                         if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                     }
+                } else {
+                    // Desktop Chrome (metadata-only): toggleMute() keeps the
+                    // audio pipeline running at gain=0 (no nextPlayTime reset).
+                    // Never set 'paused' — Chrome dismisses the widget.
+                    if (!isMuted) toggleMute();
+                    navigator.mediaSession.playbackState = 'playing';
                 }
             });
             log('Media Session enabled — lock-screen controls active');

@@ -366,6 +366,50 @@ services:
         fluentd-async: "true"
         tag: "multicast-relay"
 
+  # Leo Bodnar LBE-1420 GPS-locked clock source - web dashboard and control API
+  # Optional: only needed when using an LBE-1420 GPS reference clock with the RX888 Mk II
+  ubersdr-leobodnar:
+    image: madpsy/ubersdr-leobodnar:latest
+    container_name: ubersdr-leobodnar
+    restart: unless-stopped
+    privileged: true
+    cpu_shares: 256
+
+    networks:
+      - sdr-network
+
+    # Port 5123 — only accessible within sdr-network (not exposed to host).
+    # Access via http://ubersdr-leobodnar:5123/ from other containers.
+    expose:
+      - "5123"
+
+    volumes:
+      # Full /dev access required for /dev/hidraw* (HID) and /dev/ttyACM* (NMEA serial)
+      - /dev:/dev
+
+    environment:
+      - TZ=${TZ:-UTC}
+      - LBE_SERVE=1
+      - LBE_PORT=5123
+      # - LBE_HIDRAW=/dev/hidraw0      # HID device path (auto-discovered if not set)
+      # - LBE_SERIAL=/dev/ttyACM0     # Serial port for NMEA GPS (auto-discovered if not set)
+      # - LBE_F1=27000000             # Output frequency in Hz, saved to flash
+      # - LBE_OUT1=1                  # Enable output 1
+
+    healthcheck:
+      test: [CMD, curl, -sf, http://localhost:5123/json]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "ubersdr-leobodnar"
+
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet
 networks:

@@ -1228,7 +1228,7 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>GPSDO Dashboard:</strong> Leo Bodnar LBE-1420 GPS-disciplined oscillator status and configuration. Served directly from the <code>ubersdr-leobodnar</code> container.
                     </div>
-                    <iframe id="gpsdoIframe" src="" style="width: 100%; height: 700px; border: 1px solid #ddd; border-radius: 5px; background: #fff;" title="GPSDO Dashboard"></iframe>
+                    <iframe id="gpsdoIframe" src="" style="width: 100%; height: calc(100vh - 200px); min-height: 600px; border: 1px solid #ddd; border-radius: 5px; background: #fff;" title="GPSDO Dashboard"></iframe>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -1715,6 +1715,14 @@
                             <div style="height: 250px; position: relative;">
                                 <canvas id="loadHourlyCanvas"></canvas>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- GPSDO Health Section -->
+                    <div id="gpsdoHealthSection" class="config-section" style="display: none;">
+                        <h3 id="gpsdoHealthTitle">📡 GPSDO (Leo Bodnar LBE-1420)</h3>
+                        <div id="gpsdoHealthDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <!-- GPSDO health will be populated by JavaScript -->
                         </div>
                     </div>
 
@@ -17886,7 +17894,7 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl and NTP health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP and GPSDO health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
@@ -17897,7 +17905,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/cwskimmer-health'),
                     authenticatedFetch('/admin/mqtt-health'),
                     authenticatedFetch('/admin/rotctl-health'),
-                    authenticatedFetch('/admin/ntp-health')
+                    authenticatedFetch('/admin/ntp-health'),
+                    authenticatedFetch('/admin/gpsdo-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -17906,9 +17915,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -17924,15 +17933,16 @@ const tooltipLine2 = timeStr;
                 const mqttHealth = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
                 const rotctlHealth = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
                 const ntpHealth = (ntpResponse.ok || ntpResponse.status === 503) ? await ntpResponse.json() : null;
+                const gpsdoHealth = (gpsdoResponse.ok || gpsdoResponse.status === 503) ? await gpsdoResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -18251,9 +18261,10 @@ const tooltipLine2 = timeStr;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
                 const hasNTPIssues = data.ntp && !data.ntp.healthy;
+                const hasGPSDOIssues = data.gpsdo && data.gpsdo.enabled && !data.gpsdo.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasNTPIssues || hasSystemLoadIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -18337,6 +18348,12 @@ const tooltipLine2 = timeStr;
                     if (hasRotctlIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Rotator Control:</strong> ' + (data.rotctl.issues && data.rotctl.issues.length > 0 ? data.rotctl.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasGPSDOIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>GPSDO (Leo Bodnar LBE-1420):</strong> ' + (data.gpsdo.issues && data.gpsdo.issues.length > 0 ? data.gpsdo.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -18499,6 +18516,11 @@ const tooltipLine2 = timeStr;
                     renderRotctlHealth(container, data.rotctl);
                 }
 
+                // Render GPSDO health status
+                if (data.gpsdo && data.gpsdo.enabled) {
+                    renderGPSDOHealth(data.gpsdo);
+                }
+
                 // Render NTP time sync health status (unified static section with charts)
                 if (data.ntp) {
                     renderNTPHistorySection(data.ntp);
@@ -18517,6 +18539,7 @@ const tooltipLine2 = timeStr;
                 { id: 'frontendStatusSection',     label: 'SDR Frontend' },
                 { id: 'frequencyReferenceSection', label: 'Freq Reference' },
                 { id: 'systemLoadHistorySection',  label: 'System Load' },
+                { id: 'gpsdoHealthSection',        label: 'GPSDO' },
                 { id: 'ntpHistorySection',         label: 'NTP' },
                 { id: 'monitor-tunnel',            label: 'Tunnel' },
                 { id: 'monitor-instance-reporter', label: 'Instance Reporter' },
@@ -18547,6 +18570,95 @@ const tooltipLine2 = timeStr;
                    onmouseout="this.style.background='#f0f2ff';this.style.color='#667eea'"
                 >${s.label}</a>`
             ).join('');
+        }
+
+        function renderGPSDOHealth(data) {
+            const section = document.getElementById('gpsdoHealthSection');
+            if (!section) return;
+            section.style.display = 'block';
+
+            const displayDiv = document.getElementById('gpsdoHealthDisplay');
+            if (!displayDiv) return;
+
+            const healthy = data.healthy;
+            const statusIcon = healthy ? '✅' : '❌';
+            const statusColor = healthy ? '#28a745' : '#dc3545';
+
+            const ds = data.device_status;
+            const gps = data.gps;
+
+            // Format frequency
+            function fmtFreq(hz) {
+                if (!hz && hz !== 0) return 'N/A';
+                return (hz / 1e6).toFixed(6) + ' MHz';
+            }
+
+            // Issues banner
+            let issuesHTML = '';
+            if (!healthy && data.issues && data.issues.length > 0) {
+                issuesHTML = `<div style="margin-top: 8px; padding: 8px 12px; background: #f8d7da; border-radius: 4px; color: #721c24; font-size: 13px;">
+                    ⚠️ ${data.issues.join(' · ')}
+                </div>`;
+            }
+
+            // Device status grid
+            let deviceRows = '';
+            if (ds) {
+                const gpsLockColor = ds.gps_lock ? '#28a745' : '#dc3545';
+                const pllLockColor = ds.pll_lock ? '#28a745' : '#dc3545';
+                const antennaColor = ds.antenna_ok ? '#28a745' : '#dc3545';
+                const out1Color = ds.output1_enabled ? '#28a745' : '#dc3545';
+                const freqOK = ds.frequency_hz === 27000000;
+                const freqColor = freqOK ? '#28a745' : '#dc3545';
+                deviceRows = `
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">GPS Lock</td><td style="color:${gpsLockColor};font-weight:600">${ds.gps_lock ? 'LOCKED' : 'NO LOCK'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">PLL Lock</td><td style="color:${pllLockColor};font-weight:600">${ds.pll_lock ? 'LOCKED' : 'unlocked'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Antenna</td><td style="color:${antennaColor};font-weight:600">${ds.antenna_ok ? 'OK' : 'FAULT'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Mode</td><td>${ds.mode || 'N/A'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Output 1</td><td style="color:${out1Color};font-weight:600">${ds.output1_enabled ? (ds.output1_pps ? 'enabled (1-PPS)' : 'enabled') : 'disabled'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Drive</td><td>${ds.output1_drive || 'N/A'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Frequency</td><td style="color:${freqColor};font-weight:600">${fmtFreq(ds.frequency_hz)}</td></tr>
+                `;
+            } else {
+                deviceRows = '<tr><td colspan="2" style="color:#dc3545">HID device not available</td></tr>';
+            }
+
+            // GPS info grid
+            let gpsRows = '';
+            if (gps) {
+                gpsRows = `
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Fix</td><td>${gps.fix || '-'} ${gps.fix_mode || ''}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">UTC</td><td>${gps.datetime_utc || '-'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Sats used</td><td>${gps.sats_used != null ? gps.sats_used : '-'} (GPS: ${gps.gps_in_view != null ? gps.gps_in_view : '-'}, GLO: ${gps.glo_in_view != null ? gps.glo_in_view : '-'})</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Position</td><td>${gps.latitude != null ? gps.latitude.toFixed(6) + '°, ' + gps.longitude.toFixed(6) + '°' : '-'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">Altitude</td><td>${gps.altitude_m != null ? gps.altitude_m.toFixed(1) + ' m' : '-'}</td></tr>
+                    <tr><td style="color:#666;padding:3px 8px 3px 0">HDOP / VDOP</td><td>${gps.hdop != null ? gps.hdop.toFixed(2) : '-'} / ${gps.vdop != null ? gps.vdop.toFixed(2) : '-'}</td></tr>
+                `;
+            } else {
+                gpsRows = '<tr><td colspan="2" style="color:#dc3545">No GPS data</td></tr>';
+            }
+
+            displayDiv.innerHTML = `
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                    <span style="font-size:24px">${statusIcon}</span>
+                    <span style="font-size:16px;font-weight:600;color:${statusColor}">${healthy ? 'Healthy — GPS locked, PLL locked, 27 MHz output active' : 'Unhealthy'}</span>
+                </div>
+                ${issuesHTML}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+                    <div>
+                        <div style="font-weight:600;color:#333;margin-bottom:6px">📡 Device Status</div>
+                        <table style="font-size:13px;border-collapse:collapse">${deviceRows}</table>
+                        <div style="margin-top:8px;font-size:12px;color:#888">
+                            HID: ${data.device || 'N/A'} &nbsp;|&nbsp; Serial: ${data.serial || 'N/A'}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;color:#333;margin-bottom:6px">🛰️ GPS</div>
+                        <table style="font-size:13px;border-collapse:collapse">${gpsRows}</table>
+                    </div>
+                </div>
+                <div style="margin-top:10px;font-size:12px;color:#888">Last checked: ${data.last_checked ? new Date(data.last_checked).toLocaleTimeString() : 'N/A'}</div>
+            `;
         }
 
         function renderNTPHealth(container, data) {

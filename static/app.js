@@ -1808,7 +1808,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // lock-screen widget disappears shortly after entering paused
                         // state.  Keep it 'playing' and only control volume.
                         if (_httpAudioElement) {
-                            _httpAudioElement.volume = 0;
+                            _httpAudioElement.volume = 0.01;
                             // Ensure the element stays playing — Chrome may have paused it
                             _httpAudioElement.play().catch(() => {});
                         }
@@ -4734,7 +4734,7 @@ function playAudioBuffer(buffer) {
     if (audioContext._httpStreamMuted) {
         gainNode.gain.value = 0; // HTTP stream active — silence AudioContext output
     } else {
-        gainNode.gain.value = isMuted ? 0 : currentVolume;
+        gainNode.gain.value = isMuted ? 0.01 : currentVolume;
     }
     nextNode.connect(gainNode);
 
@@ -6198,7 +6198,7 @@ function toggleMute() {
             // Do NOT pause() — keeping the element playing maintains the Android
             // lock-screen widget.  Volume=0 silences it without pausing.
             if (_httpAudioElement) {
-                _httpAudioElement.volume = isMuted ? 0 : 1;
+                _httpAudioElement.volume = isMuted ? 0.01 : 1;
             }
             // Never set 'paused' on Chrome — widget disappears.
             // Always report 'playing'; mute is handled via volume=0.
@@ -11474,7 +11474,7 @@ async function setMediaSessionEnabled(enabled) {
                     // lock-screen widget disappears shortly after.  Keep it
                     // 'playing' and only control volume.
                     if (_httpAudioElement) {
-                        _httpAudioElement.volume = 0;
+                        _httpAudioElement.volume = 0.01;
                         _httpAudioElement.play().catch(() => {});
                     }
                     if (!isMuted) {

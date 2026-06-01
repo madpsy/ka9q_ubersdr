@@ -1013,7 +1013,17 @@ function updateMediaSession() {
 
     const freqInput = document.getElementById('frequency');
     const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
-    const freqMHz = (!isNaN(freq) && freq > 0) ? (freq / 1_000_000).toFixed(3) + ' MHz' : '';
+    // Format frequency with full Hz precision using period-separated groups:
+    // e.g. 21242500 Hz → "21.242.500 MHz"  (MHz.kHz.Hz)
+    //      7125000 Hz  → "7.125.000 MHz"
+    //      145525000 Hz→ "145.525.000 MHz"
+    let freqMHz = '';
+    if (!isNaN(freq) && freq > 0) {
+        const mhz = Math.floor(freq / 1_000_000);
+        const khz = Math.floor((freq % 1_000_000) / 1_000);
+        const hz  = freq % 1_000;
+        freqMHz = `${mhz}.${String(khz).padStart(3, '0')}.${String(hz).padStart(3, '0')} MHz`;
+    }
     const modeStr = currentMode ? currentMode.toUpperCase() : '';
     const callsign = window.instanceDescription?.receiver?.callsign || '';
 
@@ -1480,9 +1490,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Wire ⏮/⏭ and seek buttons to tune by the current frequency scroll step
                 navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
                 navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
-                // seekbackward / seekforward used by some platforms instead of previoustrack/nexttrack
-                try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
-                try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
+                // seekbackward / seekforward — tune frequency on seek button press.
+                // Chrome requires setPositionState() for seek buttons to be active;
+                // we set a fake "live" position that advances with wall-clock time.
+                try {
+                    navigator.mediaSession.setActionHandler('seekbackward', () => tuneDown());
+                    navigator.mediaSession.setActionHandler('seekforward',  () => tuneUp());
+                    // Set a fake position state so Chrome enables the seek buttons.
+                    // Duration is large (24h); position advances with real time.
+                    const _msStartTime = Date.now();
+                    navigator.mediaSession.setPositionState({
+                        duration: 86400,
+                        playbackRate: 1,
+                        position: 0
+                    });
+                    // Periodically update position so Chrome doesn't think playback stalled.
+                    if (!window._mediaSessionPositionInterval) {
+                        window._mediaSessionPositionInterval = setInterval(() => {
+                            if (!mediaSessionEnabled || !('mediaSession' in navigator)) {
+                                clearInterval(window._mediaSessionPositionInterval);
+                                window._mediaSessionPositionInterval = null;
+                                return;
+                            }
+                            try {
+                                const elapsed = (Date.now() - _msStartTime) / 1000;
+                                navigator.mediaSession.setPositionState({
+                                    duration: 86400,
+                                    playbackRate: 1,
+                                    position: Math.min(elapsed, 86399)
+                                });
+                            } catch (_) {}
+                        }, 5000);
+                    }
+                } catch (_) {}
 
                 // Map play/pause to mute/unmute (can't truly pause a live stream).
                 //
@@ -11030,6 +11070,11 @@ async function setMediaSessionEnabled(enabled) {
             try { navigator.mediaSession.metadata = null; } catch (_) {}
             try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
         }
+        // Clean up the position state update interval
+        if (window._mediaSessionPositionInterval) {
+            clearInterval(window._mediaSessionPositionInterval);
+            window._mediaSessionPositionInterval = null;
+        }
         log('Media Session disabled — audio now routes directly to destination');
     } else {
         if (!('mediaSession' in navigator)) {
@@ -11084,8 +11129,35 @@ async function setMediaSessionEnabled(enabled) {
             const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
             navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
             navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
-            try { navigator.mediaSession.setActionHandler('seekbackward', tuneDown); } catch (_) {}
-            try { navigator.mediaSession.setActionHandler('seekforward',  tuneUp);   } catch (_) {}
+            // seekbackward / seekforward — tune frequency on seek button press.
+            // Chrome requires setPositionState() for seek buttons to be active.
+            try {
+                navigator.mediaSession.setActionHandler('seekbackward', () => tuneDown());
+                navigator.mediaSession.setActionHandler('seekforward',  () => tuneUp());
+                const _msStartTime = Date.now();
+                navigator.mediaSession.setPositionState({
+                    duration: 86400,
+                    playbackRate: 1,
+                    position: 0
+                });
+                if (!window._mediaSessionPositionInterval) {
+                    window._mediaSessionPositionInterval = setInterval(() => {
+                        if (!mediaSessionEnabled || !('mediaSession' in navigator)) {
+                            clearInterval(window._mediaSessionPositionInterval);
+                            window._mediaSessionPositionInterval = null;
+                            return;
+                        }
+                        try {
+                            const elapsed = (Date.now() - _msStartTime) / 1000;
+                            navigator.mediaSession.setPositionState({
+                                duration: 86400,
+                                playbackRate: 1,
+                                position: Math.min(elapsed, 86399)
+                            });
+                        } catch (_) {}
+                    }, 5000);
+                }
+            } catch (_) {}
             // Map play/pause to mute/unmute (can't truly pause a live stream).
             // On Android Chrome (HTTP stream path): do NOT call toggleMute() — Chrome
             // fires these actions during <audio> buffering transitions (waiting→playing),

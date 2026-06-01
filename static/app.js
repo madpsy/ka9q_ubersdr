@@ -1305,13 +1305,13 @@ function updateMediaSession() {
     // _httpStreamPlaying is always false — always safe to set playbackState.
     // For Android Chrome, only set once the HTTP stream is stably playing.
     if (!_isMobileChrome || _httpStreamPlaying || !_httpAudioElement) {
-        // On Android Chrome, never set 'paused' — the lock-screen widget
-        // disappears shortly after.  Always report 'playing'; mute is
-        // handled via volume=0 on the <audio> element.
-        if (_isMobileChrome) {
-            navigator.mediaSession.playbackState = 'playing';
-        } else {
+        // On Chrome (desktop + mobile), never set 'paused' — Chrome dismisses
+        // the media controls widget.  Always report 'playing'; mute is handled
+        // via gain=0 (desktop) or volume=0 on the <audio> element (mobile).
+        if (_useMediaSessionBridge) {
             navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        } else {
+            navigator.mediaSession.playbackState = 'playing';
         }
     }
 }
@@ -1713,9 +1713,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // to fire the 'pause' MediaSession action → our handler fires → sets
                 // 'playing' → Chrome fires 'pause' again → CPU-100% feedback loop.
                 // playbackState is set in the 'playing' event handler instead.
-                if (!_isMobileChrome) {
-                    // Bridge path + desktop Chrome: safe to set playbackState immediately.
+                if (_useMediaSessionBridge) {
+                    // Bridge path (Apple/Firefox): safe to set playbackState immediately.
                     navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+                } else if (!_isMobileChrome) {
+                    // Desktop Chrome: always 'playing' — Chrome dismisses controls on 'paused'.
+                    navigator.mediaSession.playbackState = 'playing';
                 }
                 console.log('[MediaSession] Metadata set');
 
@@ -11387,13 +11390,16 @@ async function setMediaSessionEnabled(enabled) {
             // On Android Chrome the HTTP stream may still be buffering; setting
             // 'playing' now would trigger Chrome's reconciliation loop (CPU 100%).
             // _httpStreamPlaying is set once the 'playing' event fires on the element.
-            if (!_isMobileChrome || _httpStreamPlaying) {
-                // On Android Chrome, never set 'paused' — widget disappears.
-                if (_isMobileChrome) {
-                    navigator.mediaSession.playbackState = 'playing';
-                } else {
-                    navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
-                }
+            // On Chrome (desktop + mobile), never set 'paused' — Chrome dismisses
+            // the media controls widget.  Bridge path (Apple/Firefox) can use 'paused'.
+            if (_useMediaSessionBridge) {
+                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+            } else if (_isMobileChrome) {
+                // Android Chrome: only set once stream is stably playing.
+                if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
+            } else {
+                // Desktop Chrome: always 'playing'.
+                navigator.mediaSession.playbackState = 'playing';
             }
 
             const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));

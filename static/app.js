@@ -1795,7 +1795,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
-                    console.log('[MediaSession] pause action');
+                    console.log('[MediaSession] pause action, isMuted:', isMuted);
                     if (_useMediaSessionBridge) {
                         // Bridge path (Apple/Firefox): toggleMute() is safe, these
                         // browsers keep media controls visible even when paused.
@@ -1803,26 +1803,33 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (mediaElement) mediaElement.pause();
                         navigator.mediaSession.playbackState = 'paused';
                     } else if (_isMobileChrome) {
-                        // Android Chrome HTTP stream path: control volume directly.
-                        // NEVER set playbackState='paused' on Chrome — the
-                        // lock-screen widget disappears shortly after entering paused
-                        // state.  Keep it 'playing' and only control volume.
-                        if (_httpAudioElement) {
-                            _httpAudioElement.volume = 0.01;
-                            // Ensure the element stays playing — Chrome may have paused it
-                            _httpAudioElement.play().catch(() => {});
-                        }
-                        if (!isMuted) {
+                        // Android Chrome: since playbackState is always 'playing',
+                        // Chrome always shows the pause button.  Use pause as a
+                        // TOGGLE — mute if unmuted, unmute if muted.
+                        if (isMuted) {
+                            // Unmute
+                            if (_httpAudioElement) _httpAudioElement.volume = 1;
+                            isMuted = false;
+                            const btn = document.getElementById('mute-btn');
+                            if (btn) btn.textContent = '🔊 Mute';
+                            if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
+                        } else {
+                            // Mute
+                            if (_httpAudioElement) {
+                                _httpAudioElement.volume = 0.01;
+                                _httpAudioElement.play().catch(() => {});
+                            }
                             isMuted = true;
                             const btn = document.getElementById('mute-btn');
                             if (btn) btn.textContent = '🔇 Unmute';
                             if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                         }
+                        navigator.mediaSession.playbackState = 'playing';
                     } else {
-                        // Desktop Chrome (metadata-only): toggleMute() keeps the
-                        // audio pipeline running at gain=0 (no nextPlayTime reset).
-                        // Never set 'paused' — Chrome dismisses the widget.
-                        if (!isMuted) toggleMute();
+                        // Desktop Chrome (metadata-only): since playbackState is
+                        // always 'playing', Chrome always shows the pause button.
+                        // Use pause as a TOGGLE — toggleMute() handles both directions.
+                        toggleMute();
                         navigator.mediaSession.playbackState = 'playing';
                     }
                 });
@@ -11470,24 +11477,31 @@ async function setMediaSessionEnabled(enabled) {
                     if (mediaElement) mediaElement.pause();
                     navigator.mediaSession.playbackState = 'paused';
                 } else if (_isMobileChrome) {
-                    // Android Chrome: NEVER set playbackState='paused' — the
-                    // lock-screen widget disappears shortly after.  Keep it
-                    // 'playing' and only control volume.
-                    if (_httpAudioElement) {
-                        _httpAudioElement.volume = 0.01;
-                        _httpAudioElement.play().catch(() => {});
-                    }
-                    if (!isMuted) {
+                    // Android Chrome: since playbackState is always 'playing',
+                    // Chrome always shows the pause button.  Use pause as a
+                    // TOGGLE — mute if unmuted, unmute if muted.
+                    if (isMuted) {
+                        if (_httpAudioElement) _httpAudioElement.volume = 1;
+                        isMuted = false;
+                        const btn = document.getElementById('mute-btn');
+                        if (btn) btn.textContent = '🔊 Mute';
+                        if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
+                    } else {
+                        if (_httpAudioElement) {
+                            _httpAudioElement.volume = 0.01;
+                            _httpAudioElement.play().catch(() => {});
+                        }
                         isMuted = true;
                         const btn = document.getElementById('mute-btn');
                         if (btn) btn.textContent = '🔇 Unmute';
                         if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                     }
+                    navigator.mediaSession.playbackState = 'playing';
                 } else {
-                    // Desktop Chrome (metadata-only): toggleMute() keeps the
-                    // audio pipeline running at gain=0 (no nextPlayTime reset).
-                    // Never set 'paused' — Chrome dismisses the widget.
-                    if (!isMuted) toggleMute();
+                    // Desktop Chrome (metadata-only): since playbackState is
+                    // always 'playing', Chrome always shows the pause button.
+                    // Use pause as a TOGGLE.
+                    toggleMute();
                     navigator.mediaSession.playbackState = 'playing';
                 }
             });

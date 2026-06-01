@@ -342,35 +342,40 @@ let _httpAudioElement = null;
 let _httpAudioGainNode = null;       // GainNode set to 0 while HTTP stream is active
 let _httpFetchAbortController = null; // AbortController for the MSE fetch() reader
 let _httpMediaSource = null;          // MediaSource object for MSE path
+let _httpSourceBuffer = null;         // SourceBuffer for MSE path
+let _httpMSEBufferQueue = [];         // Queue for chunks waiting to be appended to SourceBuffer
+let _httpMSEAppending = false;        // True while SourceBuffer.appendBuffer() is in progress
 // True once the <audio> element has fired 'playing' (buffering complete).
 // Used to gate playbackState assignments on Chrome — setting playbackState='playing'
 // while the element is still in 'waiting' state causes Chrome to fire the 'pause'
 // MediaSession action, which triggers 'play', which triggers 'pause'... CPU-100% loop.
 let _httpStreamPlaying = false;
 
+// ── MSE toggle ──────────────────────────────────────────────────────────────
+// Set to true to use Media Source Extensions (MSE) for the HTTP audio stream.
+// MSE feeds WebM/Opus chunks directly into a SourceBuffer, bypassing Chrome's
+// aggressive ~6s pre-buffering heuristic and achieving ~200ms latency.
+// Set to false to use the simpler direct <audio src="..."> approach (6s lag).
+// Toggle this flag to quickly switch between the two approaches for testing.
+const _useMSEForHttpStream = true;
+
 /**
- * Start the MSE-based HTTP audio stream for non-Apple devices.
+ * Create (or reuse) the hidden <audio> element that anchors the Android Chrome
+ * lock-screen / notification media widget.
  *
- * Uses Media Source Extensions (MSE) to feed the WebM/Opus HTTP stream
- * directly into a SourceBuffer, bypassing the browser's aggressive
- * pre-buffering heuristics.  This achieves ~200ms latency instead of ~6s.
+ * Two modes controlled by `_useMSEForHttpStream`:
  *
- * The <audio> element plays the stream (lock-screen anchor for Android Chrome).
- * The AudioContext is muted while MSE is active — the <audio> element handles
- * all audible output.
+ *   true  (MSE) — Uses Media Source Extensions to feed the WebM/Opus HTTP
+ *         stream directly into a SourceBuffer, bypassing Chrome's aggressive
+ *         ~6s pre-buffering heuristic.  Achieves ~200ms latency.
+ *         Falls back to direct <audio src> if MSE is not supported.
  *
- * Falls back to direct <audio src> if MSE is not supported.
+ *   false (Direct) — Sets <audio src="/audio/stream?session=..."> and lets
+ *         Chrome handle buffering.  Simple and reliable but ~6s latency.
  *
- * Must be called from a user-gesture handler so audio.play() is allowed.
- * Safe to call multiple times — returns immediately if already active.
- */
-/**
- * Create (or reuse) the hidden <audio src="/audio/stream?session=..."> element
- * that anchors the Android Chrome lock-screen media widget.
- *
- * Uses a direct <audio src> element — simple and reliable.
- * The AudioContext is muted once the element confirms it is playing,
- * so the user hears the HTTP stream (which the <audio> element handles).
+ * In both modes the AudioContext output is muted once the <audio> element
+ * confirms it is playing, so the user hears audio from the <audio> element
+ * (which the lock-screen widget controls).
  *
  * Must be called from a user-gesture handler so audio.play() is allowed.
  * Safe to call multiple times — returns immediately if already active.
@@ -380,6 +385,189 @@ async function _ensureHttpAudioStream() {
 
     const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
 
+    // Check if MSE is available and enabled
+    const canUseMSE = _useMSEForHttpStream &&
+        typeof MediaSource !== 'undefined' &&
+        MediaSource.isTypeSupported('audio/webm; codecs=opus');
+
+    if (canUseMSE) {
+        await _ensureHttpAudioStreamMSE(url);
+    } else {
+        await _ensureHttpAudioStreamDirect(url);
+    }
+}
+
+/**
+ * MSE path: fetch() the HTTP stream and feed chunks into a SourceBuffer.
+ * This bypasses Chrome's ~6s pre-buffering and achieves ~200ms latency.
+ */
+async function _ensureHttpAudioStreamMSE(url) {
+    try {
+        const ms = new MediaSource();
+        _httpMediaSource = ms;
+
+        const el = document.createElement('audio');
+        el.setAttribute('playsinline', '');
+        el.style.display = 'none';
+        el.src = URL.createObjectURL(ms);
+        document.body.appendChild(el);
+        _httpAudioElement = el;
+
+        // Store error handler as named property for clean removal
+        el._errorHandler = (e) => {
+            if (el.error?.code === 4) return; // intentional teardown
+            console.error('[MediaSession/MSE] Audio element error:', el.error?.code, el.error?.message);
+            _onHttpAudioStreamEnded();
+        };
+        el.addEventListener('ended', _onHttpAudioStreamEnded);
+        el.addEventListener('error', el._errorHandler);
+        el.addEventListener('abort', _onHttpAudioStreamEnded);
+        el.addEventListener('playing', () => {
+            console.log('[MediaSession/MSE] Audio element playing — muting AudioContext output');
+            _httpStreamPlaying = true;
+            _muteAudioContextForHttpStream();
+            if ('mediaSession' in navigator && mediaSessionEnabled) {
+                updateMediaSession();
+            }
+        }, { once: true });
+
+        // Wait for MediaSource to open before adding SourceBuffer
+        await new Promise((resolve, reject) => {
+            ms.addEventListener('sourceopen', resolve, { once: true });
+            ms.addEventListener('error', reject, { once: true });
+            // Timeout in case sourceopen never fires
+            setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 5000);
+        });
+
+        if (ms.readyState !== 'open') {
+            throw new Error(`MediaSource not open (state: ${ms.readyState})`);
+        }
+
+        const sb = ms.addSourceBuffer('audio/webm; codecs=opus');
+        _httpSourceBuffer = sb;
+        sb.mode = 'sequence'; // timestamps are sequential, not random-access
+
+        // When SourceBuffer finishes appending, reset the flag and flush next chunk
+        sb.addEventListener('updateend', _onMSEUpdateEnd);
+
+        // Start fetching the stream
+        const abortController = new AbortController();
+        _httpFetchAbortController = abortController;
+
+        const resp = await fetch(url, { signal: abortController.signal });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const reader = resp.body.getReader();
+
+        console.log('[MediaSession/MSE] Stream connected — reading chunks');
+
+        // Start playback immediately (will begin once first data arrives)
+        el.play().catch(e => {
+            console.warn('[MediaSession/MSE] play() rejected:', e.message);
+        });
+
+        // Read loop — feed chunks into the SourceBuffer
+        const readLoop = async () => {
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        console.log('[MediaSession/MSE] Stream ended');
+                        _onHttpAudioStreamEnded();
+                        return;
+                    }
+
+                    // Queue the chunk for appending to the SourceBuffer
+                    _httpMSEBufferQueue.push(value);
+                    _flushMSEBufferQueue();
+
+                    // Trim the buffer to prevent unbounded memory growth.
+                    // Keep at most 2 seconds of buffered data.
+                    _trimMSEBuffer(2);
+                }
+            } catch (e) {
+                if (e.name === 'AbortError') return; // intentional teardown
+                console.error('[MediaSession/MSE] Read loop error:', e.message);
+                _onHttpAudioStreamEnded();
+            }
+        };
+
+        // Run the read loop without awaiting — it runs until stream ends or abort
+        readLoop();
+
+    } catch (e) {
+        console.error('[MediaSession/MSE] Could not start MSE stream:', e.message);
+        // Fall back to direct <audio src> approach
+        console.log('[MediaSession/MSE] Falling back to direct <audio src>');
+        _destroyHttpAudioStream();
+        await _ensureHttpAudioStreamDirect(url);
+    }
+}
+
+/**
+ * Flush queued chunks into the SourceBuffer.
+ * Called after each chunk arrives and after each updateend event.
+ * SourceBuffer only accepts one appendBuffer() at a time — this serialises them.
+ */
+function _flushMSEBufferQueue() {
+    if (!_httpSourceBuffer) return;
+    if (_httpMSEAppending) return;
+    if (_httpMSEBufferQueue.length === 0) return;
+    if (_httpSourceBuffer.updating) return;
+
+    try {
+        _httpMSEAppending = true;
+        const chunk = _httpMSEBufferQueue.shift();
+        _httpSourceBuffer.appendBuffer(chunk);
+    } catch (e) {
+        _httpMSEAppending = false;
+        // QuotaExceededError — buffer is full, trim aggressively and retry
+        if (e.name === 'QuotaExceededError') {
+            console.warn('[MediaSession/MSE] QuotaExceededError — trimming buffer');
+            _trimMSEBuffer(0.5);
+        } else {
+            console.error('[MediaSession/MSE] appendBuffer error:', e.message);
+        }
+    }
+}
+
+// Listen for updateend to reset the appending flag and flush next chunk
+// (attached via addEventListener in _ensureHttpAudioStreamMSE)
+// This is a standalone function so the event listener reference is stable.
+function _onMSEUpdateEnd() {
+    _httpMSEAppending = false;
+    _flushMSEBufferQueue();
+}
+
+/**
+ * Trim the MSE SourceBuffer to keep at most `maxSeconds` of buffered data.
+ * Removes data from the start of the buffer up to (currentTime - maxSeconds).
+ * No-op if the SourceBuffer is currently updating.
+ */
+function _trimMSEBuffer(maxSeconds) {
+    if (!_httpSourceBuffer || !_httpAudioElement) return;
+    if (_httpSourceBuffer.updating) return;
+
+    try {
+        const buffered = _httpSourceBuffer.buffered;
+        if (buffered.length === 0) return;
+
+        const currentTime = _httpAudioElement.currentTime;
+        const bufferStart = buffered.start(0);
+        const removeEnd = currentTime - maxSeconds;
+
+        if (removeEnd > bufferStart + 0.1) { // only trim if >100ms to remove
+            _httpSourceBuffer.remove(bufferStart, removeEnd);
+        }
+    } catch (e) {
+        // Ignore — buffer may have been detached during teardown
+    }
+}
+
+/**
+ * Direct <audio src> path: simple, reliable, but ~6s latency due to Chrome's
+ * pre-buffering heuristic.  Used when MSE is disabled or unavailable.
+ */
+async function _ensureHttpAudioStreamDirect(url) {
     try {
         const el = document.createElement('audio');
         el.setAttribute('playsinline', '');
@@ -388,13 +576,7 @@ async function _ensureHttpAudioStream() {
         document.body.appendChild(el);
         _httpAudioElement = el;
 
-        // Store the error handler as a named property so _destroyHttpAudioStream()
-        // can remove it with the correct reference (anonymous functions cannot be
-        // removed via removeEventListener).
         el._errorHandler = (e) => {
-            // Ignore the spurious MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) that Chrome
-            // fires when _destroyHttpAudioStream() sets el.src = '' to stop playback.
-            // That is an intentional teardown, not a real error.
             if (el.error?.code === 4) return;
             console.error('[MediaSession] Direct audio stream error:', el.error?.code, el.error?.message);
             _onHttpAudioStreamEnded();
@@ -406,9 +588,6 @@ async function _ensureHttpAudioStream() {
             console.log('[MediaSession] Direct audio stream playing — muting AudioContext output');
             _httpStreamPlaying = true;
             _muteAudioContextForHttpStream();
-            // Now that the element is stably playing, it is safe to set metadata and
-            // playbackState.  updateMediaSession() was a no-op while _httpStreamPlaying
-            // was false (Chrome buffering guard) — call it now to push metadata + state.
             if ('mediaSession' in navigator && mediaSessionEnabled) {
                 updateMediaSession();
             }
@@ -417,7 +596,7 @@ async function _ensureHttpAudioStream() {
         await el.play();
         console.log('[MediaSession] Direct audio stream play() resolved');
     } catch (e) {
-        console.error('[MediaSession] Could not start audio stream:', e.message);
+        console.error('[MediaSession] Could not start direct audio stream:', e.message);
         _destroyHttpAudioStream();
     }
 }
@@ -430,11 +609,21 @@ function _onHttpAudioStreamEnded() {
 
 /** Tear down the HTTP audio stream (MSE or direct) and restore AudioContext output. */
 function _destroyHttpAudioStream() {
+    // ── MSE cleanup ──────────────────────────────────────────────────────────
     // Abort the fetch reader (MSE path)
     if (_httpFetchAbortController) {
         _httpFetchAbortController.abort();
         _httpFetchAbortController = null;
     }
+    // Detach SourceBuffer event listener and clear queue
+    if (_httpSourceBuffer) {
+        try {
+            _httpSourceBuffer.removeEventListener('updateend', _onMSEUpdateEnd);
+        } catch (_) {}
+        _httpSourceBuffer = null;
+    }
+    _httpMSEBufferQueue = [];
+    _httpMSEAppending = false;
     // Close the MediaSource (MSE path)
     if (_httpMediaSource) {
         try {
@@ -442,7 +631,8 @@ function _destroyHttpAudioStream() {
         } catch (_) {}
         _httpMediaSource = null;
     }
-    // Remove the audio element.
+
+    // ── Audio element cleanup (shared by MSE and direct paths) ───────────────
     // Set src='' BEFORE pause() to avoid "play() interrupted by pause()" errors
     // when teardown happens while play() is still pending.
     if (_httpAudioElement) {
@@ -451,10 +641,15 @@ function _destroyHttpAudioStream() {
         el.removeEventListener('ended', _onHttpAudioStreamEnded);
         el.removeEventListener('error', el._errorHandler || _onHttpAudioStreamEnded);
         el.removeEventListener('abort', _onHttpAudioStreamEnded);
-        el.src = ''; // stops any pending play() cleanly — fires error code 4 (ignored by _errorHandler)
+        // Revoke the blob URL if MSE was used
+        if (el.src && el.src.startsWith('blob:')) {
+            URL.revokeObjectURL(el.src);
+        }
+        el.src = ''; // stops any pending play() cleanly
         try { el.load(); } catch (_) {} // reset media element state
         if (el.parentNode) el.parentNode.removeChild(el);
     }
+
     // Reset the playing flag and metadata dedup cache.
     // The dedup cache must be cleared so that when the stream restarts and
     // updateMediaSession() is called from the 'playing' handler, it will
@@ -462,6 +657,7 @@ function _destroyHttpAudioStream() {
     _httpStreamPlaying = false;
     _lastMediaSessionTitle  = null;
     _lastMediaSessionArtist = null;
+
     // Tell the server to immediately resume WebSocket audio.  Without this,
     // the server keeps httpAudioChan non-nil until the HTTP connection times
     // out, so no audio arrives over the WebSocket.  Fire-and-forget — we don't

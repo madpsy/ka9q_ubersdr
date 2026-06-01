@@ -35,6 +35,7 @@ type Config struct {
 	Rotctl             RotctlConfig             `yaml:"rotctl"`
 	GeoIP              GeoIPConfig              `yaml:"geoip"`
 	SSHProxy           SSHProxyConfig           `yaml:"ssh_proxy"`
+	GPSDO              GPSDOConfig              `yaml:"gpsdo"`
 	MCP                MCPConfig                `yaml:"mcp"`
 	Whisper            WhisperConfig            `yaml:"whisper"`
 	FreeDVExtension    FreeDVExtensionConfig    `yaml:"freedv_extension"`
@@ -530,6 +531,13 @@ type GeoIPConfig struct {
 	Enabled         bool   `yaml:"enabled"`           // Enable/disable GeoIP service
 	DatabasePath    string `yaml:"database_path"`     // Path to MaxMind GeoLite2 Country/City database file (.mmdb)
 	ASNDatabasePath string `yaml:"asn_database_path"` // Path to MaxMind GeoLite2 ASN database file (.mmdb)
+}
+
+// GPSDOConfig contains settings for the Leo Bodnar LBE-1420 GPSDO proxy
+type GPSDOConfig struct {
+	Enabled bool   `yaml:"enabled"` // Enable/disable GPSDO proxy (default: false)
+	Host    string `yaml:"host"`    // Container hostname (default: "ubersdr-leobodnar")
+	Port    int    `yaml:"port"`    // Container port (default: 5123)
 }
 
 // SSHProxyConfig contains SSH terminal proxy settings
@@ -1086,6 +1094,15 @@ func LoadConfig(filename string) (*Config, error) {
 			band.BinBandwidth = bandwidth / float64(band.BinCount)
 		}
 	}
+
+	// Set GPSDO proxy defaults if not specified
+	if config.GPSDO.Host == "" {
+		config.GPSDO.Host = "ubersdr-leobodnar" // Default Docker container name
+	}
+	if config.GPSDO.Port == 0 {
+		config.GPSDO.Port = 5123 // Default LBE-1420 dashboard port
+	}
+	// GPSDO.Enabled defaults to false (optional hardware — user must opt in)
 
 	// Set SSH proxy defaults if not specified
 	if config.SSHProxy.Host == "" {

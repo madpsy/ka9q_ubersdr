@@ -1714,6 +1714,15 @@ func main() {
 		}
 	}
 
+	// Initialize GPSDO proxy (Leo Bodnar LBE-1420 dashboard).
+	// Always created so the /gpsdo/ route is registered at startup and can be
+	// enabled/disabled live via Reconfigure without requiring a server restart.
+	gpsdoProxy := NewGPSDOProxy(&config.GPSDO)
+	if config.GPSDO.Enabled {
+		log.Printf("GPSDO proxy initialised: /gpsdo/ → http://%s:%d (SSE-aware, admin-only)",
+			config.GPSDO.Host, config.GPSDO.Port)
+	}
+
 	// Load addon proxies from addons.yaml (optional — missing file is not an error)
 	addonsPath := "addons.yaml"
 	if *configDir != "." {
@@ -1988,7 +1997,7 @@ func main() {
 	if instanceReporter != nil {
 		instanceReporter.SetPSKRankFetcher(pskRankFetcher)
 	}
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy)
 
 	// Widget manager: in-memory cache + collector proxy.
 	// Must be created after adminHandler so configPath is resolved.
@@ -2402,6 +2411,17 @@ func main() {
 		log.Printf("SSH terminal proxy enabled at /terminal (proxying to http://%s:%d)",
 			config.SSHProxy.Host, config.SSHProxy.Port)
 	}
+
+	// Register GPSDO proxy route (admin authentication required).
+	// Registered unconditionally so the route is always present; the proxy's
+	// ServeHTTP returns 503 when disabled.  Reconfigure is called by
+	// AdminHandler.handlePutConfig when the config is saved, enabling live
+	// enable/disable/host/port changes without a server restart.
+	http.HandleFunc("/gpsdo/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		gpsdoProxy.ServeHTTP(w, r)
+	}))
+	log.Printf("GPSDO proxy route registered at /gpsdo/ (enabled=%v, target=http://%s:%d)",
+		config.GPSDO.Enabled, config.GPSDO.Host, config.GPSDO.Port)
 
 	// Register the dynamic addon proxy router as a single catch-all for /addon/.
 	// Individual routes are managed at runtime by addonRouter.Register/Update/Deregister

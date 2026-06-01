@@ -392,6 +392,7 @@ type AdminHandler struct {
 	rbnFetcher          *RBNDataFetcher     // RBN fetcher (for manual refresh)
 	wsprRank            *WSPRRankFetcher    // WSPR Live receiver ranking fetcher
 	pskRank             *PSKRankFetcher     // PSKReporter top-monitor ranking fetcher
+	gpsdoProxy          *GPSDOProxy         // GPSDO reverse proxy (live-reloadable)
 }
 
 // GetEnabledPublicAddonNames returns the names of currently enabled, non-admin-only
@@ -471,7 +472,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -507,6 +508,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		rbnFetcher:          rbnFetcher,
 		wsprRank:            wsprRank,
 		pskRank:             pskRank,
+		gpsdoProxy:          gpsdoProxy,
 	}
 }
 
@@ -730,9 +732,12 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Check if this is an SSH proxy request for debug logging
-		// Exclude /terminal/sessions which is the management interface that browsers access
+		// Check if this is an SSH proxy or GPSDO proxy request for debug logging.
+		// These paths use X-Admin-Password header auth from non-browser clients, so
+		// we suppress the browser redirect and use plain 401 responses instead.
+		// Exclude /terminal/sessions which is the management interface that browsers access.
 		isSSHProxy := strings.HasPrefix(r.URL.Path, "/terminal") && r.URL.Path != "/terminal/sessions"
+		isGPSDO := strings.HasPrefix(r.URL.Path, "/gpsdo")
 
 		// CSRF protection for all admin and terminal endpoints.
 		//
@@ -833,6 +838,8 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				// Valid password, proceed
 				if isSSHProxy {
 					log.Printf("[SSH Proxy Auth] Authenticated via X-Admin-Password header for %s", r.URL.Path)
+				} else if isGPSDO {
+					log.Printf("[GPSDO Proxy Auth] Authenticated via X-Admin-Password header for %s", r.URL.Path)
 				}
 				next(w, r)
 				return
@@ -863,6 +870,8 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			// Invalid password
 			if isSSHProxy {
 				log.Printf("[SSH Proxy Auth] Invalid X-Admin-Password header for %s", r.URL.Path)
+			} else if isGPSDO {
+				log.Printf("[GPSDO Proxy Auth] Invalid X-Admin-Password header for %s", r.URL.Path)
 			}
 			http.Error(w, "Unauthorized - invalid password", http.StatusUnauthorized)
 			return
@@ -873,8 +882,8 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if err != nil {
 			// No admin_session cookie - this is expected for SSH proxy requests using X-Admin-Password header
 
-			// Check if this is a browser request (not SSH proxy or API)
-			if !isSSHProxy && isBrowserRequest(r) {
+			// Check if this is a browser request (not SSH proxy, GPSDO proxy, or API)
+			if !isSSHProxy && !isGPSDO && isBrowserRequest(r) {
 				// Redirect browsers to login page with return URL
 				returnURL := r.URL.Path
 				if r.URL.RawQuery != "" {
@@ -893,7 +902,7 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Validate session
 		if !ah.adminSessions.ValidateSession(cookie.Value) {
-			if isSSHProxy {
+			if isSSHProxy || isGPSDO {
 				// Get more details about why validation failed
 				ah.adminSessions.mu.RLock()
 				session, exists := ah.adminSessions.sessions[cookie.Value]
@@ -909,8 +918,8 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				}
 			}
 
-			// Check if this is a browser request (not SSH proxy or API)
-			if !isSSHProxy && isBrowserRequest(r) {
+			// Check if this is a browser request (not SSH proxy, GPSDO proxy, or API)
+			if !isSSHProxy && !isGPSDO && isBrowserRequest(r) {
 				// Redirect browsers to login page with return URL
 				returnURL := r.URL.Path
 				if r.URL.RawQuery != "" {
@@ -1108,6 +1117,27 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		if v, ok := server["custom_ads_txt"].(string); ok {
 			ah.config.Server.CustomAdsTxt = v
 		}
+	}
+
+	// Hot-update the GPSDO proxy so that enable/disable and host/port changes
+	// take effect immediately without a server restart.
+	if ah.gpsdoProxy != nil {
+		newGPSDO := GPSDOConfig{
+			Host: "ubersdr-leobodnar", // defaults
+			Port: 5123,
+		}
+		if gpsdo, ok := newConfig["gpsdo"].(map[string]interface{}); ok {
+			if v, ok := gpsdo["enabled"].(bool); ok {
+				newGPSDO.Enabled = v
+			}
+			if v, ok := gpsdo["host"].(string); ok && v != "" {
+				newGPSDO.Host = v
+			}
+			if v, ok := gpsdo["port"].(float64); ok && v > 0 {
+				newGPSDO.Port = int(v)
+			}
+		}
+		ah.gpsdoProxy.Reconfigure(&newGPSDO)
 	}
 
 	w.WriteHeader(http.StatusOK)

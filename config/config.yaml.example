@@ -1512,6 +1512,32 @@ ssh_proxy:
   #   - "10.0.0.0/8"          # Private network
 
 # ==============================================================================
+# GPSDO Proxy Configuration
+# ==============================================================================
+# Web dashboard proxy for the Leo Bodnar LBE-1420 GPS-disciplined oscillator.
+# The LBE-1420 provides a GPS-locked reference clock (e.g. 27 MHz) for the
+# RX888 Mk II SDR receiver.  When enabled, UberSDR proxies the leobodnar
+# container's HTTP dashboard at /gpsdo/ with admin authentication.
+#
+# Requires the ubersdr-leobodnar Docker container to be running.
+# The dashboard provides live GPS/PLL status, frequency control, and an SSE
+# event stream at /gpsdo/events.
+gpsdo:
+  # Enable GPSDO proxy (default: false)
+  # Set to true only if you have an LBE-1420 connected and the
+  # ubersdr-leobodnar container running.
+  enabled: false
+
+  # Container hostname (default: ubersdr-leobodnar)
+  # This is the Docker container name on the sdr-network.
+  # Change only if you have customised the container name.
+  host: "ubersdr-leobodnar"
+
+  # Container port (default: 5123)
+  # The port where the LBE-1420 dashboard is listening inside the container.
+  port: 5123
+
+# ==============================================================================
 # GeoIP Configuration
 # ==============================================================================
 # IP geolocation service for internal use and admin API access only

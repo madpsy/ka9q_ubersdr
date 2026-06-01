@@ -411,10 +411,32 @@ async function _ensureHttpAudioStreamMSE(url) {
         const ms = new MediaSource();
         _httpMediaSource = ms;
 
+        // Wait for MediaSource to open before adding SourceBuffer.
+        //
+        // IMPORTANT ordering: the sourceopen listener MUST be attached before
+        // el.src is assigned.  Chrome fires sourceopen synchronously (or very
+        // shortly after) the blob URL is set on the element, so attaching the
+        // listener afterwards risks missing the event entirely — which causes
+        // the 5-second timeout to fire and the path to fall back to the slow
+        // direct <audio src> approach (the ~6s lag bug on page reload).
+        //
+        // Correct order per the MSE spec:
+        //   1. Create MediaSource and attach sourceopen listener.
+        //   2. Create the <audio> element and append it to the DOM.
+        //   3. Assign el.src = URL.createObjectURL(ms)  ← triggers sourceopen.
+        const sourceOpenPromise = new Promise((resolve, reject) => {
+            ms.addEventListener('sourceopen', resolve, { once: true });
+            ms.addEventListener('error', (e) => reject(new Error('MediaSource error')), { once: true });
+            // Generous timeout — only reached if the browser never fires sourceopen
+            // (e.g. the element was removed from the DOM before the event fired).
+            setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 10000);
+        });
+
         const el = document.createElement('audio');
         el.setAttribute('playsinline', '');
         el.style.display = 'none';
-        el.src = URL.createObjectURL(ms);
+        // Append to DOM BEFORE assigning src — required by the MSE spec so that
+        // the element is in a document when the blob URL is resolved.
         document.body.appendChild(el);
         _httpAudioElement = el;
 
@@ -452,13 +474,12 @@ async function _ensureHttpAudioStreamMSE(url) {
             }
         });
 
-        // Wait for MediaSource to open before adding SourceBuffer
-        await new Promise((resolve, reject) => {
-            ms.addEventListener('sourceopen', resolve, { once: true });
-            ms.addEventListener('error', reject, { once: true });
-            // Timeout in case sourceopen never fires
-            setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 5000);
-        });
+        // Assign src AFTER the listener is registered and the element is in the DOM.
+        // This is the step that triggers sourceopen.
+        el.src = URL.createObjectURL(ms);
+
+        // Now wait — sourceopen should fire almost immediately.
+        await sourceOpenPromise;
 
         if (ms.readyState !== 'open') {
             throw new Error(`MediaSource not open (state: ${ms.readyState})`);

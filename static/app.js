@@ -1300,7 +1300,14 @@ function updateMediaSession() {
     // _httpStreamPlaying is always false — always safe to set playbackState.
     // For Android Chrome, only set once the HTTP stream is stably playing.
     if (!_isMobileChrome || _httpStreamPlaying || !_httpAudioElement) {
-        navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        // On Android Chrome, never set 'paused' — the lock-screen widget
+        // disappears shortly after.  Always report 'playing'; mute is
+        // handled via volume=0 on the <audio> element.
+        if (_isMobileChrome) {
+            navigator.mediaSession.playbackState = 'playing';
+        } else {
+            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+        }
     }
 }
 
@@ -1788,15 +1795,23 @@ document.addEventListener('DOMContentLoaded', () => {
                         navigator.mediaSession.playbackState = 'paused';
                     } else {
                         // Android Chrome HTTP stream path: control volume directly.
-                        if (_httpAudioElement) _httpAudioElement.volume = 0;
+                        // NEVER set playbackState='paused' on Android Chrome — the
+                        // lock-screen widget disappears shortly after entering paused
+                        // state.  Keep it 'playing' and only control volume.
+                        if (_httpAudioElement) {
+                            _httpAudioElement.volume = 0;
+                            // Ensure the element stays playing — Chrome may have paused it
+                            _httpAudioElement.play().catch(() => {});
+                        }
                         if (!isMuted) {
                             isMuted = true;
                             const btn = document.getElementById('mute-btn');
                             if (btn) btn.textContent = '🔇 Unmute';
                             if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                         }
-                        // Only update playbackState once stream is playing — not during buffering.
-                        if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'paused';
+                        // Do NOT set playbackState='paused' — widget disappears on Android.
+                        // The widget will still show the pause button because the <audio>
+                        // element is playing; tapping it again triggers the 'play' action.
                     }
                 });
                 console.log('[MediaSession] Action handlers registered');
@@ -4463,7 +4478,12 @@ function playAudioBuffer(buffer) {
         // Gate playbackState — only safe after 'playing' fires on _httpAudioElement (Android Chrome).
         // Bridge path + desktop Chrome: always safe to set immediately.
         if (!_isMobileChrome || _httpStreamPlaying) {
-            navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+            // On Android Chrome, never set 'paused' — widget disappears.
+            if (_isMobileChrome) {
+                navigator.mediaSession.playbackState = 'playing';
+            } else {
+                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+            }
         }
         if (_useMediaSessionBridge) {
             // Bridge path (Apple/Firefox): ensure the bridge element is still playing.
@@ -6159,8 +6179,10 @@ function toggleMute() {
             }
             // Only update playbackState once the stream is stably playing;
             // setting it during buffering triggers Chrome's reconciliation loop.
+            // On Android Chrome, never set 'paused' — widget disappears.
+            // Always report 'playing'; mute is handled via volume=0.
             if (_httpStreamPlaying) {
-                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+                navigator.mediaSession.playbackState = 'playing';
             }
         }
     }
@@ -11342,7 +11364,12 @@ async function setMediaSessionEnabled(enabled) {
             // 'playing' now would trigger Chrome's reconciliation loop (CPU 100%).
             // _httpStreamPlaying is set once the 'playing' event fires on the element.
             if (!_isMobileChrome || _httpStreamPlaying) {
-                navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+                // On Android Chrome, never set 'paused' — widget disappears.
+                if (_isMobileChrome) {
+                    navigator.mediaSession.playbackState = 'playing';
+                } else {
+                    navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
+                }
             }
 
             const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
@@ -11408,15 +11435,19 @@ async function setMediaSessionEnabled(enabled) {
                     if (mediaElement) mediaElement.pause();
                     navigator.mediaSession.playbackState = 'paused';
                 } else {
-                    if (_httpAudioElement) _httpAudioElement.volume = 0;
+                    // Android Chrome: NEVER set playbackState='paused' — the
+                    // lock-screen widget disappears shortly after.  Keep it
+                    // 'playing' and only control volume.
+                    if (_httpAudioElement) {
+                        _httpAudioElement.volume = 0;
+                        _httpAudioElement.play().catch(() => {});
+                    }
                     if (!isMuted) {
                         isMuted = true;
                         const btn = document.getElementById('mute-btn');
                         if (btn) btn.textContent = '🔇 Unmute';
                         if (window.radioAPI) window.radioAPI.notifyMuteChange(true);
                     }
-                    // Only update playbackState once the stream is stably playing.
-                    if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'paused';
                 }
             });
             log('Media Session enabled — lock-screen controls active');

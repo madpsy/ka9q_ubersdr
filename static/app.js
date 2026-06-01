@@ -431,6 +431,22 @@ async function _ensureHttpAudioStreamMSE(url) {
             }
         }, { once: true });
 
+        // Keep the <audio> element always playing — Chrome dismisses the
+        // lock-screen media widget when the element is truly paused.
+        // When the user taps "pause" on the lock-screen, Chrome fires the
+        // MediaSession 'pause' action AND pauses the element.  Our handler
+        // sets volume=0 (mute) but we must immediately resume playback so
+        // Chrome keeps the widget visible.
+        el.addEventListener('pause', () => {
+            // Only auto-resume if this is an intentional "mute via media controls"
+            // pause — not a teardown.  During teardown _httpAudioElement is nulled
+            // before el.pause() is called.
+            if (_httpAudioElement === el) {
+                console.log('[MediaSession/MSE] Auto-resuming after Chrome pause');
+                el.play().catch(() => {});
+            }
+        });
+
         // Wait for MediaSource to open before adding SourceBuffer
         await new Promise((resolve, reject) => {
             ms.addEventListener('sourceopen', resolve, { once: true });
@@ -592,6 +608,14 @@ async function _ensureHttpAudioStreamDirect(url) {
                 updateMediaSession();
             }
         }, { once: true });
+
+        // Keep the <audio> element always playing — see MSE path comment.
+        el.addEventListener('pause', () => {
+            if (_httpAudioElement === el) {
+                console.log('[MediaSession] Auto-resuming after Chrome pause');
+                el.play().catch(() => {});
+            }
+        });
 
         await el.play();
         console.log('[MediaSession] Direct audio stream play() resolved');

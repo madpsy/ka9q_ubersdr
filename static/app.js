@@ -252,6 +252,59 @@ let mediaSessionEnabled = _isApple
     ? localStorage.getItem('mediaSessionEnabled') !== 'false'  // Apple:  default ON
     : localStorage.getItem('mediaSessionEnabled') === 'true';  // Others: default OFF
 
+// ── MediaSession artwork blob URL cache ─────────────────────────────────────
+// Chrome re-fetches all artwork URLs from MediaMetadata on every internal
+// waiting→playing state transition of the associated <audio> element during
+// buffering — hundreds of times before the stream stabilises.  By converting
+// the artwork images to blob: URLs (fetched once, held in memory), Chrome's
+// re-fetches resolve instantly from memory with zero network traffic.
+const _artworkPaths = [
+    { path: '/images/apple-touch-icon.png',       sizes: '180x180', type: 'image/png' },
+    { path: '/images/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' },
+    { path: '/images/android-chrome-512x512.png', sizes: '512x512', type: 'image/png' }
+];
+let _artworkBlobUrls = null; // Array of { src, sizes, type } with blob: URLs once resolved
+let _artworkBlobPromise = null; // Singleton promise so concurrent callers share one fetch
+
+/**
+ * Pre-fetch artwork images and convert them to blob: URLs.
+ * Returns a promise that resolves to an array of MediaImage-compatible objects.
+ * The result is cached — subsequent calls return the same blob URLs instantly.
+ */
+function _ensureArtworkBlobUrls() {
+    if (_artworkBlobUrls) return Promise.resolve(_artworkBlobUrls);
+    if (_artworkBlobPromise) return _artworkBlobPromise;
+
+    _artworkBlobPromise = Promise.all(
+        _artworkPaths.map(async ({ path, sizes, type }) => {
+            try {
+                const resp = await fetch(path);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const blob = await resp.blob();
+                return { src: URL.createObjectURL(blob), sizes, type };
+            } catch (e) {
+                // Fallback to absolute HTTP URL if blob creation fails
+                console.warn(`[MediaSession] Could not create blob URL for ${path}:`, e.message);
+                return { src: `${window.location.origin}${path}`, sizes, type };
+            }
+        })
+    ).then(results => {
+        _artworkBlobUrls = results;
+        _artworkBlobPromise = null;
+        console.log('[MediaSession] Artwork blob URLs cached');
+        return results;
+    }).catch(e => {
+        _artworkBlobPromise = null;
+        console.warn('[MediaSession] Artwork blob URL pre-fetch failed:', e.message);
+        // Return HTTP URLs as fallback
+        return _artworkPaths.map(({ path, sizes, type }) => ({
+            src: `${window.location.origin}${path}`, sizes, type
+        }));
+    });
+
+    return _artworkBlobPromise;
+}
+
 // HTTP audio stream element — used on non-Apple Chrome/Edge/Android to give
 // Android Chrome the native <audio src="url"> element it needs for the lock-screen
 // / notification media widget.  Only created when mediaSessionEnabled is true and
@@ -946,19 +999,40 @@ function updateMediaSession() {
         _lastMediaSessionTitle  = newTitle;
         _lastMediaSessionArtist = newArtist;
 
-        // Use absolute URLs for artwork — Android Chrome fails to load root-relative paths
-        // when the page is served behind a reverse proxy or on a non-standard port.
-        const _artworkBase = window.location.origin;
+        // Use blob: URLs for artwork to eliminate Chrome's artwork fetch storm.
+        // Chrome re-fetches all artwork URLs on every internal waiting→playing
+        // state transition during <audio> buffering.  With blob: URLs the
+        // "fetches" resolve instantly from memory — zero network traffic.
+        // If blob URLs aren't cached yet, use HTTP URLs as a one-time fallback
+        // and kick off the pre-fetch so the next metadata update uses blobs.
+        const artwork = _artworkBlobUrls
+            ? _artworkBlobUrls
+            : _artworkPaths.map(({ path, sizes, type }) => ({
+                src: `${window.location.origin}${path}`, sizes, type
+            }));
+
         navigator.mediaSession.metadata = new MediaMetadata({
             title:  newTitle,
             artist: newArtist,
             album:  'Live SDR',
-            artwork: [
-                { src: `${_artworkBase}/images/apple-touch-icon.png`, sizes: '180x180', type: 'image/png' },
-                { src: `${_artworkBase}/images/android-chrome-192x192.png`, sizes: '192x192', type: 'image/png' },
-                { src: `${_artworkBase}/images/android-chrome-512x512.png`, sizes: '512x512', type: 'image/png' }
-            ]
+            artwork
         });
+
+        // If we used HTTP fallback URLs, pre-fetch blobs now and re-set metadata
+        // once they're ready (will be a no-op if content hasn't changed again).
+        if (!_artworkBlobUrls) {
+            _ensureArtworkBlobUrls().then(blobArtwork => {
+                // Re-apply metadata with blob URLs (only if title/artist unchanged)
+                if (_lastMediaSessionTitle === newTitle && _lastMediaSessionArtist === newArtist) {
+                    navigator.mediaSession.metadata = new MediaMetadata({
+                        title:  newTitle,
+                        artist: newArtist,
+                        album:  'Live SDR',
+                        artwork: blobArtwork
+                    });
+                }
+            });
+        }
     }
 
     // Only set playbackState once the HTTP stream is stably playing.
@@ -1327,6 +1401,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if ('mediaSession' in navigator && mediaSessionEnabled) {
+                // Pre-fetch artwork blob URLs early so they're cached before
+                // updateMediaSession() is called — eliminates Chrome's artwork
+                // fetch storm during <audio> buffering.
+                _ensureArtworkBlobUrls().catch(() => {});
+
                 const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
                 const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
 
@@ -10928,6 +11007,11 @@ async function setMediaSessionEnabled(enabled) {
             log('Media Session enabled — will activate on next audio start');
             return;
         }
+
+        // Pre-fetch artwork blob URLs before creating the stream/bridge.
+        // This ensures blob URLs are cached before updateMediaSession() runs,
+        // avoiding the HTTP fallback path entirely on first enable.
+        await _ensureArtworkBlobUrls();
 
         try {
             if (_isApple || _mediaSessionNeedsBridge) {

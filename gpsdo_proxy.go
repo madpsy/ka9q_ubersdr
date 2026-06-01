@@ -111,6 +111,11 @@ func (gp *GPSDOProxy) applyConfig(config *GPSDOConfig) {
 			proto = "https"
 		}
 		req.Header.Set("X-Forwarded-Proto", proto)
+
+		// Tell the leobodnar C server what path prefix was stripped so it can
+		// embed the correct prefix in the HTML dashboard's JS paths
+		// (EventSource URL, fetch() calls for /config/* endpoints).
+		req.Header.Set("X-Forwarded-Prefix", "/gpsdo")
 	}
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {

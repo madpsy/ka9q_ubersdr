@@ -249,17 +249,32 @@ const _isApple = /iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent);
 
 // Mobile / Android Chrome detection.
 // Only Android Chrome needs the HTTP audio stream path for the lock-screen
-// / notification media widget.  Desktop Chrome works perfectly with the
-// MediaStreamDestination bridge (same as Apple/Firefox) — no 6-second
-// buffering delay, no lag.
+// / notification media widget.
 const _isMobileChrome = /Android/i.test(navigator.userAgent) &&
     /Chrome/i.test(navigator.userAgent) && !_isApple;
 
-// True when the platform should use the MediaStreamDestination → <audio>
-// bridge for MediaSession (zero-latency, taps existing AudioContext output).
-// False only on Android Chrome, which requires a URL-based <audio src> element
-// for the lock-screen widget.
-const _useMediaSessionBridge = _isApple || _mediaSessionNeedsBridge || !_isMobileChrome;
+// ── MediaSession platform strategy ──────────────────────────────────────────
+//
+// Three paths depending on the platform:
+//
+// 1. _useMediaSessionBridge = true  (Apple Safari, Firefox)
+//    Uses MediaStreamDestination → hidden <audio srcObject> bridge.
+//    Audio routes through the bridge element; no HTTP stream needed.
+//    These browsers require an <audio> element to be playing for
+//    MediaSession to work.
+//
+// 2. _isMobileChrome = true  (Android Chrome)
+//    Uses HTTP audio stream → hidden <audio src="/audio/stream">.
+//    Android Chrome requires a URL-based <audio> element for the
+//    lock-screen / notification media widget.
+//
+// 3. Neither (desktop Chrome/Edge) — "metadata-only"
+//    Just sets navigator.mediaSession.metadata and playbackState.
+//    No bridge, no HTTP stream.  Chrome shows media controls in the
+//    toolbar because the AudioContext is producing audio.  Audio
+//    routes directly to audioContext.destination as normal.
+//
+const _useMediaSessionBridge = _isApple || _mediaSessionNeedsBridge;
 let mediaSessionEnabled = _isApple
     ? localStorage.getItem('mediaSessionEnabled') !== 'false'  // Apple:  default ON
     : localStorage.getItem('mediaSessionEnabled') === 'true';  // Others: default OFF
@@ -989,10 +1004,10 @@ function updateMediaSession() {
     // allowed metadata to be set when the first play() attempt failed (element null),
     // causing Chrome to re-fetch artwork during the retry buffering phase.
     //
-    // Bridge path (Apple/Firefox/desktop Chrome) uses MediaStreamDestination —
-    // no <audio src> element, no buffering phase, safe to set metadata immediately.
-    // Only Android Chrome uses the HTTP stream path.
-    if (!_useMediaSessionBridge && mediaSessionEnabled && !_httpStreamPlaying) {
+    // Bridge path (Apple/Firefox) and desktop Chrome (metadata-only) have no
+    // <audio src> element, no buffering phase — safe to set metadata immediately.
+    // Only Android Chrome uses the HTTP stream path and must wait.
+    if (_isMobileChrome && mediaSessionEnabled && !_httpStreamPlaying) {
         return; // Android Chrome HTTP stream path — stay silent until stably playing
     }
 
@@ -1051,9 +1066,10 @@ function updateMediaSession() {
     // Only set playbackState once the HTTP stream is stably playing.
     // On Chrome, setting it while the <audio> element is in 'waiting' state causes
     // Chrome to fire the 'pause' MediaSession action, creating a feedback loop.
-    // For bridge path (Apple/Firefox/desktop Chrome), _httpStreamPlaying is always
-    // false so we use the mediaElement/!_httpAudioElement check instead.
-    if (_httpStreamPlaying || _useMediaSessionBridge || !_httpAudioElement) {
+    // For bridge path (Apple/Firefox) and desktop Chrome (metadata-only),
+    // _httpStreamPlaying is always false — always safe to set playbackState.
+    // For Android Chrome, only set once the HTTP stream is stably playing.
+    if (!_isMobileChrome || _httpStreamPlaying || !_httpAudioElement) {
         navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
     }
 }
@@ -1423,10 +1439,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
 
                 if (_useMediaSessionBridge) {
-                    // ── Bridge path (Apple/Firefox/desktop Chrome) ─────────────────────
+                    // ── Bridge path (Apple/Firefox) ───────────────────────────────────
                     // Uses MediaStreamDestination → <audio> bridge for zero-latency
                     // MediaSession support.  Apple (Safari) has its own bridge mechanism;
-                    // Firefox and desktop Chrome need the MediaStreamDestination bridge.
+                    // Firefox needs the MediaStreamDestination bridge.
                     if (!_isApple && !mediaElement && audioContext) {
                         try {
                             const dest = audioContext.createMediaStreamDestination();
@@ -1455,7 +1471,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // to fire the 'pause' MediaSession action → our handler fires → sets
                 // 'playing' → Chrome fires 'pause' again → CPU-100% feedback loop.
                 // playbackState is set in the 'playing' event handler instead.
-                if (_useMediaSessionBridge) {
+                if (!_isMobileChrome) {
+                    // Bridge path + desktop Chrome: safe to set playbackState immediately.
                     navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
                 }
                 console.log('[MediaSession] Metadata set');
@@ -1482,10 +1499,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // state + UI without the nextPlayTime side-effect.
                 navigator.mediaSession.setActionHandler('play', () => {
                     console.log('[MediaSession] play action');
-                    if (_useMediaSessionBridge) {
-                        // Bridge path: toggleMute() is safe — no spurious actions fired.
+                    if (!_isMobileChrome) {
+                        // Bridge path + desktop Chrome: toggleMute() is safe — no spurious actions.
                         if (isMuted) toggleMute();
-                        mediaElement?.play().catch(() => {});
+                        if (mediaElement) mediaElement.play().catch(() => {});
                     } else {
                         // Android Chrome HTTP stream path: control volume directly.
                         if (_httpAudioElement) _httpAudioElement.volume = 1;
@@ -1498,16 +1515,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Only update playbackState once stream is playing — not during buffering.
                         if (_httpStreamPlaying) navigator.mediaSession.playbackState = 'playing';
                     }
-                    if (_useMediaSessionBridge) {
+                    if (!_isMobileChrome) {
                         navigator.mediaSession.playbackState = 'playing';
                     }
                 });
                 navigator.mediaSession.setActionHandler('pause', () => {
                     console.log('[MediaSession] pause action');
-                    if (_useMediaSessionBridge) {
-                        // Bridge path: toggleMute() is safe.
+                    if (!_isMobileChrome) {
+                        // Bridge path + desktop Chrome: toggleMute() is safe.
                         if (!isMuted) toggleMute();
-                        mediaElement?.pause();
+                        if (mediaElement) mediaElement.pause();
                         navigator.mediaSession.playbackState = 'paused';
                     } else {
                         // Android Chrome HTTP stream path: control volume directly.
@@ -1539,7 +1556,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // setMediaSessionEnabled() when the user enables media session via the
             // audio settings checkbox.  If media session was already enabled before
             // startAudio() (e.g. from a previous session), attempt it here.
-            if (!_useMediaSessionBridge && mediaSessionEnabled && 'mediaSession' in navigator) {
+            if (_isMobileChrome && mediaSessionEnabled && 'mediaSession' in navigator) {
                 await _ensureHttpAudioStream();
             }
         };
@@ -4184,13 +4201,14 @@ function playAudioBuffer(buffer) {
         _mediaSessionActivated = true;
         updateMediaSession();
         // Gate playbackState — only safe after 'playing' fires on _httpAudioElement (Android Chrome).
-        if (_useMediaSessionBridge || _httpStreamPlaying) {
+        // Bridge path + desktop Chrome: always safe to set immediately.
+        if (!_isMobileChrome || _httpStreamPlaying) {
             navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
         }
         if (_useMediaSessionBridge) {
-            // Bridge path: ensure the bridge element is still playing.
+            // Bridge path (Apple/Firefox): ensure the bridge element is still playing.
             if (mediaElement && !isMuted) mediaElement.play().catch(() => {});
-        } else {
+        } else if (_isMobileChrome) {
             // Android Chrome: ensure HTTP stream is running now that WebSocket audio is flowing.
             // _ensureHttpAudioStream() is a no-op if already active.
             _ensureHttpAudioStream().catch(() => {});
@@ -5864,8 +5882,8 @@ function toggleMute() {
 
     // Keep Media Session playback state in sync with mute
     if ('mediaSession' in navigator && _mediaSessionActivated) {
-        if (_useMediaSessionBridge) {
-            // Bridge path: pause/resume the MediaStreamDestination bridge element
+        if (!_isMobileChrome) {
+            // Bridge path + desktop Chrome: pause/resume the MediaStreamDestination bridge element
             navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
             if (isMuted) {
                 mediaElement?.pause();
@@ -10973,11 +10991,14 @@ function openBufferConfigModal() {
 /**
  * Enable or disable MediaSession integration and apply immediately.
  *
- * Enabling:  Bridge path (_useMediaSessionBridge=true — Apple/Firefox/desktop Chrome):
- *            creates a MediaStreamDestination + hidden <audio> bridge for zero-latency
- *            MediaSession support (requires a user gesture so audio.play() is allowed).
- *            HTTP stream path (Android Chrome only): creates a hidden <audio src> element
- *            pointing to /audio/stream for the lock-screen widget.
+ * Three platform paths:
+ *   1. Bridge (_useMediaSessionBridge — Apple/Firefox): creates a
+ *      MediaStreamDestination + hidden <audio> bridge.
+ *   2. HTTP stream (_isMobileChrome — Android Chrome): creates a hidden
+ *      <audio src="/audio/stream"> for the lock-screen widget.
+ *   3. Metadata-only (desktop Chrome/Edge): just sets metadata and
+ *      playbackState — no bridge or HTTP stream needed.
+ *
  * Disabling: tears down the bridge or HTTP stream (if any); clears OS notification.
  */
 async function setMediaSessionEnabled(enabled) {
@@ -11027,7 +11048,7 @@ async function setMediaSessionEnabled(enabled) {
 
         try {
             if (_useMediaSessionBridge) {
-                // ── Bridge path (Apple/Firefox/desktop Chrome) ────────────────
+                // ── Bridge path (Apple/Firefox) ──────────────────────────────
                 if (!_isApple && !mediaElement) {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._mediaStreamDest = dest;
@@ -11039,20 +11060,23 @@ async function setMediaSessionEnabled(enabled) {
                     await mediaElement.play();
                     console.log('[MediaSession] Audio bridge created and playing');
                 }
-            } else {
+            } else if (_isMobileChrome) {
                 // ── Android Chrome: HTTP stream ──────────────────────────────
                 // Requires an active WebSocket audio session — if not ready yet,
                 // _ensureHttpAudioStream() will be retried in playAudioBuffer().
                 await _ensureHttpAudioStream();
             }
+            // Desktop Chrome: metadata-only — no bridge or HTTP stream needed.
+            // AudioContext produces audio through destination; Chrome shows
+            // media controls in the toolbar automatically.
 
             // All platforms: metadata + action handlers
             updateMediaSession();
-            // Only set playbackState immediately on bridge paths.
+            // Set playbackState immediately on bridge + desktop Chrome paths.
             // On Android Chrome the HTTP stream may still be buffering; setting
             // 'playing' now would trigger Chrome's reconciliation loop (CPU 100%).
             // _httpStreamPlaying is set once the 'playing' event fires on the element.
-            if (_useMediaSessionBridge || _httpStreamPlaying) {
+            if (!_isMobileChrome || _httpStreamPlaying) {
                 navigator.mediaSession.playbackState = isMuted ? 'paused' : 'playing';
             }
 
@@ -11067,9 +11091,10 @@ async function setMediaSessionEnabled(enabled) {
             // fires these actions during <audio> buffering transitions (waiting→playing),
             // and toggleMute() resets nextPlayTime causing a CPU-100% feedback loop.
             navigator.mediaSession.setActionHandler('play', () => {
-                if (_useMediaSessionBridge) {
+                if (!_isMobileChrome) {
+                    // Bridge path + desktop Chrome: toggleMute() is safe.
                     if (isMuted) toggleMute();
-                    mediaElement?.play().catch(() => {});
+                    if (mediaElement) mediaElement.play().catch(() => {});
                     navigator.mediaSession.playbackState = 'playing';
                 } else {
                     if (_httpAudioElement) _httpAudioElement.volume = 1;
@@ -11085,9 +11110,10 @@ async function setMediaSessionEnabled(enabled) {
                 }
             });
             navigator.mediaSession.setActionHandler('pause', () => {
-                if (_useMediaSessionBridge) {
+                if (!_isMobileChrome) {
+                    // Bridge path + desktop Chrome: toggleMute() is safe.
                     if (!isMuted) toggleMute();
-                    mediaElement?.pause();
+                    if (mediaElement) mediaElement.pause();
                     navigator.mediaSession.playbackState = 'paused';
                 } else {
                     if (_httpAudioElement) _httpAudioElement.volume = 0;

@@ -1816,7 +1816,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         } else {
                             // Mute
                             if (_httpAudioElement) {
-                                _httpAudioElement.volume = 0.005;
+                                _httpAudioElement.volume = 0.0025;
                                 _httpAudioElement.play().catch(() => {});
                             }
                             isMuted = true;
@@ -4741,7 +4741,7 @@ function playAudioBuffer(buffer) {
     if (audioContext._httpStreamMuted) {
         gainNode.gain.value = 0; // HTTP stream active — silence AudioContext output
     } else {
-        gainNode.gain.value = isMuted ? 0.005 : currentVolume;
+        gainNode.gain.value = isMuted ? 0.0025 : currentVolume;
     }
     nextNode.connect(gainNode);
 
@@ -6205,7 +6205,7 @@ function toggleMute() {
             // Do NOT pause() — keeping the element playing maintains the Android
             // lock-screen widget.  Volume=0 silences it without pausing.
             if (_httpAudioElement) {
-                _httpAudioElement.volume = isMuted ? 0.005 : 1;
+                _httpAudioElement.volume = isMuted ? 0.0025 : 1;
             }
             // Never set 'paused' on Chrome — widget disappears.
             // Always report 'playing'; mute is handled via volume=0.
@@ -8800,7 +8800,7 @@ function updateOscilloscopeZoom() {
         const sampleRate = audioContext.sampleRate;
         const totalTimeMs = (bufferLength / sampleRate) * 1000;
 
-        const minFraction = 0.005;
+        const minFraction = 0.0025;
         const maxFraction = 1.0;
         const logMin = Math.log10(minFraction);
         const logMax = Math.log10(maxFraction);
@@ -11488,7 +11488,7 @@ async function setMediaSessionEnabled(enabled) {
                         if (window.radioAPI) window.radioAPI.notifyMuteChange(false);
                     } else {
                         if (_httpAudioElement) {
-                            _httpAudioElement.volume = 0.005;
+                            _httpAudioElement.volume = 0.0025;
                             _httpAudioElement.play().catch(() => {});
                         }
                         isMuted = true;

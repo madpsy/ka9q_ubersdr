@@ -1715,13 +1715,17 @@ func main() {
 	}
 
 	// Initialize GPSDO proxy (Leo Bodnar LBE-1420 dashboard).
-	// Always created so the /gpsdo/ route is registered at startup and can be
-	// enabled/disabled live via Reconfigure without requiring a server restart.
+	// Always created so the /gpsdo/ route is registered at startup.
+	// Visibility in the admin UI is determined at runtime by whether the
+	// leobodnar container reports a non-empty device path (e.g. "/dev/hidraw0").
 	gpsdoProxy := NewGPSDOProxy(&config.GPSDO)
-	if config.GPSDO.Enabled {
-		log.Printf("GPSDO proxy initialised: /gpsdo/ → http://%s:%d (SSE-aware, admin-only)",
-			config.GPSDO.Host, config.GPSDO.Port)
-	}
+	log.Printf("GPSDO proxy initialised: /gpsdo/ → http://%s:%d (SSE-aware, admin-only)",
+		config.GPSDO.Host, config.GPSDO.Port)
+
+	// GPSDOMonitor polls the leobodnar container every 30 s and caches the
+	// snapshot so /api/description can include GPSDO status with zero added latency.
+	gpsdoMonitor := NewGPSDOMonitor(config)
+	gpsdoMonitor.Start()
 
 	// Load addon proxies from addons.yaml (optional — missing file is not an error)
 	addonsPath := "addons.yaml"
@@ -1996,6 +2000,7 @@ func main() {
 	defer pskRankFetcher.Stop()
 	if instanceReporter != nil {
 		instanceReporter.SetPSKRankFetcher(pskRankFetcher)
+		instanceReporter.SetGPSDOMonitor(gpsdoMonitor)
 	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy)
 
@@ -2063,7 +2068,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -2423,8 +2428,8 @@ func main() {
 	http.HandleFunc("/gpsdo/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		gpsdoProxy.ServeHTTP(w, r)
 	}))
-	log.Printf("GPSDO proxy route registered at /gpsdo/ (enabled=%v, target=http://%s:%d)",
-		config.GPSDO.Enabled, config.GPSDO.Host, config.GPSDO.Port)
+	log.Printf("GPSDO proxy route registered at /gpsdo/ (target=http://%s:%d)",
+		config.GPSDO.Host, config.GPSDO.Port)
 
 	// Register the dynamic addon proxy router as a single catch-all for /addon/.
 	// Individual routes are managed at runtime by addonRouter.Register/Update/Deregister
@@ -3525,7 +3530,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -3699,6 +3704,13 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"addons":               enabledAddons,
 		"server_time":          time.Now().UTC().Format(time.RFC3339),
 		"server_time_sync":     GetNTPSynced(),
+	}
+
+	// Include GPSDO status when the Leo Bodnar LBE-1420 is fully operational.
+	// The key is omitted entirely when the device is absent or not healthy —
+	// consumers simply check if (description.gpsdo) to detect presence.
+	if gpsdoInfo := gpsdoMonitor.DescriptionInfo(); gpsdoInfo != nil {
+		response["gpsdo"] = gpsdoInfo
 	}
 
 	// Include PSKReporter rank for the configured callsign if available

@@ -1119,17 +1119,14 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Hot-update the GPSDO proxy so that enable/disable and host/port changes
-	// take effect immediately without a server restart.
+	// Hot-update the GPSDO proxy so that host/port changes take effect
+	// immediately without a server restart.
 	if ah.gpsdoProxy != nil {
 		newGPSDO := GPSDOConfig{
 			Host: "ubersdr-leobodnar", // defaults
 			Port: 5123,
 		}
 		if gpsdo, ok := newConfig["gpsdo"].(map[string]interface{}); ok {
-			if v, ok := gpsdo["enabled"].(bool); ok {
-				newGPSDO.Enabled = v
-			}
 			if v, ok := gpsdo["host"].(string); ok && v != "" {
 				newGPSDO.Host = v
 			}

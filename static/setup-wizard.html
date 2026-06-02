@@ -479,6 +479,20 @@
                     </div>
                 </div>
 
+                <!-- GPSDO location hint: shown when Leo Bodnar LBE-1420 has a GPS fix -->
+                <div id="gpsdo-location-hint" style="display:none; margin-bottom: 16px; padding: 12px 16px; background: #e8f5e9; border: 1px solid #4caf50; border-radius: 6px; font-size: 13px; color: #1b5e20;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <div>
+                            <strong>📡 GPSDO location available</strong>
+                            <span id="gpsdo-location-hint-text" style="margin-left: 8px;"></span>
+                        </div>
+                        <button type="button" id="gpsdo-use-location-btn"
+                            style="padding: 6px 14px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap;">
+                            Use GPSDO location
+                        </button>
+                    </div>
+                </div>
+
                 <div class="map-container">
                     <div id="location-map"></div>
                     <p class="map-help">💡 Drag the marker to set your location, or enter coordinates above</p>
@@ -488,6 +502,28 @@
                     <label for="asl">Altitude (ASL) *</label>
                     <input type="number" id="asl" name="asl" required placeholder="10">
                     <div class="help-text">Height above sea level in meters</div>
+                </div>
+
+                <!-- GPSDO configuration section: shown when Leo Bodnar LBE-1420 is detected -->
+                <div id="gpsdo-config-section" style="display:none; margin-top: 20px; padding: 16px; background: #e3f2fd; border: 1px solid #1976d2; border-radius: 6px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <strong style="color: #0d47a1;">📡 GPSDO (Leo Bodnar LBE-1420)</strong>
+                        <span id="gpsdo-config-status" style="font-size: 12px; color: #555; margin-left: 4px;"></span>
+                    </div>
+                    <div style="font-size: 13px; color: #1565c0; margin-bottom: 12px;">
+                        Configure the GPSDO for use with the RX888 Mk II — sets the output to 27 MHz and enables the clock output.
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                        <button type="button" id="gpsdo-configure-btn"
+                            style="padding: 8px 16px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600;">
+                            ⚙️ Configure for RX888 Mk II
+                        </button>
+                        <button type="button" id="gpsdo-blink-btn"
+                            style="padding: 8px 16px; background: #455a64; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">
+                            💡 Blink LED
+                        </button>
+                        <span id="gpsdo-action-msg" style="font-size: 12px; color: #1565c0;"></span>
+                    </div>
                 </div>
             </div>
 

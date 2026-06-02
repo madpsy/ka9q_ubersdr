@@ -10,6 +10,7 @@
     let marker = null;
     let lookupTestPassed = false; // tracks whether the lookup test has passed this session
     let wisdomLaunched = false;   // tracks whether Generate Wisdom has been clicked on step 5
+    let gpsdoSSE = null;          // SSE connection to /gpsdo/events — open while on step 1
 
     // DOM elements
     const prevBtn = document.getElementById('prevBtn');
@@ -136,6 +137,11 @@
 
     function previousStep() {
         if (currentStep > 1) {
+            // Close GPSDO SSE when leaving step 1
+            if (currentStep === 1 && gpsdoSSE) {
+                gpsdoSSE.close();
+                gpsdoSSE = null;
+            }
             currentStep--;
             updateUI();
         }
@@ -155,6 +161,12 @@
 
         // Collect data from current step
         collectStepData(currentStep);
+
+        // Close GPSDO SSE when leaving step 1
+        if (currentStep === 1 && gpsdoSSE) {
+            gpsdoSSE.close();
+            gpsdoSSE = null;
+        }
 
         // All steps 1–4 just advance to the next step
         currentStep++;
@@ -686,40 +698,32 @@
         // Initialize map
         map = L.map('location-map').setView([initialLat, initialLon], 10);
         
-        // Request user's location via browser geolocation API
-        // Trigger if no coordinates OR if coordinates are the default London values
+        // Auto-populate location on a fresh install (no coordinates set yet).
+        // Priority: GPSDO (Leo Bodnar LBE-1420) → browser geolocation → default London.
+        // If coordinates are already configured, never override them.
         const currentLat = parseFloat(latInput.value);
         const currentLon = parseFloat(lonInput.value);
         const isDefaultLocation = (
             (!latInput.value && !lonInput.value) ||
             (Math.abs(currentLat - 51.5074) < 0.001 && Math.abs(currentLon - (-0.1278)) < 0.001)
         );
-        
-        if (navigator.geolocation && isDefaultLocation) {
-            navigator.geolocation.getCurrentPosition(
-                function(position) {
-                    // Success - update map and inputs with user's location
-                    const userLat = position.coords.latitude;
-                    const userLon = position.coords.longitude;
-                    
-                    latInput.value = userLat.toFixed(6);
-                    lonInput.value = userLon.toFixed(6);
-                    
-                    marker.setLatLng([userLat, userLon]);
-                    map.setView([userLat, userLon], 10);
-                    updateMarkerTooltip();
-                    updateMaidenheadLocator();
-                },
-                function(error) {
-                    // Error or user denied - silently continue with default location
-                    console.log('Geolocation not available or denied:', error.message);
-                },
-                {
-                    enableHighAccuracy: false,
-                    timeout: 5000,
-                    maximumAge: 0
+
+        // Helper: apply a lat/lon to the map and inputs (used by GPSDO auto-populate)
+        function applyLocation(lat, lon, altM) {
+            latInput.value = lat.toFixed(6);
+            lonInput.value = lon.toFixed(6);
+            if (altM !== undefined && altM > 0) {
+                const aslInput = document.getElementById('asl');
+                if (aslInput && !aslInput.value) {
+                    aslInput.value = Math.round(altM);
                 }
-            );
+            }
+            if (marker) {
+                marker.setLatLng([lat, lon]);
+                map.setView([lat, lon], 10);
+                updateMarkerTooltip();
+                updateMaidenheadLocator();
+            }
         }
 
         // Add OpenStreetMap tiles
@@ -762,6 +766,197 @@
 
         // Initial tooltip update (after event listeners are set up)
         updateMarkerTooltip();
+
+        // Single GPSDO health fetch: auto-populate coords on fresh install AND show hint panel.
+        // On a fresh install (isDefaultLocation) we prefer GPSDO over browser geolocation.
+        // The hint panel is always shown when the device has a valid GPS fix.
+        fetch('/admin/gpsdo-health', { credentials: 'include' })
+            .then(function(resp) {
+                if (!resp.ok && resp.status !== 503) throw new Error('not available');
+                return resp.json();
+            })
+            .then(function(health) {
+                const gps = health && health.gps;
+                const hasValidFix = health && health.enabled && gps &&
+                    typeof gps.latitude === 'number' && typeof gps.longitude === 'number' &&
+                    (gps.latitude !== 0 || gps.longitude !== 0);
+
+                // Auto-populate on fresh install
+                if (isDefaultLocation && hasValidFix) {
+                    console.log('Using GPSDO location:', gps.latitude, gps.longitude);
+                    applyLocation(gps.latitude, gps.longitude, gps.altitude_m);
+                } else if (isDefaultLocation) {
+                    // GPSDO not available — fall back to browser geolocation
+                    if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                            function(position) {
+                                applyLocation(position.coords.latitude, position.coords.longitude);
+                            },
+                            function(error) {
+                                console.log('Geolocation not available or denied:', error.message);
+                            },
+                            { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+                        );
+                    }
+                }
+
+                // Show hint panel whenever GPSDO has a valid fix (regardless of isDefaultLocation)
+                if (hasValidFix) {
+                    const hint     = document.getElementById('gpsdo-location-hint');
+                    const hintText = document.getElementById('gpsdo-location-hint-text');
+                    const btn      = document.getElementById('gpsdo-use-location-btn');
+                    if (hint && hintText && btn) {
+                        const lat = gps.latitude.toFixed(6);
+                        const lon = gps.longitude.toFixed(6);
+                        const alt = (gps.altitude_m !== undefined && gps.altitude_m > 0)
+                            ? ` · ${Math.round(gps.altitude_m)} m ASL` : '';
+                        const fix  = gps.fix ? ` · ${gps.fix}` : '';
+                        const sats = (typeof gps.sats_used === 'number') ? ` · ${gps.sats_used} sats` : '';
+                        hintText.textContent = `${lat}, ${lon}${alt}${fix}${sats}`;
+                        btn.onclick = function() {
+                            const latInput = document.getElementById('latitude');
+                            const lonInput = document.getElementById('longitude');
+                            const aslInput = document.getElementById('asl');
+                            latInput.value = lat;
+                            lonInput.value = lon;
+                            if (aslInput && gps.altitude_m > 0) {
+                                aslInput.value = Math.round(gps.altitude_m);
+                            }
+                            if (marker) {
+                                marker.setLatLng([gps.latitude, gps.longitude]);
+                                map.setView([gps.latitude, gps.longitude], 10);
+                                updateMarkerTooltip();
+                                updateMaidenheadLocator();
+                            }
+                        };
+                        hint.style.display = 'block';
+                    }
+                }
+
+                // Show GPSDO config section whenever the device is detected (enabled == true),
+                // regardless of GPS fix.  Open an SSE stream for live status updates.
+                if (health && health.enabled) {
+                    initGPSDOConfigSection();
+                }
+            })
+            .catch(function() {
+                // GPSDO unavailable — fall back to browser geolocation on fresh install
+                if (isDefaultLocation && navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            applyLocation(position.coords.latitude, position.coords.longitude);
+                        },
+                        function(error) {
+                            console.log('Geolocation not available or denied:', error.message);
+                        },
+                        { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+                    );
+                }
+            });
+    }
+
+    // Initialise the GPSDO configuration section.
+    // Opens an SSE stream to /gpsdo/events for live status, wires up the two action buttons.
+    function initGPSDOConfigSection() {
+        const section    = document.getElementById('gpsdo-config-section');
+        const statusEl   = document.getElementById('gpsdo-config-status');
+        const actionMsg  = document.getElementById('gpsdo-action-msg');
+        const configBtn  = document.getElementById('gpsdo-configure-btn');
+        const blinkBtn   = document.getElementById('gpsdo-blink-btn');
+        if (!section || !configBtn || !blinkBtn) return;
+
+        section.style.display = 'block';
+
+        // Helper: update the status line from a device_status object
+        function updateStatus(ds) {
+            if (!ds) {
+                statusEl.textContent = '(device not available)';
+                return;
+            }
+            const freqMHz = (ds.frequency_hz / 1e6).toFixed(6).replace(/\.?0+$/, '') + ' MHz';
+            const out = ds.output1_enabled ? '✅ output enabled' : '⚠️ output disabled';
+            const ok  = ds.frequency_hz === 27000000 && ds.output1_enabled;
+            statusEl.textContent = `${freqMHz} · ${out}`;
+            statusEl.style.color = ok ? '#2e7d32' : '#b71c1c';
+            // Dim the configure button if already correctly set
+            configBtn.style.opacity = ok ? '0.5' : '1';
+            configBtn.title = ok ? 'Already configured correctly' : '';
+        }
+
+        // Open SSE stream for live updates
+        if (gpsdoSSE) { gpsdoSSE.close(); }
+        gpsdoSSE = new EventSource('/gpsdo/events');
+        gpsdoSSE.onmessage = function(e) {
+            try {
+                const data = JSON.parse(e.data);
+                updateStatus(data.device_status);
+            } catch (_) {}
+        };
+        gpsdoSSE.onerror = function() {
+            statusEl.textContent = '(connection lost)';
+            statusEl.style.color = '#b71c1c';
+        };
+
+        // Helper: POST to a GPSDO config endpoint
+        function gpsdoPost(path, body, cb) {
+            fetch(path, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(j) { cb(j.ok ? null : (j.error || 'unknown error')); })
+            .catch(function(err) { cb(err.message || String(err)); });
+        }
+
+        // "Configure for RX888 Mk II" — set 27 MHz then enable output
+        configBtn.onclick = function() {
+            configBtn.disabled = true;
+            blinkBtn.disabled  = true;
+            actionMsg.textContent = 'Setting frequency…';
+            actionMsg.style.color = '#1565c0';
+            gpsdoPost('/gpsdo/config/frequency', { frequency_hz: 27000000, save: true }, function(err) {
+                if (err) {
+                    actionMsg.textContent = 'Frequency error: ' + err;
+                    actionMsg.style.color = '#b71c1c';
+                    configBtn.disabled = false;
+                    blinkBtn.disabled  = false;
+                    return;
+                }
+                actionMsg.textContent = 'Enabling output…';
+                gpsdoPost('/gpsdo/config/output1', { enabled: true }, function(err2) {
+                    configBtn.disabled = false;
+                    blinkBtn.disabled  = false;
+                    if (err2) {
+                        actionMsg.textContent = 'Output error: ' + err2;
+                        actionMsg.style.color = '#b71c1c';
+                    } else {
+                        actionMsg.textContent = '✅ Configured — 27 MHz, output enabled';
+                        actionMsg.style.color = '#2e7d32';
+                        setTimeout(function() { actionMsg.textContent = ''; }, 4000);
+                    }
+                });
+            });
+        };
+
+        // "Blink LED"
+        blinkBtn.onclick = function() {
+            blinkBtn.disabled = true;
+            actionMsg.textContent = 'Blinking…';
+            actionMsg.style.color = '#1565c0';
+            gpsdoPost('/gpsdo/config/blink', {}, function(err) {
+                blinkBtn.disabled = false;
+                if (err) {
+                    actionMsg.textContent = 'Blink error: ' + err;
+                    actionMsg.style.color = '#b71c1c';
+                } else {
+                    actionMsg.textContent = '💡 LED blinking for ~3 seconds';
+                    actionMsg.style.color = '#1565c0';
+                    setTimeout(function() { actionMsg.textContent = ''; }, 4000);
+                }
+            });
+        };
     }
 
     function updateMarkerFromInputs() {

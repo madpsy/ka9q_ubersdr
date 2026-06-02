@@ -535,9 +535,8 @@ type GeoIPConfig struct {
 
 // GPSDOConfig contains settings for the Leo Bodnar LBE-1420 GPSDO proxy
 type GPSDOConfig struct {
-	Enabled bool   `yaml:"enabled"` // Enable/disable GPSDO proxy (default: false)
-	Host    string `yaml:"host"`    // Container hostname (default: "ubersdr-leobodnar")
-	Port    int    `yaml:"port"`    // Container port (default: 5123)
+	Host string `yaml:"host"` // Container hostname (default: "ubersdr-leobodnar")
+	Port int    `yaml:"port"` // Container port (default: 5123)
 }
 
 // SSHProxyConfig contains SSH terminal proxy settings
@@ -1102,7 +1101,6 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.GPSDO.Port == 0 {
 		config.GPSDO.Port = 5123 // Default LBE-1420 dashboard port
 	}
-	// GPSDO.Enabled defaults to false (optional hardware — user must opt in)
 
 	// Set SSH proxy defaults if not specified
 	if config.SSHProxy.Host == "" {

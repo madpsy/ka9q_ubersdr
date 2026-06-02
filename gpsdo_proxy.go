@@ -19,11 +19,12 @@ import (
 //
 // The proxy supports live reconfiguration via Reconfigure: calling it with a
 // new GPSDOConfig atomically replaces the inner httputil.ReverseProxy so that
-// changes to host, port, or enabled take effect immediately without a restart.
+// changes to host or port take effect immediately without a restart.
+// The proxy is always active — visibility in the admin UI is determined by
+// whether the leobodnar container reports a non-empty device path (e.g. "/dev/hidraw0").
 type GPSDOProxy struct {
-	mu      sync.RWMutex
-	enabled bool
-	inner   *httputil.ReverseProxy
+	mu    sync.RWMutex
+	inner *httputil.ReverseProxy
 }
 
 // NewGPSDOProxy creates a new GPSDO proxy instance.
@@ -41,26 +42,15 @@ func (gp *GPSDOProxy) Reconfigure(config *GPSDOConfig) {
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
 	gp.applyConfig(config)
-	if config.Enabled {
-		log.Printf("GPSDO proxy reconfigured: /gpsdo/ → http://%s:%d", config.Host, config.Port)
-	} else {
-		log.Printf("GPSDO proxy disabled via config")
-	}
+	log.Printf("GPSDO proxy reconfigured: /gpsdo/ → http://%s:%d", config.Host, config.Port)
 }
 
 // applyConfig rebuilds the inner proxy from config.
 // Must be called with gp.mu held (write lock).
 func (gp *GPSDOProxy) applyConfig(config *GPSDOConfig) {
-	gp.enabled = config.Enabled
-	if !config.Enabled {
-		gp.inner = nil
-		return
-	}
-
 	targetURL, err := url.Parse(fmt.Sprintf("http://%s:%d", config.Host, config.Port))
 	if err != nil {
-		log.Printf("GPSDO proxy: invalid target URL (host=%q port=%d): %v — proxy disabled", config.Host, config.Port, err)
-		gp.enabled = false
+		log.Printf("GPSDO proxy: invalid target URL (host=%q port=%d): %v — proxy will be unavailable", config.Host, config.Port, err)
 		gp.inner = nil
 		return
 	}
@@ -130,12 +120,11 @@ func (gp *GPSDOProxy) applyConfig(config *GPSDOConfig) {
 // Authentication is enforced by the AuthMiddleware wrapper in main.go.
 func (gp *GPSDOProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	gp.mu.RLock()
-	enabled := gp.enabled
 	inner := gp.inner
 	gp.mu.RUnlock()
 
-	if !enabled || inner == nil {
-		http.Error(w, "GPSDO proxy is disabled", http.StatusServiceUnavailable)
+	if inner == nil {
+		http.Error(w, "GPSDO dashboard service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	inner.ServeHTTP(w, r)

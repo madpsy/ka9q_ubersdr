@@ -3536,6 +3536,14 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
+                    // Probe GPSDO health once at login so the tab is visible immediately
+                    // (updateGPSDOTabVisibility is also called by loadMonitorHealth, but that
+                    // only runs when the user visits the Monitor tab)
+                    authenticatedFetch('/admin/gpsdo-health').then(r => {
+                        if (r && (r.ok || r.status === 503)) {
+                            r.json().then(h => { lastGPSDOHealth = h; updateGPSDOTabVisibility(); }).catch(() => {});
+                        }
+                    }).catch(() => {});
                     return true;
                 }
             } catch (error) {
@@ -3654,6 +3662,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
+                    // Probe GPSDO health once at login so the tab is visible immediately
+                    authenticatedFetch('/admin/gpsdo-health').then(r => {
+                        if (r && (r.ok || r.status === 503)) {
+                            r.json().then(h => { lastGPSDOHealth = h; updateGPSDOTabVisibility(); }).catch(() => {});
+                        }
+                    }).catch(() => {});
                 } else {
                     const errorText = await response.text();
                     showLoginError(errorText || 'Invalid password');
@@ -3863,7 +3877,6 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 updatePublicInstanceButton();
                 updateCallsignNameDisplay();
                 updateRotatorTabVisibility();
-                updateGPSDOTabVisibility();
                 updateTerminalButtonVisibility();
                 updateRemoteLoggingCheckbox();
                 showAlert('Configuration loaded successfully', 'success');
@@ -3872,11 +3885,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             }
         }
 
-        // Update GPSDO tab visibility based on gpsdo.enabled config
+        // Update GPSDO tab visibility based on whether the Leo Bodnar HID device
+        // is physically present (lastGPSDOHealth.enabled == true means hid_path
+        // was non-empty in the leobodnar container's /json response).
         function updateGPSDOTabVisibility() {
             const gpsdoTabBtn = document.getElementById('gpsdoTab');
-            if (gpsdoTabBtn && currentConfig.gpsdo) {
-                if (currentConfig.gpsdo.enabled === true) {
+            if (gpsdoTabBtn) {
+                if (lastGPSDOHealth?.enabled === true) {
                     gpsdoTabBtn.style.display = 'inline-block';
                 } else {
                     gpsdoTabBtn.style.display = 'none';
@@ -6488,6 +6503,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
         // Monitor health management
         let monitorRefreshInterval = null;
+        let lastGPSDOHealth = null; // Cached from last /admin/gpsdo-health poll; drives tab visibility
 
         // System stats management
         let systemRefreshInterval = null;
@@ -10647,7 +10663,8 @@ function resetStationIdColor() {
             wsprControl.innerHTML = `
                 <label style="font-weight: 500; min-width: 60px;">WSPR:</label>
                 <select id="bulkDepthWSPR" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                    <option value="1000" ${currentWSPRDepth === 1000 ? 'selected' : ''}>1000 cycles (Very Fast)</option>
+                    <option value="1000" ${currentWSPRDepth === 1000 ? 'selected' : ''}>1000 cycles (Ultra Fast)</option>
+                    <option value="2500" ${currentWSPRDepth === 2500 ? 'selected' : ''}>2500 cycles (Very Fast)</option>
                     <option value="5000" ${currentWSPRDepth === 5000 ? 'selected' : ''}>5000 cycles (Fast)</option>
                     <option value="10000" ${currentWSPRDepth === 10000 ? 'selected' : ''}>10000 cycles (Default)</option>
                     <option value="20000" ${currentWSPRDepth === 20000 ? 'selected' : ''}>20000 cycles (Deep)</option>
@@ -17938,6 +17955,8 @@ const tooltipLine2 = timeStr;
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
+                lastGPSDOHealth = gpsdoHealth;
+                updateGPSDOTabVisibility();
                 renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh

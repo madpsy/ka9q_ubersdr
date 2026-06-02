@@ -30,6 +30,7 @@ type InstanceReporter struct {
 	addonsConfig        *AddonProxiesConfig        // For reporting enabled addon proxy names
 	multiDecoder        *MultiDecoder              // For getting WSPR SSB phone predictions
 	pskRank             *PSKRankFetcher            // For getting PSKReporter rank data
+	gpsdoMonitor        *GPSDOMonitor              // For reporting GPSDO operational status
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -89,6 +90,7 @@ type InstanceReport struct {
 	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
 	SSBGridSquares             []WSPRGridSquareEntry    `json:"ssb_grid_squares,omitempty"`   // WSPR-derived grid-square map overlay data (omitted when unavailable)
 	PSKReporterRank            *PSKCallsignRank         `json:"pskreporter_rank,omitempty"`   // PSKReporter leaderboard rank for this callsign (omitted when unavailable)
+	GPSDO                      map[string]interface{}   `json:"gpsdo,omitempty"`              // Leo Bodnar LBE-1420 GPSDO status (omitted when device absent or not fully operational)
 	Test                       bool                     `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport              bool                     `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
 	NotifyInstanceDisconnected bool                     `json:"notify_instance_disconnected"` // Notify when instance disconnects
@@ -173,6 +175,27 @@ func (ir *InstanceReporter) SetPSKRankFetcher(f *PSKRankFetcher) {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	ir.pskRank = f
+}
+
+// SetGPSDOMonitor sets the GPSDO monitor for reporting device operational status.
+// This must be called after the monitor is initialized (after NewInstanceReporter).
+func (ir *InstanceReporter) SetGPSDOMonitor(m *GPSDOMonitor) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.gpsdoMonitor = m
+}
+
+// getGPSDOInfo returns the GPSDO description map when the Leo Bodnar LBE-1420 is
+// fully operational, or nil when the device is absent or any health criterion fails.
+// The returned map is identical to what /api/description embeds under "gpsdo".
+func (ir *InstanceReporter) getGPSDOInfo() map[string]interface{} {
+	ir.mu.RLock()
+	m := ir.gpsdoMonitor
+	ir.mu.RUnlock()
+	if m == nil {
+		return nil
+	}
+	return m.DescriptionInfo()
 }
 
 // getPSKCallsignRank returns the PSKReporter rank for the configured callsign,
@@ -670,6 +693,7 @@ func (ir *InstanceReporter) sendReport() error {
 		report.SSBGridSquares = ssbResult.GridSquares
 	}
 	report.PSKReporterRank = ir.getPSKCallsignRank()
+	report.GPSDO = ir.getGPSDOInfo()
 
 	jsonData, err := json.Marshal(report)
 	if err != nil {

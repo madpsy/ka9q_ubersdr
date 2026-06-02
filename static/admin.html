@@ -1226,9 +1226,9 @@
                 <!-- GPSDO Tab -->
                 <div id="gpsdoTabContent" class="tab-content">
                     <div class="alert alert-info" style="margin-bottom: 20px;">
-                        ℹ️ <strong>GPSDO Dashboard:</strong> Leo Bodnar LBE-1420 GPS-disciplined oscillator status and configuration. Served directly from the <code>ubersdr-leobodnar</code> container.
+                        ℹ️ <strong>GPSDO Dashboard:</strong> Leo Bodnar LBE-1420 GPS-disciplined oscillator status and configuration.
                     </div>
-                    <iframe id="gpsdoIframe" src="" style="width: 100%; height: 600px; border: 1px solid #ddd; border-radius: 5px; background: #fff;" title="GPSDO Dashboard"></iframe>
+                    <iframe id="gpsdoIframe" src="" style="width: 100%; height: 600px; border: none; background: #fff;" title="GPSDO Dashboard"></iframe>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -3814,16 +3814,19 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 // after the load event (e.g. SSE/fetch data populating the dashboard).
                 iframe.onload = function() {
                     try {
-                        const innerBody = iframe.contentDocument.body;
+                        const innerDoc = iframe.contentDocument;
+                        const getH = () => innerDoc.documentElement.scrollHeight;
                         // Set initial height immediately
-                        iframe.style.height = innerBody.scrollHeight + 'px';
-                        // Keep updating whenever the inner content changes size
+                        iframe.style.height = getH() + 'px';
+                        // Keep updating whenever the inner content changes size.
+                        // Observe documentElement (not just body) so margin/padding
+                        // on html are included and no border eats into the viewport.
                         new ResizeObserver(function() {
                             try {
-                                const h = iframe.contentDocument.body.scrollHeight;
+                                const h = getH();
                                 if (h > 0) iframe.style.height = h + 'px';
                             } catch(e) { /* ignore if document navigated away */ }
-                        }).observe(innerBody);
+                        }).observe(innerDoc.documentElement);
                     } catch(e) {
                         iframe.style.height = '800px'; // cross-origin fallback
                     }

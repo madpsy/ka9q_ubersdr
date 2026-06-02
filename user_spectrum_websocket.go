@@ -493,12 +493,13 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 		case "set_rate":
 			// Opt-in frame-rate reduction. divisor=1 (or 0) restores full rate.
 			// Only frames are skipped — the radiod poll rate is unchanged.
+			// Maximum divisor is 8 (1 in every 8 frames sent).
 			d := msg.Divisor
 			if d < 1 {
 				d = 1
 			}
-			if d > 32 {
-				d = 32
+			if d > 8 {
+				d = 8
 			}
 			state.mu.Lock()
 			state.frameSkip = d

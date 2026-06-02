@@ -4407,10 +4407,10 @@ class SpectrumDisplay {
                 localStorage.setItem('spectrumLineGraphEnabled', enabled.toString());
                 this.toggleLineGraphVisibility(enabled);
 
-                // Automatically adjust frame rate: half rate when line graph is hidden
+                // Automatically adjust frame rate: reduced rate when line graph is hidden
                 // (waterfall still runs but the line graph isn't drawn, so full rate
                 // has less benefit). Full rate is restored when the line graph is shown.
-                this.setRate(enabled ? 1 : 2);
+                this.setRate(enabled ? 1 : 3);
 
                 // Enable/disable smooth and hold checkboxes based on spectrum visibility
                 if (smoothCheckbox) {

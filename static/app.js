@@ -9506,7 +9506,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!window._spectrumRateApplied) {
                     window._spectrumRateApplied = true;
                     const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
-                    spectrumDisplay.setRate(lineGraphEnabled ? 1 : 2);
+                    spectrumDisplay.setRate(lineGraphEnabled ? 1 : 3);
                 }
 
                 // Only log config changes that are significant (not from periodic sync)

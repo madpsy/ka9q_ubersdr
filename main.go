@@ -1849,7 +1849,7 @@ func main() {
 
 	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
 	// This must be called after sessions is initialized but before HTTP server starts
-	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor, addonsConfig)
+	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor, addonsConfig, frontendHistory)
 
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
@@ -2001,6 +2001,7 @@ func main() {
 	if instanceReporter != nil {
 		instanceReporter.SetPSKRankFetcher(pskRankFetcher)
 		instanceReporter.SetGPSDOMonitor(gpsdoMonitor)
+		instanceReporter.SetFrontendHistory(frontendHistory)
 	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy)
 
@@ -2068,7 +2069,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor, frontendHistory)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -3530,7 +3531,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -3705,6 +3706,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"addons":               enabledAddons,
 		"server_time":          time.Now().UTC().Format(time.RFC3339),
 		"server_time_sync":     GetNTPSynced(),
+		"frontend":             buildStartupFrontendInfo(frontendHistory),
 	}
 
 	// Include GPSDO status when the Leo Bodnar LBE-1420 is fully operational.

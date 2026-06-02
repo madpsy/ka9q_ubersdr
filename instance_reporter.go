@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -31,6 +32,7 @@ type InstanceReporter struct {
 	multiDecoder        *MultiDecoder              // For getting WSPR SSB phone predictions
 	pskRank             *PSKRankFetcher            // For getting PSKReporter rank data
 	gpsdoMonitor        *GPSDOMonitor              // For reporting GPSDO operational status
+	frontendHistory     *FrontendHistoryTracker    // For reporting frontend IF power and input power
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -83,6 +85,7 @@ type InstanceReport struct {
 	SNR_1_8_30MHz              int                      `json:"snr_1_8_30_mhz"`               // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
 	Rotator                    map[string]interface{}   `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
 	FrequencyReference         map[string]interface{}   `json:"frequency_reference"`          // Frequency reference tracking information
+	Frontend                   map[string]interface{}   `json:"frontend,omitempty"`           // SDR frontend status: if_power (dBFS) and input_power_dbm (omitted when unavailable)
 	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
 	Spectrogram                bool                     `json:"spectrogram"`                  // Whether wideband spectrogram recording is enabled
 	DSP                        map[string]interface{}   `json:"dsp"`                          // DSP noise reduction insert info (enabled + allowed filter names)
@@ -184,6 +187,59 @@ func (ir *InstanceReporter) SetGPSDOMonitor(m *GPSDOMonitor) {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	ir.gpsdoMonitor = m
+}
+
+// SetFrontendHistory sets the frontend history tracker for reporting IF power and input power.
+// This must be called after the tracker is initialized (after NewInstanceReporter).
+func (ir *InstanceReporter) SetFrontendHistory(fht *FrontendHistoryTracker) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.frontendHistory = fht
+}
+
+// getFrontendInfo returns a map with if_power (dBFS) and input_power_dbm for the
+// wideband frontend, or nil when no frontend status is available.
+// Uses the most recent 1-second sample from the FrontendHistoryTracker.
+func (ir *InstanceReporter) getFrontendInfo() map[string]interface{} {
+	ir.mu.RLock()
+	fht := ir.frontendHistory
+	ir.mu.RUnlock()
+
+	if fht == nil {
+		return nil
+	}
+
+	// Get the live frontend status via the tracker's statusTracker
+	fht.historyMu.RLock()
+	samples := fht.samples
+	fht.historyMu.RUnlock()
+
+	if len(samples) == 0 {
+		return nil
+	}
+
+	latest := samples[len(samples)-1]
+
+	// Sanitise: skip if IFPower is clearly invalid
+	if math.IsNaN(float64(latest.IFPower)) || math.IsInf(float64(latest.IFPower), 0) || latest.IFPower < -200 {
+		return nil
+	}
+
+	info := map[string]interface{}{
+		"if_power": math.Round(float64(latest.IFPower)*10) / 10, // 1 decimal place, dBFS
+	}
+
+	// input_power_dbm requires the live FrontendStatus for gain/cal fields
+	status := fht.statusTracker.GetFrontendStatus(fht.widebandSSRC)
+	if status != nil {
+		netRFGain := float64(status.RFGain - status.RFAtten + status.RFLevelCal)
+		dbmValue := float64(latest.IFPower) - netRFGain
+		if !math.IsNaN(dbmValue) && !math.IsInf(dbmValue, 0) {
+			info["input_power_dbm"] = math.Round(dbmValue*10) / 10 // 1 decimal place, dBm
+		}
+	}
+
+	return info
 }
 
 // getGPSDOInfo returns the GPSDO description map when the Leo Bodnar LBE-1420 is
@@ -696,6 +752,7 @@ func (ir *InstanceReporter) sendReport() error {
 	}
 	report.PSKReporterRank = ir.getPSKCallsignRank()
 	report.GPSDO = ir.getGPSDOInfo()
+	report.Frontend = ir.getFrontendInfo()
 
 	jsonData, err := json.Marshal(report)
 	if err != nil {
@@ -1085,6 +1142,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		report.SSBGridSquares = ssbResult.GridSquares
 	}
 	report.PSKReporterRank = ir.getPSKCallsignRank()
+	report.Frontend = ir.getFrontendInfo()
 
 	jsonData, err := json.Marshal(report)
 	if err != nil {
@@ -1295,8 +1353,46 @@ func ensureUUIDForStartup(config *Config, configPath string) error {
 }
 
 // SendStartupReport sends a startup report regardless of whether instance reporting is enabled
+// buildStartupFrontendInfo extracts if_power and input_power_dbm from the most recent
+// sample in the FrontendHistoryTracker for use in the startup report.
+// Returns nil when no data is available.
+func buildStartupFrontendInfo(fht *FrontendHistoryTracker) map[string]interface{} {
+	if fht == nil {
+		return nil
+	}
+
+	fht.historyMu.RLock()
+	samples := fht.samples
+	fht.historyMu.RUnlock()
+
+	if len(samples) == 0 {
+		return nil
+	}
+
+	latest := samples[len(samples)-1]
+
+	if math.IsNaN(float64(latest.IFPower)) || math.IsInf(float64(latest.IFPower), 0) || latest.IFPower < -200 {
+		return nil
+	}
+
+	info := map[string]interface{}{
+		"if_power": math.Round(float64(latest.IFPower)*10) / 10,
+	}
+
+	status := fht.statusTracker.GetFrontendStatus(fht.widebandSSRC)
+	if status != nil {
+		netRFGain := float64(status.RFGain - status.RFAtten + status.RFLevelCal)
+		dbmValue := float64(latest.IFPower) - netRFGain
+		if !math.IsNaN(dbmValue) && !math.IsInf(dbmValue, 0) {
+			info["input_power_dbm"] = math.Round(dbmValue*10) / 10
+		}
+	}
+
+	return info
+}
+
 // This runs in a non-blocking goroutine with retries and only sends if collector endpoint is configured
-func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig) {
+func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig, frontendHistory *FrontendHistoryTracker) {
 	// Run in a goroutine to not block startup
 	go func() {
 		// Check if we have the minimum required configuration (collector hostname and port)
@@ -1440,6 +1536,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			Addons:                     enabledAddons,
 			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected,
 			NotifyInstanceStartup:      config.InstanceReporting.NotifyInstanceStartup,
+			Frontend:                   buildStartupFrontendInfo(frontendHistory),
 		}
 
 		jsonData, err := json.Marshal(report)

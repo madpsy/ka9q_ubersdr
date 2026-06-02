@@ -3386,7 +3386,6 @@ class SpectrumDisplay {
 
     // Draw vertical green lines at bandwidth edges over waterfall/graph (split mode only)
     drawBandwidthLines(xLow, xHigh) {
-        // Only draw if both edges are visible AND tuned frequency is in range
         // Check if tuned frequency is visible first
         const effectiveCenterFreq = this.isDragging ?
             this.centerFreq + this.predictedFreqOffset :
@@ -3401,15 +3400,15 @@ class SpectrumDisplay {
             return;
         }
 
-        // Only draw if both edges are visible
-        if (xLow < 0 || xLow > this.width || xHigh < 0 || xHigh > this.width) {
-            // Clear any existing bandwidth lines
-            this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
-            return;
-        }
+        // Determine which edges are within the visible range
+        const lowVisible  = xLow  >= 0 && xLow  <= this.width;
+        const highVisible = xHigh >= 0 && xHigh <= this.width;
 
         // Clear the bandwidth lines overlay canvas
         this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
+
+        // Nothing to draw if both edges are off-screen
+        if (!lowVisible && !highVisible) return;
 
         // Split mode: draw on line graph (from 70px where graph starts) and waterfall
         // Line graph is 300px tall, waterfall is variable height
@@ -3425,17 +3424,21 @@ class SpectrumDisplay {
         this.bandwidthLinesCtx.lineWidth = 2;
         this.bandwidthLinesCtx.setLineDash([5, 5]); // Dashed line pattern
 
-        // Draw left edge line
-        this.bandwidthLinesCtx.beginPath();
-        this.bandwidthLinesCtx.moveTo(xLow, startY);
-        this.bandwidthLinesCtx.lineTo(xLow, height);
-        this.bandwidthLinesCtx.stroke();
+        // Draw left edge line (only if within visible range)
+        if (lowVisible) {
+            this.bandwidthLinesCtx.beginPath();
+            this.bandwidthLinesCtx.moveTo(xLow, startY);
+            this.bandwidthLinesCtx.lineTo(xLow, height);
+            this.bandwidthLinesCtx.stroke();
+        }
 
-        // Draw right edge line
-        this.bandwidthLinesCtx.beginPath();
-        this.bandwidthLinesCtx.moveTo(xHigh, startY);
-        this.bandwidthLinesCtx.lineTo(xHigh, height);
-        this.bandwidthLinesCtx.stroke();
+        // Draw right edge line (only if within visible range)
+        if (highVisible) {
+            this.bandwidthLinesCtx.beginPath();
+            this.bandwidthLinesCtx.moveTo(xHigh, startY);
+            this.bandwidthLinesCtx.lineTo(xHigh, height);
+            this.bandwidthLinesCtx.stroke();
+        }
 
         this.bandwidthLinesCtx.restore();
     }

@@ -984,10 +984,11 @@ func LoadConfig(filename string) (*Config, error) {
 		config.SpaceWeather.PollIntervalSec = 900 // 15 minutes default
 	}
 
-	// Set noise floor defaults if not specified
-	if config.NoiseFloor.PollIntervalSec == 0 {
-		config.NoiseFloor.PollIntervalSec = 60 // 60 seconds default
-	}
+	// Noise floor is always enabled — it powers the per-band SNR buttons in the UI.
+	// Regardless of what config.yaml says, force enabled=true and lock poll_interval_sec
+	// to exactly 60 seconds so the band-status badges always reflect real data.
+	config.NoiseFloor.Enabled = true
+	config.NoiseFloor.PollIntervalSec = 60 // Always 60 seconds — not user-configurable
 	// RestartOnStall defaults to true - exit ubersdr when all bands stall post-reconnect
 	// Note: YAML booleans default to false, so we set it to true if not explicitly disabled
 	if !config.NoiseFloor.RestartOnStall {

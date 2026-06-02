@@ -1044,14 +1044,12 @@ mqtt:
 
 # Noise Floor Monitoring settings
 noisefloor:
-  # Enable or disable noise floor monitoring
-  # When enabled, creates SEPARATE spectrum sessions for each band (better resolution!)
-  enabled: true
-  
-  # Polling interval in seconds (how often to collect measurements)
-  # Lower values = more frequent updates but more CPU/disk usage
-  # Recommended: 60 seconds (1 minute) for good time resolution
-  poll_interval_sec: 60
+  # Note: enabled and poll_interval_sec are hard-coded in config.go and cannot be
+  # changed here. Noise floor monitoring is always on (enabled: true) and always
+  # polls every 60 seconds. These fields are kept in the YAML for documentation
+  # purposes only — any value set here is ignored.
+  enabled: true          # always forced true — do not change
+  poll_interval_sec: 60  # always forced to 60 — do not change
 
   # Exit ubersdr when all spectrum channels stall after a reconnect attempt (default: true)
   # When enabled, if all band spectrum channels are still stalled 30 seconds after the

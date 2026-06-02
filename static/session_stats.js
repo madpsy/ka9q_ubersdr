@@ -599,13 +599,16 @@ function createCountriesChart(countries) {
         }
     };
     
+    const countriesData = top10.map(c => c.sessions);
+    const countriesTotal = countriesData.reduce((a, b) => a + b, 0);
+
     countriesChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: top10.map(c => c.country), // Just country name, no flag
             datasets: [{
                 label: 'Sessions',
-                data: top10.map(c => c.sessions),
+                data: countriesData,
                 backgroundColor: colors,
                 borderColor: colors.map(c => c.replace('0.7', '1')),
                 borderWidth: 2
@@ -621,7 +624,8 @@ function createCountriesChart(countries) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return `Sessions: ${context.parsed.y.toLocaleString()}`;
+                            const pct = countriesTotal > 0 ? ((context.parsed.y / countriesTotal) * 100).toFixed(1) : '0.0';
+                            return `Sessions: ${context.parsed.y.toLocaleString()} (${pct}%)`;
                         }
                     }
                 }
@@ -652,7 +656,7 @@ function createCountriesChart(countries) {
                 }
             }
         },
-        plugins: [flagPlugin]
+        plugins: [flagPlugin, makePercentLabelPlugin(countriesData)]
     });
 }
 
@@ -759,13 +763,16 @@ function createBrowsersChart(browsers) {
     // Generate colors for each browser
     const colors = generateColors(browsers.length);
     
+    const browsersData = browsers.map(b => b.sessions);
+    const browsersTotalSessions = browsersData.reduce((a, b) => a + b, 0);
+
     browsersChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: browsers.map(b => b.name),
             datasets: [{
                 label: 'Sessions',
-                data: browsers.map(b => b.sessions),
+                data: browsersData,
                 backgroundColor: colors,
                 borderColor: colors.map(c => c.replace('0.7', '1')),
                 borderWidth: 2
@@ -781,7 +788,8 @@ function createBrowsersChart(browsers) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return `Sessions: ${context.parsed.y.toLocaleString()}`;
+                            const pct = browsersTotalSessions > 0 ? ((context.parsed.y / browsersTotalSessions) * 100).toFixed(1) : '0.0';
+                            return `Sessions: ${context.parsed.y.toLocaleString()} (${pct}%)`;
                         }
                     }
                 }
@@ -810,7 +818,8 @@ function createBrowsersChart(browsers) {
                     }
                 }
             }
-        }
+        },
+        plugins: [makePercentLabelPlugin(browsersData)]
     });
 }
 
@@ -825,13 +834,16 @@ function createOSChart(operatingSystems) {
     // Generate colors for each OS
     const colors = generateColors(operatingSystems.length);
     
+    const osData = operatingSystems.map(os => os.sessions);
+    const osTotalSessions = osData.reduce((a, b) => a + b, 0);
+
     osChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: operatingSystems.map(os => os.name),
             datasets: [{
                 label: 'Sessions',
-                data: operatingSystems.map(os => os.sessions),
+                data: osData,
                 backgroundColor: colors,
                 borderColor: colors.map(c => c.replace('0.7', '1')),
                 borderWidth: 2
@@ -847,7 +859,8 @@ function createOSChart(operatingSystems) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return `Sessions: ${context.parsed.y.toLocaleString()}`;
+                            const pct = osTotalSessions > 0 ? ((context.parsed.y / osTotalSessions) * 100).toFixed(1) : '0.0';
+                            return `Sessions: ${context.parsed.y.toLocaleString()} (${pct}%)`;
                         }
                     }
                 }
@@ -876,7 +889,8 @@ function createOSChart(operatingSystems) {
                     }
                 }
             }
-        }
+        },
+        plugins: [makePercentLabelPlugin(osData)]
     });
 }
 
@@ -1129,13 +1143,16 @@ function createModesChart(modes) {
     // Generate colors for each mode
     const colors = generateColors(modes.length);
     
+    const modesData = modes.map(m => m.sessions);
+    const modesTotalSessions = modesData.reduce((a, b) => a + b, 0);
+
     modesChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: modes.map(m => m.name.toUpperCase()),
             datasets: [{
                 label: 'Sessions',
-                data: modes.map(m => m.sessions),
+                data: modesData,
                 backgroundColor: colors,
                 borderColor: colors.map(c => c.replace('0.7', '1')),
                 borderWidth: 2
@@ -1152,7 +1169,8 @@ function createModesChart(modes) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return `Sessions: ${context.parsed.x.toLocaleString()}`;
+                            const pct = modesTotalSessions > 0 ? ((context.parsed.x / modesTotalSessions) * 100).toFixed(1) : '0.0';
+                            return `Sessions: ${context.parsed.x.toLocaleString()} (${pct}%)`;
                         }
                     }
                 }
@@ -1179,8 +1197,48 @@ function createModesChart(modes) {
                     }
                 }
             }
-        }
+        },
+        plugins: [makePercentLabelPlugin(modesData, 'horizontal')]
     });
+}
+
+// Reusable plugin factory: draws % label at the base of each bar if there's enough room
+function makePercentLabelPlugin(dataValues, axis = 'vertical') {
+    const total = dataValues.reduce((a, b) => a + b, 0);
+    return {
+        id: 'percentLabelPlugin',
+        afterDatasetsDraw(chart) {
+            const ctx = chart.ctx;
+            const meta = chart.getDatasetMeta(0);
+            ctx.save();
+            ctx.font = 'bold 11px Arial';
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+
+            meta.data.forEach((bar, i) => {
+                const value = dataValues[i];
+                const pct = total > 0 ? ((value / total) * 100).toFixed(1) + '%' : '';
+                const textWidth = ctx.measureText(pct).width;
+
+                if (axis === 'vertical') {
+                    const barHeight = bar.base - bar.y; // pixels tall
+                    if (barHeight >= 20) {
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillText(pct, bar.x, bar.base - 4);
+                    }
+                } else {
+                    // horizontal bar
+                    const barWidth = bar.x - bar.base; // pixels wide
+                    if (barWidth >= textWidth + 8) {
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(pct, bar.base + 4, bar.y);
+                    }
+                }
+            });
+            ctx.restore();
+        }
+    };
 }
 
 // Generate colors for charts

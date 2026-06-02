@@ -76,11 +76,14 @@ type UserSpectrumClientMessage struct {
 
 // UnmarshalJSON implements custom JSON unmarshaling to handle both float and int for Frequency
 func (m *UserSpectrumClientMessage) UnmarshalJSON(data []byte) error {
-	// Use a temporary struct with float64 for Frequency to accept both types
+	// Use a temporary struct with float64 for Frequency to accept both types.
+	// All fields of UserSpectrumClientMessage must be mirrored here; any field
+	// absent from Alias will always be zero after unmarshaling.
 	type Alias struct {
 		Type         string   `json:"type"`
 		Frequency    *float64 `json:"frequency,omitempty"`
 		BinBandwidth *float64 `json:"binBandwidth,omitempty"`
+		Divisor      int      `json:"divisor,omitempty"` // for "set_rate"
 	}
 
 	var aux Alias
@@ -89,6 +92,7 @@ func (m *UserSpectrumClientMessage) UnmarshalJSON(data []byte) error {
 	}
 
 	m.Type = aux.Type
+	m.Divisor = aux.Divisor
 
 	// Convert frequency from float64 to uint64, rounding if necessary
 	if aux.Frequency != nil {

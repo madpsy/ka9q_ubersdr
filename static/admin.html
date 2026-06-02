@@ -3810,12 +3810,20 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const iframe = document.getElementById('gpsdoIframe');
                 // Auto-size the iframe to its full content height so no inner scrollbar appears.
                 // /gpsdo/ is same-origin (proxied), so contentDocument is accessible.
+                // A ResizeObserver on the inner body handles JS-driven content that renders
+                // after the load event (e.g. SSE/fetch data populating the dashboard).
                 iframe.onload = function() {
                     try {
-                        const body = iframe.contentDocument.body;
-                        const html = iframe.contentDocument.documentElement;
-                        const h = Math.max(body.scrollHeight, body.offsetHeight, html.scrollHeight, html.offsetHeight);
-                        if (h > 0) iframe.style.height = h + 'px';
+                        const innerBody = iframe.contentDocument.body;
+                        // Set initial height immediately
+                        iframe.style.height = innerBody.scrollHeight + 'px';
+                        // Keep updating whenever the inner content changes size
+                        new ResizeObserver(function() {
+                            try {
+                                const h = iframe.contentDocument.body.scrollHeight;
+                                if (h > 0) iframe.style.height = h + 'px';
+                            } catch(e) { /* ignore if document navigated away */ }
+                        }).observe(innerBody);
                     } catch(e) {
                         iframe.style.height = '800px'; // cross-origin fallback
                     }

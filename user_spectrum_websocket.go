@@ -33,6 +33,14 @@ type spectrumState struct {
 	changes8Buf []changeEntry8 // reused by sendBinary8Spectrum
 	data8Buf    []uint8        // reused by sendBinary8Spectrum for float32→uint8 conversion
 	mu          sync.RWMutex
+
+	// Rate control — opt-in frame skipping.
+	// frameSkip == 0 or 1: full rate (default zero value means full rate).
+	// frameSkip == N > 1: send 1 in every N frames.
+	// frameCounter is incremented on every received frame; send when frameCounter%frameSkip==0.
+	// Both fields are only accessed under mu, so no separate synchronisation is needed.
+	frameSkip    int
+	frameCounter int
 }
 
 // changeEntry is a (index, float32 value) pair used for delta encoding.
@@ -63,6 +71,7 @@ type UserSpectrumClientMessage struct {
 	Type         string  `json:"type"`
 	Frequency    uint64  `json:"frequency,omitempty"`    // Center frequency for pan
 	BinBandwidth float64 `json:"binBandwidth,omitempty"` // Bandwidth per bin for zoom
+	Divisor      int     `json:"divisor,omitempty"`      // For "set_rate": 1=full rate, 2=half, etc.
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling to handle both float and int for Frequency
@@ -268,7 +277,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	}()
 
 	// Handle incoming messages
-	swsh.handleMessages(conn, session, done)
+	swsh.handleMessages(conn, session, done, state)
 
 	// CRITICAL: Wait for streaming goroutine to exit before closing channel
 	// This prevents "panic: send on closed channel" race condition where
@@ -280,7 +289,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 }
 
 // handleMessages processes incoming WebSocket messages
-func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *Session, done chan struct{}) {
+func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *Session, done chan struct{}, state *spectrumState) {
 	defer close(done)
 
 	for {
@@ -477,6 +486,22 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				swsh.sendStatus(conn, session)
 			}
 
+		case "set_rate":
+			// Opt-in frame-rate reduction. divisor=1 (or 0) restores full rate.
+			// Only frames are skipped — the radiod poll rate is unchanged.
+			d := msg.Divisor
+			if d < 1 {
+				d = 1
+			}
+			if d > 32 {
+				d = 32
+			}
+			state.mu.Lock()
+			state.frameSkip = d
+			state.frameCounter = 0 // next frame is always sent immediately after a rate change
+			state.mu.Unlock()
+			swsh.sendStatus(conn, session)
+
 		case "ping":
 			// Keepalive
 			swsh.sendMessage(conn, UserSpectrumServerMessage{Type: "pong"})
@@ -503,6 +528,18 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 		case spectrumData, ok := <-session.SpectrumChan:
 			if !ok {
 				return
+			}
+
+			// Rate control: skip this frame if a divisor > 1 has been requested.
+			// frameSkip == 0 or 1 means full rate (zero value = full rate, no init needed).
+			// The short-circuit on frameSkip > 1 ensures frameCounter%frameSkip is never
+			// evaluated when frameSkip is 0, preventing any divide-by-zero.
+			state.mu.Lock()
+			state.frameCounter++
+			skip := state.frameSkip > 1 && (state.frameCounter%state.frameSkip) != 0
+			state.mu.Unlock()
+			if skip {
+				continue
 			}
 
 			if DebugMode {

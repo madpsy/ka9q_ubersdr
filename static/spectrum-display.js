@@ -5017,6 +5017,15 @@ class SpectrumDisplay {
         this.ws.send(JSON.stringify(panMsg));
     }
 
+    // Request a frame-rate divisor from the server.
+    // divisor=1 (or 0) restores full rate; divisor=2 sends every other frame, etc.
+    // Safe to call at any time — silently ignored if the WebSocket is not open.
+    setRate(divisor) {
+        if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        const d = (divisor >= 1) ? Math.floor(divisor) : 1;
+        this.ws.send(JSON.stringify({ type: 'set_rate', divisor: d }));
+    }
+
     // Update bit rate display
     updateBitrateDisplay() {
         const bitrateElement = document.getElementById('spectrum-bitrate');

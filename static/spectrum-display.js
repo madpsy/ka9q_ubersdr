@@ -3336,30 +3336,44 @@ class SpectrumDisplay {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(0, 45, this.width, 30);
 
-        // Calculate appropriate frequency step based on available width
-        const minLabelSpacing = 80; // Minimum pixels between labels
-        const calculatedMarkers = Math.floor(this.width / minLabelSpacing);
-        const maxMarkers = Math.min(10, Math.max(3, calculatedMarkers));
-        const targetStep = this.totalBandwidth / maxMarkers;
-        
-        let freqStep;
-        if (targetStep >= 5e6) freqStep = 5e6;
-        else if (targetStep >= 2e6) freqStep = 2e6;
-        else if (targetStep >= 1e6) freqStep = 1e6;
-        else if (targetStep >= 500e3) freqStep = 500e3;
-        else if (targetStep >= 200e3) freqStep = 200e3;
-        else if (targetStep >= 100e3) freqStep = 100e3;
-        else if (targetStep >= 50e3) freqStep = 50e3;
-        else if (targetStep >= 20e3) freqStep = 20e3;
-        else if (targetStep >= 10e3) freqStep = 10e3;
-        else if (targetStep >= 5e3) freqStep = 5e3;
-        else if (targetStep >= 2e3) freqStep = 2e3;
-        else if (targetStep >= 1e3) freqStep = 1e3;
-        else if (targetStep >= 500) freqStep = 500;
-        else if (targetStep >= 200) freqStep = 200;
-        else freqStep = 100;
-
+        // Calculate appropriate frequency step based on available width.
+        // Strategy:
+        //   1. Pick an initial candidate step from the standard ladder using a rough
+        //      pixel-per-label estimate (80px minimum spacing).
+        //   2. Measure the actual rendered label width for a representative label.
+        //   3. Walk up the ladder until one step-width >= label width + padding,
+        //      guaranteeing labels never overlap regardless of zoom or canvas width.
         this._setFont(ctx, 'bold 13px monospace');
+
+        // Ordered list of all valid step sizes (Hz)
+        const stepLadder = [100, 200, 500, 1e3, 2e3, 5e3, 10e3, 20e3, 50e3,
+                            100e3, 200e3, 500e3, 1e6, 2e6, 5e6, 10e6];
+
+        // Rough initial candidate: aim for ~8 labels across the canvas
+        const roughTargetStep = this.totalBandwidth / Math.max(1, Math.floor(this.width / 80));
+        let freqStep = stepLadder[stepLadder.length - 1]; // fallback: largest step
+        for (let i = 0; i < stepLadder.length; i++) {
+            if (stepLadder[i] >= roughTargetStep) {
+                freqStep = stepLadder[i];
+                break;
+            }
+        }
+
+        // Measure actual label width for a representative label at this step,
+        // then bump up the step until one step-width comfortably fits the label.
+        const sampleLabel = this.formatFrequencyScale(
+            Math.round(effectiveCenterFreq / freqStep) * freqStep
+        );
+        const labelWidth = ctx.measureText(sampleLabel).width + 12; // +12px padding
+
+        for (let i = stepLadder.indexOf(freqStep); i < stepLadder.length; i++) {
+            const pixelsPerStep = (stepLadder[i] / this.totalBandwidth) * this.width;
+            if (pixelsPerStep >= labelWidth) {
+                freqStep = stepLadder[i];
+                break;
+            }
+            freqStep = stepLadder[i]; // keep walking up even if we haven't found a fit yet
+        }
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 

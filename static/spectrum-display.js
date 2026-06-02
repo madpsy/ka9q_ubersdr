@@ -3142,36 +3142,48 @@ class SpectrumDisplay {
         this.overlayCtx.lineWidth = 1;
         this.overlayCtx.stroke();
 
-        // Draw bandwidth bracket if both edges are visible
-        if (xLow >= 0 && xLow <= this.width && xHigh >= 0 && xHigh <= this.width) {
+        // Draw bandwidth bracket — visible whenever at least one edge is on-screen.
+        // If one edge is off-screen, the bar extends to the canvas boundary instead.
+        const lowVisible  = xLow  >= 0 && xLow  <= this.width;
+        const highVisible = xHigh >= 0 && xHigh <= this.width;
+
+        if (lowVisible || highVisible) {
             const bracketY = 45; // Position for bracket (at top of frequency scale section)
             const bracketHeight = 8;
 
-            // Store bar positions for right-click hit-test
-            this.lastBandwidthXLow = xLow;
-            this.lastBandwidthXHigh = xHigh;
+            // Clamp each edge to the canvas boundary for drawing purposes
+            const drawXLow  = Math.max(0, Math.min(this.width, xLow));
+            const drawXHigh = Math.max(0, Math.min(this.width, xHigh));
+
+            // Store bar positions for right-click hit-test (only when both are on-screen)
+            this.lastBandwidthXLow  = lowVisible  ? xLow  : null;
+            this.lastBandwidthXHigh = highVisible ? xHigh : null;
 
             // Resolve colour with full opacity for bar/ticks
             const barColor = this.getBandwidthIndicatorColor(0.9);
 
-            // Draw horizontal line connecting the edges (thicker)
+            // Draw horizontal line connecting the (clamped) edges (thicker)
             this.overlayCtx.strokeStyle = barColor;
-            this.overlayCtx.lineWidth = 3; // Thicker line
-            this.overlayCtx.beginPath();
-            this.overlayCtx.moveTo(xLow, bracketY);
-            this.overlayCtx.lineTo(xHigh, bracketY);
-            this.overlayCtx.stroke();
-
-            // Draw vertical ticks at edges (thicker)
             this.overlayCtx.lineWidth = 3;
             this.overlayCtx.beginPath();
-            this.overlayCtx.moveTo(xLow, bracketY - bracketHeight/2);
-            this.overlayCtx.lineTo(xLow, bracketY + bracketHeight/2);
-            this.overlayCtx.moveTo(xHigh, bracketY - bracketHeight/2);
-            this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight/2);
+            this.overlayCtx.moveTo(drawXLow, bracketY);
+            this.overlayCtx.lineTo(drawXHigh, bracketY);
+            this.overlayCtx.stroke();
+
+            // Draw vertical tick only at edges that are actually on-screen
+            this.overlayCtx.lineWidth = 3;
+            this.overlayCtx.beginPath();
+            if (lowVisible) {
+                this.overlayCtx.moveTo(xLow, bracketY - bracketHeight/2);
+                this.overlayCtx.lineTo(xLow, bracketY + bracketHeight/2);
+            }
+            if (highVisible) {
+                this.overlayCtx.moveTo(xHigh, bracketY - bracketHeight/2);
+                this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight/2);
+            }
             this.overlayCtx.stroke();
         } else {
-            // Bar not visible — clear stored positions
+            // Both edges off-screen — clear stored positions
             this.lastBandwidthXLow = null;
             this.lastBandwidthXHigh = null;
         }

@@ -24130,7 +24130,10 @@ Referer: ${log.referer}`;
                 const nameEsc = p.name.replace(/"/g, '&quot;');
                 html += `<tr style="border-bottom:1px solid #dee2e6;">`;
                 html += `<td style="padding:10px; font-weight:bold;">${p.name}</td>`;
-                html += `<td style="padding:10px; font-family:monospace;"><a href="${p.path}" target="_blank" style="color:#007bff;">${p.path}</a></td>`;
+                const pathCell = p.enabled
+                    ? `<a href="${p.path}" target="_blank" style="color:#007bff;">${p.path}</a>`
+                    : `<span style="color:#6c757d;">${p.path}</span>`;
+                html += `<td style="padding:10px; font-family:monospace;">${pathCell}</td>`;
                 html += `<td style="padding:10px; font-family:monospace;">${p.host}:${p.port}</td>`;
                 html += `<td style="padding:10px; text-align:center;">${enabledBadge}</td>`;
                 html += `<td style="padding:10px; text-align:center;">${authBadge}</td>`;

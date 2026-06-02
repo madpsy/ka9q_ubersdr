@@ -3680,6 +3680,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		},
 		"max_clients":          config.Server.MaxSessions,
 		"available_clients":    availableClients,
+		"bypassed_users_only":  config.Server.BypassedUsersOnly,
 		"max_session_time":     config.Server.MaxSessionTime,
 		"version":              Version,
 		"space_weather":        config.SpaceWeather.Enabled,

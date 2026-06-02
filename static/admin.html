@@ -1228,7 +1228,7 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>GPSDO Dashboard:</strong> Leo Bodnar LBE-1420 GPS-disciplined oscillator status and configuration. Served directly from the <code>ubersdr-leobodnar</code> container.
                     </div>
-                    <iframe id="gpsdoIframe" src="" style="width: 100%; height: calc(100vh - 200px); min-height: 600px; border: 1px solid #ddd; border-radius: 5px; background: #fff;" title="GPSDO Dashboard"></iframe>
+                    <iframe id="gpsdoIframe" src="" style="width: 100%; height: 600px; border: 1px solid #ddd; border-radius: 5px; background: #fff;" title="GPSDO Dashboard"></iframe>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -3808,6 +3808,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 document.getElementById('gpsdoButtons').style.display = 'flex';
                 // Load the iframe src on first activation; subsequent activations keep it loaded
                 const iframe = document.getElementById('gpsdoIframe');
+                // Auto-size the iframe to its full content height so no inner scrollbar appears.
+                // /gpsdo/ is same-origin (proxied), so contentDocument is accessible.
+                iframe.onload = function() {
+                    try {
+                        const body = iframe.contentDocument.body;
+                        const html = iframe.contentDocument.documentElement;
+                        const h = Math.max(body.scrollHeight, body.offsetHeight, html.scrollHeight, html.offsetHeight);
+                        if (h > 0) iframe.style.height = h + 'px';
+                    } catch(e) {
+                        iframe.style.height = '800px'; // cross-origin fallback
+                    }
+                };
                 if (!iframe.src || iframe.src === window.location.href) {
                     iframe.src = '/gpsdo/';
                 }

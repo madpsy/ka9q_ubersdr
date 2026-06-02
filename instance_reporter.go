@@ -71,6 +71,7 @@ type InstanceReport struct {
 	NoiseFloor                 bool                     `json:"noise_floor"`                  // Whether noise floor monitoring is enabled
 	MaxClients                 int                      `json:"max_clients"`                  // Maximum number of clients allowed
 	AvailableClients           int                      `json:"available_clients"`            // Current number of available client slots
+	BypassedUsersOnly          bool                     `json:"bypassed_users_only"`          // Whether only bypassed users (IP or password) can connect
 	MaxSessionTime             int                      `json:"max_session_time"`             // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes              []string                 `json:"public_iq_modes"`              // List of IQ modes accessible without authentication
 	CPUModel                   string                   `json:"cpu_model"`                    // CPU model name
@@ -669,6 +670,7 @@ func (ir *InstanceReporter) sendReport() error {
 		NoiseFloor:                 ir.config.NoiseFloor.Enabled,
 		MaxClients:                 ir.config.Server.MaxSessions,
 		AvailableClients:           availableClients,
+		BypassedUsersOnly:          ir.config.Server.BypassedUsersOnly,
 		MaxSessionTime:             ir.config.Server.MaxSessionTime,
 		PublicIQModes:              publicIQModes,
 		CPUModel:                   cpuModel,
@@ -1057,6 +1059,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		NoiseFloor:                 ir.config.NoiseFloor.Enabled,
 		MaxClients:                 ir.config.Server.MaxSessions,
 		AvailableClients:           availableClients,
+		BypassedUsersOnly:          ir.config.Server.BypassedUsersOnly,
 		MaxSessionTime:             ir.config.Server.MaxSessionTime,
 		PublicIQModes:              publicIQModes,
 		CPUModel:                   cpuModel,
@@ -1420,6 +1423,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			NoiseFloor:                 config.NoiseFloor.Enabled,
 			MaxClients:                 config.Server.MaxSessions,
 			AvailableClients:           availableClients,
+			BypassedUsersOnly:          config.Server.BypassedUsersOnly,
 			MaxSessionTime:             config.Server.MaxSessionTime,
 			PublicIQModes:              publicIQModes,
 			CPUModel:                   cpuModel,

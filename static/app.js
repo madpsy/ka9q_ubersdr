@@ -9474,23 +9474,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             ? getUIDefault('spectrumColorScheme', 'palette', 'jet')
             : (localStorage.getItem('spectrumColorScheme') || 'jet');
 
-        // Restore saved rate divisor (1 = full, 2 = half). Clamp to valid range.
-        // Stored as a string integer; parseInt with radix 10 is safe against NaN.
-        const savedDivisorRaw = parseInt(localStorage.getItem('spectrumRateDivisor') || '1', 10);
-        const savedDivisor = (Number.isFinite(savedDivisorRaw) && savedDivisorRaw >= 1) ? savedDivisorRaw : 1;
-
-        // Set the <select> to show the correct (Full) or (Half) option.
-        // The select values are "jet" (full) and "jet-half" (half), etc.
         const colorSchemeEl = document.getElementById('spectrum-colorscheme');
-        if (colorSchemeEl && savedColorScheme) {
-            const selectValue = savedDivisor > 1 ? savedColorScheme + '-half' : savedColorScheme;
-            // Only set if the option actually exists in the select (guards against stale values)
-            if (Array.from(colorSchemeEl.options).some(o => o.value === selectValue)) {
-                colorSchemeEl.value = selectValue;
-            } else {
-                colorSchemeEl.value = savedColorScheme; // fall back to full-rate option
-            }
-        }
+        if (colorSchemeEl && savedColorScheme) colorSchemeEl.value = savedColorScheme;
 
         // Use server default for contrast if no user preference exists
         const savedContrast = (typeof getUIDefaultNumber === 'function')
@@ -9514,15 +9499,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 log('Spectrum display disconnected');
             },
             onConfig: (config) => {
-                // Restore rate preference on the very first config message (WebSocket confirmed open).
-                // Uses a flag so reconnects don't re-send unnecessarily (the server resets rate on
-                // each new WebSocket session anyway, so this is idempotent).
-                if (!window._spectrumRateRestored) {
-                    window._spectrumRateRestored = true;
-                    const d = parseInt(localStorage.getItem('spectrumRateDivisor') || '1', 10);
-                    if (Number.isFinite(d) && d > 1) {
-                        spectrumDisplay.setRate(d);
-                    }
+                // On the very first config message the WebSocket is confirmed open.
+                // Set the frame rate based on the current spectrum line-graph checkbox state.
+                // This handles the case where the checkbox was already unchecked on load
+                // (from localStorage or ui-config) before the WebSocket connected.
+                if (!window._spectrumRateApplied) {
+                    window._spectrumRateApplied = true;
+                    const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
+                    spectrumDisplay.setRate(lineGraphEnabled ? 1 : 2);
                 }
 
                 // Only log config changes that are significant (not from periodic sync)
@@ -9824,26 +9808,10 @@ function updateSpectrumCursor() {
 function updateSpectrumColorScheme() {
     if (!spectrumDisplay) return;
 
-    const raw = document.getElementById('spectrum-colorscheme').value;
-
-    // Values are either "turbo" (full rate) or "turbo-half" (half rate).
-    // Split on the "-half" suffix to get the base palette name and divisor.
-    const isHalf = raw.endsWith('-half');
-    const scheme = isHalf ? raw.slice(0, -5) : raw;
-    const divisor = isHalf ? 2 : 1;
-
-    // Apply the base colour scheme to the display.
+    const scheme = document.getElementById('spectrum-colorscheme').value;
     spectrumDisplay.updateConfig({ colorScheme: scheme });
-
-    // Send rate-control command to the server WebSocket.
-    spectrumDisplay.setRate(divisor);
-
-    // Persist the base palette name so the ui-config default (always a base
-    // name like "jet") can still match the full-rate option on next load.
     localStorage.setItem('spectrumColorScheme', scheme);
-    // Persist the divisor separately so it can be restored on next page load.
-    localStorage.setItem('spectrumRateDivisor', String(divisor));
-    log(`Spectrum color scheme changed to ${scheme}${isHalf ? ' (half rate)' : ''}`);
+    log(`Spectrum color scheme changed to ${scheme}`);
 }
 
 function updateSpectrumRange() {

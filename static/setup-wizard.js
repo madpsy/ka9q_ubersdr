@@ -4,13 +4,14 @@
 
     // State management
     let currentStep = 1;
-    const totalSteps = 5;
+    const totalSteps = 6;
     let formData = {};
     let map = null;
     let marker = null;
     let lookupTestPassed = false; // tracks whether the lookup test has passed this session
     let wisdomLaunched = false;   // tracks whether Generate Wisdom has been clicked on step 5
     let gpsdoSSE = null;          // SSE connection to /gpsdo/events — open while on step 1
+    let wizardEnabledWidgetIDs = new Set(); // widget_ids the user has toggled on in step 6
 
     // DOM elements
     const prevBtn = document.getElementById('prevBtn');
@@ -123,8 +124,12 @@
         prevBtn.style.visibility = currentStep === 1 ? 'hidden' : 'visible';
         
         if (currentStep === totalSteps) {
+            // Step 6 (Widgets) — always allow finishing
             nextBtn.textContent = 'Finish Setup →';
-            // Disable until the user has clicked Generate Wisdom
+            nextBtn.disabled = false;
+        } else if (currentStep === totalSteps - 1) {
+            // Step 5 (Generate Wisdom) — disable until wisdom launched
+            nextBtn.textContent = 'Next →';
             nextBtn.disabled = !wisdomLaunched;
         } else {
             nextBtn.textContent = 'Next →';
@@ -148,7 +153,7 @@
     }
 
     async function nextStep() {
-        // Step 5 is the "Generate Wisdom" screen — "Finish Setup" saves config then restarts
+        // Step 6 is the "Widgets" screen — "Finish Setup" saves config then restarts
         if (currentStep === totalSteps) {
             await saveConfiguration();
             return;
@@ -168,9 +173,12 @@
             gpsdoSSE = null;
         }
 
-        // All steps 1–4 just advance to the next step
+        // Advance to next step; if entering step 6 load featured widgets
         currentStep++;
         updateUI();
+        if (currentStep === totalSteps) {
+            loadWizardFeaturedWidgets();
+        }
     }
 
     async function testLookupConnection() {
@@ -1174,6 +1182,134 @@
         }
 
         return false;
+    }
+
+    // ── Step 6: Featured Widgets ─────────────────────────────────────────────
+
+    async function loadWizardFeaturedWidgets() {
+        const container = document.getElementById('wizardWidgetsContainer');
+        if (!container) return;
+
+        container.innerHTML = '<div style="text-align:center;padding:30px;color:#718096;"><div class="spinner" style="margin:0 auto 16px;"></div><p>Loading featured widgets…</p></div>';
+
+        try {
+            const resp = await fetch('/admin/widgets/public-with-instances');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            const featured = (data.widgets || []).filter(w => w.is_featured);
+
+            if (featured.length === 0) {
+                container.innerHTML = '<p style="color:#718096;font-size:14px;text-align:center;padding:20px 0;">No featured widgets are available right now. You can browse all widgets later from <strong>Admin → UI → Widgets</strong>.</p>';
+                return;
+            }
+
+            renderWizardWidgets(featured, container);
+        } catch (e) {
+            container.innerHTML = '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:16px;color:#856404;font-size:14px;">' +
+                '⚠️ Could not load featured widgets right now — this is not a problem. ' +
+                'You can enable widgets at any time from <strong>Admin → UI → Widgets</strong>.' +
+                '</div>';
+        }
+    }
+
+    function renderWizardWidgets(widgets, container) {
+        container.innerHTML = '';
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;';
+
+        widgets.forEach(w => {
+            const isOn = wizardEnabledWidgetIDs.has(w.widget_id);
+            const card = document.createElement('div');
+            card.id = 'wizard-widget-card-' + w.widget_id;
+            card.style.cssText = 'display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:8px;border:1px solid ' +
+                (isOn ? '#f59e0b' : '#e2e8f0') + ';background:' + (isOn ? '#fffbeb' : '#fff') +
+                ';box-shadow:0 1px 4px rgba(0,0,0,.06);transition:border-color .2s,background .2s;';
+
+            const nameRow = document.createElement('div');
+            nameRow.style.cssText = 'display:flex;align-items:center;gap:8px;';
+            const nameEl = document.createElement('span');
+            nameEl.style.cssText = 'font-weight:700;font-size:15px;color:#2d3748;flex:1;min-width:0;';
+            nameEl.textContent = w.name;
+            const badge = document.createElement('span');
+            badge.style.cssText = 'padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;';
+            badge.textContent = '⭐ featured';
+            nameRow.appendChild(nameEl);
+            nameRow.appendChild(badge);
+
+            card.appendChild(nameRow);
+
+            if (w.description) {
+                const desc = document.createElement('p');
+                desc.style.cssText = 'margin:0;font-size:13px;color:#718096;line-height:1.5;';
+                desc.textContent = w.description;
+                card.appendChild(desc);
+            }
+
+            if (w.callsign) {
+                const by = document.createElement('div');
+                by.style.cssText = 'font-size:11px;color:#a0aec0;';
+                by.textContent = 'by ' + w.callsign;
+                card.appendChild(by);
+            }
+
+            const btn = document.createElement('button');
+            btn.className = isOn ? 'btn btn-danger' : 'btn btn-primary';
+            btn.style.cssText = 'margin-top:auto;font-size:13px;padding:8px 14px;width:100%;';
+            btn.textContent = isOn ? 'Disable' : 'Enable';
+            btn.addEventListener('click', () => toggleWizardWidget(w, btn, card));
+            card.appendChild(btn);
+
+            grid.appendChild(card);
+        });
+
+        container.appendChild(grid);
+
+        const note = document.createElement('p');
+        note.style.cssText = 'margin-top:16px;font-size:12px;color:#a0aec0;text-align:center;';
+        note.textContent = 'You can change these at any time from Admin → UI → Widgets.';
+        container.appendChild(note);
+    }
+
+    async function toggleWizardWidget(w, btn, card) {
+        const isCurrentlyOn = wizardEnabledWidgetIDs.has(w.widget_id);
+        btn.disabled = true;
+        btn.textContent = '…';
+
+        try {
+            if (isCurrentlyOn) {
+                const resp = await fetch('/admin/widgets/disable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ widget_id: w.widget_id })
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                wizardEnabledWidgetIDs.delete(w.widget_id);
+            } else {
+                const resp = await fetch('/admin/widgets/enable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ widget_id: w.widget_id })
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                wizardEnabledWidgetIDs.add(w.widget_id);
+            }
+
+            const nowOn = wizardEnabledWidgetIDs.has(w.widget_id);
+            card.style.border = '1px solid ' + (nowOn ? '#f59e0b' : '#e2e8f0');
+            card.style.background = nowOn ? '#fffbeb' : '#fff';
+            btn.className = nowOn ? 'btn btn-danger' : 'btn btn-primary';
+            btn.textContent = nowOn ? 'Disable' : 'Enable';
+        } catch (e) {
+            btn.textContent = isCurrentlyOn ? 'Disable' : 'Enable';
+            // Show a brief inline error without blocking the user
+            const errEl = document.createElement('span');
+            errEl.style.cssText = 'font-size:11px;color:#c33;margin-left:8px;';
+            errEl.textContent = 'Failed — try again';
+            btn.parentNode.insertBefore(errEl, btn.nextSibling);
+            setTimeout(() => errEl.remove(), 3000);
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     // Open Generate Wisdom script in popup window (mirrors admin.html behaviour)

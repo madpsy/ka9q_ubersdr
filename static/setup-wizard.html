@@ -425,6 +425,10 @@
                 <div class="progress-step-circle">5</div>
                 <div class="progress-step-label">Generate Wisdom</div>
             </div>
+            <div class="progress-step" data-step="6">
+                <div class="progress-step-circle">6</div>
+                <div class="progress-step-label">Widgets</div>
+            </div>
         </div>
 
         <div class="wizard-content">
@@ -773,6 +777,28 @@
                     <p style="color: #718096; font-size: 13px; margin-top: 12px;">
                         Click the button above to open a terminal window and run the script. Once launched, click <strong>Finish Setup →</strong> to complete the wizard.
                     </p>
+                </div>
+            </div>
+
+            <!-- Step 6: Widgets -->
+            <div class="wizard-step" data-step="6">
+                <h2 class="step-title">🧩 Widgets</h2>
+                <p class="step-description">
+                    Widgets are optional panels that appear in the web UI — things like band condition displays,
+                    propagation charts, and more. They're completely optional and can be enabled or disabled at
+                    any time from the <strong>Admin → UI</strong> tab.
+                </p>
+
+                <div style="background:#f0f4ff;border:1px solid #c5cae9;border-radius:8px;padding:16px;margin-bottom:24px;font-size:14px;color:#283593;line-height:1.6;">
+                    ⭐ The widgets below are <strong>featured</strong> — hand-picked as particularly useful for most stations.
+                    Enable any you'd like now, or skip this step and add them later.
+                </div>
+
+                <div id="wizardWidgetsContainer">
+                    <div style="text-align:center;padding:30px;color:#718096;">
+                        <div class="spinner" style="margin:0 auto 16px;"></div>
+                        <p>Loading featured widgets…</p>
+                    </div>
                 </div>
             </div>
 

@@ -9389,10 +9389,10 @@ function resetStationIdColor() {
                 const featuredBorder = isFeatured ? '#f59e0b' : '#e0e0e0';
                 row.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:${featuredBg};border-radius:6px;border:1px solid ${featuredBorder};margin-bottom:8px;gap:10px;`;
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
-                const featuredBadge = isFeatured ? '<span style="margin-left:auto;padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;">⭐ featured</span>' : '';
+                const featuredBadge = isFeatured ? '<span style="margin-left:6px;padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;vertical-align:middle;">⭐ featured</span>' : '';
                 row.innerHTML = `
                     <div style="flex:1;min-width:0;">
-                        <div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</span>${featuredBadge}</div>
+                        <div style="display:flex;align-items:center;gap:0;overflow:hidden;"><span style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${escapeHtml(w.name)}</span>${featuredBadge}</div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                         <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${(() => { const total = widgetEnabledByCount[w.widget_id] || 0; if (!total) return ''; const communityEntry = allCommunityWidgets.find(c => c.widget_id === w.widget_id); const selfIncluded = communityEntry && myInstanceUUID && (communityEntry.enabled_by || []).some(inst => inst.public_uuid === myInstanceUUID); return ` \u00b7 \uD83D\uDC65 ${total} instance${total === 1 ? '' : 's'}${selfIncluded ? ' (inc. this instance)' : ''}`; })()}</div>
                     </div>

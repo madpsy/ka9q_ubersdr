@@ -1193,9 +1193,20 @@
         container.innerHTML = '<div style="text-align:center;padding:30px;color:#718096;"><div class="spinner" style="margin:0 auto 16px;"></div><p>Loading featured widgets…</p></div>';
 
         try {
-            const resp = await fetch('/admin/widgets/public-with-instances');
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const data = await resp.json();
+            // Fetch current enabled list and featured widgets in parallel
+            const [enabledResp, publicResp] = await Promise.all([
+                fetch('/admin/widgets/enabled'),
+                fetch('/admin/widgets/public-with-instances')
+            ]);
+
+            // Pre-populate wizardEnabledWidgetIDs from the server's current enabled list
+            if (enabledResp.ok) {
+                const enabledData = await enabledResp.json();
+                wizardEnabledWidgetIDs = new Set((enabledData.enabled || []).map(e => e.widget_id));
+            }
+
+            if (!publicResp.ok) throw new Error('HTTP ' + publicResp.status);
+            const data = await publicResp.json();
             const featured = (data.widgets || []).filter(w => w.is_featured);
 
             if (featured.length === 0) {

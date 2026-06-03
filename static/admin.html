@@ -9384,11 +9384,15 @@ function resetStationIdColor() {
             container.innerHTML = '';
             widgets.forEach(w => {
                 const row = document.createElement('div');
-                row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;margin-bottom:8px;gap:10px;';
+                const isFeatured = !!w.is_featured;
+                const featuredBg     = isFeatured ? '#fffbeb' : '#fff';
+                const featuredBorder = isFeatured ? '#f59e0b' : '#e0e0e0';
+                row.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:${featuredBg};border-radius:6px;border:1px solid ${featuredBorder};margin-bottom:8px;gap:10px;`;
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
+                const featuredBadge = isFeatured ? '<span style="margin-left:auto;padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;">⭐ featured</span>' : '';
                 row.innerHTML = `
                     <div style="flex:1;min-width:0;">
-                        <div style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</div>
+                        <div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name)}</span>${featuredBadge}</div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                         <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${(() => { const total = widgetEnabledByCount[w.widget_id] || 0; if (!total) return ''; const communityEntry = allCommunityWidgets.find(c => c.widget_id === w.widget_id); const selfIncluded = communityEntry && myInstanceUUID && (communityEntry.enabled_by || []).some(inst => inst.public_uuid === myInstanceUUID); return ` \u00b7 \uD83D\uDC65 ${total} instance${total === 1 ? '' : 's'}${selfIncluded ? ' (inc. this instance)' : ''}`; })()}</div>
                     </div>
@@ -9455,16 +9459,21 @@ function resetStationIdColor() {
             container.innerHTML = '';
             entries.forEach(w => {
                 const row = document.createElement('div');
-                row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8f9fa;border-radius:5px;border:1px solid #e0e0e0;margin-bottom:6px;';
+                const isFeaturedE = !!w.is_featured;
+                const featuredBgE     = isFeaturedE ? '#fffbeb' : '#f8f9fa';
+                const featuredBorderE = isFeaturedE ? '#f59e0b' : '#e0e0e0';
+                row.style.cssText = `display:flex;align-items:center;gap:8px;padding:8px 10px;background:${featuredBgE};border-radius:5px;border:1px solid ${featuredBorderE};margin-bottom:6px;`;
                 const cachedBadge = w.cached
                     ? ''
                     : '<span style="font-size:10px;color:#e65100;margin-left:4px;" title="Not yet cached — will be fetched on next refresh">\u26a0\ufe0f</span>';
+                const featuredBadgeE = isFeaturedE ? '<span style="margin-left:8px;padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:10px;font-weight:bold;white-space:nowrap;flex-shrink:0;">⭐ featured</span>' : '';
                 row.innerHTML = `
                     <div style="flex:1;min-width:0;">
-                        <div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                            <strong>${escapeHtml(w.name || '(unnamed)')}</strong>${cachedBadge}
-                            ${myWidgetIDs.has(w.widget_id) ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
-                            ${(w.callsign || w.instance_id) ? `<span style="color:#3f51b5;font-size:12px;margin-left:6px;">by ${w.instance_id ? `<a href="https://instances.ubersdr.org/?uuid=${encodeURIComponent(w.instance_id)}" target="_blank" rel="noopener" style="color:#3f51b5;text-decoration:underline;">${escapeHtml(w.callsign || w.instance_id)}</a>` : escapeHtml(w.callsign)}</span>` : ''}
+                        <div style="font-size:13px;display:flex;align-items:center;flex-wrap:wrap;gap:4px;overflow:hidden;">
+                            <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.name || '(unnamed)')}</strong>${cachedBadge}
+                            ${myWidgetIDs.has(w.widget_id) ? '<span style="padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;flex-shrink:0;">yours</span>' : ''}
+                            ${(w.callsign || w.instance_id) ? `<span style="color:#3f51b5;font-size:12px;flex-shrink:0;">by ${w.instance_id ? `<a href="https://instances.ubersdr.org/?uuid=${encodeURIComponent(w.instance_id)}" target="_blank" rel="noopener" style="color:#3f51b5;text-decoration:underline;">${escapeHtml(w.callsign || w.instance_id)}</a>` : escapeHtml(w.callsign)}</span>` : ''}
+                            ${featuredBadgeE}
                         </div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                     </div>
@@ -9570,13 +9579,17 @@ function resetStationIdColor() {
                            ${enabledByBadges}
                        </div>`
                     : '';
+                const isFeaturedC = !!w.is_featured;
+                const cardBg     = isFeaturedC ? '#fffbeb' : (isMine ? '#f0f4ff' : '#fff');
+                const cardBorder = isFeaturedC ? '#f59e0b' : (isMine ? '#9fa8da' : '#e0e0e0');
+                const featuredBadgeC = isFeaturedC ? '<span style="margin-left:auto;padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:10px;font-weight:bold;white-space:nowrap;flex-shrink:0;">⭐ featured</span>' : '';
                 const card = document.createElement('div');
                 card.id = `community-row-${w.widget_id}`;
-                card.style.cssText = `display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:12px 14px;background:${isMine ? '#f0f4ff' : '#fff'};border-radius:8px;border:1px solid ${isMine ? '#9fa8da' : '#e0e0e0'};box-shadow:0 1px 3px rgba(0,0,0,.06);`;
+                card.style.cssText = `display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:12px 14px;background:${cardBg};border-radius:8px;border:1px solid ${cardBorder};box-shadow:0 1px 3px rgba(0,0,0,.06);`;
                 card.innerHTML = `
                     <div style="flex:1;min-width:0;margin-bottom:6px;">
-                        <div style="font-weight:600;font-size:13px;color:#283593;margin-bottom:4px;line-height:1.3;">
-                            ${isEnabled ? '<span title="Currently enabled" style="font-size:12px;margin-right:3px;">⭐</span>' : ''}${escapeHtml(w.name)}
+                        <div style="display:flex;align-items:flex-start;gap:6px;font-weight:600;font-size:13px;color:#283593;margin-bottom:4px;line-height:1.3;">
+                            <span style="flex:1;min-width:0;">${escapeHtml(w.name)}</span>${featuredBadgeC}
                         </div>
                         ${w.description ? `<div style="font-size:11px;color:#555;line-height:1.4;">${escapeHtml(w.description)}</div>` : ''}
                     </div>

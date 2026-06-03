@@ -1361,9 +1361,30 @@ class SpectrumDisplay {
 
         console.log('Connecting to spectrum WebSocket:', wsUrl);
 
+        // Store connection URL params for external use (user_session_id, password, mode)
+        this._lastConnectUrl = wsUrl;
+
         try {
             this.ws = new WebSocket(wsUrl);
             this.ws.binaryType = 'arraybuffer'; // Enable binary message handling
+
+            // Wrap ws.send to track the last sent message of each type.
+            // All senders (app.js, bookmark-manager.js, chat-ui.js, extensions.js, etc.)
+            // access spectrumDisplay.ws.send() directly, so wrapping here catches everything
+            // without modifying any call sites. Re-applied on every reconnect.
+            this._lastSentByType = this._lastSentByType || {};
+            const _origSend = this.ws.send.bind(this.ws);
+            this.ws.send = (data) => {
+                if (typeof data === 'string') {
+                    try {
+                        const msg = JSON.parse(data);
+                        if (msg && msg.type) {
+                            this._lastSentByType[msg.type] = { msg, time: Date.now() };
+                        }
+                    } catch (e) { /* not JSON, ignore */ }
+                }
+                return _origSend(data);
+            };
 
             // Track if we've detected binary protocol
             this.usingBinaryProtocol = false;
@@ -1380,6 +1401,15 @@ class SpectrumDisplay {
 
                 // Start periodic settings sync now that connection is established
                 this.startSettingsSync();
+
+                // Register visibility disconnect handler (once — idempotent)
+                this.setupVisibilityDisconnect();
+
+                // If reconnecting after a visibility-triggered disconnect, immediately
+                // resend the last known zoom/pan/rate so the server is in sync.
+                if (this._lastSentByType && Object.keys(this._lastSentByType).length > 0) {
+                    this.sendSettingsSync();
+                }
 
                 if (this.config.onConnect) {
                     this.config.onConnect();
@@ -1519,6 +1549,13 @@ class SpectrumDisplay {
         // Don't reconnect if user explicitly disconnected (e.g., idle timeout)
         if (this.userDisconnected) {
             console.log('Skipping spectrum reconnect - user disconnected');
+            return;
+        }
+
+        // Don't reconnect if we intentionally closed due to page being hidden —
+        // the visibility handler will reconnect when the page becomes visible again.
+        if (this._visibilityDisconnected) {
+            console.log('Skipping spectrum reconnect - page hidden (will reconnect on visibility)');
             return;
         }
 
@@ -5499,16 +5536,17 @@ class SpectrumDisplay {
         }
     }
 
-    // Start periodic settings sync (500ms interval)
-    // Sends current UI state to server to ensure spectrum and audio stay aligned
+    // Start periodic settings sync (1000ms interval)
+    // Actively resends zoom/pan/rate state to keep server in sync with client.
     startSettingsSync() {
         if (this.settingsSyncInterval) return;
 
         this.settingsSyncInterval = setInterval(() => {
+            if (document.hidden) return; // skip while page is not visible
             this.sendSettingsSync();
-        }, 500); // 500ms = 2 times per second
+        }, 1000); // 1s — resend last known zoom/pan/rate to server
 
-        console.log('Started settings sync (500ms interval)');
+        console.log('Started settings sync (1000ms interval)');
     }
 
     // Stop periodic settings sync
@@ -5520,25 +5558,99 @@ class SpectrumDisplay {
         }
     }
 
-    // Send settings sync message to server
-    // Requests current status to re-sync UI state with server
+    // Setup visibility-based disconnect/reconnect.
+    // When the page is hidden (tab switch, mobile background, screen lock):
+    //   - waits 5 seconds before closing (handles brief tab switches gracefully)
+    //   - if the page becomes visible again within 5s, the pending close is cancelled
+    //   - after 5s, closes the spectrum WebSocket cleanly without triggering auto-reconnect
+    // When the page becomes visible again after a close:
+    //   - reconnects immediately using the last connection URL
+    //   - resyncs zoom/pan/rate state once connected (via onopen + sendSettingsSync)
+    // Registered once (guarded by _visibilityDisconnectHandler flag).
+    setupVisibilityDisconnect() {
+        if (this._visibilityDisconnectHandler) return; // already registered
+
+        this._visibilityHideTimer = null; // pending close timer
+
+        this._visibilityDisconnectHandler = () => {
+            if (document.hidden) {
+                // Page hidden — schedule disconnect after 5s grace period.
+                // If the user switches back within 5s, the timer is cancelled below.
+                if (!this._visibilityHideTimer) {
+                    console.log('Page hidden — will disconnect spectrum WebSocket in 5s');
+                    this._visibilityHideTimer = setTimeout(() => {
+                        this._visibilityHideTimer = null;
+                        if (document.hidden && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            console.log('Page hidden 5s — disconnecting spectrum WebSocket');
+                            this._visibilityDisconnected = true; // flag: we closed it intentionally
+                            this.ws.close();
+                            // ws.onclose will fire; scheduleReconnect() checks _visibilityDisconnected
+                            // and skips the exponential-backoff reconnect
+                        }
+                    }, 5000);
+                }
+            } else {
+                // Page visible again — cancel any pending close timer
+                if (this._visibilityHideTimer) {
+                    clearTimeout(this._visibilityHideTimer);
+                    this._visibilityHideTimer = null;
+                    console.log('Page visible within 5s — cancelled pending spectrum disconnect');
+                }
+
+                // Reconnect if we were the ones who closed it
+                if (this._visibilityDisconnected) {
+                    console.log('Page visible — reconnecting spectrum WebSocket');
+                    this._visibilityDisconnected = false;
+                    // Reset reconnect counter so we get a fresh connection immediately
+                    this.reconnectAttempts = 0;
+                    this.connect().catch(err => {
+                        console.error('Visibility reconnect failed:', err);
+                    });
+                    // sendSettingsSync is called from onopen after connect succeeds
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', this._visibilityDisconnectHandler);
+        console.log('Visibility disconnect handler registered (5s grace period)');
+    }
+
+    // Resend the last known zoom, pan, and rate parameters to the server.
+    // Called every 1s to ensure the server stays in sync with the client's
+    // current view — guards against missed messages, reconnects, or server restarts.
     sendSettingsSync() {
         // Skip if not connected
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        // Skip while actively dragging (we're sending pan messages already)
+        // Skip while actively dragging (live pan messages are already being sent)
         if (this.isDragging) {
             return;
         }
 
-        // Request current status from server
-        // Server will respond with 'config' message containing current centerFreq, binBandwidth, etc.
-        // This re-synchronizes this.centerFreq with the actual displayed spectrum data
-        this.ws.send(JSON.stringify({
-            type: 'get_status'
-        }));
+        const sent = this._lastSentByType || {};
+
+        // Resend last zoom (carries both frequency and binBandwidth).
+        // Prefer zoom over pan — zoom is a superset (has both fields).
+        // Fall back to pan if we've never sent a zoom.
+        const lastZoom = sent.zoom;
+        const lastPan  = sent.pan;
+
+        if (lastZoom) {
+            this.ws.send(JSON.stringify(lastZoom.msg));
+        } else if (lastPan) {
+            this.ws.send(JSON.stringify(lastPan.msg));
+        } else {
+            // No zoom/pan recorded yet — ask server for current state instead
+            this.ws.send(JSON.stringify({ type: 'get_status' }));
+        }
+
+        // Resend last set_rate so the server frame-skip divisor stays correct
+        const lastRate = sent.set_rate;
+        if (lastRate) {
+            this.ws.send(JSON.stringify(lastRate.msg));
+        }
     }
 
     // Toggle line graph (spectrum) visibility

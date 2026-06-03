@@ -5630,19 +5630,36 @@ class SpectrumDisplay {
         }
 
         const sent = this._lastSentByType || {};
-
-        // Resend last zoom (carries both frequency and binBandwidth).
-        // Prefer zoom over pan — zoom is a superset (has both fields).
-        // Fall back to pan if we've never sent a zoom.
         const lastZoom = sent.zoom;
         const lastPan  = sent.pan;
 
+        // Always use the current confirmed center frequency from the server config
+        // response — never replay a stale frequency from a recorded zoom/pan message.
+        // This prevents the 1s sync from overwriting a frequency the user just tuned to.
+        const currentFreq = this.centerFreq;
+
         if (lastZoom) {
-            this.ws.send(JSON.stringify(lastZoom.msg));
+            // Resend zoom with current frequency + last known binBandwidth.
+            // The binBandwidth is what matters for zoom level; frequency must be current.
+            this.ws.send(JSON.stringify({
+                type: 'zoom',
+                frequency: Math.round(currentFreq),
+                binBandwidth: lastZoom.msg.binBandwidth
+            }));
         } else if (lastPan) {
-            this.ws.send(JSON.stringify(lastPan.msg));
+            // Resend pan with current frequency
+            this.ws.send(JSON.stringify({
+                type: 'pan',
+                frequency: Math.round(currentFreq)
+            }));
+        } else if (currentFreq) {
+            // No zoom/pan recorded yet but we know the current frequency — send a pan
+            this.ws.send(JSON.stringify({
+                type: 'pan',
+                frequency: Math.round(currentFreq)
+            }));
         } else {
-            // No zoom/pan recorded yet — ask server for current state instead
+            // No state at all — ask server for current state
             this.ws.send(JSON.stringify({ type: 'get_status' }));
         }
 

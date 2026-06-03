@@ -820,12 +820,36 @@
     </div>
 
     <!-- Restart Countdown Overlay -->
-    <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.9); z-index: 10000; align-items: center; justify-content: center;">
-        <div style="text-align: center; color: white;">
+    <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.92); z-index: 10000; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 20px;">
+        <div style="text-align: center; color: white; max-width: 560px; width: 100%;">
             <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">20</div>
             <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
-            <p style="font-size: 18px; color: #ccc;">You will be redirected automatically</p>
-            <div style="margin-top: 30px;">
+            <p style="font-size: 18px; color: #ccc; margin-bottom: 32px;">You will be redirected automatically</p>
+
+            <!-- Instance UUID panel (hidden until UUID is available) -->
+            <div id="instanceUUIDPanel" style="display:none; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; padding: 24px; margin-bottom: 28px; text-align: left;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                    <span style="font-size:22px;">🔑</span>
+                    <strong style="font-size:16px; color:#fff;">Your Instance Secret UUID</strong>
+                </div>
+                <p style="font-size:13px; color:#ccc; line-height:1.6; margin-bottom:14px;">
+                    This UUID is your instance's <strong style="color:#fff;">private secret</strong> — treat it like a password.
+                    Keep it safe and do not share it publicly. It can be used to <strong style="color:#fff;">reinstate or reclaim your instance</strong>
+                    on the UberSDR network if you ever need to migrate or recover your setup.
+                </p>
+                <div style="display:flex; align-items:center; gap:8px; background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:10px 14px;">
+                    <code id="instanceUUIDValue" style="flex:1; font-family:monospace; font-size:14px; color:#a5d6a7; word-break:break-all; letter-spacing:0.5px;"></code>
+                    <button id="instanceUUIDCopyBtn" onclick="copyInstanceUUID()" title="Copy to clipboard"
+                        style="flex-shrink:0; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); border-radius:5px; color:#fff; font-size:18px; cursor:pointer; padding:4px 10px; transition:background 0.2s;">
+                        📋
+                    </button>
+                </div>
+                <p style="font-size:11px; color:#aaa; margin-top:10px;">
+                    You can also find this value later in your <code style="background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:3px;">config.yaml</code> under <code style="background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:3px;">instance_reporting.instance_uuid</code>.
+                </p>
+            </div>
+
+            <div style="margin-top: 10px;">
                 <div class="spinner" style="border-color: #f3f3f3; border-top-color: #667eea;"></div>
             </div>
         </div>

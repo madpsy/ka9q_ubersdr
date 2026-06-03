@@ -663,13 +663,26 @@
                 throw new Error('Failed to mark wizard as complete');
             }
 
+            // Re-fetch config after saving so we get the server-generated instance_uuid
+            // (on a fresh install it doesn't exist until the first save)
+            let instanceUUID = existingConfig?.instance_reporting?.instance_uuid || '';
+            if (!instanceUUID) {
+                try {
+                    const freshResp = await fetch('/admin/config');
+                    if (freshResp.ok) {
+                        const freshConfig = await freshResp.json();
+                        instanceUUID = freshConfig?.instance_reporting?.instance_uuid || '';
+                    }
+                } catch (_) {}
+            }
+
             // Success! Show restart countdown
             hideLoading();
             showSuccess('Configuration saved successfully! Server is restarting...');
 
             // Show restart countdown and redirect
             setTimeout(() => {
-                showRestartCountdown();
+                showRestartCountdown(instanceUUID);
             }, 500);
 
         } catch (error) {
@@ -1088,10 +1101,20 @@
     }
 
     // Show restart countdown overlay
-    function showRestartCountdown() {
+    function showRestartCountdown(instanceUUID) {
         const overlay = document.getElementById('restartOverlay');
         const countdownEl = document.getElementById('countdownNumber');
         overlay.style.display = 'flex';
+
+        // Show the UUID panel if we have a UUID
+        if (instanceUUID) {
+            const panel   = document.getElementById('instanceUUIDPanel');
+            const uuidEl  = document.getElementById('instanceUUIDValue');
+            if (panel && uuidEl) {
+                uuidEl.textContent = instanceUUID;
+                panel.style.display = 'block';
+            }
+        }
 
         let countdown = 20;
         countdownEl.textContent = countdown;
@@ -1107,6 +1130,22 @@
             }
         }, 1000);
     }
+
+    // Copy instance UUID to clipboard
+    window.copyInstanceUUID = function copyInstanceUUID() {
+        const uuidEl = document.getElementById('instanceUUIDValue');
+        const btn    = document.getElementById('instanceUUIDCopyBtn');
+        if (!uuidEl || !btn) return;
+        const text = uuidEl.textContent.trim();
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            btn.textContent = '✅';
+            setTimeout(() => { btn.textContent = '📋'; }, 2000);
+        }).catch(() => {
+            btn.textContent = '❌';
+            setTimeout(() => { btn.textContent = '📋'; }, 2000);
+        });
+    };
 
     // Fetch user's IP address from /api/myip
     let userIPAddress = null;

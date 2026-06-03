@@ -9992,7 +9992,7 @@ function resetStationIdColor() {
         function openWidgetHtmlInCmEditor() {
             const ta = document.getElementById('widgetEditorHTML');
             const widgetName = document.getElementById('widgetEditorName').value.trim();
-            const title = widgetName ? `Edit: ${widgetName} — HTML Content` : 'Widget HTML Content';
+            const title = widgetName ? `${widgetName} — HTML Content` : 'Widget HTML Content';
             openCmEditorModal(ta, null, title, function(v) {
                 document.getElementById('widgetEditorHTML').value = v;
             });

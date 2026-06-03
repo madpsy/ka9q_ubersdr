@@ -1118,6 +1118,14 @@ class SpectrumDisplay {
         const processFrame = (timestamp) => {
             if (!this.animationLoopRunning) return;
 
+            // Pause check — page is hidden (tab switch, mobile background).
+            // Keep rAF alive so we can resume instantly without re-registering,
+            // but skip all drawing and data consumption to save CPU.
+            if (this.animationPaused) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
+
             // --- Frame rate throttle ---
             // GPU mode runs at full 60fps (sub-pixel CSS transform needs every tick).
             // CPU mode is throttled to 30fps to keep CPU usage comparable to pre-change levels.
@@ -1288,6 +1296,28 @@ class SpectrumDisplay {
         this.animationLoopRunning = false;
         this.frameQueue = [];
         console.log('Stopped spectrum frame processing loop');
+    }
+
+    // Pause the animation loop without stopping it.
+    // The rAF callback keeps firing but returns immediately, costing ~0 CPU.
+    // Use this when the page is hidden — avoids the overhead of stopping and
+    // restarting the loop (which clears the frame queue and resets timing).
+    pauseAnimation() {
+        if (this.animationPaused) return;
+        this.animationPaused = true;
+        // Reset timing so the first resumed frame doesn't try to catch up on
+        // all the elapsed time while paused (would cause a huge scroll jump).
+        this.lastRafTime = null;
+        this.scrollAccumulator = 0;
+        this.gpuScrollOffset = 0;
+        console.log('Spectrum animation paused');
+    }
+
+    // Resume the animation loop after a pause.
+    resumeAnimation() {
+        if (!this.animationPaused) return;
+        this.animationPaused = false;
+        console.log('Spectrum animation resumed');
     }
 
     // Display a spectrum frame (legacy entry point — delegates to _consumeNewFrame).
@@ -5574,10 +5604,13 @@ class SpectrumDisplay {
 
         this._visibilityDisconnectHandler = () => {
             if (document.hidden) {
-                // Page hidden — schedule disconnect after 5s grace period.
+                // Page hidden — pause animation immediately (no point drawing while invisible)
+                this.pauseAnimation();
+
+                // Schedule WebSocket disconnect after 5s grace period.
                 // If the user switches back within 5s, the timer is cancelled below.
                 if (!this._visibilityHideTimer) {
-                    console.log('Page hidden — will disconnect spectrum WebSocket in 5s');
+                    console.log('Page hidden — animation paused, will disconnect WebSocket in 5s');
                     this._visibilityHideTimer = setTimeout(() => {
                         this._visibilityHideTimer = null;
                         if (document.hidden && this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -5590,14 +5623,17 @@ class SpectrumDisplay {
                     }, 5000);
                 }
             } else {
-                // Page visible again — cancel any pending close timer
+                // Page visible again — resume animation immediately
+                this.resumeAnimation();
+
+                // Cancel any pending WebSocket close timer
                 if (this._visibilityHideTimer) {
                     clearTimeout(this._visibilityHideTimer);
                     this._visibilityHideTimer = null;
-                    console.log('Page visible within 5s — cancelled pending spectrum disconnect');
+                    console.log('Page visible within 5s — cancelled pending disconnect, animation resumed');
                 }
 
-                // Reconnect if we were the ones who closed it
+                // Reconnect WebSocket if we were the ones who closed it after 5s
                 if (this._visibilityDisconnected) {
                     console.log('Page visible — reconnecting spectrum WebSocket');
                     this._visibilityDisconnected = false;

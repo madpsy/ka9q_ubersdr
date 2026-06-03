@@ -1276,21 +1276,30 @@
         btn.textContent = '…';
 
         try {
+            // Fetch the current server-side enabled list so we don't clobber other widgets
+            const listResp = await fetch('/admin/widgets/enabled');
+            if (!listResp.ok) throw new Error('HTTP ' + listResp.status);
+            const listData = await listResp.json();
+            const currentIDs = (listData.enabled || []).map(e => e.widget_id);
+
+            let newList;
             if (isCurrentlyOn) {
-                const resp = await fetch('/admin/widgets/disable', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ widget_id: w.widget_id })
-                });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                newList = currentIDs.filter(id => id !== w.widget_id);
+            } else {
+                if (currentIDs.length >= 10) throw new Error('Maximum 10 widgets can be enabled at once');
+                newList = [...currentIDs, w.widget_id];
+            }
+
+            const resp = await fetch('/admin/widgets/enabled', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: newList })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+            if (isCurrentlyOn) {
                 wizardEnabledWidgetIDs.delete(w.widget_id);
             } else {
-                const resp = await fetch('/admin/widgets/enable', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ widget_id: w.widget_id })
-                });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 wizardEnabledWidgetIDs.add(w.widget_id);
             }
 
@@ -1304,9 +1313,9 @@
             // Show a brief inline error without blocking the user
             const errEl = document.createElement('span');
             errEl.style.cssText = 'font-size:11px;color:#c33;margin-left:8px;';
-            errEl.textContent = 'Failed — try again';
+            errEl.textContent = (e.message || 'Failed') + ' — try again';
             btn.parentNode.insertBefore(errEl, btn.nextSibling);
-            setTimeout(() => errEl.remove(), 3000);
+            setTimeout(() => errEl.remove(), 4000);
         } finally {
             btn.disabled = false;
         }

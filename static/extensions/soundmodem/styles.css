@@ -616,6 +616,62 @@
 .sm-log-panel::-webkit-scrollbar-track { background: #0a0a0f; }
 .sm-log-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 
+/* ── Frame search bar ────────────────────────────────────────────────────── */
+.sm-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
+    flex-shrink: 0;
+}
+
+.sm-search-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.sm-search-input {
+    flex: 1;
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    padding: 3px 8px;
+    outline: none;
+    min-width: 0;
+}
+
+.sm-search-input::placeholder {
+    color: #555;
+}
+
+.sm-search-input:focus {
+    border-color: #4a9eff;
+    background: #161616;
+}
+
+.sm-search-clear {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.sm-search-clear:hover {
+    color: #aaa;
+    background: #2a2a2a;
+}
+
 /* ── Output area ─────────────────────────────────────────────────────────── */
 .sm-output-area {
     flex: 1;

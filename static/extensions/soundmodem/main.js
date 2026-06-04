@@ -1623,7 +1623,14 @@ class SoundModemExtension extends DecoderExtension {
                     typeOk = true; // 'all'
             }
 
-            row.style.display = (chOk && typeOk) ? '' : 'none';
+            // Text search — match against the full text content of the row
+            let searchOk = true;
+            if (this.searchText) {
+                const rowText = row.textContent.toLowerCase();
+                searchOk = rowText.includes(this.searchText);
+            }
+
+            row.style.display = (chOk && typeOk && searchOk) ? '' : 'none';
         });
     }
 

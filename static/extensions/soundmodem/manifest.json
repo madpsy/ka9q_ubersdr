@@ -13,7 +13,7 @@
     "main": "main.js",
     "styles": ["styles.css"],
     "template": "template.html",
-    "scripts": []
+    "scripts": ["ax25decode.js"]
   },
   "settings": {}
 }

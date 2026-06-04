@@ -1053,103 +1053,34 @@ class SoundModemExtension extends DecoderExtension {
         return 0;
     }
 
-    // ── AX.25 frame parser ────────────────────────────────────────────────────
+    // ── AX.25 frame parser — delegates to AX25Decode (ax25decode.js) ──────────
 
     _parseAX25(bytes) {
-        if (bytes.length < 15) return null;
-        try {
-            const dest = this._decodeAddress(bytes, 0);
-            const src  = this._decodeAddress(bytes, 7);
-
-            let offset = 14;
-            const digi = [];
-
-            if ((bytes[13] & 0x01) === 0) {
-                while (offset + 7 <= bytes.length) {
-                    const d = this._decodeAddress(bytes, offset);
-                    digi.push(d);
-                    offset += 7;
-                    if (bytes[offset - 1] & 0x01) break;
-                }
-            }
-
-            if (offset >= bytes.length) return null;
-
-            const ctrl = bytes[offset++];
-            let frameType = 'other';
-            let pid = null;
-            let info = '';
-
-            const isUI     = (ctrl & 0xEF) === 0x03;
-            const isSABM   = (ctrl & 0xEF) === 0x2F;
-            const isUA     = (ctrl & 0xEF) === 0x63;
-            const isDISC   = (ctrl & 0xEF) === 0x43;
-            const isDM     = (ctrl & 0xEF) === 0x0F;
-            const isIFrame = (ctrl & 0x01) === 0;
-
-            if (isUI) {
-                frameType = 'ui';
-                if (offset < bytes.length) {
-                    pid  = bytes[offset++];
-                    info = this._decodeInfo(bytes, offset);
-                }
-            } else if (isIFrame) {
-                frameType = 'connected';
-                if (offset < bytes.length) {
-                    pid  = bytes[offset++];
-                    info = this._decodeInfo(bytes, offset);
-                }
-            } else if (isSABM) {
-                frameType = 'connected'; info = '[SABM]';
-            } else if (isUA) {
-                frameType = 'connected'; info = '[UA]';
-            } else if (isDISC) {
-                frameType = 'connected'; info = '[DISC]';
-            } else if (isDM) {
-                frameType = 'connected'; info = '[DM]';
-            } else {
-                info = '[ctrl=0x' + ctrl.toString(16).padStart(2, '0') + ']';
-            }
-
-            const isAPRS = isUI && pid === 0xF0;
-            if (isAPRS) frameType = 'aprs';
-
-            return { from: src, to: dest, digipeaters: digi, ctrl, pid, info, frameType, isAPRS };
-
-        } catch (e) {
-            console.warn('[SoundModem] AX.25 parse error:', e);
+        if (typeof AX25Decode === 'undefined') {
+            console.warn('[SoundModem] AX25Decode not loaded');
             return null;
         }
-    }
-
-    _decodeAddress(bytes, offset) {
-        let call = '';
-        for (let i = 0; i < 6; i++) {
-            const ch = bytes[offset + i] >> 1;
-            if (ch !== 0x20 && ch !== 0x00) call += String.fromCharCode(ch);
-        }
-        call = call.trim();
-        const ssidByte = bytes[offset + 6];
-        const ssid = (ssidByte >> 1) & 0x0F;
-        const hasBeenRepeated = (ssidByte & 0x80) !== 0;
-        return ssid > 0 ? `${call}-${ssid}${hasBeenRepeated ? '*' : ''}` : `${call}${hasBeenRepeated ? '*' : ''}`;
-    }
-
-    _decodeInfo(bytes, offset) {
-        if (offset >= bytes.length) return '';
-        const slice = bytes.slice(offset);
-        try {
-            return new TextDecoder('utf-8', { fatal: true }).decode(slice);
-        } catch (_) {
-            return new TextDecoder('latin1').decode(slice);
-        }
+        return AX25Decode.parse(bytes);
     }
 
     // ── Display ───────────────────────────────────────────────────────────────
 
     _displayFrame(parsed) {
-        if (this.filter === 'aprs' && !parsed.isAPRS) return;
-        if (this.filter === 'ui'   && parsed.frameType !== 'ui' && !parsed.isAPRS) return;
+        // ── Filter ────────────────────────────────────────────────────────────
+        const ft = parsed.frameType;
+        const CONNECTED_TYPES = new Set(['i','rr','rnr','rej','srej','sabm','sabme','ua','disc','dm','frmr','xid','test']);
+        const CONTROL_TYPES   = new Set(['rr','rnr','rej','srej']);
+        const NETROM_TYPES    = new Set(['netrom','nodes','nodes-poll','l4-connect','l4-connect-ack','l4-disc','l4-disc-ack','l4-info','l4-info-ack','l4-reset','l4-unknown']);
+
+        switch (this.filter) {
+            case 'aprs':     if (!parsed.isAPRS) return; break;
+            case 'ui':       if (ft !== 'ui' && !parsed.isAPRS) return; break;
+            case 'connected':if (!CONNECTED_TYPES.has(ft)) return; break;
+            case 'netrom':   if (!NETROM_TYPES.has(ft)) return; break;
+            case 'control':  if (!CONTROL_TYPES.has(ft)) return; break;
+            case 'ip':       if (ft !== 'ip' && ft !== 'arp') return; break;
+            default: break; // 'all'
+        }
         if (this.channelFilter !== 'all' && String(parsed.kissPort) !== this.channelFilter) return;
 
         this.frameCount++;
@@ -1158,57 +1089,63 @@ class SoundModemExtension extends DecoderExtension {
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = parsed.from;
 
-        const digiStr = parsed.digipeaters.length > 0 ? ' via ' + parsed.digipeaters.join(',') : '';
-        const pathStr = `${parsed.from} → ${parsed.to}${digiStr}`;
+        const digiStr = parsed.digipeaters && parsed.digipeaters.length > 0
+            ? ' via ' + parsed.digipeaters.join(',') : '';
+        const pathStr = `${parsed.from}→${parsed.to}${digiStr}`;
         const timeStr = new Date().toTimeString().slice(0, 8);
         this.copyBuffer.push(`[${timeStr}] ${pathStr}: ${parsed.info}`);
 
+        // Normalised CSS type (collapse l4-* subtypes to 'netrom')
+        const cssType = NETROM_TYPES.has(ft) ? 'netrom' : ft;
+
+        // ── Single-line row ───────────────────────────────────────────────────
+        // Layout: [ch badge] [time] [from→to] [frame-type tag] [payload]
         const row = document.createElement('div');
-        row.className = `sm-frame sm-frame-${parsed.frameType} sm-frame-ch-${parsed.kissPort}`;
+        row.className = `sm-frame sm-frame-${cssType} sm-frame-ch-${parsed.kissPort}`;
 
-        const meta = document.createElement('div');
-        meta.className = 'sm-frame-meta';
+        // Channel badge (A/B/C/D)
+        const chLabel = ['A','B','C','D'][parsed.kissPort] ?? String(parsed.kissPort);
+        const chBadge = document.createElement('span');
+        chBadge.className = `sm-channel-badge sm-channel-badge-${parsed.kissPort}`;
+        chBadge.textContent = chLabel;
+        row.appendChild(chBadge);
 
-        const timeEl = document.createElement('div');
+        // Timestamp
+        const timeEl = document.createElement('span');
         timeEl.className = 'sm-frame-time';
-        const chLabel = ['A', 'B', 'C', 'D'][parsed.kissPort] ?? String(parsed.kissPort);
-        const badge = document.createElement('span');
-        badge.className = `sm-channel-badge sm-channel-badge-${parsed.kissPort}`;
-        badge.textContent = chLabel;
-        timeEl.appendChild(document.createTextNode(timeStr + ' '));
-        timeEl.appendChild(badge);
+        timeEl.textContent = timeStr;
+        row.appendChild(timeEl);
 
-        const fromEl = document.createElement('div');
-        fromEl.className = 'sm-frame-from';
-        fromEl.textContent = parsed.from;
-
-        const toEl = document.createElement('div');
-        toEl.className = 'sm-frame-to';
-        toEl.textContent = parsed.to;
-
-        meta.appendChild(timeEl);
-        meta.appendChild(fromEl);
-        meta.appendChild(toEl);
-
-        const body = document.createElement('div');
-        body.className = 'sm-frame-body';
-
-        const pathEl = document.createElement('div');
+        // FROM→TO [via DIGI]
+        const pathEl = document.createElement('span');
         pathEl.className = 'sm-frame-path';
-        pathEl.textContent = pathStr + (parsed.pid != null ? ` [PID:0x${parsed.pid.toString(16).padStart(2,'0')}]` : '');
+        pathEl.textContent = pathStr;
+        row.appendChild(pathEl);
 
-        const payloadEl = document.createElement('div');
+        // Frame-type tag (ctrl type: UI / I / RR / SABM etc.)
+        const typeTag = document.createElement('span');
+        typeTag.className = `sm-frame-type-tag sm-frame-type-${cssType}`;
+        // Show a short human label
+        const TYPE_LABELS = {
+            aprs:'APRS', ui:'UI', i:'I', rr:'RR', rnr:'RNR', rej:'REJ', srej:'SREJ',
+            sabm:'SABM', sabme:'SABME', ua:'UA', disc:'DISC', dm:'DM',
+            frmr:'FRMR', xid:'XID', test:'TEST',
+            netrom:'NR', nodes:'NODES', ip:'IP', arp:'ARP', s:'S', u:'U',
+        };
+        typeTag.textContent = TYPE_LABELS[cssType] || cssType.toUpperCase();
+        row.appendChild(typeTag);
+
+        // Payload / decoded info
+        const payloadEl = document.createElement('span');
         payloadEl.className = 'sm-frame-payload';
-        payloadEl.textContent = parsed.info;
-
-        body.appendChild(pathEl);
-        body.appendChild(payloadEl);
-        row.appendChild(meta);
-        row.appendChild(body);
+        // For NET/ROM INFO frames append the raw data after the summary
+        let payloadText = parsed.info;
+        if (parsed.netrom && parsed.netrom.raw) payloadText += ' ' + parsed.netrom.raw;
+        payloadEl.textContent = payloadText;
+        row.appendChild(payloadEl);
 
         const list = document.getElementById('sm-frame-list');
         if (list) {
-            // Insert newest frame at the top so the list reads newest-first
             list.insertBefore(row, list.firstChild);
             this._trimFrameList(list);
         }
@@ -1223,30 +1160,50 @@ class SoundModemExtension extends DecoderExtension {
     }
 
     // Show/hide existing rows to match the current type + channel filters.
-    // Each row has classes: sm-frame  sm-frame-<type>  sm-frame-ch-<port>
+    // Each row has classes: sm-frame  sm-frame-<cssType>  sm-frame-ch-<port>
+    // cssType is the normalised type written by _displayFrame (l4-* → 'netrom').
     _applyFilters() {
         const list = document.getElementById('sm-frame-list');
         if (!list) return;
+
+        const CONNECTED_CSS = new Set(['i','rr','rnr','rej','srej','sabm','sabme','ua','disc','dm','frmr','xid','test']);
+        const CONTROL_CSS   = new Set(['rr','rnr','rej','srej']);
+
         Array.from(list.children).forEach(row => {
             // Derive channel from sm-frame-ch-N class
             const chMatch = Array.from(row.classList).find(c => c.startsWith('sm-frame-ch-'));
             const rowCh   = chMatch ? chMatch.replace('sm-frame-ch-', '') : null;
 
-            // Derive frame type from sm-frame-<type> class (excluding sm-frame-ch-*)
+            // Derive CSS frame type (the normalised type stored in the class)
             const typeMatch = Array.from(row.classList).find(
                 c => c.startsWith('sm-frame-') && !c.startsWith('sm-frame-ch-') && c !== 'sm-frame'
             );
             const rowType = typeMatch ? typeMatch.replace('sm-frame-', '') : null;
 
-            // Channel filter
             const chOk = this.channelFilter === 'all' || rowCh === this.channelFilter;
 
-            // Type filter — 'aprs' means isAPRS flag; 'ui' means ui or aprs
             let typeOk = true;
-            if (this.filter === 'aprs') {
-                typeOk = row.classList.contains('sm-frame-aprs');
-            } else if (this.filter === 'ui') {
-                typeOk = rowType === 'ui' || row.classList.contains('sm-frame-aprs');
+            switch (this.filter) {
+                case 'aprs':
+                    typeOk = rowType === 'aprs';
+                    break;
+                case 'ui':
+                    typeOk = rowType === 'ui' || rowType === 'aprs';
+                    break;
+                case 'connected':
+                    typeOk = CONNECTED_CSS.has(rowType);
+                    break;
+                case 'netrom':
+                    typeOk = rowType === 'netrom' || rowType === 'nodes';
+                    break;
+                case 'control':
+                    typeOk = CONTROL_CSS.has(rowType);
+                    break;
+                case 'ip':
+                    typeOk = rowType === 'ip' || rowType === 'arp';
+                    break;
+                default:
+                    typeOk = true; // 'all'
             }
 
             row.style.display = (chOk && typeOk) ? '' : 'none';

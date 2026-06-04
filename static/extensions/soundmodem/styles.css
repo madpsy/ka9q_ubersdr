@@ -232,18 +232,23 @@
 }
 
 /* ── Channel badge ───────────────────────────────────────────────────────── */
-/* Plain letter label with a coloured dot to its right, pushed to the far right
-   of its flex row via margin-left: auto */
+/* Plain letter label with a coloured dot. In the frame list row it sits at
+   the far left; in the DCD row it is pushed right via margin-left:auto on
+   the DCD row itself. */
 .sm-channel-badge {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     font-size: 10px;
     font-weight: bold;
-    color: #aaa;
+    color: #ccc;
     flex-shrink: 0;
     align-self: center;
-    margin-left: auto;
+}
+
+/* In the frame list the badge is the first child — no margin needed */
+.sm-frame > .sm-channel-badge {
+    margin-left: 0;
 }
 
 /* The coloured dot is rendered via ::after */
@@ -618,25 +623,51 @@
 
 /* ── Frame rows ──────────────────────────────────────────────────────────── */
 .sm-frame {
-    display: grid;
-    grid-template-columns: 80px 1fr;
-    gap: 0;
-    padding: 5px 12px;
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 10px;
     border-left: 3px solid transparent;
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+    overflow: hidden;
     transition: background 0.1s;
+    font-family: 'Courier New', monospace;
 }
 
 .sm-frame:hover {
     background: #1e1e1e;
 }
 
-/* Frame type colours (kept for reference but overridden by channel colour below) */
-.sm-frame.sm-frame-aprs      { border-left-color: #4CAF50; }
-.sm-frame.sm-frame-ui        { border-left-color: #2196F3; }
-.sm-frame.sm-frame-connected { border-left-color: #FF9800; }
-.sm-frame.sm-frame-other     { border-left-color: #555; }
+/* Frame type colours — overridden by channel colour rules below */
+.sm-frame.sm-frame-aprs   { border-left-color: #4CAF50; }
+.sm-frame.sm-frame-ui     { border-left-color: #2196F3; }
+/* I-frames (connected data) */
+.sm-frame.sm-frame-i      { border-left-color: #FF9800; }
+/* Supervisory frames */
+.sm-frame.sm-frame-rr     { border-left-color: #546E7A; }
+.sm-frame.sm-frame-rnr    { border-left-color: #78909C; }
+.sm-frame.sm-frame-rej    { border-left-color: #EF5350; }
+.sm-frame.sm-frame-srej   { border-left-color: #EF9A9A; }
+/* Unnumbered frames */
+.sm-frame.sm-frame-sabm   { border-left-color: #26C6DA; }
+.sm-frame.sm-frame-sabme  { border-left-color: #26C6DA; }
+.sm-frame.sm-frame-ua     { border-left-color: #80DEEA; }
+.sm-frame.sm-frame-disc   { border-left-color: #FF7043; }
+.sm-frame.sm-frame-dm     { border-left-color: #FFAB91; }
+.sm-frame.sm-frame-frmr   { border-left-color: #D32F2F; }
+.sm-frame.sm-frame-xid    { border-left-color: #AB47BC; }
+.sm-frame.sm-frame-test   { border-left-color: #7E57C2; }
+/* NET/ROM */
+.sm-frame.sm-frame-netrom { border-left-color: #FFA726; }
+.sm-frame.sm-frame-nodes  { border-left-color: #FFCC02; }
+/* IP / ARP */
+.sm-frame.sm-frame-ip     { border-left-color: #29B6F6; }
+.sm-frame.sm-frame-arp    { border-left-color: #4FC3F7; }
+/* Fallback */
+.sm-frame.sm-frame-other  { border-left-color: #555; }
 
 /* Channel colours take priority — match waterfall/badge palette */
 .sm-frame.sm-frame-ch-0 { border-left-color: #1565C0; }  /* Ch A — blue */
@@ -644,65 +675,83 @@
 .sm-frame.sm-frame-ch-2 { border-left-color: #6A1B9A; }  /* Ch C — purple */
 .sm-frame.sm-frame-ch-3 { border-left-color: #E65100; }  /* Ch D — orange */
 
-.sm-frame-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding-right: 10px;
-    border-right: 1px solid #2a2a2a;
-    min-width: 0;
-}
-
+/* Single-line row elements */
 .sm-frame-time {
-    display: flex;
-    align-items: center;
-    gap: 4px;
     font-size: 10px;
-    color: #666;
+    color: #555;
     white-space: nowrap;
-}
-
-.sm-frame-from {
-    font-size: 12px;
-    font-weight: bold;
-    color: #2196F3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.sm-frame-to {
-    font-size: 11px;
-    color: #888;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.sm-frame-body {
-    padding-left: 10px;
-    min-width: 0;
+    flex-shrink: 0;
 }
 
 .sm-frame-path {
-    font-size: 10px;
-    color: #666;
+    font-size: 11px;
+    color: #888;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-bottom: 2px;
+    flex-shrink: 0;
+    font-weight: bold;
 }
+
+/* Frame-type tag pill */
+.sm-frame-type-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: bold;
+    padding: 0 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: #2a2a2a;
+    color: #aaa;
+    line-height: 1.6;
+}
+/* Type-specific tag colours */
+.sm-frame-type-aprs   { background: #1B5E20; color: #a5d6a7; }
+.sm-frame-type-ui     { background: #0D47A1; color: #90caf9; }
+.sm-frame-type-i      { background: #E65100; color: #ffe082; }
+.sm-frame-type-rr,
+.sm-frame-type-rnr,
+.sm-frame-type-rej,
+.sm-frame-type-srej   { background: #263238; color: #90a4ae; }
+.sm-frame-type-sabm,
+.sm-frame-type-sabme  { background: #006064; color: #80deea; }
+.sm-frame-type-ua     { background: #004D40; color: #b2dfdb; }
+.sm-frame-type-disc,
+.sm-frame-type-dm     { background: #BF360C; color: #ffab91; }
+.sm-frame-type-frmr   { background: #B71C1C; color: #ef9a9a; }
+.sm-frame-type-xid    { background: #4A148C; color: #ce93d8; }
+.sm-frame-type-netrom { background: #E65100; color: #ffcc80; }
+.sm-frame-type-nodes  { background: #F57F17; color: #fff9c4; }
+.sm-frame-type-ip     { background: #01579B; color: #81d4fa; }
+.sm-frame-type-arp    { background: #006064; color: #b3e5fc; }
 
 .sm-frame-payload {
-    font-size: 13px;
+    font-size: 12px;
     color: #e0e0e0;
-    word-break: break-all;
-    white-space: pre-wrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
 }
 
-/* APRS / UI payload colour coding */
-.sm-frame-aprs .sm-frame-payload { color: #a5d6a7; }
-.sm-frame-ui   .sm-frame-payload { color: #90caf9; }
+/* Payload colour by frame type (applied to the payload span) */
+.sm-frame-aprs   .sm-frame-payload { color: #a5d6a7; }
+.sm-frame-ui     .sm-frame-payload { color: #90caf9; }
+.sm-frame-i      .sm-frame-payload { color: #ffe082; }
+.sm-frame-netrom .sm-frame-payload { color: #ffcc80; }
+.sm-frame-nodes  .sm-frame-payload { color: #ffe57f; }
+.sm-frame-ip     .sm-frame-payload { color: #81d4fa; }
+.sm-frame-arp    .sm-frame-payload { color: #b3e5fc; }
+.sm-frame-rr     .sm-frame-payload,
+.sm-frame-rnr    .sm-frame-payload,
+.sm-frame-rej    .sm-frame-payload,
+.sm-frame-srej   .sm-frame-payload { color: #90a4ae; }
+.sm-frame-sabm   .sm-frame-payload,
+.sm-frame-sabme  .sm-frame-payload { color: #80deea; }
+.sm-frame-ua     .sm-frame-payload { color: #b2ebf2; }
+.sm-frame-disc   .sm-frame-payload,
+.sm-frame-dm     .sm-frame-payload { color: #ffab91; }
+.sm-frame-frmr   .sm-frame-payload { color: #ef9a9a; }
 
 /* ── Status bar ──────────────────────────────────────────────────────────── */
 .sm-status-bar {
@@ -771,6 +820,6 @@
 @media (max-width: 600px) {
     .sm-stats { gap: 12px; }
     .sm-header { flex-direction: column; align-items: flex-start; }
-    .sm-frame { grid-template-columns: 70px 1fr; }
+    .sm-frame { font-size: 11px; gap: 4px; padding: 2px 6px; }
     .sm-dcd-row { order: -1; }
 }

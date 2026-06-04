@@ -50,6 +50,7 @@ class SoundModemExtension extends DecoderExtension {
         this._origHandler = null;
         this._ourHandler  = null;
         this._handlersSet = false;
+        this.searchText   = '';   // real-time text search filter
 
         // Waterfall — draws FFT data from the page's existing AnalyserNode via radio.getAnalyser()
         this._wfCtx          = null;   // 2D context for scrolling waterfall canvas
@@ -293,6 +294,23 @@ class SoundModemExtension extends DecoderExtension {
 
         const logToggle = document.getElementById('sm-log-toggle');
         if (logToggle) logToggle.addEventListener('click', () => this._toggleLogPanel());
+
+        // Real-time text search
+        const searchInput = document.getElementById('sm-search-input');
+        if (searchInput) {
+            searchInput.value = this.searchText;
+            searchInput.addEventListener('input', (e) => {
+                this.searchText = e.target.value.trim().toLowerCase();
+                this._applyFilters();
+            });
+        }
+        const searchClear = document.getElementById('sm-search-clear');
+        if (searchClear) searchClear.addEventListener('click', () => {
+            this.searchText = '';
+            const inp = document.getElementById('sm-search-input');
+            if (inp) inp.value = '';
+            this._applyFilters();
+        });
 
         const mapToggle = document.getElementById('sm-map-toggle');
         if (mapToggle) mapToggle.addEventListener('click', () => this._toggleMap());

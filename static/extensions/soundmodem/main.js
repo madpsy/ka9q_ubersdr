@@ -1537,6 +1537,12 @@ class SoundModemExtension extends DecoderExtension {
     // ── Display ───────────────────────────────────────────────────────────────
 
     _displayFrame(parsed) {
+        // ── Validity check — drop corrupt/noise frames ────────────────────────
+        // Real AX.25 callsigns are 1-6 alphanumeric chars + optional -N (0-15).
+        // Frames with garbage callsigns are noise bursts decoded as AX.25.
+        const validCall = /^[A-Z0-9]{1,6}(-\d{1,2})?$/i;
+        if (!validCall.test(parsed.from) || !validCall.test(parsed.to)) return;
+
         // ── Filter ────────────────────────────────────────────────────────────
         const ft = parsed.frameType;
         const CONNECTED_TYPES = new Set(['i','rr','rnr','rej','srej','sabm','sabme','ua','disc','dm','frmr','xid','test']);

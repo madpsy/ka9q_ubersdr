@@ -10,7 +10,7 @@ package soundmodem
  * Each user session gets its own QtSoundModem subprocess with:
  *   - A unique working directory in /dev/shm (RAM-backed, no disk I/O)
  *   - A unique KISS TCP port (for reading decoded AX.25 frames)
- *   - A unique AGW TCP port (enabled but not connected to by this extension)
+ *   - A unique AGW TCP port (connected for DCD state and monitor text)
  *
  * Wire protocol (backend → frontend):
  *   0x20  AX.25 packet frame (decoded by QtSoundModem via KISS)
@@ -18,6 +18,15 @@ package soundmodem
  *
  *   0x21  Error event (e.g. binary not found, subprocess crash)
  *         [type:1=0x21][msg_len:4 uint32 BE][msg: UTF-8]
+ *
+ *   0x22  Raw KISS frame (output_mode="kiss")
+ *         [type:1=0x22][frame_len:4 uint32 BE][kiss_frame: N bytes]
+ *
+ *   0x23  DCD state change (from AGW PE 'd' frame)
+ *         [type:1=0x23][channel:1][dcd_on:1]
+ *
+ *   0x24  Monitor text (from AGW PE 'U'/'I'/'S'/'T' frames)
+ *         [type:1=0x24][channel:1][is_tx:1][text_len:4 uint32 BE][text: UTF-8]
  *
  * Frontend params (passed in audio_extension_attach → params):
  *   channels: array of up to 4 channel config objects:
@@ -57,6 +66,8 @@ const (
 	MsgPacket    = 0x20 // AX.25 packet frame (KISS headers stripped, output_mode="ax25")
 	MsgError     = 0x21 // Error message
 	MsgKISSFrame = 0x22 // Raw KISS frame with 0xC0 delimiters (output_mode="kiss")
+	MsgDCD       = 0x23 // DCD state change: [type:1][channel:1][dcd_on:1]
+	MsgMonitor   = 0x24 // Monitor text: [type:1][channel:1][is_tx:1][text_len:4 BE][text: UTF-8]
 )
 
 // --- Global port pool ---

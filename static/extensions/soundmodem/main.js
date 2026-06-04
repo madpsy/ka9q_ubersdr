@@ -9,14 +9,11 @@
 //   0x21  Error event (subprocess crash or binary not found)
 //         [type:1=0x21][msg_len:4 uint32 BE][msg: UTF-8]
 //
-// Frontend params sent on attach:
-//   {
-//     channels: [
-//       { enabled: bool, modem: int, freq: float, rcvr_pairs: int, fx25: int, il2p: int },
-//       ...  (up to 4)
-//     ],
-//     dcd_threshold: int
-//   }
+//   0x23  DCD state change
+//         [type:1=0x23][channel:1][dcd_on:1]
+//
+//   0x24  Monitor text (decoded frame as human-readable string from AGW)
+//         [type:1=0x24][channel:1][is_tx:1][text_len:4 uint32 BE][text: UTF-8]
 
 class SoundModemExtension extends DecoderExtension {
     constructor() {
@@ -29,14 +26,30 @@ class SoundModemExtension extends DecoderExtension {
 
         this.running       = false;
         this.frameCount    = 0;
-        this.filter        = 'all';   // frame type filter: all | aprs | ui
-        this.channelFilter = 'all';   // channel filter: all | 0 | 1 | 2 | 3
+        this.filter        = 'all';
+        this.channelFilter = 'all';
         this.copyBuffer    = [];
-        this.configOpen    = false;
 
         this._origHandler = null;
         this._ourHandler  = null;
         this._handlersSet = false;
+
+        // Waterfall — draws FFT data from the page's existing AnalyserNode via radio.getAnalyser()
+        this._wfCtx          = null;   // 2D context for scrolling waterfall canvas
+        this._wfHdrCtx       = null;   // 2D context for frequency scale header canvas
+        this._wfFftBuf       = null;   // Uint8Array for getByteFrequencyData()
+        this._wfRunning      = false;
+        this._wfSampleRate   = 48000;  // updated from analyser.context.sampleRate on first audio frame
+        this._wfMaxFreq      = 3300;   // Hz shown on waterfall (matches QtSoundModem WaterfallMax)
+        this._wfChannelFreqs = [];     // [{freq, enabled}] snapshot from config at start time
+
+        // Monitor panel
+        this._monitorLines = 0;
+        this._monitorMax   = 300;
+        this._monitorOpen  = false;
+
+        // DCD state per channel
+        this._dcdState = [false, false, false, false];
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -53,10 +66,12 @@ class SoundModemExtension extends DecoderExtension {
 
     onDeactivate() {
         if (this.running) this._stopDecoder();
+        this._stopWaterfall();
     }
 
     onDisable() {
         if (this.running) this._stopDecoder();
+        this._stopWaterfall();
         this._restoreBinaryHandler();
     }
 
@@ -88,70 +103,77 @@ class SoundModemExtension extends DecoderExtension {
         if (this._handlersSet) return;
         this._handlersSet = true;
 
-        const startBtn   = document.getElementById('sm-start-btn');
-        const clearBtn   = document.getElementById('sm-clear-btn');
-        const copyBtn    = document.getElementById('sm-copy-btn');
-        const configBtn  = document.getElementById('sm-config-btn');
-        const filterSel  = document.getElementById('sm-filter-select');
+        const startBtn  = document.getElementById('sm-start-btn');
+        const clearBtn  = document.getElementById('sm-clear-btn');
+        const copyBtn   = document.getElementById('sm-copy-btn');
+        const filterSel = document.getElementById('sm-filter-select');
 
         if (startBtn)  startBtn.addEventListener('click',  () => this._toggleDecoder());
         if (clearBtn)  clearBtn.addEventListener('click',  () => this._clearOutput());
         if (copyBtn)   copyBtn.addEventListener('click',   () => this._copyOutput());
-        if (configBtn) configBtn.addEventListener('click',  () => this._toggleConfig());
         if (filterSel) filterSel.addEventListener('change', (e) => { this.filter = e.target.value; });
 
-        const channelFilterSel = document.getElementById('sm-channel-filter');
-        if (channelFilterSel) channelFilterSel.addEventListener('change', (e) => {
+        const chFilterSel = document.getElementById('sm-channel-filter');
+        if (chFilterSel) chFilterSel.addEventListener('change', (e) => {
             this.channelFilter = e.target.value;
         });
 
-        // Wire up channel enable checkboxes to enable/disable their param rows
+        const monToggle = document.getElementById('sm-monitor-toggle');
+        if (monToggle) monToggle.addEventListener('click', () => this._toggleMonitorPanel());
+
         for (let i = 0; i < 4; i++) {
             const cb = document.getElementById(`sm-ch${i}-enabled`);
-            if (cb) {
-                cb.addEventListener('change', () => this._updateChannelState(i));
-            }
+            if (cb) cb.addEventListener('change', () => this._updateChannelState(i));
         }
 
-        // Restore DOM state after re-activation
+        // Restore state
         if (filterSel) filterSel.value = this.filter;
-        const channelFilterSel2 = document.getElementById('sm-channel-filter');
-        if (channelFilterSel2) channelFilterSel2.value = this.channelFilter;
+        const chFilterSel2 = document.getElementById('sm-channel-filter');
+        if (chFilterSel2) chFilterSel2.value = this.channelFilter;
         if (startBtn && this.running) {
             startBtn.textContent = 'Stop';
             startBtn.classList.add('running');
         }
-
-        // Restore config panel visibility
-        const panel = document.getElementById('sm-config-panel');
-        if (panel) panel.style.display = this.configOpen ? 'block' : 'none';
-
+        this._setConfigVisible(!this.running);
         this._updateCountDisplay();
+
+        // Restore DCD LED states
+        for (let i = 0; i < 4; i++) this._updateDCDLed(i, this._dcdState[i]);
+
+        // Restore monitor panel visibility
+        const monPanel = document.getElementById('sm-monitor-panel');
+        if (monPanel) monPanel.style.display = this._monitorOpen ? 'flex' : 'none';
+        const monBtn = document.getElementById('sm-monitor-toggle');
+        if (monBtn) monBtn.textContent = this._monitorOpen ? 'Hide Monitor' : 'Monitor';
+
+        // Init waterfall canvases
+        this._initWaterfallCanvases();
+        if (this.running) this._startWaterfall();
     }
 
     _updateChannelState(idx) {
+        // No-op while running — config is locked
+        if (this.running) return;
         const cb     = document.getElementById(`sm-ch${idx}-enabled`);
         const params = document.getElementById(`sm-ch${idx}-params`);
         if (!cb || !params) return;
-
         const enabled = cb.checked;
         params.classList.toggle('sm-channel-params-disabled', !enabled);
+        params.querySelectorAll('input, select').forEach(el => { el.disabled = !enabled; });
+    }
 
-        // Enable/disable all inputs within the params div
-        params.querySelectorAll('input, select').forEach(el => {
-            el.disabled = !enabled;
+    _setConfigVisible(visible) {
+        const panel = document.getElementById('sm-config-panel');
+        if (!panel) return;
+        panel.style.display = visible ? '' : 'none';
+        // Also disable/enable all inputs inside the config panel so they cannot
+        // be interacted with even if the panel is somehow visible while running.
+        panel.querySelectorAll('input, select, button').forEach(el => {
+            el.disabled = !visible;
         });
     }
 
-    _toggleConfig() {
-        this.configOpen = !this.configOpen;
-        const panel = document.getElementById('sm-config-panel');
-        if (panel) panel.style.display = this.configOpen ? 'block' : 'none';
-        const btn = document.getElementById('sm-config-btn');
-        if (btn) btn.classList.toggle('active', this.configOpen);
-    }
-
-    // ── Collect params from UI ────────────────────────────────────────────────
+    // ── Collect params ────────────────────────────────────────────────────────
 
     _collectParams() {
         const channels = [];
@@ -162,7 +184,6 @@ class SoundModemExtension extends DecoderExtension {
             const rcvrPairs = parseInt(document.getElementById(`sm-ch${i}-rcvr`)?.value   ?? '0', 10);
             const fx25      = parseInt(document.getElementById(`sm-ch${i}-fx25`)?.value   ?? '1', 10);
             const il2p      = parseInt(document.getElementById(`sm-ch${i}-il2p`)?.value   ?? '0', 10);
-
             channels.push({
                 enabled,
                 modem:      isNaN(modem)     ? 1    : modem,
@@ -172,10 +193,8 @@ class SoundModemExtension extends DecoderExtension {
                 il2p:       isNaN(il2p)      ? 0    : il2p,
             });
         }
-
         const dcdRaw = parseInt(document.getElementById('sm-dcd-threshold')?.value ?? '20', 10);
         const dcdThreshold = isNaN(dcdRaw) ? 20 : Math.max(1, Math.min(100, dcdRaw));
-
         return { channels, dcd_threshold: dcdThreshold };
     }
 
@@ -191,13 +210,13 @@ class SoundModemExtension extends DecoderExtension {
         if (!ws) { this._setStatus('Error: WebSocket not connected', 'error'); return; }
 
         const params = this._collectParams();
-
-        // Validate: at least one channel enabled
-        const anyEnabled = params.channels.some(ch => ch.enabled);
-        if (!anyEnabled) {
+        if (!params.channels.some(ch => ch.enabled)) {
             this._setStatus('Error: enable at least one channel', 'error');
             return;
         }
+
+        // Snapshot channel frequencies for waterfall markers
+        this._wfChannelFreqs = params.channels.map(ch => ({ freq: ch.freq, enabled: ch.enabled }));
 
         this._installBinaryHandler();
 
@@ -213,9 +232,8 @@ class SoundModemExtension extends DecoderExtension {
         const btn = document.getElementById('sm-start-btn');
         if (btn) { btn.textContent = 'Stop'; btn.classList.add('running'); }
 
-        // Disable config while running
-        const configBtn = document.getElementById('sm-config-btn');
-        if (configBtn) configBtn.disabled = true;
+        this._setConfigVisible(false);
+        this._startWaterfall();
     }
 
     _stopDecoder() {
@@ -223,16 +241,21 @@ class SoundModemExtension extends DecoderExtension {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'audio_extension_detach' }));
         }
-
         this._restoreBinaryHandler();
+        this._stopWaterfall();
         this.running = false;
         this._setStatus('Stopped');
 
         const btn = document.getElementById('sm-start-btn');
         if (btn) { btn.textContent = 'Start'; btn.classList.remove('running'); }
 
-        const configBtn = document.getElementById('sm-config-btn');
-        if (configBtn) configBtn.disabled = false;
+        this._setConfigVisible(true);
+
+        // Clear DCD LEDs
+        for (let i = 0; i < 4; i++) {
+            this._dcdState[i] = false;
+            this._updateDCDLed(i, false);
+        }
     }
 
     // ── WebSocket binary interception ─────────────────────────────────────────
@@ -246,10 +269,7 @@ class SoundModemExtension extends DecoderExtension {
     _installBinaryHandler() {
         const c = window.dxClusterClient;
         if (!c || !c.ws) return;
-
-        if (!this._origHandler) {
-            this._origHandler = c.ws.onmessage;
-        }
+        if (!this._origHandler) this._origHandler = c.ws.onmessage;
 
         this._ourHandler = (event) => {
             if (event.data instanceof ArrayBuffer) {
@@ -268,19 +288,15 @@ class SoundModemExtension extends DecoderExtension {
                         return;
                     }
                 } catch (_) { /* not JSON */ }
-
                 if (this._origHandler) this._origHandler.call(c.ws, event);
             }
         };
-
         c.ws.onmessage = this._ourHandler;
     }
 
     _restoreBinaryHandler() {
         const c = window.dxClusterClient;
-        if (c && c.ws && this._origHandler) {
-            c.ws.onmessage = this._origHandler;
-        }
+        if (c && c.ws && this._origHandler) c.ws.onmessage = this._origHandler;
         this._origHandler = null;
         this._ourHandler  = null;
     }
@@ -290,32 +306,30 @@ class SoundModemExtension extends DecoderExtension {
     _handleBinary(buf) {
         const view = new DataView(buf);
         if (buf.byteLength < 1) return;
-        const type = view.getUint8(0);
-
-        switch (type) {
+        switch (view.getUint8(0)) {
             case 0x20: this._handlePacket(view, buf); break;
             case 0x21: this._handleBinaryError(view, buf); break;
+            case 0x23: this._handleDCD(view, buf); break;
+            case 0x24: this._handleMonitor(view, buf); break;
             default:
-                console.warn('[SoundModem] unknown binary message type:', type.toString(16));
+                console.warn('[SoundModem] unknown binary type:', view.getUint8(0).toString(16));
         }
     }
 
-    // 0x20 AX.25 packet frame
+    // 0x20 AX.25 packet
     _handlePacket(view, buf) {
         if (buf.byteLength < 6) return;
         const kissPort = view.getUint8(1);
         const frameLen = view.getUint32(2, false);
         if (buf.byteLength < 6 + frameLen) return;
-
         const ax25 = new Uint8Array(buf, 6, frameLen);
         const parsed = this._parseAX25(ax25);
         if (!parsed) return;
-
         parsed.kissPort = kissPort;
         this._displayFrame(parsed);
     }
 
-    // 0x21 error event
+    // 0x21 error
     _handleBinaryError(view, buf) {
         if (buf.byteLength < 5) return;
         const msgLen = view.getUint32(1, false);
@@ -324,22 +338,277 @@ class SoundModemExtension extends DecoderExtension {
         this._handleServerError(msg);
     }
 
+    // 0x23 DCD state: [type:1][channel:1][dcd_on:1]
+    _handleDCD(view, buf) {
+        if (buf.byteLength < 3) return;
+        const channel = view.getUint8(1);
+        const dcdOn   = view.getUint8(2) !== 0;
+        if (channel < 4) {
+            this._dcdState[channel] = dcdOn;
+            this._updateDCDLed(channel, dcdOn);
+        }
+    }
+
+    // 0x24 monitor text: [type:1][channel:1][is_tx:1][text_len:4 BE][text: UTF-8]
+    _handleMonitor(view, buf) {
+        if (buf.byteLength < 7) return;
+        const channel = view.getUint8(1);
+        const isTX    = view.getUint8(2) !== 0;
+        const textLen = view.getUint32(3, false);
+        if (buf.byteLength < 7 + textLen) return;
+        const text = new TextDecoder().decode(new Uint8Array(buf, 7, textLen)).trim();
+        if (text) this._appendMonitorLine(channel, isTX, text);
+    }
+
     _handleServerError(msg) {
         console.error('[SoundModem] backend error:', msg);
         this._setStatus('Error: ' + msg, 'error');
         this._restoreBinaryHandler();
+        this._stopWaterfall();
         this.running = false;
         const btn = document.getElementById('sm-start-btn');
         if (btn) { btn.textContent = 'Start'; btn.classList.remove('running'); }
-        const configBtn = document.getElementById('sm-config-btn');
-        if (configBtn) configBtn.disabled = false;
+        this._setConfigVisible(true);
+    }
+
+    // ── DCD LED helpers ───────────────────────────────────────────────────────
+
+    _updateDCDLed(channel, on) {
+        const led = document.getElementById(`sm-dcd-led-${channel}`);
+        if (!led) return;
+        led.classList.toggle('sm-dcd-on',  on);
+        led.classList.toggle('sm-dcd-off', !on);
+        led.title = `Ch ${['A','B','C','D'][channel]} DCD: ${on ? 'ACTIVE' : 'idle'}`;
+    }
+
+    // ── Monitor panel ─────────────────────────────────────────────────────────
+
+    _toggleMonitorPanel() {
+        this._monitorOpen = !this._monitorOpen;
+        const panel = document.getElementById('sm-monitor-panel');
+        const btn   = document.getElementById('sm-monitor-toggle');
+        if (panel) panel.style.display = this._monitorOpen ? 'flex' : 'none';
+        if (btn)   btn.textContent = this._monitorOpen ? 'Hide Monitor' : 'Monitor';
+    }
+
+    _appendMonitorLine(channel, isTX, text) {
+        const list = document.getElementById('sm-monitor-list');
+        if (!list) return;
+
+        const chLabel = ['A','B','C','D'][channel] ?? String(channel);
+        const timeStr = new Date().toTimeString().slice(0, 8);
+
+        const line = document.createElement('div');
+        line.className = 'sm-monitor-line' + (isTX ? ' sm-monitor-tx' : ' sm-monitor-rx');
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'sm-monitor-time';
+        timeEl.textContent = timeStr;
+
+        const badge = document.createElement('span');
+        badge.className = `sm-channel-badge sm-channel-badge-${channel}`;
+        badge.textContent = chLabel;
+
+        const dirEl = document.createElement('span');
+        dirEl.className = 'sm-monitor-dir';
+        dirEl.textContent = isTX ? 'TX' : 'RX';
+
+        const textEl = document.createElement('span');
+        textEl.className = 'sm-monitor-text';
+        textEl.textContent = text;
+
+        line.appendChild(timeEl);
+        line.appendChild(badge);
+        line.appendChild(dirEl);
+        line.appendChild(textEl);
+        list.appendChild(line);
+        this._monitorLines++;
+
+        while (this._monitorLines > this._monitorMax) {
+            list.removeChild(list.firstChild);
+            this._monitorLines--;
+        }
+
+        const panel = document.getElementById('sm-monitor-panel');
+        if (panel) panel.scrollTop = panel.scrollHeight;
+    }
+
+    // ── Waterfall ─────────────────────────────────────────────────────────────
+
+    _initWaterfallCanvases() {
+        const wfCanvas  = document.getElementById('sm-wf-canvas');
+        const hdrCanvas = document.getElementById('sm-wf-header');
+        if (!wfCanvas || !hdrCanvas) return;
+
+        const container = wfCanvas.parentElement;
+        const w = Math.max((container ? container.getBoundingClientRect().width : 0) || 400, 200);
+        const h = 120;
+
+        wfCanvas.width   = w;
+        wfCanvas.height  = h;
+        hdrCanvas.width  = w;
+        hdrCanvas.height = 20;
+
+        this._wfCtx    = wfCanvas.getContext('2d');
+        this._wfHdrCtx = hdrCanvas.getContext('2d');
+
+        this._wfCtx.fillStyle = '#000';
+        this._wfCtx.fillRect(0, 0, w, h);
+
+        this._drawWaterfallHeader();
+    }
+
+    _drawWaterfallHeader() {
+        const ctx = this._wfHdrCtx;
+        if (!ctx) return;
+        const w = ctx.canvas.width;
+        const h = ctx.canvas.height;
+        const maxFreq = this._wfMaxFreq;
+
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, w, h);
+
+        // Major ticks every 500 Hz
+        ctx.strokeStyle = '#555';
+        ctx.fillStyle   = '#888';
+        ctx.font        = '9px monospace';
+        ctx.textAlign   = 'center';
+        ctx.lineWidth   = 1;
+
+        for (let f = 0; f <= maxFreq; f += 500) {
+            const x = Math.round((f / maxFreq) * w);
+            ctx.beginPath();
+            ctx.moveTo(x, h - 6);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+            if (f > 0 && f < maxFreq) {
+                ctx.fillText(f >= 1000 ? (f / 1000).toFixed(1) + 'k' : String(f), x, h - 8);
+            }
+        }
+
+        // Minor ticks every 100 Hz
+        ctx.strokeStyle = '#333';
+        for (let f = 100; f < maxFreq; f += 100) {
+            if (f % 500 === 0) continue;
+            const x = Math.round((f / maxFreq) * w);
+            ctx.beginPath();
+            ctx.moveTo(x, h - 3);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+        }
+
+        // Channel frequency markers
+        const chColors = ['#1565C0', '#2E7D32', '#6A1B9A', '#E65100'];
+        const chNames  = ['A', 'B', 'C', 'D'];
+        this._wfChannelFreqs.forEach((ch, i) => {
+            if (!ch.enabled || ch.freq <= 0) return;
+            const x = Math.round((ch.freq / maxFreq) * w);
+            ctx.strokeStyle = chColors[i];
+            ctx.lineWidth   = 2;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.fillStyle = chColors[i];
+            ctx.font      = 'bold 9px monospace';
+            ctx.textAlign = x > w - 20 ? 'right' : 'left';
+            ctx.fillText(chNames[i], x + (x > w - 20 ? -3 : 3), 9);
+        });
+        ctx.textAlign = 'center';
+    }
+
+    _startWaterfall() {
+        if (this._wfRunning) return;
+        this._wfRunning = true;
+        this._drawWaterfallHeader();
+    }
+
+    _stopWaterfall() {
+        this._wfRunning = false;
+        this._wfFftBuf = null;
+    }
+
+    // Called by the DecoderExtension framework every audio frame with time-domain PCM.
+    // Follows the same pattern as the FSK extension: call radio.getAnalyser() here,
+    // get frequency data, and draw the waterfall line directly.
+    // The waterfall runs always (not just when the decoder is active) so the user
+    // can see the spectrum before pressing Start — just like the QtSoundModem GUI.
+    onProcessAudio(_dataArray) {
+        if (!this._wfCtx) return;
+
+        const analyser = this.radio ? this.radio.getAnalyser() : null;
+        if (!analyser) return;
+
+        // Update sample rate on first call (or if it changes)
+        if (analyser.context && analyser.context.sampleRate !== this._wfSampleRate) {
+            this._wfSampleRate = analyser.context.sampleRate;
+            this._drawWaterfallHeader();
+        }
+
+        // Allocate or reallocate FFT buffer if needed
+        if (!this._wfFftBuf || this._wfFftBuf.length !== analyser.frequencyBinCount) {
+            this._wfFftBuf = new Uint8Array(analyser.frequencyBinCount);
+        }
+
+        analyser.getByteFrequencyData(this._wfFftBuf);
+        this._renderWaterfallLine();
+    }
+
+    _renderWaterfallLine() {
+        const ctx = this._wfCtx;
+        const w   = ctx.canvas.width;
+        const h   = ctx.canvas.height;
+        const bins = this._wfFftBuf;
+        const nyquist  = this._wfSampleRate / 2;
+        const maxFreq  = this._wfMaxFreq;
+        const totalBins = bins.length;
+
+        // Scroll existing content down by 1 pixel
+        ctx.drawImage(ctx.canvas, 0, 0, w, h - 1, 0, 1, w, h - 1);
+
+        // Draw new line at top
+        const imageData = ctx.createImageData(w, 1);
+        const data = imageData.data;
+
+        for (let px = 0; px < w; px++) {
+            const freq   = (px / w) * maxFreq;
+            const binIdx = Math.min(Math.round((freq / nyquist) * totalBins), totalBins - 1);
+            const val    = bins[binIdx];
+
+            data[px * 4]     = this._wfColorR(val);
+            data[px * 4 + 1] = this._wfColorG(val);
+            data[px * 4 + 2] = this._wfColorB(val);
+            data[px * 4 + 3] = 255;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+    }
+
+    // Waterfall colour map: black → blue → cyan → green → yellow → red
+    _wfColorR(v) {
+        if (v < 64)  return 0;
+        if (v < 128) return 0;
+        if (v < 192) return Math.round((v - 128) * 4);
+        return 255;
+    }
+    _wfColorG(v) {
+        if (v < 64)  return 0;
+        if (v < 128) return Math.round((v - 64) * 4);
+        if (v < 192) return 255;
+        return Math.round(255 - (v - 192) * 4);
+    }
+    _wfColorB(v) {
+        if (v < 64)  return Math.round(v * 4);
+        if (v < 128) return 255;
+        if (v < 192) return Math.round(255 - (v - 128) * 4);
+        return 0;
     }
 
     // ── AX.25 frame parser ────────────────────────────────────────────────────
 
     _parseAX25(bytes) {
         if (bytes.length < 15) return null;
-
         try {
             const dest = this._decodeAddress(bytes, 0);
             const src  = this._decodeAddress(bytes, 7);
@@ -359,28 +628,27 @@ class SoundModemExtension extends DecoderExtension {
             if (offset >= bytes.length) return null;
 
             const ctrl = bytes[offset++];
-
             let frameType = 'other';
             let pid = null;
             let info = '';
 
-            const isUI    = (ctrl & 0xEF) === 0x03;
-            const isSABM  = (ctrl & 0xEF) === 0x2F;
-            const isUA    = (ctrl & 0xEF) === 0x63;
-            const isDISC  = (ctrl & 0xEF) === 0x43;
-            const isDM    = (ctrl & 0xEF) === 0x0F;
+            const isUI     = (ctrl & 0xEF) === 0x03;
+            const isSABM   = (ctrl & 0xEF) === 0x2F;
+            const isUA     = (ctrl & 0xEF) === 0x63;
+            const isDISC   = (ctrl & 0xEF) === 0x43;
+            const isDM     = (ctrl & 0xEF) === 0x0F;
             const isIFrame = (ctrl & 0x01) === 0;
 
             if (isUI) {
                 frameType = 'ui';
                 if (offset < bytes.length) {
-                    pid = bytes[offset++];
+                    pid  = bytes[offset++];
                     info = this._decodeInfo(bytes, offset);
                 }
             } else if (isIFrame) {
                 frameType = 'connected';
                 if (offset < bytes.length) {
-                    pid = bytes[offset++];
+                    pid  = bytes[offset++];
                     info = this._decodeInfo(bytes, offset);
                 }
             } else if (isSABM) {
@@ -432,11 +700,8 @@ class SoundModemExtension extends DecoderExtension {
     // ── Display ───────────────────────────────────────────────────────────────
 
     _displayFrame(parsed) {
-        // Apply frame type filter
         if (this.filter === 'aprs' && !parsed.isAPRS) return;
         if (this.filter === 'ui'   && parsed.frameType !== 'ui' && !parsed.isAPRS) return;
-
-        // Apply channel filter
         if (this.channelFilter !== 'all' && String(parsed.kissPort) !== this.channelFilter) return;
 
         this.frameCount++;
@@ -445,13 +710,9 @@ class SoundModemExtension extends DecoderExtension {
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = parsed.from;
 
-        const digiStr = parsed.digipeaters.length > 0
-            ? ' via ' + parsed.digipeaters.join(',')
-            : '';
+        const digiStr = parsed.digipeaters.length > 0 ? ' via ' + parsed.digipeaters.join(',') : '';
         const pathStr = `${parsed.from} → ${parsed.to}${digiStr}`;
-
-        const now = new Date();
-        const timeStr = now.toTimeString().slice(0, 8);
+        const timeStr = new Date().toTimeString().slice(0, 8);
         this.copyBuffer.push(`[${timeStr}] ${pathStr}: ${parsed.info}`);
 
         const row = document.createElement('div');
@@ -462,7 +723,6 @@ class SoundModemExtension extends DecoderExtension {
 
         const timeEl = document.createElement('div');
         timeEl.className = 'sm-frame-time';
-        // Time + channel badge
         const chLabel = ['A', 'B', 'C', 'D'][parsed.kissPort] ?? String(parsed.kissPort);
         const badge = document.createElement('span');
         badge.className = `sm-channel-badge sm-channel-badge-${parsed.kissPort}`;
@@ -495,16 +755,13 @@ class SoundModemExtension extends DecoderExtension {
 
         body.appendChild(pathEl);
         body.appendChild(payloadEl);
-
         row.appendChild(meta);
         row.appendChild(body);
 
         const list = document.getElementById('sm-frame-list');
         if (list) {
             list.appendChild(row);
-            while (list.children.length > 500) {
-                list.removeChild(list.firstChild);
-            }
+            while (list.children.length > 500) list.removeChild(list.firstChild);
         }
 
         const area = document.getElementById('sm-output-area');
@@ -547,8 +804,6 @@ class SoundModemExtension extends DecoderExtension {
             console.error('[SoundModem] copy failed:', err);
         });
     }
-
-    onProcessAudio(_dataArray) {}
 }
 
 // Register

@@ -10,6 +10,9 @@ package soundmodem
  * Decoded packet flow:
  *   subprocess KISS TCP server → kissReadLoop → resultChan (binary frames)
  *
+ * AGW monitoring flow:
+ *   subprocess AGW TCP server → agwReadLoop → resultChan (DCD + monitor text)
+ *
  * Each instance gets its own working directory in /dev/shm (RAM-backed tmpfs)
  * containing a QtSoundModem.ini with unique KISS and AGW port numbers.
  * The directory is removed on Stop().
@@ -18,11 +21,26 @@ package soundmodem
  *   FEND (0xC0) [type_byte] [ax25_data...] FEND (0xC0)
  *   type_byte bits 7-4: port number, bits 3-0: command (0=data)
  *
+ * AGW PE protocol (subset used here):
+ *   Each frame: [port:1][reserved:3][datakind:1][reserved:1][pid:1][reserved:1]
+ *               [callfrom:10][callto:10][datalen:4 LE][reserved:4][data: datalen bytes]
+ *   datakind 'U' = unproto/UI frame monitor text
+ *   datakind 'I' = connected I-frame monitor text
+ *   datakind 'S' = supervisory frame monitor text
+ *   datakind 'T' = own transmitted frame monitor text
+ *   datakind 'd' = DCD state (data[0] = 0 or 1)
+ *
  * Wire protocol sent to resultChan (backend → frontend):
  *   0x20  AX.25 packet
  *         [type:1=0x20][kiss_port:1][frame_len:4 uint32 BE][ax25_frame: N bytes]
  *   0x21  Error
  *         [type:1=0x21][msg_len:4 uint32 BE][msg: UTF-8]
+ *   0x22  Raw KISS frame (output_mode="kiss")
+ *         [type:1=0x22][frame_len:4 uint32 BE][kiss_frame: N bytes]
+ *   0x23  DCD state change
+ *         [type:1=0x23][channel:1][dcd_on:1]
+ *   0x24  Monitor text (decoded frame as human-readable string)
+ *         [type:1=0x24][channel:1][is_tx:1][text_len:4 uint32 BE][text: UTF-8]
  */
 
 import (
@@ -56,6 +74,27 @@ const (
 
 	// kissReadBufSize is the size of the KISS TCP read buffer.
 	kissReadBufSize = 4096
+
+	// agwConnectTimeout is how long we wait for the AGW port to open.
+	agwConnectTimeout = 10 * time.Second
+
+	// agwConnectRetryInterval is how long to wait between AGW connect attempts.
+	agwConnectRetryInterval = 200 * time.Millisecond
+
+	// agwHeaderSize is the fixed size of an AGW PE frame header.
+	agwHeaderSize = 36
+)
+
+// AGW PE datakind constants (the frame type byte at offset 4 in the header).
+const (
+	agwKindMonitorUI  = 'U' // unproto / UI frame monitor text
+	agwKindMonitorI   = 'I' // connected I-frame monitor text
+	agwKindMonitorS   = 'S' // supervisory frame monitor text
+	agwKindMonitorT   = 'T' // own transmitted frame monitor text
+	agwKindDCD        = 'd' // DCD state change
+	agwKindVersion    = 'R' // version info (sent on connect)
+	agwKindPortInfo   = 'G' // port info
+	agwKindMonitorRaw = 'K' // raw monitor frame
 )
 
 // ChannelConfig holds per-modem-channel configuration.
@@ -195,9 +234,6 @@ func buildIni(cfg SoundModemConfig, agwPort, kissPort int) string {
 	// [KISS]
 	fmt.Fprintf(&b, "[KISS]\nPort=%d\nServer=1\n\n", kissPort)
 
-	// [MGMT] — Port=0 disables the management server
-	fmt.Fprintf(&b, "[MGMT]\nPort=0\n\n")
-
 	// [Modem]
 	fmt.Fprintf(&b, "[Modem]\n")
 	fmt.Fprintf(&b, "CWIDCall=\n")
@@ -274,6 +310,7 @@ type SoundModemDecoder struct {
 	stdin io.WriteCloser
 
 	kissConn net.Conn // TCP connection to KISS server
+	agwConn  net.Conn // TCP connection to AGW PE server
 
 	running   bool
 	stopChan  chan struct{}
@@ -371,7 +408,7 @@ func (d *SoundModemDecoder) Start(audioChan <-chan AudioSample, resultChan chan<
 		cmd.Process.Pid, d.kissPort, d.agwPort, tempDir, strings.Join(chSummary, " "))
 
 	// Connect to the KISS TCP server (with retry until QtSoundModem is ready).
-	kissConn, err := d.connectKISS()
+	kissConn, err := d.connectWithRetry("KISS", d.kissPort, kissConnectTimeout, kissConnectRetryInterval)
 	if err != nil {
 		// Subprocess started but KISS port never opened — kill and clean up.
 		d.running = false
@@ -383,36 +420,63 @@ func (d *SoundModemDecoder) Start(audioChan <-chan AudioSample, resultChan chan<
 	}
 	d.kissConn = kissConn
 
+	// Connect to the AGW PE TCP server (non-fatal if it fails — KISS still works).
+	agwConn, err := d.connectWithRetry("AGW", d.agwPort, agwConnectTimeout, agwConnectRetryInterval)
+	if err != nil {
+		log.Printf("[SoundModem] Warning: failed to connect to AGW port %d: %v (DCD/monitor disabled)", d.agwPort, err)
+	} else {
+		d.agwConn = agwConn
+		// Send AGW 'M' command to enable frame monitoring.
+		if err := d.sendAGWMonitorEnable(agwConn); err != nil {
+			log.Printf("[SoundModem] Warning: failed to send AGW monitor enable: %v", err)
+		}
+	}
+
 	// Start goroutines.
 	d.wg.Add(3)
 	go d.writeLoop(audioChan)
 	go d.kissReadLoop(resultChan)
 	go d.waitLoop()
 
+	// Start AGW read goroutine only if we have a connection.
+	if d.agwConn != nil {
+		d.wg.Add(1)
+		go d.agwReadLoop(resultChan)
+	}
+
 	return nil
 }
 
-// connectKISS retries connecting to the KISS TCP port until QtSoundModem
-// is ready or the timeout expires.
-func (d *SoundModemDecoder) connectKISS() (net.Conn, error) {
-	addr := fmt.Sprintf("127.0.0.1:%d", d.kissPort)
-	deadline := time.Now().Add(kissConnectTimeout)
+// connectWithRetry retries connecting to a TCP port until it opens or the timeout expires.
+func (d *SoundModemDecoder) connectWithRetry(name string, port int, timeout, retryInterval time.Duration) (net.Conn, error) {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, kissConnectRetryInterval)
+		conn, err := net.DialTimeout("tcp", addr, retryInterval)
 		if err == nil {
-			log.Printf("[SoundModem] Connected to KISS port %d", d.kissPort)
+			log.Printf("[SoundModem] Connected to %s port %d", name, port)
 			return conn, nil
 		}
 		// Check if stop was requested while waiting.
 		select {
 		case <-d.stopChan:
-			return nil, fmt.Errorf("stopped while waiting for KISS port")
+			return nil, fmt.Errorf("stopped while waiting for %s port", name)
 		default:
 		}
-		time.Sleep(kissConnectRetryInterval)
+		time.Sleep(retryInterval)
 	}
-	return nil, fmt.Errorf("timed out after %s", kissConnectTimeout)
+	return nil, fmt.Errorf("timed out after %s waiting for %s port %d", timeout, name, port)
+}
+
+// sendAGWMonitorEnable sends the AGW 'M' command to enable frame monitoring output.
+// The AGW PE protocol requires this before the server will send 'U'/'I'/'S'/'T' frames.
+func (d *SoundModemDecoder) sendAGWMonitorEnable(conn net.Conn) error {
+	// AGW header: 36 bytes, all zero except datakind at offset 4.
+	hdr := make([]byte, agwHeaderSize)
+	hdr[4] = 'M' // enable monitoring
+	_, err := conn.Write(hdr)
+	return err
 }
 
 // Stop shuts down the subprocess and cleans up resources.
@@ -432,6 +496,10 @@ func (d *SoundModemDecoder) Stop() error {
 	// Close KISS connection → kissReadLoop unblocks.
 	if d.kissConn != nil {
 		_ = d.kissConn.Close()
+	}
+	// Close AGW connection → agwReadLoop unblocks.
+	if d.agwConn != nil {
+		_ = d.agwConn.Close()
 	}
 	d.mu.Unlock()
 
@@ -599,10 +667,6 @@ func (d *SoundModemDecoder) kissReadLoop(resultChan chan<- []byte) {
 				d.mu.Unlock()
 				if running {
 					log.Printf("[SoundModem] KISS read error: %v", err)
-					select {
-					case resultChan <- encodeErrorFrame("Sound Modem KISS connection lost"):
-					default:
-					}
 				}
 			}
 			return
@@ -610,13 +674,10 @@ func (d *SoundModemDecoder) kissReadLoop(resultChan chan<- []byte) {
 	}
 }
 
-// waitLoop waits for the subprocess to exit and signals a crash if unexpected.
+// waitLoop waits for the subprocess to exit and sends a crash error if it
+// exits unexpectedly while the decoder is still supposed to be running.
 func (d *SoundModemDecoder) waitLoop() {
 	defer d.wg.Done()
-
-	if d.cmd == nil {
-		return
-	}
 
 	err := d.cmd.Wait()
 
@@ -624,22 +685,117 @@ func (d *SoundModemDecoder) waitLoop() {
 	running := d.running
 	d.mu.Unlock()
 
-	if running {
-		if err != nil {
-			log.Printf("[SoundModem] Subprocess exited unexpectedly: %v", err)
-			select {
-			case d.crashChan <- err:
-			default:
+	if running && err != nil {
+		log.Printf("[SoundModem] Subprocess exited unexpectedly: %v", err)
+		select {
+		case d.crashChan <- fmt.Errorf("QtSoundModem subprocess exited: %w", err):
+		default:
+		}
+	}
+}
+
+// agwReadLoop reads AGW PE frames from the AGW TCP connection and emits
+// DCD state (0x23) and monitor text (0x24) messages on resultChan.
+func (d *SoundModemDecoder) agwReadLoop(resultChan chan<- []byte) {
+	defer d.wg.Done()
+
+	hdr := make([]byte, agwHeaderSize)
+
+	for {
+		// Check stop before blocking read.
+		select {
+		case <-d.stopChan:
+			return
+		default:
+		}
+
+		d.mu.Lock()
+		conn := d.agwConn
+		d.mu.Unlock()
+		if conn == nil {
+			return
+		}
+
+		// Read the fixed 36-byte header.
+		if _, err := io.ReadFull(conn, hdr); err != nil {
+			d.mu.Lock()
+			running := d.running
+			d.mu.Unlock()
+			if running {
+				log.Printf("[SoundModem] AGW read error (header): %v", err)
 			}
-		} else {
-			log.Printf("[SoundModem] Subprocess exited unexpectedly (exit code 0)")
-			select {
-			case d.crashChan <- fmt.Errorf("QtSoundModem exited unexpectedly"):
-			default:
+			return
+		}
+
+		port := hdr[0]                                    // AGW port (0-based channel index)
+		kind := hdr[4]                                    // datakind
+		dataLen := binary.LittleEndian.Uint32(hdr[28:32]) // payload length
+
+		// Read the payload (may be zero bytes).
+		var data []byte
+		if dataLen > 0 {
+			// Sanity-cap to avoid OOM on corrupt frames.
+			if dataLen > 65536 {
+				log.Printf("[SoundModem] AGW frame too large (%d bytes), skipping", dataLen)
+				// Drain the bytes to stay in sync.
+				drain := make([]byte, dataLen)
+				_, _ = io.ReadFull(conn, drain)
+				continue
+			}
+			data = make([]byte, dataLen)
+			if _, err := io.ReadFull(conn, data); err != nil {
+				d.mu.Lock()
+				running := d.running
+				d.mu.Unlock()
+				if running {
+					log.Printf("[SoundModem] AGW read error (data): %v", err)
+				}
+				return
 			}
 		}
-	} else {
-		log.Printf("[SoundModem] Subprocess exited cleanly")
+
+		switch kind {
+		case agwKindDCD:
+			// data[0] = 0 (DCD off) or 1 (DCD on)
+			dcdOn := byte(0)
+			if len(data) > 0 && data[0] != 0 {
+				dcdOn = 1
+			}
+			pkt := encodeDCDFrame(port, dcdOn)
+			select {
+			case resultChan <- pkt:
+			default:
+				log.Printf("[SoundModem] Result channel full, dropping DCD frame")
+			}
+
+		case agwKindMonitorUI, agwKindMonitorI, agwKindMonitorS:
+			// RX monitor text — isTX = 0
+			if len(data) > 0 {
+				pkt := encodeMonitorFrame(port, 0, data)
+				select {
+				case resultChan <- pkt:
+				default:
+					log.Printf("[SoundModem] Result channel full, dropping monitor frame")
+				}
+			}
+
+		case agwKindMonitorT:
+			// TX monitor text — isTX = 1 (we are RX-only but log it anyway)
+			if len(data) > 0 {
+				pkt := encodeMonitorFrame(port, 1, data)
+				select {
+				case resultChan <- pkt:
+				default:
+					log.Printf("[SoundModem] Result channel full, dropping TX monitor frame")
+				}
+			}
+
+		case agwKindVersion, agwKindPortInfo, agwKindMonitorRaw:
+			// Informational frames — ignore silently.
+
+		default:
+			// Unknown frame kind — ignore.
+		}
 	}
 }
 
@@ -649,50 +805,67 @@ func (d *SoundModemDecoder) CrashChan() <-chan error {
 	return d.crashChan
 }
 
-// encodePacketFrame builds a 0x20 binary frame (output_mode="ax25"):
+// --- Wire-protocol frame encoders ---
+
+// encodePacketFrame builds a 0x20 AX.25 packet envelope:
 //
 //	[type:1=0x20][kiss_port:1][frame_len:4 uint32 BE][ax25_frame: N bytes]
-//
-// The KISS type byte is stripped; only the raw AX.25 frame bytes are included.
 func encodePacketFrame(kissPort byte, ax25 []byte) []byte {
-	pkt := make([]byte, 1+1+4+len(ax25))
-	pkt[0] = MsgPacket
-	pkt[1] = kissPort
-	binary.BigEndian.PutUint32(pkt[2:6], uint32(len(ax25)))
-	copy(pkt[6:], ax25)
-	return pkt
+	buf := make([]byte, 6+len(ax25))
+	buf[0] = MsgPacket
+	buf[1] = kissPort
+	binary.BigEndian.PutUint32(buf[2:6], uint32(len(ax25)))
+	copy(buf[6:], ax25)
+	return buf
 }
 
-// encodeKISSFrame builds a 0x22 binary frame (output_mode="kiss"):
+// encodeKISSFrame builds a 0x22 raw KISS frame envelope:
 //
 //	[type:1=0x22][frame_len:4 uint32 BE][kiss_frame: N bytes]
 //
-// kiss_frame is the complete KISS frame including the 0xC0 delimiters and type byte,
-// exactly as it would appear on a KISS TNC TCP connection. Clients can pipe this
-// directly to direwolf, APRS software, or any other KISS-aware application.
-func encodeKISSFrame(kissContent []byte) []byte {
-	// Reconstruct the full KISS frame: FEND + content + FEND
-	// kissContent is the raw bytes between the 0xC0 delimiters (type byte + AX.25 data)
-	kissFrame := make([]byte, 1+len(kissContent)+1)
-	kissFrame[0] = kissFrameEnd
-	copy(kissFrame[1:], kissContent)
-	kissFrame[len(kissFrame)-1] = kissFrameEnd
+// where kiss_frame = 0xC0 [kiss_type_byte] [ax25_data...] 0xC0
+func encodeKISSFrame(frame []byte) []byte {
+	// Reconstruct the full KISS frame with 0xC0 delimiters.
+	kissFrame := make([]byte, 0, 2+len(frame))
+	kissFrame = append(kissFrame, kissFrameEnd)
+	kissFrame = append(kissFrame, frame...)
+	kissFrame = append(kissFrame, kissFrameEnd)
 
-	pkt := make([]byte, 1+4+len(kissFrame))
-	pkt[0] = MsgKISSFrame
-	binary.BigEndian.PutUint32(pkt[1:5], uint32(len(kissFrame)))
-	copy(pkt[5:], kissFrame)
-	return pkt
+	buf := make([]byte, 5+len(kissFrame))
+	buf[0] = MsgKISSFrame
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(kissFrame)))
+	copy(buf[5:], kissFrame)
+	return buf
 }
 
-// encodeErrorFrame builds a 0x21 binary frame:
+// encodeErrorFrame builds a 0x21 error message envelope:
 //
 //	[type:1=0x21][msg_len:4 uint32 BE][msg: UTF-8]
 func encodeErrorFrame(msg string) []byte {
-	b := []byte(msg)
-	pkt := make([]byte, 1+4+len(b))
-	pkt[0] = MsgError
-	binary.BigEndian.PutUint32(pkt[1:5], uint32(len(b)))
-	copy(pkt[5:], b)
-	return pkt
+	msgBytes := []byte(msg)
+	buf := make([]byte, 5+len(msgBytes))
+	buf[0] = MsgError
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(msgBytes)))
+	copy(buf[5:], msgBytes)
+	return buf
+}
+
+// encodeDCDFrame builds a 0x23 DCD state change envelope:
+//
+//	[type:1=0x23][channel:1][dcd_on:1]
+func encodeDCDFrame(channel, dcdOn byte) []byte {
+	return []byte{MsgDCD, channel, dcdOn}
+}
+
+// encodeMonitorFrame builds a 0x24 monitor text envelope:
+//
+//	[type:1=0x24][channel:1][is_tx:1][text_len:4 uint32 BE][text: UTF-8]
+func encodeMonitorFrame(channel, isTX byte, text []byte) []byte {
+	buf := make([]byte, 7+len(text))
+	buf[0] = MsgMonitor
+	buf[1] = channel
+	buf[2] = isTX
+	binary.BigEndian.PutUint32(buf[3:7], uint32(len(text)))
+	copy(buf[7:], text)
+	return buf
 }

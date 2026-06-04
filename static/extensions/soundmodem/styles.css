@@ -1,5 +1,172 @@
 /* Sound Modem Extension — QtSoundModem / AX.25 packet decoder */
 
+/* ── Container ───────────────────────────────────────────────────────────── */
+.sm-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.sm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #2a2a2a;
+    border-bottom: 2px solid #3a3a3a;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.sm-header h3 {
+    margin: 0;
+    font-size: 17px;
+    color: #2196F3;
+    white-space: nowrap;
+}
+
+/* ── Stats row ───────────────────────────────────────────────────────────── */
+.sm-stats {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    justify-content: center;
+}
+
+.sm-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 13px;
+}
+
+.sm-stat-label {
+    color: #888;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sm-stat-value {
+    font-weight: bold;
+    font-size: 15px;
+    color: #e0e0e0;
+    min-width: 4ch;
+    text-align: right;
+}
+
+/* ── DCD LED row ─────────────────────────────────────────────────────────── */
+.sm-dcd-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.sm-dcd-label {
+    font-size: 10px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: 2px;
+}
+
+.sm-dcd-led {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: bold;
+    cursor: default;
+    transition: background 0.1s, box-shadow 0.1s;
+    border: 1px solid #444;
+    user-select: none;
+}
+
+.sm-dcd-off {
+    background: #1a1a1a;
+    color: #555;
+    box-shadow: none;
+}
+
+.sm-dcd-on {
+    background: #e53935;
+    color: #fff;
+    box-shadow: 0 0 6px 2px rgba(229, 57, 53, 0.7);
+    border-color: #ff5252;
+}
+
+/* ── Header controls ─────────────────────────────────────────────────────── */
+.sm-header-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.sm-filter-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    margin-right: 2px;
+    align-self: center;
+    line-height: 1;
+}
+
+.sm-filter-select {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+    align-self: center;
+}
+
+.sm-filter-select:focus {
+    outline: none;
+    border-color: #888;
+}
+
+.sm-filter-narrow { width: 52px; }
+
+/* ── Waterfall ───────────────────────────────────────────────────────────── */
+.sm-waterfall-wrap {
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    border-bottom: 1px solid #2a2a2a;
+    flex-shrink: 0;
+}
+
+.sm-wf-header {
+    display: block;
+    width: 100%;
+    height: 20px;
+    background: #1a1a1a;
+    cursor: default;
+}
+
+.sm-wf-canvas {
+    display: block;
+    width: 100%;
+    height: 120px;
+    background: #000;
+    cursor: default;
+    image-rendering: pixelated;
+}
+
 /* ── Channel badge ───────────────────────────────────────────────────────── */
 .sm-channel-badge {
     display: inline-block;
@@ -17,10 +184,6 @@
 .sm-channel-badge-2 { background: #6A1B9A; color: #fff; }  /* Ch C — purple */
 .sm-channel-badge-3 { background: #E65100; color: #fff; }  /* Ch D — orange */
 
-/* ── Narrow filter select ────────────────────────────────────────────────── */
-.sm-filter-narrow { width: 52px; }
-
-
 /* ── Config panel ────────────────────────────────────────────────────────── */
 .sm-config-panel {
     background: #1e1e1e;
@@ -28,6 +191,7 @@
     padding: 10px 16px;
     overflow-y: auto;
     max-height: 340px;
+    flex-shrink: 0;
 }
 
 .sm-config-header {
@@ -157,99 +321,113 @@
     color: #666;
 }
 
-
-.sm-container {
-    display: flex;
+/* ── Monitor panel ───────────────────────────────────────────────────────── */
+.sm-monitor-panel {
     flex-direction: column;
-    height: 100%;
-    background: #1a1a1a;
-    color: #e0e0e0;
-    font-family: 'Courier New', monospace;
+    background: #0d0d0d;
+    border-bottom: 1px solid #2a2a2a;
+    max-height: 180px;
+    overflow-y: auto;
+    flex-shrink: 0;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────── */
-.sm-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 16px;
-    background: #2a2a2a;
-    border-bottom: 2px solid #3a3a3a;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-
-.sm-header h3 {
-    margin: 0;
-    font-size: 17px;
-    color: #2196F3;
-    white-space: nowrap;
-}
-
-/* ── Stats row ───────────────────────────────────────────────────────────── */
-.sm-stats {
-    display: flex;
-    gap: 20px;
-    flex: 1;
-    justify-content: center;
-}
-
-.sm-stat {
+.sm-monitor-header {
     display: flex;
     align-items: baseline;
-    gap: 5px;
-    font-size: 13px;
+    gap: 10px;
+    padding: 5px 12px 4px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-shrink: 0;
 }
 
-.sm-stat-label {
-    color: #888;
+.sm-monitor-title {
     font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.sm-stat-value {
     font-weight: bold;
-    font-size: 15px;
-    color: #e0e0e0;
-    min-width: 4ch;
-    text-align: right;
-}
-
-/* ── Header controls ─────────────────────────────────────────────────────── */
-.sm-header-controls {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.sm-filter-label {
-    font-size: 11px;
-    color: #888;
+    color: #2196F3;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+.sm-monitor-hint {
+    font-size: 10px;
+    color: #555;
+}
+
+.sm-monitor-list {
+    padding: 2px 0;
+}
+
+.sm-monitor-line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    border-left: 2px solid transparent;
+}
+
+.sm-monitor-line:hover {
+    background: #161616;
+}
+
+.sm-monitor-rx {
+    border-left-color: #1565C0;
+}
+
+.sm-monitor-tx {
+    border-left-color: #b71c1c;
+    opacity: 0.7;
+}
+
+.sm-monitor-time {
+    color: #555;
+    font-size: 10px;
     white-space: nowrap;
-    margin-right: 2px;
-    align-self: center;
-    line-height: 1;
+    flex-shrink: 0;
 }
 
-.sm-filter-select {
-    background: #2a2a2a;
-    color: #e0e0e0;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 6px;
-    font-size: 12px;
-    font-family: 'Courier New', monospace;
-    cursor: pointer;
-    align-self: center;
+.sm-monitor-dir {
+    font-size: 9px;
+    font-weight: bold;
+    padding: 0 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
 }
 
-.sm-filter-select:focus {
-    outline: none;
-    border-color: #888;
+.sm-monitor-rx .sm-monitor-dir {
+    background: #1565C0;
+    color: #fff;
 }
+
+.sm-monitor-tx .sm-monitor-dir {
+    background: #b71c1c;
+    color: #fff;
+}
+
+.sm-monitor-text {
+    color: #b0bec5;
+    word-break: break-all;
+    white-space: pre-wrap;
+    flex: 1;
+}
+
+.sm-monitor-rx .sm-monitor-text {
+    color: #90caf9;
+}
+
+.sm-monitor-tx .sm-monitor-text {
+    color: #ef9a9a;
+}
+
+/* Scrollbar for monitor panel */
+.sm-monitor-panel::-webkit-scrollbar       { width: 4px; }
+.sm-monitor-panel::-webkit-scrollbar-track { background: #0d0d0d; }
+.sm-monitor-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 
 /* ── Output area ─────────────────────────────────────────────────────────── */
 .sm-output-area {
@@ -281,21 +459,10 @@
     background: #1e1e1e;
 }
 
-.sm-frame.sm-frame-aprs {
-    border-left-color: #4CAF50;
-}
-
-.sm-frame.sm-frame-ui {
-    border-left-color: #2196F3;
-}
-
-.sm-frame.sm-frame-connected {
-    border-left-color: #FF9800;
-}
-
-.sm-frame.sm-frame-other {
-    border-left-color: #555;
-}
+.sm-frame.sm-frame-aprs     { border-left-color: #4CAF50; }
+.sm-frame.sm-frame-ui       { border-left-color: #2196F3; }
+.sm-frame.sm-frame-connected { border-left-color: #FF9800; }
+.sm-frame.sm-frame-other    { border-left-color: #555; }
 
 .sm-frame-meta {
     display: flex;
@@ -350,9 +517,9 @@
     white-space: pre-wrap;
 }
 
-/* APRS payload colour coding */
+/* APRS / UI payload colour coding */
 .sm-frame-aprs .sm-frame-payload { color: #a5d6a7; }
-.sm-frame-ui    .sm-frame-payload { color: #90caf9; }
+.sm-frame-ui   .sm-frame-payload { color: #90caf9; }
 
 /* ── Status bar ──────────────────────────────────────────────────────────── */
 .sm-status-bar {
@@ -360,6 +527,7 @@
     background: #2a2a2a;
     border-top: 1px solid #3a3a3a;
     font-size: 12px;
+    flex-shrink: 0;
 }
 
 .sm-status-text {
@@ -372,13 +540,14 @@
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .sm-btn {
-    padding: 6px 14px;
+    padding: 5px 12px;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     font-family: 'Courier New', monospace;
     transition: background 0.2s;
+    white-space: nowrap;
 }
 
 .sm-btn-primary            { background: #2196F3; color: #fff; }
@@ -390,15 +559,20 @@
 .sm-btn-secondary:hover    { background: #4a4a4a; }
 .sm-btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
 .sm-output-area::-webkit-scrollbar       { width: 6px; }
 .sm-output-area::-webkit-scrollbar-track { background: #111; }
 .sm-output-area::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
 .sm-output-area::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+
+.sm-config-panel::-webkit-scrollbar       { width: 4px; }
+.sm-config-panel::-webkit-scrollbar-track { background: #1e1e1e; }
+.sm-config-panel::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 2px; }
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
     .sm-stats { gap: 12px; }
     .sm-header { flex-direction: column; align-items: flex-start; }
     .sm-frame { grid-template-columns: 70px 1fr; }
+    .sm-dcd-row { order: -1; }
 }

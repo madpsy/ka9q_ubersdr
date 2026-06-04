@@ -973,6 +973,87 @@ class SoundModemExtension extends DecoderExtension {
         return { lat: lat.toFixed(6), lon: lon.toFixed(6), latStr, lonStr };
     }
 
+    /**
+     * Populate a payload <span> with linkified content.
+     * Handles two link types (in priority order):
+     *   1. APRS coordinates → Google Maps link (sm-aprs-map-link)
+     *   2. http:// / https:// URLs → plain <a> link (sm-url-link)
+     *
+     * The algorithm: build a list of {start, end, node} replacements, sort by
+     * position, then interleave text nodes and link elements.
+     */
+    _linkifyPayload(container, text, aprsPos) {
+        // Collect all link spans: { start, end, makeEl }
+        const spans = [];
+
+        // 1. APRS coordinate span
+        if (aprsPos) {
+            const coordStr = `${aprsPos.latStr}/${aprsPos.lonStr}`;
+            const idx = text.indexOf(coordStr);
+            if (idx >= 0) {
+                const mapsUrl = `https://www.google.com/maps?q=${aprsPos.lat},${aprsPos.lon}`;
+                spans.push({
+                    start: idx,
+                    end:   idx + coordStr.length,
+                    makeEl() {
+                        const a = document.createElement('a');
+                        a.href      = mapsUrl;
+                        a.target    = '_blank';
+                        a.rel       = 'noopener noreferrer';
+                        a.className = 'sm-aprs-map-link';
+                        a.textContent = coordStr;
+                        return a;
+                    },
+                });
+            }
+        }
+
+        // 2. URL spans — find all http(s):// occurrences
+        const urlRe = /https?:\/\/[^\s<>"')\]]+/g;
+        let m;
+        while ((m = urlRe.exec(text)) !== null) {
+            const url = m[0];
+            const start = m.index;
+            const end   = start + url.length;
+            // Skip if already covered by an APRS span
+            if (spans.some(s => start >= s.start && end <= s.end)) continue;
+            spans.push({
+                start,
+                end,
+                makeEl() {
+                    const a = document.createElement('a');
+                    a.href      = url;
+                    a.target    = '_blank';
+                    a.rel       = 'noopener noreferrer';
+                    a.className = 'sm-url-link';
+                    a.textContent = url;
+                    return a;
+                },
+            });
+        }
+
+        if (spans.length === 0) {
+            container.textContent = text;
+            return;
+        }
+
+        // Sort by start position
+        spans.sort((a, b) => a.start - b.start);
+
+        // Build DOM: interleave text nodes and link elements
+        let pos = 0;
+        spans.forEach(span => {
+            if (span.start > pos) {
+                container.appendChild(document.createTextNode(text.slice(pos, span.start)));
+            }
+            container.appendChild(span.makeEl());
+            pos = span.end;
+        });
+        if (pos < text.length) {
+            container.appendChild(document.createTextNode(text.slice(pos)));
+        }
+    }
+
     // ── APRS Station Map ──────────────────────────────────────────────────────
 
     _toggleMap() {
@@ -1614,29 +1695,8 @@ class SoundModemExtension extends DecoderExtension {
         // Native tooltip shows full text on hover (bypasses CSS ellipsis truncation)
         payloadEl.title = payloadText;
 
-        if (aprsPos) {
-            // Split payload into pre-coords, coords, post-coords and linkify the coords
-            const mapsUrl = `https://www.google.com/maps?q=${aprsPos.lat},${aprsPos.lon}`;
-            const coordStr = `${aprsPos.latStr}/${aprsPos.lonStr}`;
-            const idx = payloadText.indexOf(coordStr);
-            if (idx >= 0) {
-                const pre  = payloadText.slice(0, idx);
-                const post = payloadText.slice(idx + coordStr.length);
-                if (pre)  payloadEl.appendChild(document.createTextNode(pre));
-                const link = document.createElement('a');
-                link.href      = mapsUrl;
-                link.target    = '_blank';
-                link.rel       = 'noopener noreferrer';
-                link.className = 'sm-aprs-map-link';
-                link.textContent = coordStr;
-                payloadEl.appendChild(link);
-                if (post) payloadEl.appendChild(document.createTextNode(post));
-            } else {
-                payloadEl.textContent = payloadText;
-            }
-        } else {
-            payloadEl.textContent = payloadText;
-        }
+        // Build payload with clickable links: APRS coords → Google Maps, URLs → href
+        this._linkifyPayload(payloadEl, payloadText, aprsPos);
         row.appendChild(payloadEl);
 
         const list = document.getElementById('sm-frame-list');

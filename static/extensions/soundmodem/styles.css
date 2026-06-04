@@ -840,6 +840,19 @@
     text-decoration-style: solid;
 }
 
+/* URL links in frame payload */
+.sm-url-link {
+    color: #80cbc4;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    cursor: pointer;
+}
+
+.sm-url-link:hover {
+    color: #b2dfdb;
+    text-decoration-style: solid;
+}
+
 /* Payload colour by frame type (applied to the payload span) */
 .sm-frame-aprs   .sm-frame-payload { color: #a5d6a7; }
 .sm-frame-ui     .sm-frame-payload { color: #90caf9; }

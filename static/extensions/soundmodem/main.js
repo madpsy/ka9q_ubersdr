@@ -975,14 +975,12 @@ class SoundModemExtension extends DecoderExtension {
             // Audio frequency at cursor
             const audioHz = Math.round((mx / w) * maxFreq);
 
-            // RF frequency = dial frequency + audio offset
-            // radio.getFrequency() returns Hz; USB convention: RF = dial + audio
+            // RF frequency = dial frequency + audio offset (USB convention)
             let rfLabel = '';
             try {
-                const dialHz = (typeof radio !== 'undefined') ? radio.getFrequency() : null;
+                const dialHz = this.radio ? this.radio.getFrequency() : null;
                 if (dialHz && dialHz > 0) {
                     const rfHz = dialHz + audioHz;
-                    // Format RF frequency nicely
                     if (rfHz >= 1e6) {
                         rfLabel = ` | ${(rfHz / 1e6).toFixed(4)} MHz`;
                     } else {

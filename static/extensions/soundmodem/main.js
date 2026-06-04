@@ -77,8 +77,8 @@ class SoundModemExtension extends DecoderExtension {
         this._logMax   = 500;
         this._logOpen  = false;
 
-        // Settings panel — shown by default when stopped
-        this._settingsOpen = true;
+        // Settings panel — hidden by default; first click opens it
+        this._settingsOpen = false;
 
         // DCD state per channel + auto-clear timers
         this._dcdState  = [false, false, false, false];
@@ -564,7 +564,13 @@ class SoundModemExtension extends DecoderExtension {
         const btn = document.getElementById('sm-start-btn');
         if (btn) this._setStartBtnRunning(btn);
 
-        // Hide config panel (but keep _settingsOpen state so toggle still works)
+        // Hide config panel and reset _settingsOpen so the toggle is in sync
+        this._settingsOpen = false;
+        const settingsBtn = document.getElementById('sm-settings-toggle');
+        if (settingsBtn) {
+            settingsBtn.classList.remove('active');
+            settingsBtn.textContent = 'Settings';
+        }
         this._setConfigVisible(false);
         this._startWaterfall();
     }

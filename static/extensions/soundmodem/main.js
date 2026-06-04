@@ -113,6 +113,16 @@ class SoundModemExtension extends DecoderExtension {
             `;
             document.head.appendChild(style);
         }
+        // Set a taller default panel height if the user hasn't resized it yet.
+        // The resize system stores the height in localStorage under 'extension-panel-height'.
+        try {
+            if (!localStorage.getItem('extension-panel-height')) {
+                localStorage.setItem('extension-panel-height', '650');
+                // Also apply it immediately to the panel content element if present
+                const panelContent = document.getElementById('extension-panel-content');
+                if (panelContent) panelContent.style.maxHeight = '650px';
+            }
+        } catch (_) { /* localStorage not available */ }
     }
 
     _waitForDOM(cb, attempts = 0) {

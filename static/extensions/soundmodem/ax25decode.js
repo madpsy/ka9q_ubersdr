@@ -33,9 +33,10 @@
  */
 
 /* exported AX25Decode */
-/* global AX25Decode */
 
-const AX25Decode = (() => { // eslint-disable-line no-unused-vars
+// Use window assignment so the global is accessible across script tags
+// regardless of strict-mode or browser script scoping quirks.
+window.AX25Decode = (() => {
 
     // ── AX.25 / NET/ROM constants ─────────────────────────────────────────────
 

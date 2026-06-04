@@ -617,6 +617,24 @@
 .sm-log-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 
 /* ── Frame search bar ────────────────────────────────────────────────────── */
+.sm-callsign-filter-select {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    padding: 3px 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    max-width: 160px;
+}
+
+.sm-callsign-filter-select:focus {
+    outline: none;
+    border-color: #4a9eff;
+}
+
 .sm-search-bar {
     display: flex;
     align-items: center;

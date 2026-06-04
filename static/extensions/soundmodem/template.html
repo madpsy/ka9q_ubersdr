@@ -381,9 +381,12 @@
 
     <!-- ── Frame search bar ──────────────────────────────────────────────── -->
     <div class="sm-search-bar">
+        <select id="sm-callsign-filter-select" class="sm-callsign-filter-select" title="Filter by callsign">
+            <option value="">All callsigns</option>
+        </select>
         <span class="sm-search-icon">🔍</span>
         <input type="text" id="sm-search-input" class="sm-search-input"
-               placeholder="Filter by callsign or content…" autocomplete="off" spellcheck="false">
+               placeholder="Filter by content…" autocomplete="off" spellcheck="false">
         <button class="sm-search-clear" id="sm-search-clear" title="Clear filter">✕</button>
     </div>
 

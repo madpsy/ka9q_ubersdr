@@ -50,7 +50,9 @@ class SoundModemExtension extends DecoderExtension {
         this._origHandler = null;
         this._ourHandler  = null;
         this._handlersSet = false;
-        this.searchText   = '';   // real-time text search filter
+        this.searchText      = '';        // real-time text search filter
+        this._seenCallsigns  = new Set(); // all callsigns ever seen (from/to/digi)
+        this._callsignFilter = '';        // selected callsign from dropdown ('' = all)
 
         // Waterfall — draws FFT data from the page's existing AnalyserNode via radio.getAnalyser()
         this._wfCtx          = null;   // 2D context for scrolling waterfall canvas
@@ -295,6 +297,17 @@ class SoundModemExtension extends DecoderExtension {
         const logToggle = document.getElementById('sm-log-toggle');
         if (logToggle) logToggle.addEventListener('click', () => this._toggleLogPanel());
 
+        // Callsign dropdown filter
+        const callsignSel = document.getElementById('sm-callsign-filter-select');
+        if (callsignSel) {
+            this._updateCallsignDropdown(); // populate with any already-seen callsigns
+            callsignSel.value = this._callsignFilter;
+            callsignSel.addEventListener('change', (e) => {
+                this._callsignFilter = e.target.value;
+                this._applyFilters();
+            });
+        }
+
         // Real-time text search
         const searchInput = document.getElementById('sm-search-input');
         if (searchInput) {
@@ -307,8 +320,11 @@ class SoundModemExtension extends DecoderExtension {
         const searchClear = document.getElementById('sm-search-clear');
         if (searchClear) searchClear.addEventListener('click', () => {
             this.searchText = '';
+            this._callsignFilter = '';
             const inp = document.getElementById('sm-search-input');
             if (inp) inp.value = '';
+            const sel = document.getElementById('sm-callsign-filter-select');
+            if (sel) sel.value = '';
             this._applyFilters();
         });
 
@@ -731,6 +747,10 @@ class SoundModemExtension extends DecoderExtension {
         const btn   = document.getElementById('sm-monitor-toggle');
         if (panel) panel.style.display = this._monitorOpen ? 'flex' : 'none';
         if (btn)   btn.textContent = this._monitorOpen ? 'Hide Monitor' : 'Monitor';
+        // Scroll to bottom when opening so the latest messages are visible
+        if (this._monitorOpen && panel) {
+            requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+        }
     }
 
     // ── Process log panel ─────────────────────────────────────────────────────
@@ -741,6 +761,10 @@ class SoundModemExtension extends DecoderExtension {
         const btn   = document.getElementById('sm-log-toggle');
         if (panel) panel.style.display = this._logOpen ? 'flex' : 'none';
         if (btn)   btn.textContent = this._logOpen ? 'Hide Log' : 'Log';
+        // Scroll to bottom when opening so the latest log lines are visible
+        if (this._logOpen && panel) {
+            requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+        }
     }
 
     _appendLogLine(text) {
@@ -1427,6 +1451,25 @@ class SoundModemExtension extends DecoderExtension {
         this._updateAgoDisplay();
         if (!this._agoTimer) this._startAgoTimer();
 
+        // Track all callsigns seen (from, to, digipeaters — strip * suffix)
+        const stripStar = c => c.replace(/\*$/, '');
+        const prevSize = this._seenCallsigns.size;
+        this._seenCallsigns.add(stripStar(parsed.from));
+        if (parsed.to) this._seenCallsigns.add(stripStar(parsed.to));
+        if (parsed.digipeaters) {
+            parsed.digipeaters.forEach(d => {
+                const bare = stripStar(d);
+                // Skip generic aliases like WIDE1-1, WIDE2-2, RELAY, TRACE etc.
+                if (!/^(WIDE|RELAY|TRACE|GATE|TCPIP|NOGATE|RFONLY)/i.test(bare)) {
+                    this._seenCallsigns.add(bare);
+                }
+            });
+        }
+        // Only rebuild dropdown if new callsigns were added
+        if (this._seenCallsigns.size !== prevSize) {
+            this._updateCallsignDropdown();
+        }
+
         const digiStr = parsed.digipeaters && parsed.digipeaters.length > 0
             ? ' via ' + parsed.digipeaters.join(',') : '';
         const pathStr = `${parsed.from}→${parsed.to}${digiStr}`;
@@ -1623,6 +1666,13 @@ class SoundModemExtension extends DecoderExtension {
                     typeOk = true; // 'all'
             }
 
+            // Callsign dropdown filter — match against full row text
+            let callsignOk = true;
+            if (this._callsignFilter) {
+                const rowText = row.textContent.toLowerCase();
+                callsignOk = rowText.includes(this._callsignFilter.toLowerCase());
+            }
+
             // Text search — match against the full text content of the row
             let searchOk = true;
             if (this.searchText) {
@@ -1630,13 +1680,29 @@ class SoundModemExtension extends DecoderExtension {
                 searchOk = rowText.includes(this.searchText);
             }
 
-            row.style.display = (chOk && typeOk && searchOk) ? '' : 'none';
+            row.style.display = (chOk && typeOk && callsignOk && searchOk) ? '' : 'none';
         });
     }
 
     _updateCountDisplay() {
         const el = document.getElementById('sm-frame-count');
         if (el) el.textContent = this.frameCount;
+    }
+
+    _updateCallsignDropdown() {
+        const sel = document.getElementById('sm-callsign-filter-select');
+        if (!sel) return;
+        const current = this._callsignFilter;
+        // Rebuild options: "All callsigns" + sorted list
+        sel.innerHTML = '<option value="">All callsigns</option>';
+        const sorted = Array.from(this._seenCallsigns).sort();
+        sorted.forEach(call => {
+            const opt = document.createElement('option');
+            opt.value = call;
+            opt.textContent = call;
+            if (call === current) opt.selected = true;
+            sel.appendChild(opt);
+        });
     }
 
     // ── Last-frame "time ago" display ─────────────────────────────────────────

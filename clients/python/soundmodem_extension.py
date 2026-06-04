@@ -249,6 +249,7 @@ class SoundModemExtension:
         self._build_ui()
         self._load_config()
         self._read_channel_freqs_from_ui()
+        self._update_kiss_overlay()   # apply saved output mode to overlay
         self._start_waterfall_loop()
         self._start_ago_loop()
 
@@ -401,16 +402,19 @@ class SoundModemExtension:
                                    values=['0 (off)', '1', '2', '4', '8'],
                                    state='readonly', width=8)
             rcvr_cb.grid(row=i + 1, column=4, padx=4)
+            rcvr_cb.bind('<<ComboboxSelected>>', lambda e: self._save_config())
 
             fx25_cb = ttk.Combobox(parent, textvariable=self._ch_fx25[i],
                                    values=['0 Off', '1 RX only', '2 RX+TX'],
                                    state='readonly', width=10)
             fx25_cb.grid(row=i + 1, column=5, padx=4)
+            fx25_cb.bind('<<ComboboxSelected>>', lambda e: self._save_config())
 
             il2p_cb = ttk.Combobox(parent, textvariable=self._ch_il2p[i],
                                    values=['0 Off', '1 IL2P', '2 IL2P+CRC', '3 Both'],
                                    state='readonly', width=12)
             il2p_cb.grid(row=i + 1, column=6, padx=4)
+            il2p_cb.bind('<<ComboboxSelected>>', lambda e: self._save_config())
 
             self._ch_param_frames.append((modem_cb, freq_e, rcvr_cb, fx25_cb, il2p_cb))
 
@@ -420,6 +424,8 @@ class SoundModemExtension:
         ttk.Label(dcd_row, text='DCD Threshold:').pack(side='left', padx=(0, 4))
         self._dcd_thresh_entry = ttk.Entry(dcd_row, textvariable=self._dcd_thresh, width=6)
         self._dcd_thresh_entry.pack(side='left')
+        self._dcd_thresh_entry.bind('<FocusOut>', lambda e: self._save_config())
+        self._dcd_thresh_entry.bind('<Return>',   lambda e: self._save_config())
         ttk.Label(dcd_row, text='(1–100)', foreground='gray').pack(side='left', padx=(4, 0))
 
         # Output mode + KISS TCP port
@@ -527,6 +533,18 @@ class SoundModemExtension:
         self._tree.tag_configure('aprs',   background='#1a2a1a')
         self._tree.tag_configure('netrom', background='#1a1a2a')
         self._tree.tag_configure('ip',     background='#2a1a1a')
+
+        # KISS mode overlay — shown instead of the frame list when output_mode='kiss'
+        self._kiss_overlay_var = tk.StringVar(value='')
+        self._kiss_overlay = tk.Label(
+            parent,
+            textvariable=self._kiss_overlay_var,
+            bg='#1a1a1a', fg='#aaaaaa',
+            font=('TkDefaultFont', 11),
+            justify='center',
+            wraplength=500,
+        )
+        # Hidden by default; shown via place() when KISS mode is active
 
     # ── Settings panel toggle ─────────────────────────────────────────────────
 
@@ -654,10 +672,31 @@ class SoundModemExtension:
 
     # ── Output mode + KISS TCP server ────────────────────────────────────────
 
+    def _update_kiss_overlay(self):
+        """Show or hide the KISS mode overlay over the frame list."""
+        if not hasattr(self, '_kiss_overlay'):
+            return
+        if self._output_mode == 'kiss':
+            port = self._kiss_port_var.get()
+            self._kiss_overlay_var.set(
+                f'📡 KISS TCP Mode\n\n'
+                f'Connect your KISS-compatible client to:\n'
+                f'0.0.0.0:{port}\n\n'
+                f'Decoded frames are not shown in this mode.'
+            )
+            # Cover the Treeview using place geometry
+            self._kiss_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self._tree.configure(selectmode='none')
+        else:
+            self._kiss_overlay.place_forget()
+            self._tree.configure(selectmode='browse')
+
     def _on_output_mode_change(self):
         """Handle output mode radio button change."""
         mode = self._output_mode_var.get()
         self._output_mode = mode
+        self._update_kiss_overlay()
+        self._save_config()
         if self.running:
             # Send set_output_mode control message to backend (no restart needed)
             self._send_set_output_mode(mode)
@@ -690,7 +729,7 @@ class SoundModemExtension:
         try:
             srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            srv.bind(('127.0.0.1', port))
+            srv.bind(('0.0.0.0', port))
             srv.listen(5)
             srv.settimeout(1.0)
             self._kiss_server_sock = srv
@@ -698,7 +737,8 @@ class SoundModemExtension:
                 target=self._kiss_accept_loop, daemon=True)
             self._kiss_server_thread.start()
             self.window.after(0, lambda p=port: self._kiss_status_var.set(
-                f'Listening on 127.0.0.1:{p}'))
+                f'Listening on 0.0.0.0:{p}'))
+            self.window.after(0, self._update_kiss_overlay)
             print(f'[SoundModem] KISS TCP server started on port {port}')
         except Exception as e:
             self.window.after(0, lambda err=e: self._kiss_status_var.set(f'Error: {err}'))
@@ -724,6 +764,11 @@ class SoundModemExtension:
             self._kiss_status_var.set('')
         except Exception:
             pass
+        # Hide the overlay when server stops
+        try:
+            self._update_kiss_overlay()
+        except Exception:
+            pass
         print('[SoundModem] KISS TCP server stopped')
 
     def _kiss_accept_loop(self):
@@ -734,16 +779,53 @@ class SoundModemExtension:
                 with self._kiss_clients_lock:
                     self._kiss_clients.append(conn)
                 print(f'[SoundModem] KISS client connected: {addr}')
-                n = len(self._kiss_clients)
-                self.window.after(0, lambda n=n: self._kiss_status_var.set(
-                    f'Listening — {n} client(s) connected'))
+                self._update_kiss_client_count()
+                # Monitor this client for disconnection in a separate thread
+                t = threading.Thread(
+                    target=self._kiss_client_monitor,
+                    args=(conn, addr),
+                    daemon=True)
+                t.start()
             except socket.timeout:
                 continue
             except Exception:
                 break
 
+    def _kiss_client_monitor(self, conn: socket.socket, addr):
+        """Background thread: detect when a KISS client disconnects."""
+        try:
+            # recv with zero bytes returns b'' on clean close, raises on error
+            while True:
+                data = conn.recv(1)
+                if not data:
+                    break  # clean disconnect
+        except Exception:
+            pass
+        # Remove from client list and update count
+        with self._kiss_clients_lock:
+            if conn in self._kiss_clients:
+                self._kiss_clients.remove(conn)
+        try:
+            conn.close()
+        except Exception:
+            pass
+        print(f'[SoundModem] KISS client disconnected: {addr}')
+        self._update_kiss_client_count()
+
+    def _update_kiss_client_count(self):
+        """Update the KISS status label with current client count (thread-safe)."""
+        with self._kiss_clients_lock:
+            n = len(self._kiss_clients)
+        port = self._kiss_port_var.get()
+        try:
+            self.window.after(0, lambda n=n, p=port: self._kiss_status_var.set(
+                f'Listening on 0.0.0.0:{p} — {n} client(s) connected'))
+        except Exception:
+            pass
+
     def _forward_kiss_frame(self, kiss_frame: bytes):
         """Forward a raw KISS frame to all connected TCP clients."""
+        had_dead = False
         with self._kiss_clients_lock:
             dead = []
             for c in list(self._kiss_clients):
@@ -757,19 +839,21 @@ class SoundModemExtension:
                     c.close()
                 except Exception:
                     pass
-            n = len(self._kiss_clients)
-        try:
-            port = self._kiss_port_var.get()
-            self.window.after(0, lambda n=n, p=port: self._kiss_status_var.set(
-                f'Listening on 127.0.0.1:{p} — {n} client(s)'))
-        except Exception:
-            pass
+            had_dead = bool(dead)
+        if had_dead:
+            self._update_kiss_client_count()
 
     # ── Config persistence ────────────────────────────────────────────────────
 
     def _save_config(self):
         try:
-            cfg = {'_v': _CONFIG_VERSION, 'channels': [], 'dcd_threshold': self._dcd_thresh.get()}
+            cfg = {
+                '_v':           _CONFIG_VERSION,
+                'channels':     [],
+                'dcd_threshold': self._dcd_thresh.get(),
+                'output_mode':  getattr(self, '_output_mode_var', None) and self._output_mode_var.get() or 'ax25',
+                'kiss_port':    self._kiss_port_var.get(),
+            }
             for i in range(4):
                 cfg['channels'].append({
                     'enabled':    self._ch_enabled[i].get(),
@@ -805,6 +889,13 @@ class SoundModemExtension:
                 self._on_ch_enabled_change(i)
             if 'dcd_threshold' in cfg:
                 self._dcd_thresh.set(str(cfg['dcd_threshold']))
+            if 'output_mode' in cfg and hasattr(self, '_output_mode_var'):
+                mode = cfg['output_mode']
+                if mode in ('ax25', 'kiss'):
+                    self._output_mode_var.set(mode)
+                    self._output_mode = mode
+            if 'kiss_port' in cfg:
+                self._kiss_port_var.set(str(cfg['kiss_port']))
         except Exception:
             pass
 
@@ -905,9 +996,10 @@ class SoundModemExtension:
         self._settings_frame.grid_remove()
         self._settings_btn.config(text='Settings ▼')
         self._set_config_inputs_enabled(False)
-        # Start KISS TCP server if in KISS mode
+        # Start KISS TCP server if in KISS mode and update overlay
         if self._output_mode == 'kiss':
             self._start_kiss_server()
+        self._update_kiss_overlay()
 
     def _stop_decoder(self):
         if not self.running:
@@ -1018,6 +1110,10 @@ class SoundModemExtension:
         if len(data) < 5 + frame_len:
             return
         kiss_frame = data[5:5 + frame_len]
+        # Count the frame (same counter as AX.25 mode)
+        self.frame_count += 1
+        self._count_var.set(str(self.frame_count))
+        self._last_frame_time = time.time()
         # Forward to all connected KISS TCP clients
         self._forward_kiss_frame(kiss_frame)
 

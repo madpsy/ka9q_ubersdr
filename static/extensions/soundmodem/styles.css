@@ -638,10 +638,10 @@
     display: flex;
     flex-direction: row;
     align-items: baseline;
-    gap: 8px;
-    padding: 3px 10px;
+    gap: 10px;
+    padding: 4px 12px;
     border-left: 3px solid transparent;
-    font-size: 13px;
+    font-size: 16px;
     line-height: 1.7;
     white-space: nowrap;
     overflow: hidden;
@@ -689,15 +689,15 @@
 
 /* Single-line row elements */
 .sm-frame-time {
-    font-size: 11px;
-    color: #555;
+    font-size: 13px;
+    color: #666;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 .sm-frame-path {
-    font-size: 13px;
-    color: #aaa;
+    font-size: 15px;
+    color: #bbb;
     white-space: nowrap;
     flex-shrink: 0;
     font-weight: bold;
@@ -706,15 +706,15 @@
 /* Frame-type tag pill */
 .sm-frame-type-tag {
     display: inline-block;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: bold;
-    padding: 1px 5px;
+    padding: 1px 6px;
     border-radius: 3px;
     white-space: nowrap;
     flex-shrink: 0;
     background: #2a2a2a;
     color: #aaa;
-    line-height: 1.5;
+    line-height: 1.6;
 }
 /* Type-specific tag colours */
 .sm-frame-type-aprs   { background: #1B5E20; color: #a5d6a7; }
@@ -737,13 +737,26 @@
 .sm-frame-type-arp    { background: #006064; color: #b3e5fc; }
 
 .sm-frame-payload {
-    font-size: 13px;
+    font-size: 15px;
     color: #e0e0e0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
     min-width: 0;
+}
+
+/* APRS position Google Maps link */
+.sm-aprs-map-link {
+    color: #4fc3f7;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    cursor: pointer;
+}
+
+.sm-aprs-map-link:hover {
+    color: #81d4fa;
+    text-decoration-style: solid;
 }
 
 /* Payload colour by frame type (applied to the payload span) */
@@ -834,4 +847,117 @@
     .sm-header { flex-direction: column; align-items: flex-start; }
     .sm-frame { font-size: 11px; gap: 4px; padding: 2px 6px; }
     .sm-dcd-row { order: -1; }
+}
+
+/* ── APRS Station Map modal ───────────────────────────────────────────────── */
+.sm-map-modal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    flex-direction: column;
+    background: #111;
+    border: 1px solid #333;
+}
+
+.sm-map-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+
+.sm-map-modal-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+}
+
+.sm-map-station-count {
+    font-size: 11px;
+    color: #888;
+    font-family: 'Courier New', monospace;
+    flex: 1;
+}
+
+.sm-map-close-btn {
+    background: none;
+    border: 1px solid #444;
+    color: #aaa;
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.sm-map-close-btn:hover {
+    background: #2a2a2a;
+    color: #fff;
+}
+
+.sm-map-container {
+    flex: 1;
+    min-height: 0;
+}
+
+/* Dark tile filter for the Leaflet map */
+.sm-map-dark .leaflet-tile {
+    filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+/* Custom APRS station marker */
+.sm-map-marker {
+    background: none;
+    border: none;
+}
+
+.sm-map-marker-dot {
+    width: 10px;
+    height: 10px;
+    background: #4fc3f7;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(79,195,247,0.8);
+}
+
+.sm-map-marker-label {
+    position: absolute;
+    top: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.75);
+    color: #4fc3f7;
+    font-size: 10px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+/* Leaflet popup dark theme */
+.sm-map-container .leaflet-popup-content-wrapper {
+    background: #1e1e1e;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.sm-map-container .leaflet-popup-tip {
+    background: #1e1e1e;
+}
+
+.sm-map-container .leaflet-popup-content {
+    margin: 8px 12px;
+    line-height: 1.5;
 }

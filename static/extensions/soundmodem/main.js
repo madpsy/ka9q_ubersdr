@@ -80,6 +80,11 @@ class SoundModemExtension extends DecoderExtension {
         // DCD state per channel + auto-clear timers
         this._dcdState  = [false, false, false, false];
         this._dcdTimers = [null,  null,  null,  null];  // setTimeout handles for auto-clear
+
+        // APRS station map: callsign → { lat, lon, comment, time, marker }
+        this._stationMap  = new Map();
+        this._leafletMap  = null;   // Leaflet map instance
+        this._mapOpen     = false;
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -273,6 +278,12 @@ class SoundModemExtension extends DecoderExtension {
 
         const logToggle = document.getElementById('sm-log-toggle');
         if (logToggle) logToggle.addEventListener('click', () => this._toggleLogPanel());
+
+        const mapToggle = document.getElementById('sm-map-toggle');
+        if (mapToggle) mapToggle.addEventListener('click', () => this._toggleMap());
+
+        const mapCloseBtn = document.getElementById('sm-map-close-btn');
+        if (mapCloseBtn) mapCloseBtn.addEventListener('click', () => this._toggleMap());
 
         const logClearBtn = document.getElementById('sm-log-clear-btn');
         if (logClearBtn) logClearBtn.addEventListener('click', () => {
@@ -848,6 +859,147 @@ class SoundModemExtension extends DecoderExtension {
         ];
     }
 
+    /**
+     * Parse an APRS position from an info field string.
+     * Handles the common uncompressed formats:
+     *   !DDMM.mmN/DDDMM.mmW[sym][comment]
+     *   =DDMM.mmN/DDDMM.mmW[sym][comment]
+     *   @DDHHmmz/DDDMM.mmW... (time-stamped, less common)
+     *
+     * Returns { lat, lon, latStr, lonStr } in decimal degrees, or null.
+     */
+    static _parseAPRSPosition(info) {
+        if (!info) return null;
+
+        // Match uncompressed APRS position: DDMM.mmN/DDDMM.mmW (or E/S)
+        // The position can appear after a leading type char (!, =, @, /, etc.)
+        const re = /(\d{2})(\d{2}\.\d+)([NS])[\/\\](\d{3})(\d{2}\.\d+)([EW])/;
+        const m = info.match(re);
+        if (!m) return null;
+
+        const latDeg  = parseInt(m[1], 10);
+        const latMin  = parseFloat(m[2]);
+        const latHemi = m[3];
+        const lonDeg  = parseInt(m[4], 10);
+        const lonMin  = parseFloat(m[5]);
+        const lonHemi = m[6];
+
+        let lat = latDeg + latMin / 60;
+        let lon = lonDeg + lonMin / 60;
+        if (latHemi === 'S') lat = -lat;
+        if (lonHemi === 'W') lon = -lon;
+
+        // Reconstruct the exact string as it appears in the info field
+        const latStr = `${m[1]}${m[2]}${m[3]}`;
+        const lonStr = `${m[4]}${m[5]}${m[6]}`;
+
+        return { lat: lat.toFixed(6), lon: lon.toFixed(6), latStr, lonStr };
+    }
+
+    // ── APRS Station Map ──────────────────────────────────────────────────────
+
+    _toggleMap() {
+        this._mapOpen = !this._mapOpen;
+        const modal = document.getElementById('sm-map-modal');
+        const btn   = document.getElementById('sm-map-toggle');
+        if (!modal) return;
+        if (this._mapOpen) {
+            modal.style.display = 'flex';
+            if (btn) btn.textContent = 'Hide Map';
+            this._initLeafletMap();
+            this._updateAllMapMarkers();
+            this._updateMapStationCount();
+        } else {
+            modal.style.display = 'none';
+            if (btn) btn.textContent = 'Map';
+        }
+    }
+
+    _initLeafletMap() {
+        if (this._leafletMap) {
+            // Already initialised — just invalidate size in case modal was hidden
+            this._leafletMap.invalidateSize();
+            return;
+        }
+        if (typeof L === 'undefined') {
+            // Leaflet not loaded — inject it
+            const link = document.createElement('link');
+            link.rel  = 'stylesheet';
+            link.href = '/leaflet.css';
+            document.head.appendChild(link);
+            const script = document.createElement('script');
+            script.src = '/leaflet.js';
+            script.onload = () => {
+                this._initLeafletMap();
+                this._updateAllMapMarkers();
+            };
+            document.head.appendChild(script);
+            return;
+        }
+        const container = document.getElementById('sm-map-container');
+        if (!container) return;
+
+        this._leafletMap = L.map(container, { zoomControl: true });
+
+        // Dark-styled tile layer (OpenStreetMap)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18,
+        }).addTo(this._leafletMap);
+
+        // Apply dark filter via CSS class
+        container.classList.add('sm-map-dark');
+    }
+
+    _makeMarkerIcon(callsign) {
+        // Custom DivIcon with callsign label
+        return L.divIcon({
+            className: 'sm-map-marker',
+            html: `<div class="sm-map-marker-dot"></div><div class="sm-map-marker-label">${callsign}</div>`,
+            iconAnchor: [0, 8],
+            popupAnchor: [0, -12],
+        });
+    }
+
+    _updateMapMarker(callsign, entry) {
+        if (!this._leafletMap) return;
+        const timeStr = entry.time.toTimeString().slice(0, 8);
+        const popupHtml = `<b>${callsign}</b><br>${entry.comment}<br><small>Last seen: ${timeStr}</small>`;
+
+        if (entry.marker) {
+            entry.marker.setLatLng([entry.lat, entry.lon]);
+            entry.marker.setPopupContent(popupHtml);
+        } else {
+            entry.marker = L.marker([entry.lat, entry.lon], { icon: this._makeMarkerIcon(callsign) })
+                .addTo(this._leafletMap)
+                .bindPopup(popupHtml);
+            this._stationMap.set(callsign, entry);
+        }
+    }
+
+    _updateAllMapMarkers() {
+        if (!this._leafletMap) return;
+        const bounds = [];
+        this._stationMap.forEach((entry, callsign) => {
+            this._updateMapMarker(callsign, entry);
+            bounds.push([entry.lat, entry.lon]);
+        });
+        if (bounds.length > 0) {
+            this._leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+        } else {
+            this._leafletMap.setView([51.5, -0.1], 5); // Default: UK
+        }
+        this._leafletMap.invalidateSize();
+    }
+
+    _updateMapStationCount() {
+        const el = document.getElementById('sm-map-station-count');
+        if (el) {
+            const n = this._stationMap.size;
+            el.textContent = `${n} station${n !== 1 ? 's' : ''}`;
+        }
+    }
+
     _drawWaterfallHeader() {
         const ctx = this._wfHdrCtx;
         if (!ctx) return;
@@ -1245,12 +1397,58 @@ class SoundModemExtension extends DecoderExtension {
         row.appendChild(typeTag);
 
         // Payload / decoded info
-        const payloadEl = document.createElement('span');
-        payloadEl.className = 'sm-frame-payload';
         // For NET/ROM INFO frames append the raw data after the summary
         let payloadText = parsed.info;
         if (parsed.netrom && parsed.netrom.raw) payloadText += ' ' + parsed.netrom.raw;
-        payloadEl.textContent = payloadText;
+
+        // Try to extract APRS position and make it a Google Maps link
+        const aprsPos = parsed.isAPRS ? SoundModemExtension._parseAPRSPosition(payloadText) : null;
+
+        // Store position in station map (even when map is closed)
+        if (aprsPos) {
+            const callsign = parsed.from;
+            const existing = this._stationMap.get(callsign);
+            const entry = {
+                lat:     parseFloat(aprsPos.lat),
+                lon:     parseFloat(aprsPos.lon),
+                comment: payloadText,
+                time:    new Date(),
+                marker:  existing ? existing.marker : null,
+            };
+            this._stationMap.set(callsign, entry);
+            // Update marker if map is open
+            if (this._mapOpen && this._leafletMap) {
+                this._updateMapMarker(callsign, entry);
+                this._updateMapStationCount();
+            }
+        }
+
+        const payloadEl = document.createElement('span');
+        payloadEl.className = 'sm-frame-payload';
+
+        if (aprsPos) {
+            // Split payload into pre-coords, coords, post-coords and linkify the coords
+            const mapsUrl = `https://www.google.com/maps?q=${aprsPos.lat},${aprsPos.lon}`;
+            const coordStr = `${aprsPos.latStr}/${aprsPos.lonStr}`;
+            const idx = payloadText.indexOf(coordStr);
+            if (idx >= 0) {
+                const pre  = payloadText.slice(0, idx);
+                const post = payloadText.slice(idx + coordStr.length);
+                if (pre)  payloadEl.appendChild(document.createTextNode(pre));
+                const link = document.createElement('a');
+                link.href      = mapsUrl;
+                link.target    = '_blank';
+                link.rel       = 'noopener noreferrer';
+                link.className = 'sm-aprs-map-link';
+                link.textContent = coordStr;
+                payloadEl.appendChild(link);
+                if (post) payloadEl.appendChild(document.createTextNode(post));
+            } else {
+                payloadEl.textContent = payloadText;
+            }
+        } else {
+            payloadEl.textContent = payloadText;
+        }
         row.appendChild(payloadEl);
 
         const list = document.getElementById('sm-frame-list');

@@ -64,6 +64,7 @@
             <button id="sm-settings-toggle" class="sm-btn sm-btn-secondary">Settings</button>
             <button id="sm-monitor-toggle" class="sm-btn sm-btn-secondary">Monitor</button>
             <button id="sm-log-toggle"     class="sm-btn sm-btn-secondary">Log</button>
+            <button id="sm-map-toggle"     class="sm-btn sm-btn-secondary">Map</button>
             <button id="sm-clear-btn"   class="sm-btn sm-btn-secondary">Clear</button>
             <button id="sm-copy-btn"    class="sm-btn sm-btn-secondary">Copy</button>
             <button id="sm-start-btn"   class="sm-btn sm-btn-primary sm-start-ready">Start</button>
@@ -387,6 +388,16 @@
     <!-- ── Status bar ─────────────────────────────────────────────────────── -->
     <div class="sm-status-bar">
         <span class="sm-status-text" id="sm-status-text">Ready — press Start to begin decoding</span>
+    </div>
+
+    <!-- ── APRS Station Map modal ────────────────────────────────────────── -->
+    <div class="sm-map-modal" id="sm-map-modal" style="display:none;">
+        <div class="sm-map-modal-header">
+            <span class="sm-map-modal-title">📡 APRS Station Map</span>
+            <span class="sm-map-station-count" id="sm-map-station-count">0 stations</span>
+            <button class="sm-map-close-btn" id="sm-map-close-btn">✕</button>
+        </div>
+        <div class="sm-map-container" id="sm-map-container"></div>
     </div>
 
 </div>

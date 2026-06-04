@@ -433,8 +433,16 @@ func NewSoundModemExtension(audioParams AudioExtensionParams, extensionParams ma
 }
 
 // Start begins processing audio.
+// If Start() fails, it calls Stop() internally to release the port slot and user count,
+// since the audio extension manager does not call Stop() when Start() returns an error.
 func (e *SoundModemExtension) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
-	return e.decoder.Start(audioChan, resultChan)
+	if err := e.decoder.Start(audioChan, resultChan); err != nil {
+		// Decoder failed to start — clean up port slot, user count, and temp dir.
+		// We call Stop() directly rather than duplicating the cleanup logic.
+		_ = e.Stop()
+		return err
+	}
+	return nil
 }
 
 // Stop stops the extension and cleans up resources.

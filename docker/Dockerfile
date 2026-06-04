@@ -42,10 +42,16 @@ RUN apt-get update && apt-get install -y \
     libsamplerate0 \
     libopus0 \
     libopusfile0 \
-    libqt5core5a \
-    libqt6core6 \
-    libqt6network6 \
-    libcurl4 \
+    libqt5core5t64 \
+    libqt5gui5t64 \
+    libqt5widgets5t64 \
+    libqt5network5t64 \
+    libqt5multimedia5 \
+    libqt5serialport5 \
+    libqt6core6t64 \
+    libqt6network6t64 \
+    libasound2t64 \
+    libcurl4t64 \
     libfftw3-single3 \
     libfftw3-bin \
     libgfortran5 \

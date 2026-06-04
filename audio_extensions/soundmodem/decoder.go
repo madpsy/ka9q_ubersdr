@@ -324,7 +324,9 @@ func (d *SoundModemDecoder) Start(audioChan <-chan AudioSample, resultChan chan<
 	// Launch QtSoundModem in nogui mode with the temp dir as CWD.
 	cmd := exec.Command(binaryPath, "nogui")
 	cmd.Dir = tempDir
-	cmd.Stderr = io.Discard // suppress Qt/debug output
+	// Log stderr to help diagnose startup failures (KISS port not opening, etc.)
+	// In production this can be changed to io.Discard once stable.
+	cmd.Stderr = os.Stderr
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

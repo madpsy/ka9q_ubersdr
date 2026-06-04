@@ -32,7 +32,7 @@ extensions:
   # WEFAX Decoder - Weather Fax decoder for receiving weather charts and satellite images
   - wefax
 
-  # Sound Modem - Packet Modem for AFSK/BFSK with IL2P Support
+  # Sound Modem - Packet Decoder for AFSK/BFSK with IL2P Support
   - soundmodem
 
 # Default extension to load automatically (optional)

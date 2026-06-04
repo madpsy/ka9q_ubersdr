@@ -37,6 +37,7 @@ class SoundModemExtension extends DecoderExtension {
         // Waterfall — draws FFT data from the page's existing AnalyserNode via radio.getAnalyser()
         this._wfCtx          = null;   // 2D context for scrolling waterfall canvas
         this._wfHdrCtx       = null;   // 2D context for frequency scale header canvas
+        this._wfOvlCtx       = null;   // 2D context for channel-line overlay canvas
         this._wfFftBuf       = null;   // Uint8Array for getByteFrequencyData()
         this._wfRunning      = false;
         this._wfSampleRate   = 48000;  // updated from analyser.context.sampleRate on first audio frame
@@ -125,7 +126,20 @@ class SoundModemExtension extends DecoderExtension {
 
         for (let i = 0; i < 4; i++) {
             const cb = document.getElementById(`sm-ch${i}-enabled`);
-            if (cb) cb.addEventListener('change', () => this._updateChannelState(i));
+            if (cb) cb.addEventListener('change', () => {
+                this._updateChannelState(i);
+                // Redraw waterfall header so enabled-channel bars update immediately
+                if (!this.running) {
+                    this._readChannelFreqsFromUI();
+                    this._drawWaterfallHeader();
+                }
+            });
+
+            // Redraw header when freq or modem changes (live preview)
+            const freqIn  = document.getElementById(`sm-ch${i}-freq`);
+            const modemSel = document.getElementById(`sm-ch${i}-modem`);
+            if (freqIn)   freqIn.addEventListener('change',  () => { if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
+            if (modemSel) modemSel.addEventListener('change', () => { if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
         }
 
         // Clamp numeric inputs to their min/max when the field is committed
@@ -161,7 +175,9 @@ class SoundModemExtension extends DecoderExtension {
         const monBtn = document.getElementById('sm-monitor-toggle');
         if (monBtn) monBtn.textContent = this._monitorOpen ? 'Hide Monitor' : 'Monitor';
 
-        // Init waterfall canvases
+        // Init waterfall canvases — read current UI state first so header shows
+        // channel markers even before the decoder is started
+        this._readChannelFreqsFromUI();
         this._initWaterfallCanvases();
         if (this.running) this._startWaterfall();
     }
@@ -189,6 +205,22 @@ class SoundModemExtension extends DecoderExtension {
     }
 
     // ── Collect params ────────────────────────────────────────────────────────
+
+    // Read just the freq/modem/enabled fields from the DOM into _wfChannelFreqs
+    // so the waterfall header can show channel markers before the decoder starts.
+    _readChannelFreqsFromUI() {
+        this._wfChannelFreqs = [];
+        for (let i = 0; i < 4; i++) {
+            const enabled = document.getElementById(`sm-ch${i}-enabled`)?.checked ?? false;
+            const modem   = parseInt(document.getElementById(`sm-ch${i}-modem`)?.value ?? '1', 10);
+            const freq    = parseFloat(document.getElementById(`sm-ch${i}-freq`)?.value ?? '1700');
+            this._wfChannelFreqs.push({
+                enabled,
+                modem: isNaN(modem) ? 1    : modem,
+                freq:  isNaN(freq)  ? 1700 : freq,
+            });
+        }
+    }
 
     _collectParams() {
         const channels = [];
@@ -453,9 +485,10 @@ class SoundModemExtension extends DecoderExtension {
     _initWaterfallCanvases() {
         const wfCanvas  = document.getElementById('sm-wf-canvas');
         const hdrCanvas = document.getElementById('sm-wf-header');
+        const ovlCanvas = document.getElementById('sm-wf-overlay');
         if (!wfCanvas || !hdrCanvas) return;
 
-        const container = wfCanvas.parentElement;
+        const container = wfCanvas.parentElement;  // .sm-wf-body
         const w = Math.max((container ? container.getBoundingClientRect().width : 0) || 400, 200);
         const h = 120;
 
@@ -470,7 +503,14 @@ class SoundModemExtension extends DecoderExtension {
         this._wfCtx.fillStyle = '#000';
         this._wfCtx.fillRect(0, 0, w, h);
 
+        if (ovlCanvas) {
+            ovlCanvas.width  = w;
+            ovlCanvas.height = h;
+            this._wfOvlCtx = ovlCanvas.getContext('2d');
+        }
+
         this._drawWaterfallHeader();
+        this._drawWaterfallOverlay();
     }
 
     // rx_shift (BPF bandwidth) per modem index, from sm_main.c
@@ -507,8 +547,8 @@ class SoundModemExtension extends DecoderExtension {
         ctx.fillRect(0, 0, w, h);
 
         // Major ticks every 500 Hz
-        ctx.strokeStyle = '#555';
-        ctx.fillStyle   = '#888';
+        ctx.strokeStyle = '#ccc';
+        ctx.fillStyle   = '#fff';
         ctx.font        = '9px monospace';
         ctx.textAlign   = 'center';
         ctx.lineWidth   = 1;
@@ -525,7 +565,7 @@ class SoundModemExtension extends DecoderExtension {
         }
 
         // Minor ticks every 100 Hz
-        ctx.strokeStyle = '#333';
+        ctx.strokeStyle = '#666';
         for (let f = 100; f < maxFreq; f += 100) {
             if (f % 500 === 0) continue;
             const x = Math.round((f / maxFreq) * w);
@@ -591,6 +631,56 @@ class SoundModemExtension extends DecoderExtension {
             ctx.fillText(chNames[i], xCtr + (xCtr > w - 20 ? -3 : 3), 9);
         });
         ctx.textAlign = 'center';
+
+        // Keep the waterfall overlay in sync
+        this._drawWaterfallOverlay();
+    }
+
+    // Draw semi-transparent channel centre lines over the scrolling waterfall canvas.
+    // Uses a separate overlay canvas so the FFT scroll doesn't erase them.
+    _drawWaterfallOverlay() {
+        const ctx = this._wfOvlCtx;
+        if (!ctx) return;
+        const w = ctx.canvas.width;
+        const h = ctx.canvas.height;
+        const maxFreq  = this._wfMaxFreq;
+        const rxShifts = SoundModemExtension.RX_SHIFT;
+        const chColors = ['#1565C0', '#2E7D32', '#6A1B9A', '#E65100'];
+
+        ctx.clearRect(0, 0, w, h);
+
+        this._wfChannelFreqs.forEach((ch, i) => {
+            if (!ch.enabled || ch.freq <= 0) return;
+
+            const shift = (rxShifts[ch.modem] ?? 1000) / 2;
+            const xCtr  = Math.round((ch.freq          / maxFreq) * w);
+            const xLo   = Math.round(((ch.freq - shift) / maxFreq) * w);
+            const xHi   = Math.round(((ch.freq + shift) / maxFreq) * w);
+            const color = chColors[i];
+
+            // Semi-transparent bandwidth band
+            ctx.fillStyle = color + '18';   // ~10% opacity
+            ctx.fillRect(xLo, 0, xHi - xLo, h);
+
+            // Centre line — dashed, semi-transparent
+            ctx.save();
+            ctx.strokeStyle = color + 'aa'; // ~67% opacity
+            ctx.lineWidth   = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(xCtr, 0);
+            ctx.lineTo(xCtr, h);
+            ctx.stroke();
+            ctx.restore();
+
+            // Edge lines — faint solid
+            ctx.strokeStyle = color + '55'; // ~33% opacity
+            ctx.lineWidth   = 1;
+            ctx.beginPath();
+            ctx.moveTo(xLo, 0); ctx.lineTo(xLo, h);
+            ctx.moveTo(xHi, 0); ctx.lineTo(xHi, h);
+            ctx.stroke();
+        });
     }
 
     _startWaterfall() {

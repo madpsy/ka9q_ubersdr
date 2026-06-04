@@ -48,8 +48,11 @@
     <div class="sm-waterfall-wrap">
         <!-- Frequency scale header -->
         <canvas id="sm-wf-header" class="sm-wf-header"></canvas>
-        <!-- Scrolling FFT waterfall -->
-        <canvas id="sm-wf-canvas" class="sm-wf-canvas"></canvas>
+        <!-- Scrolling FFT waterfall + overlay for channel lines -->
+        <div class="sm-wf-body">
+            <canvas id="sm-wf-canvas"   class="sm-wf-canvas"></canvas>
+            <canvas id="sm-wf-overlay"  class="sm-wf-overlay"></canvas>
+        </div>
     </div>
 
     <!-- ── Config panel (shown when stopped) ─────────────────────────────── -->

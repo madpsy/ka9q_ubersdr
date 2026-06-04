@@ -158,13 +158,36 @@
     cursor: default;
 }
 
-.sm-wf-canvas {
-    display: block;
+/* Wrapper that stacks the waterfall canvas and overlay on top of each other */
+.sm-wf-body {
+    position: relative;
     width: 100%;
     height: 120px;
+    flex-shrink: 0;
+}
+
+.sm-wf-canvas {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     background: #000;
     cursor: default;
     image-rendering: pixelated;
+}
+
+/* Overlay canvas — sits on top of the waterfall, pointer-events: none so it
+   doesn't block mouse interaction with the waterfall beneath */
+.sm-wf-overlay {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
 }
 
 /* ── Channel badge ───────────────────────────────────────────────────────── */

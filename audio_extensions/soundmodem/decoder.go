@@ -28,7 +28,8 @@ package soundmodem
  *   datakind 'I' = connected I-frame monitor text
  *   datakind 'S' = supervisory frame monitor text
  *   datakind 'T' = own transmitted frame monitor text
- *   datakind 'd' = DCD state (data[0] = 0 or 1)
+ *   Note: 'd' (lowercase) is a client→server disconnect command, not DCD.
+ *         DCD is only a Qt GUI signal and is never sent over AGW.
  *
  * Wire protocol sent to resultChan (backend → frontend):
  *   0x20  AX.25 packet
@@ -37,13 +38,16 @@ package soundmodem
  *         [type:1=0x21][msg_len:4 uint32 BE][msg: UTF-8]
  *   0x22  Raw KISS frame (output_mode="kiss")
  *         [type:1=0x22][frame_len:4 uint32 BE][kiss_frame: N bytes]
- *   0x23  DCD state change
+ *   0x23  DCD activity pulse (derived from monitor frame arrival)
  *         [type:1=0x23][channel:1][dcd_on:1]
  *   0x24  Monitor text (decoded frame as human-readable string)
  *         [type:1=0x24][channel:1][is_tx:1][text_len:4 uint32 BE][text: UTF-8]
+ *   0x25  Process log line (stderr from QtSoundModem subprocess)
+ *         [type:1=0x25][line_len:4 uint32 BE][line: UTF-8]
  */
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -87,11 +91,13 @@ const (
 
 // AGW PE datakind constants (the frame type byte at offset 4 in the header).
 const (
-	agwKindMonitorUI  = 'U' // unproto / UI frame monitor text
-	agwKindMonitorI   = 'I' // connected I-frame monitor text
-	agwKindMonitorS   = 'S' // supervisory frame monitor text
-	agwKindMonitorT   = 'T' // own transmitted frame monitor text
-	agwKindDCD        = 'd' // DCD state change
+	agwKindMonitorUI = 'U' // unproto / UI frame monitor text
+	agwKindMonitorI  = 'I' // connected I-frame monitor text
+	agwKindMonitorS  = 'S' // supervisory frame monitor text
+	agwKindMonitorT  = 'T' // own transmitted frame monitor text
+	// Note: 'd' (lowercase) is a client→server disconnect command, NOT a DCD notification.
+	// DCD in QtSoundModem is only a Qt GUI signal — it is never sent over the AGW socket.
+	// We derive DCD from monitor frame activity instead (see agwReadLoop).
 	agwKindVersion    = 'R' // version info (sent on connect)
 	agwKindPortInfo   = 'G' // port info
 	agwKindMonitorRaw = 'K' // raw monitor frame
@@ -361,9 +367,13 @@ func (d *SoundModemDecoder) Start(audioChan <-chan AudioSample, resultChan chan<
 	// Launch QtSoundModem in nogui mode with the temp dir as CWD.
 	cmd := exec.Command(binaryPath, "nogui")
 	cmd.Dir = tempDir
-	// Log stderr to help diagnose startup failures (KISS port not opening, etc.)
-	// In production this can be changed to io.Discard once stable.
-	cmd.Stderr = os.Stderr
+	// Capture stderr via a pipe so we can forward it to the frontend as 0x25
+	// log frames instead of spamming the ubersdr process log.
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		_ = os.RemoveAll(tempDir)
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -433,10 +443,11 @@ func (d *SoundModemDecoder) Start(audioChan <-chan AudioSample, resultChan chan<
 	}
 
 	// Start goroutines.
-	d.wg.Add(3)
+	d.wg.Add(4)
 	go d.writeLoop(audioChan)
 	go d.kissReadLoop(resultChan)
 	go d.waitLoop()
+	go d.stderrReadLoop(stderrPipe, resultChan)
 
 	// Start AGW read goroutine only if we have a connection.
 	if d.agwConn != nil {
@@ -469,12 +480,13 @@ func (d *SoundModemDecoder) connectWithRetry(name string, port int, timeout, ret
 	return nil, fmt.Errorf("timed out after %s waiting for %s port %d", timeout, name, port)
 }
 
-// sendAGWMonitorEnable sends the AGW 'M' command to enable frame monitoring output.
+// sendAGWMonitorEnable sends the AGW 'm' command to enable frame monitoring output.
 // The AGW PE protocol requires this before the server will send 'U'/'I'/'S'/'T' frames.
+// Note: lowercase 'm' toggles monitoring on; uppercase 'M' is a different command (send data).
 func (d *SoundModemDecoder) sendAGWMonitorEnable(conn net.Conn) error {
 	// AGW header: 36 bytes, all zero except datakind at offset 4.
 	hdr := make([]byte, agwHeaderSize)
-	hdr[4] = 'M' // enable monitoring
+	hdr[4] = 'm' // lowercase 'm' = toggle monitor enable
 	_, err := conn.Write(hdr)
 	return err
 }
@@ -761,22 +773,18 @@ func (d *SoundModemDecoder) agwReadLoop(resultChan chan<- []byte) {
 		}
 
 		switch kind {
-		case agwKindDCD:
-			// data[0] = 0 (DCD off) or 1 (DCD on)
-			dcdOn := byte(0)
-			if len(data) > 0 && data[0] != 0 {
-				dcdOn = 1
-			}
-			pkt := encodeDCDFrame(port, dcdOn)
-			select {
-			case resultChan <- pkt:
-			default:
-				log.Printf("[SoundModem] Result channel full, dropping DCD frame")
-			}
-
 		case agwKindMonitorUI, agwKindMonitorI, agwKindMonitorS:
-			// RX monitor text — isTX = 0
+			// RX monitor text — isTX = 0.
+			// Also emit a DCD-on event so the frontend LED lights up.
+			// The frontend uses a timer to auto-clear the LED after ~500 ms.
 			if len(data) > 0 {
+				// DCD on — frontend will auto-clear after timeout
+				dcdOn := encodeDCDFrame(port, 1)
+				select {
+				case resultChan <- dcdOn:
+				default:
+				}
+				// Monitor text
 				pkt := encodeMonitorFrame(port, 0, data)
 				select {
 				case resultChan <- pkt:
@@ -786,7 +794,7 @@ func (d *SoundModemDecoder) agwReadLoop(resultChan chan<- []byte) {
 			}
 
 		case agwKindMonitorT:
-			// TX monitor text — isTX = 1 (we are RX-only but log it anyway)
+			// TX monitor text — isTX = 1
 			if len(data) > 0 {
 				pkt := encodeMonitorFrame(port, 1, data)
 				select {
@@ -801,6 +809,23 @@ func (d *SoundModemDecoder) agwReadLoop(resultChan chan<- []byte) {
 
 		default:
 			// Unknown frame kind — ignore.
+		}
+	}
+}
+
+// stderrReadLoop reads lines from the subprocess stderr pipe and forwards them
+// to resultChan as 0x25 log frames so the frontend can display them live.
+// This prevents QtSoundModem's verbose output from polluting the ubersdr log.
+func (d *SoundModemDecoder) stderrReadLoop(r io.Reader, resultChan chan<- []byte) {
+	defer d.wg.Done()
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		pkt := encodeLogFrame(line)
+		select {
+		case resultChan <- pkt:
+		default:
+			// Drop if channel full — log lines are low priority
 		}
 	}
 }
@@ -873,5 +898,17 @@ func encodeMonitorFrame(channel, isTX byte, text []byte) []byte {
 	buf[2] = isTX
 	binary.BigEndian.PutUint32(buf[3:7], uint32(len(text)))
 	copy(buf[7:], text)
+	return buf
+}
+
+// encodeLogFrame builds a 0x25 process log line envelope:
+//
+//	[type:1=0x25][line_len:4 uint32 BE][line: UTF-8]
+func encodeLogFrame(line string) []byte {
+	lineBytes := []byte(line)
+	buf := make([]byte, 5+len(lineBytes))
+	buf[0] = MsgLog
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(lineBytes)))
+	copy(buf[5:], lineBytes)
 	return buf
 }

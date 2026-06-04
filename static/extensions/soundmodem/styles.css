@@ -506,6 +506,102 @@
 .sm-monitor-panel::-webkit-scrollbar-track { background: #0d0d0d; }
 .sm-monitor-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 
+/* ── Process log panel ───────────────────────────────────────────────────── */
+.sm-log-panel {
+    flex-direction: column;
+    background: #0a0a0f;
+    border-bottom: 1px solid #2a2a2a;
+    max-height: 200px;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.sm-log-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 12px 4px;
+    background: #111118;
+    border-bottom: 1px solid #2a2a2a;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-shrink: 0;
+}
+
+.sm-log-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #ff9800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sm-log-hint {
+    font-size: 10px;
+    color: #555;
+    flex: 1;
+}
+
+.sm-log-clear-btn {
+    font-size: 9px;
+    padding: 1px 6px;
+    background: #1e1e1e;
+    color: #888;
+    border: 1px solid #333;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    line-height: 1.6;
+}
+
+.sm-log-clear-btn:hover {
+    background: #2a2a2a;
+    color: #bbb;
+    border-color: #555;
+}
+
+.sm-log-list {
+    padding: 2px 0;
+}
+
+.sm-log-line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 1px 12px;
+    font-size: 10px;
+    line-height: 1.5;
+    font-family: 'Courier New', monospace;
+    border-left: 2px solid #333;
+    color: #8bc34a;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.sm-log-line:hover {
+    background: #0f0f18;
+}
+
+.sm-log-time {
+    color: #555;
+    font-size: 9px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.sm-log-text {
+    color: #8bc34a;
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Scrollbar for log panel */
+.sm-log-panel::-webkit-scrollbar       { width: 4px; }
+.sm-log-panel::-webkit-scrollbar-track { background: #0a0a0f; }
+.sm-log-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+
 /* ── Output area ─────────────────────────────────────────────────────────── */
 .sm-output-area {
     flex: 1;

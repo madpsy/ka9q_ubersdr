@@ -66,8 +66,9 @@ const (
 	MsgPacket    = 0x20 // AX.25 packet frame (KISS headers stripped, output_mode="ax25")
 	MsgError     = 0x21 // Error message
 	MsgKISSFrame = 0x22 // Raw KISS frame with 0xC0 delimiters (output_mode="kiss")
-	MsgDCD       = 0x23 // DCD state change: [type:1][channel:1][dcd_on:1]
+	MsgDCD       = 0x23 // DCD activity pulse: [type:1][channel:1][dcd_on:1]
 	MsgMonitor   = 0x24 // Monitor text: [type:1][channel:1][is_tx:1][text_len:4 BE][text: UTF-8]
+	MsgLog       = 0x25 // Process log line (stderr from QtSoundModem): [type:1][line_len:4 BE][line: UTF-8]
 )
 
 // --- Global port pool ---

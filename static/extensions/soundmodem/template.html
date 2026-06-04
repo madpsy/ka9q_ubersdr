@@ -59,6 +59,7 @@
             </select>
             <button id="sm-settings-toggle" class="sm-btn sm-btn-secondary">Settings</button>
             <button id="sm-monitor-toggle" class="sm-btn sm-btn-secondary">Monitor</button>
+            <button id="sm-log-toggle"     class="sm-btn sm-btn-secondary">Log</button>
             <button id="sm-clear-btn"   class="sm-btn sm-btn-secondary">Clear</button>
             <button id="sm-copy-btn"    class="sm-btn sm-btn-secondary">Copy</button>
             <button id="sm-start-btn"   class="sm-btn sm-btn-primary sm-start-ready">Start</button>
@@ -360,6 +361,16 @@
             <span class="sm-monitor-hint">Raw decoded frames</span>
         </div>
         <div class="sm-monitor-list" id="sm-monitor-list"></div>
+    </div>
+
+    <!-- ── Process log panel (QtSoundModem stderr, hidden by default) ────── -->
+    <div class="sm-log-panel" id="sm-log-panel" style="display:none;">
+        <div class="sm-log-header">
+            <span class="sm-log-title">Process Log</span>
+            <span class="sm-log-hint">QtSoundModem stderr output</span>
+            <button class="sm-log-clear-btn" id="sm-log-clear-btn">Clear</button>
+        </div>
+        <div class="sm-log-list" id="sm-log-list"></div>
     </div>
 
     <!-- ── Frame output area ──────────────────────────────────────────────── -->

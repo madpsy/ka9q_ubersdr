@@ -52,11 +52,17 @@ class SoundModemExtension extends DecoderExtension {
         this._monitorMax   = 300;
         this._monitorOpen  = false;
 
+        // Process log panel (QtSoundModem stderr)
+        this._logLines = 0;
+        this._logMax   = 500;
+        this._logOpen  = false;
+
         // Settings panel — shown by default when stopped
         this._settingsOpen = true;
 
-        // DCD state per channel
-        this._dcdState = [false, false, false, false];
+        // DCD state per channel + auto-clear timers
+        this._dcdState  = [false, false, false, false];
+        this._dcdTimers = [null,  null,  null,  null];  // setTimeout handles for auto-clear
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -215,11 +221,15 @@ class SoundModemExtension extends DecoderExtension {
         if (startBtn)  startBtn.addEventListener('click',  () => this._toggleDecoder());
         if (clearBtn)  clearBtn.addEventListener('click',  () => this._clearOutput());
         if (copyBtn)   copyBtn.addEventListener('click',   () => this._copyOutput());
-        if (filterSel) filterSel.addEventListener('change', (e) => { this.filter = e.target.value; });
+        if (filterSel) filterSel.addEventListener('change', (e) => {
+            this.filter = e.target.value;
+            this._applyFilters();
+        });
 
         const chFilterSel = document.getElementById('sm-channel-filter');
         if (chFilterSel) chFilterSel.addEventListener('change', (e) => {
             this.channelFilter = e.target.value;
+            this._applyFilters();
         });
 
         // Max-frames select
@@ -233,6 +243,15 @@ class SoundModemExtension extends DecoderExtension {
 
         const monToggle = document.getElementById('sm-monitor-toggle');
         if (monToggle) monToggle.addEventListener('click', () => this._toggleMonitorPanel());
+
+        const logToggle = document.getElementById('sm-log-toggle');
+        if (logToggle) logToggle.addEventListener('click', () => this._toggleLogPanel());
+
+        const logClearBtn = document.getElementById('sm-log-clear-btn');
+        if (logClearBtn) logClearBtn.addEventListener('click', () => {
+            const list = document.getElementById('sm-log-list');
+            if (list) { list.innerHTML = ''; this._logLines = 0; }
+        });
 
         for (let i = 0; i < 4; i++) {
             const cb = document.getElementById(`sm-ch${i}-enabled`);
@@ -310,6 +329,12 @@ class SoundModemExtension extends DecoderExtension {
         if (monPanel) monPanel.style.display = this._monitorOpen ? 'flex' : 'none';
         const monBtn = document.getElementById('sm-monitor-toggle');
         if (monBtn) monBtn.textContent = this._monitorOpen ? 'Hide Monitor' : 'Monitor';
+
+        // Restore log panel visibility
+        const logPanel = document.getElementById('sm-log-panel');
+        if (logPanel) logPanel.style.display = this._logOpen ? 'flex' : 'none';
+        const logBtn = document.getElementById('sm-log-toggle');
+        if (logBtn) logBtn.textContent = this._logOpen ? 'Hide Log' : 'Log';
 
         // Init waterfall canvases — read current UI state first so header shows
         // channel markers even before the decoder is started
@@ -470,8 +495,9 @@ class SoundModemExtension extends DecoderExtension {
         // Re-show config panel (with inputs enabled) if settings was open
         this._setConfigVisible(this._settingsOpen, false);
 
-        // Clear DCD LEDs
+        // Clear DCD LEDs and cancel any pending auto-clear timers
         for (let i = 0; i < 4; i++) {
+            if (this._dcdTimers[i]) { clearTimeout(this._dcdTimers[i]); this._dcdTimers[i] = null; }
             this._dcdState[i] = false;
             this._updateDCDLed(i, false);
         }
@@ -530,6 +556,7 @@ class SoundModemExtension extends DecoderExtension {
             case 0x21: this._handleBinaryError(view, buf); break;
             case 0x23: this._handleDCD(view, buf); break;
             case 0x24: this._handleMonitor(view, buf); break;
+            case 0x25: this._handleLog(view, buf); break;
             default:
                 console.warn('[SoundModem] unknown binary type:', view.getUint8(0).toString(16));
         }
@@ -558,13 +585,32 @@ class SoundModemExtension extends DecoderExtension {
     }
 
     // 0x23 DCD state: [type:1][channel:1][dcd_on:1]
+    // DCD-on events are sent by the backend when a monitor frame arrives.
+    // We auto-clear the LED after 500 ms so it acts as a brief activity flash.
     _handleDCD(view, buf) {
         if (buf.byteLength < 3) return;
         const channel = view.getUint8(1);
         const dcdOn   = view.getUint8(2) !== 0;
-        if (channel < 4) {
-            this._dcdState[channel] = dcdOn;
-            this._updateDCDLed(channel, dcdOn);
+        if (channel >= 4) return;
+
+        if (dcdOn) {
+            // Light the LED and (re)start the auto-clear timer.
+            this._dcdState[channel] = true;
+            this._updateDCDLed(channel, true);
+            if (this._dcdTimers[channel]) clearTimeout(this._dcdTimers[channel]);
+            this._dcdTimers[channel] = setTimeout(() => {
+                this._dcdTimers[channel] = null;
+                this._dcdState[channel]  = false;
+                this._updateDCDLed(channel, false);
+            }, 500);
+        } else {
+            // Explicit DCD-off: cancel timer and clear immediately.
+            if (this._dcdTimers[channel]) {
+                clearTimeout(this._dcdTimers[channel]);
+                this._dcdTimers[channel] = null;
+            }
+            this._dcdState[channel] = false;
+            this._updateDCDLed(channel, false);
         }
     }
 
@@ -608,6 +654,61 @@ class SoundModemExtension extends DecoderExtension {
         const btn   = document.getElementById('sm-monitor-toggle');
         if (panel) panel.style.display = this._monitorOpen ? 'flex' : 'none';
         if (btn)   btn.textContent = this._monitorOpen ? 'Hide Monitor' : 'Monitor';
+    }
+
+    // ── Process log panel ─────────────────────────────────────────────────────
+
+    _toggleLogPanel() {
+        this._logOpen = !this._logOpen;
+        const panel = document.getElementById('sm-log-panel');
+        const btn   = document.getElementById('sm-log-toggle');
+        if (panel) panel.style.display = this._logOpen ? 'flex' : 'none';
+        if (btn)   btn.textContent = this._logOpen ? 'Hide Log' : 'Log';
+    }
+
+    _appendLogLine(text) {
+        const list = document.getElementById('sm-log-list');
+        if (!list) return;
+
+        const timeStr = new Date().toTimeString().slice(0, 8);
+
+        const line = document.createElement('div');
+        line.className = 'sm-log-line';
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'sm-log-time';
+        timeEl.textContent = timeStr;
+
+        const textEl = document.createElement('span');
+        textEl.className = 'sm-log-text';
+        textEl.textContent = text;
+
+        line.appendChild(timeEl);
+        line.appendChild(textEl);
+        list.appendChild(line);
+        this._logLines++;
+
+        while (this._logLines > this._logMax) {
+            list.removeChild(list.firstChild);
+            this._logLines--;
+        }
+
+        // Auto-scroll only if panel is open and already at bottom
+        const panel = document.getElementById('sm-log-panel');
+        if (panel && this._logOpen) {
+            const atBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
+            if (atBottom) panel.scrollTop = panel.scrollHeight;
+        }
+    }
+
+    // 0x25 process log line: [type:1][line_len:4 BE][line: UTF-8]
+    _handleLog(view, buf) {
+        if (buf.byteLength < 5) return;
+        const lineLen = view.getUint32(1, false);
+        if (buf.byteLength < 5 + lineLen) return;
+        const lineBytes = new Uint8Array(buf, 5, lineLen);
+        const text = new TextDecoder().decode(lineBytes);
+        this._appendLogLine(text);
     }
 
     _appendMonitorLine(channel, isTX, text) {
@@ -1119,6 +1220,37 @@ class SoundModemExtension extends DecoderExtension {
         const limit = this.maxFrames > 0 ? this.maxFrames : Infinity;
         // Newest frames are at the top (firstChild); remove oldest from the bottom (lastChild)
         while (list.children.length > limit) list.removeChild(list.lastChild);
+    }
+
+    // Show/hide existing rows to match the current type + channel filters.
+    // Each row has classes: sm-frame  sm-frame-<type>  sm-frame-ch-<port>
+    _applyFilters() {
+        const list = document.getElementById('sm-frame-list');
+        if (!list) return;
+        Array.from(list.children).forEach(row => {
+            // Derive channel from sm-frame-ch-N class
+            const chMatch = Array.from(row.classList).find(c => c.startsWith('sm-frame-ch-'));
+            const rowCh   = chMatch ? chMatch.replace('sm-frame-ch-', '') : null;
+
+            // Derive frame type from sm-frame-<type> class (excluding sm-frame-ch-*)
+            const typeMatch = Array.from(row.classList).find(
+                c => c.startsWith('sm-frame-') && !c.startsWith('sm-frame-ch-') && c !== 'sm-frame'
+            );
+            const rowType = typeMatch ? typeMatch.replace('sm-frame-', '') : null;
+
+            // Channel filter
+            const chOk = this.channelFilter === 'all' || rowCh === this.channelFilter;
+
+            // Type filter — 'aprs' means isAPRS flag; 'ui' means ui or aprs
+            let typeOk = true;
+            if (this.filter === 'aprs') {
+                typeOk = row.classList.contains('sm-frame-aprs');
+            } else if (this.filter === 'ui') {
+                typeOk = rowType === 'ui' || row.classList.contains('sm-frame-aprs');
+            }
+
+            row.style.display = (chOk && typeOk) ? '' : 'none';
+        });
     }
 
     _updateCountDisplay() {

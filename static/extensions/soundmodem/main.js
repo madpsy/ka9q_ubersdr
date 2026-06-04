@@ -573,6 +573,10 @@ class SoundModemExtension extends DecoderExtension {
         }
         this._setConfigVisible(false);
         this._startWaterfall();
+
+        // Update placeholder to "waiting" state now that decoder is running
+        const emptyEl = document.getElementById('sm-frame-empty');
+        if (emptyEl) emptyEl.textContent = 'Waiting for first frame…';
     }
 
     _stopDecoder() {
@@ -600,6 +604,10 @@ class SoundModemExtension extends DecoderExtension {
 
         // Stop the "time ago" ticker
         this._stopAgoTimer();
+
+        // Restore "configure" placeholder when stopped
+        const emptyEl = document.getElementById('sm-frame-empty');
+        if (emptyEl) emptyEl.textContent = 'Configure at least one channel and press Start…';
     }
 
     // ── WebSocket binary interception ─────────────────────────────────────────
@@ -1782,11 +1790,13 @@ class SoundModemExtension extends DecoderExtension {
         const list = document.getElementById('sm-frame-list');
         if (list) {
             list.innerHTML = '';
-            // Restore the "Waiting for first frame…" placeholder
+            // Restore placeholder — text depends on whether decoder is running
             const empty = document.createElement('div');
             empty.className = 'sm-frame-empty';
             empty.id = 'sm-frame-empty';
-            empty.textContent = 'Waiting for first frame…';
+            empty.textContent = this.running
+                ? 'Waiting for first frame…'
+                : 'Configure at least one channel and press Start…';
             list.appendChild(empty);
         }
         const lastEl = document.getElementById('sm-last-callsign');

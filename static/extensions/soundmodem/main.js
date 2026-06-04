@@ -41,7 +41,9 @@ class SoundModemExtension extends DecoderExtension {
         this._wfRunning      = false;
         this._wfSampleRate   = 48000;  // updated from analyser.context.sampleRate on first audio frame
         this._wfMaxFreq      = 3300;   // Hz shown on waterfall (matches QtSoundModem WaterfallMax)
-        this._wfChannelFreqs = [];     // [{freq, enabled}] snapshot from config at start time
+        this._wfChannelFreqs = [];     // [{freq, enabled, modem}] snapshot from config at start time
+        this._wfLineMs       = 50;     // ms between waterfall lines (20 lines/sec = steady scroll speed)
+        this._wfLastLineAt   = 0;      // performance.now() timestamp of last rendered line
 
         // Monitor panel
         this._monitorLines = 0;
@@ -126,9 +128,11 @@ class SoundModemExtension extends DecoderExtension {
             if (cb) cb.addEventListener('change', () => this._updateChannelState(i));
         }
 
-        // Clamp numeric inputs to their min/max on every keystroke
+        // Clamp numeric inputs to their min/max when the field is committed
+        // (on blur or Enter). Using 'change' instead of 'input' so the user
+        // can type freely without the value being clamped mid-entry.
         document.querySelectorAll('#sm-config-panel input[type="number"]').forEach(input => {
-            input.addEventListener('input', () => {
+            input.addEventListener('change', () => {
                 const min = parseFloat(input.min);
                 const max = parseFloat(input.max);
                 const val = parseFloat(input.value);
@@ -605,6 +609,9 @@ class SoundModemExtension extends DecoderExtension {
     // get frequency data, and draw the waterfall line directly.
     // The waterfall runs always (not just when the decoder is active) so the user
     // can see the spectrum before pressing Start — just like the QtSoundModem GUI.
+    //
+    // Throttled to _wfLineMs ms per line (default 50 ms = 20 lines/sec) so the
+    // scroll speed is constant regardless of the animation-loop frame rate.
     onProcessAudio(_dataArray) {
         if (!this._wfCtx) return;
 
@@ -622,7 +629,14 @@ class SoundModemExtension extends DecoderExtension {
             this._wfFftBuf = new Uint8Array(analyser.frequencyBinCount);
         }
 
+        // Always pull fresh frequency data so the buffer stays current
         analyser.getByteFrequencyData(this._wfFftBuf);
+
+        // Throttle: only scroll one line every _wfLineMs milliseconds
+        const now = performance.now();
+        if (now - this._wfLastLineAt < this._wfLineMs) return;
+        this._wfLastLineAt = now;
+
         this._renderWaterfallLine();
     }
 

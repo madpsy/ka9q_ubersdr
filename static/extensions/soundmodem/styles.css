@@ -134,6 +134,23 @@
     align-self: center;
 }
 
+.sm-autoscroll-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #888;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.sm-autoscroll-label input[type="checkbox"] {
+    accent-color: #4a9eff;
+    cursor: pointer;
+    margin: 0;
+}
+
 .sm-filter-select:focus {
     outline: none;
     border-color: #888;
@@ -495,10 +512,17 @@
     background: #1e1e1e;
 }
 
-.sm-frame.sm-frame-aprs     { border-left-color: #4CAF50; }
-.sm-frame.sm-frame-ui       { border-left-color: #2196F3; }
+/* Frame type colours (kept for reference but overridden by channel colour below) */
+.sm-frame.sm-frame-aprs      { border-left-color: #4CAF50; }
+.sm-frame.sm-frame-ui        { border-left-color: #2196F3; }
 .sm-frame.sm-frame-connected { border-left-color: #FF9800; }
-.sm-frame.sm-frame-other    { border-left-color: #555; }
+.sm-frame.sm-frame-other     { border-left-color: #555; }
+
+/* Channel colours take priority — match waterfall/badge palette */
+.sm-frame.sm-frame-ch-0 { border-left-color: #1565C0; }  /* Ch A — blue */
+.sm-frame.sm-frame-ch-1 { border-left-color: #2E7D32; }  /* Ch B — green */
+.sm-frame.sm-frame-ch-2 { border-left-color: #6A1B9A; }  /* Ch C — purple */
+.sm-frame.sm-frame-ch-3 { border-left-color: #E65100; }  /* Ch D — orange */
 
 .sm-frame-meta {
     display: flex;

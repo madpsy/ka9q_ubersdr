@@ -29,6 +29,8 @@ class SoundModemExtension extends DecoderExtension {
         this.filter        = 'all';
         this.channelFilter = 'all';
         this.copyBuffer    = [];
+        this.autoScroll    = true;   // mirrors the auto-scroll checkbox
+        this.maxFrames     = 500;    // mirrors the max-frames select (0 = unlimited)
 
         this._origHandler = null;
         this._ourHandler  = null;
@@ -173,6 +175,42 @@ class SoundModemExtension extends DecoderExtension {
             this.channelFilter = e.target.value;
         });
 
+        // Auto-scroll checkbox
+        const autoScrollCb = document.getElementById('sm-autoscroll');
+        if (autoScrollCb) {
+            autoScrollCb.addEventListener('change', (e) => {
+                this.autoScroll = e.target.checked;
+                // If re-enabled, jump to bottom immediately
+                if (this.autoScroll) {
+                    const area = document.getElementById('sm-output-area');
+                    if (area) area.scrollTop = area.scrollHeight;
+                }
+            });
+        }
+
+        // Max-frames select
+        const maxFramesSel = document.getElementById('sm-max-frames');
+        if (maxFramesSel) {
+            maxFramesSel.addEventListener('change', (e) => {
+                this.maxFrames = parseInt(e.target.value, 10) || 0;
+                this._trimFrameList();
+            });
+        }
+
+        // When user manually scrolls up in the output area, disable auto-scroll.
+        // When they scroll back to the bottom, re-enable it.
+        const outputArea = document.getElementById('sm-output-area');
+        if (outputArea) {
+            outputArea.addEventListener('scroll', () => {
+                const atBottom = outputArea.scrollHeight - outputArea.scrollTop - outputArea.clientHeight < 40;
+                if (atBottom !== this.autoScroll) {
+                    this.autoScroll = atBottom;
+                    const cb = document.getElementById('sm-autoscroll');
+                    if (cb) cb.checked = this.autoScroll;
+                }
+            });
+        }
+
         const monToggle = document.getElementById('sm-monitor-toggle');
         if (monToggle) monToggle.addEventListener('click', () => this._toggleMonitorPanel());
 
@@ -226,6 +264,10 @@ class SoundModemExtension extends DecoderExtension {
         if (filterSel) filterSel.value = this.filter;
         const chFilterSel2 = document.getElementById('sm-channel-filter');
         if (chFilterSel2) chFilterSel2.value = this.channelFilter;
+        const autoScrollCb2 = document.getElementById('sm-autoscroll');
+        if (autoScrollCb2) autoScrollCb2.checked = this.autoScroll;
+        const maxFramesSel2 = document.getElementById('sm-max-frames');
+        if (maxFramesSel2) maxFramesSel2.value = String(this.maxFrames);
         if (startBtn && this.running) {
             startBtn.textContent = 'Stop';
             startBtn.classList.add('running');
@@ -958,7 +1000,7 @@ class SoundModemExtension extends DecoderExtension {
         this.copyBuffer.push(`[${timeStr}] ${pathStr}: ${parsed.info}`);
 
         const row = document.createElement('div');
-        row.className = `sm-frame sm-frame-${parsed.frameType}`;
+        row.className = `sm-frame sm-frame-${parsed.frameType} sm-frame-ch-${parsed.kissPort}`;
 
         const meta = document.createElement('div');
         meta.className = 'sm-frame-meta';
@@ -1003,11 +1045,20 @@ class SoundModemExtension extends DecoderExtension {
         const list = document.getElementById('sm-frame-list');
         if (list) {
             list.appendChild(row);
-            while (list.children.length > 500) list.removeChild(list.firstChild);
+            this._trimFrameList(list);
         }
 
-        const area = document.getElementById('sm-output-area');
-        if (area) area.scrollTop = area.scrollHeight;
+        if (this.autoScroll) {
+            const area = document.getElementById('sm-output-area');
+            if (area) area.scrollTop = area.scrollHeight;
+        }
+    }
+
+    _trimFrameList(list) {
+        if (!list) list = document.getElementById('sm-frame-list');
+        if (!list) return;
+        const limit = this.maxFrames > 0 ? this.maxFrames : Infinity;
+        while (list.children.length > limit) list.removeChild(list.firstChild);
     }
 
     _updateCountDisplay() {

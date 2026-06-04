@@ -638,11 +638,11 @@
     display: flex;
     flex-direction: row;
     align-items: baseline;
-    gap: 6px;
-    padding: 2px 10px;
+    gap: 8px;
+    padding: 3px 10px;
     border-left: 3px solid transparent;
-    font-size: 12px;
-    line-height: 1.6;
+    font-size: 13px;
+    line-height: 1.7;
     white-space: nowrap;
     overflow: hidden;
     transition: background 0.1s;
@@ -689,15 +689,15 @@
 
 /* Single-line row elements */
 .sm-frame-time {
-    font-size: 10px;
+    font-size: 11px;
     color: #555;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 .sm-frame-path {
-    font-size: 11px;
-    color: #888;
+    font-size: 13px;
+    color: #aaa;
     white-space: nowrap;
     flex-shrink: 0;
     font-weight: bold;
@@ -706,15 +706,15 @@
 /* Frame-type tag pill */
 .sm-frame-type-tag {
     display: inline-block;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: bold;
-    padding: 0 4px;
+    padding: 1px 5px;
     border-radius: 3px;
     white-space: nowrap;
     flex-shrink: 0;
     background: #2a2a2a;
     color: #aaa;
-    line-height: 1.6;
+    line-height: 1.5;
 }
 /* Type-specific tag colours */
 .sm-frame-type-aprs   { background: #1B5E20; color: #a5d6a7; }
@@ -737,7 +737,7 @@
 .sm-frame-type-arp    { background: #006064; color: #b3e5fc; }
 
 .sm-frame-payload {
-    font-size: 12px;
+    font-size: 13px;
     color: #e0e0e0;
     overflow: hidden;
     text-overflow: ellipsis;

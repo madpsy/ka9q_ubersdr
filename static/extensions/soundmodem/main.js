@@ -1451,11 +1451,11 @@ class SoundModemExtension extends DecoderExtension {
         this._updateAgoDisplay();
         if (!this._agoTimer) this._startAgoTimer();
 
-        // Track all callsigns seen (from, to, digipeaters — strip * suffix)
+        // Track sender callsigns seen (from + actioned digipeaters — strip * suffix)
+        // We deliberately exclude parsed.to (destination) as it's not a real station.
         const stripStar = c => c.replace(/\*$/, '');
         const prevSize = this._seenCallsigns.size;
         this._seenCallsigns.add(stripStar(parsed.from));
-        if (parsed.to) this._seenCallsigns.add(stripStar(parsed.to));
         if (parsed.digipeaters) {
             parsed.digipeaters.forEach(d => {
                 const bare = stripStar(d);

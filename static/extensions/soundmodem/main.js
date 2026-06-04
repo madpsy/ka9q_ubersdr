@@ -29,8 +29,7 @@ class SoundModemExtension extends DecoderExtension {
         this.filter        = 'all';
         this.channelFilter = 'all';
         this.copyBuffer    = [];
-        this.autoScroll    = true;   // mirrors the auto-scroll checkbox
-        this.maxFrames     = 500;    // mirrors the max-frames select (0 = unlimited)
+        this.maxFrames     = 25;     // mirrors the max-frames select (0 = unlimited)
 
         this._origHandler = null;
         this._ourHandler  = null;
@@ -52,6 +51,9 @@ class SoundModemExtension extends DecoderExtension {
         this._monitorLines = 0;
         this._monitorMax   = 300;
         this._monitorOpen  = false;
+
+        // Settings panel — shown by default when stopped
+        this._settingsOpen = true;
 
         // DCD state per channel
         this._dcdState = [false, false, false, false];
@@ -193,6 +195,9 @@ class SoundModemExtension extends DecoderExtension {
         const copyBtn   = document.getElementById('sm-copy-btn');
         const filterSel = document.getElementById('sm-filter-select');
 
+        const settingsToggle = document.getElementById('sm-settings-toggle');
+        if (settingsToggle) settingsToggle.addEventListener('click', () => this._toggleSettings());
+
         if (startBtn)  startBtn.addEventListener('click',  () => this._toggleDecoder());
         if (clearBtn)  clearBtn.addEventListener('click',  () => this._clearOutput());
         if (copyBtn)   copyBtn.addEventListener('click',   () => this._copyOutput());
@@ -203,39 +208,12 @@ class SoundModemExtension extends DecoderExtension {
             this.channelFilter = e.target.value;
         });
 
-        // Auto-scroll checkbox
-        const autoScrollCb = document.getElementById('sm-autoscroll');
-        if (autoScrollCb) {
-            autoScrollCb.addEventListener('change', (e) => {
-                this.autoScroll = e.target.checked;
-                // If re-enabled, jump to bottom immediately
-                if (this.autoScroll) {
-                    const area = document.getElementById('sm-output-area');
-                    if (area) area.scrollTop = area.scrollHeight;
-                }
-            });
-        }
-
         // Max-frames select
         const maxFramesSel = document.getElementById('sm-max-frames');
         if (maxFramesSel) {
             maxFramesSel.addEventListener('change', (e) => {
                 this.maxFrames = parseInt(e.target.value, 10) || 0;
                 this._trimFrameList();
-            });
-        }
-
-        // When user manually scrolls up in the output area, disable auto-scroll.
-        // When they scroll back to the bottom, re-enable it.
-        const outputArea = document.getElementById('sm-output-area');
-        if (outputArea) {
-            outputArea.addEventListener('scroll', () => {
-                const atBottom = outputArea.scrollHeight - outputArea.scrollTop - outputArea.clientHeight < 40;
-                if (atBottom !== this.autoScroll) {
-                    this.autoScroll = atBottom;
-                    const cb = document.getElementById('sm-autoscroll');
-                    if (cb) cb.checked = this.autoScroll;
-                }
             });
         }
 
@@ -292,15 +270,26 @@ class SoundModemExtension extends DecoderExtension {
         if (filterSel) filterSel.value = this.filter;
         const chFilterSel2 = document.getElementById('sm-channel-filter');
         if (chFilterSel2) chFilterSel2.value = this.channelFilter;
-        const autoScrollCb2 = document.getElementById('sm-autoscroll');
-        if (autoScrollCb2) autoScrollCb2.checked = this.autoScroll;
         const maxFramesSel2 = document.getElementById('sm-max-frames');
         if (maxFramesSel2) maxFramesSel2.value = String(this.maxFrames);
-        if (startBtn && this.running) {
-            startBtn.textContent = 'Stop';
-            startBtn.classList.add('running');
+        if (startBtn) {
+            if (this.running) {
+                startBtn.textContent = 'Stop';
+                startBtn.classList.remove('sm-start-ready');
+                startBtn.classList.add('running');
+            } else {
+                startBtn.textContent = 'Start';
+                startBtn.classList.remove('running');
+                startBtn.classList.add('sm-start-ready');
+            }
         }
-        this._setConfigVisible(!this.running);
+        // Restore settings panel visibility
+        const settingsBtn2 = document.getElementById('sm-settings-toggle');
+        if (settingsBtn2) {
+            settingsBtn2.classList.toggle('active', this._settingsOpen);
+            settingsBtn2.textContent = this._settingsOpen ? 'Settings ▲' : 'Settings';
+        }
+        this._setConfigVisible(this._settingsOpen && !this.running);
         this._updateCountDisplay();
 
         // Restore DCD LED states
@@ -317,6 +306,17 @@ class SoundModemExtension extends DecoderExtension {
         this._readChannelFreqsFromUI();
         this._initWaterfallCanvases();
         if (this.running) this._startWaterfall();
+    }
+
+    _toggleSettings() {
+        this._settingsOpen = !this._settingsOpen;
+        const btn = document.getElementById('sm-settings-toggle');
+        if (btn) {
+            btn.classList.toggle('active', this._settingsOpen);
+            btn.textContent = this._settingsOpen ? 'Settings ▲' : 'Settings';
+        }
+        // Only show the panel if not running (inputs are disabled when running anyway)
+        this._setConfigVisible(this._settingsOpen && !this.running);
     }
 
     _updateChannelState(idx) {
@@ -414,7 +414,11 @@ class SoundModemExtension extends DecoderExtension {
         this._setStatus('Connecting…');
 
         const btn = document.getElementById('sm-start-btn');
-        if (btn) { btn.textContent = 'Stop'; btn.classList.add('running'); }
+        if (btn) {
+            btn.textContent = 'Stop';
+            btn.classList.remove('sm-start-ready');
+            btn.classList.add('running');
+        }
 
         this._setConfigVisible(false);
         this._startWaterfall();
@@ -431,9 +435,13 @@ class SoundModemExtension extends DecoderExtension {
         this._setStatus('Stopped');
 
         const btn = document.getElementById('sm-start-btn');
-        if (btn) { btn.textContent = 'Start'; btn.classList.remove('running'); }
+        if (btn) {
+            btn.textContent = 'Start';
+            btn.classList.remove('running');
+            btn.classList.add('sm-start-ready');
+        }
 
-        this._setConfigVisible(true);
+        this._setConfigVisible(this._settingsOpen);
 
         // Clear DCD LEDs
         for (let i = 0; i < 4; i++) {
@@ -551,8 +559,12 @@ class SoundModemExtension extends DecoderExtension {
         this._stopWaterfall();
         this.running = false;
         const btn = document.getElementById('sm-start-btn');
-        if (btn) { btn.textContent = 'Start'; btn.classList.remove('running'); }
-        this._setConfigVisible(true);
+        if (btn) {
+            btn.textContent = 'Start';
+            btn.classList.remove('running');
+            btn.classList.add('sm-start-ready');
+        }
+        this._setConfigVisible(this._settingsOpen);
     }
 
     // ── DCD LED helpers ───────────────────────────────────────────────────────
@@ -1072,13 +1084,9 @@ class SoundModemExtension extends DecoderExtension {
 
         const list = document.getElementById('sm-frame-list');
         if (list) {
-            list.appendChild(row);
+            // Insert newest frame at the top so the list reads newest-first
+            list.insertBefore(row, list.firstChild);
             this._trimFrameList(list);
-        }
-
-        if (this.autoScroll) {
-            const area = document.getElementById('sm-output-area');
-            if (area) area.scrollTop = area.scrollHeight;
         }
     }
 
@@ -1086,7 +1094,8 @@ class SoundModemExtension extends DecoderExtension {
         if (!list) list = document.getElementById('sm-frame-list');
         if (!list) return;
         const limit = this.maxFrames > 0 ? this.maxFrames : Infinity;
-        while (list.children.length > limit) list.removeChild(list.firstChild);
+        // Newest frames are at the top (firstChild); remove oldest from the bottom (lastChild)
+        while (list.children.length > limit) list.removeChild(list.lastChild);
     }
 
     _updateCountDisplay() {

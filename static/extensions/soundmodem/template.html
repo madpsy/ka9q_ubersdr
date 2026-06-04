@@ -49,20 +49,19 @@
             </select>
             <span class="sm-filter-label">Max</span>
             <select id="sm-max-frames" class="sm-filter-select sm-filter-narrow">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
                 <option value="100">100</option>
                 <option value="250">250</option>
-                <option value="500" selected>500</option>
-                <option value="1000">1000</option>
+                <option value="500">500</option>
                 <option value="0">∞</option>
             </select>
-            <label class="sm-autoscroll-label">
-                <input type="checkbox" id="sm-autoscroll" checked>
-                Auto-scroll
-            </label>
+            <button id="sm-settings-toggle" class="sm-btn sm-btn-secondary">Settings</button>
             <button id="sm-monitor-toggle" class="sm-btn sm-btn-secondary">Monitor</button>
             <button id="sm-clear-btn"   class="sm-btn sm-btn-secondary">Clear</button>
             <button id="sm-copy-btn"    class="sm-btn sm-btn-secondary">Copy</button>
-            <button id="sm-start-btn"   class="sm-btn sm-btn-primary">Start</button>
+            <button id="sm-start-btn"   class="sm-btn sm-btn-primary sm-start-ready">Start</button>
         </div>
     </div>
 

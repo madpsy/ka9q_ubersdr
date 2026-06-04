@@ -639,12 +639,27 @@
 
 .sm-btn-primary            { background: #2196F3; color: #fff; }
 .sm-btn-primary:hover      { background: #1976D2; }
-.sm-btn-primary.running    { background: #f44336; }
+
+/* Start button — pulse green when idle to draw attention */
+@keyframes sm-start-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.6); }
+    50%       { box-shadow: 0 0 0 6px rgba(76, 175, 80, 0); }
+}
+.sm-btn-primary.sm-start-ready {
+    background: #388E3C;
+    animation: sm-start-pulse 1.8s ease-in-out infinite;
+}
+.sm-btn-primary.sm-start-ready:hover { background: #2E7D32; animation: none; }
+
+/* Running state — solid red, no pulse */
+.sm-btn-primary.running    { background: #f44336; animation: none; }
 .sm-btn-primary.running:hover { background: #da190b; }
 
 .sm-btn-secondary          { background: #3a3a3a; color: #e0e0e0; }
 .sm-btn-secondary:hover    { background: #4a4a4a; }
 .sm-btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+.sm-btn-secondary.active   { background: #1565C0; color: #fff; }
+.sm-btn-secondary.active:hover { background: #0D47A1; }
 
 /* ── Scrollbars ──────────────────────────────────────────────────────────── */
 .sm-output-area::-webkit-scrollbar       { width: 6px; }

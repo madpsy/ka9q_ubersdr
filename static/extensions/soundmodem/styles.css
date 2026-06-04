@@ -129,10 +129,29 @@
 }
 
 .sm-dcd-on {
-    background: #e53935;
     color: #fff;
-    box-shadow: 0 0 6px 2px rgba(229, 57, 53, 0.7);
-    border-color: #ff5252;
+}
+
+/* Per-channel DCD LED colours — match waterfall/badge palette */
+.sm-dcd-on-0 {
+    background: #29B6F6;
+    box-shadow: 0 0 8px 3px rgba(41, 182, 246, 0.8);
+    border-color: #81D4FA;
+}
+.sm-dcd-on-1 {
+    background: #66BB6A;
+    box-shadow: 0 0 8px 3px rgba(102, 187, 106, 0.8);
+    border-color: #A5D6A7;
+}
+.sm-dcd-on-2 {
+    background: #CE93D8;
+    box-shadow: 0 0 8px 3px rgba(206, 147, 216, 0.8);
+    border-color: #E1BEE7;
+}
+.sm-dcd-on-3 {
+    background: #FFA726;
+    box-shadow: 0 0 8px 3px rgba(255, 167, 38, 0.8);
+    border-color: #FFCC80;
 }
 
 /* ── Header controls ─────────────────────────────────────────────────────── */
@@ -270,10 +289,10 @@
     flex-shrink: 0;
 }
 
-.sm-channel-badge-0::after { background: #1565C0; }  /* Ch A — blue */
-.sm-channel-badge-1::after { background: #2E7D32; }  /* Ch B — green */
-.sm-channel-badge-2::after { background: #6A1B9A; }  /* Ch C — purple */
-.sm-channel-badge-3::after { background: #E65100; }  /* Ch D — orange */
+.sm-channel-badge-0::after { background: #29B6F6; }  /* Ch A — sky blue */
+.sm-channel-badge-1::after { background: #66BB6A; }  /* Ch B — bright green */
+.sm-channel-badge-2::after { background: #CE93D8; }  /* Ch C — light purple */
+.sm-channel-badge-3::after { background: #FFA726; }  /* Ch D — amber */
 
 /* ── Config panel ────────────────────────────────────────────────────────── */
 .sm-config-panel {
@@ -763,10 +782,10 @@
 .sm-frame.sm-frame-other  { border-left-color: #555; }
 
 /* Channel colours take priority — match waterfall/badge palette */
-.sm-frame.sm-frame-ch-0 { border-left-color: #1565C0; }  /* Ch A — blue */
-.sm-frame.sm-frame-ch-1 { border-left-color: #2E7D32; }  /* Ch B — green */
-.sm-frame.sm-frame-ch-2 { border-left-color: #6A1B9A; }  /* Ch C — purple */
-.sm-frame.sm-frame-ch-3 { border-left-color: #E65100; }  /* Ch D — orange */
+.sm-frame.sm-frame-ch-0 { border-left-color: #29B6F6; }  /* Ch A — sky blue */
+.sm-frame.sm-frame-ch-1 { border-left-color: #66BB6A; }  /* Ch B — bright green */
+.sm-frame.sm-frame-ch-2 { border-left-color: #CE93D8; }  /* Ch C — light purple */
+.sm-frame.sm-frame-ch-3 { border-left-color: #FFA726; }  /* Ch D — amber */
 
 /* Single-line row elements */
 .sm-frame-time {

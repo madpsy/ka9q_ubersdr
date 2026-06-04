@@ -766,6 +766,8 @@ class SoundModemExtension extends DecoderExtension {
         if (!led) return;
         led.classList.toggle('sm-dcd-on',  on);
         led.classList.toggle('sm-dcd-off', !on);
+        // Add channel-specific class so each LED lights in its own colour
+        led.classList.toggle(`sm-dcd-on-${channel}`, on);
         led.title = `Ch ${['A','B','C','D'][channel]} DCD: ${on ? 'ACTIVE' : 'idle'}`;
     }
 
@@ -1270,7 +1272,7 @@ class SoundModemExtension extends DecoderExtension {
         }
 
         // Channel frequency markers — bandwidth bar + centre line
-        const chColors = ['#1565C0', '#2E7D32', '#6A1B9A', '#E65100'];
+        const chColors = ['#29B6F6', '#66BB6A', '#CE93D8', '#FFA726'];
         const chNames  = ['A', 'B', 'C', 'D'];
         const rxShifts = SoundModemExtension.RX_SHIFT;
 
@@ -1339,7 +1341,8 @@ class SoundModemExtension extends DecoderExtension {
         const h = ctx.canvas.height;
         const maxFreq  = this._wfMaxFreq;
         const rxShifts = SoundModemExtension.RX_SHIFT;
-        const chColors = ['#1565C0', '#2E7D32', '#6A1B9A', '#E65100'];
+        // Use bright, saturated colours that stand out against the dark waterfall
+        const chColors = ['#29B6F6', '#66BB6A', '#CE93D8', '#FFA726'];
 
         ctx.clearRect(0, 0, w, h);
 
@@ -1353,39 +1356,38 @@ class SoundModemExtension extends DecoderExtension {
             const color  = chColors[i];
             const chName = ['A','B','C','D'][i] ?? String(i);
 
-            // Bandwidth band — more visible fill
-            ctx.fillStyle = color + '30';   // ~19% opacity
+            // Bandwidth band fill
+            ctx.fillStyle = color + '40';   // ~25% opacity
             ctx.fillRect(xLo, 0, xHi - xLo, h);
 
-            // Edge lines — solid, clearly visible
-            ctx.strokeStyle = color + '99'; // ~60% opacity
-            ctx.lineWidth   = 1;
+            // Edge lines — bright, solid
+            ctx.strokeStyle = color + 'cc'; // ~80% opacity
+            ctx.lineWidth   = 1.5;
             ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(xLo, 0); ctx.lineTo(xLo, h);
             ctx.moveTo(xHi, 0); ctx.lineTo(xHi, h);
             ctx.stroke();
 
-            // Centre line — bright solid
+            // Centre line — full brightness, wider
             ctx.save();
-            ctx.strokeStyle = color + 'ee'; // ~93% opacity
-            ctx.lineWidth   = 2;
-            ctx.setLineDash([5, 3]);
+            ctx.strokeStyle = color;        // 100% opacity
+            ctx.lineWidth   = 2.5;
+            ctx.setLineDash([6, 3]);
             ctx.beginPath();
             ctx.moveTo(xCtr, 0);
             ctx.lineTo(xCtr, h);
             ctx.stroke();
             ctx.restore();
 
-            // Channel label at top of centre line
+            // Channel label — larger, with stronger background
             ctx.save();
-            ctx.font         = 'bold 10px monospace';
+            ctx.font         = 'bold 12px monospace';
             ctx.textAlign    = 'center';
             ctx.textBaseline = 'top';
-            // Dark background pill behind the label
-            const labelW = ctx.measureText(chName).width + 6;
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(xCtr - labelW / 2, 2, labelW, 13);
+            const labelW = ctx.measureText(chName).width + 8;
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(xCtr - labelW / 2, 2, labelW, 16);
             ctx.fillStyle = color;
             ctx.fillText(chName, xCtr, 3);
             ctx.restore();

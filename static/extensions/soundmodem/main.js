@@ -1821,8 +1821,8 @@ class SoundModemExtension extends DecoderExtension {
         const sel = document.getElementById('sm-callsign-filter-select');
         if (!sel) return;
         const current = this._callsignFilter;
-        // Rebuild options: "All callsigns" + sorted list
-        sel.innerHTML = '<option value="">All callsigns</option>';
+        // Rebuild options: "Sender" placeholder + sorted list
+        sel.innerHTML = '<option value="">Sender</option>';
         const sorted = Array.from(this._seenCallsigns).sort();
         sorted.forEach(call => {
             const opt = document.createElement('option');

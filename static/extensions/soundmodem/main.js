@@ -289,7 +289,7 @@ class SoundModemExtension extends DecoderExtension {
             settingsBtn2.classList.toggle('active', this._settingsOpen);
             settingsBtn2.textContent = this._settingsOpen ? 'Settings ▲' : 'Settings';
         }
-        this._setConfigVisible(this._settingsOpen && !this.running);
+        this._setConfigVisible(this._settingsOpen, this.running);
         this._updateCountDisplay();
 
         // Restore DCD LED states
@@ -315,8 +315,8 @@ class SoundModemExtension extends DecoderExtension {
             btn.classList.toggle('active', this._settingsOpen);
             btn.textContent = this._settingsOpen ? 'Settings ▲' : 'Settings';
         }
-        // Only show the panel if not running (inputs are disabled when running anyway)
-        this._setConfigVisible(this._settingsOpen && !this.running);
+        // Show panel whenever _settingsOpen; disable inputs if running (read-only view)
+        this._setConfigVisible(this._settingsOpen, this.running);
     }
 
     _updateChannelState(idx) {
@@ -330,15 +330,18 @@ class SoundModemExtension extends DecoderExtension {
         params.querySelectorAll('input, select').forEach(el => { el.disabled = !enabled; });
     }
 
-    _setConfigVisible(visible) {
+    // visible  — whether to show the panel
+    // readOnly — if true, show it but disable all inputs (running state)
+    _setConfigVisible(visible, readOnly = false) {
         const panel = document.getElementById('sm-config-panel');
         if (!panel) return;
         panel.style.display = visible ? '' : 'none';
-        // Also disable/enable all inputs inside the config panel so they cannot
-        // be interacted with even if the panel is somehow visible while running.
-        panel.querySelectorAll('input, select, button').forEach(el => {
-            el.disabled = !visible;
-        });
+        if (visible) {
+            // Disable inputs when running (read-only view), enable when stopped
+            panel.querySelectorAll('input, select, button').forEach(el => {
+                el.disabled = readOnly;
+            });
+        }
     }
 
     // ── Collect params ────────────────────────────────────────────────────────
@@ -420,6 +423,7 @@ class SoundModemExtension extends DecoderExtension {
             btn.classList.add('running');
         }
 
+        // Hide config panel (but keep _settingsOpen state so toggle still works)
         this._setConfigVisible(false);
         this._startWaterfall();
     }
@@ -441,7 +445,8 @@ class SoundModemExtension extends DecoderExtension {
             btn.classList.add('sm-start-ready');
         }
 
-        this._setConfigVisible(this._settingsOpen);
+        // Re-show config panel (with inputs enabled) if settings was open
+        this._setConfigVisible(this._settingsOpen, false);
 
         // Clear DCD LEDs
         for (let i = 0; i < 4; i++) {
@@ -564,7 +569,7 @@ class SoundModemExtension extends DecoderExtension {
             btn.classList.remove('running');
             btn.classList.add('sm-start-ready');
         }
-        this._setConfigVisible(this._settingsOpen);
+        this._setConfigVisible(this._settingsOpen, false);
     }
 
     // ── DCD LED helpers ───────────────────────────────────────────────────────

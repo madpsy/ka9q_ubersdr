@@ -1,5 +1,5 @@
-// Sound Modem Extension — powered by QtSoundModem (nogui mode)
-// Decodes AX.25 packet radio frames via KISS TNC and displays them.
+// Sound Modem Extension — AX.25 packet radio decoder
+// Decodes packet radio frames via KISS TNC and displays them.
 //
 // Binary wire protocol (backend → frontend):
 //
@@ -41,7 +41,7 @@ class SoundModemExtension extends DecoderExtension {
         this._wfFftBuf       = null;   // Uint8Array for getByteFrequencyData()
         this._wfRunning      = false;
         this._wfSampleRate   = 48000;  // updated from analyser.context.sampleRate on first audio frame
-        this._wfMaxFreq      = 3300;   // Hz shown on waterfall (matches QtSoundModem WaterfallMax)
+        this._wfMaxFreq      = 3300;   // Hz shown on waterfall (0–3300 Hz audio range)
         this._wfChannelFreqs = [];     // [{freq, enabled, modem}] snapshot from config at start time
         this._wfLineMs       = 50;     // ms between waterfall lines (20 lines/sec = steady scroll speed)
         this._wfLastLineAt   = 0;      // performance.now() timestamp of last rendered line
@@ -575,7 +575,7 @@ class SoundModemExtension extends DecoderExtension {
             ctx.stroke();
         }
 
-        // Channel frequency markers — bandwidth bar + centre line, matching QtSoundModem do_pointer()
+        // Channel frequency markers — bandwidth bar + centre line
         const chColors = ['#1565C0', '#2E7D32', '#6A1B9A', '#E65100'];
         const chNames  = ['A', 'B', 'C', 'D'];
         const rxShifts = SoundModemExtension.RX_SHIFT;
@@ -698,7 +698,7 @@ class SoundModemExtension extends DecoderExtension {
     // Follows the same pattern as the FSK extension: call radio.getAnalyser() here,
     // get frequency data, and draw the waterfall line directly.
     // The waterfall runs always (not just when the decoder is active) so the user
-    // can see the spectrum before pressing Start — just like the QtSoundModem GUI.
+    // can see the spectrum before pressing Start.
     //
     // Throttled to _wfLineMs ms per line (default 50 ms = 20 lines/sec) so the
     // scroll speed is constant regardless of the animation-loop frame rate.

@@ -685,10 +685,16 @@ func (d *SoundModemDecoder) waitLoop() {
 	running := d.running
 	d.mu.Unlock()
 
-	if running && err != nil {
-		log.Printf("[SoundModem] Subprocess exited unexpectedly: %v", err)
+	if running {
+		// Process exited while we were still supposed to be running — always notify.
+		exitDesc := "exited cleanly"
+		if err != nil {
+			exitDesc = err.Error()
+		}
+		log.Printf("[SoundModem] Subprocess exited unexpectedly: %s", exitDesc)
+		crashErr := fmt.Errorf("modem process exited unexpectedly: %s", exitDesc)
 		select {
-		case d.crashChan <- fmt.Errorf("QtSoundModem subprocess exited: %w", err):
+		case d.crashChan <- crashErr:
 		default:
 		}
 	}

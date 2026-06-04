@@ -2,7 +2,7 @@
   "name": "soundmodem",
   "displayName": "Sound Modem",
   "version": "1.0.0",
-  "description": "AX.25 packet radio decoder powered by QtSoundModem. Decodes AFSK 1200bd, BPSK, QPSK and other packet modes. Displays decoded frames with callsign parsing and APRS support.",
+  "description": "AX.25 packet radio decoder. Decodes AFSK 1200bd, BPSK, QPSK and other packet modes. Displays decoded frames with callsign parsing and APRS support.",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "📡",

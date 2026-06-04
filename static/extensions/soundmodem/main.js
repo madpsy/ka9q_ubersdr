@@ -103,10 +103,13 @@ class SoundModemExtension extends DecoderExtension {
     }
 
     // ── localStorage persistence ──────────────────────────────────────────────
+    // Bump _CONFIG_VERSION whenever the default channel settings change so that
+    // stale saved configs are discarded and the new HTML defaults take effect.
+    static get _CONFIG_VERSION() { return 2; }
 
     _saveConfig() {
         try {
-            const cfg = { channels: [], dcd_threshold: null };
+            const cfg = { _v: SoundModemExtension._CONFIG_VERSION, channels: [], dcd_threshold: null };
             for (let i = 0; i < 4; i++) {
                 cfg.channels.push({
                     enabled:    document.getElementById(`sm-ch${i}-enabled`)?.checked ?? false,
@@ -128,6 +131,12 @@ class SoundModemExtension extends DecoderExtension {
             if (!raw) return;
             const cfg = JSON.parse(raw);
             if (!cfg || !Array.isArray(cfg.channels)) return;
+            // If the config was saved by an older version, discard it so the
+            // new HTML defaults (channel A/B enabled with 300bd IL2P+CRC) apply.
+            if ((cfg._v ?? 1) < SoundModemExtension._CONFIG_VERSION) {
+                localStorage.removeItem('sm_config');
+                return;
+            }
 
             cfg.channels.forEach((ch, i) => {
                 if (i >= 4) return;

@@ -32,6 +32,9 @@ extensions:
   # WEFAX Decoder - Weather Fax decoder for receiving weather charts and satellite images
   - wefax
 
+  # Sound Modem - Packet Modem for AFSK/BFSK with IL2P Support
+  - soundmodem
+
 # Default extension to load automatically (optional)
 # Set to the slug of an extension from the list above, or leave empty/commented for none
 # default_extension: ""

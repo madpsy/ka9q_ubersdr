@@ -168,21 +168,32 @@
 }
 
 /* ── Channel badge ───────────────────────────────────────────────────────── */
+/* Plain letter label with a small coloured dot to its right — no background fill */
 .sm-channel-badge {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: 10px;
     font-weight: bold;
-    padding: 1px 5px;
-    border-radius: 3px;
-    letter-spacing: 0.05em;
+    color: #aaa;
     flex-shrink: 0;
     align-self: center;
 }
 
-.sm-channel-badge-0 { background: #1565C0; color: #fff; }  /* Ch A — blue */
-.sm-channel-badge-1 { background: #2E7D32; color: #fff; }  /* Ch B — green */
-.sm-channel-badge-2 { background: #6A1B9A; color: #fff; }  /* Ch C — purple */
-.sm-channel-badge-3 { background: #E65100; color: #fff; }  /* Ch D — orange */
+/* The coloured dot is rendered via ::after */
+.sm-channel-badge::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.sm-channel-badge-0::after { background: #1565C0; }  /* Ch A — blue */
+.sm-channel-badge-1::after { background: #2E7D32; }  /* Ch B — green */
+.sm-channel-badge-2::after { background: #6A1B9A; }  /* Ch C — purple */
+.sm-channel-badge-3::after { background: #E65100; }  /* Ch D — orange */
 
 /* ── Config panel ────────────────────────────────────────────────────────── */
 .sm-config-panel {

@@ -126,6 +126,17 @@ class SoundModemExtension extends DecoderExtension {
             if (cb) cb.addEventListener('change', () => this._updateChannelState(i));
         }
 
+        // Clamp numeric inputs to their min/max on every keystroke
+        document.querySelectorAll('#sm-config-panel input[type="number"]').forEach(input => {
+            input.addEventListener('input', () => {
+                const min = parseFloat(input.min);
+                const max = parseFloat(input.max);
+                const val = parseFloat(input.value);
+                if (!isNaN(val) && !isNaN(min) && val < min) input.value = min;
+                if (!isNaN(val) && !isNaN(max) && val > max) input.value = max;
+            });
+        });
+
         // Restore state
         if (filterSel) filterSel.value = this.filter;
         const chFilterSel2 = document.getElementById('sm-channel-filter');
@@ -215,8 +226,8 @@ class SoundModemExtension extends DecoderExtension {
             return;
         }
 
-        // Snapshot channel frequencies for waterfall markers
-        this._wfChannelFreqs = params.channels.map(ch => ({ freq: ch.freq, enabled: ch.enabled }));
+        // Snapshot channel frequencies + modem type for waterfall markers
+        this._wfChannelFreqs = params.channels.map(ch => ({ freq: ch.freq, enabled: ch.enabled, modem: ch.modem }));
 
         this._installBinaryHandler();
 
@@ -458,6 +469,29 @@ class SoundModemExtension extends DecoderExtension {
         this._drawWaterfallHeader();
     }
 
+    // rx_shift (BPF bandwidth) per modem index, from sm_main.c
+    // Used to draw the channel bandwidth bar in the waterfall header.
+    static get RX_SHIFT() {
+        return [
+            200,   // 0  AFSK 300 bd
+            1000,  // 1  AFSK 1200 bd (Bell 202)
+            450,   // 2  AFSK 600 bd
+            1805,  // 3  AFSK 2400 bd
+            1200,  // 4  BPSK 1200 bd
+            600,   // 5  BPSK 600 bd
+            300,   // 6  BPSK 300 bd
+            2400,  // 7  BPSK 2400 bd
+            2400,  // 8  QPSK 4800 bd
+            1800,  // 9  QPSK 3600 bd
+            1200,  // 10 QPSK 2400 bd
+            525,   // 11 BPSK FEC (175*3)
+            1200,  // 12 DW QPSK V26A
+            1600,  // 13 DW 8PSK V27
+            1200,  // 14 DW QPSK V26B
+            500,   // 15 ARDOP
+        ];
+    }
+
     _drawWaterfallHeader() {
         const ctx = this._wfHdrCtx;
         if (!ctx) return;
@@ -497,23 +531,60 @@ class SoundModemExtension extends DecoderExtension {
             ctx.stroke();
         }
 
-        // Channel frequency markers
+        // Channel frequency markers — bandwidth bar + centre line, matching QtSoundModem do_pointer()
         const chColors = ['#1565C0', '#2E7D32', '#6A1B9A', '#E65100'];
         const chNames  = ['A', 'B', 'C', 'D'];
+        const rxShifts = SoundModemExtension.RX_SHIFT;
+
         this._wfChannelFreqs.forEach((ch, i) => {
             if (!ch.enabled || ch.freq <= 0) return;
-            const x = Math.round((ch.freq / maxFreq) * w);
-            ctx.strokeStyle = chColors[i];
-            ctx.lineWidth   = 2;
+
+            const shift   = (rxShifts[ch.modem] ?? 1000) / 2;   // half-bandwidth in Hz
+            const fLo     = ch.freq - shift;
+            const fHi     = ch.freq + shift;
+            const xCtr    = Math.round((ch.freq / maxFreq) * w);
+            const xLo     = Math.round((fLo    / maxFreq) * w);
+            const xHi     = Math.round((fHi    / maxFreq) * w);
+
+            const color   = chColors[i];
+
+            // Filled bandwidth band (semi-transparent)
+            ctx.fillStyle = color + '33';   // ~20% opacity
+            ctx.fillRect(xLo, 0, xHi - xLo, h);
+
+            // Horizontal bar at mid-height
+            const barY = Math.round(h / 2);
+            ctx.strokeStyle = color;
+            ctx.lineWidth   = 1;
             ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
+            ctx.moveTo(xLo, barY);
+            ctx.lineTo(xHi, barY);
+            ctx.stroke();
+
+            // Vertical end-caps (left and right edges of bandwidth)
+            const capH = Math.round(h * 0.4);
+            ctx.beginPath();
+            ctx.moveTo(xLo, barY - capH);
+            ctx.lineTo(xLo, barY + capH);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(xHi, barY - capH);
+            ctx.lineTo(xHi, barY + capH);
+            ctx.stroke();
+
+            // Centre tick (taller, 2px wide)
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(xCtr, 0);
+            ctx.lineTo(xCtr, h);
             ctx.stroke();
             ctx.lineWidth = 1;
-            ctx.fillStyle = chColors[i];
+
+            // Channel label
+            ctx.fillStyle = color;
             ctx.font      = 'bold 9px monospace';
-            ctx.textAlign = x > w - 20 ? 'right' : 'left';
-            ctx.fillText(chNames[i], x + (x > w - 20 ? -3 : 3), 9);
+            ctx.textAlign = xCtr > w - 20 ? 'right' : 'left';
+            ctx.fillText(chNames[i], xCtr + (xCtr > w - 20 ? -3 : 3), 9);
         });
         ctx.textAlign = 'center';
     }

@@ -89,6 +89,11 @@ class SoundModemExtension extends DecoderExtension {
         this._stationMap  = new Map();
         this._leafletMap  = null;   // Leaflet map instance
         this._mapOpen     = false;
+
+        // RF link graph: Set of "CALL_A|CALL_B" (canonical sorted key)
+        // Populated from digipeater paths — each actioned digi heard the previous hop.
+        this._rfLinks     = new Set();
+        this._rfPolylines = new Map(); // "CALL_A|CALL_B" → Leaflet polyline
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -992,12 +997,48 @@ class SoundModemExtension extends DecoderExtension {
             this._updateMapMarker(callsign, entry);
             bounds.push([entry.lat, entry.lon]);
         });
+        // Draw all known RF links
+        this._drawAllRFLinks();
         if (bounds.length > 0) {
             this._leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
         } else {
             this._leafletMap.setView([51.5, -0.1], 5); // Default: UK
         }
         this._leafletMap.invalidateSize();
+    }
+
+    /**
+     * Draw (or update) a single RF link polyline between two callsigns.
+     * Only draws if both callsigns have known positions in _stationMap.
+     */
+    _drawRFLink(key, callA, callB) {
+        if (!this._leafletMap) return;
+        const a = this._stationMap.get(callA);
+        const b = this._stationMap.get(callB);
+        if (!a || !b) return; // One or both positions unknown — skip
+
+        if (this._rfPolylines.has(key)) {
+            // Update existing line (positions may have changed)
+            this._rfPolylines.get(key).setLatLngs([[a.lat, a.lon], [b.lat, b.lon]]);
+        } else {
+            const line = L.polyline([[a.lat, a.lon], [b.lat, b.lon]], {
+                color:     '#4fc3f7',
+                weight:    1.5,
+                opacity:   0.6,
+                dashArray: '4 4',
+            }).addTo(this._leafletMap);
+            // Tooltip showing the link
+            line.bindTooltip(`${callA} ↔ ${callB}`, { sticky: true, direction: 'center' });
+            this._rfPolylines.set(key, line);
+        }
+    }
+
+    /** Draw all known RF links that have positions for both endpoints. */
+    _drawAllRFLinks() {
+        this._rfLinks.forEach(key => {
+            const [a, b] = key.split('|');
+            this._drawRFLink(key, a, b);
+        });
     }
 
     _updateMapStationCount() {
@@ -1368,6 +1409,34 @@ class SoundModemExtension extends DecoderExtension {
         const timeStr = new Date().toTimeString().slice(0, 8);
         this.copyBuffer.push(`[${timeStr}] ${pathStr}: ${parsed.info}`);
 
+        // ── RF link extraction from digipeater path ───────────────────────────
+        // Each actioned digi (marked with *) heard the previous hop directly.
+        // Build a chain: [source, digi1*, digi2*, ...] and record each adjacent pair.
+        if (parsed.digipeaters && parsed.digipeaters.length > 0) {
+            // Strip the * suffix to get the bare callsign
+            const strip = c => c.replace(/\*$/, '').split('-')[0] + (c.includes('-') ? '-' + c.replace(/\*$/, '').split('-')[1] : '');
+            const chain = [parsed.from];
+            for (const d of parsed.digipeaters) {
+                if (d.endsWith('*')) {
+                    chain.push(strip(d));
+                } else {
+                    break; // Stop at first un-actioned digi
+                }
+            }
+            // Record each adjacent pair as a bidirectional RF link
+            for (let i = 0; i + 1 < chain.length; i++) {
+                const a = chain[i], b = chain[i + 1];
+                const key = [a, b].sort().join('|');
+                if (!this._rfLinks.has(key)) {
+                    this._rfLinks.add(key);
+                    // Draw the line immediately if map is open and both have positions
+                    if (this._mapOpen && this._leafletMap) {
+                        this._drawRFLink(key, a, b);
+                    }
+                }
+            }
+        }
+
         // Normalised CSS type (collapse l4-* subtypes to 'netrom')
         const cssType = NETROM_TYPES.has(ft) ? 'netrom' : ft;
 
@@ -1428,9 +1497,11 @@ class SoundModemExtension extends DecoderExtension {
                 marker:  existing ? existing.marker : null,
             };
             this._stationMap.set(callsign, entry);
-            // Update marker if map is open
+            // Update marker if map is open; also redraw RF links in case
+            // this new position unlocks a previously position-less link endpoint
             if (this._mapOpen && this._leafletMap) {
                 this._updateMapMarker(callsign, entry);
+                this._drawAllRFLinks();
                 this._updateMapStationCount();
             }
         }

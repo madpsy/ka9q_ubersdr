@@ -15,39 +15,40 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin              AdminConfig              `yaml:"admin"`
-	Radiod             RadiodConfig             `yaml:"radiod"`
-	Server             ServerConfig             `yaml:"server"`
-	Audio              AudioConfig              `yaml:"audio"`
-	Spectrum           SpectrumConfig           `yaml:"spectrum"`
-	NoiseFloor         NoiseFloorConfig         `yaml:"noisefloor"`
-	Spectrogram        SpectrogramConfig        `yaml:"spectrogram"`
-	Decoder            DecoderConfig            `yaml:"decoder"`
-	Prometheus         PrometheusConfig         `yaml:"prometheus"`
-	MQTT               MQTTConfig               `yaml:"mqtt"`
-	Logging            LoggingConfig            `yaml:"logging"`
-	DXCluster          DXClusterConfig          `yaml:"dxcluster"`
-	FreeDVReporter     FreeDVReporterConfig     `yaml:"freedv_reporter"`
-	Chat               ChatConfig               `yaml:"chat"`
-	SpaceWeather       SpaceWeatherConfig       `yaml:"spaceweather"`
-	InstanceReporting  InstanceReportingConfig  `yaml:"instance_reporting"`
-	FrequencyReference FrequencyReferenceConfig `yaml:"frequency_reference"`
-	Rotctl             RotctlConfig             `yaml:"rotctl"`
-	GeoIP              GeoIPConfig              `yaml:"geoip"`
-	SSHProxy           SSHProxyConfig           `yaml:"ssh_proxy"`
-	GPSDO              GPSDOConfig              `yaml:"gpsdo"`
-	MCP                MCPConfig                `yaml:"mcp"`
-	Whisper            WhisperConfig            `yaml:"whisper"`
-	FreeDVExtension    FreeDVExtensionConfig    `yaml:"freedv_extension"`
-	EiBi               EiBiConfig               `yaml:"eibi"`
-	NTP                NTPConfig                `yaml:"ntp"`
-	UI                 UIConfig                 `yaml:"ui"`
-	DSP                DSPConfig                `yaml:"dsp"`
-	LookupServices     LookupServicesConfig     `yaml:"lookup_services"`
-	Bookmarks          []Bookmark               `yaml:"bookmarks"`
-	Bands              []Band                   `yaml:"bands"`
-	Extensions         []string                 `yaml:"extensions"`
-	DefaultExtension   string                   `yaml:"default_extension,omitempty"`
+	Admin              AdminConfig               `yaml:"admin"`
+	Radiod             RadiodConfig              `yaml:"radiod"`
+	Server             ServerConfig              `yaml:"server"`
+	Audio              AudioConfig               `yaml:"audio"`
+	Spectrum           SpectrumConfig            `yaml:"spectrum"`
+	NoiseFloor         NoiseFloorConfig          `yaml:"noisefloor"`
+	Spectrogram        SpectrogramConfig         `yaml:"spectrogram"`
+	Decoder            DecoderConfig             `yaml:"decoder"`
+	Prometheus         PrometheusConfig          `yaml:"prometheus"`
+	MQTT               MQTTConfig                `yaml:"mqtt"`
+	Logging            LoggingConfig             `yaml:"logging"`
+	DXCluster          DXClusterConfig           `yaml:"dxcluster"`
+	FreeDVReporter     FreeDVReporterConfig      `yaml:"freedv_reporter"`
+	Chat               ChatConfig                `yaml:"chat"`
+	SpaceWeather       SpaceWeatherConfig        `yaml:"spaceweather"`
+	InstanceReporting  InstanceReportingConfig   `yaml:"instance_reporting"`
+	FrequencyReference FrequencyReferenceConfig  `yaml:"frequency_reference"`
+	Rotctl             RotctlConfig              `yaml:"rotctl"`
+	GeoIP              GeoIPConfig               `yaml:"geoip"`
+	SSHProxy           SSHProxyConfig            `yaml:"ssh_proxy"`
+	GPSDO              GPSDOConfig               `yaml:"gpsdo"`
+	MCP                MCPConfig                 `yaml:"mcp"`
+	Whisper            WhisperConfig             `yaml:"whisper"`
+	FreeDVExtension    FreeDVExtensionConfig     `yaml:"freedv_extension"`
+	SoundModem         SoundModemExtensionConfig `yaml:"soundmodem_extension"`
+	EiBi               EiBiConfig                `yaml:"eibi"`
+	NTP                NTPConfig                 `yaml:"ntp"`
+	UI                 UIConfig                  `yaml:"ui"`
+	DSP                DSPConfig                 `yaml:"dsp"`
+	LookupServices     LookupServicesConfig      `yaml:"lookup_services"`
+	Bookmarks          []Bookmark                `yaml:"bookmarks"`
+	Bands              []Band                    `yaml:"bands"`
+	Extensions         []string                  `yaml:"extensions"`
+	DefaultExtension   string                    `yaml:"default_extension,omitempty"`
 }
 
 // LookupServicesConfig contains settings for callsign lookup providers.
@@ -569,6 +570,12 @@ type WhisperConfig struct {
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension
 type FreeDVExtensionConfig struct {
 	MaxUsers int `yaml:"max_users"` // Maximum concurrent users of the FreeDV extension (0 = unlimited, default: 10)
+}
+
+// SoundModemExtensionConfig contains settings for the Sound Modem audio extension
+type SoundModemExtensionConfig struct {
+	Enabled  *bool `yaml:"enabled"`   // Whether the extension is registered (default: true; nil = not set = enabled)
+	MaxUsers int   `yaml:"max_users"` // Maximum concurrent users (0 = unlimited, default: 5)
 }
 
 // EiBiConfig contains settings for the EiBi shortwave broadcast schedule

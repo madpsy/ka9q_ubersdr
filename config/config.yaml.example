@@ -1770,6 +1770,27 @@ freedv_extension:
   max_users: 10
 
 # ==============================================================================
+# Sound Modem Extension Configuration
+# ==============================================================================
+# Controls the Sound Modem AX.25 packet decoder extension.
+# Each user who activates the Sound Modem extension spawns a dedicated
+# QtSoundModem subprocess in nogui mode. Audio is fed via stdin (mono int16 LE
+# PCM) and decoded AX.25 frames are read back via a KISS TNC TCP connection.
+# Each instance uses a unique working directory in /dev/shm (RAM-backed tmpfs)
+# and a unique pair of TCP ports (KISS + AGW) from the range 18100–18199.
+soundmodem_extension:
+  # Enable or disable the Sound Modem extension (default: true)
+  # When false, the extension is not registered and clients cannot attach to it.
+  enabled: true
+
+  # Maximum concurrent users of the Sound Modem extension (default: 5)
+  # Each active user spawns a QtSoundModem subprocess, so this directly
+  # controls the number of subprocesses running at any one time.
+  # Set to 0 for unlimited users (not recommended for public instances).
+  # Recommended: 3-5 depending on server capacity.
+  max_users: 5
+
+# ==============================================================================
 # DSP Noise Reduction Insert (ubersdr-dsp gRPC container)
 # ==============================================================================
 # When enabled, clients can route their audio through the ubersdr-dsp container

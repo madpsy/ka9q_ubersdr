@@ -334,9 +334,9 @@ func (aem *AudioExtensionManager) forwardResults(activeExtension *ActiveAudioExt
 				crashChan = nil
 				continue
 			}
-			errMsg := "FreeDV decoder process exited unexpectedly"
+			errMsg := fmt.Sprintf("%s subprocess exited unexpectedly", activeExtension.ExtensionName)
 			if crashErr != nil {
-				errMsg = fmt.Sprintf("FreeDV decoder process crashed: %v", crashErr)
+				errMsg = fmt.Sprintf("%s subprocess crashed: %v", activeExtension.ExtensionName, crashErr)
 			}
 			log.Printf("AudioExtension: Crash detected for session %s: %s", activeExtension.SessionID, errMsg)
 			// Notify the frontend

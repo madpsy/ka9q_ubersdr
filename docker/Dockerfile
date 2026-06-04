@@ -67,6 +67,12 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /usr/local/bin/jt9_decode \
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/cw-decoder_${TARGETARCH} -O /usr/local/bin/cw-decoder \
     && chmod +x /usr/local/bin/cw-decoder \
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+         wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/piQtSoundModem64 -O /usr/local/bin/QtSoundModem; \
+       else \
+         wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/QtSoundModem64 -O /usr/local/bin/QtSoundModem; \
+       fi \
+    && chmod +x /usr/local/bin/QtSoundModem \
     && mkdir -p /opt/freedv \
     && wget https://github.com/madpsy/ubersdr_freedv/releases/download/latest/freedv_${TARGETARCH}.zip -O /tmp/freedv.zip \
     && unzip /tmp/freedv.zip -d /opt/freedv \

@@ -1,0 +1,383 @@
+/* Sound Modem Extension — QtSoundModem / AX.25 packet decoder */
+
+/* ── Config panel ────────────────────────────────────────────────────────── */
+.sm-config-panel {
+    background: #1e1e1e;
+    border-bottom: 2px solid #3a3a3a;
+    padding: 10px 16px;
+    overflow-y: auto;
+    max-height: 340px;
+}
+
+.sm-config-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.sm-config-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #2196F3;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sm-config-hint {
+    font-size: 11px;
+    color: #666;
+}
+
+.sm-global-settings {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.sm-channels {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+
+.sm-channel {
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 8px 10px;
+}
+
+.sm-channel-header {
+    margin-bottom: 6px;
+}
+
+.sm-channel-enable {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.sm-channel-enable input[type="checkbox"] {
+    accent-color: #2196F3;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.sm-channel-label {
+    font-size: 12px;
+    font-weight: bold;
+    color: #2196F3;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sm-channel-params {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sm-channel-params-disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.sm-param-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sm-param-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    min-width: 72px;
+    flex-shrink: 0;
+}
+
+.sm-param-select,
+.sm-param-input {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 3px 5px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.sm-param-select:focus,
+.sm-param-input:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+.sm-param-select:disabled,
+.sm-param-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sm-modem-select { width: 100%; }
+.sm-param-short  { width: 70px; }
+.sm-param-narrow { width: 90px; }
+
+.sm-param-hint {
+    font-size: 11px;
+    color: #666;
+}
+
+
+.sm-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.sm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #2a2a2a;
+    border-bottom: 2px solid #3a3a3a;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.sm-header h3 {
+    margin: 0;
+    font-size: 17px;
+    color: #2196F3;
+    white-space: nowrap;
+}
+
+/* ── Stats row ───────────────────────────────────────────────────────────── */
+.sm-stats {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    justify-content: center;
+}
+
+.sm-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 13px;
+}
+
+.sm-stat-label {
+    color: #888;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sm-stat-value {
+    font-weight: bold;
+    font-size: 15px;
+    color: #e0e0e0;
+    min-width: 4ch;
+    text-align: right;
+}
+
+/* ── Header controls ─────────────────────────────────────────────────────── */
+.sm-header-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.sm-filter-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    margin-right: 2px;
+    align-self: center;
+    line-height: 1;
+}
+
+.sm-filter-select {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+    align-self: center;
+}
+
+.sm-filter-select:focus {
+    outline: none;
+    border-color: #888;
+}
+
+/* ── Output area ─────────────────────────────────────────────────────────── */
+.sm-output-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    background: #111;
+}
+
+.sm-frame-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Frame rows ──────────────────────────────────────────────────────────── */
+.sm-frame {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 0;
+    padding: 5px 12px;
+    border-left: 3px solid transparent;
+    font-size: 13px;
+    line-height: 1.5;
+    transition: background 0.1s;
+}
+
+.sm-frame:hover {
+    background: #1e1e1e;
+}
+
+.sm-frame.sm-frame-aprs {
+    border-left-color: #4CAF50;
+}
+
+.sm-frame.sm-frame-ui {
+    border-left-color: #2196F3;
+}
+
+.sm-frame.sm-frame-connected {
+    border-left-color: #FF9800;
+}
+
+.sm-frame.sm-frame-other {
+    border-left-color: #555;
+}
+
+.sm-frame-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding-right: 10px;
+    border-right: 1px solid #2a2a2a;
+    min-width: 0;
+}
+
+.sm-frame-time {
+    font-size: 10px;
+    color: #666;
+    white-space: nowrap;
+}
+
+.sm-frame-from {
+    font-size: 12px;
+    font-weight: bold;
+    color: #2196F3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sm-frame-to {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sm-frame-body {
+    padding-left: 10px;
+    min-width: 0;
+}
+
+.sm-frame-path {
+    font-size: 10px;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+
+.sm-frame-payload {
+    font-size: 13px;
+    color: #e0e0e0;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
+/* APRS payload colour coding */
+.sm-frame-aprs .sm-frame-payload { color: #a5d6a7; }
+.sm-frame-ui    .sm-frame-payload { color: #90caf9; }
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+.sm-status-bar {
+    padding: 6px 16px;
+    background: #2a2a2a;
+    border-top: 1px solid #3a3a3a;
+    font-size: 12px;
+}
+
+.sm-status-text {
+    color: #888;
+    font-style: italic;
+}
+
+.sm-status-text.error { color: #ff4444; font-style: normal; }
+.sm-status-text.ok    { color: #4CAF50; font-style: normal; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.sm-btn {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+    transition: background 0.2s;
+}
+
+.sm-btn-primary            { background: #2196F3; color: #fff; }
+.sm-btn-primary:hover      { background: #1976D2; }
+.sm-btn-primary.running    { background: #f44336; }
+.sm-btn-primary.running:hover { background: #da190b; }
+
+.sm-btn-secondary          { background: #3a3a3a; color: #e0e0e0; }
+.sm-btn-secondary:hover    { background: #4a4a4a; }
+.sm-btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+.sm-output-area::-webkit-scrollbar       { width: 6px; }
+.sm-output-area::-webkit-scrollbar-track { background: #111; }
+.sm-output-area::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+.sm-output-area::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+    .sm-stats { gap: 12px; }
+    .sm-header { flex-direction: column; align-items: flex-start; }
+    .sm-frame { grid-template-columns: 70px 1fr; }
+}

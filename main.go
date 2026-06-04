@@ -33,6 +33,7 @@ import (
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/morse"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/soundmodem"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/whisper"
@@ -1521,6 +1522,49 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: whisper v%s", whisperInfo["version"].(string))
+
+	// Register Sound Modem extension
+	// enabled defaults to true — only skip registration if explicitly set to false in config.
+	// config.SoundModem.Enabled is *bool: nil = not set = enabled, false = explicitly disabled.
+	soundmodemEnabled := config.SoundModem.Enabled == nil || *config.SoundModem.Enabled
+	if soundmodemEnabled {
+		soundmodemMaxUsers := config.SoundModem.MaxUsers
+		if soundmodemMaxUsers == 0 {
+			soundmodemMaxUsers = 5 // default: 5 concurrent users
+		}
+		soundmodem.GlobalCfg = &soundmodem.GlobalConfig{
+			MaxUsers: soundmodemMaxUsers,
+		}
+		soundmodemInfo := soundmodem.GetInfo()
+
+		soundmodemFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+			smParams := soundmodem.AudioExtensionParams{
+				SampleRate:    audioParams.SampleRate,
+				Channels:      audioParams.Channels,
+				BitsPerSample: audioParams.BitsPerSample,
+			}
+
+			smExt, err := soundmodem.Factory(smParams, extensionParams)
+			if err != nil {
+				return nil, err
+			}
+
+			return &soundmodemExtensionWrapper{ext: smExt}, nil
+		}
+
+		audioExtensionRegistry.Register(
+			"soundmodem",
+			soundmodemFactoryWrapper,
+			AudioExtensionInfo{
+				Name:        soundmodemInfo["name"].(string),
+				Description: soundmodemInfo["description"].(string),
+				Version:     soundmodemInfo["version"].(string),
+			},
+		)
+		log.Printf("Registered audio extension: soundmodem v%s", soundmodemInfo["version"].(string))
+	} else {
+		log.Printf("Sound Modem extension disabled (soundmodem_extension.enabled: false)")
+	}
 
 	// Register FreeDV extension
 	// Callsign and locator come from the instance config; the frontend only provides freq_hz
@@ -5824,6 +5868,43 @@ func (w *whisperExtensionWrapper) HandleControlMessage(message []byte, resultCha
 	if whisperExt, ok := w.ext.(*whisper.WhisperExtension); ok {
 		whisperExt.HandleControlMessage(message, resultChan)
 	}
+}
+
+// soundmodemExtensionWrapper wraps a soundmodem.AudioExtension to implement main.AudioExtension
+type soundmodemExtensionWrapper struct {
+	ext soundmodem.AudioExtension
+}
+
+func (w *soundmodemExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to soundmodem.AudioSample
+	smChan := make(chan soundmodem.AudioSample, cap(audioChan))
+	go func() {
+		defer close(smChan)
+		for sample := range audioChan {
+			smChan <- soundmodem.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(smChan, resultChan)
+}
+
+func (w *soundmodemExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *soundmodemExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// CrashChan implements CrashReporter — delegates to the inner SoundModemExtension.
+func (w *soundmodemExtensionWrapper) CrashChan() <-chan error {
+	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return cr.CrashChan()
+	}
+	return nil
 }
 
 // freedvExtensionWrapper wraps a freedv.AudioExtension to implement main.AudioExtension

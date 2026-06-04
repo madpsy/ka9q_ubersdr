@@ -1,0 +1,335 @@
+<div class="sm-container">
+    <!-- Header -->
+    <div class="sm-header">
+        <h3>📡 Sound Modem</h3>
+        <div class="sm-stats" id="sm-stats">
+            <span class="sm-stat">
+                <span class="sm-stat-label">Frames</span>
+                <span class="sm-stat-value" id="sm-frame-count">0</span>
+            </span>
+            <span class="sm-stat">
+                <span class="sm-stat-label">Last</span>
+                <span class="sm-stat-value" id="sm-last-callsign">---</span>
+            </span>
+        </div>
+        <div class="sm-header-controls">
+            <label class="sm-filter-label" for="sm-filter-select">Filter</label>
+            <select id="sm-filter-select" class="sm-filter-select">
+                <option value="all">All frames</option>
+                <option value="aprs">APRS only</option>
+                <option value="ui">UI frames</option>
+            </select>
+            <button id="sm-config-btn" class="sm-btn sm-btn-secondary" title="Configure modem channels">⚙</button>
+            <button id="sm-start-btn" class="sm-btn sm-btn-primary">Start</button>
+            <button id="sm-clear-btn" class="sm-btn sm-btn-secondary">Clear</button>
+            <button id="sm-copy-btn" class="sm-btn sm-btn-secondary">Copy</button>
+        </div>
+    </div>
+
+    <!-- Configuration panel (hidden by default) -->
+    <div class="sm-config-panel" id="sm-config-panel" style="display:none">
+        <div class="sm-config-header">
+            <span class="sm-config-title">Modem Channel Configuration</span>
+            <span class="sm-config-hint">Configure up to 4 simultaneous decoders</span>
+        </div>
+
+        <!-- Global settings -->
+        <div class="sm-global-settings">
+            <label class="sm-param-label" for="sm-dcd-threshold">DCD Threshold</label>
+            <input type="number" id="sm-dcd-threshold" class="sm-param-input sm-param-short"
+                   min="1" max="100" value="20" title="Data Carrier Detect sensitivity (1=most sensitive, 100=least)">
+            <span class="sm-param-hint">1–100 (lower = more sensitive)</span>
+        </div>
+
+        <!-- Channel rows -->
+        <div class="sm-channels">
+            <!-- Channel A -->
+            <div class="sm-channel" id="sm-ch-0">
+                <div class="sm-channel-header">
+                    <label class="sm-channel-enable">
+                        <input type="checkbox" id="sm-ch0-enabled" checked>
+                        <span class="sm-channel-label">Channel A</span>
+                    </label>
+                </div>
+                <div class="sm-channel-params" id="sm-ch0-params">
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch0-modem">Modem</label>
+                        <select id="sm-ch0-modem" class="sm-param-select sm-modem-select">
+                            <option value="0">AFSK 300bd</option>
+                            <option value="1" selected>AFSK 1200bd (Bell 202)</option>
+                            <option value="2">AFSK 600bd</option>
+                            <option value="3">AFSK 2400bd</option>
+                            <option value="4">BPSK 1200bd</option>
+                            <option value="5">BPSK 600bd</option>
+                            <option value="6">BPSK 300bd</option>
+                            <option value="7">BPSK 2400bd</option>
+                            <option value="8">QPSK 4800bd</option>
+                            <option value="9">QPSK 3600bd</option>
+                            <option value="10">QPSK 2400bd</option>
+                            <option value="11">BPSK FEC 4×100bd</option>
+                            <option value="12">DW QPSK V26A 2400bd</option>
+                            <option value="13">DW 8PSK V27 4800bd</option>
+                            <option value="14">DW QPSK V26B 2400bd</option>
+                            <option value="15">ARDOP Packet</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch0-freq">Freq (Hz)</label>
+                        <input type="number" id="sm-ch0-freq" class="sm-param-input sm-param-short"
+                               min="100" max="4000" value="1700" step="50">
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch0-rcvr">Rcvr Pairs</label>
+                        <select id="sm-ch0-rcvr" class="sm-param-select sm-param-narrow">
+                            <option value="0" selected>0 (off)</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch0-fx25">FX.25</label>
+                        <select id="sm-ch0-fx25" class="sm-param-select sm-param-narrow">
+                            <option value="0">Off</option>
+                            <option value="1" selected>RX only</option>
+                            <option value="2">RX+TX</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch0-il2p">IL2P</label>
+                        <select id="sm-ch0-il2p" class="sm-param-select sm-param-narrow">
+                            <option value="0" selected>Off</option>
+                            <option value="1">IL2P</option>
+                            <option value="2">IL2P+CRC</option>
+                            <option value="3">Both</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Channel B -->
+            <div class="sm-channel" id="sm-ch-1">
+                <div class="sm-channel-header">
+                    <label class="sm-channel-enable">
+                        <input type="checkbox" id="sm-ch1-enabled">
+                        <span class="sm-channel-label">Channel B</span>
+                    </label>
+                </div>
+                <div class="sm-channel-params sm-channel-params-disabled" id="sm-ch1-params">
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch1-modem">Modem</label>
+                        <select id="sm-ch1-modem" class="sm-param-select sm-modem-select" disabled>
+                            <option value="0">AFSK 300bd</option>
+                            <option value="1" selected>AFSK 1200bd (Bell 202)</option>
+                            <option value="2">AFSK 600bd</option>
+                            <option value="3">AFSK 2400bd</option>
+                            <option value="4">BPSK 1200bd</option>
+                            <option value="5">BPSK 600bd</option>
+                            <option value="6">BPSK 300bd</option>
+                            <option value="7">BPSK 2400bd</option>
+                            <option value="8">QPSK 4800bd</option>
+                            <option value="9">QPSK 3600bd</option>
+                            <option value="10">QPSK 2400bd</option>
+                            <option value="11">BPSK FEC 4×100bd</option>
+                            <option value="12">DW QPSK V26A 2400bd</option>
+                            <option value="13">DW 8PSK V27 4800bd</option>
+                            <option value="14">DW QPSK V26B 2400bd</option>
+                            <option value="15">ARDOP Packet</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch1-freq">Freq (Hz)</label>
+                        <input type="number" id="sm-ch1-freq" class="sm-param-input sm-param-short"
+                               min="100" max="4000" value="1700" step="50" disabled>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch1-rcvr">Rcvr Pairs</label>
+                        <select id="sm-ch1-rcvr" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0" selected>0 (off)</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch1-fx25">FX.25</label>
+                        <select id="sm-ch1-fx25" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0">Off</option>
+                            <option value="1" selected>RX only</option>
+                            <option value="2">RX+TX</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch1-il2p">IL2P</label>
+                        <select id="sm-ch1-il2p" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0" selected>Off</option>
+                            <option value="1">IL2P</option>
+                            <option value="2">IL2P+CRC</option>
+                            <option value="3">Both</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Channel C -->
+            <div class="sm-channel" id="sm-ch-2">
+                <div class="sm-channel-header">
+                    <label class="sm-channel-enable">
+                        <input type="checkbox" id="sm-ch2-enabled">
+                        <span class="sm-channel-label">Channel C</span>
+                    </label>
+                </div>
+                <div class="sm-channel-params sm-channel-params-disabled" id="sm-ch2-params">
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch2-modem">Modem</label>
+                        <select id="sm-ch2-modem" class="sm-param-select sm-modem-select" disabled>
+                            <option value="0">AFSK 300bd</option>
+                            <option value="1" selected>AFSK 1200bd (Bell 202)</option>
+                            <option value="2">AFSK 600bd</option>
+                            <option value="3">AFSK 2400bd</option>
+                            <option value="4">BPSK 1200bd</option>
+                            <option value="5">BPSK 600bd</option>
+                            <option value="6">BPSK 300bd</option>
+                            <option value="7">BPSK 2400bd</option>
+                            <option value="8">QPSK 4800bd</option>
+                            <option value="9">QPSK 3600bd</option>
+                            <option value="10">QPSK 2400bd</option>
+                            <option value="11">BPSK FEC 4×100bd</option>
+                            <option value="12">DW QPSK V26A 2400bd</option>
+                            <option value="13">DW 8PSK V27 4800bd</option>
+                            <option value="14">DW QPSK V26B 2400bd</option>
+                            <option value="15">ARDOP Packet</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch2-freq">Freq (Hz)</label>
+                        <input type="number" id="sm-ch2-freq" class="sm-param-input sm-param-short"
+                               min="100" max="4000" value="1700" step="50" disabled>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch2-rcvr">Rcvr Pairs</label>
+                        <select id="sm-ch2-rcvr" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0" selected>0 (off)</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch2-fx25">FX.25</label>
+                        <select id="sm-ch2-fx25" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0">Off</option>
+                            <option value="1" selected>RX only</option>
+                            <option value="2">RX+TX</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch2-il2p">IL2P</label>
+                        <select id="sm-ch2-il2p" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0" selected>Off</option>
+                            <option value="1">IL2P</option>
+                            <option value="2">IL2P+CRC</option>
+                            <option value="3">Both</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Channel D -->
+            <div class="sm-channel" id="sm-ch-3">
+                <div class="sm-channel-header">
+                    <label class="sm-channel-enable">
+                        <input type="checkbox" id="sm-ch3-enabled">
+                        <span class="sm-channel-label">Channel D</span>
+                    </label>
+                </div>
+                <div class="sm-channel-params sm-channel-params-disabled" id="sm-ch3-params">
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch3-modem">Modem</label>
+                        <select id="sm-ch3-modem" class="sm-param-select sm-modem-select" disabled>
+                            <option value="0">AFSK 300bd</option>
+                            <option value="1" selected>AFSK 1200bd (Bell 202)</option>
+                            <option value="2">AFSK 600bd</option>
+                            <option value="3">AFSK 2400bd</option>
+                            <option value="4">BPSK 1200bd</option>
+                            <option value="5">BPSK 600bd</option>
+                            <option value="6">BPSK 300bd</option>
+                            <option value="7">BPSK 2400bd</option>
+                            <option value="8">QPSK 4800bd</option>
+                            <option value="9">QPSK 3600bd</option>
+                            <option value="10">QPSK 2400bd</option>
+                            <option value="11">BPSK FEC 4×100bd</option>
+                            <option value="12">DW QPSK V26A 2400bd</option>
+                            <option value="13">DW 8PSK V27 4800bd</option>
+                            <option value="14">DW QPSK V26B 2400bd</option>
+                            <option value="15">ARDOP Packet</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch3-freq">Freq (Hz)</label>
+                        <input type="number" id="sm-ch3-freq" class="sm-param-input sm-param-short"
+                               min="100" max="4000" value="1700" step="50" disabled>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch3-rcvr">Rcvr Pairs</label>
+                        <select id="sm-ch3-rcvr" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0" selected>0 (off)</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch3-fx25">FX.25</label>
+                        <select id="sm-ch3-fx25" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0">Off</option>
+                            <option value="1" selected>RX only</option>
+                            <option value="2">RX+TX</option>
+                        </select>
+                    </div>
+                    <div class="sm-param-row">
+                        <label class="sm-param-label" for="sm-ch3-il2p">IL2P</label>
+                        <select id="sm-ch3-il2p" class="sm-param-select sm-param-narrow" disabled>
+                            <option value="0" selected>Off</option>
+                            <option value="1">IL2P</option>
+                            <option value="2">IL2P+CRC</option>
+                            <option value="3">Both</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- end .sm-channels -->
+    </div>
+    <!-- end .sm-config-panel -->
+
+    <!-- Frame list -->
+    <div class="sm-output-area" id="sm-output-area">
+        <div class="sm-frame-list" id="sm-frame-list"></div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="sm-status-bar">
+        <span id="sm-status-text" class="sm-status-text">Ready — configure channels then press Start</span>
+    </div>
+</div>

@@ -10,6 +10,30 @@
     font-family: 'Courier New', monospace;
 }
 
+/* ── Frequency preset selector ───────────────────────────────────────────── */
+.sm-freq-selector {
+    padding: 6px 16px;
+    background: #222;
+    border-bottom: 1px solid #333;
+}
+
+.sm-freq-preset-select {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+    width: 100%;
+    max-width: 360px;
+}
+
+.sm-freq-preset-select:hover {
+    border-color: #4a9eff;
+}
+
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .sm-header {
     display: flex;

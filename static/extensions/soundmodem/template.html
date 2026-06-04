@@ -1,5 +1,15 @@
 <div class="sm-container">
 
+    <!-- ── Frequency preset selector ─────────────────────────────────────── -->
+    <div class="sm-freq-selector">
+        <select id="sm-freq-preset" class="sm-freq-preset-select">
+            <option value="">— Tune to frequency —</option>
+            <optgroup label="UK Packet">
+                <option value="7049450,usb">7.049.45 MHz USB (UK Packet)</option>
+            </optgroup>
+        </select>
+    </div>
+
     <!-- ── Header ─────────────────────────────────────────────────────────── -->
     <div class="sm-header">
         <div class="sm-stats" id="sm-stats">
@@ -94,8 +104,8 @@
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch0-modem">Modem</label>
                         <select id="sm-ch0-modem" class="sm-param-select sm-modem-select">
-                            <option value="0">AFSK AX.25 300bd</option>
-                            <option value="1" selected>AFSK AX.25 1200bd (Bell 202)</option>
+                            <option value="0" selected>AFSK AX.25 300bd</option>
+                            <option value="1">AFSK AX.25 1200bd (Bell 202)</option>
                             <option value="2">AFSK AX.25 600bd</option>
                             <option value="3">AFSK AX.25 2400bd</option>
                             <option value="4">BPSK AX.25 1200bd</option>
@@ -115,7 +125,7 @@
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch0-freq">Freq (Hz)</label>
                         <input id="sm-ch0-freq" type="number" class="sm-param-input sm-param-short"
-                               min="100" max="4000" value="1700">
+                               min="100" max="4000" value="850">
                     </div>
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch0-rcvr">Rcvr Pairs</label>
@@ -138,9 +148,9 @@
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch0-il2p">IL2P</label>
                         <select id="sm-ch0-il2p" class="sm-param-select sm-param-narrow">
-                            <option value="0" selected>Off</option>
+                            <option value="0">Off</option>
                             <option value="1">IL2P</option>
-                            <option value="2">IL2P+CRC</option>
+                            <option value="2" selected>IL2P+CRC</option>
                             <option value="3">Both</option>
                         </select>
                     </div>
@@ -151,21 +161,21 @@
             <div class="sm-channel" id="sm-ch-1">
                 <div class="sm-channel-header">
                     <label class="sm-channel-enable">
-                        <input type="checkbox" id="sm-ch1-enabled">
+                        <input type="checkbox" id="sm-ch1-enabled" checked>
                         <span class="sm-channel-label sm-channel-badge sm-channel-badge-1">Channel B</span>
                     </label>
                 </div>
-                <div class="sm-channel-params sm-channel-params-disabled" id="sm-ch1-params">
+                <div class="sm-channel-params" id="sm-ch1-params">
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch1-modem">Modem</label>
-                        <select id="sm-ch1-modem" class="sm-param-select sm-modem-select" disabled>
+                        <select id="sm-ch1-modem" class="sm-param-select sm-modem-select">
                             <option value="0">AFSK AX.25 300bd</option>
-                            <option value="1" selected>AFSK AX.25 1200bd (Bell 202)</option>
+                            <option value="1">AFSK AX.25 1200bd (Bell 202)</option>
                             <option value="2">AFSK AX.25 600bd</option>
                             <option value="3">AFSK AX.25 2400bd</option>
                             <option value="4">BPSK AX.25 1200bd</option>
                             <option value="5">BPSK AX.25 600bd</option>
-                            <option value="6">BPSK AX.25 300bd</option>
+                            <option value="6" selected>BPSK AX.25 300bd</option>
                             <option value="7">BPSK AX.25 2400bd</option>
                             <option value="8">QPSK AX.25 4800bd</option>
                             <option value="9">QPSK AX.25 3600bd</option>
@@ -180,11 +190,11 @@
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch1-freq">Freq (Hz)</label>
                         <input id="sm-ch1-freq" type="number" class="sm-param-input sm-param-short"
-                               min="100" max="4000" value="1700" disabled>
+                               min="100" max="4000" value="2150">
                     </div>
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch1-rcvr">Rcvr Pairs</label>
-                        <select id="sm-ch1-rcvr" class="sm-param-select sm-param-narrow" disabled>
+                        <select id="sm-ch1-rcvr" class="sm-param-select sm-param-narrow">
                             <option value="0" selected>0 (off)</option>
                             <option value="1">1</option>
                             <option value="2">2</option>
@@ -194,7 +204,7 @@
                     </div>
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch1-fx25">FX.25</label>
-                        <select id="sm-ch1-fx25" class="sm-param-select sm-param-narrow" disabled>
+                        <select id="sm-ch1-fx25" class="sm-param-select sm-param-narrow">
                             <option value="0">Off</option>
                             <option value="1" selected>RX only</option>
                             <option value="2">RX+TX</option>
@@ -202,10 +212,10 @@
                     </div>
                     <div class="sm-param-row">
                         <label class="sm-param-label" for="sm-ch1-il2p">IL2P</label>
-                        <select id="sm-ch1-il2p" class="sm-param-select sm-param-narrow" disabled>
-                            <option value="0" selected>Off</option>
+                        <select id="sm-ch1-il2p" class="sm-param-select sm-param-narrow">
+                            <option value="0">Off</option>
                             <option value="1">IL2P</option>
-                            <option value="2">IL2P+CRC</option>
+                            <option value="2" selected>IL2P+CRC</option>
                             <option value="3">Both</option>
                         </select>
                     </div>

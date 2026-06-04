@@ -160,6 +160,25 @@ class SoundModemExtension extends DecoderExtension {
         if (this._handlersSet) return;
         this._handlersSet = true;
 
+        // Frequency preset dropdown — tunes the radio like FT8 extension does
+        const freqPreset = document.getElementById('sm-freq-preset');
+        if (freqPreset) {
+            let lastPresetVal = '';
+            freqPreset.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    const [freq, mode] = e.target.value.split(',');
+                    this._tuneToFrequency(parseInt(freq, 10), mode);
+                    lastPresetVal = e.target.value;
+                }
+            });
+            freqPreset.addEventListener('click', (e) => {
+                if (e.target.value && e.target.value === lastPresetVal) {
+                    const [freq, mode] = e.target.value.split(',');
+                    this._tuneToFrequency(parseInt(freq, 10), mode);
+                }
+            });
+        }
+
         const startBtn  = document.getElementById('sm-start-btn');
         const clearBtn  = document.getElementById('sm-clear-btn');
         const copyBtn   = document.getElementById('sm-copy-btn');
@@ -1083,6 +1102,13 @@ class SoundModemExtension extends DecoderExtension {
         if (list) list.innerHTML = '';
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = '---';
+    }
+
+    _tuneToFrequency(freq, mode) {
+        // Tune the radio to the given frequency and mode, following the same
+        // pattern as the FT8 extension (window.setFrequency / window.setMode).
+        if (window.setFrequency) window.setFrequency(freq);
+        if (window.setMode)      window.setMode(mode || 'usb');
     }
 
     _copyOutput() {

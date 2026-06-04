@@ -51,8 +51,10 @@ class SoundModemExtension extends DecoderExtension {
         this._ourHandler  = null;
         this._handlersSet = false;
         this.searchText      = '';        // real-time text search filter
-        this._seenCallsigns  = new Set(); // all callsigns ever seen (from/to/digi)
-        this._callsignFilter = '';        // selected callsign from dropdown ('' = all)
+        this._seenCallsigns  = new Set(); // all sender callsigns ever seen
+        this._callsignFilter = '';        // selected sender from dropdown ('' = all)
+        this._seenDests      = new Set(); // all destination callsigns ever seen
+        this._destFilter     = '';        // selected destination from dropdown ('' = all)
 
         // Waterfall — draws FFT data from the page's existing AnalyserNode via radio.getAnalyser()
         this._wfCtx          = null;   // 2D context for scrolling waterfall canvas
@@ -297,13 +299,24 @@ class SoundModemExtension extends DecoderExtension {
         const logToggle = document.getElementById('sm-log-toggle');
         if (logToggle) logToggle.addEventListener('click', () => this._toggleLogPanel());
 
-        // Callsign dropdown filter
+        // Sender callsign dropdown filter
         const callsignSel = document.getElementById('sm-callsign-filter-select');
         if (callsignSel) {
-            this._updateCallsignDropdown(); // populate with any already-seen callsigns
+            this._updateCallsignDropdown();
             callsignSel.value = this._callsignFilter;
             callsignSel.addEventListener('change', (e) => {
                 this._callsignFilter = e.target.value;
+                this._applyFilters();
+            });
+        }
+
+        // Destination dropdown filter
+        const destSel = document.getElementById('sm-dest-filter-select');
+        if (destSel) {
+            this._updateDestDropdown();
+            destSel.value = this._destFilter;
+            destSel.addEventListener('change', (e) => {
+                this._destFilter = e.target.value;
                 this._applyFilters();
             });
         }
@@ -321,10 +334,13 @@ class SoundModemExtension extends DecoderExtension {
         if (searchClear) searchClear.addEventListener('click', () => {
             this.searchText = '';
             this._callsignFilter = '';
+            this._destFilter = '';
             const inp = document.getElementById('sm-search-input');
             if (inp) inp.value = '';
             const sel = document.getElementById('sm-callsign-filter-select');
             if (sel) sel.value = '';
+            const dsel = document.getElementById('sm-dest-filter-select');
+            if (dsel) dsel.value = '';
             this._applyFilters();
         });
 
@@ -1547,23 +1563,29 @@ class SoundModemExtension extends DecoderExtension {
         this._updateAgoDisplay();
         if (!this._agoTimer) this._startAgoTimer();
 
-        // Track sender callsigns seen (from + actioned digipeaters — strip * suffix)
-        // We deliberately exclude parsed.to (destination) as it's not a real station.
+        // Track sender callsigns (from + actioned digipeaters, excluding generic aliases)
         const stripStar = c => c.replace(/\*$/, '');
-        const prevSize = this._seenCallsigns.size;
+        const prevSenderSize = this._seenCallsigns.size;
         this._seenCallsigns.add(stripStar(parsed.from));
         if (parsed.digipeaters) {
             parsed.digipeaters.forEach(d => {
                 const bare = stripStar(d);
-                // Skip generic aliases like WIDE1-1, WIDE2-2, RELAY, TRACE etc.
                 if (!/^(WIDE|RELAY|TRACE|GATE|TCPIP|NOGATE|RFONLY)/i.test(bare)) {
                     this._seenCallsigns.add(bare);
                 }
             });
         }
-        // Only rebuild dropdown if new callsigns were added
-        if (this._seenCallsigns.size !== prevSize) {
+        if (this._seenCallsigns.size !== prevSenderSize) {
             this._updateCallsignDropdown();
+        }
+
+        // Track destination callsigns
+        if (parsed.to) {
+            const prevDestSize = this._seenDests.size;
+            this._seenDests.add(parsed.to);
+            if (this._seenDests.size !== prevDestSize) {
+                this._updateDestDropdown();
+            }
         }
 
         const digiStr = parsed.digipeaters && parsed.digipeaters.length > 0
@@ -1628,6 +1650,9 @@ class SoundModemExtension extends DecoderExtension {
         // Layout: [ch badge] [time] [from→to] [frame-type tag] [payload]
         const row = document.createElement('div');
         row.className = `sm-frame sm-frame-${cssType} sm-frame-ch-${parsed.kissPort}`;
+        // Store sender and destination for precise dropdown filtering
+        row.dataset.from = parsed.from;
+        row.dataset.to   = parsed.to || '';
 
         // Channel badge (A/B/C/D)
         const chLabel = ['A','B','C','D'][parsed.kissPort] ?? String(parsed.kissPort);
@@ -1764,11 +1789,16 @@ class SoundModemExtension extends DecoderExtension {
                     typeOk = true; // 'all'
             }
 
-            // Callsign dropdown filter — match against full row text
+            // Sender dropdown filter — exact match on data-from attribute
             let callsignOk = true;
             if (this._callsignFilter) {
-                const rowText = row.textContent.toLowerCase();
-                callsignOk = rowText.includes(this._callsignFilter.toLowerCase());
+                callsignOk = (row.dataset.from || '').toLowerCase() === this._callsignFilter.toLowerCase();
+            }
+
+            // Destination dropdown filter — exact match on data-to attribute
+            let destOk = true;
+            if (this._destFilter) {
+                destOk = (row.dataset.to || '').toLowerCase() === this._destFilter.toLowerCase();
             }
 
             // Text search — match against the full text content of the row
@@ -1778,7 +1808,7 @@ class SoundModemExtension extends DecoderExtension {
                 searchOk = rowText.includes(this.searchText);
             }
 
-            row.style.display = (chOk && typeOk && callsignOk && searchOk) ? '' : 'none';
+            row.style.display = (chOk && typeOk && callsignOk && destOk && searchOk) ? '' : 'none';
         });
     }
 
@@ -1799,6 +1829,21 @@ class SoundModemExtension extends DecoderExtension {
             opt.value = call;
             opt.textContent = call;
             if (call === current) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    _updateDestDropdown() {
+        const sel = document.getElementById('sm-dest-filter-select');
+        if (!sel) return;
+        const current = this._destFilter;
+        sel.innerHTML = '<option value="">Destination</option>';
+        const sorted = Array.from(this._seenDests).sort();
+        sorted.forEach(dest => {
+            const opt = document.createElement('option');
+            opt.value = dest;
+            opt.textContent = dest;
+            if (dest === current) opt.selected = true;
             sel.appendChild(opt);
         });
     }

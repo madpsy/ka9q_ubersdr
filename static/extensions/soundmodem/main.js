@@ -1,4 +1,20 @@
 // Sound Modem Extension — AX.25 packet radio decoder
+// Synchronously load ax25decode.js if not already available.
+// Using XHR sync ensures the decoder is ready before any KISS frames arrive,
+// regardless of the async script-loading order from the manifest.
+if (!window.AX25Decode) {
+    try {
+        const _xhr = new XMLHttpRequest();
+        _xhr.open('GET', '/extensions/soundmodem/ax25decode.js', false); // false = synchronous
+        _xhr.send(null);
+        if (_xhr.status === 200) {
+            // eslint-disable-next-line no-eval
+            eval(_xhr.responseText); // sets window.AX25Decode
+        }
+    } catch (_e) {
+        console.error('[SoundModem] Failed to load ax25decode.js synchronously:', _e);
+    }
+}
 // Decodes packet radio frames via KISS TNC and displays them.
 //
 // Binary wire protocol (backend → frontend):

@@ -81,6 +81,10 @@ class SoundModemExtension extends DecoderExtension {
         this._dcdState  = [false, false, false, false];
         this._dcdTimers = [null,  null,  null,  null];  // setTimeout handles for auto-clear
 
+        // Last-frame time tracking for the "Xm Ys ago" display
+        this._lastFrameTime = null;
+        this._agoTimer      = null;
+
         // APRS station map: callsign → { lat, lon, comment, time, marker }
         this._stationMap  = new Map();
         this._leafletMap  = null;   // Leaflet map instance
@@ -379,6 +383,9 @@ class SoundModemExtension extends DecoderExtension {
         this._readChannelFreqsFromUI();
         this._initWaterfallCanvases();
         if (this.running) this._startWaterfall();
+
+        // Restore map button label with current station count
+        this._updateMapStationCount();
     }
 
     _toggleSettings() {
@@ -539,6 +546,9 @@ class SoundModemExtension extends DecoderExtension {
             this._dcdState[i] = false;
             this._updateDCDLed(i, false);
         }
+
+        // Stop the "time ago" ticker
+        this._stopAgoTimer();
     }
 
     // ── WebSocket binary interception ─────────────────────────────────────────
@@ -901,18 +911,16 @@ class SoundModemExtension extends DecoderExtension {
     _toggleMap() {
         this._mapOpen = !this._mapOpen;
         const modal = document.getElementById('sm-map-modal');
-        const btn   = document.getElementById('sm-map-toggle');
         if (!modal) return;
         if (this._mapOpen) {
             modal.style.display = 'flex';
-            if (btn) btn.textContent = 'Hide Map';
             this._initLeafletMap();
             this._updateAllMapMarkers();
-            this._updateMapStationCount();
         } else {
             modal.style.display = 'none';
-            if (btn) btn.textContent = 'Map';
         }
+        // Always update button text with current count
+        this._updateMapStationCount();
     }
 
     _initLeafletMap() {
@@ -993,11 +1001,12 @@ class SoundModemExtension extends DecoderExtension {
     }
 
     _updateMapStationCount() {
+        const n = this._stationMap.size;
         const el = document.getElementById('sm-map-station-count');
-        if (el) {
-            const n = this._stationMap.size;
-            el.textContent = `${n} station${n !== 1 ? 's' : ''}`;
-        }
+        if (el) el.textContent = `${n} station${n !== 1 ? 's' : ''}`;
+        // Keep the Map button label in sync
+        const btn = document.getElementById('sm-map-toggle');
+        if (btn) btn.textContent = this._mapOpen ? `Hide Map (${n})` : `Map (${n})`;
     }
 
     _drawWaterfallHeader() {
@@ -1349,6 +1358,9 @@ class SoundModemExtension extends DecoderExtension {
 
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = parsed.from;
+        this._lastFrameTime = Date.now();
+        this._updateAgoDisplay();
+        if (!this._agoTimer) this._startAgoTimer();
 
         const digiStr = parsed.digipeaters && parsed.digipeaters.length > 0
             ? ' via ' + parsed.digipeaters.join(',') : '';
@@ -1525,6 +1537,37 @@ class SoundModemExtension extends DecoderExtension {
         if (el) el.textContent = this.frameCount;
     }
 
+    // ── Last-frame "time ago" display ─────────────────────────────────────────
+
+    _formatAgo(ms) {
+        const s = Math.floor(ms / 1000);
+        if (s < 60)  return `${s}s`;
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        if (m < 60)  return r > 0 ? `${m}m${r}s` : `${m}m`;
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        return rm > 0 ? `${h}h${rm}m` : `${h}h`;
+    }
+
+    _updateAgoDisplay() {
+        const el = document.getElementById('sm-last-ago');
+        if (!el) return;
+        if (!this._lastFrameTime) { el.textContent = ''; return; }
+        el.textContent = this._formatAgo(Date.now() - this._lastFrameTime);
+    }
+
+    _startAgoTimer() {
+        if (this._agoTimer) return;
+        this._agoTimer = setInterval(() => this._updateAgoDisplay(), 1000);
+    }
+
+    _stopAgoTimer() {
+        if (this._agoTimer) { clearInterval(this._agoTimer); this._agoTimer = null; }
+        const el = document.getElementById('sm-last-ago');
+        if (el) el.textContent = '';
+    }
+
     // ── UI helpers ────────────────────────────────────────────────────────────
 
     _setStatus(text, cls) {
@@ -1550,6 +1593,8 @@ class SoundModemExtension extends DecoderExtension {
         }
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = '---';
+        this._lastFrameTime = null;
+        this._stopAgoTimer();
     }
 
     _tuneToFrequency(freq, mode) {

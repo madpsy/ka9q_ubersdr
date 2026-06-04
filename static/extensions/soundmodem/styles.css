@@ -84,6 +84,13 @@
     text-align: right;
 }
 
+.sm-stat-ago {
+    font-size: 11px;
+    color: #666;
+    margin-left: 4px;
+    font-style: italic;
+}
+
 /* ── DCD LED row ─────────────────────────────────────────────────────────── */
 .sm-dcd-row {
     display: flex;

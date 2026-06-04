@@ -1014,11 +1014,12 @@ class SoundModemExtension extends DecoderExtension {
 
     _makeMarkerIcon(callsign) {
         // Custom DivIcon with callsign label
+        // Dot is 16px; anchor at its centre so the marker sits on the coordinate
         return L.divIcon({
             className: 'sm-map-marker',
             html: `<div class="sm-map-marker-dot"></div><div class="sm-map-marker-label">${callsign}</div>`,
-            iconAnchor: [0, 8],
-            popupAnchor: [0, -12],
+            iconAnchor: [8, 8],
+            popupAnchor: [0, -20],
         });
     }
 
@@ -1564,12 +1565,12 @@ class SoundModemExtension extends DecoderExtension {
                 marker:  existing ? existing.marker : null,
             };
             this._stationMap.set(callsign, entry);
-            // Update marker if map is open; also redraw RF links in case
-            // this new position unlocks a previously position-less link endpoint
+            // Always update the button count (map may be closed)
+            this._updateMapStationCount();
+            // Update marker and RF links only if map is open
             if (this._mapOpen && this._leafletMap) {
                 this._updateMapMarker(callsign, entry);
                 this._drawAllRFLinks();
-                this._updateMapStationCount();
             }
         }
 

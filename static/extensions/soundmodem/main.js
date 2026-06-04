@@ -50,11 +50,12 @@ class SoundModemExtension extends DecoderExtension {
         this._origHandler = null;
         this._ourHandler  = null;
         this._handlersSet = false;
-        this.searchText      = '';        // real-time text search filter
-        this._seenCallsigns  = new Set(); // all sender callsigns ever seen
-        this._callsignFilter = '';        // selected sender from dropdown ('' = all)
-        this._seenDests      = new Set(); // all destination callsigns ever seen
-        this._destFilter     = '';        // selected destination from dropdown ('' = all)
+        this.searchText         = '';        // real-time text search filter
+        this._seenCallsigns     = new Set(); // all sender callsigns ever seen
+        this._callsignFilter    = '';        // selected sender from dropdown ('' = all)
+        this._seenDests         = new Set(); // all destination callsigns ever seen
+        this._destFilter        = '';        // selected destination from dropdown ('' = all)
+        this._callsignChannels  = new Map(); // callsign → Set of kissPort numbers heard on
 
         // Waterfall — draws FFT data from the page's existing AnalyserNode via radio.getAnalyser()
         this._wfCtx          = null;   // 2D context for scrolling waterfall canvas
@@ -1151,7 +1152,25 @@ class SoundModemExtension extends DecoderExtension {
         canHear.sort();
         heardBy.sort();
 
-        let popupHtml = `<b>${callsign}</b><br>`;
+        // Build channel badges for channels this callsign has been heard on
+        const CH_COLORS = ['#29B6F6', '#66BB6A', '#CE93D8', '#FFA726'];
+        const CH_NAMES  = ['A', 'B', 'C', 'D'];
+        const channels  = this._callsignChannels.get(callsign);
+        let chBadges = '';
+        if (channels && channels.size > 0) {
+            const sorted = Array.from(channels).sort();
+            chBadges = sorted.map(ch => {
+                const color = CH_COLORS[ch] || '#888';
+                const name  = CH_NAMES[ch]  || String(ch);
+                return `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:4px">` +
+                       `${name}<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};box-shadow:0 0 4px ${color}"></span>` +
+                       `</span>`;
+            }).join('');
+        }
+
+        let popupHtml = `<b>${callsign}</b>`;
+        if (chBadges) popupHtml += ` ${chBadges}`;
+        popupHtml += `<br>`;
         if (entry.comment) popupHtml += `<span style="font-size:11px">${entry.comment}</span><br>`;
         popupHtml += `<small>Last seen: ${timeStr}</small>`;
         if (canHear.length > 0) {
@@ -1585,6 +1604,12 @@ class SoundModemExtension extends DecoderExtension {
         this.frameCount++;
         this._updateCountDisplay();
 
+        // Track which channel(s) this callsign has been heard on
+        if (!this._callsignChannels.has(parsed.from)) {
+            this._callsignChannels.set(parsed.from, new Set());
+        }
+        this._callsignChannels.get(parsed.from).add(parsed.kissPort);
+
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = parsed.from;
         this._lastFrameTime = Date.now();
@@ -1724,22 +1749,29 @@ class SoundModemExtension extends DecoderExtension {
 
         // Store position in station map (even when map is closed)
         if (aprsPos) {
-            const callsign = parsed.from;
-            const existing = this._stationMap.get(callsign);
-            const entry = {
-                lat:     parseFloat(aprsPos.lat),
-                lon:     parseFloat(aprsPos.lon),
-                comment: payloadText,
-                time:    new Date(),
-                marker:  existing ? existing.marker : null,
-            };
-            this._stationMap.set(callsign, entry);
-            // Always update the button count (map may be closed)
-            this._updateMapStationCount();
-            // Update marker and RF links only if map is open
-            if (this._mapOpen && this._leafletMap) {
-                this._updateMapMarker(callsign, entry);
-                this._drawAllRFLinks();
+            const lat = parseFloat(aprsPos.lat);
+            const lon = parseFloat(aprsPos.lon);
+            // Guard against NaN/out-of-range coordinates (malformed APRS position strings)
+            if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                console.warn('[SoundModem] Invalid APRS position skipped:', aprsPos, 'from', parsed.from);
+            } else {
+                const callsign = parsed.from;
+                const existing = this._stationMap.get(callsign);
+                const entry = {
+                    lat,
+                    lon,
+                    comment: payloadText,
+                    time:    new Date(),
+                    marker:  existing ? existing.marker : null,
+                };
+                this._stationMap.set(callsign, entry);
+                // Always update the button count (map may be closed)
+                this._updateMapStationCount();
+                // Update marker and RF links only if map is open
+                if (this._mapOpen && this._leafletMap) {
+                    this._updateMapMarker(callsign, entry);
+                    this._drawAllRFLinks();
+                }
             }
         }
 

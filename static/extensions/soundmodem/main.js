@@ -100,6 +100,58 @@ class SoundModemExtension extends DecoderExtension {
         }
     }
 
+    // ── localStorage persistence ──────────────────────────────────────────────
+
+    _saveConfig() {
+        try {
+            const cfg = { channels: [], dcd_threshold: null };
+            for (let i = 0; i < 4; i++) {
+                cfg.channels.push({
+                    enabled:    document.getElementById(`sm-ch${i}-enabled`)?.checked ?? false,
+                    modem:      document.getElementById(`sm-ch${i}-modem`)?.value      ?? '1',
+                    freq:       document.getElementById(`sm-ch${i}-freq`)?.value       ?? '1700',
+                    rcvr_pairs: document.getElementById(`sm-ch${i}-rcvr`)?.value       ?? '0',
+                    fx25:       document.getElementById(`sm-ch${i}-fx25`)?.value       ?? '1',
+                    il2p:       document.getElementById(`sm-ch${i}-il2p`)?.value       ?? '0',
+                });
+            }
+            cfg.dcd_threshold = document.getElementById('sm-dcd-threshold')?.value ?? '20';
+            localStorage.setItem('sm_config', JSON.stringify(cfg));
+        } catch (_) { /* storage unavailable */ }
+    }
+
+    _loadConfig() {
+        try {
+            const raw = localStorage.getItem('sm_config');
+            if (!raw) return;
+            const cfg = JSON.parse(raw);
+            if (!cfg || !Array.isArray(cfg.channels)) return;
+
+            cfg.channels.forEach((ch, i) => {
+                if (i >= 4) return;
+                const cbEl    = document.getElementById(`sm-ch${i}-enabled`);
+                const modemEl = document.getElementById(`sm-ch${i}-modem`);
+                const freqEl  = document.getElementById(`sm-ch${i}-freq`);
+                const rcvrEl  = document.getElementById(`sm-ch${i}-rcvr`);
+                const fx25El  = document.getElementById(`sm-ch${i}-fx25`);
+                const il2pEl  = document.getElementById(`sm-ch${i}-il2p`);
+
+                if (cbEl    && ch.enabled    !== undefined) cbEl.checked  = !!ch.enabled;
+                if (modemEl && ch.modem      !== undefined) modemEl.value = String(ch.modem);
+                if (freqEl  && ch.freq       !== undefined) freqEl.value  = String(ch.freq);
+                if (rcvrEl  && ch.rcvr_pairs !== undefined) rcvrEl.value  = String(ch.rcvr_pairs);
+                if (fx25El  && ch.fx25       !== undefined) fx25El.value  = String(ch.fx25);
+                if (il2pEl  && ch.il2p       !== undefined) il2pEl.value  = String(ch.il2p);
+
+                // Sync the enabled/disabled visual state of the params block
+                this._updateChannelState(i);
+            });
+
+            const dcdEl = document.getElementById('sm-dcd-threshold');
+            if (dcdEl && cfg.dcd_threshold !== undefined) dcdEl.value = String(cfg.dcd_threshold);
+        } catch (_) { /* corrupt storage — ignore */ }
+    }
+
     // ── Event handlers ────────────────────────────────────────────────────────
 
     _setupHandlers() {
@@ -128,6 +180,7 @@ class SoundModemExtension extends DecoderExtension {
             const cb = document.getElementById(`sm-ch${i}-enabled`);
             if (cb) cb.addEventListener('change', () => {
                 this._updateChannelState(i);
+                this._saveConfig();
                 // Redraw waterfall header so enabled-channel bars update immediately
                 if (!this.running) {
                     this._readChannelFreqsFromUI();
@@ -135,12 +188,23 @@ class SoundModemExtension extends DecoderExtension {
                 }
             });
 
-            // Redraw header when freq or modem changes (live preview)
-            const freqIn  = document.getElementById(`sm-ch${i}-freq`);
+            // Save + redraw header when freq or modem changes
+            const freqIn   = document.getElementById(`sm-ch${i}-freq`);
             const modemSel = document.getElementById(`sm-ch${i}-modem`);
-            if (freqIn)   freqIn.addEventListener('change',  () => { if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
-            if (modemSel) modemSel.addEventListener('change', () => { if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
+            const rcvrSel  = document.getElementById(`sm-ch${i}-rcvr`);
+            const fx25Sel  = document.getElementById(`sm-ch${i}-fx25`);
+            const il2pSel  = document.getElementById(`sm-ch${i}-il2p`);
+
+            if (freqIn)   freqIn.addEventListener('change',   () => { this._saveConfig(); if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
+            if (modemSel) modemSel.addEventListener('change', () => { this._saveConfig(); if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
+            if (rcvrSel)  rcvrSel.addEventListener('change',  () => this._saveConfig());
+            if (fx25Sel)  fx25Sel.addEventListener('change',  () => this._saveConfig());
+            if (il2pSel)  il2pSel.addEventListener('change',  () => this._saveConfig());
         }
+
+        // DCD threshold — save on change
+        const dcdThreshEl = document.getElementById('sm-dcd-threshold');
+        if (dcdThreshEl) dcdThreshEl.addEventListener('change', () => this._saveConfig());
 
         // Clamp numeric inputs to their min/max when the field is committed
         // (on blur or Enter). Using 'change' instead of 'input' so the user
@@ -155,7 +219,10 @@ class SoundModemExtension extends DecoderExtension {
             });
         });
 
-        // Restore state
+        // Restore persisted config into DOM inputs first
+        this._loadConfig();
+
+        // Restore runtime state
         if (filterSel) filterSel.value = this.filter;
         const chFilterSel2 = document.getElementById('sm-channel-filter');
         if (chFilterSel2) chFilterSel2.value = this.channelFilter;

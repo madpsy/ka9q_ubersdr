@@ -1137,7 +1137,27 @@ class SoundModemExtension extends DecoderExtension {
     _updateMapMarker(callsign, entry) {
         if (!this._leafletMap) return;
         const timeStr = entry.time.toTimeString().slice(0, 8);
-        const popupHtml = `<b>${callsign}</b><br>${entry.comment}<br><small>Last seen: ${timeStr}</small>`;
+
+        // Build heard/heard-by lists from _rfLinks
+        const heardBy   = [];  // stations that have heard this callsign
+        const canHear   = [];  // stations this callsign has heard
+        this._rfLinks.forEach(key => {
+            const [a, b] = key.split('|');
+            if (a === callsign) canHear.push(b);
+            else if (b === callsign) heardBy.push(a);
+        });
+        canHear.sort();
+        heardBy.sort();
+
+        let popupHtml = `<b>${callsign}</b><br>`;
+        if (entry.comment) popupHtml += `<span style="font-size:11px">${entry.comment}</span><br>`;
+        popupHtml += `<small>Last seen: ${timeStr}</small>`;
+        if (canHear.length > 0) {
+            popupHtml += `<br><small><b>Hears:</b> ${canHear.join(', ')}</small>`;
+        }
+        if (heardBy.length > 0) {
+            popupHtml += `<br><small><b>Heard by:</b> ${heardBy.join(', ')}</small>`;
+        }
 
         if (entry.marker) {
             entry.marker.setLatLng([entry.lat, entry.lon]);
@@ -1145,7 +1165,7 @@ class SoundModemExtension extends DecoderExtension {
         } else {
             entry.marker = L.marker([entry.lat, entry.lon], { icon: this._makeMarkerIcon(callsign) })
                 .addTo(this._leafletMap)
-                .bindPopup(popupHtml);
+                .bindPopup(popupHtml, { maxWidth: 300 });
             this._stationMap.set(callsign, entry);
         }
     }

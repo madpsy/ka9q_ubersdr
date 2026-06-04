@@ -1,5 +1,26 @@
 /* Sound Modem Extension — QtSoundModem / AX.25 packet decoder */
 
+/* ── Channel badge ───────────────────────────────────────────────────────── */
+.sm-channel-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.sm-channel-badge-0 { background: #1565C0; color: #fff; }  /* Ch A — blue */
+.sm-channel-badge-1 { background: #2E7D32; color: #fff; }  /* Ch B — green */
+.sm-channel-badge-2 { background: #6A1B9A; color: #fff; }  /* Ch C — purple */
+.sm-channel-badge-3 { background: #E65100; color: #fff; }  /* Ch D — orange */
+
+/* ── Narrow filter select ────────────────────────────────────────────────── */
+.sm-filter-narrow { width: 52px; }
+
+
 /* ── Config panel ────────────────────────────────────────────────────────── */
 .sm-config-panel {
     background: #1e1e1e;

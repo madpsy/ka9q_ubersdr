@@ -27,11 +27,12 @@ class SoundModemExtension extends DecoderExtension {
             preferredBandwidth: 3000
         });
 
-        this.running     = false;
-        this.frameCount  = 0;
-        this.filter      = 'all';
-        this.copyBuffer  = [];
-        this.configOpen  = false;
+        this.running       = false;
+        this.frameCount    = 0;
+        this.filter        = 'all';   // frame type filter: all | aprs | ui
+        this.channelFilter = 'all';   // channel filter: all | 0 | 1 | 2 | 3
+        this.copyBuffer    = [];
+        this.configOpen    = false;
 
         this._origHandler = null;
         this._ourHandler  = null;
@@ -99,6 +100,11 @@ class SoundModemExtension extends DecoderExtension {
         if (configBtn) configBtn.addEventListener('click',  () => this._toggleConfig());
         if (filterSel) filterSel.addEventListener('change', (e) => { this.filter = e.target.value; });
 
+        const channelFilterSel = document.getElementById('sm-channel-filter');
+        if (channelFilterSel) channelFilterSel.addEventListener('change', (e) => {
+            this.channelFilter = e.target.value;
+        });
+
         // Wire up channel enable checkboxes to enable/disable their param rows
         for (let i = 0; i < 4; i++) {
             const cb = document.getElementById(`sm-ch${i}-enabled`);
@@ -109,6 +115,8 @@ class SoundModemExtension extends DecoderExtension {
 
         // Restore DOM state after re-activation
         if (filterSel) filterSel.value = this.filter;
+        const channelFilterSel2 = document.getElementById('sm-channel-filter');
+        if (channelFilterSel2) channelFilterSel2.value = this.channelFilter;
         if (startBtn && this.running) {
             startBtn.textContent = 'Stop';
             startBtn.classList.add('running');
@@ -424,8 +432,12 @@ class SoundModemExtension extends DecoderExtension {
     // ── Display ───────────────────────────────────────────────────────────────
 
     _displayFrame(parsed) {
+        // Apply frame type filter
         if (this.filter === 'aprs' && !parsed.isAPRS) return;
         if (this.filter === 'ui'   && parsed.frameType !== 'ui' && !parsed.isAPRS) return;
+
+        // Apply channel filter
+        if (this.channelFilter !== 'all' && String(parsed.kissPort) !== this.channelFilter) return;
 
         this.frameCount++;
         this._updateCountDisplay();
@@ -450,7 +462,13 @@ class SoundModemExtension extends DecoderExtension {
 
         const timeEl = document.createElement('div');
         timeEl.className = 'sm-frame-time';
-        timeEl.textContent = timeStr;
+        // Time + channel badge
+        const chLabel = ['A', 'B', 'C', 'D'][parsed.kissPort] ?? String(parsed.kissPort);
+        const badge = document.createElement('span');
+        badge.className = `sm-channel-badge sm-channel-badge-${parsed.kissPort}`;
+        badge.textContent = chLabel;
+        timeEl.appendChild(document.createTextNode(timeStr + ' '));
+        timeEl.appendChild(badge);
 
         const fromEl = document.createElement('div');
         fromEl.className = 'sm-frame-from';

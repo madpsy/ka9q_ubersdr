@@ -13,11 +13,19 @@
             </span>
         </div>
         <div class="sm-header-controls">
-            <label class="sm-filter-label" for="sm-filter-select">Filter</label>
+            <label class="sm-filter-label" for="sm-filter-select">Type</label>
             <select id="sm-filter-select" class="sm-filter-select">
                 <option value="all">All frames</option>
                 <option value="aprs">APRS only</option>
                 <option value="ui">UI frames</option>
+            </select>
+            <label class="sm-filter-label" for="sm-channel-filter">Ch</label>
+            <select id="sm-channel-filter" class="sm-filter-select sm-filter-narrow">
+                <option value="all">All</option>
+                <option value="0">A</option>
+                <option value="1">B</option>
+                <option value="2">C</option>
+                <option value="3">D</option>
             </select>
             <button id="sm-config-btn" class="sm-btn sm-btn-secondary" title="Configure modem channels">⚙</button>
             <button id="sm-start-btn" class="sm-btn sm-btn-primary">Start</button>

@@ -1505,6 +1505,27 @@ class SoundModemExtension extends DecoderExtension {
             }
         }
 
+        // ── HEARD frame RF link extraction ────────────────────────────────────
+        // BPQ32 sends "FROM→HEARD" UI frames whose payload is a space-separated
+        // list of callsigns that FROM has directly heard.
+        // e.g. GB7BWR→HEARD: "EI5IYB GB7NOT GB7RDG GB7WEM PD4R GB7BPQ"
+        // Each listed callsign has a direct RF link to FROM.
+        if (parsed.to === 'HEARD' && parsed.infoRaw) {
+            const heardCalls = parsed.infoRaw.trim().split(/\s+/).filter(c => /^[A-Z0-9]+-?[0-9]*$/i.test(c));
+            heardCalls.forEach(heardCall => {
+                const a = parsed.from;
+                const b = heardCall.toUpperCase();
+                if (a === b) return;
+                const key = [a, b].sort().join('|');
+                if (!this._rfLinks.has(key)) {
+                    this._rfLinks.add(key);
+                    if (this._mapOpen && this._leafletMap) {
+                        this._drawRFLink(key, a, b);
+                    }
+                }
+            });
+        }
+
         // Normalised CSS type (collapse l4-* subtypes to 'netrom')
         const cssType = NETROM_TYPES.has(ft) ? 'netrom' : ft;
 

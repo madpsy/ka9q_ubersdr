@@ -1149,11 +1149,11 @@ class SoundModemExtension extends DecoderExtension {
     // ── AX.25 frame parser — delegates to AX25Decode (ax25decode.js) ──────────
 
     _parseAX25(bytes) {
-        if (typeof AX25Decode === 'undefined') {
+        if (!window.AX25Decode) {
             console.warn('[SoundModem] AX25Decode not loaded');
             return null;
         }
-        return AX25Decode.parse(bytes);
+        return window.AX25Decode.parse(bytes);
     }
 
     // ── Display ───────────────────────────────────────────────────────────────

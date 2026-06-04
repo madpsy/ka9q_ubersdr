@@ -744,3 +744,6 @@ window.AX25Decode = (() => {
     return { parse, pidName };
 
 })();
+
+// Confirm the script executed and the global is set
+console.log('[AX25Decode] loaded, window.AX25Decode =', typeof window.AX25Decode);

@@ -46,6 +46,7 @@ class SoundModemExtension extends DecoderExtension {
         this._wfChannelFreqs = [];     // [{freq, enabled, modem}] snapshot from config at start time
         this._wfLineMs       = 50;     // ms between waterfall lines (20 lines/sec = steady scroll speed)
         this._wfLastLineAt   = 0;      // performance.now() timestamp of last rendered line
+        this._wfMouseX       = null;   // canvas X of current mouse position (null = not hovering)
 
         // Monitor panel
         this._monitorLines = 0;
@@ -780,6 +781,18 @@ class SoundModemExtension extends DecoderExtension {
             ovlCanvas.width  = w;
             ovlCanvas.height = h;
             this._wfOvlCtx = ovlCanvas.getContext('2d');
+
+            // Mouse hover — show audio + RF frequency tooltip
+            ovlCanvas.addEventListener('mousemove', (e) => {
+                const rect = ovlCanvas.getBoundingClientRect();
+                // Scale from CSS pixels to canvas pixels
+                this._wfMouseX = (e.clientX - rect.left) * (ovlCanvas.width / rect.width);
+                this._drawWaterfallOverlay();
+            });
+            ovlCanvas.addEventListener('mouseleave', () => {
+                this._wfMouseX = null;
+                this._drawWaterfallOverlay();
+            });
         }
 
         this._drawWaterfallHeader();
@@ -932,12 +945,12 @@ class SoundModemExtension extends DecoderExtension {
             const color = chColors[i];
 
             // Semi-transparent bandwidth band
-            ctx.fillStyle = color + '18';   // ~10% opacity
+            ctx.fillStyle = color + '18';
             ctx.fillRect(xLo, 0, xHi - xLo, h);
 
             // Centre line — dashed, semi-transparent
             ctx.save();
-            ctx.strokeStyle = color + 'aa'; // ~67% opacity
+            ctx.strokeStyle = color + 'aa';
             ctx.lineWidth   = 1;
             ctx.setLineDash([4, 4]);
             ctx.beginPath();
@@ -947,13 +960,70 @@ class SoundModemExtension extends DecoderExtension {
             ctx.restore();
 
             // Edge lines — faint solid
-            ctx.strokeStyle = color + '55'; // ~33% opacity
+            ctx.strokeStyle = color + '55';
             ctx.lineWidth   = 1;
             ctx.beginPath();
             ctx.moveTo(xLo, 0); ctx.lineTo(xLo, h);
             ctx.moveTo(xHi, 0); ctx.lineTo(xHi, h);
             ctx.stroke();
         });
+
+        // ── Mouse crosshair + frequency tooltip ───────────────────────────────
+        if (this._wfMouseX !== null) {
+            const mx = this._wfMouseX;
+
+            // Audio frequency at cursor
+            const audioHz = Math.round((mx / w) * maxFreq);
+
+            // RF frequency = dial frequency + audio offset
+            // radio.getFrequency() returns Hz; USB convention: RF = dial + audio
+            let rfLabel = '';
+            try {
+                const dialHz = (typeof radio !== 'undefined') ? radio.getFrequency() : null;
+                if (dialHz && dialHz > 0) {
+                    const rfHz = dialHz + audioHz;
+                    // Format RF frequency nicely
+                    if (rfHz >= 1e6) {
+                        rfLabel = ` | ${(rfHz / 1e6).toFixed(4)} MHz`;
+                    } else {
+                        rfLabel = ` | ${(rfHz / 1e3).toFixed(3)} kHz`;
+                    }
+                }
+            } catch (_) { /* radio API not available */ }
+
+            const label = `${audioHz} Hz${rfLabel}`;
+
+            // Vertical crosshair line
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+            ctx.lineWidth   = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(mx, 0);
+            ctx.lineTo(mx, h);
+            ctx.stroke();
+            ctx.restore();
+
+            // Tooltip box
+            ctx.font = 'bold 10px monospace';
+            const textW = ctx.measureText(label).width;
+            const padX = 4, padY = 3;
+            const boxW = textW + padX * 2;
+            const boxH = 14;
+            // Position: above cursor, flip left if near right edge
+            let bx = mx + 6;
+            if (bx + boxW > w) bx = mx - boxW - 6;
+            const by = 4;
+
+            ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            ctx.beginPath();
+            ctx.roundRect(bx, by, boxW, boxH, 3);
+            ctx.fill();
+
+            ctx.fillStyle = '#fff';
+            ctx.textBaseline = 'top';
+            ctx.fillText(label, bx + padX, by + padY);
+        }
     }
 
     _startWaterfall() {

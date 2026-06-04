@@ -137,8 +137,14 @@ class SoundModemExtension extends DecoderExtension {
             style.id = 'sm-keyframes';
             style.textContent = `
                 @keyframes sm-start-pulse {
-                    0%, 100% { box-shadow: 0 0 0 0 rgba(76,175,80,0.6); }
-                    50%       { box-shadow: 0 0 0 8px rgba(76,175,80,0); }
+                    0%, 100% {
+                        box-shadow: 0 0 0 0 rgba(76,175,80,0.7);
+                        background: #388E3C;
+                    }
+                    50% {
+                        box-shadow: 0 0 0 10px rgba(76,175,80,0);
+                        background: #4CAF50;
+                    }
                 }
             `;
             document.head.appendChild(style);
@@ -484,10 +490,10 @@ class SoundModemExtension extends DecoderExtension {
 
     _setStartBtnReady(btn) {
         btn.textContent = 'Start';
-        btn.style.background = '#388E3C';
         btn.style.color = '#fff';
         btn.style.animation = 'sm-start-pulse 1.8s ease-in-out infinite';
         btn.style.boxShadow = '';
+        btn.style.background = ''; // Let the keyframe control background
     }
 
     // ── Decoder control ───────────────────────────────────────────────────────

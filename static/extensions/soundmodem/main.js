@@ -1597,6 +1597,8 @@ class SoundModemExtension extends DecoderExtension {
 
         const payloadEl = document.createElement('span');
         payloadEl.className = 'sm-frame-payload';
+        // Native tooltip shows full text on hover (bypasses CSS ellipsis truncation)
+        payloadEl.title = payloadText;
 
         if (aprsPos) {
             // Split payload into pre-coords, coords, post-coords and linkify the coords

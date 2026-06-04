@@ -92,6 +92,20 @@ class SoundModemExtension extends DecoderExtension {
             el.innerHTML = tpl;
             this._handlersSet = false;
         }
+        // Inject keyframes into <head> once so the start-button pulse animation
+        // works even when set via inline style (inline styles can reference
+        // @keyframes from any stylesheet in the document).
+        if (!document.getElementById('sm-keyframes')) {
+            const style = document.createElement('style');
+            style.id = 'sm-keyframes';
+            style.textContent = `
+                @keyframes sm-start-pulse {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(76,175,80,0.6); }
+                    50%       { box-shadow: 0 0 0 8px rgba(76,175,80,0); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
     }
 
     _waitForDOM(cb, attempts = 0) {
@@ -274,13 +288,9 @@ class SoundModemExtension extends DecoderExtension {
         if (maxFramesSel2) maxFramesSel2.value = String(this.maxFrames);
         if (startBtn) {
             if (this.running) {
-                startBtn.textContent = 'Stop';
-                startBtn.classList.remove('sm-start-ready');
-                startBtn.classList.add('running');
+                this._setStartBtnRunning(startBtn);
             } else {
-                startBtn.textContent = 'Start';
-                startBtn.classList.remove('running');
-                startBtn.classList.add('sm-start-ready');
+                this._setStartBtnReady(startBtn);
             }
         }
         // Restore settings panel visibility
@@ -385,6 +395,26 @@ class SoundModemExtension extends DecoderExtension {
         return { channels, dcd_threshold: dcdThreshold };
     }
 
+    // ── Start button visual state helpers ────────────────────────────────────
+    // Use inline styles so they always win regardless of CSS load order or
+    // specificity conflicts with the host page's stylesheet.
+
+    _setStartBtnRunning(btn) {
+        btn.textContent = 'Stop';
+        btn.style.background = '#f44336';
+        btn.style.color = '#fff';
+        btn.style.animation = 'none';
+        btn.style.boxShadow = 'none';
+    }
+
+    _setStartBtnReady(btn) {
+        btn.textContent = 'Start';
+        btn.style.background = '#388E3C';
+        btn.style.color = '#fff';
+        btn.style.animation = 'sm-start-pulse 1.8s ease-in-out infinite';
+        btn.style.boxShadow = '';
+    }
+
     // ── Decoder control ───────────────────────────────────────────────────────
 
     _toggleDecoder() {
@@ -417,11 +447,7 @@ class SoundModemExtension extends DecoderExtension {
         this._setStatus('Connecting…');
 
         const btn = document.getElementById('sm-start-btn');
-        if (btn) {
-            btn.textContent = 'Stop';
-            btn.classList.remove('sm-start-ready');
-            btn.classList.add('running');
-        }
+        if (btn) this._setStartBtnRunning(btn);
 
         // Hide config panel (but keep _settingsOpen state so toggle still works)
         this._setConfigVisible(false);
@@ -439,11 +465,7 @@ class SoundModemExtension extends DecoderExtension {
         this._setStatus('Stopped');
 
         const btn = document.getElementById('sm-start-btn');
-        if (btn) {
-            btn.textContent = 'Start';
-            btn.classList.remove('running');
-            btn.classList.add('sm-start-ready');
-        }
+        if (btn) this._setStartBtnReady(btn);
 
         // Re-show config panel (with inputs enabled) if settings was open
         this._setConfigVisible(this._settingsOpen, false);
@@ -564,11 +586,7 @@ class SoundModemExtension extends DecoderExtension {
         this._stopWaterfall();
         this.running = false;
         const btn = document.getElementById('sm-start-btn');
-        if (btn) {
-            btn.textContent = 'Start';
-            btn.classList.remove('running');
-            btn.classList.add('sm-start-ready');
-        }
+        if (btn) this._setStartBtnReady(btn);
         this._setConfigVisible(this._settingsOpen, false);
     }
 

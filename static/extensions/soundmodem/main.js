@@ -77,8 +77,8 @@ class SoundModemExtension extends DecoderExtension {
         this._logMax   = 500;
         this._logOpen  = false;
 
-        // Settings panel — hidden by default; first click opens it
-        this._settingsOpen = false;
+        // Settings panel — shown by default on initial load
+        this._settingsOpen = true;
 
         // DCD state per channel + auto-clear timers
         this._dcdState  = [false, false, false, false];

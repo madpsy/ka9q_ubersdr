@@ -948,34 +948,49 @@ class SoundModemExtension extends DecoderExtension {
         this._wfChannelFreqs.forEach((ch, i) => {
             if (!ch.enabled || ch.freq <= 0) return;
 
-            const shift = (rxShifts[ch.modem] ?? 1000) / 2;
-            const xCtr  = Math.round((ch.freq          / maxFreq) * w);
-            const xLo   = Math.round(((ch.freq - shift) / maxFreq) * w);
-            const xHi   = Math.round(((ch.freq + shift) / maxFreq) * w);
-            const color = chColors[i];
+            const shift  = (rxShifts[ch.modem] ?? 1000) / 2;
+            const xCtr   = Math.round((ch.freq           / maxFreq) * w);
+            const xLo    = Math.round(((ch.freq - shift)  / maxFreq) * w);
+            const xHi    = Math.round(((ch.freq + shift)  / maxFreq) * w);
+            const color  = chColors[i];
+            const chName = ['A','B','C','D'][i] ?? String(i);
 
-            // Semi-transparent bandwidth band
-            ctx.fillStyle = color + '18';
+            // Bandwidth band — more visible fill
+            ctx.fillStyle = color + '30';   // ~19% opacity
             ctx.fillRect(xLo, 0, xHi - xLo, h);
 
-            // Centre line — dashed, semi-transparent
-            ctx.save();
-            ctx.strokeStyle = color + 'aa';
+            // Edge lines — solid, clearly visible
+            ctx.strokeStyle = color + '99'; // ~60% opacity
             ctx.lineWidth   = 1;
-            ctx.setLineDash([4, 4]);
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(xLo, 0); ctx.lineTo(xLo, h);
+            ctx.moveTo(xHi, 0); ctx.lineTo(xHi, h);
+            ctx.stroke();
+
+            // Centre line — bright solid
+            ctx.save();
+            ctx.strokeStyle = color + 'ee'; // ~93% opacity
+            ctx.lineWidth   = 2;
+            ctx.setLineDash([5, 3]);
             ctx.beginPath();
             ctx.moveTo(xCtr, 0);
             ctx.lineTo(xCtr, h);
             ctx.stroke();
             ctx.restore();
 
-            // Edge lines — faint solid
-            ctx.strokeStyle = color + '55';
-            ctx.lineWidth   = 1;
-            ctx.beginPath();
-            ctx.moveTo(xLo, 0); ctx.lineTo(xLo, h);
-            ctx.moveTo(xHi, 0); ctx.lineTo(xHi, h);
-            ctx.stroke();
+            // Channel label at top of centre line
+            ctx.save();
+            ctx.font         = 'bold 10px monospace';
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'top';
+            // Dark background pill behind the label
+            const labelW = ctx.measureText(chName).width + 6;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(xCtr - labelW / 2, 2, labelW, 13);
+            ctx.fillStyle = color;
+            ctx.fillText(chName, xCtr, 3);
+            ctx.restore();
         });
 
         // ── Mouse crosshair + frequency tooltip ───────────────────────────────
@@ -1224,6 +1239,9 @@ class SoundModemExtension extends DecoderExtension {
 
         const list = document.getElementById('sm-frame-list');
         if (list) {
+            // Remove the "Waiting for first frame…" placeholder on first real frame
+            const empty = document.getElementById('sm-frame-empty');
+            if (empty) empty.remove();
             list.insertBefore(row, list.firstChild);
             this._trimFrameList(list);
         }
@@ -1307,7 +1325,15 @@ class SoundModemExtension extends DecoderExtension {
         this.copyBuffer = [];
         this._updateCountDisplay();
         const list = document.getElementById('sm-frame-list');
-        if (list) list.innerHTML = '';
+        if (list) {
+            list.innerHTML = '';
+            // Restore the "Waiting for first frame…" placeholder
+            const empty = document.createElement('div');
+            empty.className = 'sm-frame-empty';
+            empty.id = 'sm-frame-empty';
+            empty.textContent = 'Waiting for first frame…';
+            list.appendChild(empty);
+        }
         const lastEl = document.getElementById('sm-last-callsign');
         if (lastEl) lastEl.textContent = '---';
     }

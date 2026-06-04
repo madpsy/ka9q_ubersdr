@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/soundmodem"
 	"github.com/gorilla/websocket"
 )
 
@@ -294,6 +295,33 @@ func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocke
 			log.Printf("AudioExtension: Active extension is not whisper, cannot handle summary request")
 			return aem.sendErrorSafe(activeExtension, conn, "summary requests only supported for whisper extension")
 		}
+
+	case "set_output_mode":
+		// Switch the soundmodem output format on the fly (no subprocess restart needed).
+		// Expected message: { "type": "audio_extension_control", "control_type": "set_output_mode", "output_mode": "ax25" | "kiss" }
+		modeStr, ok := msg["output_mode"].(string)
+		if !ok || modeStr == "" {
+			log.Printf("AudioExtension: set_output_mode missing output_mode")
+			return aem.sendErrorSafe(activeExtension, conn, "output_mode is required for set_output_mode (\"ax25\" or \"kiss\")")
+		}
+
+		smWrapper, ok := activeExtension.Extension.(*soundmodemExtensionWrapper)
+		if !ok {
+			log.Printf("AudioExtension: set_output_mode called on non-soundmodem extension")
+			return aem.sendErrorSafe(activeExtension, conn, "set_output_mode is only supported for the soundmodem extension")
+		}
+
+		if err := smWrapper.SetOutputMode(soundmodem.OutputMode(modeStr)); err != nil {
+			log.Printf("AudioExtension: set_output_mode failed: %v", err)
+			return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("set_output_mode failed: %v", err))
+		}
+
+		log.Printf("AudioExtension: [%s] output_mode switched to %q", sessionID, modeStr)
+		return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
+			"type":         "audio_extension_control_ack",
+			"control_type": "set_output_mode",
+			"output_mode":  modeStr,
+		})
 
 	default:
 		log.Printf("AudioExtension: Unknown control type: %s", controlType)

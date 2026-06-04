@@ -57,6 +57,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -310,6 +311,10 @@ type SoundModemDecoder struct {
 	kissPort int
 	agwPort  int
 
+	// outputMode is read on every decoded frame in kissReadLoop, so it is stored
+	// as an atomic.Value to allow lock-free runtime switching via SetOutputMode.
+	outputMode atomic.Value // stores OutputMode (string)
+
 	tempDir string // /dev/shm/soundmodem-XXXXXX
 
 	cmd   *exec.Cmd
@@ -327,12 +332,20 @@ type SoundModemDecoder struct {
 
 // NewSoundModemDecoder creates a new decoder but does not start the subprocess.
 func NewSoundModemDecoder(cfg SoundModemConfig, kissPort, agwPort int) (*SoundModemDecoder, error) {
-	return &SoundModemDecoder{
+	d := &SoundModemDecoder{
 		cfg:       cfg,
 		kissPort:  kissPort,
 		agwPort:   agwPort,
 		crashChan: make(chan error, 1),
-	}, nil
+	}
+	d.outputMode.Store(cfg.OutputMode)
+	return d, nil
+}
+
+// SetOutputMode atomically updates the output format used for subsequently decoded frames.
+// It takes effect immediately on the next frame decoded by kissReadLoop — no restart required.
+func (d *SoundModemDecoder) SetOutputMode(mode OutputMode) {
+	d.outputMode.Store(mode)
 }
 
 // Start launches the subprocess and begins the read/write goroutines.
@@ -636,7 +649,7 @@ func (d *SoundModemDecoder) kissReadLoop(resultChan chan<- []byte) {
 						kissCmd := frame[0] & 0x0F
 						if kissCmd == 0 { // data frame
 							var pkt []byte
-							switch d.cfg.OutputMode {
+							switch d.outputMode.Load().(OutputMode) {
 							case OutputModeKISS:
 								// Send the complete raw KISS frame (with 0xC0 delimiters)
 								// so the client can pipe it directly to other KISS software.

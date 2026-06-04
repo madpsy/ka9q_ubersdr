@@ -9202,6 +9202,8 @@ class RadioGUI:
             self.open_freedv_window()
         elif ext_name == 'morse':
             self.open_morse_window()
+        elif ext_name == 'soundmodem':
+            self.open_soundmodem_window()
         else:
             messagebox.showinfo("Info", f"Extension '{ext_info['displayName']}' is not yet supported in the Python client")
 
@@ -9223,6 +9225,8 @@ class RadioGUI:
             return 'FreeDV'
         if hasattr(self, 'morse_window') and self.morse_window and self.morse_window.window.winfo_exists():
             return 'Morse (CW)'
+        if hasattr(self, 'soundmodem_window') and self.soundmodem_window and self.soundmodem_window.window.winfo_exists():
+            return 'Sound Modem'
         return None
 
     def open_navtex_window(self):
@@ -9652,6 +9656,59 @@ class RadioGUI:
                 self._mark_window_closed('morse')
                 _morse_win.destroy()
             _morse_win.protocol("WM_DELETE_WINDOW", _morse_close)
+
+    def open_soundmodem_window(self):
+        """Open the Sound Modem AX.25 packet decoder extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'soundmodem_window') and self.soundmodem_window and self.soundmodem_window.window.winfo_exists():
+            self.soundmodem_window.window.lift()
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to a server first")
+            return
+
+        # Import Sound Modem extension
+        try:
+            from soundmodem_extension import create_soundmodem_window
+        except ImportError:
+            messagebox.showerror("Error", "Sound Modem extension not available")
+            return
+
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
+        # Create Sound Modem window
+        self.soundmodem_window = create_soundmodem_window(
+            self.root,
+            ws_manager,
+            self
+        )
+
+        # Restore saved geometry and wire close handler
+        if self.soundmodem_window and hasattr(self.soundmodem_window, 'window') and self.soundmodem_window.window:
+            self.restore_window_geometry('soundmodem', self.soundmodem_window.window)
+            _sm_win = self.soundmodem_window.window
+            def _sm_close():
+                self.save_window_geometry('soundmodem', _sm_win)
+                self._mark_window_closed('soundmodem')
+                self.soundmodem_window.on_closing()
+            _sm_win.protocol("WM_DELETE_WINDOW", _sm_close)
 
     def auto_reopen_previous_windows(self):
         """Reopen windows that were open in the previous session.

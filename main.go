@@ -5899,6 +5899,15 @@ func (w *soundmodemExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }
 
+// SetOutputMode switches the output format on the fly without restarting QtSoundModem.
+// Returns an error if mode is invalid or the inner extension does not support it.
+func (w *soundmodemExtensionWrapper) SetOutputMode(mode soundmodem.OutputMode) error {
+	if sm, ok := w.ext.(*soundmodem.SoundModemExtension); ok {
+		return sm.SetOutputMode(mode)
+	}
+	return fmt.Errorf("inner extension does not support SetOutputMode")
+}
+
 // CrashChan implements CrashReporter — delegates to the inner SoundModemExtension.
 func (w *soundmodemExtensionWrapper) CrashChan() <-chan error {
 	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {

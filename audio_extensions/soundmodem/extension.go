@@ -29,6 +29,8 @@ package soundmodem
  *         [type:1=0x24][channel:1][is_tx:1][text_len:4 uint32 BE][text: UTF-8]
  *
  * Frontend params (passed in audio_extension_attach → params):
+ *   output_mode: "ax25" | "kiss"  (optional, default "ax25"; can be changed at runtime
+ *                                   via audio_extension_control set_output_mode)
  *   channels: array of up to 4 channel config objects:
  *     { enabled: bool, modem: int, freq: float, rcvr_pairs: int, fx25: int, il2p: int }
  *   dcd_threshold: int (1–100, default 20)
@@ -161,7 +163,7 @@ type SoundModemExtension struct {
 // The frontend sends:
 //
 //	params: {
-//	  output_mode: "ax25" | "kiss",   // REQUIRED
+//	  output_mode: "ax25" | "kiss",   // optional, default "ax25"
 //	  channels: [
 //	    { enabled: true, modem: 1, freq: 1700, rcvr_pairs: 0, fx25: 1, il2p: 0 },
 //	    ...  (up to 4)
@@ -171,22 +173,21 @@ type SoundModemExtension struct {
 func validateChannelConfig(sampleRate int, extensionParams map[string]interface{}) (SoundModemConfig, error) {
 	cfg := DefaultSoundModemConfig(sampleRate)
 
-	// --- output_mode (REQUIRED) ---
-	rawMode, ok := extensionParams["output_mode"]
-	if !ok {
-		return cfg, fmt.Errorf("output_mode is required: must be \"ax25\" or \"kiss\"")
-	}
-	modeStr, ok := rawMode.(string)
-	if !ok {
-		return cfg, fmt.Errorf("output_mode must be a string (\"ax25\" or \"kiss\"), got %T", rawMode)
-	}
-	switch OutputMode(modeStr) {
-	case OutputModeAX25:
-		cfg.OutputMode = OutputModeAX25
-	case OutputModeKISS:
-		cfg.OutputMode = OutputModeKISS
-	default:
-		return cfg, fmt.Errorf("output_mode %q is invalid: must be \"ax25\" or \"kiss\"", modeStr)
+	// --- output_mode (optional, default "ax25") ---
+	cfg.OutputMode = OutputModeAX25
+	if rawMode, ok := extensionParams["output_mode"]; ok {
+		modeStr, ok := rawMode.(string)
+		if !ok {
+			return cfg, fmt.Errorf("output_mode must be a string (\"ax25\" or \"kiss\"), got %T", rawMode)
+		}
+		switch OutputMode(modeStr) {
+		case OutputModeAX25:
+			cfg.OutputMode = OutputModeAX25
+		case OutputModeKISS:
+			cfg.OutputMode = OutputModeKISS
+		default:
+			return cfg, fmt.Errorf("output_mode %q is invalid: must be \"ax25\" or \"kiss\"", modeStr)
+		}
 	}
 
 	// --- dcd_threshold ---
@@ -488,6 +489,18 @@ func (e *SoundModemExtension) Stop() error {
 // GetName returns the extension name.
 func (e *SoundModemExtension) GetName() string {
 	return "soundmodem"
+}
+
+// SetOutputMode switches the output format for subsequently decoded frames without
+// restarting the QtSoundModem subprocess. mode must be "ax25" or "kiss".
+func (e *SoundModemExtension) SetOutputMode(mode OutputMode) error {
+	switch mode {
+	case OutputModeAX25, OutputModeKISS:
+		e.decoder.SetOutputMode(mode)
+		return nil
+	default:
+		return fmt.Errorf("output_mode %q is invalid: must be \"ax25\" or \"kiss\"", mode)
+	}
 }
 
 // CrashChan returns a channel that receives an error if the subprocess crashes

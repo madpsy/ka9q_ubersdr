@@ -70,9 +70,10 @@ func GetInfo() map[string]interface{} {
 		"parameters": map[string]interface{}{
 			"output_mode": map[string]interface{}{
 				"type":        "string",
-				"description": "REQUIRED. Controls what the backend sends for each decoded frame. \"ax25\" strips KISS framing and sends raw AX.25 bytes in a 0x20 envelope (use for the built-in web display). \"kiss\" sends the complete raw KISS frame with 0xC0 delimiters in a 0x22 envelope (use for piping to direwolf or other KISS software).",
+				"description": "Optional. Controls what the backend sends for each decoded frame. \"ax25\" (default) strips KISS framing and sends raw AX.25 bytes in a 0x20 envelope (use for the built-in web display). \"kiss\" sends the complete raw KISS frame with 0xC0 delimiters in a 0x22 envelope (use for piping to direwolf or other KISS software). Can be changed at runtime via audio_extension_control set_output_mode without restarting the modem.",
 				"enum":        []string{"ax25", "kiss"},
-				"required":    true,
+				"default":     "ax25",
+				"required":    false,
 			},
 			"channels": map[string]interface{}{
 				"type":        "array",

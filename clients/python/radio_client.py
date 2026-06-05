@@ -2068,6 +2068,8 @@ class RadioClient:
                     await self.setup_sounddevice()
                 elif self.output_mode == 'wav':
                     self.setup_wav_writer()
+                elif self.output_mode == 'null':
+                    pass  # discard all audio (used by headless extension modes)
                 elif self.output_mode == 'stdout':
                     print(f"stdout output: {self.sample_rate} Hz, {self.output_channels} channel(s)", file=sys.stderr)
                 elif self.output_mode == 'udp':
@@ -2614,6 +2616,41 @@ Examples:
 
   # CLI mode with Serial CAT control (bidirectional sync)
   %(prog)s --no-gui -f 14074000 -m usb --radio-control-type serial --radio-serial-port /dev/ttyUSB0 --radio-vfo A
+
+Headless Sound Modem examples:
+  # Use saved channel config (from GUI settings):
+  %(prog)s --soundmodem --callsign M9PSY
+
+  # Override channels explicitly — default GUI config (AFSK 300bd on 850 Hz + BPSK 300bd on 2150 Hz):
+  %(prog)s --soundmodem --callsign M9PSY -f 7049450 -m usb \\
+      --channel modem=0,freq=850,rcvr_pairs=0,fx25=1,il2p=2 \\
+      --channel modem=6,freq=2150,rcvr_pairs=0,fx25=1,il2p=2
+
+  # Custom KISS TCP port with explicit channels:
+  %(prog)s --soundmodem --callsign M9PSY -f 7049450 -m usb --kiss-port 8101 \\
+      --channel modem=0,freq=850,rcvr_pairs=0,fx25=1,il2p=2
+
+Modem index reference:
+   0 = AFSK AX.25 300bd
+   1 = AFSK AX.25 1200bd (Bell 202)
+   2 = AFSK AX.25 600bd
+   3 = AFSK AX.25 2400bd
+   4 = BPSK AX.25 1200bd
+   5 = BPSK AX.25 600bd
+   6 = BPSK AX.25 300bd
+   7 = BPSK AX.25 2400bd
+   8 = QPSK AX.25 4800bd
+   9 = QPSK AX.25 3600bd
+  10 = QPSK AX.25 2400bd
+  11 = BPSK FEC 4x100bd
+  12 = DW QPSK V26A 2400bd
+  13 = DW 8PSK V27 4800bd
+  14 = DW QPSK V26B 2400bd
+  15 = ARDOP Packet
+
+rcvr_pairs:  0=off  1=1 pair  2=2 pairs  4=4 pairs  8=8 pairs
+fx25:        0=off  1=RX only  2=RX+TX
+il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
         """
     )
 
@@ -2705,6 +2742,30 @@ Examples:
                         help='Radio sync direction: sdr-to-rig or rig-to-sdr (default: sdr-to-rig)')
     parser.add_argument('--list-serial-ports', action='store_true',
                         help='List available serial ports and exit')
+
+    parser.add_argument('--soundmodem', action='store_true',
+                        help=(
+                            'Run Sound Modem in headless KISS TCP mode (no GUI). '
+                            'Loads channel config from ~/.ubersdr_soundmodem.json unless '
+                            '--channel flags are given. Use --kiss-port to set the KISS TCP '
+                            'port (default 8100). See examples below.'
+                        ))
+    parser.add_argument('--kiss-port', type=int, default=None,
+                        help='KISS TCP listen port for --soundmodem mode (default: 8100; overrides saved config)')
+    parser.add_argument(
+        '--channel',
+        metavar='modem=N,freq=F,rcvr_pairs=N,fx25=N,il2p=N',
+        action='append',
+        dest='soundmodem_channels',
+        help=(
+            'Explicit channel config for --soundmodem mode (repeatable, up to 4 times for '
+            'channels A/B/C/D in order). All five keys are required. '
+            'When any --channel flag is given the saved config channel settings are ignored '
+            'and only the specified channels are enabled. '
+            'Keys: modem (int), freq (Hz, float), rcvr_pairs (0/1/2/4/8), fx25 (0-2), il2p (0-3). '
+            'See examples below.'
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -2947,6 +3008,16 @@ Examples:
             bandwidth_low = default_low
         if bandwidth_high is None:
             bandwidth_high = default_high
+
+    # ── Headless Sound Modem mode ─────────────────────────────────────────────
+    if getattr(args, 'soundmodem', False):
+        try:
+            from radio_gui import run_headless_soundmodem
+        except ImportError as _e:
+            print(f'ERROR: Could not import radio_gui: {_e}', file=sys.stderr)
+            sys.exit(1)
+        run_headless_soundmodem(args)
+        sys.exit(0)
 
     # Auto-detect headless environment before attempting GUI launch
     if not args.no_gui:

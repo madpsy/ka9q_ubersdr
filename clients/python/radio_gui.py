@@ -9943,6 +9943,432 @@ class RadioGUI:
         self.root.after(500, self.root.destroy)
 
 
+def run_headless_soundmodem(args):
+    """
+    Run Sound Modem in headless KISS TCP mode.
+
+    Uses RadioClient for the audio WebSocket (which handles the /connection
+    handshake, reconnection, keepalives, etc.) and DXClusterWebSocket for the
+    extension control channel — exactly the same components the GUI uses.
+
+    Loads saved channel config from ~/.ubersdr_soundmodem.json.
+    Runs until SIGINT/SIGTERM.
+    """
+    import asyncio as _asyncio
+    import json as _json
+    import os as _os
+    import signal as _signal
+    import socket as _socket
+    import struct as _struct
+    import threading as _threading
+    import time as _time
+
+    # ── Load saved config ──────────────────────────────────────────────────────
+    _CONFIG_PATH    = _os.path.join(_os.path.expanduser('~'), '.ubersdr_soundmodem.json')
+    _CONFIG_VERSION = 2
+
+    # Default channel params (mirrors SoundModemExtension defaults)
+    _DEFAULT_CHANNELS = [
+        {'enabled': True,  'modem': 0, 'freq': 850.0,  'rcvr_pairs': 0, 'fx25': 1, 'il2p': 2},
+        {'enabled': True,  'modem': 6, 'freq': 2150.0, 'rcvr_pairs': 0, 'fx25': 1, 'il2p': 2},
+        {'enabled': False, 'modem': 1, 'freq': 1700.0, 'rcvr_pairs': 0, 'fx25': 0, 'il2p': 0},
+        {'enabled': False, 'modem': 1, 'freq': 1700.0, 'rcvr_pairs': 0, 'fx25': 0, 'il2p': 0},
+    ]
+
+    channels      = [dict(c) for c in _DEFAULT_CHANNELS]
+    dcd_threshold = 20
+    kiss_port     = 8100
+
+    try:
+        if _os.path.exists(_CONFIG_PATH):
+            with open(_CONFIG_PATH) as _f:
+                _cfg = _json.load(_f)
+            if isinstance(_cfg.get('channels'), list) and _cfg.get('_v', 1) >= _CONFIG_VERSION:
+                for _i, _ch in enumerate(_cfg['channels'][:4]):
+                    # Parse values the same way _collect_params() does in
+                    # soundmodem_extension.py — the GUI saves display strings
+                    # like "0: AFSK 300bd", "0 (off)", "1 RX only", "2 IL2P+CRC"
+                    # but the server expects plain integers / floats.
+                    if 'enabled' in _ch:
+                        channels[_i]['enabled'] = bool(_ch['enabled'])
+                    if 'modem' in _ch:
+                        _v = str(_ch['modem'])
+                        try:
+                            channels[_i]['modem'] = int(_v.split(':')[0]) if ':' in _v else int(_v)
+                        except (ValueError, TypeError):
+                            pass  # keep default
+                    if 'freq' in _ch:
+                        try:
+                            channels[_i]['freq'] = float(_ch['freq'])
+                        except (ValueError, TypeError):
+                            pass
+                    if 'rcvr_pairs' in _ch:
+                        _v = str(_ch['rcvr_pairs'])
+                        try:
+                            channels[_i]['rcvr_pairs'] = int(_v.split()[0])
+                        except (ValueError, TypeError):
+                            pass
+                    if 'fx25' in _ch:
+                        _v = str(_ch['fx25'])
+                        try:
+                            channels[_i]['fx25'] = int(_v.split()[0])
+                        except (ValueError, TypeError):
+                            pass
+                    if 'il2p' in _ch:
+                        _v = str(_ch['il2p'])
+                        try:
+                            channels[_i]['il2p'] = int(_v.split()[0])
+                        except (ValueError, TypeError):
+                            pass
+                if 'dcd_threshold' in _cfg:
+                    dcd_threshold = int(_cfg['dcd_threshold'])
+                if 'kiss_port' in _cfg:
+                    kiss_port = int(_cfg['kiss_port'])
+    except Exception as _e:
+        print(f'[soundmodem] Warning: could not load config: {_e}', file=sys.stderr)
+
+    # CLI --kiss-port overrides saved config
+    if getattr(args, 'kiss_port', None) is not None:
+        kiss_port = args.kiss_port
+
+    # ── CLI --channel overrides (ignore saved config channel settings) ─────────
+    _cli_channels = getattr(args, 'soundmodem_channels', None) or []
+    if _cli_channels:
+        if len(_cli_channels) > 4:
+            print(
+                f'ERROR: At most 4 --channel flags are supported (got {len(_cli_channels)}). '
+                'Channels map to A/B/C/D in order.',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        _REQUIRED_KEYS = ('modem', 'freq', 'rcvr_pairs', 'fx25', 'il2p')
+        # Start from all-disabled defaults
+        channels = [dict(c, enabled=False) for c in _DEFAULT_CHANNELS]
+
+        for _i, _spec in enumerate(_cli_channels):
+            _parsed = {}
+            for _pair in _spec.split(','):
+                _pair = _pair.strip()
+                if '=' not in _pair:
+                    continue
+                _k, _val = _pair.split('=', 1)
+                _parsed[_k.strip()] = _val.strip()
+
+            # Validate all required keys are present
+            _missing = [k for k in _REQUIRED_KEYS if k not in _parsed]
+            if _missing:
+                print(
+                    f'ERROR: --channel #{_i + 1} is missing required key(s): '
+                    f'{", ".join(_missing)}.\n'
+                    f'       Required: modem=N,freq=F,rcvr_pairs=N,fx25=N,il2p=N\n'
+                    f'       Example:  --channel modem=0,freq=850,rcvr_pairs=0,fx25=1,il2p=2',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            try:
+                channels[_i] = {
+                    'enabled':    True,
+                    'modem':      int(_parsed['modem']),
+                    'freq':       float(_parsed['freq']),
+                    'rcvr_pairs': int(_parsed['rcvr_pairs']),
+                    'fx25':       int(_parsed['fx25']),
+                    'il2p':       int(_parsed['il2p']),
+                }
+            except (ValueError, TypeError) as _e:
+                print(
+                    f'ERROR: --channel #{_i + 1} has an invalid value: {_e}\n'
+                    f'       modem/rcvr_pairs/fx25/il2p must be integers; freq must be a number.',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+    # Frequency / mode from CLI
+    _audio_freq = int(getattr(args, 'frequency', None) or 14100000)
+    _audio_mode = (getattr(args, 'mode', None) or 'usb').lower()
+
+    # ── Build RadioClient ──────────────────────────────────────────────────────
+    # RadioClient handles /connection handshake, reconnection, keepalives, etc.
+    # output_mode='null' discards audio; the audio session on /ws stays alive
+    # so the extension can attach on /ws/dxcluster.
+    from radio_client import RadioClient
+    from dxcluster_websocket import DXClusterWebSocket
+
+    _audio_ready = _threading.Event()   # set when /ws session is established
+    _stop_event  = _threading.Event()
+
+    def _status_cb(msg_type, msg):
+        # RadioClient fires status_callback("info", "Connected!") via _log()
+        # when the WebSocket session is established (after /connection handshake).
+        if msg_type == 'info' and isinstance(msg, str) and 'Connected' in msg:
+            if not _audio_ready.is_set():
+                print(f'[soundmodem] Audio session established ({_audio_freq} Hz {_audio_mode.upper()})',
+                      file=sys.stderr)
+                _audio_ready.set()
+        elif msg_type == 'server_error':
+            reason = msg if isinstance(msg, str) else str(msg)
+            print(f'[soundmodem] Server error: {reason}', file=sys.stderr)
+            _stop_event.set()
+
+    client = RadioClient(
+        url=getattr(args, 'url', None),
+        host=getattr(args, 'host', None) or 'localhost',
+        port=getattr(args, 'port', None) or 8080,
+        frequency=_audio_freq,
+        mode=_audio_mode,
+        output_mode='null',
+        ssl=getattr(args, 'ssl', False),
+        password=getattr(args, 'password', None),
+        auto_reconnect=True,
+        status_callback=_status_cb,
+    )
+
+    # ── Check server supports soundmodem extension ────────────────────────────
+    # Mirrors what the GUI does: only show the extension if the server advertises it.
+    _http_proto = 'https' if getattr(args, 'ssl', False) else 'http'
+    _url_arg    = getattr(args, 'url', None)
+    if _url_arg:
+        # Derive HTTP base from the URL arg (strip ws:// → http://, strip path)
+        _http_base = _url_arg.replace('wss://', 'https://').replace('ws://', 'http://')
+        _parts = _http_base.split('://', 1)
+        if len(_parts) == 2 and '/' in _parts[1]:
+            _http_base = _parts[0] + '://' + _parts[1].split('/')[0]
+    else:
+        _http_base = f'{_http_proto}://{getattr(args, "host", None) or "localhost"}:{getattr(args, "port", None) or 8080}'
+
+    try:
+        import urllib.request as _urlreq
+        import urllib.error  as _urlerr
+        _ext_req = _urlreq.Request(
+            f'{_http_base}/api/extensions',
+            headers={'User-Agent': 'UberSDR Client 1.0 (python)'},
+        )
+        with _urlreq.urlopen(_ext_req, timeout=10) as _resp:
+            _ext_data = _json.loads(_resp.read())
+        _available = _ext_data.get('available', _ext_data if isinstance(_ext_data, list) else [])
+        _ext_slugs = [_e.get('slug', _e.get('name', '')) for _e in _available]
+        if 'soundmodem' not in _ext_slugs:
+            print(
+                'ERROR: The server does not have the soundmodem extension enabled.\n'
+                f'       Available extensions: {", ".join(_ext_slugs) or "(none)"}',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f'[soundmodem] Server supports soundmodem extension ✓', file=sys.stderr)
+    except SystemExit:
+        raise
+    except Exception as _e:
+        # If we can't reach the extensions API, warn but continue — the attach
+        # will fail with a clear server-side error if the extension is absent.
+        print(f'[soundmodem] Warning: could not check extensions API: {_e}', file=sys.stderr)
+
+    def _run_client():
+        try:
+            _asyncio.run(client.run())
+        except Exception as _e:
+            print(f'[soundmodem] RadioClient error: {_e}', file=sys.stderr)
+        finally:
+            _stop_event.set()
+
+    _threading.Thread(target=_run_client, daemon=True, name='soundmodem-radio-client').start()
+
+    # ── KISS TCP server ────────────────────────────────────────────────────────
+    _kiss_clients      = []
+    _kiss_clients_lock = _threading.Lock()
+    _frame_count       = [0]
+
+    def _kiss_accept_loop(srv_sock):
+        srv_sock.settimeout(1.0)
+        while not _stop_event.is_set():
+            try:
+                conn, addr = srv_sock.accept()
+                with _kiss_clients_lock:
+                    _kiss_clients.append(conn)
+                print(f'[soundmodem] KISS client connected from {addr[0]}:{addr[1]}', file=sys.stderr)
+
+                def _monitor(c, a):
+                    try:
+                        while not _stop_event.is_set():
+                            data = c.recv(1)
+                            if not data:
+                                break
+                    except Exception:
+                        pass
+                    with _kiss_clients_lock:
+                        if c in _kiss_clients:
+                            _kiss_clients.remove(c)
+                    try:
+                        c.close()
+                    except Exception:
+                        pass
+                    print(f'[soundmodem] KISS client disconnected from {a[0]}:{a[1]}', file=sys.stderr)
+
+                _threading.Thread(target=_monitor, args=(conn, addr), daemon=True).start()
+            except _socket.timeout:
+                continue
+            except Exception:
+                break
+
+    def _forward_kiss_frame(kiss_frame: bytes):
+        dead = []
+        with _kiss_clients_lock:
+            clients_snapshot = list(_kiss_clients)
+        for _c in clients_snapshot:
+            try:
+                _c.sendall(kiss_frame)
+            except Exception:
+                dead.append(_c)
+        if dead:
+            with _kiss_clients_lock:
+                for _c in dead:
+                    if _c in _kiss_clients:
+                        _kiss_clients.remove(_c)
+                    try:
+                        _c.close()
+                    except Exception:
+                        pass
+
+    # Start KISS TCP server
+    try:
+        _srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        _srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        _srv.bind(('0.0.0.0', kiss_port))
+        _srv.listen(8)
+        print(f'[soundmodem] KISS TCP server listening on 0.0.0.0:{kiss_port}', file=sys.stderr)
+    except OSError as _e:
+        print(f'ERROR: Cannot bind KISS TCP server on port {kiss_port}: {_e}', file=sys.stderr)
+        client.running = False
+        sys.exit(1)
+
+    _threading.Thread(target=_kiss_accept_loop, args=(_srv,), daemon=True).start()
+
+    # ── Wait for audio session ─────────────────────────────────────────────────
+    print('[soundmodem] Waiting for audio session…', file=sys.stderr)
+    if not _audio_ready.wait(timeout=30.0):
+        print('ERROR: Timed out waiting for audio session. Check server address.', file=sys.stderr)
+        client.running = False
+        _stop_event.set()
+        try:
+            _srv.close()
+        except Exception:
+            pass
+        sys.exit(1)
+
+    # ── DXClusterWebSocket — extension control channel ─────────────────────────
+    # Build the ws:// base URL from the same parameters RadioClient used.
+    _url = getattr(args, 'url', None)
+    _ssl = getattr(args, 'ssl', False)
+    if _url:
+        _ws_base = _url.replace('http://', 'ws://').replace('https://', 'wss://')
+        _parts = _ws_base.split('://', 1)
+        if len(_parts) == 2 and '/' in _parts[1]:
+            _ws_base = _parts[0] + '://' + _parts[1].split('/')[0]
+    else:
+        _proto   = 'wss' if _ssl else 'ws'
+        _h       = getattr(args, 'host', None) or 'localhost'
+        _p       = getattr(args, 'port', None) or 8080
+        _ws_base = f'{_proto}://{_h}:{_p}'
+
+    _dx_ws = DXClusterWebSocket(_ws_base, client.user_session_id)
+
+    # Override the on_message handler to process binary KISS frames, and
+    # override on_open to send audio_extension_attach.
+    def _dx_on_message_override(ws, message):
+        if isinstance(message, bytes):
+            if len(message) < 1:
+                return
+            t = message[0]
+            if t == 0x22:
+                # KISS frame: [0x22][frame_len:4 BE][kiss_frame:N]
+                if len(message) < 5:
+                    return
+                frame_len = _struct.unpack('>I', message[1:5])[0]
+                if len(message) < 5 + frame_len:
+                    return
+                kiss_frame = message[5:5 + frame_len]
+                _frame_count[0] += 1
+                if _frame_count[0] % 100 == 0:
+                    print(f'[soundmodem] {_frame_count[0]} KISS frames forwarded', file=sys.stderr)
+                _forward_kiss_frame(kiss_frame)
+            elif t == 0x25:
+                # Log message: [0x25][len:4 BE][utf8 text]
+                if len(message) >= 5:
+                    _mlen = _struct.unpack('>I', message[1:5])[0]
+                    if len(message) >= 5 + _mlen:
+                        _text = message[5:5 + _mlen].decode('utf-8', errors='replace')
+                        print(f'[soundmodem] {_text}', file=sys.stderr)
+        else:
+            # Let DXClusterWebSocket handle JSON messages normally
+            _dx_ws._on_message(ws, message)
+            # Also log extension-specific messages
+            try:
+                _data = _json.loads(message)
+                _mtype = _data.get('type', '')
+                if _mtype == 'audio_extension_attached':
+                    print('[soundmodem] Extension attached — receiving KISS frames', file=sys.stderr)
+                elif _mtype == 'audio_extension_error':
+                    print(f'[soundmodem] Server error: {_data.get("error", "?")}', file=sys.stderr)
+            except Exception:
+                pass
+
+    def _dx_on_open_override(ws):
+        _dx_ws._on_open(ws)
+        print('[soundmodem] Extension control connected', file=sys.stderr)
+        _params = {'channels': channels, 'dcd_threshold': dcd_threshold}
+        _msg = {
+            'type':           'audio_extension_attach',
+            'extension_name': 'soundmodem',
+            'params':         {'output_mode': 'kiss', **_params},
+        }
+        try:
+            ws.send(_json.dumps(_msg))
+        except Exception as _e:
+            print(f'[soundmodem] Failed to send attach: {_e}', file=sys.stderr)
+
+    # Patch the WebSocketApp factory so our overrides are used on every
+    # connection attempt (including reconnects inside DXClusterWebSocket).
+    _orig_create = _dx_ws._create_websocket
+
+    def _patched_create():
+        _orig_create()
+        _dx_ws.ws.on_message = _dx_on_message_override
+        _dx_ws.ws.on_open    = _dx_on_open_override
+
+    _dx_ws._create_websocket = _patched_create
+    # connect() calls _create_websocket() internally — no need to call it manually
+    _dx_ws.connect()
+
+    # ── Signal handling ────────────────────────────────────────────────────────
+    def _shutdown(sig, frame):
+        print('\n[soundmodem] Shutting down…', file=sys.stderr)
+        _stop_event.set()
+        client.running = False
+        if _dx_ws.ws:
+            try:
+                _dx_ws.ws.send(_json.dumps({'type': 'audio_extension_detach'}))
+            except Exception:
+                pass
+        _dx_ws.disconnect()
+        try:
+            _srv.close()
+        except Exception:
+            pass
+
+    _signal.signal(_signal.SIGINT,  _shutdown)
+    if hasattr(_signal, 'SIGTERM'):
+        _signal.signal(_signal.SIGTERM, _shutdown)
+
+    # ── Main loop ──────────────────────────────────────────────────────────────
+    _n_ch = sum(1 for c in channels if c['enabled'])
+    print(f'[soundmodem] Channels: {_n_ch} enabled  |  KISS port: {kiss_port}', file=sys.stderr)
+    print('[soundmodem] Press Ctrl+C to stop', file=sys.stderr)
+
+    # Block until stopped
+    _stop_event.wait()
+    print('[soundmodem] Stopped.', file=sys.stderr)
+
+
 def main(config=None):
     """Main entry point for GUI mode."""
     # Use provided config or defaults
@@ -9985,7 +10411,47 @@ if __name__ == '__main__':
 
     import argparse
 
-    parser = argparse.ArgumentParser(description='ka9q_ubersdr Radio GUI Client')
+    parser = argparse.ArgumentParser(
+        description='ka9q_ubersdr Radio GUI Client',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            'Headless Sound Modem examples:\n'
+            '\n'
+            '  # Use saved channel config (from GUI settings):\n'
+            '  %(prog)s --soundmodem --callsign M9PSY\n'
+            '\n'
+            '  # Override channels explicitly — default GUI config (AFSK 300bd on 850 Hz + BPSK 300bd on 2150 Hz):\n'
+            '  %(prog)s --soundmodem --callsign M9PSY --frequency 7.04945 --mode usb \\\n'
+            '      --channel modem=0,freq=850,rcvr_pairs=0,fx25=1,il2p=2 \\\n'
+            '      --channel modem=6,freq=2150,rcvr_pairs=0,fx25=1,il2p=2\n'
+            '\n'
+            '  # Custom KISS TCP port:\n'
+            '  %(prog)s --soundmodem --callsign M9PSY --frequency 7.04945 --mode usb --kiss-port 8101 \\\n'
+            '      --channel modem=0,freq=850,rcvr_pairs=0,fx25=1,il2p=2\n'
+            '\n'
+            'Modem index reference:\n'
+            '   0 = AFSK AX.25 300bd\n'
+            '   1 = AFSK AX.25 1200bd (Bell 202)\n'
+            '   2 = AFSK AX.25 600bd\n'
+            '   3 = AFSK AX.25 2400bd\n'
+            '   4 = BPSK AX.25 1200bd\n'
+            '   5 = BPSK AX.25 600bd\n'
+            '   6 = BPSK AX.25 300bd\n'
+            '   7 = BPSK AX.25 2400bd\n'
+            '   8 = QPSK AX.25 4800bd\n'
+            '   9 = QPSK AX.25 3600bd\n'
+            '  10 = QPSK AX.25 2400bd\n'
+            '  11 = BPSK FEC 4x100bd\n'
+            '  12 = DW QPSK V26A 2400bd\n'
+            '  13 = DW 8PSK V27 4800bd\n'
+            '  14 = DW QPSK V26B 2400bd\n'
+            '  15 = ARDOP Packet\n'
+            '\n'
+            'rcvr_pairs:  0=off  1=1 pair  2=2 pairs  4=4 pairs  8=8 pairs\n'
+            'fx25:        0=off  1=RX only  2=RX+TX\n'
+            'il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both\n'
+        ),
+    )
     parser.add_argument('--host', type=str, help='Server host')
     parser.add_argument('--port', type=int, help='Server port')
     parser.add_argument('--url', type=str, help='Server URL (alternative to host:port)')
@@ -9996,8 +10462,36 @@ if __name__ == '__main__':
     parser.add_argument('--rigctl-host', type=str, help='Rigctl host (e.g., localhost)')
     parser.add_argument('--rigctl-port', type=int, help='Rigctl port (default: 4532)')
     parser.add_argument('--rigctl-sync', action='store_true', help='Enable rigctl sync on connect')
+    parser.add_argument('--soundmodem', action='store_true',
+                        help=(
+                            'Run Sound Modem in headless KISS TCP mode (no GUI). '
+                            'Loads channel config from ~/.ubersdr_soundmodem.json unless '
+                            '--channel flags are given. Use --kiss-port to set the KISS TCP '
+                            'port (default 8100). See examples below.'
+                        ))
+    parser.add_argument('--kiss-port', type=int, default=None,
+                        help='KISS TCP listen port for --soundmodem mode (default: 8100; overrides saved config)')
+    parser.add_argument(
+        '--channel',
+        metavar='modem=N,freq=F,rcvr_pairs=N,fx25=N,il2p=N',
+        action='append',
+        dest='soundmodem_channels',
+        help=(
+            'Explicit channel config for --soundmodem mode (repeatable, up to 4 times for '
+            'channels A/B/C/D in order). All five keys are required. '
+            'When any --channel flag is given the saved config channel settings are ignored '
+            'and only the specified channels are enabled. '
+            'Keys: modem (int), freq (Hz, float), rcvr_pairs (0-3), fx25 (0-3), il2p (0-3). '
+            'See examples below.'
+        ),
+    )
 
     args = parser.parse_args()
+
+    # ── Headless Sound Modem mode ─────────────────────────────────────────────
+    if args.soundmodem:
+        run_headless_soundmodem(args)
+        sys.exit(0)
 
     # Build config from arguments
     # Note: bandwidth defaults should already be set correctly by radio_client.py

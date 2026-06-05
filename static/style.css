@@ -3092,14 +3092,15 @@ input[type="range"]::-moz-range-thumb {
    visual bar size or affecting the layout of neighbouring elements.
    ::after is used because ::before is already the visual grip dots.
    Only applied on coarse-pointer (touch) devices so desktop is unaffected.
-   Expands 20px upward (into the bottom of the waterfall — no buttons there)
-   and 20px downward (into the hidden badge containers — also no buttons). */
+   Expands 40px upward into the waterfall (no buttons there).
+   Does NOT expand downward — the Btns/Wheel radio buttons in .controls sit
+   immediately below the handle on mobile and would be blocked. */
 @media (pointer: coarse) {
     .waterfall-resize-handle::after {
         content: '';
         position: absolute;
-        top: -20px;
-        bottom: -20px;
+        top: -40px;
+        bottom: 0;
         left: 0;
         right: 0;
     }

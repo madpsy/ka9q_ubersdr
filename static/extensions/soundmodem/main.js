@@ -367,20 +367,22 @@ class SoundModemExtension extends DecoderExtension {
                     this._readChannelFreqsFromUI();
                     this._drawWaterfallHeader();
                 }
+                // Keep DCD LED tooltip in sync with enabled state
+                this._updateDCDLed(i, this._dcdState[i]);
             });
 
-            // Save + redraw header when freq or modem changes
+            // Save + redraw header when freq or modem changes; also refresh DCD tooltip
             const freqIn   = document.getElementById(`sm-ch${i}-freq`);
             const modemSel = document.getElementById(`sm-ch${i}-modem`);
             const rcvrSel  = document.getElementById(`sm-ch${i}-rcvr`);
             const fx25Sel  = document.getElementById(`sm-ch${i}-fx25`);
             const il2pSel  = document.getElementById(`sm-ch${i}-il2p`);
 
-            if (freqIn)   freqIn.addEventListener('change',   () => { this._saveConfig(); if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
-            if (modemSel) modemSel.addEventListener('change', () => { this._saveConfig(); if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
-            if (rcvrSel)  rcvrSel.addEventListener('change',  () => this._saveConfig());
-            if (fx25Sel)  fx25Sel.addEventListener('change',  () => this._saveConfig());
-            if (il2pSel)  il2pSel.addEventListener('change',  () => this._saveConfig());
+            if (freqIn)   freqIn.addEventListener('change',   () => { this._saveConfig(); this._updateDCDLed(i, this._dcdState[i]); if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
+            if (modemSel) modemSel.addEventListener('change', () => { this._saveConfig(); this._updateDCDLed(i, this._dcdState[i]); if (!this.running) { this._readChannelFreqsFromUI(); this._drawWaterfallHeader(); } });
+            if (rcvrSel)  rcvrSel.addEventListener('change',  () => { this._saveConfig(); this._updateDCDLed(i, this._dcdState[i]); });
+            if (fx25Sel)  fx25Sel.addEventListener('change',  () => { this._saveConfig(); this._updateDCDLed(i, this._dcdState[i]); });
+            if (il2pSel)  il2pSel.addEventListener('change',  () => { this._saveConfig(); this._updateDCDLed(i, this._dcdState[i]); });
         }
 
         // DCD threshold — save on change
@@ -762,6 +764,52 @@ class SoundModemExtension extends DecoderExtension {
 
     // ── DCD LED helpers ───────────────────────────────────────────────────────
 
+    // Human-readable label for each modem index (mirrors the <option> text in template.html)
+    static get MODEM_LABELS() {
+        return [
+            'AFSK AX.25 300bd',          // 0
+            'AFSK AX.25 1200bd (Bell 202)', // 1
+            'AFSK AX.25 600bd',          // 2
+            'AFSK AX.25 2400bd',         // 3
+            'BPSK AX.25 1200bd',         // 4
+            'BPSK AX.25 600bd',          // 5
+            'BPSK AX.25 300bd',          // 6
+            'BPSK AX.25 2400bd',         // 7
+            'QPSK AX.25 4800bd',         // 8
+            'QPSK AX.25 3600bd',         // 9
+            'QPSK AX.25 2400bd',         // 10
+            'BPSK FEC 4×100bd',          // 11
+            'DW QPSK V26A 2400bd',       // 12
+            'DW 8PSK V27 4800bd',        // 13
+            'DW QPSK V26B 2400bd',       // 14
+            'ARDOP Packet',              // 15
+        ];
+    }
+
+    // Build a tooltip string showing all 5 modem parameters for a channel.
+    // Reads current values from the DOM (works both before and after start).
+    _channelTooltip(channel) {
+        const chName = ['A', 'B', 'C', 'D'][channel] ?? String(channel);
+
+        const modemIdx  = parseInt(document.getElementById(`sm-ch${channel}-modem`)?.value ?? '1', 10);
+        const freq      = document.getElementById(`sm-ch${channel}-freq`)?.value  ?? '?';
+        const rcvrPairs = document.getElementById(`sm-ch${channel}-rcvr`)?.value  ?? '?';
+        const fx25Val   = document.getElementById(`sm-ch${channel}-fx25`)?.value  ?? '?';
+        const il2pVal   = document.getElementById(`sm-ch${channel}-il2p`)?.value  ?? '?';
+
+        const modemLabel = SoundModemExtension.MODEM_LABELS[modemIdx] ?? `Modem ${modemIdx}`;
+
+        const rcvrLabel = rcvrPairs === '0' ? '0 (off)' : rcvrPairs;
+
+        const fx25Labels = { '0': 'Off', '1': 'RX only', '2': 'RX+TX' };
+        const fx25Label  = fx25Labels[fx25Val] ?? fx25Val;
+
+        const il2pLabels = { '0': 'Off', '1': 'IL2P', '2': 'IL2P+CRC', '3': 'Both' };
+        const il2pLabel  = il2pLabels[il2pVal] ?? il2pVal;
+
+        return `Ch ${chName}\nModem: ${modemLabel}\nFreq: ${freq} Hz\nRcvr Pairs: ${rcvrLabel}\nFX.25: ${fx25Label}\nIL2P: ${il2pLabel}`;
+    }
+
     _updateDCDLed(channel, on) {
         const led = document.getElementById(`sm-dcd-led-${channel}`);
         if (!led) return;
@@ -769,7 +817,7 @@ class SoundModemExtension extends DecoderExtension {
         led.classList.toggle('sm-dcd-off', !on);
         // Add channel-specific class so each LED lights in its own colour
         led.classList.toggle(`sm-dcd-on-${channel}`, on);
-        led.title = `Ch ${['A','B','C','D'][channel]} DCD: ${on ? 'ACTIVE' : 'idle'}`;
+        led.title = this._channelTooltip(channel);
     }
 
     // ── Monitor panel ─────────────────────────────────────────────────────────
@@ -1707,11 +1755,12 @@ class SoundModemExtension extends DecoderExtension {
         row.dataset.from = parsed.from;
         row.dataset.to   = parsed.to || '';
 
-        // Channel badge (A/B/C/D)
+        // Channel badge (A/B/C/D) — tooltip shows the modem config for this channel
         const chLabel = ['A','B','C','D'][parsed.kissPort] ?? String(parsed.kissPort);
         const chBadge = document.createElement('span');
         chBadge.className = `sm-channel-badge sm-channel-badge-${parsed.kissPort}`;
         chBadge.textContent = chLabel;
+        chBadge.title = this._channelTooltip(parsed.kissPort);
         row.appendChild(chBadge);
 
         // Timestamp

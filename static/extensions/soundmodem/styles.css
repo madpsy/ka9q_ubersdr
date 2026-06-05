@@ -122,22 +122,22 @@
     user-select: none;
 }
 
-/* Channel enabled — green ring */
-.sm-dcd-enabled {
-    border-color: #4CAF50;
-    box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.4);
-}
+/* Per-channel enabled ring — matches waterfall/badge palette */
+.sm-dcd-enabled-0 { border-color: #29B6F6; box-shadow: 0 0 0 1px rgba(41,  182, 246, 0.35); }
+.sm-dcd-enabled-1 { border-color: #66BB6A; box-shadow: 0 0 0 1px rgba(102, 187, 106, 0.35); }
+.sm-dcd-enabled-2 { border-color: #CE93D8; box-shadow: 0 0 0 1px rgba(206, 147, 216, 0.35); }
+.sm-dcd-enabled-3 { border-color: #FFA726; box-shadow: 0 0 0 1px rgba(255, 167,  38, 0.35); }
 
-/* Channel disabled — red ring */
+/* Channel disabled — back to grey, dimmed */
 .sm-dcd-disabled {
-    border-color: #f44336;
-    box-shadow: 0 0 0 1px rgba(244, 67, 54, 0.3);
-    opacity: 0.55;
+    border-color: #444;
+    box-shadow: none;
+    opacity: 0.5;
 }
 
 .sm-dcd-off {
     background: #1a1a1a;
-    color: #555;
+    color: #fff;
 }
 
 .sm-dcd-on {

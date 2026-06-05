@@ -821,13 +821,13 @@ class SoundModemExtension extends DecoderExtension {
         if (!led) return;
         const enabled = this._isChannelEnabled(channel);
 
-        led.classList.toggle('sm-dcd-on',       on);
-        led.classList.toggle('sm-dcd-off',      !on);
+        led.classList.toggle('sm-dcd-on',  on);
+        led.classList.toggle('sm-dcd-off', !on);
         // Per-channel colour when DCD fires
         led.classList.toggle(`sm-dcd-on-${channel}`, on);
-        // Green ring = enabled, red ring = disabled
-        led.classList.toggle('sm-dcd-enabled',  enabled);
-        led.classList.toggle('sm-dcd-disabled', !enabled);
+        // Ring: channel colour when enabled, grey when disabled
+        led.classList.toggle(`sm-dcd-enabled-${channel}`, enabled);
+        led.classList.toggle('sm-dcd-disabled',            !enabled);
 
         led.title = this._channelTooltip(channel);
     }

@@ -786,10 +786,16 @@ class SoundModemExtension extends DecoderExtension {
         ];
     }
 
+    // Returns true if the channel's enabled checkbox is checked.
+    _isChannelEnabled(channel) {
+        return document.getElementById(`sm-ch${channel}-enabled`)?.checked ?? false;
+    }
+
     // Build a tooltip string showing all 5 modem parameters for a channel.
     // Reads current values from the DOM (works both before and after start).
     _channelTooltip(channel) {
-        const chName = ['A', 'B', 'C', 'D'][channel] ?? String(channel);
+        const chName  = ['A', 'B', 'C', 'D'][channel] ?? String(channel);
+        const enabled = this._isChannelEnabled(channel);
 
         const modemIdx  = parseInt(document.getElementById(`sm-ch${channel}-modem`)?.value ?? '1', 10);
         const freq      = document.getElementById(`sm-ch${channel}-freq`)?.value  ?? '?';
@@ -798,8 +804,7 @@ class SoundModemExtension extends DecoderExtension {
         const il2pVal   = document.getElementById(`sm-ch${channel}-il2p`)?.value  ?? '?';
 
         const modemLabel = SoundModemExtension.MODEM_LABELS[modemIdx] ?? `Modem ${modemIdx}`;
-
-        const rcvrLabel = rcvrPairs === '0' ? '0 (off)' : rcvrPairs;
+        const rcvrLabel  = rcvrPairs === '0' ? '0 (off)' : rcvrPairs;
 
         const fx25Labels = { '0': 'Off', '1': 'RX only', '2': 'RX+TX' };
         const fx25Label  = fx25Labels[fx25Val] ?? fx25Val;
@@ -807,16 +812,23 @@ class SoundModemExtension extends DecoderExtension {
         const il2pLabels = { '0': 'Off', '1': 'IL2P', '2': 'IL2P+CRC', '3': 'Both' };
         const il2pLabel  = il2pLabels[il2pVal] ?? il2pVal;
 
-        return `Ch ${chName}\nModem: ${modemLabel}\nFreq: ${freq} Hz\nRcvr Pairs: ${rcvrLabel}\nFX.25: ${fx25Label}\nIL2P: ${il2pLabel}`;
+        const statusLine = enabled ? '✔ Enabled' : '✘ Disabled';
+        return `Ch ${chName} — ${statusLine}\nModem: ${modemLabel}\nFreq: ${freq} Hz\nRcvr Pairs: ${rcvrLabel}\nFX.25: ${fx25Label}\nIL2P: ${il2pLabel}`;
     }
 
     _updateDCDLed(channel, on) {
-        const led = document.getElementById(`sm-dcd-led-${channel}`);
+        const led     = document.getElementById(`sm-dcd-led-${channel}`);
         if (!led) return;
-        led.classList.toggle('sm-dcd-on',  on);
-        led.classList.toggle('sm-dcd-off', !on);
-        // Add channel-specific class so each LED lights in its own colour
+        const enabled = this._isChannelEnabled(channel);
+
+        led.classList.toggle('sm-dcd-on',       on);
+        led.classList.toggle('sm-dcd-off',      !on);
+        // Per-channel colour when DCD fires
         led.classList.toggle(`sm-dcd-on-${channel}`, on);
+        // Green ring = enabled, red ring = disabled
+        led.classList.toggle('sm-dcd-enabled',  enabled);
+        led.classList.toggle('sm-dcd-disabled', !enabled);
+
         led.title = this._channelTooltip(channel);
     }
 

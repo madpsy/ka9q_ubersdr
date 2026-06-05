@@ -117,15 +117,27 @@
     font-size: 9px;
     font-weight: bold;
     cursor: default;
-    transition: background 0.1s, box-shadow 0.1s;
-    border: 1px solid #444;
+    transition: background 0.1s, box-shadow 0.1s, border-color 0.1s;
+    border: 2px solid #444;
     user-select: none;
+}
+
+/* Channel enabled — green ring */
+.sm-dcd-enabled {
+    border-color: #4CAF50;
+    box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.4);
+}
+
+/* Channel disabled — red ring */
+.sm-dcd-disabled {
+    border-color: #f44336;
+    box-shadow: 0 0 0 1px rgba(244, 67, 54, 0.3);
+    opacity: 0.55;
 }
 
 .sm-dcd-off {
     background: #1a1a1a;
     color: #555;
-    box-shadow: none;
 }
 
 .sm-dcd-on {

@@ -131,14 +131,7 @@ class WaterfallWebGL {
         // _texReady is set to true only after _createRingTexture() successfully
         // allocates the texture.  If it's false (e.g. resize() fired before _init()
         // completed, or the texture was just deleted), skip the upload silently.
-        if (!this._texReady) {
-            if (!this._warnedNotReady) {
-                console.warn(`[WaterfallWebGL] pushRow called before texture ready — _texReady=${this._texReady} _ringTex=${!!this._ringTex} width=${this.width} ringRows=${this.ringRows}`);
-                console.trace();
-                this._warnedNotReady = true;
-            }
-            return;
-        }
+        if (!this._texReady) return;
 
         const gl      = this.gl;
         // Use _texWidth (the width the GPU texture was actually allocated at) rather than
@@ -195,6 +188,11 @@ class WaterfallWebGL {
             console.warn('[WaterfallWebGL] pushRow: _ringTex is null despite _texReady=true — skipping');
             return;
         }
+        // Ensure UNPACK_ALIGNMENT=1 for R8 single-channel rows.
+        // The GL default is 4; any canvas width not divisible by 4 causes GL_INVALID_OPERATION.
+        // This is set globally in _createRingTexture() but we set it here too for safety
+        // in case another GL call changed it between texture creation and row upload.
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         gl.bindTexture(gl.TEXTURE_2D, this._ringTex);
         gl.texSubImage2D(
             gl.TEXTURE_2D,
@@ -205,14 +203,6 @@ class WaterfallWebGL {
             gl.RED, gl.UNSIGNED_BYTE,
             row
         );
-        // Check for GL errors immediately after upload (helps diagnose "TexImage not specified" warnings)
-        if (!this._warnedTexSubImage) {
-            const err = gl.getError();
-            if (err !== gl.NO_ERROR) {
-                console.error(`[WaterfallWebGL] texSubImage2D error 0x${err.toString(16)}: _texReady=${this._texReady} _texWidth=${this._texWidth} _writeRow=${this._writeRow} ringRows=${this.ringRows} W=${W}`);
-                this._warnedTexSubImage = true; // only log once
-            }
-        }
         gl.bindTexture(gl.TEXTURE_2D, null);
 
         this._writeRow = (this._writeRow + 1) % this.ringRows;
@@ -493,6 +483,11 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, this._ringTex);
 
         // R8: single-channel, 8-bit unsigned.  Initialise to 0 (= no data).
+        // CRITICAL: set UNPACK_ALIGNMENT to 1 for single-channel textures.
+        // The default alignment is 4, which requires each row to be a multiple of
+        // 4 bytes.  For R8 (1 byte/pixel) a canvas width that is not a multiple of
+        // 4 (e.g. 1443px) causes GL_INVALID_OPERATION on texImage2D / texSubImage2D.
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         const blank = new Uint8Array(this.width * this.ringRows);
         gl.texImage2D(
             gl.TEXTURE_2D, 0,

@@ -3507,13 +3507,8 @@ async function handleBinaryMessage(data) {
     }
 
     try {
-        // Convert Blob to ArrayBuffer if needed
-        let arrayBuffer;
-        if (data instanceof Blob) {
-            arrayBuffer = await data.arrayBuffer();
-        } else {
-            arrayBuffer = data;
-        }
+        // data is always ArrayBuffer — ws.binaryType = 'arraybuffer' is set in websocket-manager.js
+        const arrayBuffer = data;
 
         // Parse binary packet header
         // Version 1 (13 bytes): timestamp(8) + sample_rate(4) + channels(1)

@@ -9494,12 +9494,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 log('Spectrum display disconnected');
             },
             onConfig: (config) => {
-                // On the very first config message the WebSocket is confirmed open.
-                // Set the frame rate based on the current spectrum line-graph checkbox state.
-                // This handles the case where the checkbox was already unchecked on load
-                // (from localStorage or ui-config) before the WebSocket connected.
-                if (!window._spectrumRateApplied) {
+                // Re-apply the frame rate whenever binBandwidth changes (or on first config).
+                // This covers two cases:
+                //   1. First config: session is on the shared channel where set_rate is ignored;
+                //      we still record the divisor so it is ready for when the session goes private.
+                //   2. Zoom/pan config: the session may have just migrated from the shared channel
+                //      to a private channel (or vice-versa). Re-sending set_rate ensures the
+                //      correct poll divisor is applied immediately on the new private channel,
+                //      rather than waiting up to 1 s for the periodic sendSettingsSync to do it.
+                // setRate() is idempotent and a no-op when the WebSocket is not open.
+                if (!window._spectrumRateApplied || window._lastSpectrumBinBw !== config.binBandwidth) {
                     window._spectrumRateApplied = true;
+                    window._lastSpectrumBinBw = config.binBandwidth;
                     const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
                     spectrumDisplay.setRate(lineGraphEnabled ? 1 : 3);
                 }

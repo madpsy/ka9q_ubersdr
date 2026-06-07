@@ -57,6 +57,7 @@ class WaterfallWebGL {
         // Ring-buffer write pointer
         this._writeRow  = 0;
         this._hasData   = false;  // true once first row is pushed
+        this._texReady  = false;  // true once texImage2D has allocated the ring texture
 
         // WebGL state
         this.gl        = null;
@@ -125,6 +126,12 @@ class WaterfallWebGL {
      */
     pushRow(spectrumData, minDb, maxDb, contrast, intensity, manualRange) {
         if (!this._supported || !spectrumData || spectrumData.length === 0) return;
+
+        // Guard: texImage2D must have been called before texSubImage2D is valid.
+        // _texReady is set to true only after _createRingTexture() successfully
+        // allocates the texture.  If it's false (e.g. resize() fired before _init()
+        // completed, or the texture was just deleted), skip the upload silently.
+        if (!this._texReady) return;
 
         const gl      = this.gl;
         // Use _texWidth (the width the GPU texture was actually allocated at) rather than
@@ -431,6 +438,9 @@ void main() {
 
     _createRingTexture() {
         const gl = this.gl;
+        // Mark texture as not ready before deleting/recreating it.
+        // pushRow() checks _texReady and will skip uploads until texImage2D completes.
+        this._texReady = false;
         if (this._ringTex) gl.deleteTexture(this._ringTex);
 
         this._ringTex = gl.createTexture();
@@ -463,6 +473,7 @@ void main() {
 
         this._writeRow = 0;
         this._hasData  = false;
+        this._texReady = true;   // texImage2D has now allocated the texture; pushRow() may proceed
     }
 
     _createLutTexture() {

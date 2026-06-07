@@ -1127,8 +1127,10 @@ class SpectrumDisplay {
             }
 
             // --- Frame rate throttle ---
-            // GPU mode runs at full 60fps (sub-pixel CSS transform needs every tick).
-            // CPU mode is throttled to 30fps to keep CPU usage comparable to pre-change levels.
+            // Both CPU and GPU modes are throttled to 30fps. The GPU sub-pixel offset
+            // accumulator uses elapsed wall-clock time, so smoothness is preserved at
+            // any frame rate — 30fps gives 2-6 sub-pixel composites per waterfall row
+            // at typical scroll speeds, which is visually indistinguishable from 60fps.
             requestAnimationFrame(processFrame);
 
             // --- Initialise timing on first tick ---
@@ -1137,8 +1139,8 @@ class SpectrumDisplay {
             }
 
             const sinceLastFrame = timestamp - this.lastRafTime;
-            if (!this.gpuScrollEnabled && sinceLastFrame < FRAME_INTERVAL_MS) {
-                return; // CPU mode: too soon — skip this tick
+            if (sinceLastFrame < FRAME_INTERVAL_MS) {
+                return; // too soon — skip this tick
             }
 
             // Cap elapsed to 200ms so a hidden/backgrounded tab doesn't cause a huge jump

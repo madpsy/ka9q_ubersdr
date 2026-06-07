@@ -97,6 +97,20 @@
       "rewrite_origin": false,
       "rate_limit": 100,
       "allowed_ips": ["0.0.0.0/0"]
+    },
+    {
+      "name": "packet",
+      "status": "Stable",
+      "description": "AX.25 packet radio decoder — connects to UberSDR and decodes AX.25 packet frames across up to 4 channels per dial frequency, with a live web UI displaying decoded frames and station activity.",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_packet/refs/heads/main/install.sh",
+      "host": "packet",
+      "port": 6089,
+      "enabled": true,
+      "require_admin": false,
+      "strip_prefix": true,
+      "rewrite_origin": false,
+      "rate_limit": 100,
+      "allowed_ips": ["0.0.0.0/0"]
     }
   ]
 }

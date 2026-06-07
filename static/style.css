@@ -2186,22 +2186,19 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .band-status-container {
-        gap: 3px;
-        padding: 4px 8px;
-        flex-wrap: wrap;
+        gap: 2px;
+        padding: 4px 6px;
         justify-content: center;
     }
 
     /* Make band badges smaller and tighter on mobile */
     .band-buttons-container {
-        gap: 3px;
-        flex-wrap: wrap;
-        justify-content: center;
+        gap: 2px;
     }
 
     .band-status-badge {
-        padding: 3px 6px;
-        font-size: 0.72em;
+        padding: 3px 5px;
+        font-size: 0.65em;
     }
 
     /* Hide voice activity, callsign lookup, and TTS buttons on mobile */

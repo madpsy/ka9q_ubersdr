@@ -11,9 +11,9 @@
  * Every 30fps tick:
  *   1. CPU uploads ONE new row of bytes via texSubImage2D  (tiny transfer)
  *   2. Fragment shader maps each visible pixel to the correct ring-buffer row
- *      using the write pointer + sub-pixel scroll offset (in pixel units)
+ *      using the write pointer (integer pixel rows — no scroll in shader)
  *   3. The WebGL offscreen canvas is blitted onto the main Canvas2D canvas
- *      via transferToImageBitmap() + drawImage() — avoids cross-context stall
+ *      via drawImage() with a fractional Y offset for sub-pixel smooth scroll
  *
  * Key design decisions
  * ────────────────────
@@ -22,8 +22,8 @@
  * • Ring buffer maps 1 texture row : 1 visible waterfall pixel.  The shader
  *   uses uVisibleRows (not uRingRows) for the pixel→row mapping so the scroll
  *   is always 1:1 regardless of ring buffer size.
- * • Sub-pixel scroll offset is passed in pixels (gpuScrollOffset, 0..1) and
- *   converted to a ring-row fraction inside the shader.
+ * • Sub-pixel scroll is applied in the drawImage blit (dest Y += scrollPixels),
+ *   not in the shader — avoids per-pixel fractional row lookups and jitter.
  * • Magnitude 0 = no data → black.  Real data stored as 1..255.
  */
 
@@ -61,14 +61,13 @@ class WaterfallWebGL {
         this._lutTex   = null;
 
         // Uniform locations
-        this._uRingTex      = null;
-        this._uLutTex       = null;
-        this._uWriteRow     = null;
-        this._uRingRows     = null;
-        this._uVisibleRows  = null;  // waterfall height in pixels
-        this._uScrollPixels = null;  // sub-pixel scroll offset in pixels [0,1)
-        this._uWaterfallY   = null;  // normalised Y start of waterfall [0,1]
-        this._uWaterfallH   = null;  // normalised height of waterfall [0,1]
+        this._uRingTex     = null;
+        this._uLutTex      = null;
+        this._uWriteRow    = null;
+        this._uRingRows    = null;
+        this._uVisibleRows = null;  // waterfall height in pixels
+        this._uWaterfallY  = null;  // normalised Y start of waterfall [0,1]
+        this._uWaterfallH  = null;  // normalised height of waterfall [0,1]
 
         this._supported = false;
         this._init();
@@ -180,7 +179,7 @@ class WaterfallWebGL {
     /**
      * Render the waterfall onto the main canvas.  Call every rAF tick.
      *
-     * @param {number} scrollPixels   - sub-pixel scroll offset in pixels [0,1)
+     * @param {number} scrollPixels    - sub-pixel scroll offset in pixels [0,1)
      * @param {number} waterfallStartY - pixel Y where waterfall begins
      */
     render(scrollPixels, waterfallStartY) {
@@ -203,30 +202,31 @@ class WaterfallWebGL {
         gl.bindTexture(gl.TEXTURE_2D, this._lutTex);
         gl.uniform1i(this._uLutTex, 1);
 
-        // Uniforms
-        gl.uniform1i(this._uWriteRow,     this._writeRow);
-        gl.uniform1i(this._uRingRows,     this.ringRows);
-        gl.uniform1i(this._uVisibleRows,  visibleRows);
-        gl.uniform1f(this._uScrollPixels, scrollPixels);
+        // Uniforms — no scroll offset in shader; sub-pixel shift is applied in the blit
+        gl.uniform1i(this._uWriteRow,    this._writeRow);
+        gl.uniform1i(this._uRingRows,    this.ringRows);
+        gl.uniform1i(this._uVisibleRows, visibleRows);
 
         // Waterfall region in normalised [0,1] canvas coordinates (Y=0 at top)
         gl.uniform1f(this._uWaterfallY, waterfallStartY / this.height);
         gl.uniform1f(this._uWaterfallH, visibleRows / this.height);
 
-        // Draw full-screen quad
+        // Draw full-screen quad onto offscreen WebGL canvas
         gl.bindVertexArray(this._vao);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(null);
 
-        // Blit WebGL offscreen canvas → main Canvas2D canvas.
-        // Only overwrite the waterfall region — leave the line graph area untouched.
-        // preserveDrawingBuffer:true ensures the framebuffer is still valid here.
+        // Blit WebGL offscreen canvas → main Canvas2D canvas with sub-pixel Y shift.
+        // The destination Y is offset by scrollPixels (0..1) to give smooth sub-pixel
+        // scrolling — same technique as the original Canvas2D GPU composite path.
+        // Source is 1px taller to fill the gap left by the shift.
+        const srcH = Math.min(visibleRows - scrollPixels, visibleRows);
         this.mainCtx.drawImage(
             this._glCanvas,
-            0, waterfallStartY,
-            this.width, visibleRows,
-            0, waterfallStartY,
-            this.width, visibleRows
+            0, waterfallStartY,                    // source x, y (no shift — image is at correct position)
+            this.width, srcH,                      // source w, h (clip bottom to avoid overflow)
+            0, waterfallStartY + scrollPixels,     // dest x, y (shifted down by sub-pixel amount)
+            this.width, srcH                       // dest w, h
         );
     }
 
@@ -306,8 +306,8 @@ void main() {
         //   pixelY (0 = top of waterfall) → ring row index
         //   ringRow = (writeRow - 1 - pixelY) mod ringRows
         //
-        // Sub-pixel scroll: gpuScrollOffset is in pixels [0,1).
-        //   Adding it to pixelY shifts the waterfall down by that fraction.
+        // Sub-pixel scroll is handled by the drawImage blit (not in the shader).
+        // The shader always maps integer pixel rows to ring rows.
         //
         // Magnitude encoding: 0 = no data (→ black), 1..255 = real data.
         //   Shader decodes: realMag = (storedByte - 1) / 254.0
@@ -321,7 +321,6 @@ uniform sampler2D uLutTex;      // colour LUT:  256 × 1, RGBA
 uniform int       uWriteRow;    // ring write pointer
 uniform int       uRingRows;    // total ring buffer rows
 uniform int       uVisibleRows; // waterfall height in pixels
-uniform float     uScrollPixels;// sub-pixel scroll offset [0,1) in pixels
 uniform float     uWaterfallY;  // normalised Y start of waterfall [0,1]
 uniform float     uWaterfallH;  // normalised height of waterfall [0,1]
 
@@ -337,15 +336,11 @@ void main() {
         return;
     }
 
-    // Pixel position within the waterfall, top=0, in pixels (float)
-    float pixelY = (py - uWaterfallY) / uWaterfallH * float(uVisibleRows);
+    // Integer pixel position within the waterfall, top=0
+    int pixelRow = int((py - uWaterfallY) / uWaterfallH * float(uVisibleRows));
 
-    // Apply sub-pixel scroll offset (in pixels)
-    pixelY = pixelY + uScrollPixels;
-
-    // Map pixel position to ring buffer row (1:1 — one ring row per visible pixel)
-    int pixelRow = int(pixelY);  // integer pixel index (0 = top = most recent)
-    int ringRow  = ((uWriteRow - 1 - pixelRow) % uRingRows + uRingRows) % uRingRows;
+    // Map to ring buffer row (1:1 — one ring row per visible pixel)
+    int ringRow = ((uWriteRow - 1 - pixelRow) % uRingRows + uRingRows) % uRingRows;
 
     // Sample ring buffer
     float u = vUV.x;
@@ -386,14 +381,13 @@ void main() {
 
         this._program = prog;
 
-        this._uRingTex      = gl.getUniformLocation(prog, 'uRingTex');
-        this._uLutTex       = gl.getUniformLocation(prog, 'uLutTex');
-        this._uWriteRow     = gl.getUniformLocation(prog, 'uWriteRow');
-        this._uRingRows     = gl.getUniformLocation(prog, 'uRingRows');
-        this._uVisibleRows  = gl.getUniformLocation(prog, 'uVisibleRows');
-        this._uScrollPixels = gl.getUniformLocation(prog, 'uScrollPixels');
-        this._uWaterfallY   = gl.getUniformLocation(prog, 'uWaterfallY');
-        this._uWaterfallH   = gl.getUniformLocation(prog, 'uWaterfallH');
+        this._uRingTex     = gl.getUniformLocation(prog, 'uRingTex');
+        this._uLutTex      = gl.getUniformLocation(prog, 'uLutTex');
+        this._uWriteRow    = gl.getUniformLocation(prog, 'uWriteRow');
+        this._uRingRows    = gl.getUniformLocation(prog, 'uRingRows');
+        this._uVisibleRows = gl.getUniformLocation(prog, 'uVisibleRows');
+        this._uWaterfallY  = gl.getUniformLocation(prog, 'uWaterfallY');
+        this._uWaterfallH  = gl.getUniformLocation(prog, 'uWaterfallH');
     }
 
     _compileShader(type, source) {
@@ -532,13 +526,9 @@ function patchSpectrumDisplayWithWebGL(sd) {
     };
 
     // Replace scrollWaterfallGPUComposite() — called every rAF tick
-    let _dbgFrame = 0;
     sd.scrollWaterfallGPUComposite = function() {
         const lineGraphVisible = sd.lineGraphCanvas && sd.lineGraphCanvas.style.display !== 'none';
         const waterfallStartY  = lineGraphVisible ? 0 : 75;
-        if (++_dbgFrame <= 10) {
-            console.log(`[WaterfallWebGL] render: sd.width=${sd.width} sd.height=${sd.height} wgl.width=${wgl.width} wgl.height=${wgl.height} waterfallStartY=${waterfallStartY} gpuScrollOffset=${sd.gpuScrollOffset.toFixed(3)} writeRow=${wgl._writeRow}`);
-        }
         wgl.render(sd.gpuScrollOffset, waterfallStartY);
     };
 

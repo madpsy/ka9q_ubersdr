@@ -131,7 +131,14 @@ class WaterfallWebGL {
         // _texReady is set to true only after _createRingTexture() successfully
         // allocates the texture.  If it's false (e.g. resize() fired before _init()
         // completed, or the texture was just deleted), skip the upload silently.
-        if (!this._texReady) return;
+        if (!this._texReady) {
+            if (!this._warnedNotReady) {
+                console.warn(`[WaterfallWebGL] pushRow called before texture ready — _texReady=${this._texReady} _ringTex=${!!this._ringTex} width=${this.width} ringRows=${this.ringRows}`);
+                console.trace();
+                this._warnedNotReady = true;
+            }
+            return;
+        }
 
         const gl      = this.gl;
         // Use _texWidth (the width the GPU texture was actually allocated at) rather than
@@ -184,6 +191,10 @@ class WaterfallWebGL {
         }
 
         // Upload one row to the ring buffer texture (gl.RED matches gl.R8 internal format)
+        if (!this._ringTex) {
+            console.warn('[WaterfallWebGL] pushRow: _ringTex is null despite _texReady=true — skipping');
+            return;
+        }
         gl.bindTexture(gl.TEXTURE_2D, this._ringTex);
         gl.texSubImage2D(
             gl.TEXTURE_2D,
@@ -194,6 +205,14 @@ class WaterfallWebGL {
             gl.RED, gl.UNSIGNED_BYTE,
             row
         );
+        // Check for GL errors immediately after upload (helps diagnose "TexImage not specified" warnings)
+        if (!this._warnedTexSubImage) {
+            const err = gl.getError();
+            if (err !== gl.NO_ERROR) {
+                console.error(`[WaterfallWebGL] texSubImage2D error 0x${err.toString(16)}: _texReady=${this._texReady} _texWidth=${this._texWidth} _writeRow=${this._writeRow} ringRows=${this.ringRows} W=${W}`);
+                this._warnedTexSubImage = true; // only log once
+            }
+        }
         gl.bindTexture(gl.TEXTURE_2D, null);
 
         this._writeRow = (this._writeRow + 1) % this.ringRows;
@@ -288,6 +307,24 @@ class WaterfallWebGL {
             }
 
             this.gl = gl;
+
+            // Handle WebGL context loss — mark as unsupported so pushRow/render no-op
+            // until the context is restored and textures are re-uploaded.
+            this._glCanvas.addEventListener('webglcontextlost', (e) => {
+                e.preventDefault();
+                console.warn('[WaterfallWebGL] WebGL context lost — pausing uploads');
+                this._texReady  = false;
+                this._supported = false;
+            });
+            this._glCanvas.addEventListener('webglcontextrestored', () => {
+                console.log('[WaterfallWebGL] WebGL context restored — reinitialising');
+                this._buildShaders();
+                this._buildQuad();
+                this._createRingTexture();
+                this._createLutTexture();
+                this._supported = true;
+            });
+
             this._buildShaders();
             this._buildQuad();
             this._createRingTexture();
@@ -441,6 +478,15 @@ void main() {
         // Mark texture as not ready before deleting/recreating it.
         // pushRow() checks _texReady and will skip uploads until texImage2D completes.
         this._texReady = false;
+
+        // Guard: width must be > 0.  texImage2D with width=0 creates a texture object
+        // with no image data at mip level 0 — texSubImage2D on it produces
+        // "TexImage not yet specified" warnings.
+        if (this.width <= 0 || this.ringRows <= 0) {
+            console.warn(`[WaterfallWebGL] _createRingTexture: invalid dimensions ${this.width}×${this.ringRows} — skipping`);
+            return;
+        }
+
         if (this._ringTex) gl.deleteTexture(this._ringTex);
 
         this._ringTex = gl.createTexture();
@@ -466,6 +512,17 @@ void main() {
 
         gl.bindTexture(gl.TEXTURE_2D, null);
 
+        // Verify texImage2D succeeded before marking the texture as ready.
+        // If the GL context is in an error state (e.g. OOM, context loss) texImage2D
+        // silently no-ops and the texture has no image data — texSubImage2D would then
+        // produce "TexImage not yet specified" warnings.
+        const texErr = gl.getError();
+        if (texErr !== gl.NO_ERROR) {
+            console.error(`[WaterfallWebGL] _createRingTexture: texImage2D failed (GL error 0x${texErr.toString(16)}) — texture not ready`);
+            this._texReady = false;
+            return;
+        }
+
         // Record the width the texture was actually allocated at.
         // pushRow() reads _texWidth (not this.width) so it never uploads a row
         // whose byte-length doesn't match the live GPU texture.
@@ -473,7 +530,7 @@ void main() {
 
         this._writeRow = 0;
         this._hasData  = false;
-        this._texReady = true;   // texImage2D has now allocated the texture; pushRow() may proceed
+        this._texReady = true;   // texImage2D succeeded; pushRow() may proceed
     }
 
     _createLutTexture() {

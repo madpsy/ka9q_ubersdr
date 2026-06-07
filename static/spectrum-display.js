@@ -3211,20 +3211,28 @@ class SpectrumDisplay {
         this.overlayCtx.lineWidth = 1;
         this.overlayCtx.stroke();
 
-        // Draw bandwidth bracket — visible whenever at least one edge is on-screen.
-        // If one edge is off-screen, the bar extends to the canvas boundary instead.
-        const lowVisible  = xLow  >= 0 && xLow  <= this.width;
-        const highVisible = xHigh >= 0 && xHigh <= this.width;
+        // Draw bandwidth bracket — visible whenever the bandwidth region intersects the view.
+        // Cases:
+        //   lowVisible  && highVisible  → both ticks drawn normally
+        //   lowVisible  && !highVisible → left tick drawn, right end clamped + arrow pointing right
+        //   !lowVisible && highVisible  → right tick drawn, left end clamped + arrow pointing left
+        //   !lowVisible && !highVisible && xLow<0 && xHigh>width → spans full view, arrows on both ends
+        //   !lowVisible && !highVisible && both same side → bandwidth entirely off-screen, hide
+        const lowVisible   = xLow  >= 0 && xLow  <= this.width;
+        const highVisible  = xHigh >= 0 && xHigh <= this.width;
+        const spansFullView = xLow < 0 && xHigh > this.width;
+        const anyVisible   = lowVisible || highVisible || spansFullView;
 
-        if (lowVisible || highVisible) {
-            const bracketY = 45; // Position for bracket (at top of frequency scale section)
+        if (anyVisible) {
+            const bracketY     = 45; // Position for bracket (at top of frequency scale section)
             const bracketHeight = 8;
+            const arrowSize    = 6;  // Half-width of the arrowhead triangle
 
             // Clamp each edge to the canvas boundary for drawing purposes
             const drawXLow  = Math.max(0, Math.min(this.width, xLow));
             const drawXHigh = Math.max(0, Math.min(this.width, xHigh));
 
-            // Store bar positions for right-click hit-test (only when both are on-screen)
+            // Store bar positions for right-click hit-test (only when on-screen)
             this.lastBandwidthXLow  = lowVisible  ? xLow  : null;
             this.lastBandwidthXHigh = highVisible ? xHigh : null;
 
@@ -3239,21 +3247,47 @@ class SpectrumDisplay {
             this.overlayCtx.lineTo(drawXHigh, bracketY);
             this.overlayCtx.stroke();
 
-            // Draw vertical tick only at edges that are actually on-screen
+            // Draw vertical tick at edges that are actually on-screen
             this.overlayCtx.lineWidth = 3;
             this.overlayCtx.beginPath();
             if (lowVisible) {
-                this.overlayCtx.moveTo(xLow, bracketY - bracketHeight/2);
-                this.overlayCtx.lineTo(xLow, bracketY + bracketHeight/2);
+                this.overlayCtx.moveTo(xLow, bracketY - bracketHeight / 2);
+                this.overlayCtx.lineTo(xLow, bracketY + bracketHeight / 2);
             }
             if (highVisible) {
-                this.overlayCtx.moveTo(xHigh, bracketY - bracketHeight/2);
-                this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight/2);
+                this.overlayCtx.moveTo(xHigh, bracketY - bracketHeight / 2);
+                this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight / 2);
             }
             this.overlayCtx.stroke();
+
+            // Draw directional arrows at clamped ends where the edge is off-screen.
+            // Arrow points toward the direction the off-screen edge lies.
+            this.overlayCtx.fillStyle = barColor;
+
+            // Left end arrow (pointing left) — low edge is off the left side
+            if (!lowVisible) {
+                const ax = drawXLow; // = 0
+                this.overlayCtx.beginPath();
+                this.overlayCtx.moveTo(ax,              bracketY);           // tip
+                this.overlayCtx.lineTo(ax + arrowSize,  bracketY - arrowSize);
+                this.overlayCtx.lineTo(ax + arrowSize,  bracketY + arrowSize);
+                this.overlayCtx.closePath();
+                this.overlayCtx.fill();
+            }
+
+            // Right end arrow (pointing right) — high edge is off the right side
+            if (!highVisible) {
+                const ax = drawXHigh; // = this.width
+                this.overlayCtx.beginPath();
+                this.overlayCtx.moveTo(ax,              bracketY);           // tip
+                this.overlayCtx.lineTo(ax - arrowSize,  bracketY - arrowSize);
+                this.overlayCtx.lineTo(ax - arrowSize,  bracketY + arrowSize);
+                this.overlayCtx.closePath();
+                this.overlayCtx.fill();
+            }
         } else {
-            // Both edges off-screen — clear stored positions
-            this.lastBandwidthXLow = null;
+            // Both edges off-screen on the same side — bandwidth entirely outside view
+            this.lastBandwidthXLow  = null;
             this.lastBandwidthXHigh = null;
         }
 

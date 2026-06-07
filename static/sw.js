@@ -4,7 +4,7 @@
 // so we never want stale data. We only cache the app shell for offline
 // fallback so the user sees a useful message rather than a blank page.
 
-const CACHE_NAME = 'ubersdr-shell-v1';
+const CACHE_NAME = 'ubersdr-shell-v2';
 
 // App-shell assets to pre-cache on install
 const SHELL_ASSETS = [
@@ -44,10 +44,13 @@ self.addEventListener('fetch', (event) => {
   // Only handle GET requests; let everything else pass through
   if (event.request.method !== 'GET') return;
 
-  // Don't intercept WebSocket upgrades or API/SSE streams
+  // Don't intercept WebSocket upgrades, API/SSE streams, or addon requests.
+  // Addon paths are prefixed with /addon/ and may contain their own streaming
+  // API endpoints (SSE, audio) that must not be intercepted.
   const url = new URL(event.request.url);
   if (
     url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/addon/') ||
     url.pathname.startsWith('/ws') ||
     url.pathname.startsWith('/sse')
   ) {

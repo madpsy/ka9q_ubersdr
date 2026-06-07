@@ -220,16 +220,16 @@ class SoundModemExtension:
         self._dcd_thresh  = tk.StringVar()
 
         # Defaults exactly matching template.html
-        # Ch A: enabled, modem=0 (AFSK 300bd), freq=850,  rcvr=0, fx25=1 (RX only), il2p=2 (IL2P+CRC)
-        # Ch B: enabled, modem=6 (BPSK 300bd), freq=2150, rcvr=0, fx25=1 (RX only), il2p=2 (IL2P+CRC)
+        # Ch A: enabled, modem=0 (AFSK 300bd), freq=850,  rcvr=0, fx25=1 (On), il2p=2 (IL2P+CRC)
+        # Ch B: enabled, modem=6 (BPSK 300bd), freq=2150, rcvr=0, fx25=1 (On), il2p=2 (IL2P+CRC)
         # Ch C: disabled, modem=1, freq=1700, rcvr=0, fx25=1, il2p=0 (Off)
         # Ch D: disabled, modem=1, freq=1700, rcvr=0, fx25=1, il2p=0 (Off)
         defaults = [
-            # enabled, modem (index: name),                    freq,   rcvr,       fx25,         il2p
-            (True,  f'0: {MODEM_NAMES[0]}', '850',  '0 (off)', '1 RX only', '2 IL2P+CRC'),
-            (True,  f'6: {MODEM_NAMES[6]}', '2150', '0 (off)', '1 RX only', '2 IL2P+CRC'),
-            (False, f'1: {MODEM_NAMES[1]}', '1700', '0 (off)', '1 RX only', '0 Off'),
-            (False, f'1: {MODEM_NAMES[1]}', '1700', '0 (off)', '1 RX only', '0 Off'),
+            # enabled, modem (index: name),                    freq,   rcvr,       fx25,    il2p
+            (True,  f'0: {MODEM_NAMES[0]}', '850',  '0 (off)', '1 On', '2 IL2P+CRC'),
+            (True,  f'6: {MODEM_NAMES[6]}', '2150', '0 (off)', '1 On', '2 IL2P+CRC'),
+            (False, f'1: {MODEM_NAMES[1]}', '1700', '0 (off)', '1 On', '0 Off'),
+            (False, f'1: {MODEM_NAMES[1]}', '1700', '0 (off)', '1 On', '0 Off'),
         ]
         for i, (en, mo, fr, rc, fx, il) in enumerate(defaults):
             self._ch_enabled[i].set(en)
@@ -405,7 +405,7 @@ class SoundModemExtension:
             rcvr_cb.bind('<<ComboboxSelected>>', lambda e: self._save_config())
 
             fx25_cb = ttk.Combobox(parent, textvariable=self._ch_fx25[i],
-                                   values=['0 Off', '1 RX only', '2 RX+TX'],
+                                   values=['0 Off', '1 On'],
                                    state='readonly', width=10)
             fx25_cb.grid(row=i + 1, column=5, padx=4)
             fx25_cb.bind('<<ComboboxSelected>>', lambda e: self._save_config())

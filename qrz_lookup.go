@@ -581,8 +581,17 @@ func (s *QRZService) fetchWithRetry(call string) (*QRZCallsign, error) {
 	}
 
 	if sessionExpired {
-		// The session expired between our check and the actual API call.
-		// Force a refresh (authSf deduplicates concurrent attempts) and retry.
+		// The session was rejected by QRZ (e.g. "Invalid session key" or
+		// "Session Timeout").  The local TTL may not have expired yet, so
+		// sessionKeyValid() would return true and refreshSession() would
+		// skip doAuthHTTP() entirely.  Force-invalidate the cached key first
+		// so that refreshSession() is guaranteed to make a fresh auth call.
+		s.mu.Lock()
+		s.sessionKey = ""
+		s.sessionExp = time.Time{}
+		s.mu.Unlock()
+
+		// Now refresh (authSf deduplicates concurrent attempts) and retry.
 		if authErr := s.refreshSession(); authErr != nil {
 			return nil, fmt.Errorf("qrz: re-auth after session timeout failed: %w", authErr)
 		}

@@ -1684,14 +1684,10 @@ func main() {
 
 				// Broadcast to WSJT-X UDP if enabled and mode is enabled
 				if wsjtxBroadcaster != nil && wsjtxBroadcaster.IsModeEnabled(decode.Mode) {
-					var err error
 					if decode.IsWSPR {
-						err = wsjtxBroadcaster.SendWSPRDecode(&decode)
+						wsjtxBroadcaster.SendWSPRDecode(&decode) //nolint:errcheck
 					} else {
-						err = wsjtxBroadcaster.SendDecode(&decode)
-					}
-					if err != nil {
-						log.Printf("Failed to send WSJT-X UDP message: %v", err)
+						wsjtxBroadcaster.SendDecode(&decode) //nolint:errcheck
 					}
 				}
 

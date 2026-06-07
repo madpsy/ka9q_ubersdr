@@ -263,8 +263,8 @@ func validateChannelConfig(sampleRate int, extensionParams map[string]interface{
 		if err != nil {
 			return cfg, fmt.Errorf("channels[%d] (%s): %w", i, chName, err)
 		}
-		if fx25 < 0 || fx25 > 2 {
-			return cfg, fmt.Errorf("channels[%d] (%s): fx25 %d out of range [0, 2]", i, chName, fx25)
+		if fx25 < 0 || fx25 > 1 {
+			return cfg, fmt.Errorf("channels[%d] (%s): fx25 %d out of range [0, 1]", i, chName, fx25)
 		}
 
 		il2p, err := toIntRequired(chMap, "il2p", 0)

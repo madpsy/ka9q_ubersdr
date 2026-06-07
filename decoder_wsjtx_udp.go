@@ -186,9 +186,7 @@ func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
 
 	// Send Status message first if needed (still under sendMutex)
 	if needStatus {
-		if err := w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName); err != nil {
-			log.Printf("WSJT-X UDP: Failed to send Status for %s: %v", decode.BandName, err)
-		}
+		w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName) //nolint:errcheck
 	}
 
 	// Build message
@@ -253,9 +251,7 @@ func (w *WSJTXUDPBroadcaster) SendWSPRDecode(decode *DecodeInfo) error {
 
 	// Send Status message first if needed (still under sendMutex)
 	if needStatus {
-		if err := w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName); err != nil {
-			log.Printf("WSJT-X UDP: Failed to send Status for %s: %v", decode.BandName, err)
-		}
+		w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName) //nolint:errcheck
 	}
 
 	// Build message

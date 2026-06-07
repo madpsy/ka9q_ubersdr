@@ -806,7 +806,7 @@ class SoundModemExtension extends DecoderExtension {
         const modemLabel = SoundModemExtension.MODEM_LABELS[modemIdx] ?? `Modem ${modemIdx}`;
         const rcvrLabel  = rcvrPairs === '0' ? '0 (off)' : rcvrPairs;
 
-        const fx25Labels = { '0': 'Off', '1': 'RX only', '2': 'RX+TX' };
+        const fx25Labels = { '0': 'Off', '1': 'On' };
         const fx25Label  = fx25Labels[fx25Val] ?? fx25Val;
 
         const il2pLabels = { '0': 'Off', '1': 'IL2P', '2': 'IL2P+CRC', '3': 'Both' };

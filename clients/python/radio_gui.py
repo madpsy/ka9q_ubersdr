@@ -446,6 +446,9 @@ class RadioGUI:
         self.chat_window = None
         self.chat_display = None
 
+        # Callsign lookup window
+        self.lookup_window = None
+
         # Extensions window
         self.extensions_window = None
 
@@ -2380,6 +2383,11 @@ class RadioGUI:
                 # Don't pack yet - will be shown after connection if server supports it
             else:
                 self.chat_btn = None
+
+            # Lookup button (conditionally shown when server has lookup service enabled)
+            self.lookup_btn = ttk.Button(button_frame_row2, text="Lookup", width=8,
+                                         command=self.open_lookup_window)
+            # Don't pack yet - will be shown after connection if server supports it
 
             # Extensions button (always available)
             self.ext_btn = ttk.Button(button_frame_row2, text="Extensions", width=10,
@@ -7352,6 +7360,549 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open users window: {e}")
             self.log_status(f"ERROR: Failed to open users window - {e}")
 
+    def open_lookup_window(self):
+        """Open the callsign lookup window.
+
+        Styled to match the web UI's callsign_lookup.html: dark theme, two-column
+        operator card (photo + info grid), aliases as clickable tags, distance/bearing
+        from receiver, and an optional map via tkintermapview.
+        """
+        # Bring existing window to front if already open
+        if self.lookup_window and self.lookup_window.winfo_exists():
+            self.lookup_window.lift()
+            self.lookup_window.focus_force()
+            return
+
+        if not self.connected or not self.client:
+            messagebox.showerror("Not Connected", "You must be connected to use the callsign lookup service.")
+            return
+
+        # ── Build base URL ────────────────────────────────────────────────────
+        hostname = self.server_var.get().strip()
+        port = self.port_var.get().strip()
+        use_tls = self.tls_var.get()
+        if '://' in hostname:
+            base_url = hostname.rstrip('/')
+        else:
+            protocol = 'https' if use_tls else 'http'
+            base_url = f"{protocol}://{hostname}:{port}"
+
+        # ── Receiver GPS (for distance/bearing) ──────────────────────────────
+        receiver_lat = None
+        receiver_lon = None
+        receiver_callsign = None
+        if self.client and hasattr(self.client, 'server_description'):
+            desc = self.client.server_description or {}
+            rx = desc.get('receiver', {})
+            gps = rx.get('gps', {})
+            if gps.get('lat') and gps.get('lon'):
+                try:
+                    receiver_lat = float(gps['lat'])
+                    receiver_lon = float(gps['lon'])
+                except (TypeError, ValueError):
+                    pass
+            receiver_callsign = rx.get('callsign') or None
+
+        # ── Colour palette (matches web UI dark theme) ────────────────────────
+        BG       = '#1a1a1a'
+        BG2      = '#222222'
+        BG3      = '#2a2a2a'
+        BORDER   = '#333333'
+        FG       = '#e0e0e0'
+        FG_DIM   = '#888888'
+        AMBER    = '#ffc107'
+        BLUE     = '#4a9eff'
+        RED_ERR  = '#dc3545'
+
+        # ── PIL availability (for photo display) ─────────────────────────────
+        try:
+            from PIL import Image as _PILImage, ImageTk as _PILImageTk
+            _PIL_OK = True
+        except ImportError:
+            _PIL_OK = False
+
+        # ── tkintermapview availability ───────────────────────────────────────
+        try:
+            import tkintermapview as _tmv
+            _MAP_OK = True
+        except ImportError:
+            _MAP_OK = False
+
+        # ── Create window ─────────────────────────────────────────────────────
+        win = tk.Toplevel(self.root)
+        win.title("Callsign Lookup")
+        win.resizable(True, True)
+        win.configure(bg=BG)
+        self.lookup_window = win
+        self.restore_window_geometry('lookup', win, "700x660")
+
+        def _on_close():
+            self.save_window_geometry('lookup', win)
+            self._mark_window_closed('lookup')
+            win.destroy()
+            self.lookup_window = None
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # ── Search bar ────────────────────────────────────────────────────────
+        search_bar = tk.Frame(win, bg=BG2, bd=0)
+        search_bar.pack(fill=tk.X)
+        tk.Frame(win, bg=BORDER, height=1).pack(fill=tk.X)
+
+        tk.Label(search_bar, text="Callsign:", bg=BG2, fg='#aaaaaa',
+                 font=('TkDefaultFont', 10)).pack(side=tk.LEFT, padx=(12, 6), pady=10)
+
+        callsign_var = tk.StringVar()
+        callsign_entry = tk.Entry(search_bar, textvariable=callsign_var, width=16,
+                                  bg=BG3, fg='#ffffff', insertbackground='#ffffff',
+                                  relief=tk.FLAT, bd=1, highlightthickness=1,
+                                  highlightbackground='#444444', highlightcolor=BLUE,
+                                  font=('TkFixedFont', 12))
+        callsign_entry.pack(side=tk.LEFT, padx=(0, 8), pady=8, ipady=4)
+
+        def _force_upper(*_):
+            v = callsign_var.get()
+            upper = v.upper()
+            if v != upper:
+                callsign_var.set(upper)
+        callsign_var.trace_add('write', _force_upper)
+
+        go_btn = tk.Button(search_bar, text="Go", bg=BLUE, fg='#ffffff',
+                           activebackground='#3a8eef', activeforeground='#ffffff',
+                           relief=tk.FLAT, bd=0, padx=14, pady=5,
+                           font=('TkDefaultFont', 10, 'bold'), cursor='hand2')
+        go_btn.pack(side=tk.LEFT, pady=8)
+
+        # ── Scrollable result area ────────────────────────────────────────────
+        outer = tk.Frame(win, bg=BG)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(outer, bg=BG, highlightthickness=0, bd=0)
+        vscroll = tk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vscroll.set)
+        vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        result_frame = tk.Frame(canvas, bg=BG)
+        result_frame_id = canvas.create_window((0, 0), window=result_frame, anchor='nw')
+
+        def _on_result_configure(event):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        result_frame.bind('<Configure>', _on_result_configure)
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(result_frame_id, width=event.width)
+        canvas.bind('<Configure>', _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            if event.num == 4:
+                canvas.yview_scroll(-1, 'units')
+            elif event.num == 5:
+                canvas.yview_scroll(1, 'units')
+            else:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        canvas.bind_all('<MouseWheel>', _on_mousewheel)
+        canvas.bind_all('<Button-4>', _on_mousewheel)
+        canvas.bind_all('<Button-5>', _on_mousewheel)
+
+        # ── State ─────────────────────────────────────────────────────────────
+        _lookup_cache    = {}       # normalised callsign -> result data
+        _photo_image_ref = [None]   # keep PIL ImageTk reference alive
+        _map_widget_ref  = [None]   # tkintermapview widget reference
+
+        # ── Helpers ───────────────────────────────────────────────────────────
+        def _normalise(raw):
+            parts = raw.strip().upper().split('/')
+            return max(parts, key=len) if parts else raw.strip().upper()
+
+        def _calc_distance_bearing(spot_lat, spot_lon):
+            """Return (dist_km, bearing_deg) from receiver to spot, or None."""
+            if receiver_lat is None or receiver_lon is None:
+                return None
+            import math
+            R = 6371
+            to_rad = math.radians
+            phi1, phi2 = to_rad(receiver_lat), to_rad(spot_lat)
+            dphi = to_rad(spot_lat - receiver_lat)
+            dlam = to_rad(spot_lon - receiver_lon)
+            a = (math.sin(dphi / 2) ** 2
+                 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
+            dist_km = round(R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+            y = math.sin(to_rad(spot_lon - receiver_lon)) * math.cos(phi2)
+            x = (math.cos(phi1) * math.sin(phi2)
+                 - math.sin(phi1) * math.cos(phi2) * math.cos(to_rad(spot_lon - receiver_lon)))
+            bearing = round((math.degrees(math.atan2(y, x)) + 360) % 360)
+            return dist_km, bearing
+
+        def _clear_result():
+            """Destroy all widgets inside result_frame."""
+            for w in result_frame.winfo_children():
+                w.destroy()
+            _photo_image_ref[0] = None
+            if _map_widget_ref[0]:
+                try:
+                    _map_widget_ref[0].destroy()
+                except Exception:
+                    pass
+                _map_widget_ref[0] = None
+
+        def _show_state_msg(text, color=None):
+            _clear_result()
+            tk.Label(result_frame, text=text, bg=BG, fg=(color or FG_DIM),
+                     font=('TkDefaultFont', 11), wraplength=500,
+                     justify=tk.CENTER).pack(pady=40, padx=20)
+
+        def _show_idle():
+            _show_state_msg("Enter a callsign above and press Go.")
+
+        def _show_loading(callsign):
+            _show_state_msg(f"Looking up {callsign}\u2026")
+
+        def _show_error(msg):
+            _show_state_msg(f"\u26a0  {msg}", color=RED_ERR)
+
+        _modal_ref = [None]  # single photo modal — reused across clicks
+
+        def _open_photo_modal(pil_image):
+            """Open (or raise) the full-size photo modal using an already-loaded PIL image."""
+            if not _PIL_OK or pil_image is None:
+                return
+
+            # If a modal is already open, just raise it
+            if _modal_ref[0] and _modal_ref[0].winfo_exists():
+                _modal_ref[0].lift()
+                _modal_ref[0].focus_force()
+                return
+
+            modal = tk.Toplevel(win)
+            modal.title("Operator Photo")
+            modal.configure(bg='#000000')
+            _modal_ref[0] = modal
+
+            def _on_modal_close():
+                _modal_ref[0] = None
+                modal.destroy()
+            modal.protocol("WM_DELETE_WINDOW", _on_modal_close)
+
+            # Scale image to fit 80% of screen
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            img = pil_image.copy()
+            img.thumbnail((int(sw * 0.8), int(sh * 0.8)), _PILImage.LANCZOS)
+            photo = _PILImageTk.PhotoImage(img)
+
+            lbl = tk.Label(modal, image=photo, bg='#000000', cursor='hand2')
+            lbl.image = photo  # keep reference
+            lbl.pack()
+            lbl.bind('<Button-1>', lambda e: _on_modal_close())
+            modal.bind('<Escape>', lambda e: _on_modal_close())
+
+            # Grab focus after the image is placed
+            modal.update_idletasks()
+            modal.grab_set()
+
+        def _do_lookup_for(callsign_str):
+            """Trigger a lookup for the given callsign string (used by alias/trustee clicks)."""
+            base = _normalise(callsign_str)
+            if not base:
+                return
+            callsign_var.set(base)
+            _do_lookup()
+
+        def _show_result(data, callsign):
+            """Render the operator card matching the web UI layout."""
+            _clear_result()
+
+            # ── Full name ─────────────────────────────────────────────────────
+            full_name = data.get('name_fmt', '')
+            if not full_name:
+                parts = []
+                if data.get('fname'):    parts.append(data['fname'])
+                if data.get('nickname'): parts.append(f'"{data["nickname"]}"'  )
+                if data.get('name'):     parts.append(data['name'])
+                full_name = ' '.join(parts)
+
+            # ── Operator card ─────────────────────────────────────────────────
+            card = tk.Frame(result_frame, bg=BG2, bd=0,
+                            highlightthickness=1, highlightbackground=BORDER)
+            card.pack(fill=tk.X, padx=16, pady=(16, 8))
+
+            # Left column: photo + distance/bearing + QRZ link
+            left_col = tk.Frame(card, bg=BG2)
+            left_col.pack(side=tk.LEFT, padx=(16, 12), pady=16, anchor='n')
+
+            # Photo box
+            photo_frame = tk.Frame(left_col, bg=BG3, width=160, height=160,
+                                   highlightthickness=2, highlightbackground='#444444')
+            photo_frame.pack_propagate(False)
+            photo_frame.pack()
+
+            img_url = data.get('image', '')
+            if img_url and _PIL_OK:
+                ph_lbl = tk.Label(photo_frame, text='\U0001f4f7', bg=BG3, fg='#555555',
+                                  font=('TkDefaultFont', 32))
+                ph_lbl.place(relx=0.5, rely=0.5, anchor='center')
+
+                def _load_photo(url=img_url):
+                    try:
+                        import io
+                        resp = requests.get(url, timeout=10)
+                        resp.raise_for_status()
+                        full_img = _PILImage.open(io.BytesIO(resp.content))
+                        full_img.load()  # decode fully before thumbnail
+                        # Thumbnail copy for the card (160×160)
+                        thumb = full_img.copy()
+                        thumb.thumbnail((160, 160), _PILImage.LANCZOS)
+                        photo = _PILImageTk.PhotoImage(thumb)
+                        _photo_image_ref[0] = photo
+
+                        def _place(p=photo, orig=full_img):
+                            if not win.winfo_exists():
+                                return
+                            ph_lbl.destroy()
+                            img_lbl = tk.Label(photo_frame, image=p, bg=BG3, cursor='hand2')
+                            img_lbl.image = p
+                            img_lbl.place(relx=0.5, rely=0.5, anchor='center')
+                            # Pass the full PIL image to the modal (no re-download needed)
+                            img_lbl.bind('<Button-1>', lambda e, o=orig: _open_photo_modal(o))
+                            img_lbl.bind('<Enter>', lambda e: photo_frame.config(highlightbackground=BLUE))
+                            img_lbl.bind('<Leave>', lambda e: photo_frame.config(highlightbackground='#444444'))
+                        win.after(0, _place)
+                    except Exception:
+                        pass
+                import threading as _t
+                _t.Thread(target=_load_photo, daemon=True).start()
+            else:
+                tk.Label(photo_frame, text='\U0001f4f7', bg=BG3, fg='#555555',
+                         font=('TkDefaultFont', 32)).place(relx=0.5, rely=0.5, anchor='center')
+
+            # Distance / bearing
+            spot_lat = data.get('lat')
+            spot_lon = data.get('lon')
+            db_result = None
+            if spot_lat and spot_lon:
+                try:
+                    db_result = _calc_distance_bearing(float(spot_lat), float(spot_lon))
+                except (TypeError, ValueError):
+                    pass
+
+            if db_result:
+                dist_km, bearing = db_result
+                dist_f = tk.Frame(left_col, bg=BG2)
+                dist_f.pack(pady=(8, 0))
+                tk.Label(dist_f, text='Distance', bg=BG2, fg=FG_DIM,
+                         font=('TkDefaultFont', 9, 'bold')).pack()
+                tk.Label(dist_f, text=f'{dist_km:,} km', bg=BG2, fg=FG,
+                         font=('TkDefaultFont', 10)).pack()
+                tk.Label(dist_f, text='Bearing', bg=BG2, fg=FG_DIM,
+                         font=('TkDefaultFont', 9, 'bold')).pack(pady=(4, 0))
+                tk.Label(dist_f, text=f'{bearing}\u00b0', bg=BG2, fg=FG,
+                         font=('TkDefaultFont', 10)).pack()
+
+            # QRZ link
+            qrz_url = f"https://www.qrz.com/db/{callsign}"
+            qrz_lbl = tk.Label(left_col, text="View on QRZ.com \u2197", bg=BG2, fg=BLUE,
+                                font=('TkDefaultFont', 9), cursor='hand2')
+            qrz_lbl.pack(pady=(8, 0))
+            qrz_lbl.bind('<Button-1>', lambda e, u=qrz_url: __import__('webbrowser').open(u))
+            qrz_lbl.bind('<Enter>', lambda e: qrz_lbl.config(fg='#6ab8ff'))
+            qrz_lbl.bind('<Leave>', lambda e: qrz_lbl.config(fg=BLUE))
+
+            # Right column
+            right_col = tk.Frame(card, bg=BG2)
+            right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=16, padx=(0, 16))
+
+            # Callsign heading
+            tk.Label(right_col, text=callsign, bg=BG2, fg=AMBER,
+                     font=('TkFixedFont', 22, 'bold')).pack(anchor='w')
+
+            # Aliases row
+            aliases_raw = data.get('aliases', '')
+            if aliases_raw:
+                alias_list = [a.strip() for a in aliases_raw.split(',') if a.strip()]
+                if alias_list:
+                    alias_row = tk.Frame(right_col, bg=BG2)
+                    alias_row.pack(anchor='w', pady=(4, 0))
+                    for alias in alias_list:
+                        a_lbl = tk.Label(alias_row, text=alias, bg='#0d2a4a', fg=BLUE,
+                                         font=('TkFixedFont', 10), cursor='hand2',
+                                         relief=tk.FLAT, bd=0, padx=6, pady=2,
+                                         highlightthickness=1, highlightbackground='#1a4a7a')
+                        a_lbl.pack(side=tk.LEFT, padx=(0, 4))
+                        a_lbl.bind('<Button-1>', lambda e, cs=alias: _do_lookup_for(cs))
+                        a_lbl.bind('<Enter>', lambda e, l=a_lbl: l.config(bg='#1a3a6a'))
+                        a_lbl.bind('<Leave>', lambda e, l=a_lbl: l.config(bg='#0d2a4a'))
+
+            # Full name
+            if full_name:
+                tk.Label(right_col, text=full_name, bg=BG2, fg='#ffffff',
+                         font=('TkDefaultFont', 13), wraplength=380,
+                         justify=tk.LEFT).pack(anchor='w', pady=(6, 10))
+            else:
+                tk.Frame(right_col, bg=BG2, height=10).pack()
+
+            # ── Info grid ─────────────────────────────────────────────────────
+            grid_frame = tk.Frame(right_col, bg=BG2)
+            grid_frame.pack(fill=tk.X, anchor='w')
+            grid_frame.columnconfigure(1, weight=1)
+            _grid_row = [0]
+
+            def _add_row(label, value, is_callsign_link=False):
+                if value is None or value == '':
+                    return
+                r = _grid_row[0]
+                tk.Label(grid_frame, text=label, bg=BG2, fg=FG_DIM,
+                         font=('TkDefaultFont', 10), anchor='w',
+                         padx=0, pady=2).grid(row=r, column=0, sticky='w', padx=(0, 12))
+                if is_callsign_link:
+                    v_lbl = tk.Label(grid_frame, text=str(value), bg=BG2, fg=BLUE,
+                                     font=('TkDefaultFont', 10), anchor='w',
+                                     cursor='hand2', pady=2)
+                    v_lbl.grid(row=r, column=1, sticky='w')
+                    v_lbl.bind('<Button-1>', lambda e, cs=str(value): _do_lookup_for(cs))
+                    v_lbl.bind('<Enter>', lambda e, l=v_lbl: l.config(fg='#6ab8ff'))
+                    v_lbl.bind('<Leave>', lambda e, l=v_lbl: l.config(fg=BLUE))
+                else:
+                    tk.Label(grid_frame, text=str(value), bg=BG2, fg=FG,
+                             font=('TkDefaultFont', 10), anchor='w',
+                             pady=2, wraplength=320, justify=tk.LEFT).grid(row=r, column=1, sticky='w')
+                _grid_row[0] += 1
+
+            def _add_divider():
+                r = _grid_row[0]
+                tk.Frame(grid_frame, bg=BORDER, height=1).grid(
+                    row=r, column=0, columnspan=2, sticky='ew', pady=5)
+                _grid_row[0] += 1
+
+            yesno = lambda v: 'Yes' if v == '1' else ('No' if v == '0' else v)
+
+            # Licence
+            _add_row('Class',    data.get('class'))
+            _add_row('Licences', data.get('licences'))
+            _add_row('Expires',  data.get('expdate'))
+            _add_row('Trustee',  data.get('trustee'), is_callsign_link=bool(data.get('trustee')))
+
+            # Location
+            addr_parts = [p for p in [data.get('addr2'), data.get('state')] if p]
+            if addr_parts or data.get('country'):
+                _add_divider()
+                if addr_parts:
+                    _add_row('Location', ', '.join(addr_parts))
+                _add_row('Country', data.get('country'))
+
+            if spot_lat and spot_lon:
+                _add_row('Lat/Lon', f"{spot_lat}, {spot_lon}")
+            _add_row('Grid',      data.get('grid'))
+            _add_row('County',    data.get('county'))
+            _add_row('DXCC',      data.get('dxcc'))
+            _add_row('CQ Zone',   data.get('cqzone'))
+            _add_row('ITU Zone',  data.get('ituzone'))
+            _add_row('Time Zone', data.get('timezone'))
+            gmt = data.get('gmtoffset')
+            if gmt is not None and gmt != '':
+                _add_row('GMT Offset', gmt)
+
+            if data.get('url') or data.get('qslmgr'):
+                _add_divider()
+                _add_row('Website',  data.get('url'))
+                _add_row('QSL Mgr',  data.get('qslmgr'))
+
+            if data.get('eqsl') or data.get('mqsl') or data.get('lotw'):
+                _add_divider()
+                _add_row('eQSL',     yesno(data.get('eqsl')))
+                _add_row('Mail QSL', yesno(data.get('mqsl')))
+                _add_row('LoTW',     yesno(data.get('lotw')))
+
+            # ── Map (below card) ──────────────────────────────────────────────
+            if spot_lat and spot_lon:
+                try:
+                    lat_f = float(spot_lat)
+                    lon_f = float(spot_lon)
+                    map_wrap = tk.Frame(result_frame, bg=BG2,
+                                       highlightthickness=1, highlightbackground=BORDER)
+                    map_wrap.pack(fill=tk.X, padx=16, pady=(0, 16))
+
+                    if _MAP_OK:
+                        map_widget = _tmv.TkinterMapView(map_wrap, width=660, height=220,
+                                                         corner_radius=0)
+                        map_widget.pack(fill=tk.X)
+                        map_widget.set_position(lat_f, lon_f)
+                        map_widget.set_zoom(10)
+                        map_widget.set_marker(lat_f, lon_f, text=callsign)
+                        if receiver_lat is not None and receiver_lon is not None:
+                            map_widget.set_marker(receiver_lat, receiver_lon,
+                                                  text=receiver_callsign or 'Receiver')
+                        _map_widget_ref[0] = map_widget
+                    else:
+                        # Fallback: show coordinates as text
+                        country_str = data.get('country', '')
+                        loc_text = f"\U0001f4cd  {lat_f:.4f}, {lon_f:.4f}"
+                        if country_str:
+                            loc_text += f"  \u2014  {country_str}"
+                        if db_result:
+                            loc_text += f"  \u2014  {db_result[0]:,} km / {db_result[1]}\u00b0"
+                        tk.Label(map_wrap, text=loc_text, bg=BG2, fg=FG,
+                                 font=('TkDefaultFont', 10), pady=10).pack()
+                except (TypeError, ValueError):
+                    pass
+
+        # ── Lookup logic ──────────────────────────────────────────────────────
+        def _do_lookup():
+            raw = callsign_var.get().strip()
+            if not raw:
+                return
+
+            base = _normalise(raw)
+            if not base:
+                return
+
+            callsign_var.set(base)
+
+            # Fast path: in-session cache
+            if base in _lookup_cache:
+                _show_result(_lookup_cache[base], base)
+                return
+
+            # Get session UUID
+            uuid_str = ''
+            if self.client and hasattr(self.client, 'user_session_id'):
+                uuid_str = self.client.user_session_id or ''
+
+            if not uuid_str:
+                _show_error("No active session UUID \u2014 please reconnect and try again.")
+                return
+
+            _show_loading(base)
+            go_btn.config(state='disabled')
+
+            def _fetch(b=base, u=uuid_str):
+                try:
+                    api_url = (f"{base_url}/api/lookup"
+                               f"?callsign={requests.utils.quote(b)}"
+                               f"&uuid={requests.utils.quote(u)}")
+                    resp = requests.get(api_url, timeout=10)
+                    data = resp.json()
+                    if not resp.ok:
+                        err = data.get('error', f"HTTP {resp.status_code}")
+                        win.after(0, lambda: _show_error(err))
+                    else:
+                        _lookup_cache[b] = data
+                        win.after(0, lambda: _show_result(data, b))
+                except Exception as exc:
+                    win.after(0, lambda: _show_error(str(exc)))
+                finally:
+                    win.after(0, lambda: go_btn.config(state='normal'))
+
+            import threading as _threading
+            _threading.Thread(target=_fetch, daemon=True).start()
+
+        go_btn.configure(command=_do_lookup)
+        callsign_entry.bind('<Return>', lambda e: _do_lookup())
+
+        _show_idle()
+        callsign_entry.focus_set()
+        self.log_status("Callsign lookup window opened")
+
     def open_chat_window(self):
         """Open a separate chat window."""
         # Don't open multiple windows
@@ -8177,6 +8728,15 @@ class RadioGUI:
         if self.cw_spots_btn:
             self.cw_spots_btn.pack_forget()
 
+        # Hide lookup button
+        if hasattr(self, 'lookup_btn') and self.lookup_btn:
+            self.lookup_btn.pack_forget()
+
+        # Close lookup window if open
+        if self.lookup_window and self.lookup_window.winfo_exists():
+            self.lookup_window.destroy()
+            self.lookup_window = None
+
         # Stop recording if active
         if self.recording:
             self.stop_recording()
@@ -8544,6 +9104,13 @@ class RadioGUI:
                                     self.log_status("Rotator control available on this server")
                                 elif self.rotator_btn:
                                     self.rotator_btn.pack_forget()
+
+                                # Pack lookup button if server has lookup service enabled
+                                if desc.get('lookup_service', False):
+                                    self.lookup_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                    self.log_status("Callsign lookup service available on this server")
+                                else:
+                                    self.lookup_btn.pack_forget()
 
                             # Print loading message before opening GUI windows
                             print("Loading GUI (may take a moment)...", file=sys.stderr)
@@ -9987,7 +10554,7 @@ def run_headless_soundmodem(args):
                 for _i, _ch in enumerate(_cfg['channels'][:4]):
                     # Parse values the same way _collect_params() does in
                     # soundmodem_extension.py — the GUI saves display strings
-                    # like "0: AFSK 300bd", "0 (off)", "1 RX only", "2 IL2P+CRC"
+                    # like "0: AFSK 300bd", "0 (off)", "1 On", "2 IL2P+CRC"
                     # but the server expects plain integers / floats.
                     if 'enabled' in _ch:
                         channels[_i]['enabled'] = bool(_ch['enabled'])
@@ -10448,7 +11015,7 @@ if __name__ == '__main__':
             '  15 = ARDOP Packet\n'
             '\n'
             'rcvr_pairs:  0=off  1=1 pair  2=2 pairs  4=4 pairs  8=8 pairs\n'
-            'fx25:        0=off  1=RX only  2=RX+TX\n'
+            'fx25:        0=off  1=on\n'
             'il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both\n'
         ),
     )
@@ -10481,7 +11048,7 @@ if __name__ == '__main__':
             'channels A/B/C/D in order). All five keys are required. '
             'When any --channel flag is given the saved config channel settings are ignored '
             'and only the specified channels are enabled. '
-            'Keys: modem (int), freq (Hz, float), rcvr_pairs (0-3), fx25 (0-3), il2p (0-3). '
+            'Keys: modem (int), freq (Hz, float), rcvr_pairs (0/1/2/4/8), fx25 (0-1), il2p (0-3). '
             'See examples below.'
         ),
     )

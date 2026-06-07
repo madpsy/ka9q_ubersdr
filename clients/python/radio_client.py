@@ -2649,7 +2649,7 @@ Modem index reference:
   15 = ARDOP Packet
 
 rcvr_pairs:  0=off  1=1 pair  2=2 pairs  4=4 pairs  8=8 pairs
-fx25:        0=off  1=RX only  2=RX+TX
+fx25:        0=off  1=on
 il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
         """
     )
@@ -2762,7 +2762,7 @@ il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
             'channels A/B/C/D in order). All five keys are required. '
             'When any --channel flag is given the saved config channel settings are ignored '
             'and only the specified channels are enabled. '
-            'Keys: modem (int), freq (Hz, float), rcvr_pairs (0/1/2/4/8), fx25 (0-2), il2p (0-3). '
+            'Keys: modem (int), freq (Hz, float), rcvr_pairs (0/1/2/4/8), fx25 (0-1), il2p (0-3). '
             'See examples below.'
         ),
     )

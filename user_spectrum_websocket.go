@@ -285,9 +285,9 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 }
 
 // sharedPollDivisor is the hardcoded poll-rate divisor for the shared default spectrum channel.
-// The shared SSRC is polled at PollPeriodMs × sharedPollDivisor (i.e. every 3rd tick).
+// The shared SSRC is polled at PollPeriodMs × sharedPollDivisor (i.e. every 2nd tick).
 // This constant is also used in user_spectrum.go (same package) for the poll-loop throttle.
-const sharedPollDivisor = 3
+const sharedPollDivisor = 2
 
 // handleMessages processes incoming WebSocket messages
 func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *Session, done chan struct{}, state *spectrumState) {

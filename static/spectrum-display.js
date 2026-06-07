@@ -5091,6 +5091,16 @@ class SpectrumDisplay {
         // Reset initial zoom flag so it will zoom in again on next scroll
         this.hasPerformedInitialZoom = false;
 
+        // Clear stale zoom/pan records so sendSettingsSync() doesn't re-apply
+        // the previous zoom level ~1 second after the reset. Without this,
+        // every path that reaches full bandwidth (scroll wheel, zoom-out button,
+        // Min button, Q key, slider at 0, mobile slider) snaps back one zoom
+        // level because the 1s periodic sync re-sends the last recorded zoom msg.
+        if (this._lastSentByType) {
+            delete this._lastSentByType['zoom'];
+            delete this._lastSentByType['pan'];
+        }
+
         // Send reset request to server - backend will use default config values
         this.ws.send(JSON.stringify({
             type: 'reset'

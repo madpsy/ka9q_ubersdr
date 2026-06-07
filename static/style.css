@@ -3962,7 +3962,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* Decoder Extension Panels */
 .decoder-extension-panel {
-    padding: 0 30px;
+    padding: 0;
     background: var(--page-bg);
     border-top: none;
     transform: scale(0.75);

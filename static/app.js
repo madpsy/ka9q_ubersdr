@@ -9596,6 +9596,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Expose for idle detector
         window.spectrumDisplay = spectrumDisplay;
 
+        // Activate true WebGL waterfall if available (replaces Canvas2D GPU scroll path)
+        if (typeof patchSpectrumDisplayWithWebGL === 'function') {
+            patchSpectrumDisplayWithWebGL(spectrumDisplay);
+        }
+
         // Restore saved waterfall height (the IIFE already set the CSS variable;
         // now that the instance exists we can apply it properly to the canvas).
         {

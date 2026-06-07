@@ -2179,8 +2179,29 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* Hide band status badges bar on mobile */
+    /* On mobile: show band buttons but hide voice/TTS/lookup buttons */
     .band-status-bar {
+        display: block !important;
+        padding: 4px 8px;
+    }
+
+    .band-status-container {
+        gap: 4px;
+        padding: 4px 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    /* Make band badges smaller on mobile */
+    .band-status-badge {
+        padding: 3px 7px;
+        font-size: 0.72em;
+    }
+
+    /* Hide voice activity, callsign lookup, and TTS buttons on mobile */
+    #voice-activity-button,
+    #callsign-lookup-button,
+    #tts-announce-button {
         display: none !important;
     }
 

@@ -2186,15 +2186,21 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .band-status-container {
-        gap: 4px;
+        gap: 3px;
         padding: 4px 8px;
         flex-wrap: wrap;
         justify-content: center;
     }
 
-    /* Make band badges smaller on mobile */
+    /* Make band badges smaller and tighter on mobile */
+    .band-buttons-container {
+        gap: 3px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
     .band-status-badge {
-        padding: 3px 7px;
+        padding: 3px 6px;
         font-size: 0.72em;
     }
 

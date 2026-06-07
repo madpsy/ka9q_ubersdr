@@ -4,28 +4,27 @@
  * Architecture
  * ────────────
  * The waterfall is stored as a 2-D ring-buffer texture on the GPU.
- * Each row holds one spectrum frame as raw normalised float values [0,1].
- * A 1-D colour-LUT texture (256 × 1 RGBA) maps those values to colours.
+ * Each row holds one spectrum frame as normalised magnitude bytes (1..255).
+ * Value 0 is reserved as a "no data" sentinel → rendered as black.
+ * A 1-D colour-LUT texture (256 × 1 RGBA) maps magnitudes to colours.
  *
- * Every frame:
+ * Every 30fps tick:
  *   1. CPU uploads ONE new row of bytes via texSubImage2D  (tiny transfer)
- *   2. Fragment shader reads the ring buffer + LUT and draws the full quad
- *      with a fractional sub-pixel Y offset for smooth scrolling
+ *   2. Fragment shader maps each visible pixel to the correct ring-buffer row
+ *      using the write pointer + sub-pixel scroll offset (in pixel units)
  *   3. The WebGL offscreen canvas is blitted onto the main Canvas2D canvas
- *      via drawImage — this is necessary because SpectrumDisplay already holds
- *      a '2d' context on the main canvas, and a canvas can only have one context.
+ *      via transferToImageBitmap() + drawImage() — avoids cross-context stall
  *
- * Nothing else touches the CPU per frame — no ImageData, no per-pixel JS loops.
- *
- * Public API (mirrors the methods SpectrumDisplay delegates to)
- * ─────────────────────────────────────────────────────────────
- *   new WaterfallWebGL(mainCanvas, options)
- *   .isSupported()                → bool
- *   .resize(width, height)
- *   .setColorScheme(name, colorGradient)   // pass the existing 256-entry gradient
- *   .pushRow(spectrumData, minDb, maxDb, contrast, intensity, manualRange)
- *   .render(subPixelOffset, waterfallStartY)  // call every rAF tick
- *   .destroy()
+ * Key design decisions
+ * ────────────────────
+ * • Separate offscreen <canvas> for WebGL2 — the main canvas already has a
+ *   '2d' context; a canvas can only have one rendering context type.
+ * • Ring buffer maps 1 texture row : 1 visible waterfall pixel.  The shader
+ *   uses uVisibleRows (not uRingRows) for the pixel→row mapping so the scroll
+ *   is always 1:1 regardless of ring buffer size.
+ * • Sub-pixel scroll offset is passed in pixels (gpuScrollOffset, 0..1) and
+ *   converted to a ring-row fraction inside the shader.
+ * • Magnitude 0 = no data → black.  Real data stored as 1..255.
  */
 
 'use strict';
@@ -34,81 +33,74 @@ class WaterfallWebGL {
     /**
      * @param {HTMLCanvasElement} mainCanvas - the existing spectrum-display-canvas
      *        (already has a '2d' context — we create a separate offscreen WebGL canvas)
-     * @param {object}            options
-     * @param {number}  [options.ringRows=2048]  - ring buffer height (power of 2, >= canvas height)
+     * @param {object} options
+     * @param {number} [options.ringRows=2048] - ring buffer height (power of 2, >= canvas height)
      */
     constructor(mainCanvas, options = {}) {
-        // The main canvas already has a Canvas2D context (acquired by SpectrumDisplay).
-        // We cannot call getContext('webgl2') on it — a canvas can only have one context.
-        // Instead we create a hidden offscreen canvas for WebGL and blit it onto the
-        // main canvas via ctx.drawImage() in render().
-        this.mainCanvas  = mainCanvas;
-        this.mainCtx     = mainCanvas.getContext('2d');  // already exists — just retrieves it
+        this.mainCanvas = mainCanvas;
+        this.mainCtx    = mainCanvas.getContext('2d');  // retrieves existing context
 
         this.ringRows = options.ringRows || 2048;
-        this.width   = mainCanvas.width;
-        this.height  = mainCanvas.height;
+        this.width    = mainCanvas.width;
+        this.height   = mainCanvas.height;
 
         // Offscreen canvas that owns the WebGL2 context
-        this._glCanvas = document.createElement('canvas');
+        this._glCanvas        = document.createElement('canvas');
         this._glCanvas.width  = this.width;
         this._glCanvas.height = this.height;
 
-        // Ring-buffer write pointer (which texture row to write next)
-        this._writeRow = 0;
+        // Ring-buffer write pointer
+        this._writeRow  = 0;
+        this._hasData   = false;  // true once first row is pushed
 
-        // WebGL context (on the offscreen canvas)
-        this.gl = null;
-        this._program = null;
-        this._vao = null;
-
-        // Texture handles
-        this._ringTex = null;   // R8 ring buffer
-        this._lutTex  = null;   // 256×1 RGBA colour LUT
+        // WebGL state
+        this.gl        = null;
+        this._program  = null;
+        this._vao      = null;
+        this._ringTex  = null;
+        this._lutTex   = null;
 
         // Uniform locations
-        this._uRingTex    = null;
-        this._uLutTex     = null;
-        this._uWriteRow   = null;
-        this._uRingRows   = null;
-        this._uScrollOff  = null;
-        this._uWaterfallY = null;  // normalised Y start of waterfall region [0,1]
-        this._uWaterfallH = null;  // normalised height of waterfall region [0,1]
+        this._uRingTex      = null;
+        this._uLutTex       = null;
+        this._uWriteRow     = null;
+        this._uRingRows     = null;
+        this._uVisibleRows  = null;  // waterfall height in pixels
+        this._uScrollPixels = null;  // sub-pixel scroll offset in pixels [0,1)
+        this._uWaterfallY   = null;  // normalised Y start of waterfall [0,1]
+        this._uWaterfallH   = null;  // normalised height of waterfall [0,1]
 
         this._supported = false;
         this._init();
     }
 
-    // ── Public ────────────────────────────────────────────────────────────────
+    // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Returns true if WebGL initialised successfully */
     isSupported() { return this._supported; }
 
-    /** Resize offscreen canvas and textures when the main canvas changes size */
+    /** Resize offscreen canvas and ring texture when the main canvas changes size */
     resize(width, height) {
         if (!this._supported) return;
         this.width  = width;
         this.height = height;
         this._glCanvas.width  = width;
         this._glCanvas.height = height;
-        const gl = this.gl;
-        gl.viewport(0, 0, width, height);
-        // Ring buffer width must match canvas width; recreate if needed
-        this._createRingTexture();
+        this.gl.viewport(0, 0, width, height);
+        this._createRingTexture();  // recreates at new width; resets write pointer
     }
 
     /**
-     * Upload a new 256-entry RGBA colour LUT built from the existing gradient.
-     * @param {string}   name          - colour scheme name (informational only)
+     * Upload a 256-entry RGBA colour LUT from the existing gradient array.
+     * @param {string}   name          - colour scheme name (informational)
      * @param {string[]} colorGradient - array of 'rgb(r,g,b)' strings, length 256
      */
     setColorScheme(name, colorGradient) {
         if (!this._supported) return;
-        const gl = this.gl;
+        const gl   = this.gl;
         const data = new Uint8Array(256 * 4);
         for (let i = 0; i < 256; i++) {
             const str = colorGradient[i] || 'rgb(0,0,0)';
-            const m = str.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            const m   = str.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
             if (m) {
                 data[i * 4]     = parseInt(m[1]);
                 data[i * 4 + 1] = parseInt(m[2]);
@@ -124,23 +116,15 @@ class WaterfallWebGL {
     /**
      * Push one new spectrum row into the ring buffer.
      * Applies the same contrast/intensity/range normalisation as the CPU path.
-     *
-     * @param {number[]} spectrumData  - raw dB values, one per FFT bin
-     * @param {number}   minDb
-     * @param {number}   maxDb
-     * @param {number}   contrast      - config.contrast (0-255 threshold)
-     * @param {number}   intensity     - config.intensity (-1..+1)
-     * @param {boolean}  manualRange   - config.manualRangeEnabled
+     * Magnitude is stored as 1..255 (0 is reserved as "no data" → black).
      */
     pushRow(spectrumData, minDb, maxDb, contrast, intensity, manualRange) {
         if (!this._supported || !spectrumData || spectrumData.length === 0) return;
 
-        this._lastRow = spectrumData;
-
-        const gl     = this.gl;
-        const W      = this.width;
+        const gl      = this.gl;
+        const W       = this.width;
         const dbRange = maxDb - minDb;
-        const row    = new Uint8Array(W);   // one byte per pixel — normalised magnitude
+        const row     = new Uint8Array(W);
 
         for (let x = 0; x < W; x++) {
             const binPos   = (x / W) * spectrumData.length;
@@ -171,76 +155,78 @@ class WaterfallWebGL {
                 magnitude = Math.min(255, magnitude * (1 + intensity * 2));
             }
 
-            row[x] = Math.round(Math.max(0, Math.min(255, magnitude)));
+            // Store as 1..255 — 0 is reserved as "no data" sentinel (renders black).
+            // Add 1 and clamp so that even a true-zero magnitude stores as 1 (not black).
+            row[x] = Math.max(1, Math.min(255, Math.round(magnitude) + 1));
         }
 
-        // Upload the single row into the ring buffer texture.
-        // Internal format is R8 (WebGL2), so the pixel format must be gl.RED — not gl.LUMINANCE.
+        // Upload one row to the ring buffer texture (gl.RED matches gl.R8 internal format)
         gl.bindTexture(gl.TEXTURE_2D, this._ringTex);
         gl.texSubImage2D(
             gl.TEXTURE_2D,
-            0,                  // mip level
-            0,                  // x offset
-            this._writeRow,     // y offset = ring write pointer
-            W,                  // width
-            1,                  // height (one row)
-            gl.RED,             // format — must match R8 internal format
-            gl.UNSIGNED_BYTE,
+            0,               // mip level
+            0,               // x offset
+            this._writeRow,  // y offset = ring write pointer
+            W, 1,            // width, height
+            gl.RED, gl.UNSIGNED_BYTE,
             row
         );
         gl.bindTexture(gl.TEXTURE_2D, null);
 
-        // Advance write pointer (wraps around)
         this._writeRow = (this._writeRow + 1) % this.ringRows;
+        this._hasData  = true;
     }
 
     /**
-     * Render the waterfall.  Call every rAF tick.
+     * Render the waterfall onto the main canvas.  Call every rAF tick.
      *
-     * @param {number} subPixelOffset  - fractional pixel scroll offset [0,1)
-     * @param {number} waterfallStartY - pixel Y where waterfall begins (below line graph)
+     * @param {number} scrollPixels   - sub-pixel scroll offset in pixels [0,1)
+     * @param {number} waterfallStartY - pixel Y where waterfall begins
      */
-    render(subPixelOffset, waterfallStartY) {
+    render(scrollPixels, waterfallStartY) {
         if (!this._supported) return;
         const gl = this.gl;
+
+        const visibleRows = this.height - waterfallStartY;
+        if (visibleRows <= 0) return;
 
         gl.viewport(0, 0, this.width, this.height);
         gl.useProgram(this._program);
 
-        // Bind ring buffer to texture unit 0
+        // Texture unit 0 — ring buffer
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this._ringTex);
         gl.uniform1i(this._uRingTex, 0);
 
-        // Bind LUT to texture unit 1
+        // Texture unit 1 — colour LUT
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, this._lutTex);
         gl.uniform1i(this._uLutTex, 1);
 
         // Uniforms
-        gl.uniform1i(this._uWriteRow,  this._writeRow);
-        gl.uniform1i(this._uRingRows,  this.ringRows);
-        gl.uniform1f(this._uScrollOff, subPixelOffset / this.height);
+        gl.uniform1i(this._uWriteRow,     this._writeRow);
+        gl.uniform1i(this._uRingRows,     this.ringRows);
+        gl.uniform1i(this._uVisibleRows,  visibleRows);
+        gl.uniform1f(this._uScrollPixels, scrollPixels);
 
         // Waterfall region in normalised [0,1] canvas coordinates (Y=0 at top)
-        const wfY = waterfallStartY / this.height;
-        const wfH = (this.height - waterfallStartY) / this.height;
-        gl.uniform1f(this._uWaterfallY, wfY);
-        gl.uniform1f(this._uWaterfallH, wfH);
+        gl.uniform1f(this._uWaterfallY, waterfallStartY / this.height);
+        gl.uniform1f(this._uWaterfallH, visibleRows / this.height);
 
-        // Draw full-screen quad onto the offscreen WebGL canvas
+        // Draw full-screen quad
         gl.bindVertexArray(this._vao);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(null);
 
-        // Blit the WebGL offscreen canvas onto the main Canvas2D canvas.
+        // Blit WebGL offscreen canvas → main Canvas2D canvas.
         // Only overwrite the waterfall region — leave the line graph area untouched.
+        // preserveDrawingBuffer:true ensures the framebuffer is still valid here.
         this.mainCtx.drawImage(
             this._glCanvas,
-            0, waterfallStartY,          // source x, y
-            this.width, this.height - waterfallStartY,  // source w, h
-            0, waterfallStartY,          // dest x, y
-            this.width, this.height - waterfallStartY   // dest w, h
+            0, waterfallStartY,
+            this.width, visibleRows,
+            0, waterfallStartY,
+            this.width, visibleRows
         );
     }
 
@@ -259,14 +245,12 @@ class WaterfallWebGL {
 
     _init() {
         try {
-            // Request WebGL2 on the offscreen canvas (not the main canvas which already
-            // has a '2d' context — mixing context types on one canvas is not allowed).
             const gl = this._glCanvas.getContext('webgl2', {
                 alpha:                 false,
                 antialias:             false,
                 depth:                 false,
                 stencil:               false,
-                preserveDrawingBuffer: false,
+                preserveDrawingBuffer: true,   // required: drawImage reads the framebuffer after drawArrays
                 powerPreference:       'high-performance',
             });
 
@@ -276,7 +260,6 @@ class WaterfallWebGL {
             }
 
             this.gl = gl;
-
             this._buildShaders();
             this._buildQuad();
             this._createRingTexture();
@@ -292,13 +275,10 @@ class WaterfallWebGL {
     _buildShaders() {
         const gl = this.gl;
 
-        // ── Vertex shader ──────────────────────────────────────────────────
-        // Emits a full-screen quad in clip space from 4 hard-coded positions.
+        // Vertex shader — full-screen quad via gl_VertexID (no vertex buffer needed)
         const vsSource = `#version 300 es
 precision highp float;
 
-// Full-screen quad: two triangles as a strip
-// Positions in clip space: (-1,-1), (1,-1), (-1,1), (1,1)
 const vec2 POSITIONS[4] = vec2[4](
     vec2(-1.0, -1.0),
     vec2( 1.0, -1.0),
@@ -306,37 +286,44 @@ const vec2 POSITIONS[4] = vec2[4](
     vec2( 1.0,  1.0)
 );
 
-out vec2 vUV;  // [0,1] UV with Y=0 at top
+out vec2 vUV;
 
 void main() {
     vec2 pos = POSITIONS[gl_VertexID];
     gl_Position = vec4(pos, 0.0, 1.0);
-    // Convert clip-space [-1,1] to UV [0,1]; flip Y so UV.y=0 is top of canvas
+    // UV: x=[0,1] left→right, y=[0,1] top→bottom
     vUV = vec2(pos.x * 0.5 + 0.5, 0.5 - pos.y * 0.5);
 }
 `;
 
-        // ── Fragment shader ────────────────────────────────────────────────
-        // Reads the ring-buffer texture and maps through the colour LUT.
+        // Fragment shader
         //
         // Ring buffer layout:
-        //   Row _writeRow-1 (mod ringRows) = most recent spectrum frame (top of waterfall)
-        //   Row _writeRow   (mod ringRows) = oldest frame (bottom of waterfall)
+        //   _writeRow - 1  (mod ringRows) = most recently written row  → top of waterfall
+        //   _writeRow      (mod ringRows) = oldest row                 → bottom of waterfall
         //
-        // For a canvas pixel at normalised Y offset `py` within the waterfall:
-        //   ringRow = (_writeRow + floor(py * visibleRows + scrollOffset)) mod ringRows
+        // Pixel-to-ring-row mapping (1:1, independent of ringRows size):
+        //   pixelY (0 = top of waterfall) → ring row index
+        //   ringRow = (writeRow - 1 - pixelY) mod ringRows
+        //
+        // Sub-pixel scroll: gpuScrollOffset is in pixels [0,1).
+        //   Adding it to pixelY shifts the waterfall down by that fraction.
+        //
+        // Magnitude encoding: 0 = no data (→ black), 1..255 = real data.
+        //   Shader decodes: realMag = (storedByte - 1) / 254.0
         //
         const fsSource = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 
-uniform sampler2D uRingTex;   // ring buffer: width × ringRows, R8 (single channel)
-uniform sampler2D uLutTex;    // colour LUT:  256 × 1, RGBA
-uniform int       uWriteRow;  // current ring write pointer
-uniform int       uRingRows;  // total ring buffer height
-uniform float     uScrollOff; // sub-pixel scroll offset in normalised canvas coords
-uniform float     uWaterfallY;// normalised Y where waterfall starts (0=top)
-uniform float     uWaterfallH;// normalised height of waterfall region
+uniform sampler2D uRingTex;     // ring buffer: width × ringRows, R8
+uniform sampler2D uLutTex;      // colour LUT:  256 × 1, RGBA
+uniform int       uWriteRow;    // ring write pointer
+uniform int       uRingRows;    // total ring buffer rows
+uniform int       uVisibleRows; // waterfall height in pixels
+uniform float     uScrollPixels;// sub-pixel scroll offset [0,1) in pixels
+uniform float     uWaterfallY;  // normalised Y start of waterfall [0,1]
+uniform float     uWaterfallH;  // normalised height of waterfall [0,1]
 
 in  vec2 vUV;
 out vec4 fragColor;
@@ -350,25 +337,32 @@ void main() {
         return;
     }
 
-    // Normalised position within the waterfall [0,1], top=0
-    float wfPos = (py - uWaterfallY) / uWaterfallH;
+    // Pixel position within the waterfall, top=0, in pixels (float)
+    float pixelY = (py - uWaterfallY) / uWaterfallH * float(uVisibleRows);
 
-    // Apply sub-pixel scroll offset (in normalised canvas coords → convert to wf coords)
-    float scrollInWf = uScrollOff / uWaterfallH;
-    wfPos = wfPos + scrollInWf;
+    // Apply sub-pixel scroll offset (in pixels)
+    pixelY = pixelY + uScrollPixels;
 
-    // Map to ring buffer row
-    // Row 0 of the waterfall = most recently written row = uWriteRow - 1
-    float ringRowF = wfPos * float(uRingRows);
-    int   ringRow  = (uWriteRow - 1 - int(ringRowF) + uRingRows * 2) % uRingRows;
+    // Map pixel position to ring buffer row (1:1 — one ring row per visible pixel)
+    int pixelRow = int(pixelY);  // integer pixel index (0 = top = most recent)
+    int ringRow  = ((uWriteRow - 1 - pixelRow) % uRingRows + uRingRows) % uRingRows;
 
-    // Sample ring buffer (R8 format → .r channel holds the normalised magnitude [0,1])
+    // Sample ring buffer
     float u = vUV.x;
     float v = (float(ringRow) + 0.5) / float(uRingRows);
-    float magnitude = texture(uRingTex, vec2(u, v)).r;
+    float stored = texture(uRingTex, vec2(u, v)).r * 255.0;  // 0..255
 
-    // Look up colour from LUT
-    float lutU = magnitude * (255.0 / 256.0) + (0.5 / 256.0); // texel-centre sample
+    // 0 = no data → black
+    if (stored < 0.5) {
+        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    // Decode: stored 1..255 → magnitude 0..254 → normalised 0..1
+    float magnitude = (stored - 1.0) / 254.0;
+
+    // Look up colour from LUT (texel-centre sampling)
+    float lutU = magnitude * (255.0 / 256.0) + (0.5 / 256.0);
     vec4  color = texture(uLutTex, vec2(lutU, 0.5));
 
     fragColor = vec4(color.rgb, 1.0);
@@ -392,14 +386,14 @@ void main() {
 
         this._program = prog;
 
-        // Cache uniform locations
-        this._uRingTex    = gl.getUniformLocation(prog, 'uRingTex');
-        this._uLutTex     = gl.getUniformLocation(prog, 'uLutTex');
-        this._uWriteRow   = gl.getUniformLocation(prog, 'uWriteRow');
-        this._uRingRows   = gl.getUniformLocation(prog, 'uRingRows');
-        this._uScrollOff  = gl.getUniformLocation(prog, 'uScrollOff');
-        this._uWaterfallY = gl.getUniformLocation(prog, 'uWaterfallY');
-        this._uWaterfallH = gl.getUniformLocation(prog, 'uWaterfallH');
+        this._uRingTex      = gl.getUniformLocation(prog, 'uRingTex');
+        this._uLutTex       = gl.getUniformLocation(prog, 'uLutTex');
+        this._uWriteRow     = gl.getUniformLocation(prog, 'uWriteRow');
+        this._uRingRows     = gl.getUniformLocation(prog, 'uRingRows');
+        this._uVisibleRows  = gl.getUniformLocation(prog, 'uVisibleRows');
+        this._uScrollPixels = gl.getUniformLocation(prog, 'uScrollPixels');
+        this._uWaterfallY   = gl.getUniformLocation(prog, 'uWaterfallY');
+        this._uWaterfallH   = gl.getUniformLocation(prog, 'uWaterfallH');
     }
 
     _compileShader(type, source) {
@@ -416,10 +410,8 @@ void main() {
     }
 
     _buildQuad() {
-        const gl = this.gl;
-        // We use gl_VertexID in the vertex shader so no buffer data is needed —
-        // just an empty VAO to satisfy the WebGL2 requirement.
-        this._vao = gl.createVertexArray();
+        // gl_VertexID-based quad — no vertex buffer needed, just an empty VAO
+        this._vao = this.gl.createVertexArray();
     }
 
     _createRingTexture() {
@@ -429,31 +421,28 @@ void main() {
         this._ringTex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this._ringTex);
 
-        // Allocate ring buffer: width × ringRows, single-channel R8 (WebGL2 sized internal format)
-        // Initialise to zero (black / minimum signal)
+        // R8: single-channel, 8-bit unsigned.  Initialise to 0 (= no data).
         const blank = new Uint8Array(this.width * this.ringRows);
         gl.texImage2D(
             gl.TEXTURE_2D, 0,
-            gl.R8,                  // internal format (WebGL2)
+            gl.R8,
             this.width, this.ringRows,
             0,
-            gl.RED,                 // format
-            gl.UNSIGNED_BYTE,
+            gl.RED, gl.UNSIGNED_BYTE,
             blank
         );
 
-        // No mipmaps; linear filtering for smooth sub-pixel scroll.
-        // CLAMP_TO_EDGE on both axes — the shader handles ring-buffer wrapping via modulo,
-        // so REPEAT is not needed and would cause interpolation artefacts at the seam.
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        // Nearest in X (crisp pixels), nearest in Y (no interpolation across ring rows —
+        // each ring row is exactly one waterfall pixel, so linear would blur history).
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
         gl.bindTexture(gl.TEXTURE_2D, null);
 
-        // Reset write pointer when texture is recreated
         this._writeRow = 0;
+        this._hasData  = false;
     }
 
     _createLutTexture() {
@@ -461,12 +450,10 @@ void main() {
         this._lutTex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this._lutTex);
 
-        // Default to greyscale until setColorScheme() is called
+        // Default greyscale until setColorScheme() is called
         const data = new Uint8Array(256 * 4);
         for (let i = 0; i < 256; i++) {
-            data[i * 4]     = i;
-            data[i * 4 + 1] = i;
-            data[i * 4 + 2] = i;
+            data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = i;
             data[i * 4 + 3] = 255;
         }
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
@@ -478,20 +465,15 @@ void main() {
     }
 }
 
-// ── Integration helper ────────────────────────────────────────────────────────
+// ── Integration patch ─────────────────────────────────────────────────────────
 //
-// Call this after SpectrumDisplay is constructed to monkey-patch the GPU scroll
-// path to use WaterfallWebGL instead of the Canvas2D offscreen approach.
-//
-// Usage (in app.js or index.html, after spectrum-display.js is loaded):
-//
-//   import { patchSpectrumDisplayWithWebGL } from './spectrum-webgl.js';
-//   // or just include spectrum-webgl.js before app.js and call:
-//   patchSpectrumDisplayWithWebGL(window.spectrumDisplay);
+// Monkey-patches the GPU scroll methods on an existing SpectrumDisplay instance
+// to use WaterfallWebGL instead of the Canvas2D offscreen approach.
+// Falls back silently if WebGL2 is unavailable.
 //
 function patchSpectrumDisplayWithWebGL(sd) {
     if (!sd || !(sd instanceof SpectrumDisplay)) {
-        console.warn('[WaterfallWebGL] patchSpectrumDisplayWithWebGL: invalid SpectrumDisplay instance');
+        console.warn('[WaterfallWebGL] invalid SpectrumDisplay instance');
         return false;
     }
 
@@ -501,52 +483,39 @@ function patchSpectrumDisplayWithWebGL(sd) {
         return false;
     }
 
-    // Upload the current colour scheme immediately
+    // Sync colour scheme immediately
     wgl.setColorScheme(sd.config.colorScheme, sd.colorGradient);
 
-    // Re-upload LUT whenever the colour scheme changes.
-    // SpectrumDisplay has no setColorScheme() method — colour changes go through
-    // updateConfig({ colorScheme: name }) which rebuilds sd.colorGradient internally.
+    // Hook updateConfig to re-sync LUT when colour scheme changes.
+    // (SpectrumDisplay has no setColorScheme() — changes go through updateConfig.)
     const origUpdateConfig = sd.updateConfig.bind(sd);
     sd.updateConfig = function(newConfig) {
         origUpdateConfig(newConfig);
-        // If colorScheme changed, sd.colorGradient has been rebuilt — sync to GPU LUT
         if (newConfig.colorScheme) {
             wgl.setColorScheme(newConfig.colorScheme, sd.colorGradient);
         }
     };
 
-    // Patch resizeCanvas (called on window resize)
+    // Hook all three resize paths — each directly sets sd.height without
+    // going through a single common method.
+    const _syncSize = () => wgl.resize(sd.width, sd.height);
+
     const origResizeCanvas = sd.resizeCanvas?.bind(sd);
     if (origResizeCanvas) {
-        sd.resizeCanvas = function() {
-            origResizeCanvas();
-            wgl.resize(sd.width, sd.height);
-        };
+        sd.resizeCanvas = function() { origResizeCanvas(); _syncSize(); };
     }
 
-    // Patch setWaterfallHeight (called by drag-resize UI).
-    // This method directly sets sd.height and sd.canvas.height without going through
-    // resizeCanvas(), so we must hook it separately to keep wgl dimensions in sync.
     const origSetWaterfallHeight = sd.setWaterfallHeight?.bind(sd);
     if (origSetWaterfallHeight) {
-        sd.setWaterfallHeight = function(h) {
-            origSetWaterfallHeight(h);
-            wgl.resize(sd.width, sd.height);
-        };
+        sd.setWaterfallHeight = function(h) { origSetWaterfallHeight(h); _syncSize(); };
     }
 
-    // Patch toggleLineGraphVisibility (called when the Spectrum checkbox is toggled).
-    // This also resizes the canvas directly, changing sd.height.
     const origToggleLineGraph = sd.toggleLineGraphVisibility?.bind(sd);
     if (origToggleLineGraph) {
-        sd.toggleLineGraphVisibility = function(visible) {
-            origToggleLineGraph(visible);
-            wgl.resize(sd.width, sd.height);
-        };
+        sd.toggleLineGraphVisibility = function(v) { origToggleLineGraph(v); _syncSize(); };
     }
 
-    // Replace scrollWaterfallGPU() — called when a whole pixel boundary is crossed
+    // Replace scrollWaterfallGPU() — called once per whole-pixel boundary crossed
     sd.scrollWaterfallGPU = function() {
         if (!sd.spectrumData || sd.spectrumData.length === 0) return;
         if (sd.config.autoRange) sd.updateAutoRange();
@@ -563,9 +532,13 @@ function patchSpectrumDisplayWithWebGL(sd) {
     };
 
     // Replace scrollWaterfallGPUComposite() — called every rAF tick
+    let _dbgFrame = 0;
     sd.scrollWaterfallGPUComposite = function() {
         const lineGraphVisible = sd.lineGraphCanvas && sd.lineGraphCanvas.style.display !== 'none';
         const waterfallStartY  = lineGraphVisible ? 0 : 75;
+        if (++_dbgFrame <= 10) {
+            console.log(`[WaterfallWebGL] render: sd.width=${sd.width} sd.height=${sd.height} wgl.width=${wgl.width} wgl.height=${wgl.height} waterfallStartY=${waterfallStartY} gpuScrollOffset=${sd.gpuScrollOffset.toFixed(3)} writeRow=${wgl._writeRow}`);
+        }
         wgl.render(sd.gpuScrollOffset, waterfallStartY);
     };
 
@@ -573,18 +546,15 @@ function patchSpectrumDisplayWithWebGL(sd) {
     sd.resetGPUScroll = function() {
         sd.gpuScrollOffset     = 0;
         sd.gpuScrollBaseOffset = 0;
-        // Recreate ring texture (clears history)
-        wgl._createRingTexture();
+        wgl._createRingTexture();  // clears ring buffer and resets write pointer
     };
 
-    // Store reference for debugging
     sd._webglWaterfall = wgl;
-
     console.log('[WaterfallWebGL] Patch applied — GPU waterfall active');
     return true;
 }
 
-// Expose globally so index.html can call it without ES module syntax
+// Expose globally (no ES module syntax needed)
 if (typeof window !== 'undefined') {
     window.WaterfallWebGL = WaterfallWebGL;
     window.patchSpectrumDisplayWithWebGL = patchSpectrumDisplayWithWebGL;

@@ -42,6 +42,11 @@ type UserSpectrumManager struct {
 	wg                     sync.WaitGroup
 	pollInterval           time.Duration
 	backgroundPollInterval time.Duration
+
+	// sharedTickCount is incremented on every user-spectrum poll tick and used
+	// to throttle the shared default channel to 1-in-3 polls.
+	// Only ever accessed from the single pollLoop goroutine — no mutex needed.
+	sharedTickCount int
 }
 
 // NewUserSpectrumManager creates a new per-user spectrum manager
@@ -203,35 +208,70 @@ func (usm *UserSpectrumManager) pollLoop() {
 // pollUserSpectrumSessions sends poll commands for user-facing spectrum sessions only.
 // Background sessions (noisefloor, frequency-reference) are excluded and polled separately
 // at a lower rate to avoid saturating the radio stat thread with expensive wide-bin spectrum_poll() calls.
-// SSRCs are deduplicated so the shared default channel is only polled once regardless of
-// how many subscribers it has.
+//
+// Rate control:
+//   - Private sessions: polled at PollPeriodMs ÷ session.PollDivisor.  A divisor of 0 or 1
+//     means full rate (zero value = full rate, no init needed).
+//   - Shared default channel: polled at PollPeriodMs × 3 (hardcoded ÷3) because many
+//     clients share one SSRC and no single client controls the rate.
 func (usm *UserSpectrumManager) pollUserSpectrumSessions() {
+	// pollTickCount is incremented on every tick for the shared channel throttle.
+	// It is only ever touched by this goroutine so no mutex is needed.
+	usm.sharedTickCount++
+
+	// Collect private sessions and the shared SSRC under a read lock.
+	// We snapshot what we need so the lock is held as briefly as possible.
+	type privateTarget struct {
+		ssrc    uint32
+		session *Session
+	}
+	var privateTargets []privateTarget
+	var sharedSSRC uint32
+
 	usm.sessions.mu.RLock()
-	seen := make(map[uint32]bool)
-	spectrumSSRCs := make([]uint32, 0)
+	seenPrivate := make(map[uint32]bool)
 	for _, session := range usm.sessions.sessions {
-		if session.IsSpectrum && !session.IsBackground {
-			if !seen[session.SSRC] {
-				seen[session.SSRC] = true
-				spectrumSSRCs = append(spectrumSSRCs, session.SSRC)
-			}
+		if !session.IsSpectrum || session.IsBackground || session.IsSharedSubscriber {
+			continue
+		}
+		if !seenPrivate[session.SSRC] {
+			seenPrivate[session.SSRC] = true
+			privateTargets = append(privateTargets, privateTarget{session.SSRC, session})
 		}
 	}
-	// Also poll the shared default channel SSRC if it is active and not already covered
-	// by a subscriber session (it always is, but this is a safety net).
-	if sdc := usm.sessions.sharedDefaultChan; sdc != nil && sdc.active && !seen[sdc.ssrc] {
-		spectrumSSRCs = append(spectrumSSRCs, sdc.ssrc)
+	if sdc := usm.sessions.sharedDefaultChan; sdc != nil && sdc.active {
+		sharedSSRC = sdc.ssrc
 	}
 	usm.sessions.mu.RUnlock()
 
-	// Send polls in parallel (non-blocking)
-	// sendCommand() is thread-safe (protected by mutex in RadiodController)
-	for _, ssrc := range spectrumSSRCs {
+	// Shared channel: poll every sharedPollDivisor-th tick (defined in user_spectrum_websocket.go).
+	// This reduces radiod spectrum_poll() calls for the channel shared by all
+	// default-view clients without requiring any per-client coordination.
+	if sharedSSRC != 0 && usm.sharedTickCount%sharedPollDivisor == 0 {
 		go func(s uint32) {
 			if err := usm.sendPoll(s); err != nil {
-				log.Printf("ERROR: Failed to send spectrum poll for SSRC 0x%08x: %v", s, err)
+				log.Printf("ERROR: Failed to send spectrum poll for shared SSRC 0x%08x: %v", s, err)
 			}
-		}(ssrc)
+		}(sharedSSRC)
+	}
+
+	// Private sessions: honour per-session PollDivisor set by the client's set_rate message.
+	// session.pollTickCount is only touched here (single pollLoop goroutine) — no mutex needed.
+	// session.PollDivisor is an atomic.Int32 written by the WebSocket handler goroutine.
+	for _, t := range privateTargets {
+		d := int(t.session.PollDivisor.Load())
+		if d < 1 {
+			d = 1 // 0 (uninitialised default) → full rate
+		}
+		t.session.pollTickCount++
+		if t.session.pollTickCount%d == 0 {
+			ssrc := t.ssrc
+			go func(s uint32) {
+				if err := usm.sendPoll(s); err != nil {
+					log.Printf("ERROR: Failed to send spectrum poll for SSRC 0x%08x: %v", s, err)
+				}
+			}(ssrc)
+		}
 	}
 }
 

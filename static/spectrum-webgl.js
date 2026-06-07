@@ -44,6 +44,11 @@ class WaterfallWebGL {
         this.width    = mainCanvas.width;
         this.height   = mainCanvas.height;
 
+        // Actual texture width — kept in sync with this.width only after _createRingTexture().
+        // pushRow() uses this value (not this.width) to avoid uploading rows whose width
+        // doesn't match the currently-allocated GPU texture.
+        this._texWidth = this.width;
+
         // Offscreen canvas that owns the WebGL2 context
         this._glCanvas        = document.createElement('canvas');
         this._glCanvas.width  = this.width;
@@ -80,12 +85,13 @@ class WaterfallWebGL {
     /** Resize offscreen canvas and ring texture when the main canvas changes size */
     resize(width, height) {
         if (!this._supported) return;
+        if (width === this.width && height === this.height) return; // no-op
         this.width  = width;
         this.height = height;
         this._glCanvas.width  = width;
         this._glCanvas.height = height;
         this.gl.viewport(0, 0, width, height);
-        this._createRingTexture();  // recreates at new width; resets write pointer
+        this._createRingTexture();  // recreates at new width; resets write pointer + _texWidth
     }
 
     /**
@@ -121,7 +127,18 @@ class WaterfallWebGL {
         if (!this._supported || !spectrumData || spectrumData.length === 0) return;
 
         const gl      = this.gl;
-        const W       = this.width;
+        // Use _texWidth (the width the GPU texture was actually allocated at) rather than
+        // this.width, which may have been updated by resize() before the new texture is
+        // fully in place.  This prevents texSubImage2D from writing outside texture bounds.
+        const W       = this._texWidth;
+        if (W <= 0) return;
+
+        // Safety: _writeRow must be within [0, ringRows).  If somehow it drifted out of
+        // range (e.g. ringRows changed), clamp it back rather than issuing an invalid GL call.
+        if (this._writeRow < 0 || this._writeRow >= this.ringRows) {
+            this._writeRow = 0;
+        }
+
         const dbRange = maxDb - minDb;
         const row     = new Uint8Array(W);
 
@@ -238,6 +255,10 @@ class WaterfallWebGL {
         gl.deleteTexture(this._lutTex);
         gl.deleteProgram(this._program);
         gl.deleteVertexArray(this._vao);
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
         this._supported = false;
     }
 
@@ -435,6 +456,11 @@ void main() {
 
         gl.bindTexture(gl.TEXTURE_2D, null);
 
+        // Record the width the texture was actually allocated at.
+        // pushRow() reads _texWidth (not this.width) so it never uploads a row
+        // whose byte-length doesn't match the live GPU texture.
+        this._texWidth = this.width;
+
         this._writeRow = 0;
         this._hasData  = false;
     }
@@ -471,7 +497,7 @@ function patchSpectrumDisplayWithWebGL(sd) {
         return false;
     }
 
-    const wgl = new WaterfallWebGL(sd.canvas, { ringRows: 2048 });
+    const wgl = new WaterfallWebGL(sd.canvas, { ringRows: 512 });
     if (!wgl.isSupported()) {
         console.warn('[WaterfallWebGL] WebGL2 not supported — patch not applied');
         return false;
@@ -490,23 +516,67 @@ function patchSpectrumDisplayWithWebGL(sd) {
         }
     };
 
-    // Hook all three resize paths — each directly sets sd.height without
-    // going through a single common method.
-    const _syncSize = () => wgl.resize(sd.width, sd.height);
+    // ── Resize handling ──────────────────────────────────────────────────────
+    // The SpectrumDisplay constructor installs a debounced window 'resize' listener
+    // that directly mutates sd.width / sd.height / canvas.width / canvas.height
+    // without going through any single method we can easily hook.  Rather than
+    // trying to intercept every code path, we use a ResizeObserver on the canvas
+    // element itself: it fires whenever the canvas pixel dimensions actually change,
+    // regardless of what triggered the change (window resize, waterfall height drag,
+    // split-mode toggle, etc.).
+    const _syncSize = () => {
+        const w = sd.canvas.width;
+        const h = sd.canvas.height;
+        if (w > 0 && h > 0) {
+            wgl.resize(w, h);
+        }
+    };
 
-    const origResizeCanvas = sd.resizeCanvas?.bind(sd);
-    if (origResizeCanvas) {
-        sd.resizeCanvas = function() { origResizeCanvas(); _syncSize(); };
+    if (typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(_syncSize);
+        ro.observe(sd.canvas);
+        // Store so destroy() can disconnect it
+        wgl._resizeObserver = ro;
+    } else {
+        // Fallback: hook the three named resize methods (older browsers)
+        const origResizeCanvas = sd.resizeCanvas?.bind(sd);
+        if (origResizeCanvas) {
+            sd.resizeCanvas = function() { origResizeCanvas(); _syncSize(); };
+        }
+
+        const origSetWaterfallHeight = sd.setWaterfallHeight?.bind(sd);
+        if (origSetWaterfallHeight) {
+            sd.setWaterfallHeight = function(h) { origSetWaterfallHeight(h); _syncSize(); };
+        }
+
+        const origToggleLineGraph = sd.toggleLineGraphVisibility?.bind(sd);
+        if (origToggleLineGraph) {
+            sd.toggleLineGraphVisibility = function(v) { origToggleLineGraph(v); _syncSize(); };
+        }
     }
 
-    const origSetWaterfallHeight = sd.setWaterfallHeight?.bind(sd);
-    if (origSetWaterfallHeight) {
-        sd.setWaterfallHeight = function(h) { origSetWaterfallHeight(h); _syncSize(); };
-    }
-
-    const origToggleLineGraph = sd.toggleLineGraphVisibility?.bind(sd);
-    if (origToggleLineGraph) {
-        sd.toggleLineGraphVisibility = function(v) { origToggleLineGraph(v); _syncSize(); };
+    // Clear the ring buffer when the tab becomes visible again after a
+    // visibility-triggered WebSocket disconnect.  Without this, up to ringRows
+    // rows of stale data (from before the tab was hidden) scroll through the
+    // waterfall before fresh data fills the ring.
+    //
+    // resumeAnimation() is called exactly when the tab becomes visible — at that
+    // point the WebSocket is about to reconnect and no new rows have been pushed,
+    // so clearing here is safe and immediate.
+    //
+    // We only clear when _visibilityDisconnected was true (the WebSocket actually
+    // closed after the 5s grace period) — not for brief tab switches that resumed
+    // within 5s without closing the connection.
+    const origResumeAnimation = sd.resumeAnimation?.bind(sd);
+    if (origResumeAnimation) {
+        sd.resumeAnimation = function() {
+            const wasDisconnected = sd._visibilityDisconnected;
+            origResumeAnimation();
+            if (wasDisconnected) {
+                wgl._createRingTexture();
+                console.log('[WaterfallWebGL] Ring buffer cleared on visibility reconnect');
+            }
+        };
     }
 
     // Replace scrollWaterfallGPU() — called once per whole-pixel boundary crossed

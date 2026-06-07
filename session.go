@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -94,6 +95,15 @@ type Session struct {
 	BinCount           int
 	BinBandwidth       float64
 	SpectrumChan       chan []float32 // Channel for spectrum data
+
+	// Poll-rate control for private spectrum sessions.
+	// PollDivisor is written by the WebSocket set_rate handler and read by the
+	// pollLoop goroutine; atomic access avoids a mutex.
+	// 0 and 1 both mean full rate (zero value = full rate, no init needed).
+	// pollTickCount is only ever incremented by the single pollLoop goroutine
+	// so it needs no synchronisation.
+	PollDivisor   atomic.Int32 // 1=full rate, 2=half, …, 8=1/8 rate
+	pollTickCount int          // incremented each poll tick; poll when tickCount%divisor==0
 
 	// Per-session frequency-gain LUT (lookup table).
 	// gainLUT[j] holds the pre-computed dB offset for bin j, derived from the

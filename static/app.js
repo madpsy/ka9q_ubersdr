@@ -1891,7 +1891,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         try { navigator.mediaSession.metadata = null; } catch (_) {}
                         try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
                     }
-                }, 500);
+                }, 1000);
             }
         };
 

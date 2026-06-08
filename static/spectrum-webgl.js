@@ -87,12 +87,22 @@ class WaterfallWebGL {
     resize(width, height) {
         if (!this._supported) return;
         if (width === this.width && height === this.height) return; // no-op
+
+        const widthChanged = width !== this.width;
+
         this.width  = width;
         this.height = height;
         this._glCanvas.width  = width;
         this._glCanvas.height = height;
         this.gl.viewport(0, 0, width, height);
-        this._createRingTexture();  // recreates at new width; resets write pointer + _texWidth
+
+        if (widthChanged) {
+            // Width change requires a new texture — old rows are the wrong byte-width.
+            this._createRingTexture();
+        }
+        // Height-only change: the ring texture is still valid (same width).
+        // render() recomputes uVisibleRows/uWaterfallY/uWaterfallH from this.height
+        // every frame, so no further action is needed — history is preserved.
     }
 
     /**
@@ -669,7 +679,9 @@ function patchSpectrumDisplayWithWebGL(sd) {
     sd.resetGPUScroll = function() {
         sd.gpuScrollOffset     = 0;
         sd.gpuScrollBaseOffset = 0;
-        wgl._createRingTexture();  // clears ring buffer and resets write pointer
+        // Do NOT call _createRingTexture() here — that erases history on every
+        // height change (drag slider, spectrum toggle).  wgl.resize() (called via
+        // ResizeObserver) already handles texture reallocation when width changes.
     };
 
     sd._webglWaterfall = wgl;

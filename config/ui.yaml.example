@@ -82,7 +82,7 @@ ui:
   # Disable if users report visual glitches on older hardware
   # localStorage key: spectrumGpuScrollEnabled
   gpu_scroll:
-    default: false
+    default: true
 
   # Default spatial smoothing for new visitors
   # Reduces noise fuzziness in the spectrum display

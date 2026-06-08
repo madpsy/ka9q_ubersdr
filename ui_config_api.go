@@ -57,7 +57,7 @@ func isValidOrigin(s string) bool {
 //	  "palette":                    "jet",                     // spectrumColorScheme
 //	  "contrast":                   10,                        // spectrumAutoContrast (0-20)
 //	  "vu_meter_style":             "bar",                     // vuMeterStyle
-//	  "gpu_scroll":                 false,                     // spectrumGpuScrollEnabled
+//	  "gpu_scroll":                 true,                      // spectrumGpuScrollEnabled
 //	  "smoothing":                  false,                     // spectrumSmoothEnabled
 //	  "peak_hold":                  true,                      // spectrumHoldEnabled
 //	  "line_graph":                 false,                     // spectrumLineGraphEnabled

@@ -8685,7 +8685,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     const el = document.getElementById(id);
                     if (el) el.checked = setting ? Boolean(setting.default) : fallback;
                 };
-                setCheck('ui-gpu-scroll',  ui.gpu_scroll,  false);
+                setCheck('ui-gpu-scroll',  ui.gpu_scroll,  true);
                 setCheck('ui-smoothing',   ui.smoothing,   false);
                 setCheck('ui-peak-hold',   ui.peak_hold,   true);
                 setCheck('ui-line-graph',  ui.line_graph,  false);

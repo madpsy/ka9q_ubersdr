@@ -54,8 +54,8 @@ class SpectrumDisplay {
         // When enabled the rAF loop runs at 60fps and advances a float pixel offset each tick;
         // the canvas is shifted by that offset via CSS transform (GPU-composited, sub-pixel).
         // A new canvas row is only painted when the offset crosses a whole pixel boundary.
-        // Disabled by default; user can enable via the "GPU" checkbox.
-        this.gpuScrollEnabled = false; // set from localStorage in setupScrollHandler
+        // Enabled by default; user can disable via the "GPU" checkbox.
+        this.gpuScrollEnabled = true; // set from localStorage in setupScrollHandler
         this.gpuScrollOffset = 0;     // fractional pixel offset (0 .. waterfallHeight)
         this.gpuNextWriteRow = 0;     // ring-buffer write pointer (canvas row index)
 
@@ -4427,9 +4427,9 @@ class SpectrumDisplay {
         // Setup GPU scroll checkbox handler
         const gpuScrollCheckbox = document.getElementById('spectrum-gpu-scroll-enable');
         if (gpuScrollCheckbox) {
-            // Load saved preference from localStorage (default to false/unchecked)
+            // Load saved preference from localStorage (default to true/checked)
             const savedGpuState = localStorage.getItem('spectrumGpuScrollEnabled');
-            const isGpuEnabled = savedGpuState === 'true'; // Only true if explicitly saved as 'true'
+            const isGpuEnabled = savedGpuState !== 'false'; // true unless explicitly saved as 'false'
             gpuScrollCheckbox.checked = isGpuEnabled;
             this.gpuScrollEnabled = isGpuEnabled;
 

@@ -257,8 +257,8 @@ function applyServerUIDefaults() {
     // SpectrumDisplay reads these from localStorage in its constructor/setupControls.
     // Pre-populate localStorage with server defaults if no user preference exists.
 
-    // GPU scroll: spectrumGpuScrollEnabled (default: false)
-    const gpuScrollDefault = getUIDefaultBool('spectrumGpuScrollEnabled', 'gpu_scroll', false);
+    // GPU scroll: spectrumGpuScrollEnabled (default: true)
+    const gpuScrollDefault = getUIDefaultBool('spectrumGpuScrollEnabled', 'gpu_scroll', true);
     try {
         if (localStorage.getItem('spectrumGpuScrollEnabled') === null) {
             localStorage.setItem('spectrumGpuScrollEnabled', gpuScrollDefault.toString());

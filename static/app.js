@@ -14098,8 +14098,16 @@ function _dockApply() {
     wrapper.appendChild(controls);
     wrapper.appendChild(audio);
 
-    // Insert wrapper as first child of the waterfall container
-    container.insertBefore(wrapper, container.firstChild);
+    // Insert wrapper just before .spectrum-display-controls so it sits
+    // directly above that bar in the stacking order (both are position:absolute
+    // inside the container; the wrapper uses transform:translateY(-100%) to
+    // float above the controls bar).
+    const spectrumControls = container.querySelector('.spectrum-display-controls');
+    if (spectrumControls) {
+        container.insertBefore(wrapper, spectrumControls);
+    } else {
+        container.appendChild(wrapper);
+    }
 
     // Update button state
     btn.textContent = '⊟';

@@ -4737,19 +4737,22 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* Wrapper that holds both .controls and .audio-controls when docked.
-   Sits at the top of .spectrum-display-container (position:relative).
-   Uses normal block flow internally so the two panels stack naturally. */
+   Sits just above the .spectrum-display-controls bar at the bottom of the
+   waterfall. Inserted before .spectrum-display-controls in the DOM so it
+   stacks naturally above it using bottom:0 + transform. */
 #dock-overlay-wrapper {
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 0;
     width: 100%;
-    z-index: 15;
+    z-index: 9; /* below .spectrum-display-controls (z-index:10) so the bar stays on top */
     background: rgba(26, 37, 47, 0.92);
     backdrop-filter: blur(3px);
-    border-bottom: 1px solid rgba(255,255,255,0.10);
-    /* Scrollable if the combined height exceeds the waterfall */
-    max-height: 80%;
+    border-top: 1px solid rgba(255,255,255,0.10);
+    /* Shift upward by 100% of own height so it sits above the controls bar */
+    transform: translateY(-100%);
+    /* Scrollable if the combined height exceeds the available waterfall space */
+    max-height: 70%;
     overflow-y: auto;
 }
 

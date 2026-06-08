@@ -1081,13 +1081,21 @@ function toggleVFO() {
         // Trigger squelch update after tune completes (for FM/NFM modes)
         // Use setTimeout to ensure mode change is processed first
         const state = vfoStates[newVFO];
-        if (FM_SQUELCH_ENABLED && (state.mode === 'fm' || state.mode === 'nfm')) {
+        if (state.mode === 'fm' || state.mode === 'nfm') {
             setTimeout(() => {
-                const squelchSlider = document.getElementById('squelch');
-                if (squelchSlider) {
-                    // Trigger the change event to call updateSquelch()
-                    squelchSlider.dispatchEvent(new Event('change'));
-                    console.log('[VFO] Triggered squelch change event');
+                if (FM_SQUELCH_ENABLED) {
+                    // Normal path: send whatever the slider is set to
+                    const squelchSlider = document.getElementById('squelch');
+                    if (squelchSlider) {
+                        squelchSlider.dispatchEvent(new Event('change'));
+                        console.log('[VFO] Triggered squelch change event');
+                    }
+                } else {
+                    // Squelch UI disabled: always send open (-999) so server never squelches
+                    if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+                        wsManager.send({ type: 'set_squelch', squelchOpen: -999.0 });
+                        console.log('[VFO] Squelch UI disabled — sent open squelch to server');
+                    }
                 }
             }, 500);
         }

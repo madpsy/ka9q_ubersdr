@@ -150,6 +150,23 @@ type Session struct {
 	// is set to nil on teardown, avoiding any send-on-closed-channel panic.
 	httpAudioChan chan AudioPacket
 	httpAudioMu   sync.Mutex
+
+	// Audio gate thresholds (client-side, ubersdr-internal — radiod is not involved).
+	// Audio packets are dropped before encoding/sending when the signal is below
+	// the threshold.  Signal-quality data (silence ticker packets) continues
+	// flowing over the WebSocket regardless of gate state.
+	//
+	// -999 is the sentinel meaning "disabled" (default for new sessions).
+	// Valid range for both fields: -999 to +999.
+	//
+	// AudioGateMinSNR:   minimum SNR in dB (basebandPower − noiseDensity).
+	//                    SNR is always ≥ 0 for a real signal; -999 = disabled.
+	// AudioGateMinPower: minimum baseband power in dBFS (a negative value, e.g. -80).
+	//                    -999 = disabled.
+	//
+	// Protected by mu.
+	AudioGateMinSNR   float32
+	AudioGateMinPower float32
 }
 
 // SessionManager manages all active sessions

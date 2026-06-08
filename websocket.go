@@ -326,6 +326,10 @@ type ClientMessage struct {
 	Enabled *bool                  `json:"enabled,omitempty"` // set_dsp: true=enable, false=disable
 	Filter  string                 `json:"filter,omitempty"`  // set_dsp: filter name ("nr2","rn2","nr4","dfnr","bnr")
 	Params  map[string]interface{} `json:"params,omitempty"`  // set_dsp / set_dsp_params: filter parameters
+	// Audio gate fields (type: "set_audio_gate") — all optional; nil = keep current value.
+	// Valid range: -999 (disabled/sentinel) to +999.
+	MinSNR   *float32 `json:"min_snr,omitempty"`   // minimum SNR in dB (basebandPower − noiseDensity); -999 = disabled
+	MinPower *float32 `json:"min_power,omitempty"` // minimum baseband power in dBFS (e.g. -80.0); -999 = disabled
 }
 
 // dspValidFilters is the set of known filter names.
@@ -614,6 +618,33 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		log.Printf("WIDEIQ_IGNORE_URL_BW: mode=%s", mode)
 	}
 
+	// Parse optional audio gate thresholds from query string.
+	// Valid range: -999 (disabled) to +999.  Both default to -999 (disabled).
+	initialGateMinSNR := float32(-999)
+	initialGateMinPower := float32(-999)
+	if v := query.Get("min_snr"); v != "" {
+		var f float32
+		if _, err := fmt.Sscanf(v, "%g", &f); err == nil {
+			if f >= -999 && f <= 999 {
+				initialGateMinSNR = f
+			} else {
+				wsh.sendError(conn, fmt.Sprintf("min_snr %.1f is out of valid range (-999 to +999)", f))
+				return
+			}
+		}
+	}
+	if v := query.Get("min_power"); v != "" {
+		var f float32
+		if _, err := fmt.Sscanf(v, "%g", &f); err == nil {
+			if f >= -999 && f <= 999 {
+				initialGateMinPower = f
+			} else {
+				wsh.sendError(conn, fmt.Sprintf("min_power %.1f is out of valid range (-999 to +999)", f))
+				return
+			}
+		}
+	}
+
 	// Validate mode - "spectrum" is reserved for the spectrum manager
 	if mode == "spectrum" {
 		log.Printf("Rejected WebSocket connection: mode 'spectrum' is reserved")
@@ -640,6 +671,14 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Password is already stored in session during creation
+
+	// Apply initial audio gate thresholds from query params (both default to -999 = disabled).
+	session.AudioGateMinSNR = initialGateMinSNR
+	session.AudioGateMinPower = initialGateMinPower
+	if initialGateMinSNR > -998 || initialGateMinPower > -998 {
+		log.Printf("Audio gate initialised for session %s: min_snr=%.1f min_power=%.1f",
+			session.ID, initialGateMinSNR, initialGateMinPower)
+	}
 
 	// Store WebSocket connection reference in session for kick functionality
 	session.WSConn = conn
@@ -1411,6 +1450,64 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				"filters":   filterList,
 			}})
 
+		case "set_audio_gate":
+			// Gate audio delivery based on SNR and/or baseband power.
+			// Packets below the threshold are dropped before encoding/sending to the client.
+			// Signal-quality data (silence ticker packets) continues flowing over the
+			// WebSocket regardless of gate state, so the client can watch SNR in real time.
+			//
+			// This is entirely internal to ubersdr — radiod is not involved.
+			// Default for new sessions: both thresholds are -999 (disabled).
+			//
+			// min_snr:   SNR threshold in dB (basebandPower − noiseDensity).
+			//            SNR is always ≥ 0 for a real signal. -999 = disabled.
+			// min_power: Baseband power threshold in dBFS (a negative value, e.g. -80.0).
+			//            -999 = disabled.
+			//
+			// Valid range for both fields: -999 to +999.
+			// Omitting a field leaves that threshold unchanged.
+			// Set a field to -999 to disable it.
+			if msg.MinSNR == nil && msg.MinPower == nil {
+				wsh.sendError(conn, "set_audio_gate requires at least one of: min_snr, min_power")
+				continue
+			}
+
+			const gateMin float32 = -999
+			const gateMax float32 = 999
+
+			if msg.MinSNR != nil {
+				if *msg.MinSNR < gateMin || *msg.MinSNR > gateMax {
+					wsh.sendError(conn, fmt.Sprintf(
+						"min_snr %.1f is out of valid range (-999 to +999)", *msg.MinSNR))
+					continue
+				}
+			}
+			if msg.MinPower != nil {
+				if *msg.MinPower < gateMin || *msg.MinPower > gateMax {
+					wsh.sendError(conn, fmt.Sprintf(
+						"min_power %.1f is out of valid range (-999 to +999)", *msg.MinPower))
+					continue
+				}
+			}
+
+			currentSession.mu.Lock()
+			if msg.MinSNR != nil {
+				currentSession.AudioGateMinSNR = *msg.MinSNR
+			}
+			if msg.MinPower != nil {
+				currentSession.AudioGateMinPower = *msg.MinPower
+			}
+			snrSnapshot := currentSession.AudioGateMinSNR
+			powerSnapshot := currentSession.AudioGateMinPower
+			currentSession.mu.Unlock()
+
+			log.Printf("Audio gate updated for session %s: min_snr=%.1f min_power=%.1f",
+				currentSession.ID, snrSnapshot, powerSnapshot)
+			wsh.sendMessage(conn, ServerMessage{Type: "audio_gate_updated", Info: map[string]interface{}{
+				"min_snr":   snrSnapshot,
+				"min_power": powerSnapshot,
+			}})
+
 		default:
 			log.Printf("Unknown message type: %s", msg.Type)
 		}
@@ -1649,6 +1746,33 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			hc := session.httpAudioChan
 			session.httpAudioMu.Unlock()
 			if hc != nil {
+				// Apply audio gate before forwarding to the HTTP stream (Android path).
+				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
+				// We fetch signal quality here so the gate applies consistently whether
+				// audio is going to HTTP or WebSocket.
+				httpIsIQMode := session.Mode == "iq" || session.Mode == "iq48" ||
+					session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
+				if !httpIsIQMode {
+					session.mu.RLock()
+					gateMinSNR := session.AudioGateMinSNR
+					gateMinPower := session.AudioGateMinPower
+					session.mu.RUnlock()
+					if gateMinSNR > -998 || gateMinPower > -998 {
+						var bbPower, ndDensity float32 = -999, -999
+						if wsh.sessions != nil && wsh.sessions.radiod != nil {
+							if cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC); cs != nil {
+								bbPower = cs.BasebandPower + float32(wsh.config.Spectrum.GainDB)
+								ndDensity = cs.NoiseDensity + float32(wsh.config.Spectrum.GainDB)
+							}
+						}
+						snr := bbPower - ndDensity
+						if (gateMinSNR > -998 && snr < gateMinSNR) ||
+							(gateMinPower > -998 && bbPower < gateMinPower) {
+							// Gate closed — drop packet for both HTTP and WebSocket paths.
+							continue
+						}
+					}
+				}
 				select {
 				case hc <- audioPacket:
 					// Forwarded to HTTP stream — skip WebSocket audio encoding
@@ -1759,6 +1883,25 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					}
 				}
 
+				// Audio gate: drop packet if SNR or baseband power is below threshold.
+				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
+				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
+				// When gate is active (threshold > -998), suppress the packet and let the
+				// signalUpdateTicker continue sending signal-quality data to the client.
+				if !isIQMode {
+					session.mu.RLock()
+					gateMinSNR := session.AudioGateMinSNR
+					gateMinPower := session.AudioGateMinPower
+					session.mu.RUnlock()
+					if gateMinSNR > -998 || gateMinPower > -998 {
+						snr := basebandPower - noiseDensity
+						if (gateMinSNR > -998 && snr < gateMinSNR) ||
+							(gateMinPower > -998 && basebandPower < gateMinPower) {
+							continue // gate closed — suppress audio, signal-quality ticker continues
+						}
+					}
+				}
+
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
 				if err != nil {
 					continue
@@ -1858,6 +2001,25 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						// Apply total gain adjustment
 						basebandPower += gainAdjustment
 						noiseDensity += gainAdjustment
+					}
+				}
+
+				// Audio gate: drop packet if SNR or baseband power is below threshold.
+				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
+				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
+				// When gate is active (threshold > -998), suppress the packet and let the
+				// signalUpdateTicker continue sending signal-quality data to the client.
+				if !isIQMode {
+					session.mu.RLock()
+					gateMinSNRPCM := session.AudioGateMinSNR
+					gateMinPowerPCM := session.AudioGateMinPower
+					session.mu.RUnlock()
+					if gateMinSNRPCM > -998 || gateMinPowerPCM > -998 {
+						snr := basebandPower - noiseDensity
+						if (gateMinSNRPCM > -998 && snr < gateMinSNRPCM) ||
+							(gateMinPowerPCM > -998 && basebandPower < gateMinPowerPCM) {
+							continue // gate closed — suppress audio, signal-quality ticker continues
+						}
 					}
 				}
 

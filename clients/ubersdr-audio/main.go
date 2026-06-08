@@ -2486,6 +2486,15 @@ func main() {
 				go func() { _ = client.SendGetDSPFilters() }()
 			}
 			updateDSPUI()
+			// Re-apply SNR squelch gate on reconnect (server resets to -999 on each new session).
+			go func() {
+				appState.Mu.RLock()
+				gateVal := appState.AudioGateMinSNR
+				appState.Mu.RUnlock()
+				if gateVal > -998 {
+					_ = client.SendSetAudioGate(&gateVal)
+				}
+			}()
 			// Fetch /stats immediately on connect so the user count appears right away
 			// rather than waiting up to 10 s for the ticker to fire.
 			go func() {
@@ -2680,13 +2689,24 @@ func main() {
 	}
 
 	client.OnAudioLevel = func(dBFS float32) {
-		audioBar.SetValue(float64(dBFS))
-		// Update AppState audio level.
+		// If the SNR gate is active and the SNR is below the threshold,
+		// the gate is suppressing audio — show silence on the audio bar
+		// rather than the stale last-played value.
 		appState.Mu.RLock()
+		gateMinSNR := appState.AudioGateMinSNR
+		snrDB := appState.SignalSNRDB
 		bb := appState.SignalBasebandDBFS
 		nd := appState.SignalNoiseDensityDBFS
 		appState.Mu.RUnlock()
-		appState.UpdateSignal(bb, nd, dBFS)
+
+		if gateMinSNR > -998 && snrDB < gateMinSNR {
+			// Gate is closed — show no-data on audio bar.
+			audioBar.SetNoData()
+			appState.UpdateSignal(bb, nd, -999)
+		} else {
+			audioBar.SetValue(float64(dBFS))
+			appState.UpdateSignal(bb, nd, dBFS)
+		}
 	}
 
 	connectBtn.OnTapped = func() {
@@ -2763,6 +2783,73 @@ func main() {
 		bwSlider,
 	)
 
+	// SNR squelch slider — sits in the "SNR & Squelch" subsection of the Audio card.
+	// Range: 24 (off, far left) to 80 dB.
+	// Far LEFT (24) = disabled sentinel (-999 sent to server).
+	// Sliding right increases the threshold.
+	const snrSquelchOff = 24.0 // slider value meaning "disabled" (far left)
+	const snrSquelchMin = 24.0
+	const snrSquelchMax = 80.0
+
+	snrSquelchLabel := widget.NewLabel("Squelch: off")
+	snrSquelchSlider := widget.NewSlider(snrSquelchMin, snrSquelchMax)
+	snrSquelchSlider.Step = 0.5
+	snrSquelchSlider.SetValue(snrSquelchOff) // default: disabled (far left)
+
+	sendSnrGate := func(sliderVal float64) {
+		var threshold float32
+		if sliderVal <= snrSquelchOff {
+			threshold = -999 // disabled (far left)
+		} else {
+			threshold = float32(sliderVal)
+		}
+		appState.Mu.Lock()
+		appState.AudioGateMinSNR = threshold
+		appState.Mu.Unlock()
+		if client.State() == StateConnected {
+			_ = client.SendSetAudioGate(&threshold)
+		}
+	}
+
+	var snrSquelchDebounce *time.Timer
+	snrSquelchSlider.OnChanged = func(v float64) {
+		// Update label immediately for responsive feel.
+		if v <= snrSquelchOff {
+			snrSquelchLabel.SetText("Squelch: off")
+		} else {
+			snrSquelchLabel.SetText(fmt.Sprintf("Squelch: ≥ %.1f dB", v))
+		}
+		// Debounce the API call: only send after 50 ms of no further changes.
+		if snrSquelchDebounce != nil {
+			snrSquelchDebounce.Stop()
+		}
+		snrSquelchDebounce = time.AfterFunc(50*time.Millisecond, func() {
+			sendSnrGate(v)
+		})
+	}
+
+	// Disable the squelch slider in IQ modes (no signal quality data available).
+	// applyIQConstraints already handles this via the existing closure; we extend it.
+	origApplyIQConstraints := applyIQConstraints
+	applyIQConstraints = func() {
+		origApplyIQConstraints()
+		if isIQMode(currentMode) {
+			snrSquelchSlider.SetValue(snrSquelchOff)
+			snrSquelchLabel.SetText("Squelch: off")
+			snrSquelchSlider.Disable()
+		} else {
+			snrSquelchSlider.Enable()
+		}
+	}
+
+	snrSquelchSection := container.NewVBox(
+		widget.NewSeparator(),
+		widget.NewLabel("SNR & Squelch"),
+		snrBar,
+		snrSquelchSlider,
+		snrSquelchLabel,
+	)
+
 	// Audio
 	deviceRow := container.NewBorder(nil, nil, nil, refreshDevicesBtn, deviceSelect)
 	audioBox := container.NewVBox(
@@ -2772,8 +2859,8 @@ func main() {
 		),
 		container.NewBorder(nil, nil, muteBtn, channelSelect, volumeSlider),
 		signalBar,
-		snrBar,
 		audioBar,
+		snrSquelchSection,
 	)
 
 	// ── flrig sync UI ─────────────────────────────────────────────────────────

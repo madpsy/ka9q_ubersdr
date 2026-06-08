@@ -668,6 +668,22 @@ func (c *RadioClient) SendSetAGC(hangTime, recoveryRate *float32) error {
 	return conn.WriteJSON(req)
 }
 
+// SendSetAudioGate sends a set_audio_gate message to set the SNR squelch threshold.
+// Pass nil to leave the current value unchanged.  Pass a pointer to -999 to disable.
+func (c *RadioClient) SendSetAudioGate(minSNR *float32) error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	msg := map[string]interface{}{"type": "set_audio_gate"}
+	if minSNR != nil {
+		msg["min_snr"] = *minSNR
+	}
+	return conn.WriteJSON(msg)
+}
+
 // SendGetDSPFilters requests the list of available DSP filters from the server.
 // The response is delivered asynchronously via the OnDSPFilters callback.
 func (c *RadioClient) SendGetDSPFilters() error {

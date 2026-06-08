@@ -135,6 +135,7 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	// Audio
 	mux.HandleFunc("/api/v1/audio", s.handleAudio)
 	mux.HandleFunc("/api/v1/audio/devices", s.handleAudioDevices)
+	mux.HandleFunc("/api/v1/audio/gate", s.handleAudioGate)
 	mux.HandleFunc("/api/v1/audio/stream", s.audioWS.ServeHTTP)
 
 	// AGC

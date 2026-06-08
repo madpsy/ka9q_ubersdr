@@ -267,6 +267,55 @@ func (s *APIServer) putAudio(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAudioGate handles GET/PUT /api/v1/audio/gate.
+//
+// GET  → returns {"min_snr": <float32>}  (-999 = disabled)
+// PUT  → body {"min_snr": <float32>}     (-999 to +999; -999 = disable)
+//
+// On PUT the value is stored in AppState and forwarded to the upstream ubersdr
+// server via set_audio_gate over the RadioClient WebSocket.
+func (s *APIServer) handleAudioGate(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.state.Mu.RLock()
+		minSNR := s.state.AudioGateMinSNR
+		s.state.Mu.RUnlock()
+		writeJSON(w, http.StatusOK, map[string]any{"min_snr": minSNR})
+
+	case http.MethodPut:
+		var body struct {
+			MinSNR *float32 `json:"min_snr"`
+		}
+		if !decodeBody(w, r, &body) {
+			return
+		}
+		if body.MinSNR == nil {
+			apiError(w, http.StatusBadRequest, "min_snr is required")
+			return
+		}
+		v := *body.MinSNR
+		if v < -999 || v > 999 {
+			apiFieldError(w, "min_snr", v, "-999 to +999 (-999 = disabled)")
+			return
+		}
+		s.state.Mu.Lock()
+		s.state.AudioGateMinSNR = v
+		s.state.Mu.Unlock()
+
+		// Forward to upstream ubersdr server if connected.
+		if s.client.State() == StateConnected {
+			if err := s.client.SendSetAudioGate(&v); err != nil {
+				// Non-fatal: state is stored, will be applied on next connect.
+				_ = err
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"min_snr": v})
+
+	default:
+		methodOnly(w, r, http.MethodGet, http.MethodPut)
+	}
+}
+
 func (s *APIServer) handleAudioDevices(w http.ResponseWriter, r *http.Request) {
 	if !methodOnly(w, r, http.MethodGet) {
 		return

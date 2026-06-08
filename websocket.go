@@ -1501,8 +1501,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			powerSnapshot := currentSession.AudioGateMinPower
 			currentSession.mu.Unlock()
 
-			log.Printf("Audio gate updated for session %s: min_snr=%.1f min_power=%.1f",
-				currentSession.ID, snrSnapshot, powerSnapshot)
 			wsh.sendMessage(conn, ServerMessage{Type: "audio_gate_updated", Info: map[string]interface{}{
 				"min_snr":   snrSnapshot,
 				"min_power": powerSnapshot,

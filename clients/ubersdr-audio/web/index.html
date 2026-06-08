@@ -279,14 +279,6 @@
                 <span class="meter-unit">dBFS</span>
               </div>
               <div class="meter-row">
-                <span class="meter-label">SNR</span>
-                <div class="meter-bar-wrap">
-                  <div class="meter-bar" id="snr-bar"></div>
-                </div>
-                <span class="meter-value" id="snr-value">—</span>
-                <span class="meter-unit">dB</span>
-              </div>
-              <div class="meter-row">
                 <span class="meter-label">Audio</span>
                 <div class="meter-bar-wrap">
                   <div class="meter-bar" id="audio-bar"></div>
@@ -294,6 +286,25 @@
                 <span class="meter-value" id="audio-value">—</span>
                 <span class="meter-unit">dBFS</span>
               </div>
+            </div>
+
+            <!-- SNR & Squelch subsection -->
+            <div class="snr-squelch-section">
+              <div class="snr-squelch-header">SNR &amp; Squelch</div>
+              <div class="meter-row">
+                <span class="meter-label">SNR</span>
+                <!-- SNR bar with squelch slider overlaid on the same track -->
+                <div class="meter-bar-wrap snr-bar-wrap">
+                  <div class="meter-bar" id="snr-bar"></div>
+                  <input type="range" id="snr-squelch-slider"
+                         class="snr-squelch-slider"
+                         min="24" max="80" step="0.5" value="24"
+                         title="SNR squelch threshold (far left = off, drag right to activate)">
+                </div>
+                <span class="meter-value" id="snr-value">—</span>
+                <span class="meter-unit">dB</span>
+              </div>
+              <div class="snr-squelch-hint" id="snr-squelch-hint">Squelch off</div>
             </div>
           </div>
         </section>

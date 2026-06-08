@@ -61,6 +61,11 @@ type AppState struct {
 	SignalAudioDBFS        float32
 	SignalUpdatedAt        *time.Time // nil until first reading
 
+	// ── Audio gate ────────────────────────────────────────────────────────────
+	// SNR squelch threshold sent to the upstream ubersdr server via set_audio_gate.
+	// -999 = disabled (default).  Valid range: -999 to +999.
+	AudioGateMinSNR float32
+
 	// ── Connection metadata ───────────────────────────────────────────────────
 	ActiveCallsign     string
 	ActiveName         string
@@ -194,6 +199,7 @@ func NewAppState() *AppState {
 		SignalNoiseDensityDBFS: -999,
 		SignalSNRDB:            -999,
 		SignalAudioDBFS:        -999,
+		AudioGateMinSNR:        -999, // disabled by default
 		BrowserAutoConnect:     true, // default enabled; overridden from prefs in main()
 	}
 }

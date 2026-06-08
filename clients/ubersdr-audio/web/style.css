@@ -516,6 +516,92 @@ input:disabled, select:disabled, button:disabled {
   flex-shrink: 0;
 }
 
+/* ── SNR & Squelch subsection ─────────────────────────────────────────────── */
+.snr-squelch-section {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.snr-squelch-header {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+/* The SNR bar wrap needs relative positioning so the slider can be overlaid */
+.snr-bar-wrap {
+  position: relative;
+}
+
+/* Squelch slider sits on top of the SNR bar track, sharing the same dimensions */
+.snr-squelch-slider {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  z-index: 2;
+}
+
+/* Transparent track — the bar fill shows through underneath */
+.snr-squelch-slider::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 100%;
+}
+.snr-squelch-slider::-moz-range-track {
+  background: transparent;
+  height: 100%;
+}
+
+/* Thumb: a vertical white line with a small triangle indicator */
+.snr-squelch-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 3px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 1px;
+  box-shadow: 0 0 3px rgba(0,0,0,0.6);
+  cursor: ew-resize;
+  margin-top: -4px; /* vertically centre within the 8px track */
+}
+.snr-squelch-slider::-moz-range-thumb {
+  width: 3px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  border: none;
+  border-radius: 1px;
+  box-shadow: 0 0 3px rgba(0,0,0,0.6);
+  cursor: ew-resize;
+}
+
+/* When disabled (IQ mode), hide the thumb */
+.snr-squelch-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0;
+}
+
+/* Hint text below the SNR row */
+.snr-squelch-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  min-height: 1em;
+}
+.snr-squelch-hint.active {
+  color: var(--orange);
+}
+
 /* ── Signal Meters ────────────────────────────────────────────────────────── */
 .meters {
   display: flex;

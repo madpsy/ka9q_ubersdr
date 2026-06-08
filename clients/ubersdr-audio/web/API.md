@@ -492,6 +492,55 @@ The first entry is always `{"id": "", "name": "Default Device"}`.
 
 ---
 
+### `GET /api/v1/audio/gate`
+
+Get the current SNR squelch gate threshold.
+
+**Response `200`:**
+```json
+{ "min_snr": -999.0 }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `min_snr` | float | SNR threshold in dB; `-999.0` = disabled (gate off) |
+
+---
+
+### `PUT /api/v1/audio/gate`
+
+Set the SNR squelch gate threshold.  When active, audio frames are suppressed
+server-side until the SNR (baseband power − noise density) meets or exceeds
+the threshold.  Signal-quality data continues flowing regardless of gate state.
+
+This is a **client-side gate** applied by the ubersdr-audio client — radiod is
+not involved.  The gate is reset to disabled (`-999`) on each new connection
+and re-applied automatically on reconnect.
+
+**Request body:**
+```json
+{ "min_snr": 10.0 }
+```
+
+| Field | Type | Constraints | Notes |
+|---|---|---|---|
+| `min_snr` | float | [-999, +999] | SNR threshold in dB; `-999` = disabled |
+
+**Behaviour:**
+- SNR is computed as `baseband_dbfs − noise_density_dbfs` (always ≥ 0 for a real signal)
+- When `min_snr > -999`: audio frames are dropped until `snr_db ≥ min_snr`
+- When `min_snr = -999`: gate is disabled; all audio flows normally (default)
+- IQ modes (`iq`, `iq48`, `iq96`, `iq192`, `iq384`) ignore the gate entirely
+- The gate applies to all audio paths: WebSocket binary frames, HTTP WebM/Opus stream (Android), and the `/audio/stream` WebSocket
+
+**Errors:**
+- `400` — `min_snr` field missing
+- `422` — `min_snr` outside [-999, +999]
+
+**Response `200`:** `{"min_snr": 10.0}`
+
+---
+
 ### `GET /api/v1/audio/stream` *(WebSocket)*
 
 Stream decoded PCM audio frames in real time over a WebSocket connection.
@@ -1249,7 +1298,7 @@ ubersdr-audio: stdout PCM stream: 48000 Hz, 2 channel(s), signed 16-bit little-e
 | `api_handlers_connection.go` | `GET /status`, `POST /connect`, `POST /disconnect`, `GET /instances`, `POST /instances/connect` |
 | `api_handlers_instance.go` | `GET /instance` — live fetch of connected server's `/api/description` |
 | `api_handlers_tune.go` | `GET /tune`, `PUT /tune` |
-| `api_handlers_audio.go` | `GET /audio`, `PUT /audio`, `GET /audio/devices` |
+| `api_handlers_audio.go` | `GET /audio`, `PUT /audio`, `GET /audio/devices`, `GET /audio/gate`, `PUT /audio/gate` |
 | `api_audio_ws.go` | WebSocket broker for `GET /audio/stream` — fan-out decoded PCM to connected WS clients |
 | `api_handlers_agc.go` | `GET /agc`, `PUT /agc` |
 | `api_handlers_dsp.go` | `GET /dsp`, `PUT /dsp`, `PATCH /dsp/params`, `GET /dsp/filters` |

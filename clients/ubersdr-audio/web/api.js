@@ -86,6 +86,8 @@ const API = (() => {
     getAudio:        ()     => get('/audio'),
     putAudio:        (body) => put('/audio', body),
     getAudioDevices: ()     => get('/audio/devices'),
+    getAudioGate:    ()          => get('/audio/gate'),
+    putAudioGate:    (minSNR)    => put('/audio/gate', { min_snr: minSNR }),
 
     // ── AGC ──────────────────────────────────────────────────────────────────
     getAGC:  ()     => get('/agc'),

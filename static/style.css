@@ -4723,44 +4723,11 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* =============================================================================
-   Receiver Layout — Controls Dock Feature
-   Wraps .spectrum-display-panel, .band-status-bar, .controls, .audio-controls
-   in a flex column so CSS order can reposition them without touching the DOM.
+   Controls Dock Feature
+   When docked, .controls and .audio-controls are wrapped in a
+   #dock-overlay-wrapper div that is moved inside .spectrum-display-container
+   as an absolute overlay at the top of the waterfall canvas.
    ============================================================================= */
-
-.receiver-layout {
-    display: flex;
-    flex-direction: column;
-}
-
-/* Default (undocked): mirror natural DOM order — no visual change */
-.receiver-layout .spectrum-display-panel { order: 1; }
-.receiver-layout .band-status-bar        { order: 2; }
-.receiver-layout .controls               { order: 3; }
-.receiver-layout .audio-controls         { order: 4; }
-
-/* ── Docked mode: big controls float above the waterfall, band bar stays on top ── */
-.receiver-layout.controls-docked .band-status-bar        { order: 1; }
-.receiver-layout.controls-docked .controls               { order: 2; }
-.receiver-layout.controls-docked .audio-controls         { order: 3; }
-.receiver-layout.controls-docked .spectrum-display-panel { order: 4; }
-
-/* Margin re-tuning for docked position.
-   Undocked: .controls has margin-top:-30px to close the gap below the waterfall.
-   Docked: controls sit at the top of the layout — that compensation is wrong here.
-   Reset it and only compensate downward for the scale(0.75) height shrinkage. */
-.receiver-layout.controls-docked .controls {
-    margin-top: 0;
-    padding-top: 10px;
-    margin-bottom: -50px;
-}
-
-/* .audio-controls also uses negative margins tuned for below-.controls position.
-   In docked mode it follows .controls directly, so tighten the gap. */
-.receiver-layout.controls-docked .audio-controls {
-    margin-top: -60px;
-    margin-bottom: -10px;
-}
 
 /* Dock button active (docked) state */
 #dock-controls-button.active {
@@ -4769,25 +4736,35 @@ input[type="range"]::-moz-range-thumb {
     color: #fff;
 }
 
-/* Mobile: dock feature is disabled — reset any docked overrides and hide button.
-   The button is already hidden via the shared mobile rule above; these rules
-   ensure the layout is never accidentally reordered on narrow screens. */
-@media (max-width: 768px) {
-    .receiver-layout.controls-docked .controls,
-    .receiver-layout.controls-docked .audio-controls,
-    .receiver-layout.controls-docked .band-status-bar,
-    .receiver-layout.controls-docked .spectrum-display-panel {
-        order: unset;
-    }
+/* Wrapper that holds both .controls and .audio-controls when docked.
+   Sits at the top of .spectrum-display-container (position:relative).
+   Uses normal block flow internally so the two panels stack naturally. */
+#dock-overlay-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 15;
+    background: rgba(26, 37, 47, 0.92);
+    backdrop-filter: blur(3px);
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    /* Scrollable if the combined height exceeds the waterfall */
+    max-height: 80%;
+    overflow-y: auto;
+}
 
-    .receiver-layout.controls-docked .controls {
-        margin-top: -10px;
-        margin-bottom: -30px;
-        padding-top: 10px;
-    }
+/* Inside the overlay wrapper, reset the margins that were tuned for the
+   normal page-flow position below the waterfall.
+   NOTE: .controls and .audio-controls already have transform:scale(0.75) from
+   their main CSS rules — do NOT re-apply it here or it will double-scale. */
+#dock-overlay-wrapper .controls {
+    margin-top: 0;
+    margin-bottom: -60px; /* compensate for scale(0.75) height shrinkage */
+    padding-top: 8px;
+}
 
-    .receiver-layout.controls-docked .audio-controls {
-        margin-top: 0;
-        margin-bottom: 0;
-    }
+#dock-overlay-wrapper .audio-controls {
+    margin-top: -70px; /* close gap after scaled .controls */
+    margin-bottom: -10px;
+    padding-bottom: 8px;
 }

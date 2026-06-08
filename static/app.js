@@ -14067,40 +14067,91 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
 // =============================================================================
 // Controls Dock Feature
-// Toggles the #receiver-layout.controls-docked class to reorder the big
-// controls panel above the waterfall using CSS flex order.
+// When docked, .controls and .audio-controls are wrapped in a
+// #dock-overlay-wrapper div that is inserted inside .spectrum-display-container
+// as an absolute overlay at the top of the waterfall canvas.
+// On undock the wrapper is removed and the two panels are restored to their
+// original positions in the DOM.
 // State is persisted in localStorage under 'controlsDocked'.
 // =============================================================================
 
-function toggleControlsDock() {
-    const layout = document.getElementById('receiver-layout');
-    const btn    = document.getElementById('dock-controls-button');
-    if (!layout || !btn) return;
+// Records where the controls live in the DOM when undocked so we can restore them.
+let _dockControlsAnchor      = null; // nextSibling of .controls before docking
+let _dockAudioControlsAnchor = null; // nextSibling of .audio-controls before docking
+let _dockOriginalParent      = null; // parent of both nodes before docking
 
-    const isDocked = layout.classList.toggle('controls-docked');
-    btn.textContent = isDocked ? '⊟' : '⊞';
-    btn.classList.toggle('active', isDocked);
-    btn.title = isDocked
-        ? 'Undock receiver controls (move below waterfall)'
-        : 'Dock receiver controls above waterfall';
-    localStorage.setItem('controlsDocked', isDocked ? '1' : '0');
+function _dockApply() {
+    const container = document.querySelector('.spectrum-display-container');
+    const controls  = document.querySelector('.controls');
+    const audio     = document.querySelector('.audio-controls');
+    const btn       = document.getElementById('dock-controls-button');
+    if (!container || !controls || !audio || !btn) return;
 
-    // When docking: ensure the waterfall is tall enough to be useful.
-    // If the user had it collapsed to a tiny sliver, bump it to a sensible minimum.
-    if (isDocked) {
-        const MIN_DOCKED_HEIGHT = 200;
-        const currentH = window.spectrumDisplay
-            ? window.spectrumDisplay.waterfallHeight
-            : (parseInt(localStorage.getItem('waterfallHeight'), 10) || 300);
-        if (currentH < MIN_DOCKED_HEIGHT) {
-            if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
-                window.spectrumDisplay.setWaterfallHeight(MIN_DOCKED_HEIGHT);
-            }
-            // Also update the CSS variable directly in case spectrumDisplay isn't ready yet
-            document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
-            document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
-            localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
+    // Record original DOM positions before moving
+    _dockOriginalParent      = controls.parentNode;
+    _dockControlsAnchor      = controls.nextSibling;
+    _dockAudioControlsAnchor = audio.nextSibling;
+
+    // Create the overlay wrapper and move both panels into it
+    const wrapper = document.createElement('div');
+    wrapper.id = 'dock-overlay-wrapper';
+    wrapper.appendChild(controls);
+    wrapper.appendChild(audio);
+
+    // Insert wrapper as first child of the waterfall container
+    container.insertBefore(wrapper, container.firstChild);
+
+    // Update button state
+    btn.textContent = '⊟';
+    btn.classList.add('active');
+    btn.title = 'Undock receiver controls (move below waterfall)';
+
+    // Ensure waterfall is tall enough to be useful when docked
+    const MIN_DOCKED_HEIGHT = 300;
+    const currentH = window.spectrumDisplay
+        ? window.spectrumDisplay.waterfallHeight
+        : (parseInt(localStorage.getItem('waterfallHeight'), 10) || 300);
+    if (currentH < MIN_DOCKED_HEIGHT) {
+        if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+            window.spectrumDisplay.setWaterfallHeight(MIN_DOCKED_HEIGHT);
         }
+        document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
+        document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
+        localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
+    }
+}
+
+function _dockRemove() {
+    const wrapper  = document.getElementById('dock-overlay-wrapper');
+    const btn      = document.getElementById('dock-controls-button');
+    if (!wrapper || !btn) return;
+
+    const controls = wrapper.querySelector('.controls');
+    const audio    = wrapper.querySelector('.audio-controls');
+
+    // Restore both panels to their original DOM positions
+    if (_dockOriginalParent && controls && audio) {
+        _dockOriginalParent.insertBefore(controls, _dockControlsAnchor);
+        _dockOriginalParent.insertBefore(audio, _dockAudioControlsAnchor);
+    }
+
+    // Remove the now-empty wrapper
+    wrapper.remove();
+
+    // Update button state
+    btn.textContent = '⊞';
+    btn.classList.remove('active');
+    btn.title = 'Dock receiver controls above waterfall';
+}
+
+function toggleControlsDock() {
+    const isDocked = document.getElementById('dock-overlay-wrapper') !== null;
+    if (isDocked) {
+        _dockRemove();
+        localStorage.setItem('controlsDocked', '0');
+    } else {
+        _dockApply();
+        localStorage.setItem('controlsDocked', '1');
     }
 }
 // Expose to global scope — app.js is a module so inline onclick= handlers need window.*
@@ -14108,24 +14159,5 @@ window.toggleControlsDock = toggleControlsDock;
 
 function initControlsDock() {
     if (localStorage.getItem('controlsDocked') !== '1') return;
-
-    const layout = document.getElementById('receiver-layout');
-    const btn    = document.getElementById('dock-controls-button');
-    if (!layout || !btn) return;
-
-    layout.classList.add('controls-docked');
-    btn.textContent = '⊟';
-    btn.classList.add('active');
-    btn.title = 'Undock receiver controls (move below waterfall)';
-
-    // Enforce minimum waterfall height when restoring docked state on page load.
-    // initWaterfallResize() has already applied the saved CSS variable from
-    // localStorage, so we only need to patch it if the saved value is too small.
-    const MIN_DOCKED_HEIGHT = 200;
-    const savedH = parseInt(localStorage.getItem('waterfallHeight'), 10) || 300;
-    if (savedH < MIN_DOCKED_HEIGHT) {
-        localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
-        document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
-        document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
-    }
+    _dockApply();
 }

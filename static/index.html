@@ -253,6 +253,9 @@
             <div id="local-time" class="time-line">--:--:--</div>
         </div>
 
+        <!-- Receiver layout wrapper — flex column; CSS order swapped when controls-docked class is set -->
+        <div id="receiver-layout" class="receiver-layout">
+
         <!-- Full-band Spectrum Display -->
         <div class="spectrum-display-panel">
             <div class="spectrum-display-container">
@@ -398,6 +401,7 @@
                     <div class="band-status-badge" data-band="12m" data-status="OPEN">12m</div>
                     <div class="band-status-badge" data-band="10m" data-status="OPEN">10m</div>
                     <button id="tts-announce-button" class="tts-announce-button" title="Text-to-Speech Announcements (Y key)&#10;Announces frequency and mode changes for accessibility&#10;Uses Google English voices only">📢</button>
+                    <button id="dock-controls-button" class="tts-announce-button" onclick="toggleControlsDock()" title="Dock receiver controls above waterfall">⊞</button>
                 </div>
             </div>
         </div>
@@ -629,6 +633,8 @@
                 <canvas id="vu-meter-leds-compact" class="vu-meter-leds-compact" style="display:none;"></canvas>
             </div>
         </div>
+
+        </div><!-- /#receiver-layout -->
 
         <!-- Browser zoom buttons — hidden on wide screens, shown below audio-controls on narrow via CSS -->
         <div id="browser-zoom-group">

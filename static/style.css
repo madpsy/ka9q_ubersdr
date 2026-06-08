@@ -2214,10 +2214,11 @@ input[type="range"]::-moz-range-thumb {
         font-size: 0.65em;
     }
 
-    /* Hide voice activity, callsign lookup, and TTS buttons on mobile */
+    /* Hide voice activity, callsign lookup, TTS, and dock buttons on mobile */
     #voice-activity-button,
     #callsign-lookup-button,
-    #tts-announce-button {
+    #tts-announce-button,
+    #dock-controls-button {
         display: none !important;
     }
 
@@ -4719,4 +4720,74 @@ input[type="range"]::-moz-range-thumb {
     line-height: 1.5;
     word-break: break-all;
     overflow-wrap: break-word;
+}
+
+/* =============================================================================
+   Receiver Layout — Controls Dock Feature
+   Wraps .spectrum-display-panel, .band-status-bar, .controls, .audio-controls
+   in a flex column so CSS order can reposition them without touching the DOM.
+   ============================================================================= */
+
+.receiver-layout {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Default (undocked): mirror natural DOM order — no visual change */
+.receiver-layout .spectrum-display-panel { order: 1; }
+.receiver-layout .band-status-bar        { order: 2; }
+.receiver-layout .controls               { order: 3; }
+.receiver-layout .audio-controls         { order: 4; }
+
+/* ── Docked mode: big controls float above the waterfall ─────────────────── */
+.receiver-layout.controls-docked .controls               { order: 1; }
+.receiver-layout.controls-docked .audio-controls         { order: 2; }
+.receiver-layout.controls-docked .band-status-bar        { order: 3; }
+.receiver-layout.controls-docked .spectrum-display-panel { order: 4; }
+
+/* Margin re-tuning for docked position.
+   Undocked: .controls has margin-top:-30px to close the gap below the waterfall.
+   Docked: controls sit at the top of the layout — that compensation is wrong here.
+   Reset it and only compensate downward for the scale(0.75) height shrinkage. */
+.receiver-layout.controls-docked .controls {
+    margin-top: 0;
+    padding-top: 10px;
+    margin-bottom: -50px;
+}
+
+/* .audio-controls also uses negative margins tuned for below-.controls position.
+   In docked mode it follows .controls directly, so tighten the gap. */
+.receiver-layout.controls-docked .audio-controls {
+    margin-top: -60px;
+    margin-bottom: -10px;
+}
+
+/* Dock button active (docked) state */
+#dock-controls-button.active {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.35) 0%, rgba(118, 75, 162, 0.35) 100%);
+    border-color: #667eea;
+    color: #fff;
+}
+
+/* Mobile: dock feature is disabled — reset any docked overrides and hide button.
+   The button is already hidden via the shared mobile rule above; these rules
+   ensure the layout is never accidentally reordered on narrow screens. */
+@media (max-width: 768px) {
+    .receiver-layout.controls-docked .controls,
+    .receiver-layout.controls-docked .audio-controls,
+    .receiver-layout.controls-docked .band-status-bar,
+    .receiver-layout.controls-docked .spectrum-display-panel {
+        order: unset;
+    }
+
+    .receiver-layout.controls-docked .controls {
+        margin-top: -10px;
+        margin-bottom: -30px;
+        padding-top: 10px;
+    }
+
+    .receiver-layout.controls-docked .audio-controls {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
 }

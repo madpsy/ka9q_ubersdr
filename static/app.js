@@ -2633,6 +2633,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Restore controls dock state from localStorage
+    initControlsDock();
 });
 
 // ============================================================================
@@ -14061,3 +14064,66 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         showFirefoxSuggestion();
     }
 })();
+
+// =============================================================================
+// Controls Dock Feature
+// Toggles the #receiver-layout.controls-docked class to reorder the big
+// controls panel above the waterfall using CSS flex order.
+// State is persisted in localStorage under 'controlsDocked'.
+// =============================================================================
+
+function toggleControlsDock() {
+    const layout = document.getElementById('receiver-layout');
+    const btn    = document.getElementById('dock-controls-button');
+    if (!layout || !btn) return;
+
+    const isDocked = layout.classList.toggle('controls-docked');
+    btn.textContent = isDocked ? '⊟' : '⊞';
+    btn.classList.toggle('active', isDocked);
+    btn.title = isDocked
+        ? 'Undock receiver controls (move below waterfall)'
+        : 'Dock receiver controls above waterfall';
+    localStorage.setItem('controlsDocked', isDocked ? '1' : '0');
+
+    // When docking: ensure the waterfall is tall enough to be useful.
+    // If the user had it collapsed to a tiny sliver, bump it to a sensible minimum.
+    if (isDocked) {
+        const MIN_DOCKED_HEIGHT = 200;
+        const currentH = window.spectrumDisplay
+            ? window.spectrumDisplay.waterfallHeight
+            : (parseInt(localStorage.getItem('waterfallHeight'), 10) || 300);
+        if (currentH < MIN_DOCKED_HEIGHT) {
+            if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+                window.spectrumDisplay.setWaterfallHeight(MIN_DOCKED_HEIGHT);
+            }
+            // Also update the CSS variable directly in case spectrumDisplay isn't ready yet
+            document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
+            document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
+            localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
+        }
+    }
+}
+
+function initControlsDock() {
+    if (localStorage.getItem('controlsDocked') !== '1') return;
+
+    const layout = document.getElementById('receiver-layout');
+    const btn    = document.getElementById('dock-controls-button');
+    if (!layout || !btn) return;
+
+    layout.classList.add('controls-docked');
+    btn.textContent = '⊟';
+    btn.classList.add('active');
+    btn.title = 'Undock receiver controls (move below waterfall)';
+
+    // Enforce minimum waterfall height when restoring docked state on page load.
+    // initWaterfallResize() has already applied the saved CSS variable from
+    // localStorage, so we only need to patch it if the saved value is too small.
+    const MIN_DOCKED_HEIGHT = 200;
+    const savedH = parseInt(localStorage.getItem('waterfallHeight'), 10) || 300;
+    if (savedH < MIN_DOCKED_HEIGHT) {
+        localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
+        document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
+        document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
+    }
+}

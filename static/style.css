@@ -2130,12 +2130,15 @@ input[type="range"]::-moz-range-thumb {
         justify-content: center;
         padding: 5px 10px;
     }
-    .audio-controls > .control-group:not(#audio-buttons-group):not(#snr-squelch-group) {
+    .audio-controls > .control-group:not(#audio-buttons-group):not(#volume-squelch-group) {
         display: none !important;
     }
-    #snr-squelch-group {
+    /* Show the volume+squelch column on mobile, but hide the volume sub-row */
+    #volume-squelch-group {
         display: flex !important;
-        margin-left: 0;
+    }
+    #volume-row {
+        display: none !important;
     }
     #mute-btn,
     #rmn-btn-group,

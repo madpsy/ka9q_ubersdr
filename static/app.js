@@ -3182,6 +3182,57 @@ async function fetchSiteDescription() {
                 if (data.dsp && data.dsp.enabled && Array.isArray(data.dsp.filters) && data.dsp.filters.length > 0) {
                     serverNRWrapper.style.display = '';
                     console.log('[ServerNR] DSP available — filters:', data.dsp.filters.join(', '));
+
+                    // ── Server NR overlay ─────────────────────────────────────────
+                    // Cover the entire .noise-reduction-container with a semi-transparent
+                    // overlay so the client-side controls are visually superseded.
+                    // The #server-nr-btn-wrapper sits inside the container but is given
+                    // a higher z-index so it remains fully interactive above the overlay.
+                    const nrContainer = document.querySelector('.noise-reduction-container');
+                    if (nrContainer && !document.getElementById('server-nr-overlay')) {
+                        // Raise the button wrapper above the overlay
+                        serverNRWrapper.style.position = 'relative';
+                        serverNRWrapper.style.zIndex = '20';
+
+                        // Create overlay
+                        const overlay = document.createElement('div');
+                        overlay.id = 'server-nr-overlay';
+                        overlay.style.cssText = [
+                            'position:absolute',
+                            'inset:0',
+                            'z-index:10',
+                            'background:rgba(18,18,28,0.82)',
+                            'backdrop-filter:blur(2px)',
+                            'border-radius:6px',
+                            'display:flex',
+                            'flex-direction:column',
+                            'align-items:center',
+                            'justify-content:center',
+                            'gap:6px',
+                            'padding:12px',
+                            'text-align:center',
+                            'pointer-events:none',
+                        ].join(';');
+
+                        const icon = document.createElement('div');
+                        icon.style.cssText = 'font-size:22px;line-height:1;';
+                        icon.textContent = '🖥';
+
+                        const title = document.createElement('div');
+                        title.id = 'server-nr-overlay-title';
+                        title.style.cssText = 'font-size:13px;font-weight:700;color:#e0e0e0;';
+                        title.textContent = 'Server-side NR available';
+
+                        const sub = document.createElement('div');
+                        sub.id = 'server-nr-overlay-sub';
+                        sub.style.cssText = 'font-size:11px;color:#aaa;line-height:1.4;';
+                        sub.textContent = 'Client controls inactive — use the NR button\nor the Server NR panel below';
+
+                        overlay.appendChild(icon);
+                        overlay.appendChild(title);
+                        overlay.appendChild(sub);
+                        nrContainer.appendChild(overlay);
+                    }
                 } else {
                     serverNRWrapper.style.display = 'none';
                     console.log('[ServerNR] DSP not available on this server');
@@ -3907,22 +3958,53 @@ function _syncNRQuickButtonFromDspStatus(info) {
     const dsp = window.instanceDescription && window.instanceDescription.dsp;
     if (!dsp || !dsp.enabled) return; // server NR not available — leave client-side UI alone
     const btn = document.getElementById('nr2-quick-toggle');
-    if (!btn) return;
+    const statusBadge = document.getElementById('noise-reduction-status-badge');
+    const overlayTitle = document.getElementById('server-nr-overlay-title');
+    const overlaySub = document.getElementById('server-nr-overlay-sub');
+
     if (info && info.enabled && info.filter) {
         const idx = Array.isArray(dsp.filters) ? dsp.filters.indexOf(info.filter) : -1;
         _serverNRFilterIndex = idx >= 0 ? idx : -1;
-        btn.textContent = info.filter.toUpperCase();
-        btn.style.backgroundColor = '#1a9e4a';
-        btn.style.opacity = '';
-        btn.style.cursor = '';
-        btn.disabled = false;
+
+        // Quick-toggle button
+        if (btn) {
+            btn.textContent = info.filter.toUpperCase();
+            btn.style.backgroundColor = '#1a9e4a';
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+            btn.disabled = false;
+        }
+
+        // Status badge in the NR card
+        if (statusBadge) {
+            statusBadge.textContent = info.filter.toUpperCase() + ' ACTIVE';
+            statusBadge.className = 'filter-status-badge filter-enabled';
+        }
+
+        // Overlay message
+        if (overlayTitle) overlayTitle.textContent = 'Server NR active — ' + info.filter.toUpperCase();
+        if (overlaySub) overlaySub.textContent = 'Use the NR button or Server NR panel below\nto change or disable';
     } else {
         _serverNRFilterIndex = -1;
-        btn.textContent = 'NR';
-        btn.style.backgroundColor = '#6c757d';
-        btn.style.opacity = '';
-        btn.style.cursor = '';
-        btn.disabled = false;
+
+        // Quick-toggle button
+        if (btn) {
+            btn.textContent = 'NR';
+            btn.style.backgroundColor = '#6c757d';
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+            btn.disabled = false;
+        }
+
+        // Status badge
+        if (statusBadge) {
+            statusBadge.textContent = 'DISABLED';
+            statusBadge.className = 'filter-status-badge filter-disabled';
+        }
+
+        // Overlay message
+        if (overlayTitle) overlayTitle.textContent = 'Server-side NR available';
+        if (overlaySub) overlaySub.textContent = 'Client controls inactive — use the NR button\nor the Server NR panel below';
     }
 }
 

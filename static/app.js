@@ -3607,6 +3607,9 @@ async function handleBinaryMessage(data) {
                     // Always update mini charts (they live on the main page)
                     drawDbfsHistoryChart();
                     drawSnrHistoryChart();
+
+                    // Keep the live SNR marker on the squelch slider in sync
+                    if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
                 }
             }
         }
@@ -6244,6 +6247,37 @@ function updateSNRSquelchDisplay() {
         lbl.textContent = '\u2265' + parseFloat(sl.value).toFixed(1);
         lbl.style.color = '';
     }
+
+    // ── Live SNR marker on the squelch slider track ────────────────────────
+    // Shows a vertical line at the position corresponding to the current SNR
+    // so the user can see at a glance where to set the squelch threshold.
+    const marker = document.getElementById('snr-squelch-snr-marker');
+    if (marker) {
+        const bp  = window.currentBasebandPower;
+        const nd  = window.currentNoiseDensity;
+        const snr = (bp != null && nd != null && bp > -900 && nd > -900)
+                    ? bp - nd : null;
+        if (snr !== null) {
+            const MIN = parseFloat(sl.min);   // 24
+            const MAX = parseFloat(sl.max);   // 80
+            // Account for browser thumb inset: the usable track is narrower than
+            // the element width by one thumb-radius on each side (~8px typical).
+            // We read the actual rendered width so this works at any screen size.
+            const thumbRadius = 8;
+            const trackWidth  = sl.offsetWidth - thumbRadius * 2;
+            const fraction    = Math.max(0, Math.min(1, (snr - MIN) / (MAX - MIN)));
+            const pxLeft      = thumbRadius + fraction * trackWidth;
+            marker.style.left    = pxLeft + 'px';
+            marker.style.display = 'block';
+            // Turn red when squelch is active and currently gating (SNR < threshold)
+            const gating = t > SNR_SQUELCH_SENTINEL + 1 && snr < t;
+            marker.style.background = gating ? '#dc3545' : '#4a9eff';
+            marker.title = 'Current SNR: ' + snr.toFixed(1) + ' dB';
+        } else {
+            marker.style.display = 'none';
+        }
+    }
+    // ───────────────────────────────────────────────────────────────────────
 }
 
 let _snrSquelchTimer = null;
@@ -6262,6 +6296,32 @@ function sendSNRSquelch() {
 function initSNRSquelch() {
     const sl = document.getElementById('snr-squelch-slider');
     if (!sl) return;
+
+    // ── Inject SNR marker element into the DOM (no HTML change needed) ─────
+    // Wrap the slider in a relative-positioned div so we can overlay the marker.
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:relative; flex:1; display:flex; align-items:center; min-width:0;';
+    sl.parentNode.insertBefore(wrapper, sl);
+    wrapper.appendChild(sl);
+    sl.style.width  = '100%';
+    sl.style.margin = '0';   // remove any default margin that would shift the track
+
+    const marker = document.createElement('div');
+    marker.id = 'snr-squelch-snr-marker';
+    marker.style.cssText = [
+        'position:absolute',
+        'top:4px',
+        'bottom:4px',
+        'width:2px',
+        'border-radius:1px',
+        'background:#4a9eff',
+        'pointer-events:none',
+        'display:none',
+        'transition:left 0.1s linear, background 0.2s'
+    ].join(';');
+    wrapper.appendChild(marker);
+    // ───────────────────────────────────────────────────────────────────────
+
     sl.addEventListener('input',    () => updateSNRSquelchDisplay());
     sl.addEventListener('change',   () => { updateSNRSquelchDisplay(); sendSNRSquelch(); });
     sl.addEventListener('touchend', () => { updateSNRSquelchDisplay(); sendSNRSquelch(); });

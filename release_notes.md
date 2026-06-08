@@ -1,6 +1,13 @@
-# Latest Stable - 0.1.52 - 8th Jun 2026
+# Latest Stable - 0.1.53 - 8th Jun 2026
 
-## Version 0.1.52 - Latest Stable
+## Version 0.1.53 - Latest Stable
+
+### Bug Fixes
+- Waterfall fix for clearing on vertical height change (still has to clear on width change)
+- Control docking was meant to be in previous release but was missed
+- Server side Noise Reduction takes priority over client side when available (another miss from previous version)
+
+## Version 0.1.52
 
 ### New Features
 - Added **SNR Squlech** which performs the squelch on the backend meaning when SNR is less than the value no audio is sent to the client

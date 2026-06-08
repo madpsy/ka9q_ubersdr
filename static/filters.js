@@ -374,6 +374,13 @@ function toggleEQQuick() {
         button.textContent = 'CW';
         button.style.backgroundColor = '#17a2b8'; // Cyan
         console.log('EQ Quick Toggle: CW preset enabled');
+    } else if (eqQuickState === 'cw') {
+        // Apply Music preset
+        eqQuickState = 'music';
+        applyEQPreset('music');
+        button.textContent = 'Music';
+        button.style.backgroundColor = '#fd7e14'; // Orange
+        console.log('EQ Quick Toggle: Music preset enabled');
     } else {
         // Disable EQ
         eqQuickState = 'off';

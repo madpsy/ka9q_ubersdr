@@ -3920,11 +3920,42 @@ function handleMessage(msg) {
                        serverNRForwardToPopout(msg);
                    }
                    break;
-        case 'dsp_error':
+        case 'dsp_error': {
             // Forward DSP error to the popout
             serverNRForwardToPopout(msg);
-            log('DSP error: ' + (msg.info && msg.info.message ? msg.info.message : JSON.stringify(msg.info)), 'error');
+            const errCode    = (msg.info && msg.info.code)    || 'ERROR';
+            const errMessage = (msg.info && msg.info.message) || JSON.stringify(msg.info);
+            log('DSP error: ' + errMessage, 'error');
+
+            // Roll back the NR quick-toggle button to the last confirmed server state.
+            // _cycleServerNR() updates the button optimistically; if the server rejects
+            // the request (CAPACITY, RATE_LIMITED, or any other error) no dsp_status
+            // echo is sent, so we must correct the button ourselves.
+            // _syncNRQuickButtonFromDspStatus() resets both the button UI and
+            // _serverNRFilterIndex to match the last known-good server state.
+            const lastInfo = _lastDspStatus ? (_lastDspStatus.info || {}) : {};
+            _syncNRQuickButtonFromDspStatus(lastInfo);
+
+            // Give the user a brief visual error flash on the NR button so they
+            // know the attempt was rejected (red for ~1.5 s, then back to normal).
+            const nrBtn = document.getElementById('nr2-quick-toggle');
+            if (nrBtn) {
+                const dsp = window.instanceDescription && window.instanceDescription.dsp;
+                if (dsp && dsp.enabled) {
+                    nrBtn.style.backgroundColor = '#c0392b';
+                    nrBtn.textContent = errCode === 'CAPACITY'     ? 'FULL'
+                                      : errCode === 'RATE_LIMITED' ? 'WAIT'
+                                      : 'ERR';
+                    setTimeout(() => {
+                        // Restore to current confirmed state (may have changed during timeout)
+                        _syncNRQuickButtonFromDspStatus(
+                            _lastDspStatus ? (_lastDspStatus.info || {}) : {}
+                        );
+                    }, 1500);
+                }
+            }
             break;
+        }
         case 'dsp_params_sent':
             // Param update acknowledged — no UI action needed
             break;

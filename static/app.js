@@ -3187,6 +3187,11 @@ async function fetchSiteDescription() {
                     console.log('[ServerNR] DSP not available on this server');
                 }
             }
+
+            // Update the NR quick-toggle button tooltip and behaviour now that we
+            // know whether server-side DSP is available.  updateNRModeSupport()
+            // reads instanceDescription.dsp, so call it after the global is set.
+            updateNRModeSupport(currentMode);
         } else {
             console.error('Failed to fetch site description:', response.status);
         }
@@ -3855,6 +3860,8 @@ function handleMessage(msg) {
                        !!(msg.info && msg.info.enabled),
                        (msg.info && msg.info.filter) || null
                    );
+                   // Sync the NR quick-toggle button to reflect server state
+                   _syncNRQuickButtonFromDspStatus(msg.info || {});
                    // Forward to the popout — but skip param-update echoes when the
                    // popout is already open (it already has the correct values; no need
                    // to re-run handleDSPStatus and flash the status message).
@@ -3883,6 +3890,74 @@ let _serverNRPopout = null;
 
 /** Last dsp_status message received from the server — replayed when popout reopens. */
 let _lastDspStatus = null;
+
+/**
+ * Tracks which server-side DSP filter is currently selected in the NR quick-toggle
+ * cycle.  -1 = off; 0..n = index into instanceDescription.dsp.filters[].
+ */
+let _serverNRFilterIndex = -1;
+
+/**
+ * Sync the NR quick-toggle button (#nr2-quick-toggle) to reflect the current
+ * server-side DSP state reported in a dsp_status message.  Only acts when the
+ * server has DSP enabled (instanceDescription.dsp.enabled === true).
+ * @param {object} info  — the msg.info payload from a dsp_status message
+ */
+function _syncNRQuickButtonFromDspStatus(info) {
+    const dsp = window.instanceDescription && window.instanceDescription.dsp;
+    if (!dsp || !dsp.enabled) return; // server NR not available — leave client-side UI alone
+    const btn = document.getElementById('nr2-quick-toggle');
+    if (!btn) return;
+    if (info && info.enabled && info.filter) {
+        const idx = Array.isArray(dsp.filters) ? dsp.filters.indexOf(info.filter) : -1;
+        _serverNRFilterIndex = idx >= 0 ? idx : -1;
+        btn.textContent = info.filter.toUpperCase();
+        btn.style.backgroundColor = '#1a9e4a';
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+        btn.disabled = false;
+    } else {
+        _serverNRFilterIndex = -1;
+        btn.textContent = 'NR';
+        btn.style.backgroundColor = '#6c757d';
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+        btn.disabled = false;
+    }
+}
+
+/**
+ * Cycle through server-side DSP filters on the NR quick-toggle button.
+ * Sequence: Off → filter[0] → filter[1] → … → Off
+ * Sends set_dsp over the WebSocket with default params ({}).
+ * @param {string[]} filters  — list of filter names from instanceDescription.dsp.filters
+ */
+function _cycleServerNR(filters) {
+    _serverNRFilterIndex++;
+    if (_serverNRFilterIndex >= filters.length) {
+        _serverNRFilterIndex = -1;
+    }
+    const btn = document.getElementById('nr2-quick-toggle');
+    if (_serverNRFilterIndex === -1) {
+        // Turn off
+        if (wsManager && wsManager.isConnected()) {
+            wsManager.send({ type: 'set_dsp', enabled: false });
+        }
+        if (btn) {
+            btn.textContent = 'NR';
+            btn.style.backgroundColor = '#6c757d';
+        }
+    } else {
+        const name = filters[_serverNRFilterIndex];
+        if (wsManager && wsManager.isConnected()) {
+            wsManager.send({ type: 'set_dsp', enabled: true, filter: name, params: {} });
+        }
+        if (btn) {
+            btn.textContent = name.toUpperCase();
+            btn.style.backgroundColor = '#1a9e4a';
+        }
+    }
+}
 
 /**
  * Update the "Server NR (DSP Insert)" button in the noise-reduction card to
@@ -6523,6 +6598,23 @@ const NR_ENGINE_UNSUPPORTED_MODES = ['fm', 'nfm', 'cwu', 'cwl'];
 // forces the engine off when switching to an unsupported mode.
 function updateNRModeSupport(mode) {
     const btn = document.getElementById('nr2-quick-toggle');
+
+    // When server-side DSP is available the quick-toggle cycles server filters,
+    // which work in all demodulation modes.  Skip the client-side NR engine
+    // restrictions entirely and just keep the tooltip accurate.
+    const dsp = window.instanceDescription && window.instanceDescription.dsp;
+    if (dsp && dsp.enabled && Array.isArray(dsp.filters) && dsp.filters.length > 0) {
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+            btn.title = 'Cycle Server NR: Off → ' +
+                dsp.filters.map(f => f.toUpperCase()).join(' → ') +
+                ' → Off (N key)';
+        }
+        return;
+    }
+
     const unsupported = NR_ENGINE_UNSUPPORTED_MODES.includes(mode);
 
     if (unsupported) {
@@ -6549,9 +6641,19 @@ function updateNRModeSupport(mode) {
     }
 }
 
-// Quick toggle: cycles Off → NR → NR2 → Off
+// Quick toggle: cycles Off → NR → NR2 → Off (client-side), or cycles through
+// server-side DSP filters when the server has DSP enabled.
 // Skips the 'nr' step on modes where the NR engine is not suitable.
 function toggleNR2Quick() {
+    // When server-side DSP is available, cycle through server filters instead
+    // of client-side NR engines.  Client-side NR is left off entirely.
+    const dsp = window.instanceDescription && window.instanceDescription.dsp;
+    if (dsp && dsp.enabled && Array.isArray(dsp.filters) && dsp.filters.length > 0) {
+        _cycleServerNR(dsp.filters);
+        return;
+    }
+
+    // Client-side fallback (original behaviour)
     const unsupported = NR_ENGINE_UNSUPPORTED_MODES.includes(currentMode);
     let nextMode;
     if (noiseReductionMode === 'off') {

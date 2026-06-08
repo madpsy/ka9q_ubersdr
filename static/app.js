@@ -5543,10 +5543,21 @@ function setMode(mode, preserveBandwidth = false) {
 
         // FM_SQUELCH_ENABLED is false: always send squelch-open so the server
         // never applies a squelch threshold regardless of the slider position.
+        // Send immediately if connected, and also after a short delay to cover
+        // the case where the connection is being established right now.
         if (!FM_SQUELCH_ENABLED && (mode === 'fm' || mode === 'nfm')) {
-            if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
-                wsManager.send({ type: 'set_squelch', squelchOpen: -999.0 });
-                log('Squelch: Open (squelch UI disabled)');
+            const sendOpenSquelch = () => {
+                if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+                    wsManager.send({ type: 'set_squelch', squelchOpen: -999.0 });
+                    log('Squelch: Open (squelch UI disabled)');
+                    return true;
+                }
+                return false;
+            };
+            if (!sendOpenSquelch()) {
+                // WS not open yet — retry after connection is established
+                setTimeout(sendOpenSquelch, 500);
+                setTimeout(sendOpenSquelch, 1500);
             }
         }
     }

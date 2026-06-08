@@ -1241,6 +1241,16 @@ let _lastMediaSessionArtist = null;
 function updateMediaSession() {
     if (!('mediaSession' in navigator)) return;
 
+    // If MediaSession is disabled, suppress Chrome's automatic controls and bail out.
+    // Without this guard, every frequency/mode change calls updateMediaSession() and
+    // sets navigator.mediaSession.metadata, which re-associates Chrome with MediaSession
+    // and brings back the media controls icon even when the user hasn't enabled it.
+    if (!mediaSessionEnabled) {
+        try { navigator.mediaSession.metadata = null; } catch (_) {}
+        try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
+        return;
+    }
+
     // On Chrome/Edge with the HTTP stream path, do NOT touch MediaSession at all
     // until the <audio> element has fired 'playing' (i.e. _httpStreamPlaying = true).
     //
@@ -1880,18 +1890,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // startAudio() (e.g. from a previous session), attempt it here.
             if (_isMobileChrome && mediaSessionEnabled && 'mediaSession' in navigator) {
                 await _ensureHttpAudioStream();
-            }
-
-            // If MediaSession is disabled, suppress Chrome's automatic media controls icon.
-            // Chrome associates the AudioContext with MediaSession once audio starts flowing.
-            // We delay 500ms to ensure Chrome has completed its association before we opt out.
-            if ('mediaSession' in navigator && !mediaSessionEnabled) {
-                setTimeout(() => {
-                    if (!mediaSessionEnabled) { // still disabled after delay
-                        try { navigator.mediaSession.metadata = null; } catch (_) {}
-                        try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
-                    }
-                }, 1000);
             }
         };
 

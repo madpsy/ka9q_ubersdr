@@ -4798,6 +4798,23 @@ input[type="range"]::-moz-range-thumb {
     padding: 4px 30px;
 }
 
+/* All text inside the overlay gets a dark shadow so it's readable against
+   any waterfall colour — labels, value spans, checkbox text, etc. */
+#dock-overlay-wrapper label,
+#dock-overlay-wrapper span,
+#dock-overlay-wrapper .control-group label,
+#dock-overlay-wrapper .bandwidth-controls label,
+#dock-overlay-wrapper #bandwidth-combined-value,
+#dock-overlay-wrapper #bandwidth-low-value,
+#dock-overlay-wrapper #bandwidth-high-value,
+#dock-overlay-wrapper #volume-value,
+#dock-overlay-wrapper #snr-squelch-value {
+    text-shadow:
+        0 0 4px rgba(0, 0, 0, 0.95),
+        0 1px 3px rgba(0, 0, 0, 0.85),
+        0 -1px 3px rgba(0, 0, 0, 0.85);
+}
+
 /* S-meter canvas: match the semi-transparent style of the mini history charts */
 #dock-overlay-wrapper #s-meter-canvas {
     background: rgba(15, 25, 40, 0.75) !important;

@@ -4742,7 +4742,10 @@ input[type="range"]::-moz-range-thumb {
    on the children affecting layout calculations.
    top/left/width are set via inline style by JS (_dockPositionWrapper).
    The wrapper is appended to <body> so it is never clipped by any ancestor.
-   Background is fully transparent so the waterfall is completely visible. */
+   Background is fully transparent so the waterfall is completely visible.
+   pointer-events:none on the wrapper means clicks pass through the transparent
+   gaps to the waterfall canvas; pointer-events:auto is restored on the actual
+   interactive child elements so buttons/inputs/selects still work. */
 #dock-overlay-wrapper {
     position: fixed;
     z-index: 1000;
@@ -4750,6 +4753,24 @@ input[type="range"]::-moz-range-thumb {
     overflow: hidden;
     max-height: 80vh;
     overflow-y: auto;
+    pointer-events: none;
+}
+
+/* Restore pointer events on all interactive children */
+#dock-overlay-wrapper button,
+#dock-overlay-wrapper input,
+#dock-overlay-wrapper select,
+#dock-overlay-wrapper label,
+#dock-overlay-wrapper .band-status-badge,
+#dock-overlay-wrapper .voice-activity-button,
+#dock-overlay-wrapper .tts-announce-button,
+#dock-overlay-wrapper .freq-readout-display,
+#dock-overlay-wrapper .freq-digit,
+#dock-overlay-wrapper .tuning-wheel,
+#dock-overlay-wrapper .s-meter-container,
+#dock-overlay-wrapper .smeter-charts-panel,
+#dock-overlay-wrapper canvas {
+    pointer-events: auto;
 }
 
 /* Inside the overlay wrapper, reset the margins that were tuned for the

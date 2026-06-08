@@ -14078,6 +14078,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
 let _dockControlsAnchor      = null; // nextSibling of .controls before docking
 let _dockAudioControlsAnchor = null; // nextSibling of .audio-controls before docking
+let _dockBandBarAnchor        = null; // nextSibling of .band-status-bar before docking
 let _dockOriginalParent      = null; // parent of both nodes before docking
 let _dockRAF                 = null; // requestAnimationFrame handle for position updates
 
@@ -14101,6 +14102,7 @@ function _dockPositionWrapper() {
 function _dockApply() {
     const controls = document.querySelector('.controls');
     const audio    = document.querySelector('.audio-controls');
+    const bandBar  = document.querySelector('.band-status-bar');
     const btn      = document.getElementById('dock-controls-button');
     if (!controls || !audio || !btn) return;
 
@@ -14108,10 +14110,13 @@ function _dockApply() {
     _dockOriginalParent      = controls.parentNode;
     _dockControlsAnchor      = controls.nextSibling;
     _dockAudioControlsAnchor = audio.nextSibling;
+    if (bandBar) _dockBandBarAnchor = bandBar.nextSibling;
 
-    // Create the fixed overlay wrapper on <body> and move both panels into it
+    // Create the fixed overlay wrapper on <body> and move panels into it.
+    // Order inside wrapper: band bar → controls → audio-controls (top to bottom)
     const wrapper = document.createElement('div');
     wrapper.id = 'dock-overlay-wrapper';
+    if (bandBar) wrapper.appendChild(bandBar);
     wrapper.appendChild(controls);
     wrapper.appendChild(audio);
     document.body.appendChild(wrapper);
@@ -14150,11 +14155,13 @@ function _dockRemove() {
 
     const controls = wrapper.querySelector('.controls');
     const audio    = wrapper.querySelector('.audio-controls');
+    const bandBar  = wrapper.querySelector('.band-status-bar');
 
-    // Restore both panels to their exact original DOM positions
-    if (_dockOriginalParent && controls && audio) {
-        _dockOriginalParent.insertBefore(controls, _dockControlsAnchor);
-        _dockOriginalParent.insertBefore(audio, _dockAudioControlsAnchor);
+    // Restore all panels to their exact original DOM positions
+    if (_dockOriginalParent) {
+        if (bandBar)   _dockOriginalParent.insertBefore(bandBar,  _dockBandBarAnchor);
+        if (controls)  _dockOriginalParent.insertBefore(controls, _dockControlsAnchor);
+        if (audio)     _dockOriginalParent.insertBefore(audio,    _dockAudioControlsAnchor);
     }
 
     // Remove the now-empty wrapper from <body>

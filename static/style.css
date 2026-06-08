@@ -4770,3 +4770,11 @@ input[type="range"]::-moz-range-thumb {
     margin-bottom: -10px;
     padding-bottom: 8px;
 }
+
+/* Band status bar inside the overlay — remove its own background since the
+   wrapper provides the dark background. Keep padding for spacing. */
+#dock-overlay-wrapper .band-status-bar {
+    background: transparent;
+    padding: 4px 30px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}

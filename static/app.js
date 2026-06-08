@@ -19,6 +19,11 @@ import { screenWakeLock } from './wake-lock.js';
 // navigated to the page with those parameters.
 const initialPageParams = new URLSearchParams(window.location.search);
 
+// Feature flag: set to true to re-enable the FM/NFM squelch UI panel and
+// the associated set_squelch server commands.  Currently disabled while the
+// squelch feature is under development.
+const FM_SQUELCH_ENABLED = false;
+
 // Notification system
 let _notificationTimer = null;
 
@@ -1004,7 +1009,7 @@ function loadVFOState(vfo) {
     const bandwidthControls = document.getElementById('bandwidth-controls');
     const squelchControls = document.getElementById('squelch-controls');
     
-    if (state.mode === 'fm' || state.mode === 'nfm') {
+    if (FM_SQUELCH_ENABLED && (state.mode === 'fm' || state.mode === 'nfm')) {
         bandwidthControls.style.display = 'none';
         squelchControls.style.display = 'block';
     } else {
@@ -1076,7 +1081,7 @@ function toggleVFO() {
         // Trigger squelch update after tune completes (for FM/NFM modes)
         // Use setTimeout to ensure mode change is processed first
         const state = vfoStates[newVFO];
-        if (state.mode === 'fm' || state.mode === 'nfm') {
+        if (FM_SQUELCH_ENABLED && (state.mode === 'fm' || state.mode === 'nfm')) {
             setTimeout(() => {
                 const squelchSlider = document.getElementById('squelch');
                 if (squelchSlider) {
@@ -5493,7 +5498,7 @@ function setMode(mode, preserveBandwidth = false) {
     const bandwidthControls = document.getElementById('bandwidth-controls');
     const squelchControls = document.getElementById('squelch-controls');
     
-    if (mode === 'fm' || mode === 'nfm') {
+    if (FM_SQUELCH_ENABLED && (mode === 'fm' || mode === 'nfm')) {
         // FM/NFM modes: hide bandwidth, show squelch
         bandwidthControls.style.display = 'none';
         squelchControls.style.display = 'block';
@@ -6166,7 +6171,7 @@ function updateSquelch() {
     }
     
     // Send squelch update via WebSocket
-    if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+    if (FM_SQUELCH_ENABLED && wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
         const msg = {
             type: 'set_squelch',
             squelchOpen: squelchDb

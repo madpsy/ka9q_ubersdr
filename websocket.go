@@ -1783,10 +1783,6 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				}
 			}
 
-			// Track when we receive real audio (to know when squelch is open).
-			// Only reached when NOT forwarding to HTTP stream.
-			lastAudioTime = time.Now()
-
 			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 
@@ -1938,6 +1934,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					copy(packet[13:], opusData)
 				}
 
+				// Track that real audio was sent (gate passed) — keeps the silence ticker quiet.
+				lastAudioTime = time.Now()
+
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()
 				conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -2042,6 +2041,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					log.Printf("PCM binary encoding error: %v", err)
 					continue
 				}
+
+				// Track that real audio was sent (gate passed) — keeps the silence ticker quiet.
+				lastAudioTime = time.Now()
 
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()

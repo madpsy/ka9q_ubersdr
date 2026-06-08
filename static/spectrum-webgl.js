@@ -58,6 +58,10 @@ class WaterfallWebGL {
         this._writeRow  = 0;
         this._hasData   = false;  // true once first row is pushed
         this._texReady  = false;  // true once texImage2D has allocated the ring texture
+        // Number of rows actually written since the last texture reset (capped at ringRows).
+        // Used as uValidRows in the shader so pixels beyond the written history render black
+        // rather than showing stale data from a previous (taller) waterfall height.
+        this._validRows = 0;
 
         // WebGL state
         this.gl        = null;
@@ -74,6 +78,7 @@ class WaterfallWebGL {
         this._uVisibleRows = null;  // waterfall height in pixels
         this._uWaterfallY  = null;  // normalised Y start of waterfall [0,1]
         this._uWaterfallH  = null;  // normalised height of waterfall [0,1]
+        this._uValidRows   = null;  // rows actually written (clamps history depth)
 
         this._supported = false;
         this._init();
@@ -215,8 +220,9 @@ class WaterfallWebGL {
         );
         gl.bindTexture(gl.TEXTURE_2D, null);
 
-        this._writeRow = (this._writeRow + 1) % this.ringRows;
-        this._hasData  = true;
+        this._writeRow  = (this._writeRow + 1) % this.ringRows;
+        this._validRows = Math.min(this._validRows + 1, this.ringRows);
+        this._hasData   = true;
     }
 
     /**
@@ -249,6 +255,7 @@ class WaterfallWebGL {
         gl.uniform1i(this._uWriteRow,    this._writeRow);
         gl.uniform1i(this._uRingRows,    this.ringRows);
         gl.uniform1i(this._uVisibleRows, visibleRows);
+        gl.uniform1i(this._uValidRows,   this._validRows);
 
         // Waterfall region in normalised [0,1] canvas coordinates (Y=0 at top)
         gl.uniform1f(this._uWaterfallY, waterfallStartY / this.height);
@@ -386,6 +393,7 @@ uniform sampler2D uLutTex;      // colour LUT:  256 × 1, RGBA
 uniform int       uWriteRow;    // ring write pointer
 uniform int       uRingRows;    // total ring buffer rows
 uniform int       uVisibleRows; // waterfall height in pixels
+uniform int       uValidRows;   // rows actually written (history depth guard)
 uniform float     uWaterfallY;  // normalised Y start of waterfall [0,1]
 uniform float     uWaterfallH;  // normalised height of waterfall [0,1]
 
@@ -403,6 +411,13 @@ void main() {
 
     // Integer pixel position within the waterfall, top=0
     int pixelRow = int((py - uWaterfallY) / uWaterfallH * float(uVisibleRows));
+
+    // Beyond the number of rows actually written → black (no stale data from
+    // a previous taller waterfall height bleeds through after a resize).
+    if (pixelRow >= uValidRows) {
+        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
 
     // Map to ring buffer row (1:1 — one ring row per visible pixel)
     int ringRow = ((uWriteRow - 1 - pixelRow) % uRingRows + uRingRows) % uRingRows;
@@ -451,6 +466,7 @@ void main() {
         this._uWriteRow    = gl.getUniformLocation(prog, 'uWriteRow');
         this._uRingRows    = gl.getUniformLocation(prog, 'uRingRows');
         this._uVisibleRows = gl.getUniformLocation(prog, 'uVisibleRows');
+        this._uValidRows   = gl.getUniformLocation(prog, 'uValidRows');
         this._uWaterfallY  = gl.getUniformLocation(prog, 'uWaterfallY');
         this._uWaterfallH  = gl.getUniformLocation(prog, 'uWaterfallH');
     }
@@ -533,9 +549,10 @@ void main() {
         // whose byte-length doesn't match the live GPU texture.
         this._texWidth = this.width;
 
-        this._writeRow = 0;
-        this._hasData  = false;
-        this._texReady = true;   // texImage2D succeeded; pushRow() may proceed
+        this._writeRow  = 0;
+        this._validRows = 0;
+        this._hasData   = false;
+        this._texReady  = true;   // texImage2D succeeded; pushRow() may proceed
     }
 
     _createLutTexture() {

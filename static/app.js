@@ -3215,17 +3215,17 @@ async function fetchSiteDescription() {
                         ].join(';');
 
                         const icon = document.createElement('div');
-                        icon.style.cssText = 'font-size:22px;line-height:1;';
+                        icon.style.cssText = 'font-size:26px;line-height:1;';
                         icon.textContent = '🖥';
 
                         const title = document.createElement('div');
                         title.id = 'server-nr-overlay-title';
-                        title.style.cssText = 'font-size:13px;font-weight:700;color:#e0e0e0;';
+                        title.style.cssText = 'font-size:15px;font-weight:700;color:#e0e0e0;';
                         title.textContent = 'Server-side NR available';
 
                         const sub = document.createElement('div');
                         sub.id = 'server-nr-overlay-sub';
-                        sub.style.cssText = 'font-size:11px;color:#aaa;line-height:1.4;';
+                        sub.style.cssText = 'font-size:13px;color:#aaa;line-height:1.4;';
                         sub.textContent = 'Client controls inactive — use the NR button\nor the Server NR panel below';
 
                         overlay.appendChild(icon);

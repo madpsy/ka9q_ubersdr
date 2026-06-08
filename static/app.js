@@ -14100,6 +14100,7 @@ function _dockPositionWrapper() {
 }
 
 function _dockApply() {
+    if (_dockIsMobile()) return; // dock feature disabled on mobile
     const controls = document.querySelector('.controls');
     const audio    = document.querySelector('.audio-controls');
     const bandBar  = document.querySelector('.band-status-bar');
@@ -14186,7 +14187,15 @@ function toggleControlsDock() {
 // Expose to global scope — app.js is a module so inline onclick= handlers need window.*
 window.toggleControlsDock = toggleControlsDock;
 
+// Returns true if the viewport is narrow enough to be considered mobile.
+// Dock feature is disabled on mobile — the layout is already single-column
+// and the overlay would be too cramped.
+function _dockIsMobile() {
+    return window.innerWidth <= 768;
+}
+
 function initControlsDock() {
     if (localStorage.getItem('controlsDocked') !== '1') return;
+    if (_dockIsMobile()) return; // skip on mobile even if saved state says docked
     _dockApply();
 }

@@ -5532,6 +5532,15 @@ function setMode(mode, preserveBandwidth = false) {
         // Other modes: show bandwidth, hide squelch
         bandwidthControls.style.display = 'block';
         squelchControls.style.display = 'none';
+
+        // FM_SQUELCH_ENABLED is false: always send squelch-open so the server
+        // never applies a squelch threshold regardless of the slider position.
+        if (!FM_SQUELCH_ENABLED && (mode === 'fm' || mode === 'nfm')) {
+            if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+                wsManager.send({ type: 'set_squelch', squelchOpen: -999.0 });
+                log('Squelch: Open (squelch UI disabled)');
+            }
+        }
     }
 
     // Update bandwidth limits based on mode
@@ -6170,18 +6179,21 @@ function updateSquelch() {
         squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
     }
     
-    // Send squelch update via WebSocket
-    if (FM_SQUELCH_ENABLED && wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+    // Send squelch update via WebSocket.
+    // When FM_SQUELCH_ENABLED is false, always send the open value (-999) so
+    // the server never applies a threshold even if this function is called.
+    const squelchDbToSend = FM_SQUELCH_ENABLED ? squelchDb : -999.0;
+    if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
         const msg = {
             type: 'set_squelch',
-            squelchOpen: squelchDb
+            squelchOpen: squelchDbToSend
         };
         wsManager.send(msg);
         
-        if (squelchDb === -999.0) {
-            log('Squelch: Open (no squelch)');
+        if (squelchDbToSend === -999.0) {
+            log(FM_SQUELCH_ENABLED ? 'Squelch: Open (no squelch)' : 'Squelch: Open (squelch UI disabled)');
         } else {
-            log(`Squelch: Closed at ${squelchDb.toFixed(1)} dB SNR`);
+            log(`Squelch: Closed at ${squelchDbToSend.toFixed(1)} dB SNR`);
         }
     }
 }

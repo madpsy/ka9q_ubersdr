@@ -1881,6 +1881,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_isMobileChrome && mediaSessionEnabled && 'mediaSession' in navigator) {
                 await _ensureHttpAudioStream();
             }
+
+            // If MediaSession is disabled, suppress Chrome's automatic media controls icon.
+            // Chrome associates the AudioContext with MediaSession once audio starts flowing.
+            // We delay 500ms to ensure Chrome has completed its association before we opt out.
+            if ('mediaSession' in navigator && !mediaSessionEnabled) {
+                setTimeout(() => {
+                    if (!mediaSessionEnabled) { // still disabled after delay
+                        try { navigator.mediaSession.metadata = null; } catch (_) {}
+                        try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
+                    }
+                }, 500);
+            }
         };
 
         audioStartButton.addEventListener('click', startAudio);

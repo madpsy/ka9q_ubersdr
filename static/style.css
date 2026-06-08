@@ -4736,45 +4736,43 @@ input[type="range"]::-moz-range-thumb {
     color: #fff;
 }
 
-/* Wrapper that holds both .controls and .audio-controls when docked.
+/* Wrapper that holds .band-status-bar, .controls and .audio-controls when docked.
    Uses position:fixed so it is positioned relative to the viewport,
    not the waterfall container — this avoids all issues with transform:scale()
    on the children affecting layout calculations.
    top/left/width are set via inline style by JS (_dockPositionWrapper).
-   The wrapper is appended to <body> so it is never clipped by any ancestor. */
+   The wrapper is appended to <body> so it is never clipped by any ancestor.
+   Background is fully transparent so the waterfall is completely visible. */
 #dock-overlay-wrapper {
     position: fixed;
     z-index: 1000;
-    background: rgba(26, 37, 47, 0.95);
-    backdrop-filter: blur(3px);
-    border-top: 1px solid rgba(255,255,255,0.12);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: transparent;
     overflow: hidden;
-    /* Prevent the wrapper itself from being taller than the waterfall */
     max-height: 80vh;
     overflow-y: auto;
 }
 
 /* Inside the overlay wrapper, reset the margins that were tuned for the
-   normal page-flow position below the waterfall.
+   normal page-flow position below the waterfall, and make all backgrounds
+   transparent so the waterfall is fully visible behind the overlay.
    NOTE: .controls and .audio-controls already have transform:scale(0.75) from
    their main CSS rules — do NOT re-apply it here or it will double-scale. */
 #dock-overlay-wrapper .controls {
     margin-top: 0;
     margin-bottom: -60px; /* compensate for scale(0.75) height shrinkage */
     padding-top: 8px;
+    background: transparent;
 }
 
 #dock-overlay-wrapper .audio-controls {
     margin-top: -70px; /* close gap after scaled .controls */
     margin-bottom: -10px;
     padding-bottom: 8px;
+    background: transparent;
 }
 
-/* Band status bar inside the overlay — remove its own background since the
-   wrapper provides the dark background. Keep padding for spacing. */
+/* Band status bar inside the overlay — transparent background */
 #dock-overlay-wrapper .band-status-bar {
     background: transparent;
     padding: 4px 30px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
 }

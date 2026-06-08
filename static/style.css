@@ -4797,3 +4797,16 @@ input[type="range"]::-moz-range-thumb {
     background: transparent;
     padding: 4px 30px;
 }
+
+/* S-meter canvas: match the semi-transparent style of the mini history charts */
+#dock-overlay-wrapper #s-meter-canvas {
+    background: rgba(15, 25, 40, 0.75) !important;
+}
+
+/* S-meter readout bar below the canvas (inline background:#2c3e50 in HTML) */
+#dock-overlay-wrapper .smeter-left > div:last-child {
+    background: rgba(44, 62, 80, 0.75) !important;
+    border-radius: 0 0 4px 4px;
+}
+
+/* Mini history chart canvases already use rgba(15,25,40,0.75) — no change needed */

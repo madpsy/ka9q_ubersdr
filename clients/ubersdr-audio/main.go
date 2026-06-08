@@ -2795,6 +2795,8 @@ func main() {
 	snrSquelchSlider := widget.NewSlider(snrSquelchMin, snrSquelchMax)
 	snrSquelchSlider.Step = 0.5
 	snrSquelchSlider.SetValue(snrSquelchOff) // default: disabled (far left)
+	// Store reference so the API handler can update the slider when the web UI changes the gate.
+	appState.SNRSquelchSlider = snrSquelchSlider
 
 	sendSnrGate := func(sliderVal float64) {
 		var threshold float32

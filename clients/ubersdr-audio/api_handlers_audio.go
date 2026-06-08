@@ -300,7 +300,13 @@ func (s *APIServer) handleAudioGate(w http.ResponseWriter, r *http.Request) {
 		}
 		s.state.Mu.Lock()
 		s.state.AudioGateMinSNR = v
+		sl := s.state.SNRSquelchSlider
 		s.state.Mu.Unlock()
+
+		// Update the Fyne slider widget so the GUI stays in sync with the web UI.
+		if sl != nil {
+			sl.SetValue(float64(v))
+		}
 
 		// Forward to upstream ubersdr server if connected.
 		if s.client.State() == StateConnected {

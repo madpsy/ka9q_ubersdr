@@ -123,6 +123,21 @@ const Signal = (() => {
     }, 50);
   }
 
+  /**
+   * Apply an audio_gate snapshot from the status poll.
+   * Updates the squelch slider position to match the current gate value,
+   * keeping the web UI in sync with the Fyne GUI (and vice versa).
+   * Does NOT send a gate update back to the API (avoids feedback loop).
+   */
+  function applyGateSnapshot(gate) {
+    if (!gate) return;
+    const sl = squelchSlider();
+    if (!sl || document.activeElement === sl) return; // don't override while user is dragging
+    const threshold = gate.min_snr ?? SQUELCH_SENTINEL;
+    sl.value = thresholdToSlider(threshold);
+    updateHint(threshold);
+  }
+
   /** Apply a full signal snapshot object from the API. */
   function applySnapshot(sig) {
     if (!sig) { setNoData(); return; }
@@ -261,5 +276,5 @@ const Signal = (() => {
     }
   }
 
-  return { init, applySnapshot, setNoData, stop, startSSE, onModeChange };
+  return { init, applySnapshot, applyGateSnapshot, setNoData, stop, startSSE, onModeChange };
 })();

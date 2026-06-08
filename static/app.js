@@ -132,6 +132,7 @@ const wsManager = new WebSocketManager({
             // Initialize stereo channel routing
             initializeStereoChannels();
             initializeSquelch();
+            initSNRSquelch();
             initializeCompressor();
             initializeLowpassFilter();
             initializeEqualizer();
@@ -207,6 +208,12 @@ const wsManager = new WebSocketManager({
         log('Disconnected');
         updateConnectionStatus('disconnected');
         stopStatsUpdates();
+        // Reset SNR squelch slider to "Off" position on disconnect
+        const snrSl = document.getElementById('snr-squelch-slider');
+        if (snrSl) {
+            snrSl.value = SNR_SQUELCH_OFF_VAL;
+            updateSNRSquelchDisplay();
+        }
     },
     onError: (error) => {
         if (error.type === 'connection_rejected' || error.type === 'reconnection_blocked') {
@@ -3656,6 +3663,7 @@ async function handleBinaryMessage(data) {
             // Reinitialize audio processing nodes
             initializeStereoChannels();
             initializeSquelch();
+            initSNRSquelch();
             initializeCompressor();
             initializeLowpassFilter();
             initializeEqualizer();
@@ -3793,6 +3801,17 @@ function handleMessage(msg) {
         case 'squelch_updated':
             // Squelch state update from server (informational only)
             // The server sends this when squelch opens/closes
+            break;
+        case 'audio_gate_updated':
+            // Server echoes back the current audio gate (SNR squelch) threshold
+            if (msg.info && typeof msg.info.min_snr === 'number') {
+                const sl = document.getElementById('snr-squelch-slider');
+                if (sl) {
+                    const serverVal = msg.info.min_snr;
+                    sl.value = (serverVal <= SNR_SQUELCH_SENTINEL + 1) ? SNR_SQUELCH_OFF_VAL : serverVal;
+                    updateSNRSquelchDisplay();
+                }
+            }
             break;
 
         // ── Server-side DSP noise reduction ──────────────────────────────────
@@ -4307,6 +4326,7 @@ async function handlePCMAudio(msg) {
         // Reinitialize audio processing nodes
         initializeStereoChannels();
         initializeSquelch();
+        initSNRSquelch();
         initializeCompressor();
         initializeLowpassFilter();
         initializeEqualizer();
@@ -6153,6 +6173,53 @@ function updateSquelch() {
 // Make squelch functions globally accessible for inline event handlers
 window.updateSquelchDisplay = updateSquelchDisplay;
 window.updateSquelch = updateSquelch;
+
+// ── SNR Squelch (audio gate via set_audio_gate WebSocket message) ─────────
+const SNR_SQUELCH_OFF_VAL  = 24;    // slider far-left position = disabled
+const SNR_SQUELCH_SENTINEL = -999;  // value sent to server when disabled
+
+function snrSquelchThreshold(sliderVal) {
+    const v = parseFloat(sliderVal);
+    return v <= SNR_SQUELCH_OFF_VAL ? SNR_SQUELCH_SENTINEL : v;
+}
+
+function updateSNRSquelchDisplay() {
+    const sl  = document.getElementById('snr-squelch-slider');
+    const lbl = document.getElementById('snr-squelch-value');
+    if (!sl || !lbl) return;
+    const t = snrSquelchThreshold(sl.value);
+    if (t <= SNR_SQUELCH_SENTINEL + 1) {
+        lbl.textContent = 'Off';
+        lbl.style.color = '#888';
+    } else {
+        lbl.textContent = '\u2265' + parseFloat(sl.value).toFixed(1);
+        lbl.style.color = '#ffc107';
+    }
+}
+
+let _snrSquelchTimer = null;
+function sendSNRSquelch() {
+    if (_snrSquelchTimer) clearTimeout(_snrSquelchTimer);
+    _snrSquelchTimer = setTimeout(() => {
+        const sl = document.getElementById('snr-squelch-slider');
+        if (!sl) return;
+        const t = snrSquelchThreshold(sl.value);
+        if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+            wsManager.send({ type: 'set_audio_gate', min_snr: t });
+        }
+    }, 80);
+}
+
+function initSNRSquelch() {
+    const sl = document.getElementById('snr-squelch-slider');
+    if (!sl) return;
+    sl.addEventListener('input',    () => updateSNRSquelchDisplay());
+    sl.addEventListener('change',   () => { updateSNRSquelchDisplay(); sendSNRSquelch(); });
+    sl.addEventListener('touchend', () => { updateSNRSquelchDisplay(); sendSNRSquelch(); });
+    updateSNRSquelchDisplay();
+}
+window.initSNRSquelch = initSNRSquelch;
+window.updateSNRSquelchDisplay = updateSNRSquelchDisplay;
 
 // Update current bandwidth display in status text
 function updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh) {

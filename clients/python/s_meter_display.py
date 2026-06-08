@@ -101,6 +101,7 @@ class SMeterDisplay:
         self.window.title("S-Meter")
         self.window.geometry(f"{self.width}x{self.height + 80}")
         self.window.minsize(self.min_width, self.min_height + 80)
+        self.window.configure(bg='#2c3e50')
         
         # Create canvas that fills the window
         self.canvas = tk.Canvas(self.window, bg='#2c3e50', highlightthickness=0)
@@ -110,17 +111,17 @@ class SMeterDisplay:
         self.canvas.bind('<Configure>', self._on_resize)
         
         # Create value display labels
-        display_frame = ttk.Frame(self.window)
+        display_frame = tk.Frame(self.window, bg='#2c3e50')
         display_frame.pack(pady=5)
         
-        ttk.Label(display_frame, text="Current:").grid(row=0, column=0, padx=5)
-        self.value_label = ttk.Label(display_frame, text="S0", font=('Arial', 14, 'bold'),
-                                     foreground='#dc3545')
+        tk.Label(display_frame, text="Current:", bg='#2c3e50', fg='white').grid(row=0, column=0, padx=5)
+        self.value_label = tk.Label(display_frame, text="S0", font=('Arial', 14, 'bold'),
+                                    bg='#2c3e50', foreground='#dc3545')
         self.value_label.grid(row=0, column=1, padx=5)
         
-        ttk.Label(display_frame, text="Peak:").grid(row=0, column=2, padx=(20, 5))
-        self.peak_label = ttk.Label(display_frame, text="S0", font=('Arial', 14, 'bold'),
-                                    foreground='#00ffff')
+        tk.Label(display_frame, text="Peak:", bg='#2c3e50', fg='white').grid(row=0, column=2, padx=(20, 5))
+        self.peak_label = tk.Label(display_frame, text="S0", font=('Arial', 14, 'bold'),
+                                   bg='#2c3e50', foreground='#00ffff')
         self.peak_label.grid(row=0, column=3, padx=5)
         
         # Handle window close

@@ -265,6 +265,15 @@ type RadioClient struct {
 	// coalesces into a single stale redraw, making the audio level bar appear stuck.
 	pcmDeliverCh chan pcmDecodedPacket
 
+	// Gate fade-in state.
+	// When the audio gate opens (first real audio frame after silence), a 100ms
+	// linear ramp is applied to avoid a hard click.  prevFrameWasSilence tracks
+	// whether the previous delivered frame was all-zero (gate-closed silence from
+	// the server's ticker).  fadeInSamplesLeft counts down the remaining ramp.
+	// Both fields are only accessed from the pcmDeliverCh worker goroutine.
+	prevFrameWasSilence bool
+	fadeInSamplesLeft   int
+
 	mu sync.RWMutex
 }
 
@@ -1028,6 +1037,30 @@ func rmsDBFS(pcmLE []byte) float32 {
 	return float32(20 * math.Log10(rms))
 }
 
+// applyGateFadeIn applies a partial linear gain ramp to pcmLE (little-endian int16).
+// It is called when the audio gate has just opened, to avoid a hard click.
+// The ramp spans 100 ms total; fadeInLeft tracks how many samples remain.
+// Each call advances the ramp by len(pcmLE)/2 samples and decrements *fadeInLeft.
+func applyGateFadeIn(pcmLE []byte, fadeInLeft *int, totalFadeSamples int) {
+	n := len(pcmLE) / 2
+	for i := 0; i < n; i++ {
+		if *fadeInLeft <= 0 {
+			break
+		}
+		// pos is how far into the ramp we are: 0 at the very start, totalFadeSamples at the end.
+		// fadeInLeft counts down from totalFadeSamples to 0, so:
+		//   pos = totalFadeSamples - fadeInLeft  (before decrement for this sample)
+		pos := totalFadeSamples - *fadeInLeft
+		if pos < 0 {
+			pos = 0
+		}
+		gain := float32(pos) / float32(totalFadeSamples) // 0.0 → 1.0
+		s := int16(binary.LittleEndian.Uint16(pcmLE[i*2:]))
+		binary.LittleEndian.PutUint16(pcmLE[i*2:], uint16(int16(float32(s)*gain)))
+		*fadeInLeft--
+	}
+}
+
 // deliverAudio pushes PCM to the audio output, creating or recreating the
 // AudioOutput if the stream parameters changed.
 //
@@ -1041,6 +1074,23 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 	// exactly what came off the wire after Opus/PCM decoding — unmodified.
 	if c.Sink != nil {
 		c.Sink.WritePCM(pcmLE, sampleRate, channels)
+	}
+
+	// Gate fade-in: detect transition from silence (gate closed) to real audio
+	// (gate open) and apply a 100ms linear ramp to avoid a hard click.
+	// Silence packets from the server's ticker have all-zero PCM → rmsDBFS = -144.
+	const fadeInSecs = 0.100
+	const silenceFloor = float32(-140) // -144 = all-zero; use -140 as threshold
+	frameDBFS := rmsDBFS(pcmLE)
+	isSilence := frameDBFS <= silenceFloor
+	if !isSilence && c.prevFrameWasSilence {
+		// Gate just opened — start a 100ms fade-in ramp.
+		c.fadeInSamplesLeft = int(float64(sampleRate) * fadeInSecs)
+	}
+	c.prevFrameWasSilence = isSilence
+	if c.fadeInSamplesLeft > 0 && !isSilence {
+		totalFadeSamples := int(float64(sampleRate) * fadeInSecs)
+		applyGateFadeIn(pcmLE, &c.fadeInSamplesLeft, totalFadeSamples)
 	}
 
 	// Build the metadata that travels with this chunk through the ring buffer.

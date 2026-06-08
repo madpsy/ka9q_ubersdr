@@ -576,10 +576,22 @@
         </div>
 
         <div class="audio-controls">
-            <div class="control-group">
-                <label for="volume">Volume</label>
-                <input type="range" id="volume" min="0" max="200" value="100" title="Volume (Up/Down arrows)">
-                <span id="volume-value">100%</span>
+            <div class="control-group" style="flex-direction:column; gap:2px; align-items:stretch;">
+                <!-- Row 1: Volume -->
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label for="volume" style="min-width:52px; font-weight:bold;">Volume</label>
+                    <input type="range" id="volume" min="0" max="200" value="100"
+                           title="Volume (Up/Down arrows)" style="flex:1; width:auto;">
+                    <span id="volume-value" style="min-width:40px;">100%</span>
+                </div>
+                <!-- Row 2: SNR Squelch -->
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label for="snr-squelch-slider" style="min-width:52px; font-weight:bold; font-size:0.9em;">SQL</label>
+                    <input type="range" id="snr-squelch-slider" min="24" max="80" step="0.5" value="24"
+                           title="SNR Squelch — far left = off, drag right to set threshold (dB)"
+                           style="flex:1; width:auto;">
+                    <span id="snr-squelch-value" style="min-width:40px; font-size:0.9em; color:#888;">Off</span>
+                </div>
             </div>
             <div class="control-group" style="display: flex; flex-direction: column; gap: 2px; align-items: flex-start;">
                 <label style="margin: 0;">

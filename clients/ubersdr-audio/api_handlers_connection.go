@@ -66,6 +66,7 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	sigAudio := st.SignalAudioDBFS
 	sigAt := st.SignalUpdatedAt
 	browserAutoConnect := st.BrowserAutoConnect
+	audioGateMinSNR := st.AudioGateMinSNR
 	st.Mu.RUnlock()
 
 	connState := s.client.State()
@@ -177,6 +178,9 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"settings": map[string]any{
 			"browser_auto_connect": browserAutoConnect,
+		},
+		"audio_gate": map[string]any{
+			"min_snr": audioGateMinSNR,
 		},
 		"record": recordStatusJSON(recStatus),
 	})

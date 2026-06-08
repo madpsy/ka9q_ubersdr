@@ -66,6 +66,11 @@ type AppState struct {
 	// -999 = disabled (default).  Valid range: -999 to +999.
 	AudioGateMinSNR float32
 
+	// SNRSquelchSlider is the Fyne slider widget for the SNR squelch threshold.
+	// Held so the API handler can update it when the web UI changes the gate.
+	// Fyne widget Set* methods are goroutine-safe.
+	SNRSquelchSlider interface{ SetValue(float64) }
+
 	// ── Connection metadata ───────────────────────────────────────────────────
 	ActiveCallsign     string
 	ActiveName         string

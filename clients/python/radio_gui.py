@@ -329,6 +329,7 @@ class RadioGUI:
         self.bandwidth_update_job = None  # Debounce timer for bandwidth updates
         self.squelch_update_job = None  # Debounce timer for squelch updates
         self.squelch_last_send_time = 0  # Track last squelch send time for throttling
+        self.snr_gate_update_job = None  # Debounce timer for SNR gate updates
         self.last_mode = None  # Track last mode to detect actual mode changes
         self.pending_tune_future = None  # Track pending tune message to avoid queue buildup
         self.pending_squelch_future = None  # Track pending squelch message to avoid queue buildup
@@ -483,9 +484,6 @@ class RadioGUI:
         # Server-side DSP state
         self._server_dsp_filters: list = []          # full FilterInfo dicts from server
         self._server_dsp_config_dialog = None        # open config dialog (or None)
-
-        # Signal data source selection (audio stream vs spectrum FFT)
-        self.signal_data_source = tk.StringVar(value="audio")  # "audio" or "spectrum"
 
         # Create UI
         self.create_widgets()
@@ -1739,30 +1737,43 @@ class RadioGUI:
         # Band selector will be populated after fetching bands from server
         self.band_selector_combo['values'] = [""]  # Empty initially
 
-        # Signal data source and quality metrics (fourth row, below band selector)
+        # Signal quality metrics (fourth row) — horizontal level bars matching Go client style
         signal_frame = ttk.Frame(freq_frame)
-        signal_frame.grid(row=3, column=0, columnspan=8, sticky=tk.W, pady=(5, 0))
+        signal_frame.grid(row=3, column=0, columnspan=8, sticky=(tk.W, tk.E), pady=(5, 0))
 
-        ttk.Label(signal_frame, text="Signal Data:").pack(side=tk.LEFT, padx=(0, 5))
+        # Bar dimensions
+        _BAR_W = 180
+        _BAR_H = 18
+        _TAG_W = 52   # width of the name tag on the left
 
-        # Radio buttons for signal data source
-        ttk.Radiobutton(signal_frame, text="Audio Stream", variable=self.signal_data_source,
-                       value="audio").pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(signal_frame, text="Spectrum FFT", variable=self.signal_data_source,
-                       value="spectrum").pack(side=tk.LEFT, padx=(0, 20))
+        def _make_sig_bar(parent, label_text):
+            """Create a level-bar widget (name tag + dark canvas with fill + text overlay)."""
+            frame = ttk.Frame(parent)
+            frame.pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Label(frame, text=label_text, width=9, anchor='e').pack(side=tk.LEFT)
+            cv = tk.Canvas(frame, width=_BAR_W, height=_BAR_H,
+                           bg='#323232', highlightthickness=0)
+            cv.pack(side=tk.LEFT)
+            fill_id = cv.create_rectangle(0, 0, 0, _BAR_H, fill='#505050', outline='')
+            text_id = cv.create_text(_BAR_W // 2, _BAR_H // 2, text='—',
+                                     fill='white', font=('TkDefaultFont', 9))
+            return cv, fill_id, text_id
 
-        # Signal quality metrics display
-        ttk.Label(signal_frame, text="Baseband:").pack(side=tk.LEFT, padx=(0, 2))
-        self.baseband_power_label = ttk.Label(signal_frame, text="-- dBFS", width=10)
-        self.baseband_power_label.pack(side=tk.LEFT, padx=(0, 10))
+        self._sig_bar_w = _BAR_W
+        self._sig_bar_h = _BAR_H
 
-        ttk.Label(signal_frame, text="Noise:").pack(side=tk.LEFT, padx=(0, 2))
-        self.noise_density_label = ttk.Label(signal_frame, text="-- dBFS", width=10)
-        self.noise_density_label.pack(side=tk.LEFT, padx=(0, 10))
+        # Baseband: -120 to -50 dBFS  (higher = stronger signal → green)
+        self._bb_canvas, self._bb_fill, self._bb_text = _make_sig_bar(signal_frame, 'Baseband')
+        self._bb_min, self._bb_max = -120.0, -50.0
 
-        ttk.Label(signal_frame, text="SNR:").pack(side=tk.LEFT, padx=(0, 2))
-        self.snr_label = ttk.Label(signal_frame, text="-- dB", width=10)
-        self.snr_label.pack(side=tk.LEFT)
+        # Noise: -170 to -50 dBFS  (lower = quieter → green, so colour is inverted)
+        self._ns_canvas, self._ns_fill, self._ns_text = _make_sig_bar(signal_frame, 'Noise')
+        self._ns_min, self._ns_max = -170.0, -50.0
+
+        # SNR: 25 to 80 dB  (higher = better → green)
+        self._snr_canvas, self._snr_fill, self._snr_text = _make_sig_bar(signal_frame, 'SNR')
+        self._snr_min, self._snr_max = 25.0, 80.0
+
 
         freq_frame.columnconfigure(8, weight=1)
 
@@ -2066,9 +2077,32 @@ class RadioGUI:
         # We'll update the text color when Opus packets are received
         self.opus_active = False
 
-        # NR2 Noise Reduction (row 4) - use a frame to avoid column weight issues
+        # SNR Squelch (row 4) — far left = off (-999), right = active threshold (25–80 dB)
+        ttk.Label(audio_frame, text="SNR Squelch:").grid(row=4, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+
+        snr_gate_frame = ttk.Frame(audio_frame)
+        snr_gate_frame.grid(row=4, column=1, columnspan=4, sticky=tk.W, pady=(5, 0))
+
+        # Slider: min=24 (off sentinel), max=80 dB — matches the Go client range.
+        # Value 24 = far left = disabled (-999 sent to server).
+        self.snr_gate_var = tk.DoubleVar(value=24.0)
+        self.snr_gate_scale = ttk.Scale(
+            snr_gate_frame,
+            from_=24.0,
+            to=80.0,
+            orient=tk.HORIZONTAL,
+            variable=self.snr_gate_var,
+            command=self.update_snr_gate_display,
+            length=160
+        )
+        self.snr_gate_scale.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.snr_gate_label = ttk.Label(snr_gate_frame, text="Off", width=12)
+        self.snr_gate_label.pack(side=tk.LEFT)
+
+        # NR2 Noise Reduction (row 5) - use a frame to avoid column weight issues
         nr2_container = ttk.Frame(audio_frame)
-        nr2_container.grid(row=4, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
+        nr2_container.grid(row=5, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
 
         self.nr2_enabled_var = tk.BooleanVar(value=False)
         self.nr2_check = ttk.Checkbutton(nr2_container, text="Enable NR2", variable=self.nr2_enabled_var,
@@ -2754,6 +2788,51 @@ class RadioGUI:
             self.log_status(f"ERROR: Failed to send squelch message: {e}")
 
         self.squelch_update_job = None
+
+    def update_snr_gate_display(self, value=None):
+        """Update SNR gate label and schedule a debounced gate message to the server.
+
+        Slider range: 24.0 (far left = off) to 80.0 dB.
+        Value 24.0 maps to -999 (disabled); 25.0–80.0 maps directly to dB SNR threshold.
+        """
+        slider_val = self.snr_gate_var.get()
+
+        if slider_val <= 24.0:
+            self.snr_gate_label.config(text="Off")
+        else:
+            self.snr_gate_label.config(text=f"{slider_val:.1f} dB")
+
+        # Debounce: cancel any pending send and schedule a new one in 50 ms
+        if self.snr_gate_update_job:
+            self.root.after_cancel(self.snr_gate_update_job)
+        self.snr_gate_update_job = self.root.after(50, self._apply_snr_gate_update)
+
+    def _apply_snr_gate_update(self):
+        """Send set_audio_gate message to the server (called after debounce delay)."""
+        self.snr_gate_update_job = None
+
+        if not self.connected or not self.client or not self.client.ws:
+            return
+
+        try:
+            slider_val = self.snr_gate_var.get()
+            # Far left (≤ 24.0) = disabled sentinel
+            gate_snr = -999.0 if slider_val <= 24.0 else float(slider_val)
+
+            msg = {'type': 'set_audio_gate', 'min_snr': gate_snr}
+
+            if self.event_loop and self.event_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.client.ws.send(json.dumps(msg)),
+                    self.event_loop
+                )
+
+            if gate_snr == -999.0:
+                self.log_status("SNR gate: Off")
+            else:
+                self.log_status(f"SNR gate: ≥ {gate_snr:.1f} dB SNR")
+        except Exception as e:
+            self.log_status(f"ERROR: Failed to send SNR gate message: {e}")
 
     def get_step_size_hz(self) -> int:
         """Get the current step size in Hz."""
@@ -4080,6 +4159,20 @@ class RadioGUI:
             self.left_check.config(state='disabled')
             self.right_check.config(state='disabled')
 
+            # Disable SNR gate slider and reset to off (IQ modes have no signal quality data)
+            self.snr_gate_var.set(24.0)
+            self.snr_gate_label.config(text="Off")
+            self.snr_gate_scale.config(state='disabled')
+            # Reset gate on server side too
+            if self.snr_gate_update_job:
+                self.root.after_cancel(self.snr_gate_update_job)
+                self.snr_gate_update_job = None
+            if self.connected and self.client and self.client.ws and self.event_loop and self.event_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.client.ws.send(json.dumps({'type': 'set_audio_gate', 'min_snr': -999.0})),
+                    self.event_loop
+                )
+
             # Disable EQ
             if self.eq_display and self.eq_display.is_enabled():
                 self.eq_display.enabled_var.set(False)
@@ -4174,6 +4267,9 @@ class RadioGUI:
             # Re-enable channel checkboxes
             self.left_check.config(state='normal')
             self.right_check.config(state='normal')
+
+            # Re-enable SNR gate slider
+            self.snr_gate_scale.config(state='normal')
 
             # Re-enable EQ button
             if self.eq_btn:
@@ -9256,41 +9352,71 @@ class RadioGUI:
         # Schedule next check
         self.root.after(100, self.check_status_updates)
 
+    # ── signal quality level-bar helpers ─────────────────────────────────────
+
+    @staticmethod
+    def _sig_bar_colour(frac: float, invert: bool = False) -> str:
+        """Map 0-1 fraction to a red→yellow→green hex colour.
+        If *invert* is True the mapping is reversed (green→yellow→red),
+        used for the noise bar where lower values are better."""
+        if invert:
+            frac = 1.0 - frac
+        frac = max(0.0, min(1.0, frac))
+        if frac < 0.5:
+            r = 220
+            g = int(frac * 2 * 200)
+        else:
+            g = 200
+            r = int((1.0 - (frac - 0.5) * 2) * 220)
+        return f'#{r:02x}{g:02x}00'
+
+    def _update_sig_bar(self, canvas, fill_id, text_id,
+                        value, min_val, max_val, unit, invert=False):
+        """Update a signal-quality level bar canvas."""
+        w = self._sig_bar_w
+        h = self._sig_bar_h
+        if value is None or value <= -998:
+            # No data — grey bar, dash text
+            canvas.coords(fill_id, 0, 0, 0, h)
+            canvas.itemconfig(fill_id, fill='#505050')
+            canvas.itemconfig(text_id, text='—', fill='white')
+        else:
+            frac = (value - min_val) / (max_val - min_val)
+            frac = max(0.0, min(1.0, frac))
+            bar_w = int(frac * w)
+            colour = self._sig_bar_colour(frac, invert=invert)
+            canvas.coords(fill_id, 0, 0, bar_w, h)
+            canvas.itemconfig(fill_id, fill=colour)
+            canvas.itemconfig(text_id, text=f'{value:.1f} {unit}', fill='white')
+
     def update_signal_quality_display(self):
         """Update signal quality metrics display from client data."""
         if not self.client or not self.connected:
-            # Reset display when not connected
-            self.baseband_power_label.config(text="-- dBFS")
-            self.noise_density_label.config(text="-- dBFS")
-            self.snr_label.config(text="-- dB")
+            # Reset all bars to no-data state
+            self._update_sig_bar(self._bb_canvas, self._bb_fill, self._bb_text,
+                                  None, self._bb_min, self._bb_max, 'dBFS')
+            self._update_sig_bar(self._ns_canvas, self._ns_fill, self._ns_text,
+                                  None, self._ns_min, self._ns_max, 'dBFS', invert=True)
+            self._update_sig_bar(self._snr_canvas, self._snr_fill, self._snr_text,
+                                  None, self._snr_min, self._snr_max, 'dB')
             return
 
         try:
-            # Get signal quality metrics from client
             baseband_power = getattr(self.client, 'baseband_power', -999.0)
             noise_density = getattr(self.client, 'noise_density', -999.0)
 
-            # Update baseband power display
-            if baseband_power > -999:
-                self.baseband_power_label.config(text=f"{baseband_power:.1f} dBFS")
-            else:
-                self.baseband_power_label.config(text="-- dBFS")
+            bb = baseband_power if baseband_power > -999 else None
+            ns = noise_density if noise_density > -999 else None
+            snr = (baseband_power - noise_density) if (bb is not None and ns is not None) else None
 
-            # Update noise density display
-            if noise_density > -999:
-                self.noise_density_label.config(text=f"{noise_density:.1f} dBFS")
-            else:
-                self.noise_density_label.config(text="-- dBFS")
-
-            # Calculate and display SNR
-            if baseband_power > -999 and noise_density > -999:
-                snr = baseband_power - noise_density
-                self.snr_label.config(text=f"{snr:.1f} dB")
-            else:
-                self.snr_label.config(text="-- dB")
+            self._update_sig_bar(self._bb_canvas, self._bb_fill, self._bb_text,
+                                  bb, self._bb_min, self._bb_max, 'dBFS')
+            self._update_sig_bar(self._ns_canvas, self._ns_fill, self._ns_text,
+                                  ns, self._ns_min, self._ns_max, 'dBFS', invert=True)
+            self._update_sig_bar(self._snr_canvas, self._snr_fill, self._snr_text,
+                                  snr, self._snr_min, self._snr_max, 'dB')
 
         except (AttributeError, ValueError):
-            # Handle any errors gracefully
             pass
 
     def toggle_recording(self):

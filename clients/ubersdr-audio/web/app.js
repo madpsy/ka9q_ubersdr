@@ -69,6 +69,9 @@ const App = (() => {
     // Signal (snapshot only — live updates come from SSE)
     if (s.signal) Signal.applySnapshot(s.signal);
 
+    // Audio gate — sync slider position across GUI and web UI
+    if (s.audio_gate) Signal.applyGateSnapshot(s.audio_gate);
+
     // Bookmarks — fetch on first connect, retry while empty, clear on disconnect
     if (_lastState === 'connected' && prevState !== 'connected') {
       Signal.startSSE();

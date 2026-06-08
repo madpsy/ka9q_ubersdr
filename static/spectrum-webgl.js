@@ -414,7 +414,10 @@ void main() {
 
     // Beyond the number of rows actually written → black (no stale data from
     // a previous taller waterfall height bleeds through after a resize).
-    if (pixelRow >= uValidRows) {
+    // Once the ring is full (uValidRows >= uRingRows) every slot has been
+    // overwritten at least once, so the guard is no longer needed — skip it
+    // to avoid a black band when the waterfall is taller than uRingRows.
+    if (uValidRows < uRingRows && pixelRow >= uValidRows) {
         fragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
@@ -587,7 +590,7 @@ function patchSpectrumDisplayWithWebGL(sd) {
         return false;
     }
 
-    const wgl = new WaterfallWebGL(sd.canvas, { ringRows: 512 });
+    const wgl = new WaterfallWebGL(sd.canvas, { ringRows: 2048 });
     if (!wgl.isSupported()) {
         console.warn('[WaterfallWebGL] WebGL2 not supported — patch not applied');
         return false;

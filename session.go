@@ -164,9 +164,13 @@ type Session struct {
 	// AudioGateMinPower: minimum baseband power in dBFS (a negative value, e.g. -80).
 	//                    -999 = disabled.
 	//
+	// Hysteresis: gate closes 3 dB below the open threshold.
+	// Hang timer: gate stays open for 500 ms after the last above-threshold reading.
+	//
 	// Protected by mu.
-	AudioGateMinSNR   float32
-	AudioGateMinPower float32
+	AudioGateMinSNR     float32
+	AudioGateMinPower   float32
+	AudioGateLastOpenAt time.Time // zero = gate never opened; reset each time a packet passes
 }
 
 // SessionManager manages all active sessions

@@ -1512,6 +1512,72 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 	}
 }
 
+// Audio gate constants.
+const (
+	// audioGateHysteresis is the dB gap between the open and close thresholds.
+	// Gate opens at min_snr; gate closes (after hang) at min_snr − audioGateHysteresis.
+	audioGateHysteresis = float32(3.0)
+
+	// audioGateHangTime is how long the gate stays open after the signal last
+	// exceeded the open threshold, preventing clipping of transmission tails.
+	audioGateHangTime = 500 * time.Millisecond
+)
+
+// audioGateAllows returns true if the audio gate permits this packet to be sent.
+//
+// Gate logic (applied independently to SNR and power thresholds):
+//
+//  1. Gate OPENS  when signal ≥ open threshold (min_snr / min_power).
+//     The hang timer is reset each time this condition is true.
+//
+//  2. Gate stays OPEN while the hang timer is active (≤ 500 ms since last open).
+//
+//  3. Gate CLOSES when the hang timer expires AND signal < close threshold
+//     (open threshold − 3 dB).  If signal is in the hysteresis band
+//     (close threshold ≤ signal < open threshold) after hang expiry, the gate
+//     stays closed until signal rises back to the open threshold.
+//
+// The session's AudioGateLastOpenAt timestamp is updated (under mu) whenever
+// the gate passes a packet.  Callers must NOT hold session.mu.
+func audioGateAllows(session *Session, basebandPower, noiseDensity float32) bool {
+	session.mu.RLock()
+	minSNR := session.AudioGateMinSNR
+	minPower := session.AudioGateMinPower
+	lastOpen := session.AudioGateLastOpenAt
+	session.mu.RUnlock()
+
+	// Gate disabled — always allow.
+	if minSNR <= -998 && minPower <= -998 {
+		return true
+	}
+
+	snr := basebandPower - noiseDensity
+
+	// Check open thresholds — if any active criterion is met, open the gate
+	// and reset the hang timer.
+	snrAboveOpen := minSNR > -998 && snr >= minSNR
+	powerAboveOpen := minPower > -998 && basebandPower >= minPower
+	if snrAboveOpen || powerAboveOpen {
+		session.mu.Lock()
+		session.AudioGateLastOpenAt = time.Now()
+		session.mu.Unlock()
+		return true
+	}
+
+	// Open threshold not met.  Check hang timer — keep gate open while active.
+	hangActive := !lastOpen.IsZero() && time.Since(lastOpen) < audioGateHangTime
+	if hangActive {
+		return true
+	}
+
+	// Hang timer expired.  Gate is closed.
+	// The 3 dB hysteresis band (close threshold = open − audioGateHysteresis) means
+	// the gate will not reopen until the signal rises back to the full open threshold,
+	// preventing rapid toggling when the signal hovers just below min_snr / min_power.
+	// Both the hysteresis band and fully-below-threshold cases return false here.
+	return false
+}
+
 // streamAudio streams audio data to the client
 func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, format string, version int) {
 	session := sessionHolder.getSession()
@@ -1746,29 +1812,19 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			if hc != nil {
 				// Apply audio gate before forwarding to the HTTP stream (Android path).
 				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
-				// We fetch signal quality here so the gate applies consistently whether
-				// audio is going to HTTP or WebSocket.
 				httpIsIQMode := session.Mode == "iq" || session.Mode == "iq48" ||
 					session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 				if !httpIsIQMode {
-					session.mu.RLock()
-					gateMinSNR := session.AudioGateMinSNR
-					gateMinPower := session.AudioGateMinPower
-					session.mu.RUnlock()
-					if gateMinSNR > -998 || gateMinPower > -998 {
-						var bbPower, ndDensity float32 = -999, -999
-						if wsh.sessions != nil && wsh.sessions.radiod != nil {
-							if cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC); cs != nil {
-								bbPower = cs.BasebandPower + float32(wsh.config.Spectrum.GainDB)
-								ndDensity = cs.NoiseDensity + float32(wsh.config.Spectrum.GainDB)
-							}
+					var bbPower, ndDensity float32 = -999, -999
+					if wsh.sessions != nil && wsh.sessions.radiod != nil {
+						if cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC); cs != nil {
+							bbPower = cs.BasebandPower + float32(wsh.config.Spectrum.GainDB)
+							ndDensity = cs.NoiseDensity + float32(wsh.config.Spectrum.GainDB)
 						}
-						snr := bbPower - ndDensity
-						if (gateMinSNR > -998 && snr < gateMinSNR) ||
-							(gateMinPower > -998 && bbPower < gateMinPower) {
-							// Gate closed — drop packet for both HTTP and WebSocket paths.
-							continue
-						}
+					}
+					if !audioGateAllows(session, bbPower, ndDensity) {
+						// Gate closed — drop packet for both HTTP and WebSocket paths.
+						continue
 					}
 				}
 				select {
@@ -1877,23 +1933,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					}
 				}
 
-				// Audio gate: drop packet if SNR or baseband power is below threshold.
-				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
+				// Audio gate: 3 dB hysteresis + 500 ms hang timer.
+				// IQ modes carry raw RF samples — gating makes no sense there.
 				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
-				// When gate is active (threshold > -998), suppress the packet and let the
-				// signalUpdateTicker continue sending signal-quality data to the client.
-				if !isIQMode {
-					session.mu.RLock()
-					gateMinSNR := session.AudioGateMinSNR
-					gateMinPower := session.AudioGateMinPower
-					session.mu.RUnlock()
-					if gateMinSNR > -998 || gateMinPower > -998 {
-						snr := basebandPower - noiseDensity
-						if (gateMinSNR > -998 && snr < gateMinSNR) ||
-							(gateMinPower > -998 && basebandPower < gateMinPower) {
-							continue // gate closed — suppress audio, signal-quality ticker continues
-						}
-					}
+				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
+					continue // gate closed — suppress audio, signal-quality ticker continues
 				}
 
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
@@ -2001,23 +2045,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					}
 				}
 
-				// Audio gate: drop packet if SNR or baseband power is below threshold.
-				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
+				// Audio gate: 3 dB hysteresis + 500 ms hang timer.
+				// IQ modes carry raw RF samples — gating makes no sense there.
 				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
-				// When gate is active (threshold > -998), suppress the packet and let the
-				// signalUpdateTicker continue sending signal-quality data to the client.
-				if !isIQMode {
-					session.mu.RLock()
-					gateMinSNRPCM := session.AudioGateMinSNR
-					gateMinPowerPCM := session.AudioGateMinPower
-					session.mu.RUnlock()
-					if gateMinSNRPCM > -998 || gateMinPowerPCM > -998 {
-						snr := basebandPower - noiseDensity
-						if (gateMinSNRPCM > -998 && snr < gateMinSNRPCM) ||
-							(gateMinPowerPCM > -998 && basebandPower < gateMinPowerPCM) {
-							continue // gate closed — suppress audio, signal-quality ticker continues
-						}
-					}
+				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
+					continue // gate closed — suppress audio, signal-quality ticker continues
 				}
 
 				// Encode PCM packet with hybrid header strategy.

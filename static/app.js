@@ -244,7 +244,6 @@ let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist 
 let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 let mediaElement = null;  // Hidden <audio> element for MediaSession and background audio (MediaStreamDestination bridge)
 let _mediaSessionActivated = false; // True once Media Session metadata has been set after real audio flows
-let _mediaSessionSuppressed = false; // True once playbackState='none' has been sent to suppress Chrome's auto controls
 // True on Safari / Firefox — browsers that lack AudioContext.setSinkId and
 // therefore need the MediaStreamDestination → <audio> bridge for MediaSession.
 const _mediaSessionNeedsBridge = typeof AudioContext !== 'undefined' &&
@@ -4528,18 +4527,6 @@ function playAudioBuffer(buffer) {
     // Apple:     mediaElement exists (bridge path) — re-confirm metadata now that audio flows.
     // Non-Apple: retry HTTP stream if it wasn't ready in startAudio() (WebSocket may not
     //            have been connected yet when startAudio() ran).
-    //
-    // If MediaSession is disabled, suppress Chrome's automatic media controls icon once.
-    // Chrome shows its own controls for any page with an active AudioContext — setting
-    // playbackState='none' opts out.  Done here (on first real audio buffer) rather than
-    // in startAudio() so that the AudioContext is actively producing audio when we tell
-    // Chrome to opt out, and so that enabling MediaSession later via the checkbox still
-    // works (setMediaSessionEnabled(true) sets playbackState='playing' after this).
-    if (!_mediaSessionSuppressed && !mediaSessionEnabled && 'mediaSession' in navigator) {
-        _mediaSessionSuppressed = true;
-        try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
-    }
-
     if (!_mediaSessionActivated && mediaSessionEnabled && 'mediaSession' in navigator) {
         _mediaSessionActivated = true;
         updateMediaSession();
@@ -11453,7 +11440,6 @@ async function setMediaSessionEnabled(enabled) {
         // ── Tear down non-Apple HTTP stream (if active) ───────────────────────
         _destroyHttpAudioStream();
         _mediaSessionActivated = false;
-        _mediaSessionSuppressed = false; // Allow suppression to re-fire on next audio buffer
         // Hide the MediaSession indicator
         const indicator = document.getElementById('media-session-indicator');
         if (indicator) indicator.style.display = 'none';

@@ -4799,11 +4799,13 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* All text inside the overlay: force white with a dark shadow so it's
-   readable against any waterfall colour. */
+   readable against any waterfall colour.
+   Exclude .freq-digit and .freq-separator (green LED readout) and
+   .freq-unit-label which have their own intentional colours. */
 #dock-overlay-wrapper label,
-#dock-overlay-wrapper span,
 #dock-overlay-wrapper p,
-#dock-overlay-wrapper .control-group label {
+#dock-overlay-wrapper .control-group label,
+#dock-overlay-wrapper span:not(.freq-digit):not(.freq-separator):not(.freq-unit-label):not(.frequency-unit) {
     color: #ecf0f1 !important;
     text-shadow:
         0 0 4px rgba(0, 0, 0, 0.95),

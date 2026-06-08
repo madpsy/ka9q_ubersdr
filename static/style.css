@@ -4783,21 +4783,25 @@ input[type="range"]::-moz-range-thumb {
 #dock-overlay-wrapper .controls {
     margin-top: 0;
     margin-bottom: -60px; /* compensate for scale(0.75) height shrinkage */
-    padding-top: 8px;
+    padding-top: 0;
     background: transparent;
 }
 
 #dock-overlay-wrapper .audio-controls {
     margin-top: -70px; /* close gap after scaled .controls */
     margin-bottom: -10px;
-    padding-bottom: 8px;
+    padding-bottom: 4px;
     background: transparent;
 }
 
-/* Band status bar inside the overlay — transparent background */
+/* Band status bar inside the overlay — minimal padding to reduce gap */
 #dock-overlay-wrapper .band-status-bar {
     background: transparent;
-    padding: 4px 30px;
+    padding: 2px 30px 0;
+}
+
+#dock-overlay-wrapper .band-status-container {
+    padding: 2px 15px 0;
 }
 
 /* All text inside the overlay: force white with a dark shadow so it's

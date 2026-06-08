@@ -14067,47 +14067,58 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
 // =============================================================================
 // Controls Dock Feature
-// When docked, .controls and .audio-controls are wrapped in a
-// #dock-overlay-wrapper div that is inserted inside .spectrum-display-container
-// as an absolute overlay at the top of the waterfall canvas.
-// On undock the wrapper is removed and the two panels are restored to their
-// original positions in the DOM.
+// When docked, .controls and .audio-controls are moved into a
+// #dock-overlay-wrapper div appended to <body>. The wrapper uses
+// position:fixed and is positioned just above the .spectrum-display-controls
+// bar using getBoundingClientRect(). This avoids all issues with
+// transform:scale() on the children affecting layout calculations.
+// On undock the panels are restored to their exact original DOM positions.
 // State is persisted in localStorage under 'controlsDocked'.
 // =============================================================================
 
-// Records where the controls live in the DOM when undocked so we can restore them.
 let _dockControlsAnchor      = null; // nextSibling of .controls before docking
 let _dockAudioControlsAnchor = null; // nextSibling of .audio-controls before docking
 let _dockOriginalParent      = null; // parent of both nodes before docking
+let _dockRAF                 = null; // requestAnimationFrame handle for position updates
+
+// Reposition the fixed wrapper just above the .spectrum-display-controls bar.
+function _dockPositionWrapper() {
+    const wrapper  = document.getElementById('dock-overlay-wrapper');
+    const bar      = document.querySelector('.spectrum-display-controls');
+    if (!wrapper || !bar) return;
+
+    const barRect = bar.getBoundingClientRect();
+    const wrapperHeight = wrapper.offsetHeight;
+
+    // Position the bottom of the wrapper at the top of the controls bar
+    wrapper.style.top    = (barRect.top - wrapperHeight) + 'px';
+    wrapper.style.left   = barRect.left + 'px';
+    wrapper.style.width  = barRect.width + 'px';
+
+    _dockRAF = requestAnimationFrame(_dockPositionWrapper);
+}
 
 function _dockApply() {
-    const container = document.querySelector('.spectrum-display-container');
-    const controls  = document.querySelector('.controls');
-    const audio     = document.querySelector('.audio-controls');
-    const btn       = document.getElementById('dock-controls-button');
-    if (!container || !controls || !audio || !btn) return;
+    const controls = document.querySelector('.controls');
+    const audio    = document.querySelector('.audio-controls');
+    const btn      = document.getElementById('dock-controls-button');
+    if (!controls || !audio || !btn) return;
 
     // Record original DOM positions before moving
     _dockOriginalParent      = controls.parentNode;
     _dockControlsAnchor      = controls.nextSibling;
     _dockAudioControlsAnchor = audio.nextSibling;
 
-    // Create the overlay wrapper and move both panels into it
+    // Create the fixed overlay wrapper on <body> and move both panels into it
     const wrapper = document.createElement('div');
     wrapper.id = 'dock-overlay-wrapper';
     wrapper.appendChild(controls);
     wrapper.appendChild(audio);
+    document.body.appendChild(wrapper);
 
-    // Insert wrapper just before .spectrum-display-controls so it sits
-    // directly above that bar in the stacking order (both are position:absolute
-    // inside the container; the wrapper uses transform:translateY(-100%) to
-    // float above the controls bar).
-    const spectrumControls = container.querySelector('.spectrum-display-controls');
-    if (spectrumControls) {
-        container.insertBefore(wrapper, spectrumControls);
-    } else {
-        container.appendChild(wrapper);
-    }
+    // Start the rAF loop to keep the wrapper positioned above the controls bar
+    if (_dockRAF) cancelAnimationFrame(_dockRAF);
+    _dockPositionWrapper();
 
     // Update button state
     btn.textContent = '⊟';
@@ -14130,20 +14141,23 @@ function _dockApply() {
 }
 
 function _dockRemove() {
-    const wrapper  = document.getElementById('dock-overlay-wrapper');
-    const btn      = document.getElementById('dock-controls-button');
+    const wrapper = document.getElementById('dock-overlay-wrapper');
+    const btn     = document.getElementById('dock-controls-button');
     if (!wrapper || !btn) return;
+
+    // Stop the positioning loop
+    if (_dockRAF) { cancelAnimationFrame(_dockRAF); _dockRAF = null; }
 
     const controls = wrapper.querySelector('.controls');
     const audio    = wrapper.querySelector('.audio-controls');
 
-    // Restore both panels to their original DOM positions
+    // Restore both panels to their exact original DOM positions
     if (_dockOriginalParent && controls && audio) {
         _dockOriginalParent.insertBefore(controls, _dockControlsAnchor);
         _dockOriginalParent.insertBefore(audio, _dockAudioControlsAnchor);
     }
 
-    // Remove the now-empty wrapper
+    // Remove the now-empty wrapper from <body>
     wrapper.remove();
 
     // Update button state

@@ -1671,13 +1671,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // If MediaSession is disabled, suppress Chrome's automatic media controls.
-            // Must run after AudioContext is created/resumed — Chrome only respects
-            // playbackState='none' once it has associated the AudioContext with MediaSession.
-            if ('mediaSession' in navigator && !mediaSessionEnabled) {
-                try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
-            }
-
             // MediaSession audio anchor — platform-specific approach:
             //
             // Apple (iOS/macOS Safari):
@@ -4530,7 +4523,8 @@ function playAudioBuffer(buffer) {
         return;
     }
 
-    // On first real audio buffer, (re-)activate the Media Session.
+    // On first real audio buffer, (re-)activate the Media Session — or suppress Chrome's
+    // automatic controls if MediaSession is disabled.
     // Apple:     mediaElement exists (bridge path) — re-confirm metadata now that audio flows.
     // Non-Apple: retry HTTP stream if it wasn't ready in startAudio() (WebSocket may not
     //            have been connected yet when startAudio() ran).

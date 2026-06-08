@@ -6318,13 +6318,16 @@ function initSNRSquelch() {
         marker.id = 'snr-squelch-snr-marker';
         marker.style.cssText = [
             'position:absolute',
-            'top:4px',
-            'bottom:4px',
-            'width:2px',
-            'border-radius:1px',
+            'top:50%',
+            'transform:translateY(-50%)',
+            'height:18px',
+            'width:3px',
+            'border-radius:2px',
             'background:#4a9eff',
             'pointer-events:none',
             'display:none',
+            'z-index:10',
+            'box-shadow:0 0 4px rgba(74,158,255,0.8)',
             'transition:left 0.1s linear, background 0.2s'
         ].join(';');
         wrapper.appendChild(marker);

@@ -5547,21 +5547,20 @@ function setMode(mode, preserveBandwidth = false) {
         // server (tune may reset squelch state), in addition to an immediate
         // attempt if the WS is already open.
         if (!FM_SQUELCH_ENABLED && (mode === 'fm' || mode === 'nfm')) {
-            const sendOpenSquelch = (label) => {
-                const ready = wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN;
-                console.log(`[squelch-disable] ${label}: WS readyState=${wsManager?.ws?.readyState}, sending=${ready}`);
-                if (ready) {
+            const sendOpenSquelch = () => {
+                if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
                     wsManager.send({ type: 'set_squelch', squelchOpen: -999.0 });
                     log('Squelch: Open (squelch UI disabled)');
                 }
             };
             // Try immediately (no-op if not connected yet)
-            sendOpenSquelch('immediate');
+            sendOpenSquelch();
             // Always retry after tune() has been processed server-side.
-            // The server sleeps 500ms on mode change, so 1000ms and 2000ms
-            // ensure we arrive after the preset reload is complete.
-            setTimeout(() => sendOpenSquelch('500ms'), 500);
-            setTimeout(() => sendOpenSquelch('1500ms'), 1500);
+            // The server sleeps 500ms on mode change to let radiod load its preset
+            // (which may reset squelch), so we send again at 500ms and 1500ms to
+            // ensure the open-squelch command arrives after the preset reload.
+            setTimeout(sendOpenSquelch, 500);
+            setTimeout(sendOpenSquelch, 1500);
         }
     }
 

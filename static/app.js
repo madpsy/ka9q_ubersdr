@@ -14198,4 +14198,22 @@ function initControlsDock() {
     if (localStorage.getItem('controlsDocked') !== '1') return;
     if (_dockIsMobile()) return; // skip on mobile even if saved state says docked
     _dockApply();
+
+    // Auto-undock if the window is resized to mobile width while docked.
+    // Use a debounced resize listener so we don't thrash on every pixel.
+    let _dockResizeTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(_dockResizeTimer);
+        _dockResizeTimer = setTimeout(() => {
+            const wrapper = document.getElementById('dock-overlay-wrapper');
+            if (wrapper && _dockIsMobile()) {
+                // Silently undock — don't change the localStorage preference so
+                // it re-docks if the user widens the window again.
+                _dockRemove();
+            } else if (!wrapper && !_dockIsMobile() && localStorage.getItem('controlsDocked') === '1') {
+                // Re-dock when widening back above mobile threshold
+                _dockApply();
+            }
+        }, 150);
+    });
 }

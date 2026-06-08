@@ -6342,6 +6342,38 @@ function initSNRSquelch() {
     sl.addEventListener('input',    () => updateSNRSquelchDisplay());
     sl.addEventListener('change',   () => { updateSNRSquelchDisplay(); sendSNRSquelch(); });
     sl.addEventListener('touchend', () => { updateSNRSquelchDisplay(); sendSNRSquelch(); });
+
+    // ── Click the label to auto-set squelch to avg of last 5 SNR values ───
+    // The label (#snr-squelch-value) shows "Off" or "≥42.0". Clicking it
+    // sets the slider to the average of the last 5 SNR history entries so
+    // the user can quickly dial in a sensible threshold.
+    const lbl = document.getElementById('snr-squelch-value');
+    if (lbl && !lbl._snrClickBound) {
+        lbl._snrClickBound = true;
+        lbl.style.cursor = 'pointer';
+        lbl.title = 'Click to set squelch to average of last 5 SNR readings';
+        lbl.addEventListener('click', () => {
+            const history = window.snrHistory || [];
+            if (history.length === 0) return;
+            // Take the last 5 entries (most recent)
+            const last5 = history.slice(-5);
+            const avg = last5.reduce((sum, e) => sum + e.value, 0) / last5.length;
+            // Clamp to slider range and round to nearest step (0.5)
+            const MIN = parseFloat(sl.min);
+            const MAX = parseFloat(sl.max);
+            const clamped = Math.max(MIN + 0.5, Math.min(MAX, avg)); // +0.5 so it's never "Off"
+            sl.value = Math.round(clamped * 2) / 2; // round to nearest 0.5
+            updateSNRSquelchDisplay();
+            sendSNRSquelch();
+
+            // Brief flash on the label to confirm the action
+            lbl.style.transition = 'color 0.1s';
+            lbl.style.color = '#4a9eff';
+            setTimeout(() => { lbl.style.color = ''; }, 600);
+        });
+    }
+    // ───────────────────────────────────────────────────────────────────────
+
     updateSNRSquelchDisplay();
 }
 window.initSNRSquelch = initSNRSquelch;

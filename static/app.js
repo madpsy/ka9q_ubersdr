@@ -1699,6 +1699,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 audioContextState: audioContext?.state
             });
 
+            // If MediaSession is disabled, explicitly suppress Chrome's automatic
+            // media controls.  Chrome shows its own controls icon for any page with
+            // an active AudioContext — setting playbackState='none' opts out of that.
+            // Without this, the icon appears even though the user hasn't enabled it,
+            // and the user has to toggle the checkbox once to make it disappear.
+            if ('mediaSession' in navigator && !mediaSessionEnabled) {
+                try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
+            }
+
             if ('mediaSession' in navigator && mediaSessionEnabled) {
                 // Pre-fetch artwork blob URLs early so they're cached before
                 // updateMediaSession() is called — eliminates Chrome's artwork

@@ -14103,6 +14103,8 @@ function toggleControlsDock() {
         }
     }
 }
+// Expose to global scope — app.js is a module so inline onclick= handlers need window.*
+window.toggleControlsDock = toggleControlsDock;
 
 function initControlsDock() {
     if (localStorage.getItem('controlsDocked') !== '1') return;

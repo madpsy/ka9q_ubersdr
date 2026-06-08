@@ -1349,13 +1349,6 @@ const updateIOSMediaSession = updateMediaSession;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-    // Suppress Chrome's automatic media controls icon if MediaSession is disabled.
-    // Chrome shows its own controls for any page with an active AudioContext.
-    // Setting playbackState='none' on page load opts out before any audio starts.
-    if ('mediaSession' in navigator && !mediaSessionEnabled) {
-        try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
-    }
-
     // Load settings from URL parameters first
     loadSettingsFromURL();
 
@@ -1676,6 +1669,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error('Failed to resume AudioContext:', err);
                     log('Failed to activate audio context', 'error');
                 }
+            }
+
+            // If MediaSession is disabled, suppress Chrome's automatic media controls.
+            // Must run after AudioContext is created/resumed — Chrome only respects
+            // playbackState='none' once it has associated the AudioContext with MediaSession.
+            if ('mediaSession' in navigator && !mediaSessionEnabled) {
+                try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
             }
 
             // MediaSession audio anchor — platform-specific approach:

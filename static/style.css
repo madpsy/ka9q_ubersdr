@@ -1551,6 +1551,12 @@ input[type="range"]::-moz-range-thumb {
     color: var(--accent);
 }
 
+#snr-squelch-value {
+    font-weight: bold;
+    color: var(--accent);
+    cursor: pointer;
+}
+
 #mute-btn {
     background: #ffc107;
     color: #333;

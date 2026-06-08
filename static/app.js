@@ -6350,7 +6350,6 @@ function initSNRSquelch() {
     const lbl = document.getElementById('snr-squelch-value');
     if (lbl && !lbl._snrClickBound) {
         lbl._snrClickBound = true;
-        lbl.style.cursor = 'pointer';
         lbl.title = 'Click to set squelch to average of last 5 SNR readings';
         lbl.addEventListener('click', () => {
             const history = window.snrHistory || [];

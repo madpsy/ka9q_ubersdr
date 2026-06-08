@@ -6362,7 +6362,7 @@ function initSNRSquelch() {
             // Add 2 dB headroom so the squelch sits just above the average noise floor
             const MIN = parseFloat(sl.min);
             const MAX = parseFloat(sl.max);
-            const clamped = Math.max(MIN + 0.5, Math.min(MAX, avg + 2)); // +0.5 so it's never "Off"
+            const clamped = Math.max(MIN + 0.5, Math.min(MAX, avg + 3)); // +0.5 so it's never "Off"
             sl.value = Math.round(clamped * 2) / 2; // round to nearest 0.5
             updateSNRSquelchDisplay();
             sendSNRSquelch();

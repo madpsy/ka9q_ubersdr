@@ -4739,10 +4739,10 @@ input[type="range"]::-moz-range-thumb {
 .receiver-layout .controls               { order: 3; }
 .receiver-layout .audio-controls         { order: 4; }
 
-/* ── Docked mode: big controls float above the waterfall ─────────────────── */
-.receiver-layout.controls-docked .controls               { order: 1; }
-.receiver-layout.controls-docked .audio-controls         { order: 2; }
-.receiver-layout.controls-docked .band-status-bar        { order: 3; }
+/* ── Docked mode: big controls float above the waterfall, band bar stays on top ── */
+.receiver-layout.controls-docked .band-status-bar        { order: 1; }
+.receiver-layout.controls-docked .controls               { order: 2; }
+.receiver-layout.controls-docked .audio-controls         { order: 3; }
 .receiver-layout.controls-docked .spectrum-display-panel { order: 4; }
 
 /* Margin re-tuning for docked position.

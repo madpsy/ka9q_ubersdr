@@ -5543,22 +5543,25 @@ function setMode(mode, preserveBandwidth = false) {
 
         // FM_SQUELCH_ENABLED is false: always send squelch-open so the server
         // never applies a squelch threshold regardless of the slider position.
-        // Send immediately if connected, and also after a short delay to cover
-        // the case where the connection is being established right now.
+        // Always schedule a delayed send after tune() has been processed by the
+        // server (tune may reset squelch state), in addition to an immediate
+        // attempt if the WS is already open.
         if (!FM_SQUELCH_ENABLED && (mode === 'fm' || mode === 'nfm')) {
-            const sendOpenSquelch = () => {
-                if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+            const sendOpenSquelch = (label) => {
+                const ready = wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN;
+                console.log(`[squelch-disable] ${label}: WS readyState=${wsManager?.ws?.readyState}, sending=${ready}`);
+                if (ready) {
                     wsManager.send({ type: 'set_squelch', squelchOpen: -999.0 });
                     log('Squelch: Open (squelch UI disabled)');
-                    return true;
                 }
-                return false;
             };
-            if (!sendOpenSquelch()) {
-                // WS not open yet — retry after connection is established
-                setTimeout(sendOpenSquelch, 500);
-                setTimeout(sendOpenSquelch, 1500);
-            }
+            // Try immediately (no-op if not connected yet)
+            sendOpenSquelch('immediate');
+            // Always retry after tune() has been processed server-side.
+            // The server sleeps 500ms on mode change, so 1000ms and 2000ms
+            // ensure we arrive after the preset reload is complete.
+            setTimeout(() => sendOpenSquelch('500ms'), 500);
+            setTimeout(() => sendOpenSquelch('1500ms'), 1500);
         }
     }
 

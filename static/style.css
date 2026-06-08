@@ -2130,8 +2130,12 @@ input[type="range"]::-moz-range-thumb {
         justify-content: center;
         padding: 5px 10px;
     }
-    .audio-controls > .control-group:not(#audio-buttons-group) {
+    .audio-controls > .control-group:not(#audio-buttons-group):not(#snr-squelch-group) {
         display: none !important;
+    }
+    #snr-squelch-group {
+        display: flex !important;
+        margin-left: 0;
     }
     #mute-btn,
     #rmn-btn-group,

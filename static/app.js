@@ -6190,10 +6190,10 @@ function updateSNRSquelchDisplay() {
     const t = snrSquelchThreshold(sl.value);
     if (t <= SNR_SQUELCH_SENTINEL + 1) {
         lbl.textContent = 'Off';
-        lbl.style.color = '#888';
+        lbl.style.color = '';
     } else {
         lbl.textContent = '\u2265' + parseFloat(sl.value).toFixed(1);
-        lbl.style.color = '#ffc107';
+        lbl.style.color = '';
     }
 }
 

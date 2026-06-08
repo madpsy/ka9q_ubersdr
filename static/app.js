@@ -6258,13 +6258,18 @@ function updateSNRSquelchDisplay() {
         const snr = (bp != null && nd != null && bp > -900 && nd > -900)
                     ? bp - nd : null;
         if (snr !== null) {
+            const sliderWidth = sl.offsetWidth;
+            // If the slider hasn't been laid out yet (width=0), defer to next frame
+            if (sliderWidth === 0) {
+                requestAnimationFrame(() => updateSNRSquelchDisplay());
+                return;
+            }
             const MIN = parseFloat(sl.min);   // 24
             const MAX = parseFloat(sl.max);   // 80
             // Account for browser thumb inset: the usable track is narrower than
             // the element width by one thumb-radius on each side (~8px typical).
-            // We read the actual rendered width so this works at any screen size.
             const thumbRadius = 8;
-            const trackWidth  = sl.offsetWidth - thumbRadius * 2;
+            const trackWidth  = sliderWidth - thumbRadius * 2;
             const fraction    = Math.max(0, Math.min(1, (snr - MIN) / (MAX - MIN)));
             const pxLeft      = thumbRadius + fraction * trackWidth;
             marker.style.left    = pxLeft + 'px';
@@ -6298,28 +6303,37 @@ function initSNRSquelch() {
     if (!sl) return;
 
     // ── Inject SNR marker element into the DOM (no HTML change needed) ─────
-    // Wrap the slider in a relative-positioned div so we can overlay the marker.
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'position:relative; flex:1; display:flex; align-items:center; min-width:0;';
-    sl.parentNode.insertBefore(wrapper, sl);
-    wrapper.appendChild(sl);
-    sl.style.width  = '100%';
-    sl.style.margin = '0';   // remove any default margin that would shift the track
+    // Guard: only inject once — initSNRSquelch is called multiple times on
+    // reconnect, so skip the DOM surgery if the marker already exists.
+    if (!document.getElementById('snr-squelch-snr-marker')) {
+        // Wrap the slider in a relative-positioned div so we can overlay the marker.
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'position:relative; flex:1; display:flex; align-items:center; min-width:0;';
+        sl.parentNode.insertBefore(wrapper, sl);
+        wrapper.appendChild(sl);
+        sl.style.width  = '100%';
+        sl.style.margin = '0';   // remove any default margin that would shift the track
 
-    const marker = document.createElement('div');
-    marker.id = 'snr-squelch-snr-marker';
-    marker.style.cssText = [
-        'position:absolute',
-        'top:4px',
-        'bottom:4px',
-        'width:2px',
-        'border-radius:1px',
-        'background:#4a9eff',
-        'pointer-events:none',
-        'display:none',
-        'transition:left 0.1s linear, background 0.2s'
-    ].join(';');
-    wrapper.appendChild(marker);
+        const marker = document.createElement('div');
+        marker.id = 'snr-squelch-snr-marker';
+        marker.style.cssText = [
+            'position:absolute',
+            'top:4px',
+            'bottom:4px',
+            'width:2px',
+            'border-radius:1px',
+            'background:#4a9eff',
+            'pointer-events:none',
+            'display:none',
+            'transition:left 0.1s linear, background 0.2s'
+        ].join(';');
+        wrapper.appendChild(marker);
+
+        // Reposition marker whenever the slider is resized (e.g. window resize)
+        if (typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(() => updateSNRSquelchDisplay()).observe(sl);
+        }
+    }
     // ───────────────────────────────────────────────────────────────────────
 
     sl.addEventListener('input',    () => updateSNRSquelchDisplay());

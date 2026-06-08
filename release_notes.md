@@ -1,6 +1,17 @@
-# Latest Stable - 0.1.51 - 30th May 2026
+# Latest Stable - 0.1.52 - 8th Jun 2026
 
-## Version 0.1.51 - Latest Stable
+## Version 0.1.52 - Latest Stable
+
+### New Features
+- Added **SNR Squlech** which performs the squelch on the backend meaning when SNR is less than the value no audio is sent to the client
+- Added **Sound Modem** extension and separate addon. This is a fully featured 4 channel modem for decoding packet / AX.25
+- Added **Leo Bodnar GPSDO** directly into UberSDR - can be used to control an LBE-1420 as well show stats / location data
+
+### Bug Fixes
+- Waterfall 'GPU' mode performs more offloading to WebGL
+- Reduced unnecessary audio processing overhead
+
+## Version 0.1.51
 
 ### New Features
 - Added **QRZ.com Lookup** via a Lookup Service. Requires QRZ.com account. Users with XML Subscription get a lot more data but works without

@@ -4748,7 +4748,7 @@ input[type="range"]::-moz-range-thumb {
    interactive child elements so buttons/inputs/selects still work. */
 #dock-overlay-wrapper {
     position: fixed;
-    z-index: 1000;
+    z-index: 800; /* below chat-panel and rotator-panel (z-index:900) so they render on top */
     background: transparent;
     overflow: hidden;
     max-height: 80vh;

@@ -4750,8 +4750,8 @@ input[type="range"]::-moz-range-thumb {
     position: fixed;
     z-index: 800; /* below chat-panel and rotator-panel (z-index:900) so they render on top */
     /* More transparent than .spectrum-display-controls (rgba(44,62,80,0.65)) so the
-       waterfall is clearly visible behind the controls. */
-    background: rgba(44, 62, 80, 0.35);
+       waterfall is visible behind the controls, but not fully transparent. */
+    background: rgba(44, 62, 80, 0.50);
     overflow: hidden;
     max-height: 80vh;
     overflow-y: auto;

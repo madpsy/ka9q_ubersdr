@@ -2071,9 +2071,12 @@ input[type="range"]::-moz-range-thumb {
         overflow: hidden !important;
     }
 
-    /* Spectrum panel fills the container */
+    /* Spectrum panel fills the container; black background so the semi-transparent
+       .spectrum-display-controls bar at the bottom shows the waterfall behind it
+       rather than the solid page background colour. */
     .spectrum-display-panel {
         padding: 0 !important;
+        background: black !important;
     }
 
     /* Spectrum container fills the full viewport height via CSS —

@@ -2068,6 +2068,14 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Dock overlay: remove the max-height cap and scrollbar on mobile so the
+       controls panel sizes to its content without clipping or a scrollbar */
+    #dock-overlay-wrapper {
+        max-height: none !important;
+        overflow: visible !important;
+        overflow-y: visible !important;
+    }
+
     #local-time {
         display: none;
     }

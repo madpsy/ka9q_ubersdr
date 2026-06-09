@@ -14219,37 +14219,27 @@ function _dockApply() {
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
         // We must also resize the actual waterfall *canvas* to fill the viewport,
         // otherwise it stays at its default/saved height (e.g. 600px).
-        // spectrumDisplay.setWaterfallHeight() handles canvas resize, CSS vars,
-        // and localStorage — but we override localStorage afterwards so the
-        // mobile-only height doesn't persist to desktop.
-        const _applyMobileWaterfallHeight = () => {
-            const vh = window.innerHeight;
-            // In non-split mode, canvas height = fullHeight = 300 + waterfallHeight.
-            // We want fullHeight = vh so the canvas fills the viewport.
-            // Therefore waterfallHeight = vh - 300.
-            const targetH = Math.max(100, vh - 300);
-            // Set CSS variable as fallback
-            document.documentElement.style.setProperty('--waterfall-height', targetH + 'px');
-            document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
-            // Resize the actual canvas via SpectrumDisplay
-            if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
-                window.spectrumDisplay.setWaterfallHeight(targetH);
-                // Don't persist mobile height to localStorage — restore the
-                // previous saved value so desktop gets its own height back.
-                const prev = window._dockSavedWaterfallHeight;
-                if (prev != null) localStorage.setItem('waterfallHeight', String(prev));
-            }
-        };
-        // Save the current waterfall height before overriding
-        if (window.spectrumDisplay) {
-            window._dockSavedWaterfallHeight = window.spectrumDisplay.waterfallHeight;
-        } else {
-            window._dockSavedWaterfallHeight = parseInt(localStorage.getItem('waterfallHeight'), 10) || 300;
+        // In non-split mode, canvas height = fullHeight = 300 + waterfallHeight.
+        // We want fullHeight ≈ vh, so waterfallHeight = vh - 300.
+        const vh = window.innerHeight;
+        const targetH = Math.max(100, vh - 300);
+
+        // Save the original waterfall height so we can restore it when undocking
+        window._dockSavedWaterfallHeight = parseInt(localStorage.getItem('waterfallHeight'), 10) || 300;
+
+        // Set localStorage BEFORE SpectrumDisplay constructor runs (it reads
+        // waterfallHeight from localStorage). On initial page load, _dockApply
+        // runs at line ~2638 while the constructor runs at line ~9967.
+        localStorage.setItem('waterfallHeight', String(targetH));
+
+        // Set CSS variables immediately
+        document.documentElement.style.setProperty('--waterfall-height', targetH + 'px');
+        document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
+
+        // If spectrumDisplay already exists (e.g. resize event), update it directly
+        if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+            window.spectrumDisplay.setWaterfallHeight(targetH);
         }
-        requestAnimationFrame(_applyMobileWaterfallHeight);
-        // Also retry after a short delay in case spectrumDisplay isn't ready yet
-        setTimeout(_applyMobileWaterfallHeight, 500);
-        setTimeout(_applyMobileWaterfallHeight, 1500);
     } else {
         // Desktop: ensure waterfall is tall enough to be useful when docked
         const MIN_DOCKED_HEIGHT = 300;

@@ -2087,13 +2087,6 @@ input[type="range"]::-moz-range-thumb {
         min-height: unset !important;
     }
 
-    /* Waterfall canvas fills the full container on mobile.
-       JS will also set the canvas height via setWaterfallHeight(),
-       but this CSS ensures it stretches immediately. */
-    #spectrum-display-canvas {
-        height: 100% !important;
-    }
-
     /* Remove footer entirely on mobile — controls are docked over the waterfall */
     .site-footer {
         display: none !important;

@@ -2181,13 +2181,13 @@ input[type="range"]::-moz-range-thumb {
         gap: 6px !important;
     }
 
-    /* All direct children except the slider controls take the full row */
-    .bw-squelch-row > *:not(#bandwidth-controls):not(#squelch-controls):not(#snr-squelch-row) {
+    /* All direct children except the slider controls and NR button take the full row */
+    .bw-squelch-row > *:not(#bandwidth-controls):not(#squelch-controls):not(#snr-squelch-row):not(#nr2-quick-toggle) {
         flex: 0 0 100% !important;
         width: 100% !important;
     }
 
-    /* Bandwidth and squelch share the row equally */
+    /* Bandwidth and squelch share the row equally; NR button is auto-sized */
     .bw-squelch-row > #bandwidth-controls,
     .bw-squelch-row > #squelch-controls,
     .bw-squelch-row > #snr-squelch-row {
@@ -2215,6 +2215,13 @@ input[type="range"]::-moz-range-thumb {
     .bw-squelch-row > #snr-squelch-row input[type="range"] {
         width: 100% !important;
         flex: unset !important;
+    }
+
+    /* NR button moved next to SNR squelch on mobile */
+    .bw-squelch-row > #nr2-quick-toggle {
+        flex: 0 0 auto !important;
+        align-self: flex-end !important;
+        margin-bottom: 12px;
     }
 
     /* Hide the bandwidth slider toggle button on narrow screens */
@@ -2245,7 +2252,8 @@ input[type="range"]::-moz-range-thumb {
     #mute-btn,
     #rmn-btn-group,
     #eq-quick-toggle,
-    #rec-btn {
+    #rec-btn,
+    #nb-quick-toggle {
         display: none !important;
     }
     

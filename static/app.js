@@ -14192,6 +14192,11 @@ function _dockApply() {
             if (snrRow) {
                 bwEl.parentElement.appendChild(snrRow);
             }
+            // Move #nr2-quick-toggle next to the SNR squelch slider.
+            const nrBtn = document.getElementById('nr2-quick-toggle');
+            if (nrBtn) {
+                bwEl.parentElement.appendChild(nrBtn);
+            }
         }
 
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
@@ -14247,7 +14252,7 @@ function _dockRemove() {
     // Remove the now-empty wrapper from <body>
     wrapper.remove();
 
-    // Remove mobile-only class and restore #snr-squelch-row to its original parent
+    // Remove mobile-only class and restore moved elements to their original parents
     const bwEl = document.getElementById('bandwidth-controls');
     if (bwEl && bwEl.parentElement) {
         bwEl.parentElement.classList.remove('bw-squelch-row');
@@ -14256,6 +14261,11 @@ function _dockRemove() {
     const volSqGroup = document.getElementById('volume-squelch-group');
     if (snrRow && volSqGroup && snrRow.parentElement !== volSqGroup) {
         volSqGroup.appendChild(snrRow);
+    }
+    const nrBtn = document.getElementById('nr2-quick-toggle');
+    const audioBtnsGroup = document.getElementById('audio-buttons-group');
+    if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
+        audioBtnsGroup.appendChild(nrBtn);
     }
 
     // Update button state

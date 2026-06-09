@@ -20,6 +20,10 @@ class RotatorUI {
         this.createRotatorPanel();
         this.setupEventHandlers();
         
+        // Don't poll or show the panel on mobile — it's hidden via CSS and
+        // the status updates would waste bandwidth for no visible benefit.
+        if (window.innerWidth <= 1024) return;
+
         // Start fetching status immediately for collapsed tab display
         this.startStatusUpdates();
     }
@@ -316,7 +320,7 @@ class RotatorUI {
             }
             
             /* Mobile responsive styles */
-            @media (max-width: 768px) {
+            @media (max-width: 1024px) {
                 /* Hide the rotator tab entirely on mobile — the docked controls
                    overlay fills the left edge and the panel would be unusable */
                 .rotator-panel {

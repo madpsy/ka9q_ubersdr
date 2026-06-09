@@ -4841,3 +4841,11 @@ input[type="range"]::-moz-range-thumb {
 #dock-overlay-wrapper #vu-meter-compact .vu-meter {
     background: rgba(15, 25, 40, 0.45) !important;
 }
+
+/* VU meter coloured bar and peak marker — JS sets inline background gradient,
+   so use opacity to make them semi-transparent without overriding the gradient */
+#dock-overlay-wrapper #vu-meter-bar-compact,
+#dock-overlay-wrapper #vu-meter-peak-compact,
+#dock-overlay-wrapper #vu-meter-leds-compact {
+    opacity: 0.55;
+}

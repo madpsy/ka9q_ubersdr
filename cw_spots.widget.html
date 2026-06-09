@@ -130,6 +130,7 @@
   var pulseTimer = null;
   var latestSpot = null;
   var subscribed = false;
+  var dismissed  = false;
   var tries      = 0;
 
   var notif   = document.getElementById('cw-spot-notification');
@@ -147,6 +148,7 @@
   }
 
   function showSpot(spot) {
+    if (dismissed) return;
     latestSpot = spot;
 
     // Top row: callsign (left) + band badge (right)
@@ -192,6 +194,7 @@
 
   closeEl.addEventListener('click', function (e) {
     e.stopPropagation();
+    dismissed = true;
     if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
     fadeOut();
   });

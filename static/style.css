@@ -2171,11 +2171,35 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* Ensure bandwidth sliders have a usable width on mobile */
-    /* Extra bottom padding prevents the range slider thumb from being clipped */
-    .bandwidth-controls {
-        min-width: 260px;
+    /* On mobile: put bandwidth and squelch sliders side-by-side in one row.
+       The parent .control-group (which contains #bandwidth-controls and
+       #squelch-controls as siblings) is already flex-direction:column from the
+       mobile .controls rule. We switch it to flex-row for just those two
+       children by wrapping them with a :has() selector on the parent. */
+    .controls .control-group:has(#bandwidth-controls) {
+        flex-direction: row !important;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    /* Items that should still stack vertically (everything except the sliders) */
+    .controls .control-group:has(#bandwidth-controls) > *:not(#bandwidth-controls):not(#squelch-controls) {
+        flex: 0 0 100%;
+    }
+
+    /* Bandwidth and squelch share the row equally */
+    #bandwidth-controls {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        margin-top: 0 !important;
         padding-bottom: 12px;
+    }
+
+    #squelch-controls {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        margin-top: 0 !important;
     }
 
     /* Hide the bandwidth slider toggle button on narrow screens */

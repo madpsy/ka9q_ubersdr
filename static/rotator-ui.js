@@ -6,6 +6,10 @@
 
 class RotatorUI {
     constructor() {
+        // Don't create the rotator panel on mobile — it overlaps the docked
+        // controls and is not usable on a narrow screen.
+        if (window.innerWidth <= 1024) return;
+
         this.isExpanded = false;
         this.rotatorDisplay = null;
         this.statusUpdateTimer = null;
@@ -19,10 +23,6 @@ class RotatorUI {
         
         this.createRotatorPanel();
         this.setupEventHandlers();
-        
-        // Don't poll or show the panel on mobile — it's hidden via CSS and
-        // the status updates would waste bandwidth for no visible benefit.
-        if (window.innerWidth <= 1024) return;
 
         // Start fetching status immediately for collapsed tab display
         this.startStatusUpdates();

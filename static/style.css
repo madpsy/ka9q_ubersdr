@@ -2058,16 +2058,9 @@ input[type="range"]::-moz-range-thumb {
 
 /* Responsive design */
 @media (max-width: 1024px) {
+    /* Remove footer entirely on mobile — controls are docked over the waterfall */
     .site-footer {
-        margin-bottom: 18px;
-    }
-
-    .site-footer .footer-desktop {
-        display: none;
-    }
-
-    .site-footer .footer-mobile {
-        display: inline-block !important;
+        display: none !important;
     }
 
     #local-time {

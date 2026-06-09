@@ -14144,12 +14144,11 @@ function _dockPositionWrapper() {
 }
 
 function _dockApply() {
-    if (_dockIsMobile()) return; // dock feature disabled on mobile
     const controls = document.querySelector('.controls');
     const audio    = document.querySelector('.audio-controls');
     const bandBar  = document.querySelector('.band-status-bar');
     const btn      = document.getElementById('dock-controls-button');
-    if (!controls || !audio || !btn) return;
+    if (!controls || !audio) return;
 
     // Record original DOM positions before moving
     _dockOriginalParent      = controls.parentNode;
@@ -14170,23 +14169,34 @@ function _dockApply() {
     if (_dockRAF) cancelAnimationFrame(_dockRAF);
     _dockPositionWrapper();
 
-    // Update button state
-    btn.textContent = '⊟';
-    btn.classList.add('active');
-    btn.title = 'Undock receiver controls (move below waterfall)';
+    // Update button state (button is hidden on mobile via CSS but update anyway)
+    if (btn) {
+        btn.textContent = '⊟';
+        btn.classList.add('active');
+        btn.title = 'Undock receiver controls (move below waterfall)';
+    }
 
-    // Ensure waterfall is tall enough to be useful when docked
-    const MIN_DOCKED_HEIGHT = 300;
-    const currentH = window.spectrumDisplay
-        ? window.spectrumDisplay.waterfallHeight
-        : (parseInt(localStorage.getItem('waterfallHeight'), 10) || 300);
-    if (currentH < MIN_DOCKED_HEIGHT) {
-        if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
-            window.spectrumDisplay.setWaterfallHeight(MIN_DOCKED_HEIGHT);
+    if (_dockIsMobile()) {
+        // On mobile: extend the waterfall to fill the full viewport height so
+        // the controls overlay floats over it and no space is wasted below.
+        const vh = window.innerHeight;
+        document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
+        document.documentElement.style.setProperty('--waterfall-height', (vh - 300) + 'px');
+        // Don't persist this to localStorage — it's a mobile-only override.
+    } else {
+        // Desktop: ensure waterfall is tall enough to be useful when docked
+        const MIN_DOCKED_HEIGHT = 300;
+        const currentH = window.spectrumDisplay
+            ? window.spectrumDisplay.waterfallHeight
+            : (parseInt(localStorage.getItem('waterfallHeight'), 10) || 300);
+        if (currentH < MIN_DOCKED_HEIGHT) {
+            if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+                window.spectrumDisplay.setWaterfallHeight(MIN_DOCKED_HEIGHT);
+            }
+            document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
+            document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
+            localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
         }
-        document.documentElement.style.setProperty('--waterfall-height', MIN_DOCKED_HEIGHT + 'px');
-        document.documentElement.style.setProperty('--spectrum-container-height', (300 + MIN_DOCKED_HEIGHT) + 'px');
-        localStorage.setItem('waterfallHeight', String(MIN_DOCKED_HEIGHT));
     }
 }
 
@@ -14239,24 +14249,41 @@ function _dockIsMobile() {
 }
 
 function initControlsDock() {
-    if (localStorage.getItem('controlsDocked') !== '1') return;
-    if (_dockIsMobile()) return; // skip on mobile even if saved state says docked
+    // On mobile: always dock regardless of saved preference — the controls
+    // overlay is the only usable layout on a narrow screen.
+    // On desktop: only dock if the user previously chose to dock.
+    if (!_dockIsMobile() && localStorage.getItem('controlsDocked') !== '1') return;
     _dockApply();
 
-    // Auto-undock if the window is resized to mobile width while docked.
-    // Use a debounced resize listener so we don't thrash on every pixel.
+    // Debounced resize listener:
+    //   • Mobile → mobile: update the full-height waterfall size.
+    //   • Mobile → desktop: keep docked if preference says so, otherwise undock.
+    //   • Desktop → mobile: re-dock (always docked on mobile).
+    //   • Desktop → desktop: re-dock if preference says so.
     let _dockResizeTimer = null;
     window.addEventListener('resize', () => {
         clearTimeout(_dockResizeTimer);
         _dockResizeTimer = setTimeout(() => {
             const wrapper = document.getElementById('dock-overlay-wrapper');
-            if (wrapper && _dockIsMobile()) {
-                // Silently undock — don't change the localStorage preference so
-                // it re-docks if the user widens the window again.
-                _dockRemove();
-            } else if (!wrapper && !_dockIsMobile() && localStorage.getItem('controlsDocked') === '1') {
-                // Re-dock when widening back above mobile threshold
-                _dockApply();
+            if (_dockIsMobile()) {
+                // Always docked on mobile.
+                if (!wrapper) {
+                    _dockApply();
+                } else {
+                    // Already docked — just refresh the full-height waterfall size.
+                    const vh = window.innerHeight;
+                    document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
+                    document.documentElement.style.setProperty('--waterfall-height', (vh - 300) + 'px');
+                }
+            } else {
+                // Desktop: dock only if the user preference says so.
+                if (wrapper && localStorage.getItem('controlsDocked') !== '1') {
+                    // Widened from mobile — undock unless preference is set.
+                    _dockRemove();
+                } else if (!wrapper && localStorage.getItem('controlsDocked') === '1') {
+                    // Re-dock when widening back above mobile threshold.
+                    _dockApply();
+                }
             }
         }, 150);
     });

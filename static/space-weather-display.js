@@ -77,6 +77,11 @@ Propagation Quality: ${propagation}`;
     
     textEl.innerHTML = html;
     textEl.title = tooltip;
+
+    // On mobile the space weather widget is hidden and the audio buffer bar
+    // stays flush at bottom:0 — don't override either with inline styles.
+    if (window.innerWidth <= 1024) return;
+
     display.style.display = 'block';
     
     // Add click handler if noise floor is enabled

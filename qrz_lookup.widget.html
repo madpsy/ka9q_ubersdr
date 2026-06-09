@@ -209,7 +209,7 @@
 
 <!-- Photo modal — appended to body so it overlays everything -->
 <div id="qrz-photo-modal" role="dialog" aria-modal="true" aria-label="Photo enlarged">
-  <img id="qrz-modal-img" alt="" />
+  <img id="qrz-modal-img" src="#" alt="" />
 </div>
 
 <div id="qrz-widget" style="display:none;">
@@ -256,7 +256,7 @@
 
   function closePhotoModal() {
     photoModal.classList.remove('qrz-modal-open');
-    modalImg.removeAttribute('src');
+    modalImg.src = '#';
   }
 
   photoModal.addEventListener('click', function () {

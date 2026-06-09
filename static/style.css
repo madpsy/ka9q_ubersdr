@@ -2098,11 +2098,14 @@ input[type="range"]::-moz-range-thumb {
     }
 
     /* Dock overlay: remove the max-height cap and scrollbar on mobile so the
-       controls panel sizes to its content without clipping or a scrollbar */
+       controls panel sizes to its content without clipping or a scrollbar.
+       padding-bottom extends the semi-transparent background down to meet
+       the waterfall controls bar (covers the gap from _dockPositionWrapper). */
     #dock-overlay-wrapper {
         max-height: none !important;
         overflow: visible !important;
         overflow-y: visible !important;
+        padding-bottom: 12px !important;
     }
 
     /* Hide the waterfall drag-resize handle on mobile — waterfall fills full

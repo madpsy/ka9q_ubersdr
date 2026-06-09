@@ -2303,9 +2303,10 @@ input[type="range"]::-moz-range-thumb {
         grid-template-columns: 1fr;
     }
 
-    /* Show browser zoom buttons on narrow screens */
+    /* Browser zoom buttons hidden on mobile — waterfall fills full height so
+       browser-level zoom is no longer needed */
     #browser-zoom-group {
-        display: flex !important;
+        display: none !important;
     }
 }
 

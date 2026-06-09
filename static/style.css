@@ -2082,13 +2082,22 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* Reset the negative margins on the dock overlay wrapper's controls/audio-controls
-       on mobile. Those margins compensate for transform:scale(0.75) on desktop, but on
-       mobile the transform is reset to none so the negative margins cause the NR/NB
-       buttons to overlap into the waterfall control bar. */
-    #dock-overlay-wrapper .controls {
-        margin-bottom: 0 !important;
+    /* On mobile the dock overlay wrapper itself should be fully transparent —
+       the individual panels (.controls, .audio-controls) already have their own
+       backgrounds set by the main CSS rules. */
+    #dock-overlay-wrapper {
+        background: transparent !important;
     }
+
+    /* On mobile .controls uses scale(0.9) not scale(0.75), so the margin
+       compensation values are different from the desktop dock overlay rules.
+       Override the desktop -60px with the mobile-correct -30px. */
+    #dock-overlay-wrapper .controls {
+        margin-bottom: -30px !important;
+    }
+
+    /* On mobile .audio-controls has transform:none (no scale), so there is no
+       scale-gap to close. Reset the desktop -70px top margin to 0. */
     #dock-overlay-wrapper .audio-controls {
         margin-top: 0 !important;
         margin-bottom: 0 !important;

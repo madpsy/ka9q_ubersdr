@@ -14177,14 +14177,18 @@ function _dockApply() {
     }
 
     if (_dockIsMobile()) {
-        // On mobile: extend the waterfall to fill the full viewport height so
-        // the controls overlay floats over it and no space is wasted below.
-        // Defer one rAF so the wrapper has been laid out and offsetHeight is accurate.
+        // On mobile: extend the waterfall to fill the full viewport height.
+        // The overlay wrapper is position:fixed and floats over the waterfall,
+        // so it does NOT reduce the waterfall canvas height — only the
+        // spectrum-display-controls bar (position:absolute inside the container)
+        // needs to be subtracted from the waterfall canvas height.
+        // Defer one rAF so the controls bar has been laid out.
         requestAnimationFrame(() => {
             const vh = window.innerHeight;
-            const overlayH = wrapper.offsetHeight || 0;
+            const ctrlBar = document.querySelector('.spectrum-display-controls');
+            const ctrlBarH = ctrlBar ? ctrlBar.offsetHeight : 0;
             document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
-            document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - overlayH) + 'px');
+            document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - ctrlBarH) + 'px');
         });
         // Don't persist this to localStorage — it's a mobile-only override.
     } else {
@@ -14275,12 +14279,12 @@ function initControlsDock() {
                     _dockApply();
                 } else {
                     // Already docked — just refresh the full-height waterfall size.
-                    // Use actual overlay height so the waterfall fills the remaining space.
                     requestAnimationFrame(() => {
                         const vh = window.innerHeight;
-                        const overlayH = wrapper.offsetHeight || 0;
+                        const ctrlBar = document.querySelector('.spectrum-display-controls');
+                        const ctrlBarH = ctrlBar ? ctrlBar.offsetHeight : 0;
                         document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
-                        document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - overlayH) + 'px');
+                        document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - ctrlBarH) + 'px');
                     });
                 }
             } else {

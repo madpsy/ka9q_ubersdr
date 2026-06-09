@@ -126,7 +126,7 @@
             padding: 10px 15px;
             border-bottom: 1px solid #34495e;
             display: grid;
-            grid-template-columns: 120px 1fr 80px 80px;
+            grid-template-columns: 120px 1fr 100px 80px 80px;
             gap: 10px;
             align-items: center;
             transition: background 0.2s;
@@ -155,6 +155,16 @@
             border-radius: 3px;
             font-size: 11px;
             font-weight: 600;
+        }
+
+        .dx-callsign {
+            font-size: 12px;
+            font-weight: 600;
+            color: #f1c40f;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .confidence {
@@ -807,6 +817,8 @@
 
             const dialFreq = activity.estimated_dial_freq || activity.start_freq;
 
+            const dxCallsign = activity.dx_callsign || '';
+
             return `
                 <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}')">
                     <div class="frequency">${freq}</div>
@@ -814,6 +826,7 @@
                         <span class="mode">${modeUpper}</span>
                         <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz</span>
                     </div>
+                    <div class="dx-callsign">${dxCallsign}</div>
                     <div class="${confidenceClass}">${confidence}</div>
                     <div class="snr">${signalAboveNoise}</div>
                 </div>

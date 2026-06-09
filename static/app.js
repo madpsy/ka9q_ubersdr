@@ -14270,7 +14270,8 @@ window.toggleControlsDock = toggleControlsDock;
 // Dock feature is disabled on mobile — the layout is already single-column
 // and the overlay would be too cramped.
 function _dockIsMobile() {
-    return window.innerWidth <= 768;
+    // Match the CSS mobile breakpoint (max-width: 1024px)
+    return window.innerWidth <= 1024;
 }
 
 function initControlsDock() {

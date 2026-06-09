@@ -4819,15 +4819,18 @@ input[type="range"]::-moz-range-thumb {
         0 -1px 3px rgba(0, 0, 0, 0.85);
 }
 
-/* S-meter canvas: match the semi-transparent style of the mini history charts */
+/* S-meter: all 4 elements (needle canvas, readout bar, 2 history charts) — more transparent */
 #dock-overlay-wrapper #s-meter-canvas {
-    background: rgba(15, 25, 40, 0.75) !important;
+    background: rgba(15, 25, 40, 0.45) !important;
 }
 
-/* S-meter readout bar below the canvas (inline background:#2c3e50 in HTML) */
+/* S-meter readout bar below the canvas — match needle canvas colour and transparency */
 #dock-overlay-wrapper .smeter-left > div:last-child {
-    background: rgba(44, 62, 80, 0.75) !important;
+    background: rgba(15, 25, 40, 0.45) !important;
     border-radius: 0 0 4px 4px;
 }
 
-/* Mini history chart canvases already use rgba(15,25,40,0.75) — no change needed */
+/* Mini history chart canvases — reduce from base 0.75 to match the needle */
+#dock-overlay-wrapper .smeter-mini-chart-wrap canvas {
+    background: rgba(15, 25, 40, 0.45) !important;
+}

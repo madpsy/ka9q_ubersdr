@@ -1,0 +1,220 @@
+<!--
+  CW Spot Notification Widget
+  ============================
+  Displays the latest CW spot as a transient notification in the top-left
+  of the page, below the frequency notches. Fades after 3 seconds.
+  Works independently of the CW Spots extension.
+-->
+
+<style>
+  #cw-spot-notification {
+    position: fixed;
+    top: 80px;
+    left: 44px;
+    z-index: 9500;
+    pointer-events: auto;
+    background: rgba(23, 162, 184, 0.92);
+    color: #fff;
+    border-radius: 6px;
+    padding: 6px 12px 6px 9px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1.4;
+    white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(255,255,255,0.6);
+    cursor: pointer;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    display: none;
+  }
+
+  #cw-spot-notification.cw-spot-visible {
+    opacity: 1;
+  }
+
+  #cw-spot-notification.cw-spot-fading {
+    opacity: 0;
+  }
+
+  #cw-spot-notification .csn-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  #cw-spot-notification .csn-callsign {
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+
+  #cw-spot-notification .csn-band {
+    background: rgba(0,0,0,0.28);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: bold;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  #cw-spot-notification .csn-meta {
+    font-size: 10px;
+    font-weight: normal;
+    color: rgba(255,255,255,0.88);
+    margin-top: 1px;
+  }
+
+  @keyframes csnPulse {
+    0%   { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 0   rgba(23,162,184,0.7); }
+    60%  { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 10px rgba(23,162,184,0);   }
+    100% { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 0   rgba(23,162,184,0);   }
+  }
+
+  #cw-spot-notification.cw-spot-pulse {
+    animation: csnPulse 0.5s ease-out;
+  }
+</style>
+
+<div id="cw-spot-notification" title="Click to tune to this CW spot">
+  <div class="csn-top">
+    <span class="csn-callsign" id="csn-callsign">--</span>
+    <span class="csn-band"     id="csn-band"></span>
+  </div>
+  <div class="csn-meta" id="csn-meta"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var FADE_DELAY_MS  = 3000;
+  var POLL_INTERVAL  = 300;
+  var MAX_POLL_TRIES = 200;
+
+  var fadeTimer  = null;
+  var pulseTimer = null;
+  var latestSpot = null;
+  var subscribed = false;
+  var tries      = 0;
+
+  var notif   = document.getElementById('cw-spot-notification');
+  var callEl  = document.getElementById('csn-callsign');
+  var bandEl  = document.getElementById('csn-band');
+  var metaEl  = document.getElementById('csn-meta');
+
+  function esc(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showSpot(spot) {
+    latestSpot = spot;
+
+    // Top row: callsign (left) + band badge (right)
+    callEl.textContent = spot.dx_call || spot.callsign || '?';
+    bandEl.textContent = spot.band || '';
+
+    // Meta row: country · frequency
+    var country = spot.country  || '';
+    var freqHz  = spot.frequency;
+    var freqStr = freqHz ? (freqHz / 1e6).toFixed(3) + ' MHz' : '';
+    var meta = '';
+    if (country) meta += esc(country);
+    if (freqStr)  meta += (meta ? ' &middot; ' : '') + esc(freqStr);
+    metaEl.innerHTML = meta;
+
+    notif.style.display = 'block';
+
+    if (pulseTimer) { clearTimeout(pulseTimer); pulseTimer = null; }
+    notif.classList.remove('cw-spot-pulse');
+    void notif.offsetWidth;
+    notif.classList.add('cw-spot-visible');
+    notif.classList.remove('cw-spot-fading');
+    notif.classList.add('cw-spot-pulse');
+    pulseTimer = setTimeout(function () {
+      notif.classList.remove('cw-spot-pulse');
+      pulseTimer = null;
+    }, 600);
+
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    fadeTimer = setTimeout(fadeOut, FADE_DELAY_MS);
+  }
+
+  function fadeOut() {
+    fadeTimer = null;
+    notif.classList.add('cw-spot-fading');
+    notif.classList.remove('cw-spot-visible');
+    setTimeout(function () {
+      if (!notif.classList.contains('cw-spot-visible')) {
+        notif.style.display = 'none';
+      }
+    }, 400);
+  }
+
+  notif.addEventListener('click', function () {
+    if (!latestSpot || !latestSpot.frequency) return;
+    var hz = latestSpot.frequency;
+    if (window.radio && typeof window.radio.setFrequency === 'function') {
+      window.radio.setFrequency(hz, true);
+      var mode = hz < 10000000 ? 'cwl' : 'cwu';
+      if (typeof window.radio.setMode === 'function') window.radio.setMode(mode, false);
+      return;
+    }
+    if (typeof window.__catsync_setfreq_impl === 'function') {
+      window.__catsync_setfreq_impl(hz);
+    } else if (typeof window.setfreq === 'function') {
+      window.setfreq(hz);
+    }
+  });
+
+  function trySubscribe() {
+    if (subscribed) return true;
+    var client = window.dxClusterClient;
+    if (!client) return false;
+
+    if (typeof client.onCWSpot === 'function') {
+      client.onCWSpot(function (spot) { showSpot(spot); });
+    }
+
+    if (typeof client.subscribeToCWSpots === 'function') {
+      client.subscribeToCWSpots();
+    }
+
+    // Belt-and-suspenders: patch handleMessage to catch every cw_spot
+    if (typeof client.handleMessage === 'function') {
+      var orig = client.handleMessage.bind(client);
+      client.handleMessage = function (msg) {
+        orig(msg);
+        if (msg && msg.type === 'cw_spot' && msg.data) {
+          showSpot(msg.data);
+        }
+      };
+    }
+
+    subscribed = true;
+    return true;
+  }
+
+  function poll() {
+    tries++;
+    if (!subscribed) trySubscribe();
+    if (subscribed) return;
+    if (tries >= MAX_POLL_TRIES) return;
+    setTimeout(poll, POLL_INTERVAL);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(poll, 0); });
+  } else {
+    setTimeout(poll, 0);
+  }
+
+})();
+</script>

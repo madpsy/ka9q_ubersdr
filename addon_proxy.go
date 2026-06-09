@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AddonProxy handles proxying requests to a Docker addon container
@@ -111,9 +112,21 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 		}
 	}
 
-	// Error handler — return a clean 502 instead of the default Go error page
+	// Error handler — return a clean 502 instead of the default Go error page.
+	// Log errors at most once every 30 seconds per proxy instance to avoid
+	// flooding the log when the backend is persistently unreachable.
+	var (
+		errLogMu       sync.Mutex
+		lastErrLog     time.Time
+		errLogCooldown = 30 * time.Second
+	)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("Addon proxy %q error: %v", entry.Name, err)
+		errLogMu.Lock()
+		if time.Since(lastErrLog) >= errLogCooldown {
+			log.Printf("Addon proxy %q error: %v", entry.Name, err)
+			lastErrLog = time.Now()
+		}
+		errLogMu.Unlock()
 		http.Error(w, fmt.Sprintf("Addon service %q is unavailable", entry.Name), http.StatusBadGateway)
 	}
 

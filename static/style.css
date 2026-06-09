@@ -2063,6 +2063,11 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
+    /* Hide space weather so the audio buffer bar sits flush at the bottom right */
+    .space-weather-display {
+        display: none !important;
+    }
+
     #local-time {
         display: none;
     }

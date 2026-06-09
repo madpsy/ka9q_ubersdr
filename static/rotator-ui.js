@@ -6,10 +6,6 @@
 
 class RotatorUI {
     constructor() {
-        // Don't create the rotator panel on mobile — it overlaps the docked
-        // controls and is not usable on a narrow screen.
-        if (window.innerWidth <= 1024) return;
-
         this.isExpanded = false;
         this.rotatorDisplay = null;
         this.statusUpdateTimer = null;
@@ -320,11 +316,15 @@ class RotatorUI {
             }
             
             /* Mobile responsive styles */
-            @media (max-width: 1024px) {
-                /* Hide the rotator tab entirely on mobile — the docked controls
-                   overlay fills the left edge and the panel would be unusable */
-                .rotator-panel {
-                    display: none !important;
+            @media (max-width: 768px) {
+                .rotator-panel.expanded {
+                    width: 100vw;
+                    left: 0;
+                }
+
+                .rotator-content {
+                    width: calc(100vw - 40px);
+                    height: 400px;
                 }
             }
             

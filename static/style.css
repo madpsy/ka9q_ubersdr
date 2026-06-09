@@ -2181,8 +2181,8 @@ input[type="range"]::-moz-range-thumb {
         gap: 6px !important;
     }
 
-    /* All direct children except the two sliders take the full row */
-    .bw-squelch-row > *:not(#bandwidth-controls):not(#squelch-controls) {
+    /* All direct children except the slider controls take the full row */
+    .bw-squelch-row > *:not(#bandwidth-controls):not(#squelch-controls):not(#snr-squelch-row) {
         flex: 0 0 100% !important;
         width: 100% !important;
     }

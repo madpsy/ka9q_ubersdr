@@ -14141,7 +14141,7 @@ function _dockPositionWrapper() {
 
     // On mobile, add a small gap so slider thumbs don't bleed into the
     // semi-transparent waterfall controls bar.
-    const gap = _dockIsMobile() ? 4 : 0;
+    const gap = _dockIsMobile() ? 12 : 0;
     // Position the bottom of the wrapper at the top of the controls bar
     wrapper.style.top    = (barRect.top - wrapperHeight - gap) + 'px';
     wrapper.style.left   = barRect.left + 'px';

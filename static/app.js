@@ -14179,9 +14179,13 @@ function _dockApply() {
     if (_dockIsMobile()) {
         // On mobile: extend the waterfall to fill the full viewport height so
         // the controls overlay floats over it and no space is wasted below.
-        const vh = window.innerHeight;
-        document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
-        document.documentElement.style.setProperty('--waterfall-height', (vh - 300) + 'px');
+        // Defer one rAF so the wrapper has been laid out and offsetHeight is accurate.
+        requestAnimationFrame(() => {
+            const vh = window.innerHeight;
+            const overlayH = wrapper.offsetHeight || 0;
+            document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
+            document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - overlayH) + 'px');
+        });
         // Don't persist this to localStorage — it's a mobile-only override.
     } else {
         // Desktop: ensure waterfall is tall enough to be useful when docked
@@ -14271,9 +14275,13 @@ function initControlsDock() {
                     _dockApply();
                 } else {
                     // Already docked — just refresh the full-height waterfall size.
-                    const vh = window.innerHeight;
-                    document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
-                    document.documentElement.style.setProperty('--waterfall-height', (vh - 300) + 'px');
+                    // Use actual overlay height so the waterfall fills the remaining space.
+                    requestAnimationFrame(() => {
+                        const vh = window.innerHeight;
+                        const overlayH = wrapper.offsetHeight || 0;
+                        document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
+                        document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - overlayH) + 'px');
+                    });
                 }
             } else {
                 // Desktop: dock only if the user preference says so.

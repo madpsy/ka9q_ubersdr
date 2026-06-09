@@ -2157,12 +2157,12 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* On mobile: put bandwidth and squelch sliders side-by-side.
+    /* On mobile: put bandwidth and SNR squelch sliders side-by-side.
        The parent .control-group gets class 'bw-squelch-row' added by JS on
        mobile, which switches it to flex-row layout. */
     .bw-squelch-row {
         flex-direction: row !important;
-        flex-wrap: wrap !important;
+        flex-wrap: nowrap !important;
         align-items: flex-start !important;
         gap: 6px !important;
     }
@@ -2173,7 +2173,7 @@ input[type="range"]::-moz-range-thumb {
         width: 100% !important;
     }
 
-    /* Bandwidth and squelch share the row equally; NR button is auto-sized */
+    /* Bandwidth and SNR squelch share the row equally; NR button is auto-sized */
     .bw-squelch-row > #bandwidth-controls,
     .bw-squelch-row > #squelch-controls,
     .bw-squelch-row > #snr-squelch-row {
@@ -2185,40 +2185,50 @@ input[type="range"]::-moz-range-thumb {
     }
 
     /* SNR squelch row when moved into bw-squelch-row:
-       label + value on one line, slider wraps to fill full width below */
+       flex-row + wrap so label(order:1) and value-span(order:2) share the top
+       line, then slider(order:3, flex-basis:100%) wraps to its own full-width line. */
     .bw-squelch-row > #snr-squelch-row {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: wrap !important;
-        align-items: center !important;
-        gap: 4px !important;
+        align-items: flex-start !important;
+        gap: 0 !important;
         padding-bottom: 0;
     }
 
     .bw-squelch-row > #snr-squelch-row label {
-        font-size: 0.85em;
-        font-weight: bold;
+        order: 1 !important;
+        flex: 0 0 auto !important;
         min-width: unset !important;
-        flex: 0 0 auto !important;
+        font-size: 0.9em;
+        font-weight: bold;
+        /* Match the .control-group label margin-bottom so sliders align;
+           small right gap between label and value span */
+        margin: 0 4px 8px 0 !important;
     }
 
-    /* Value span stays on the same line as the label */
+    /* Value span: reordered to appear right of label on the top line */
     .bw-squelch-row > #snr-squelch-row #snr-squelch-value {
+        order: 2 !important;
         flex: 0 0 auto !important;
-        font-size: 0.85em;
+        min-width: unset !important;
+        font-size: 0.9em;
+        /* Align with label baseline */
+        margin-bottom: 8px !important;
     }
 
-    /* Slider wraps to its own full-width line */
+    /* Slider: wraps to its own full-width second line */
     .bw-squelch-row > #snr-squelch-row input[type="range"] {
+        order: 3 !important;
         flex: 0 0 100% !important;
         width: 100% !important;
         margin: 0 !important;
     }
 
-    /* NR button moved next to SNR squelch on mobile */
+    /* NR button: align to bottom of its flex cell, next to the slider */
     .bw-squelch-row > #nr2-quick-toggle {
         flex: 0 0 auto !important;
-        align-self: center !important;
+        align-self: flex-end !important;
         margin-bottom: 0;
     }
 

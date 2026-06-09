@@ -14181,22 +14181,20 @@ function _dockApply() {
     }
 
     if (_dockIsMobile()) {
-        // On mobile: add class to the .control-group containing #bandwidth-controls
-        // so CSS can lay out bandwidth + SNR squelch side-by-side in a flex row.
+        // On mobile: create a dedicated flex-row wrapper for bandwidth + SNR squelch
+        // + NR button. Insert it in place of #bandwidth-controls, then move the
+        // three elements into it. This avoids touching the parent .control-group
+        // which also contains mode buttons and bookmark search.
         const bwEl = document.getElementById('bandwidth-controls');
         if (bwEl && bwEl.parentElement) {
-            bwEl.parentElement.classList.add('bw-squelch-row');
-            // Move #snr-squelch-row from .audio-controls into this row so it
-            // sits next to the bandwidth slider.
+            const wrapper = document.createElement('div');
+            wrapper.id = 'bw-squelch-row';
+            bwEl.parentElement.insertBefore(wrapper, bwEl);
+            wrapper.appendChild(bwEl);
             const snrRow = document.getElementById('snr-squelch-row');
-            if (snrRow) {
-                bwEl.parentElement.appendChild(snrRow);
-            }
-            // Move #nr2-quick-toggle next to the SNR squelch slider.
+            if (snrRow) wrapper.appendChild(snrRow);
             const nrBtn = document.getElementById('nr2-quick-toggle');
-            if (nrBtn) {
-                bwEl.parentElement.appendChild(nrBtn);
-            }
+            if (nrBtn) wrapper.appendChild(nrBtn);
         }
 
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
@@ -14253,9 +14251,14 @@ function _dockRemove() {
     wrapper.remove();
 
     // Remove mobile-only class and restore moved elements to their original parents
-    const bwEl = document.getElementById('bandwidth-controls');
-    if (bwEl && bwEl.parentElement) {
-        bwEl.parentElement.classList.remove('bw-squelch-row');
+    // Unwrap the mobile #bw-squelch-row wrapper: move #bandwidth-controls back to
+    // its original parent, restore #snr-squelch-row to #volume-squelch-group,
+    // restore #nr2-quick-toggle to #audio-buttons-group, then remove the wrapper.
+    const bwSqRow = document.getElementById('bw-squelch-row');
+    if (bwSqRow) {
+        const bwEl = document.getElementById('bandwidth-controls');
+        if (bwEl) bwSqRow.parentElement.insertBefore(bwEl, bwSqRow);
+        bwSqRow.remove();
     }
     const snrRow = document.getElementById('snr-squelch-row');
     const volSqGroup = document.getElementById('volume-squelch-group');

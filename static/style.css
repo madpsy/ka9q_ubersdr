@@ -2112,20 +2112,6 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* On mobile .controls uses scale(0.9) not scale(0.75), so the margin
-       compensation values are different from the desktop dock overlay rules.
-       Override the desktop -60px with the mobile-correct -30px. */
-    #dock-overlay-wrapper .controls {
-        margin-bottom: -30px !important;
-    }
-
-    /* On mobile .audio-controls has transform:none (no scale), so there is no
-       scale-gap to close. Reset the desktop -70px top margin to 0. */
-    #dock-overlay-wrapper .audio-controls {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
-    }
-
     #local-time {
         display: none;
     }
@@ -2194,34 +2180,46 @@ input[type="range"]::-moz-range-thumb {
         flex: 1 1 0 !important;
         min-width: 0 !important;
         margin-top: 0 !important;
-        padding-bottom: 12px;
+        padding-bottom: 0;
         box-sizing: border-box;
     }
 
-    /* SNR squelch row when moved into bw-squelch-row: stack label above slider */
+    /* SNR squelch row when moved into bw-squelch-row:
+       label + value on one line, slider wraps to fill full width below */
     .bw-squelch-row > #snr-squelch-row {
         display: flex !important;
-        flex-direction: column !important;
-        gap: 2px !important;
-        padding-bottom: 12px;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        gap: 4px !important;
+        padding-bottom: 0;
     }
 
     .bw-squelch-row > #snr-squelch-row label {
         font-size: 0.85em;
         font-weight: bold;
         min-width: unset !important;
+        flex: 0 0 auto !important;
     }
 
+    /* Value span stays on the same line as the label */
+    .bw-squelch-row > #snr-squelch-row #snr-squelch-value {
+        flex: 0 0 auto !important;
+        font-size: 0.85em;
+    }
+
+    /* Slider wraps to its own full-width line */
     .bw-squelch-row > #snr-squelch-row input[type="range"] {
+        flex: 0 0 100% !important;
         width: 100% !important;
-        flex: unset !important;
+        margin: 0 !important;
     }
 
     /* NR button moved next to SNR squelch on mobile */
     .bw-squelch-row > #nr2-quick-toggle {
         flex: 0 0 auto !important;
-        align-self: flex-end !important;
-        margin-bottom: 12px;
+        align-self: center !important;
+        margin-bottom: 0;
     }
 
     /* Hide the bandwidth slider toggle button on narrow screens */
@@ -2229,31 +2227,9 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* On mobile, hide most of audio-controls but keep NR/NB buttons visible */
-    /* Reset the negative margins that are designed for the full desktop layout */
+    /* On mobile, hide the entire audio-controls panel — NR button is moved into
+       .bw-squelch-row by JS, so nothing useful remains here. */
     .audio-controls {
-        margin-top: 0;
-        margin-bottom: 0;
-        transform: none;
-        justify-content: center;
-        padding: 5px 10px;
-    }
-    .audio-controls > .control-group:not(#audio-buttons-group):not(#volume-squelch-group) {
-        display: none !important;
-    }
-    /* On mobile, #snr-squelch-row is moved to .bw-squelch-row by JS,
-       leaving #volume-squelch-group empty — hide it entirely. */
-    #volume-squelch-group {
-        display: none !important;
-    }
-    #volume-row {
-        display: none !important;
-    }
-    #mute-btn,
-    #rmn-btn-group,
-    #eq-quick-toggle,
-    #rec-btn,
-    #nb-quick-toggle {
         display: none !important;
     }
     

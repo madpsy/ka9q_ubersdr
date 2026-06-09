@@ -1065,6 +1065,11 @@ func main() {
 	}
 	defer dxCluster.Stop()
 
+	// Expose the DX cluster client to the voice activity package so that
+	// voice activity responses can be enriched with spotted callsigns.
+	// activeDXCluster is read-only after this point; no mutex needed.
+	activeDXCluster = dxCluster
+
 	// Load CW Skimmer configuration from cwskimmer.yaml if it exists
 	cwskimmerPath := "cwskimmer.yaml"
 	if *configDir != "." {

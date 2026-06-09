@@ -34,6 +34,12 @@ var voiceActivityCache = &VoiceActivityCache{
 	cache: make(map[string]map[uint64]*CachedVoiceActivity),
 }
 
+// activeDXCluster is set at startup (main.go) when the DX cluster client is
+// initialised. It is read-only after that point so no mutex is needed here.
+// Voice activity handlers use it to enrich responses with spotted callsigns.
+// May be nil if the DX cluster is not configured.
+var activeDXCluster *DXClusterClient
+
 // StartVoiceActivityBackgroundScanner starts a background goroutine that continuously
 // scans all bands for voice activity to keep the cache populated
 func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
@@ -171,6 +177,27 @@ type VoiceActivity struct {
 	// Internal
 	StartBin int `json:"start_bin"`
 	EndBin   int `json:"end_bin"`
+
+	// DX cluster enrichment — populated when a callsign has been spotted on this
+	// frequency within the last 30 minutes and the DX cluster is enabled.
+	// Omitted from JSON when empty so existing clients are unaffected.
+	DXCallsign string `json:"dx_callsign,omitempty"`
+}
+
+// enrichWithDXCallsigns annotates each VoiceActivity with a spotted callsign from
+// the DX cluster frequency index, if one exists within the configured TTL.
+// Safe to call with a nil or disabled DX cluster — returns the slice unchanged.
+// Never modifies the original slice header; always operates on the elements in place.
+func enrichWithDXCallsigns(activities []VoiceActivity) []VoiceActivity {
+	if activeDXCluster == nil || !activeDXCluster.config.Enabled {
+		return activities
+	}
+	for i := range activities {
+		if call := activeDXCluster.LookupCallsignByFreq(activities[i].EstimatedDialFreq); call != "" {
+			activities[i].DXCallsign = call
+		}
+	}
+	return activities
 }
 
 // VoiceActivityResponse represents the API response
@@ -1208,6 +1235,9 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	}
 	activities = filteredActivities
 
+	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil)
+	activities = enrichWithDXCallsigns(activities)
+
 	// Get averaged FFT for noise floor calculation and timestamp
 	fft := buffer.GetAveragedFFT(5 * time.Second)
 	var noiseFloor float32
@@ -1282,6 +1312,9 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 		}
 	}
 
+	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil)
+	filtered = enrichWithDXCallsigns(filtered)
+
 	return filtered, nil
 }
 
@@ -1339,6 +1372,9 @@ func GetVoiceActivityResponseForBand(nfm *NoiseFloorMonitor, band string, params
 			filtered = append(filtered, activity)
 		}
 	}
+
+	// Enrich with DX cluster callsigns (no-op when DX cluster is disabled/nil)
+	filtered = enrichWithDXCallsigns(filtered)
 
 	fft := buffer.GetAveragedFFT(5 * time.Second)
 	var noiseFloor float32

@@ -23,6 +23,12 @@ type DXSpot struct {
 	Continent string    `json:"continent"` // Continent code from CTY lookup
 }
 
+// dxFreqEntry holds the most recently spotted callsign for a frequency bucket
+type dxFreqEntry struct {
+	DXCall string
+	Time   time.Time
+}
+
 // frequencyToBand converts a frequency in Hz to an amateur radio band name
 func frequencyToBand(freqHz float64) string {
 	// Convert to MHz for easier comparison
@@ -83,6 +89,13 @@ type DXClusterClient struct {
 	spotBuffer        []DXSpot // Circular buffer for last N spots
 	bufferSize        int      // Maximum buffer size
 	prometheusMetrics *PrometheusMetrics
+
+	// Frequency index for voice activity enrichment.
+	// Keyed by (freqHz/500)*500 — same 500 Hz bucket used by VoiceActivityCache.
+	// Uses its own mutex, completely independent of c.mu.
+	freqIndex   map[uint64]dxFreqEntry
+	freqIndexMu sync.RWMutex
+	spotTTL     time.Duration // How long a spot remains valid (default 30 minutes)
 }
 
 // NewDXClusterClient creates a new DX cluster client
@@ -94,6 +107,8 @@ func NewDXClusterClient(config *DXClusterConfig) *DXClusterClient {
 		messageHandlers: make([]func(string), 0),
 		spotBuffer:      make([]DXSpot, 0, 100),
 		bufferSize:      100,
+		freqIndex:       make(map[uint64]dxFreqEntry),
+		spotTTL:         30 * time.Minute,
 	}
 }
 
@@ -116,6 +131,21 @@ func (c *DXClusterClient) Start() error {
 
 	// Start connection in background
 	go c.connectionLoop()
+
+	// Start frequency index pruning goroutine.
+	// Uses stopChan so it exits cleanly when Stop() is called.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.stopChan:
+				return
+			case <-ticker.C:
+				c.pruneFreqIndex()
+			}
+		}
+	}()
 
 	return nil
 }
@@ -460,6 +490,9 @@ func (c *DXClusterClient) processLine(line string) {
 		// Add to buffer
 		c.addSpotToBuffer(spot)
 
+		// Index the spot for voice activity frequency lookups
+		c.indexSpot(spot)
+
 		// Call spot handlers
 		c.mu.RLock()
 		handlers := c.spotHandlers
@@ -674,4 +707,61 @@ func (c *DXClusterClient) GetBufferedSpots() []DXSpot {
 	spots := make([]DXSpot, len(c.spotBuffer))
 	copy(spots, c.spotBuffer)
 	return spots
+}
+
+// indexSpot writes the spot into the frequency index so voice activity handlers
+// can look up spotted callsigns by frequency.
+// Uses freqIndexMu — completely independent of c.mu to avoid any lock ordering issues.
+func (c *DXClusterClient) indexSpot(spot DXSpot) {
+	if spot.Frequency <= 0 || spot.DXCall == "" {
+		return
+	}
+	// Round to 500 Hz bucket — matches VoiceActivityCache key strategy exactly.
+	key := uint64(spot.Frequency/500) * 500
+
+	c.freqIndexMu.Lock()
+	c.freqIndex[key] = dxFreqEntry{
+		DXCall: spot.DXCall,
+		Time:   spot.Time,
+	}
+	c.freqIndexMu.Unlock()
+}
+
+// LookupCallsignByFreq returns the most recently spotted callsign for a given
+// dial frequency (Hz), or an empty string if no valid spot exists within the TTL.
+// Safe to call from any goroutine; never panics.
+func (c *DXClusterClient) LookupCallsignByFreq(dialFreqHz uint64) string {
+	if c == nil {
+		return ""
+	}
+	if !c.config.Enabled {
+		return ""
+	}
+	key := (dialFreqHz / 500) * 500
+
+	c.freqIndexMu.RLock()
+	entry, ok := c.freqIndex[key]
+	c.freqIndexMu.RUnlock()
+
+	if !ok {
+		return ""
+	}
+	if time.Since(entry.Time) > c.spotTTL {
+		return ""
+	}
+	return entry.DXCall
+}
+
+// pruneFreqIndex removes entries from the frequency index that are older than spotTTL.
+// Called periodically by the prune goroutine started in Start().
+func (c *DXClusterClient) pruneFreqIndex() {
+	cutoff := time.Now().Add(-c.spotTTL)
+
+	c.freqIndexMu.Lock()
+	for key, entry := range c.freqIndex {
+		if entry.Time.Before(cutoff) {
+			delete(c.freqIndex, key)
+		}
+	}
+	c.freqIndexMu.Unlock()
 }

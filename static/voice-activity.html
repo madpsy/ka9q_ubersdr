@@ -819,8 +819,13 @@
 
             const dxCallsign = activity.dx_callsign || '';
 
+            const callsignAttr = dxCallsign ? ` data-callsign="${dxCallsign}"` : '';
+            const onclickAttr = dxCallsign
+                ? `tuneToFrequency(${dialFreq}, '${mode}'); lookupDXCallsign('${dxCallsign}')`
+                : `tuneToFrequency(${dialFreq}, '${mode}')`;
+
             return `
-                <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}')">
+                <div class="activity-item" onclick="${onclickAttr}"${callsignAttr}>
                     <div class="frequency">${freq}</div>
                     <div>
                         <span class="mode">${modeUpper}</span>
@@ -831,6 +836,24 @@
                     <div class="snr">${signalAboveNoise}</div>
                 </div>
             `;
+        }
+
+        // Trigger a lookup in the already-open callsign_lookup.html popup (if any).
+        // Only fires if the window is open — never opens a new window.
+        function lookupDXCallsign(callsign) {
+            if (!callsign) return;
+            // Normalise: strip /suffix and prefix/, keep longest segment
+            const base = callsign.split('/').reduce((a, b) => b.length > a.length ? b : a, '');
+            if (!base) return;
+            try {
+                const lw = window.opener && window.opener._callsignLookupWindow;
+                if (lw && !lw.closed) {
+                    lw.postMessage({ type: 'callsign_lookup', callsign: base }, window.location.origin);
+                    lw.focus();
+                }
+            } catch (e) {
+                // Cross-origin or closed window — silently ignore
+            }
         }
 
         function formatFrequency(hz) {

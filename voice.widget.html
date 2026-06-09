@@ -103,22 +103,11 @@
     min-width: 72px;
   }
 
-  .va-callsign {
-    font-size: 10px;
-    font-weight: bold;
-    color: rgba(255, 220, 100, 0.9);
-    letter-spacing: 0.3px;
-    flex: 1;
-    text-align: center;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .va-snr {
     font-size: 10px;
     font-weight: normal;
     color: rgba(255,255,255,0.75);
+    margin-left: auto;
     flex-shrink: 0;
   }
 
@@ -299,11 +288,15 @@
       var snrClass = snr == null ? '' : snr >= 10 ? 'va-snr-strong' : snr >= 5 ? 'va-snr-good' : 'va-snr-weak';
 
       var callsign = act.dx_callsign || '';
+      // Show callsign in yellow instead of dB level when available
+      var rightCol = callsign
+        ? '<span class="va-snr" style="color:rgba(255,220,100,0.9);font-weight:bold;">' + callsign + '</span>'
+        : (snrStr ? '<span class="va-snr ' + snrClass + '">' + snrStr + '</span>' : '');
 
-      return '<div class="va-row" data-freq="' + hz + '" data-mode="' + mode.toLowerCase() + '">' +
+      return '<div class="va-row" data-freq="' + hz + '" data-mode="' + mode.toLowerCase() + '"' +
+               (callsign ? ' data-callsign="' + callsign + '"' : '') + '>' +
                '<span class="va-freq">' + freq + '</span>' +
-               '<span class="va-callsign">' + callsign + '</span>' +
-               (snrStr ? '<span class="va-snr ' + snrClass + '">' + snrStr + '</span>' : '') +
+               rightCol +
              '</div>';
     }).join('');
 
@@ -313,9 +306,14 @@
     bodyEl.querySelectorAll('.va-row').forEach(function (row) {
       row.addEventListener('click', function () {
         if (wasDragged) return;
-        var hz   = parseFloat(row.getAttribute('data-freq'));
-        var mode = row.getAttribute('data-mode');
+        var hz       = parseFloat(row.getAttribute('data-freq'));
+        var mode     = row.getAttribute('data-mode');
+        var callsign = row.getAttribute('data-callsign');
         tuneToFrequency(hz, mode);
+        // Trigger QRZ lookup if the widget is available and a callsign is known
+        if (callsign && typeof window.lookupCallsign === 'function') {
+          window.lookupCallsign(callsign);
+        }
       });
     });
 

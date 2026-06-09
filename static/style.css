@@ -2178,8 +2178,9 @@ input[type="range"]::-moz-range-thumb {
         box-sizing: border-box;
     }
 
-    /* SNR squelch row: flex-row + wrap so label+value share top line,
-       slider wraps to its own full-width line below */
+    /* SNR squelch row: flex-row + wrap.
+       JS reorders DOM to: label | span | slider
+       so label+value share top line, slider wraps to full-width line below. */
     #bw-squelch-row > #snr-squelch-row {
         display: flex !important;
         flex-direction: row !important;
@@ -2189,7 +2190,6 @@ input[type="range"]::-moz-range-thumb {
     }
 
     #bw-squelch-row > #snr-squelch-row label {
-        order: 1 !important;
         flex: 0 0 auto !important;
         min-width: unset !important;
         font-size: 0.9em;
@@ -2198,7 +2198,6 @@ input[type="range"]::-moz-range-thumb {
     }
 
     #bw-squelch-row > #snr-squelch-row #snr-squelch-value {
-        order: 2 !important;
         flex: 0 0 auto !important;
         min-width: unset !important;
         font-size: 0.9em;
@@ -2206,7 +2205,6 @@ input[type="range"]::-moz-range-thumb {
     }
 
     #bw-squelch-row > #snr-squelch-row input[type="range"] {
-        order: 3 !important;
         flex: 0 0 100% !important;
         width: 100% !important;
         margin: 0 !important;

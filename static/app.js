@@ -14192,7 +14192,19 @@ function _dockApply() {
             bwEl.parentElement.insertBefore(wrapper, bwEl);
             wrapper.appendChild(bwEl);
             const snrRow = document.getElementById('snr-squelch-row');
-            if (snrRow) wrapper.appendChild(snrRow);
+            if (snrRow) {
+                // Reorder children of snrRow so label+span come before the slider,
+                // giving us: [Squelch] [Off] on line 1, [slider] on line 2.
+                // Original DOM order: label | input | span
+                const snrLabel = snrRow.querySelector('label');
+                const snrSlider = document.getElementById('snr-squelch-slider');
+                const snrValue = document.getElementById('snr-squelch-value');
+                if (snrLabel && snrSlider && snrValue) {
+                    // Move span to be right after label (before slider)
+                    snrRow.insertBefore(snrValue, snrSlider);
+                }
+                wrapper.appendChild(snrRow);
+            }
             const nrBtn = document.getElementById('nr2-quick-toggle');
             if (nrBtn) wrapper.appendChild(nrBtn);
         }
@@ -14263,6 +14275,12 @@ function _dockRemove() {
     const snrRow = document.getElementById('snr-squelch-row');
     const volSqGroup = document.getElementById('volume-squelch-group');
     if (snrRow && volSqGroup && snrRow.parentElement !== volSqGroup) {
+        // Restore span to original position: after the slider (label | slider | span)
+        const snrSlider = document.getElementById('snr-squelch-slider');
+        const snrValue = document.getElementById('snr-squelch-value');
+        if (snrSlider && snrValue && snrValue.previousSibling !== snrSlider) {
+            snrRow.appendChild(snrValue); // move span to end
+        }
         volSqGroup.appendChild(snrRow);
     }
     const nrBtn = document.getElementById('nr2-quick-toggle');

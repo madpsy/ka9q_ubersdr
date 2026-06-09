@@ -317,14 +317,10 @@ class RotatorUI {
             
             /* Mobile responsive styles */
             @media (max-width: 768px) {
-                .rotator-panel.expanded {
-                    width: 100vw;
-                    left: 0;
-                }
-                
-                .rotator-content {
-                    width: calc(100vw - 40px);
-                    height: 400px;
+                /* Hide the rotator tab entirely on mobile — the docked controls
+                   overlay fills the left edge and the panel would be unusable */
+                .rotator-panel {
+                    display: none !important;
                 }
             }
             

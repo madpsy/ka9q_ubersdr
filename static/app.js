@@ -14208,8 +14208,12 @@ function _dockApply() {
                 }
                 wrapper.appendChild(snrRow);
             }
+            // Move NR button to the frequency input row (next to step dropdown/btns/wheel)
             const nrBtn = document.getElementById('nr2-quick-toggle');
-            if (nrBtn) wrapper.appendChild(nrBtn);
+            const freqScrollCtrl = document.getElementById('frequency-scroll-controls');
+            if (nrBtn && freqScrollCtrl && freqScrollCtrl.parentElement) {
+                freqScrollCtrl.parentElement.appendChild(nrBtn);
+            }
         }
 
         // On mobile: CSS sets .spectrum-display-container to 100dvh.

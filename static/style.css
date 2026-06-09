@@ -2157,8 +2157,8 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* On mobile: #bw-squelch-row is a wrapper div created by JS containing only
-       #bandwidth-controls, #snr-squelch-row, and #nr2-quick-toggle.
+    /* On mobile: #bw-squelch-row is a wrapper div created by JS containing
+       #bandwidth-controls and #snr-squelch-row side-by-side.
        It sits inside the second .control-group of .controls, after the mode buttons. */
     #bw-squelch-row {
         display: flex !important;
@@ -2216,10 +2216,10 @@ input[type="range"]::-moz-range-thumb {
         box-sizing: border-box !important;
     }
 
-    /* NR button: align to bottom of its flex cell */
-    #bw-squelch-row > #nr2-quick-toggle {
-        flex: 0 0 auto !important;
-        align-self: flex-end !important;
+    /* NR button moved to frequency input row on mobile — no special sizing needed,
+       the parent flex row handles alignment. Hide NB button. */
+    #nb-quick-toggle {
+        display: none !important;
     }
 
     /* Hide the bandwidth slider toggle button on narrow screens */

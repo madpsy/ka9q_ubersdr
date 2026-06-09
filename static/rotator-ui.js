@@ -676,6 +676,9 @@ let rotatorUI = null;
  * Call this after checking if rotator is enabled
  */
 function initializeRotatorUI() {
+    // Don't create the rotator panel on mobile — it overlaps the docked
+    // controls overlay and is not usable on a narrow screen.
+    if (window.innerWidth <= 1024) return;
     if (!rotatorUI) {
         rotatorUI = new RotatorUI();
         // Expose globally for debugging and access

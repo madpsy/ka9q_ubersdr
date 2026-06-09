@@ -2204,11 +2204,13 @@ input[type="range"]::-moz-range-thumb {
         margin-bottom: 8px !important;
     }
 
-    #bw-squelch-row > #snr-squelch-row input[type="range"] {
+    /* Target both the slider directly and the wrapper div that initSNRSquelch()
+       creates around it (position:relative flex:1 div with the SNR marker). */
+    #bw-squelch-row > #snr-squelch-row input[type="range"],
+    #bw-squelch-row > #snr-squelch-row > div {
         flex: 0 0 100% !important;
         width: 100% !important;
         min-width: 100% !important;
-        max-width: 100% !important;
         margin: 0 !important;
         box-sizing: border-box !important;
     }

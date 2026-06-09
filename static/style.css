@@ -2167,6 +2167,7 @@ input[type="range"]::-moz-range-thumb {
         align-items: flex-start !important;
         gap: 6px !important;
         width: 100%;
+        padding-bottom: 8px;
     }
 
     /* Bandwidth and SNR squelch share the row equally */

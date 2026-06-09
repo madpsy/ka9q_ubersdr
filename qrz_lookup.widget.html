@@ -169,12 +169,48 @@
     margin: 0 auto;
     object-fit: cover;
     border: 1px solid rgba(255,255,255,0.15);
+    cursor: zoom-in;
+    transition: opacity 0.15s;
+  }
+
+  #qrz-photo:hover {
+    opacity: 0.85;
+  }
+
+  /* Photo modal overlay */
+  #qrz-photo-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: rgba(0,0,0,0.82);
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+  }
+
+  #qrz-photo-modal.qrz-modal-open {
+    display: flex;
+  }
+
+  #qrz-photo-modal img {
+    max-width: 90vw;
+    max-height: 90vh;
+    border-radius: 6px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+    object-fit: contain;
+    pointer-events: none;
   }
 
   @media (max-width: 768px) {
     #qrz-widget { display: none !important; }
   }
 </style>
+
+<!-- Photo modal — appended to body so it overlays everything -->
+<div id="qrz-photo-modal" role="dialog" aria-modal="true" aria-label="Photo enlarged">
+  <img id="qrz-modal-img" alt="" />
+</div>
 
 <div id="qrz-widget" style="display:none;">
   <div id="qrz-widget-header">
@@ -204,10 +240,34 @@
   var goBtn     = document.getElementById('qrz-go-btn');
   var statusEl  = document.getElementById('qrz-status');
   var resultEl  = document.getElementById('qrz-result');
+  var photoModal = document.getElementById('qrz-photo-modal');
+  var modalImg   = document.getElementById('qrz-modal-img');
 
   var dragState  = null;
   var wasDragged = false;
   var dismissed  = false;
+
+  // ── Photo modal ──────────────────────────────────────────────────────────
+  function openPhotoModal(src, alt) {
+    modalImg.src = src;
+    modalImg.alt = alt || '';
+    photoModal.classList.add('qrz-modal-open');
+  }
+
+  function closePhotoModal() {
+    photoModal.classList.remove('qrz-modal-open');
+    modalImg.removeAttribute('src');
+  }
+
+  photoModal.addEventListener('click', function () {
+    closePhotoModal();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && photoModal.classList.contains('qrz-modal-open')) {
+      closePhotoModal();
+    }
+  });
 
   // ── Wait for lookup service availability ─────────────────────────────────
   (function waitForLookupService() {
@@ -390,6 +450,16 @@
 
     resultEl.innerHTML = html;
     resultEl.style.display = '';
+
+    // Wire up photo click → modal
+    if (imageUrl) {
+      var photoEl = document.getElementById('qrz-photo');
+      if (photoEl) {
+        photoEl.addEventListener('click', function () {
+          openPhotoModal(photoEl.src, photoEl.alt);
+        });
+      }
+    }
   }
 
   function esc(str) {

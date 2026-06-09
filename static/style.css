@@ -2076,6 +2076,12 @@ input[type="range"]::-moz-range-thumb {
         overflow-y: visible !important;
     }
 
+    /* Hide the waterfall drag-resize handle on mobile — waterfall fills full
+       viewport height and cannot be resized */
+    .waterfall-resize-handle {
+        display: none !important;
+    }
+
     #local-time {
         display: none;
     }

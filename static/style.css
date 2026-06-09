@@ -2171,21 +2171,21 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
 
-    /* On mobile: put bandwidth and squelch sliders side-by-side in one row.
-       The parent .control-group (which contains #bandwidth-controls and
-       #squelch-controls as siblings) is already flex-direction:column from the
-       mobile .controls rule. We switch it to flex-row for just those two
-       children by wrapping them with a :has() selector on the parent. */
-    .controls .control-group:has(#bandwidth-controls) {
+    /* On mobile: put bandwidth and squelch sliders side-by-side.
+       Switch the parent .control-group (identified via :has) to a flex row
+       with wrap, then force all other children to full width so they still
+       stack, while bandwidth and squelch share the remaining row space. */
+    .controls .control-group:has(> #bandwidth-controls) {
         flex-direction: row !important;
-        flex-wrap: wrap;
+        flex-wrap: wrap !important;
         align-items: flex-start;
-        gap: 8px;
+        gap: 6px;
     }
 
-    /* Items that should still stack vertically (everything except the sliders) */
-    .controls .control-group:has(#bandwidth-controls) > *:not(#bandwidth-controls):not(#squelch-controls) {
-        flex: 0 0 100%;
+    /* All direct children except the two sliders take the full row */
+    .controls .control-group:has(> #bandwidth-controls) > *:not(#bandwidth-controls):not(#squelch-controls) {
+        flex: 0 0 100% !important;
+        width: 100% !important;
     }
 
     /* Bandwidth and squelch share the row equally */

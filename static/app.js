@@ -6783,6 +6783,50 @@ function toggleNR2Quick() {
     setNoiseReductionMode(nextMode);
 }
 
+/**
+ * Turn NR off immediately — used by right-click on the NR button.
+ * Handles both server-side DSP and client-side NR engines.
+ */
+function _nrTurnOff() {
+    const dsp = window.instanceDescription && window.instanceDescription.dsp;
+    if (dsp && dsp.enabled && Array.isArray(dsp.filters) && dsp.filters.length > 0) {
+        // Server-side: force index to -1 (off) and send disable
+        _serverNRFilterIndex = -1;
+        if (wsManager && wsManager.isConnected()) {
+            wsManager.send({ type: 'set_dsp', enabled: false });
+        }
+        const btn = document.getElementById('nr2-quick-toggle');
+        if (btn) {
+            btn.textContent = 'NR';
+            btn.style.backgroundColor = '#6c757d';
+        }
+    } else {
+        // Client-side: set mode to off
+        if (noiseReductionMode !== 'off') {
+            setNoiseReductionMode('off');
+        }
+    }
+    showNotification('Noise Reduction off', 'info', 1500);
+}
+
+// Attach right-click → instant NR off on the NR button
+(function _initNRRightClick() {
+    function _attach() {
+        const btn = document.getElementById('nr2-quick-toggle');
+        if (!btn || btn._nrRightClickBound) return;
+        btn._nrRightClickBound = true;
+        btn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            _nrTurnOff();
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _attach);
+    } else {
+        _attach();
+    }
+})();
+
 // Quick toggle for Noise Blanker
 function toggleNBQuick() {
     noiseBlankerEnabled = !noiseBlankerEnabled;

@@ -394,6 +394,45 @@ function toggleEQQuick() {
     }
 }
 
+/**
+ * Turn EQ off immediately — used by right-click on the EQ button.
+ */
+function _eqTurnOff() {
+    if (eqQuickState === 'off') return; // already off
+    const button = document.getElementById('eq-quick-toggle');
+    const checkbox = document.getElementById('equalizer-enable');
+    eqQuickState = 'off';
+    if (checkbox && checkbox.checked) {
+        checkbox.checked = false;
+        toggleEqualizer();
+    }
+    if (button) {
+        button.textContent = 'EQ';
+        button.style.backgroundColor = '#6c757d';
+    }
+    if (typeof showNotification === 'function') {
+        showNotification('EQ off', 'info', 1500);
+    }
+}
+
+// Attach right-click → instant EQ off on the EQ button
+(function _initEQRightClick() {
+    function _attach() {
+        const btn = document.getElementById('eq-quick-toggle');
+        if (!btn || btn._eqRightClickBound) return;
+        btn._eqRightClickBound = true;
+        btn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            _eqTurnOff();
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _attach);
+    } else {
+        _attach();
+    }
+})();
+
 function showEqualizerClipIndicator() {
     const indicator = document.getElementById('equalizer-clip-indicator');
     if (!indicator) return;

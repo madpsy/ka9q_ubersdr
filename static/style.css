@@ -2159,10 +2159,11 @@ input[type="range"]::-moz-range-thumb {
 
     /* On mobile: put bandwidth and SNR squelch sliders side-by-side.
        The parent .control-group gets class 'bw-squelch-row' added by JS on
-       mobile, which switches it to flex-row layout. */
+       mobile, which switches it to flex-row layout. Other children (mode buttons,
+       bookmark search) wrap to their own full-width lines via the :not() rule. */
     .bw-squelch-row {
         flex-direction: row !important;
-        flex-wrap: nowrap !important;
+        flex-wrap: wrap !important;
         align-items: flex-start !important;
         gap: 6px !important;
     }

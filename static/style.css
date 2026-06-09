@@ -2103,7 +2103,6 @@ input[type="range"]::-moz-range-thumb {
         max-height: none !important;
         overflow: visible !important;
         overflow-y: visible !important;
-        background: transparent !important;
     }
 
     /* Hide the waterfall drag-resize handle on mobile — waterfall fills full

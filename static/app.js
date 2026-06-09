@@ -14217,19 +14217,39 @@ function _dockApply() {
         }
 
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
-        // We only need to set --waterfall-height (the canvas inside the container)
-        // = viewport height minus the spectrum-display-controls bar height.
-        // Use a short timeout to ensure the controls bar is fully laid out.
+        // We must also resize the actual waterfall *canvas* to fill the viewport,
+        // otherwise it stays at its default/saved height (e.g. 600px).
+        // spectrumDisplay.setWaterfallHeight() handles canvas resize, CSS vars,
+        // and localStorage — but we override localStorage afterwards so the
+        // mobile-only height doesn't persist to desktop.
         const _applyMobileWaterfallHeight = () => {
             const vh = window.innerHeight;
-            const ctrlBar = document.querySelector('.spectrum-display-controls');
-            const ctrlBarH = ctrlBar ? ctrlBar.offsetHeight : 0;
-            document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - ctrlBarH) + 'px');
+            // In non-split mode, canvas height = fullHeight = 300 + waterfallHeight.
+            // We want fullHeight = vh so the canvas fills the viewport.
+            // Therefore waterfallHeight = vh - 300.
+            const targetH = Math.max(100, vh - 300);
+            // Set CSS variable as fallback
+            document.documentElement.style.setProperty('--waterfall-height', targetH + 'px');
+            document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
+            // Resize the actual canvas via SpectrumDisplay
+            if (window.spectrumDisplay && typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+                window.spectrumDisplay.setWaterfallHeight(targetH);
+                // Don't persist mobile height to localStorage — restore the
+                // previous saved value so desktop gets its own height back.
+                const prev = window._dockSavedWaterfallHeight;
+                if (prev != null) localStorage.setItem('waterfallHeight', String(prev));
+            }
         };
+        // Save the current waterfall height before overriding
+        if (window.spectrumDisplay) {
+            window._dockSavedWaterfallHeight = window.spectrumDisplay.waterfallHeight;
+        } else {
+            window._dockSavedWaterfallHeight = parseInt(localStorage.getItem('waterfallHeight'), 10) || 300;
+        }
         requestAnimationFrame(_applyMobileWaterfallHeight);
-        // Also retry after a short delay in case the controls bar isn't laid out yet
-        setTimeout(_applyMobileWaterfallHeight, 300);
-        // Don't persist this to localStorage — it's a mobile-only override.
+        // Also retry after a short delay in case spectrumDisplay isn't ready yet
+        setTimeout(_applyMobileWaterfallHeight, 500);
+        setTimeout(_applyMobileWaterfallHeight, 1500);
     } else {
         // Desktop: ensure waterfall is tall enough to be useful when docked
         const MIN_DOCKED_HEIGHT = 300;
@@ -14294,6 +14314,13 @@ function _dockRemove() {
     const audioBtnsGroup = document.getElementById('audio-buttons-group');
     if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
         audioBtnsGroup.appendChild(nrBtn);
+    }
+
+    // Restore waterfall canvas height to the saved (pre-mobile) value
+    if (window._dockSavedWaterfallHeight != null && window.spectrumDisplay &&
+        typeof window.spectrumDisplay.setWaterfallHeight === 'function') {
+        window.spectrumDisplay.setWaterfallHeight(window._dockSavedWaterfallHeight);
+        window._dockSavedWaterfallHeight = null;
     }
 
     // Update button state

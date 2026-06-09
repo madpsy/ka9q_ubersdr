@@ -10198,13 +10198,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Restore saved height on page load (before spectrumDisplay is constructed
     // the CSS variable still needs to be set so the container doesn't flash).
-    const saved = parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10);
-    if (saved >= 1) {
-        const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
-            document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
-        const containerH = lineGraphVisible ? 300 + saved : saved;
-        document.documentElement.style.setProperty('--spectrum-container-height', containerH + 'px');
-        document.documentElement.style.setProperty('--waterfall-height', saved + 'px');
+    // On mobile, skip this — CSS sets the container to 100dvh and _dockApply()
+    // will set --waterfall-height after layout.
+    if (window.innerWidth > 1024) {
+        const saved = parseInt(localStorage.getItem(WATERFALL_HEIGHT_KEY), 10);
+        if (saved >= 1) {
+            const lineGraphVisible = document.getElementById('spectrum-line-graph-canvas') &&
+                document.getElementById('spectrum-line-graph-canvas').style.display !== 'none';
+            const containerH = lineGraphVisible ? 300 + saved : saved;
+            document.documentElement.style.setProperty('--spectrum-container-height', containerH + 'px');
+            document.documentElement.style.setProperty('--waterfall-height', saved + 'px');
+        }
     }
 
     // Double-click resets to default (300px)
@@ -14177,19 +14181,19 @@ function _dockApply() {
     }
 
     if (_dockIsMobile()) {
-        // On mobile: extend the waterfall to fill the full viewport height.
-        // The overlay wrapper is position:fixed and floats over the waterfall,
-        // so it does NOT reduce the waterfall canvas height — only the
-        // spectrum-display-controls bar (position:absolute inside the container)
-        // needs to be subtracted from the waterfall canvas height.
-        // Defer one rAF so the controls bar has been laid out.
-        requestAnimationFrame(() => {
+        // On mobile: CSS sets .spectrum-display-container to 100dvh.
+        // We only need to set --waterfall-height (the canvas inside the container)
+        // = viewport height minus the spectrum-display-controls bar height.
+        // Use a short timeout to ensure the controls bar is fully laid out.
+        const _applyMobileWaterfallHeight = () => {
             const vh = window.innerHeight;
             const ctrlBar = document.querySelector('.spectrum-display-controls');
             const ctrlBarH = ctrlBar ? ctrlBar.offsetHeight : 0;
-            document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
             document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - ctrlBarH) + 'px');
-        });
+        };
+        requestAnimationFrame(_applyMobileWaterfallHeight);
+        // Also retry after a short delay in case the controls bar isn't laid out yet
+        setTimeout(_applyMobileWaterfallHeight, 300);
         // Don't persist this to localStorage — it's a mobile-only override.
     } else {
         // Desktop: ensure waterfall is tall enough to be useful when docked
@@ -14278,12 +14282,12 @@ function initControlsDock() {
                 if (!wrapper) {
                     _dockApply();
                 } else {
-                    // Already docked — just refresh the full-height waterfall size.
+                    // Already docked — refresh waterfall canvas height only.
+                    // CSS handles the container height (100dvh).
                     requestAnimationFrame(() => {
                         const vh = window.innerHeight;
                         const ctrlBar = document.querySelector('.spectrum-display-controls');
                         const ctrlBarH = ctrlBar ? ctrlBar.offsetHeight : 0;
-                        document.documentElement.style.setProperty('--spectrum-container-height', vh + 'px');
                         document.documentElement.style.setProperty('--waterfall-height', Math.max(100, vh - ctrlBarH) + 'px');
                     });
                 }

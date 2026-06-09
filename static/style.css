@@ -2058,6 +2058,32 @@ input[type="range"]::-moz-range-thumb {
 
 /* Responsive design */
 @media (max-width: 1024px) {
+    /* Lock the viewport — no scrolling on mobile */
+    html, body {
+        height: 100%;
+        overflow: hidden !important;
+    }
+
+    /* Container fills exactly the viewport */
+    .container {
+        height: 100vh;
+        height: 100dvh; /* dynamic viewport height — accounts for mobile browser chrome */
+        overflow: hidden !important;
+    }
+
+    /* Spectrum panel fills the container */
+    .spectrum-display-panel {
+        padding: 0 !important;
+    }
+
+    /* Spectrum container fills the full viewport height via CSS —
+       no JS timing issues. JS may refine this after layout. */
+    .spectrum-display-container {
+        height: 100vh !important;
+        height: 100dvh !important;
+        min-height: unset !important;
+    }
+
     /* Remove footer entirely on mobile — controls are docked over the waterfall */
     .site-footer {
         display: none !important;
@@ -2074,19 +2100,13 @@ input[type="range"]::-moz-range-thumb {
         max-height: none !important;
         overflow: visible !important;
         overflow-y: visible !important;
+        background: transparent !important;
     }
 
     /* Hide the waterfall drag-resize handle on mobile — waterfall fills full
        viewport height and cannot be resized */
     .waterfall-resize-handle {
         display: none !important;
-    }
-
-    /* On mobile the dock overlay wrapper itself should be fully transparent —
-       the individual panels (.controls, .audio-controls) already have their own
-       backgrounds set by the main CSS rules. */
-    #dock-overlay-wrapper {
-        background: transparent !important;
     }
 
     /* On mobile .controls uses scale(0.9) not scale(0.75), so the margin

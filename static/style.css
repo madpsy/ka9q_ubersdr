@@ -2189,12 +2189,32 @@ input[type="range"]::-moz-range-thumb {
 
     /* Bandwidth and squelch share the row equally */
     .bw-squelch-row > #bandwidth-controls,
-    .bw-squelch-row > #squelch-controls {
+    .bw-squelch-row > #squelch-controls,
+    .bw-squelch-row > #snr-squelch-row {
         flex: 1 1 0 !important;
         min-width: 0 !important;
         margin-top: 0 !important;
         padding-bottom: 12px;
         box-sizing: border-box;
+    }
+
+    /* SNR squelch row when moved into bw-squelch-row: stack label above slider */
+    .bw-squelch-row > #snr-squelch-row {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 2px !important;
+        padding-bottom: 12px;
+    }
+
+    .bw-squelch-row > #snr-squelch-row label {
+        font-size: 0.85em;
+        font-weight: bold;
+        min-width: unset !important;
+    }
+
+    .bw-squelch-row > #snr-squelch-row input[type="range"] {
+        width: 100% !important;
+        flex: unset !important;
     }
 
     /* Hide the bandwidth slider toggle button on narrow screens */
@@ -2214,9 +2234,10 @@ input[type="range"]::-moz-range-thumb {
     .audio-controls > .control-group:not(#audio-buttons-group):not(#volume-squelch-group) {
         display: none !important;
     }
-    /* Show the volume+squelch column on mobile, but hide the volume sub-row */
+    /* On mobile, #snr-squelch-row is moved to .bw-squelch-row by JS,
+       leaving #volume-squelch-group empty — hide it entirely. */
     #volume-squelch-group {
-        display: flex !important;
+        display: none !important;
     }
     #volume-row {
         display: none !important;

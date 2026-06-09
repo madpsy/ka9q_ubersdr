@@ -14182,10 +14182,16 @@ function _dockApply() {
 
     if (_dockIsMobile()) {
         // On mobile: add class to the .control-group containing #bandwidth-controls
-        // so CSS can lay out bandwidth + squelch side-by-side in a flex row.
+        // so CSS can lay out bandwidth + SNR squelch side-by-side in a flex row.
         const bwEl = document.getElementById('bandwidth-controls');
         if (bwEl && bwEl.parentElement) {
             bwEl.parentElement.classList.add('bw-squelch-row');
+            // Move #snr-squelch-row from .audio-controls into this row so it
+            // sits next to the bandwidth slider.
+            const snrRow = document.getElementById('snr-squelch-row');
+            if (snrRow) {
+                bwEl.parentElement.appendChild(snrRow);
+            }
         }
 
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
@@ -14241,10 +14247,15 @@ function _dockRemove() {
     // Remove the now-empty wrapper from <body>
     wrapper.remove();
 
-    // Remove mobile-only class from the bandwidth/squelch parent
+    // Remove mobile-only class and restore #snr-squelch-row to its original parent
     const bwEl = document.getElementById('bandwidth-controls');
     if (bwEl && bwEl.parentElement) {
         bwEl.parentElement.classList.remove('bw-squelch-row');
+    }
+    const snrRow = document.getElementById('snr-squelch-row');
+    const volSqGroup = document.getElementById('volume-squelch-group');
+    if (snrRow && volSqGroup && snrRow.parentElement !== volSqGroup) {
+        volSqGroup.appendChild(snrRow);
     }
 
     // Update button state

@@ -2377,9 +2377,12 @@ input[type="range"]::-moz-range-thumb {
         gap: 10px !important;
     }
 
-    /* Show vertical zoom slider on narrow screens */
+    /* Show vertical zoom slider on narrow screens, fixed 80px from top */
     #spectrum-vzoom-slider {
         display: block !important;
+        top: 80px !important;
+        transform: rotate(-90deg) !important;
+        transform-origin: center center;
     }
 
     input[type="range"]:not(#spectrum-vzoom-slider) {

@@ -13,7 +13,9 @@
     left: 44px;
     z-index: 9500;
     pointer-events: auto;
-    background: rgba(23, 162, 184, 0.92);
+    background: rgba(23, 162, 184, 0.35);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     color: #fff;
     border-radius: 6px;
     padding: 6px 12px 6px 9px;
@@ -23,7 +25,7 @@
     line-height: 1.4;
     white-space: nowrap;
     box-shadow: 0 2px 10px rgba(0,0,0,0.6);
-    border-left: 3px solid rgba(255,255,255,0.6);
+    border-left: 3px solid rgba(255,255,255,0.4);
     cursor: pointer;
     user-select: none;
     opacity: 0;
@@ -42,8 +44,8 @@
   #cw-spot-notification .csn-top {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
+    gap: 6px;
+    padding-right: 18px; /* room for close button */
   }
 
   #cw-spot-notification .csn-callsign {
@@ -59,6 +61,28 @@
     font-weight: bold;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  #cw-spot-notification .csn-close {
+    position: absolute;
+    top: 4px;
+    right: 5px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  #cw-spot-notification .csn-close:hover {
+    color: #fff;
+    background: rgba(0,0,0,0.3);
   }
 
   #cw-spot-notification .csn-meta {
@@ -77,9 +101,16 @@
   #cw-spot-notification.cw-spot-pulse {
     animation: csnPulse 0.5s ease-out;
   }
+
+  @media (max-width: 768px) {
+    #cw-spot-notification {
+      display: none !important;
+    }
+  }
 </style>
 
 <div id="cw-spot-notification" title="Click to tune to this CW spot">
+  <span class="csn-close" id="csn-close" title="Dismiss">&#x2715;</span>
   <div class="csn-top">
     <span class="csn-callsign" id="csn-callsign">--</span>
     <span class="csn-band"     id="csn-band"></span>
@@ -105,6 +136,7 @@
   var callEl  = document.getElementById('csn-callsign');
   var bandEl  = document.getElementById('csn-band');
   var metaEl  = document.getElementById('csn-meta');
+  var closeEl = document.getElementById('csn-close');
 
   function esc(str) {
     return String(str || '')
@@ -157,6 +189,12 @@
       }
     }, 400);
   }
+
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    fadeOut();
+  });
 
   notif.addEventListener('click', function () {
     if (!latestSpot || !latestSpot.frequency) return;

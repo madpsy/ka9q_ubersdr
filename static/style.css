@@ -4771,7 +4771,9 @@ input[type="range"]::-moz-range-thumb {
 #dock-overlay-wrapper .tuning-wheel,
 #dock-overlay-wrapper .s-meter-container,
 #dock-overlay-wrapper .smeter-charts-panel,
-#dock-overlay-wrapper canvas {
+#dock-overlay-wrapper canvas,
+#dock-overlay-wrapper #snr-squelch-value,
+#dock-overlay-wrapper #squelch-value {
     pointer-events: auto;
 }
 
@@ -4824,13 +4826,18 @@ input[type="range"]::-moz-range-thumb {
     background: rgba(15, 25, 40, 0.45) !important;
 }
 
-/* S-meter readout bar below the canvas — match needle canvas colour and transparency */
-#dock-overlay-wrapper .smeter-left > div:last-child {
+/* S-meter readout bar below the canvas — id selector beats inline style */
+#dock-overlay-wrapper #s-meter-readout-bar {
     background: rgba(15, 25, 40, 0.45) !important;
     border-radius: 0 0 4px 4px;
 }
 
 /* Mini history chart canvases — reduce from base 0.75 to match the needle */
 #dock-overlay-wrapper .smeter-mini-chart-wrap canvas {
+    background: rgba(15, 25, 40, 0.45) !important;
+}
+
+/* Compact VU meter bar (next to REC button) — semi-transparent when docked */
+#dock-overlay-wrapper #vu-meter-compact .vu-meter {
     background: rgba(15, 25, 40, 0.45) !important;
 }

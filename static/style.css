@@ -2172,34 +2172,29 @@ input[type="range"]::-moz-range-thumb {
     }
 
     /* On mobile: put bandwidth and squelch sliders side-by-side.
-       Switch the parent .control-group (identified via :has) to a flex row
-       with wrap, then force all other children to full width so they still
-       stack, while bandwidth and squelch share the remaining row space. */
-    .controls .control-group:has(> #bandwidth-controls) {
+       The parent .control-group gets class 'bw-squelch-row' added by JS on
+       mobile, which switches it to flex-row layout. */
+    .bw-squelch-row {
         flex-direction: row !important;
         flex-wrap: wrap !important;
-        align-items: flex-start;
-        gap: 6px;
+        align-items: flex-start !important;
+        gap: 6px !important;
     }
 
     /* All direct children except the two sliders take the full row */
-    .controls .control-group:has(> #bandwidth-controls) > *:not(#bandwidth-controls):not(#squelch-controls) {
+    .bw-squelch-row > *:not(#bandwidth-controls):not(#squelch-controls) {
         flex: 0 0 100% !important;
         width: 100% !important;
     }
 
     /* Bandwidth and squelch share the row equally */
-    #bandwidth-controls {
+    .bw-squelch-row > #bandwidth-controls,
+    .bw-squelch-row > #squelch-controls {
         flex: 1 1 0 !important;
         min-width: 0 !important;
         margin-top: 0 !important;
         padding-bottom: 12px;
-    }
-
-    #squelch-controls {
-        flex: 1 1 0 !important;
-        min-width: 0 !important;
-        margin-top: 0 !important;
+        box-sizing: border-box;
     }
 
     /* Hide the bandwidth slider toggle button on narrow screens */

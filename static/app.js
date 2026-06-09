@@ -14181,6 +14181,13 @@ function _dockApply() {
     }
 
     if (_dockIsMobile()) {
+        // On mobile: add class to the .control-group containing #bandwidth-controls
+        // so CSS can lay out bandwidth + squelch side-by-side in a flex row.
+        const bwEl = document.getElementById('bandwidth-controls');
+        if (bwEl && bwEl.parentElement) {
+            bwEl.parentElement.classList.add('bw-squelch-row');
+        }
+
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
         // We only need to set --waterfall-height (the canvas inside the container)
         // = viewport height minus the spectrum-display-controls bar height.
@@ -14233,6 +14240,12 @@ function _dockRemove() {
 
     // Remove the now-empty wrapper from <body>
     wrapper.remove();
+
+    // Remove mobile-only class from the bandwidth/squelch parent
+    const bwEl = document.getElementById('bandwidth-controls');
+    if (bwEl && bwEl.parentElement) {
+        bwEl.parentElement.classList.remove('bw-squelch-row');
+    }
 
     // Update button state
     btn.textContent = '⊞';

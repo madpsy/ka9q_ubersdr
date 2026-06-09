@@ -2207,7 +2207,10 @@ input[type="range"]::-moz-range-thumb {
     #bw-squelch-row > #snr-squelch-row input[type="range"] {
         flex: 0 0 100% !important;
         width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
         margin: 0 !important;
+        box-sizing: border-box !important;
     }
 
     /* NR button: align to bottom of its flex cell */

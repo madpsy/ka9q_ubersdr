@@ -1639,9 +1639,9 @@
                                 <small>Select a specific antenna or ground all antennas</small>
                             </div>
                             <div class="config-field" id="antSwitchAntennaField">
-                                <label>Antenna Number</label>
-                                <input type="number" id="antSwitchEntryAntenna" placeholder="1" min="1" max="16" step="1" value="1">
-                                <small>Antenna number to select (1–N)</small>
+                                <label>Antenna</label>
+                                <select id="antSwitchEntryAntenna"></select>
+                                <small>Antenna to select</small>
                             </div>
                             <div class="config-field">
                                 <label>Enabled</label>
@@ -20432,6 +20432,8 @@ const tooltipLine2 = timeStr;
             const cfgNum      = cfg.num_antennas || health.num_antennas || 8;
             const liveLabels  = health.antenna_labels || [];
             const numAntennas = health.num_antennas || liveLabels.length || 8;
+            // Make labels available to the scheduler section
+            antSwitchAntennaLabels = liveLabels;
             const selectedSet = new Set(health.selected || []);
             const grounded    = !!health.grounded;
             const allowMixing = !!health.allow_mixing;
@@ -20685,6 +20687,7 @@ const tooltipLine2 = timeStr;
         let antSwitchSolarEvents = [];
         let currentAntSwitchLogs = [];
         let antSwitchLogsCurrentPage = 1;
+        let antSwitchAntennaLabels = []; // populated from health.antenna_labels when tab loads
         const antSwitchLogsPerPage = 10;
 
         async function loadAntSwitchSchedulerConfig() {
@@ -20834,7 +20837,7 @@ const tooltipLine2 = timeStr;
                     } else {
                         triggerDisplay = `<span style="font-family:monospace;">${entry.time}</span>`;
                     }
-                    const actionLabel = entry.action === 'ground' ? '⏚ Ground All' : `📡 Antenna ${entry.antenna}`;
+                    const actionLabel = entry.action === 'ground' ? '⏚ Ground All' : `📡 ${antSwitchGetAntennaLabel(entry.antenna)}`;
                     const isEnabled = entry.enabled !== false;
                     const enabledIcon = isEnabled ? '✓' : '✗';
                     const enabledColor = isEnabled ? '#28a745' : '#dc3545';
@@ -20926,6 +20929,27 @@ const tooltipLine2 = timeStr;
             const now = new Date();
             const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), utcHours, utcMinutes, 0));
             return d.getHours() + d.getMinutes() / 60;
+        }
+
+        function antSwitchGetAntennaLabel(n) {
+            if (antSwitchAntennaLabels && antSwitchAntennaLabels.length >= n) {
+                return antSwitchAntennaLabels[n - 1] || `Antenna ${n}`;
+            }
+            return `Antenna ${n}`;
+        }
+
+        function antSwitchPopulateAntennaDropdown(selectedValue) {
+            const sel = document.getElementById('antSwitchEntryAntenna');
+            if (!sel) return;
+            sel.innerHTML = '';
+            const numAntennas = (antSwitchAntennaLabels && antSwitchAntennaLabels.length) || 16;
+            for (let i = 1; i <= numAntennas; i++) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = `${i}: ${antSwitchGetAntennaLabel(i)}`;
+                sel.appendChild(opt);
+            }
+            if (selectedValue !== undefined) sel.value = String(selectedValue);
         }
 
         function redrawAntSwitchTimelineWithTriggers() {
@@ -21066,8 +21090,13 @@ const tooltipLine2 = timeStr;
                 ctx.arc(x, timelineY, isHighlighted ? 7 : 5, 0, 2 * Math.PI);
                 ctx.fill();
 
-                // Label: action abbreviation (A1, A2… or ⏚)
-                const label = e.action === 'ground' ? '⏚' : `A${e.antenna}`;
+                // Label: action abbreviation (short label or ⏚)
+                const label = e.action === 'ground' ? '⏚' : (() => {
+                    const full = antSwitchGetAntennaLabel(e.antenna);
+                    // Use first word or up to 4 chars as abbreviation
+                    const parts = full.split(/[\s\-_/]+/);
+                    return parts[0].substring(0, 4);
+                })();
                 ctx.fillStyle = isHighlighted ? '#ff6b6b' : '#28a745';
                 ctx.font = isHighlighted ? 'bold 14px sans-serif' : 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
@@ -21346,7 +21375,7 @@ const tooltipLine2 = timeStr;
             document.getElementById('antSwitchEntrySolarEvent').value = '';
             document.getElementById('antSwitchEntryOffset').value = '0';
             document.getElementById('antSwitchEntryAction').value = 'select';
-            document.getElementById('antSwitchEntryAntenna').value = '1';
+            antSwitchPopulateAntennaDropdown(1);
             document.getElementById('antSwitchEntryEnabled').value = 'true';
             antSwitchPopulateSolarEventsDropdown();
             antSwitchHandleTriggerTypeChange();
@@ -21416,7 +21445,7 @@ const tooltipLine2 = timeStr;
             }
 
             document.getElementById('antSwitchEntryAction').value = entry.action || 'select';
-            document.getElementById('antSwitchEntryAntenna').value = entry.antenna || 1;
+            antSwitchPopulateAntennaDropdown(entry.antenna || 1);
             document.getElementById('antSwitchEntryEnabled').value = entry.enabled !== false ? 'true' : 'false';
 
             antSwitchHandleTriggerTypeChange();

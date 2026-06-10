@@ -431,6 +431,15 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 		as.addTriggerLog(triggerLog)
 		log.Printf("Ant switch scheduler: successfully grounded all antennas")
 	} else {
+		// Guard: check antenna number is within the currently configured range
+		numAntennas := as.handler.config.NumAntennas
+		if entry.Antenna < 1 || entry.Antenna > numAntennas {
+			errMsg := fmt.Sprintf("antenna %d out of range (num_antennas=%d) — update or disable this schedule entry", entry.Antenna, numAntennas)
+			triggerLog.Error = errMsg
+			as.addTriggerLog(triggerLog)
+			log.Printf("Ant switch scheduler: skipping entry (time=%s): %s", entry.Time, errMsg)
+			return
+		}
 		log.Printf("Ant switch scheduler: executing select antenna %d (time=%s)", entry.Antenna, entry.Time)
 		_, _, err := as.handler.selectAntenna(entry.Antenna)
 		if err != nil {
@@ -487,6 +496,7 @@ func (as *AntSwitchScheduler) GetStatus() map[string]interface{} {
 	enabled := as.config.Enabled
 	running := as.running
 	entryCount := len(as.config.Entries)
+	numAntennas := as.handler.config.NumAntennas
 
 	// Copy entries for processing outside lock
 	entriesCopy := make([]AntSwitchScheduleEntry, len(as.config.Entries))
@@ -509,11 +519,17 @@ func (as *AntSwitchScheduler) GetStatus() map[string]interface{} {
 	}
 
 	// Process entries (no lock needed - using copy)
-	entries := make([]map[string]interface{}, len(entriesCopy))
-	for i, entry := range entriesCopy {
+	// Entries whose antenna number exceeds num_antennas are silently omitted from
+	// the API response so the UI only shows entries that can actually fire.
+	var entries []map[string]interface{}
+	for _, entry := range entriesCopy {
 		action := entry.Action
 		if action == "" {
 			action = "select"
+		}
+		// Skip select entries that reference an antenna beyond the current hardware config
+		if action == "select" && (entry.Antenna < 1 || entry.Antenna > numAntennas) {
+			continue
 		}
 		entryMap := map[string]interface{}{
 			"time":    entry.Time,
@@ -529,7 +545,10 @@ func (as *AntSwitchScheduler) GetStatus() map[string]interface{} {
 		if resolvedTime, err := as.resolveEntryTimeNoLock(&entry, sunTimes); err == nil {
 			entryMap["resolved_time"] = resolvedTime
 		}
-		entries[i] = entryMap
+		entries = append(entries, entryMap)
+	}
+	if entries == nil {
+		entries = []map[string]interface{}{}
 	}
 	status["entries"] = entries
 

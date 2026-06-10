@@ -1537,10 +1537,6 @@ ant_switch:
   # Admin control via /admin/ant-switch-command never requires this password.
   password: ""
 
-  # Thunderstorm mode: forces all antennas to ground and denies public switching.
-  # Admin can still override via /admin/ant-switch-command.
-  thunderstorm: false
-
   # Antenna to select on startup (0 = no automatic selection)
   default_antenna: 0
 

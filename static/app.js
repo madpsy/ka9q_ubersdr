@@ -14264,14 +14264,24 @@ function _dockApplyMobileLayout() {
 
 // Undo mobile-specific DOM rearrangements. Safe to call when no mobile layout exists.
 function _dockRemoveMobileLayout() {
-    const bwSqRow = document.getElementById('bw-squelch-row');
-    if (bwSqRow) {
-        const bwEl = document.getElementById('bandwidth-controls');
-        if (bwEl) bwSqRow.parentElement.insertBefore(bwEl, bwSqRow);
-        bwSqRow.remove();
-    }
+    // Grab all references BEFORE removing bwSqRow — elements inside a removed
+    // node are detached from the document and getElementById() won't find them.
+    const bwSqRow    = document.getElementById('bw-squelch-row');
     const snrRow     = document.getElementById('snr-squelch-row');
     const volSqGroup = document.getElementById('volume-squelch-group');
+    const nrBtn      = document.getElementById('nr2-quick-toggle');
+
+    if (bwSqRow) {
+        const bwEl = document.getElementById('bandwidth-controls');
+        // Move #bandwidth-controls back to its original parent (before bwSqRow)
+        if (bwEl) bwSqRow.parentElement.insertBefore(bwEl, bwSqRow);
+        // Move snrRow out of bwSqRow BEFORE removing it, so it stays in the document
+        if (snrRow && snrRow.parentElement === bwSqRow) {
+            bwSqRow.parentElement.insertBefore(snrRow, bwSqRow);
+        }
+        bwSqRow.remove();
+    }
+
     if (snrRow && volSqGroup) {
         // Always restore span to last position (original: label | [wrapper > slider] | span)
         const snrValue = document.getElementById('snr-squelch-value');
@@ -14286,7 +14296,7 @@ function _dockRemoveMobileLayout() {
             }
         }
     }
-    const nrBtn = document.getElementById('nr2-quick-toggle');
+
     const audioBtnsGroup = document.getElementById('audio-buttons-group');
     if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
         audioBtnsGroup.appendChild(nrBtn);

@@ -380,6 +380,7 @@ type AdminHandler struct {
 	rotctlHandler       *RotctlAPIHandler
 	rotatorScheduler    *RotatorScheduler
 	antSwitchHandler    *AntSwitchHandler
+	antSwitchScheduler  *AntSwitchScheduler
 	geoIPService        *GeoIPService
 	loginAttempts       *LoginAttemptTracker
 	loginHistory        *AdminLoginHistory
@@ -473,7 +474,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy, antSwitchHandler *AntSwitchHandler) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy, antSwitchHandler *AntSwitchHandler, antSwitchScheduler *AntSwitchScheduler) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -511,6 +512,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		pskRank:             pskRank,
 		gpsdoProxy:          gpsdoProxy,
 		antSwitchHandler:    antSwitchHandler,
+		antSwitchScheduler:  antSwitchScheduler,
 	}
 }
 
@@ -6764,6 +6766,491 @@ func (ah *AdminHandler) HandleRotatorSchedulerLogs(w http.ResponseWriter, r *htt
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding rotator scheduler logs: %v", err)
 	}
+}
+
+// HandleAntSwitchSchedulerConfig handles GET and PUT requests for ant switch scheduler configuration
+func (ah *AdminHandler) HandleAntSwitchSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetAntSwitchSchedulerConfig(w, r)
+	case http.MethodPut:
+		ah.handleUpdateAntSwitchSchedulerConfig(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetAntSwitchSchedulerConfig returns the ant switch scheduler configuration
+func (ah *AdminHandler) handleGetAntSwitchSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	// Check if ant switch scheduler exists
+	if ah.antSwitchScheduler == nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled": false,
+			"entries": []interface{}{},
+		})
+		return
+	}
+
+	// Get status which includes config
+	status := ah.antSwitchScheduler.GetStatus()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleUpdateAntSwitchSchedulerConfig updates the ant switch scheduler configuration
+func (ah *AdminHandler) handleUpdateAntSwitchSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	// Check if ant switch scheduler exists
+	if ah.antSwitchScheduler == nil {
+		http.Error(w, "Ant switch scheduler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	var config map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Filter out status fields - only keep configuration fields
+	filteredConfig := map[string]interface{}{}
+	if enabled, ok := config["enabled"]; ok {
+		filteredConfig["enabled"] = enabled
+	}
+	if entries, ok := config["entries"]; ok {
+		filteredConfig["entries"] = entries
+	}
+
+	// Backup existing file with timestamp before replacing
+	schedulerPath := ah.antSwitchScheduler.configPath
+	if _, err := os.Stat(schedulerPath); err == nil {
+		timestamp := time.Now().Format("20060102-150405")
+		backupPath := fmt.Sprintf("%s.%s", schedulerPath, timestamp)
+		if err := os.Rename(schedulerPath, backupPath); err != nil {
+			log.Printf("Warning: Failed to backup ant_switch_schedule.yaml: %v", err)
+		} else {
+			log.Printf("Backed up ant_switch_schedule.yaml to %s", backupPath)
+		}
+	}
+
+	// Convert to YAML and write to file (using filtered config)
+	yamlData, err := yaml.Marshal(filteredConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal scheduler config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write scheduler config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload scheduler to apply changes immediately
+	if err := ah.antSwitchScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload ant switch scheduler after config update: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Ant switch scheduler configuration updated successfully",
+	})
+}
+
+// HandleAntSwitchSchedulerEntry handles POST, PUT, DELETE requests for individual entries
+func (ah *AdminHandler) HandleAntSwitchSchedulerEntry(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if ant switch scheduler exists
+	if ah.antSwitchScheduler == nil {
+		http.Error(w, "Ant switch scheduler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPost:
+		ah.handleAddAntSwitchEntry(w, r)
+	case http.MethodPut:
+		ah.handleUpdateAntSwitchEntry(w, r)
+	case http.MethodDelete:
+		ah.handleDeleteAntSwitchEntry(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAddAntSwitchEntry adds a new scheduled entry
+func (ah *AdminHandler) handleAddAntSwitchEntry(w http.ResponseWriter, r *http.Request) {
+	var newEntry map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&newEntry); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if newEntry["time"] == "" || newEntry["time"] == nil {
+		http.Error(w, "Time is required", http.StatusBadRequest)
+		return
+	}
+
+	// Read current config
+	ah.antSwitchScheduler.mu.RLock()
+	schedulerPath := ah.antSwitchScheduler.configPath
+	ah.antSwitchScheduler.mu.RUnlock()
+
+	data, err := os.ReadFile(schedulerPath)
+	var config map[string]interface{}
+	if err == nil {
+		yaml.Unmarshal(data, &config)
+	} else {
+		config = make(map[string]interface{})
+	}
+
+	// Get entries array
+	var entries []interface{}
+	if existing, ok := config["entries"].([]interface{}); ok {
+		entries = existing
+	}
+
+	// Add new entry
+	entries = append(entries, newEntry)
+	config["entries"] = entries
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload scheduler
+	if err := ah.antSwitchScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload ant switch scheduler after add: %v", err)
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Entry added successfully",
+	})
+}
+
+// handleUpdateAntSwitchEntry updates an entry by time and optional offset
+func (ah *AdminHandler) handleUpdateAntSwitchEntry(w http.ResponseWriter, r *http.Request) {
+	timeParam := r.URL.Query().Get("time")
+	if timeParam == "" {
+		http.Error(w, "Time parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Get optional offset parameter for matching solar events with different offsets
+	offsetParam := r.URL.Query().Get("offset")
+	var targetOffset int
+	hasOffset := false
+	if offsetParam != "" {
+		var err error
+		targetOffset, err = strconv.Atoi(offsetParam)
+		if err != nil {
+			http.Error(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+		hasOffset = true
+	}
+
+	var updatedEntry map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedEntry); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Read current config
+	ah.antSwitchScheduler.mu.RLock()
+	schedulerPath := ah.antSwitchScheduler.configPath
+	ah.antSwitchScheduler.mu.RUnlock()
+
+	data, err := os.ReadFile(schedulerPath)
+	if err != nil {
+		http.Error(w, "Failed to read config file", http.StatusInternalServerError)
+		return
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get entries array
+	entries, ok := config["entries"].([]interface{})
+	if !ok {
+		http.Error(w, "Invalid config structure", http.StatusInternalServerError)
+		return
+	}
+
+	// Find entry by time AND offset (if offset is provided)
+	entryIndex := -1
+	for i, entryInterface := range entries {
+		if entryMap, ok := entryInterface.(map[string]interface{}); ok {
+			if t, ok := entryMap["time"].(string); ok && t == timeParam {
+				if hasOffset {
+					entryOffset := 0
+					if offset, ok := entryMap["offset"]; ok {
+						switch v := offset.(type) {
+						case int:
+							entryOffset = v
+						case float64:
+							entryOffset = int(v)
+						}
+					}
+					if entryOffset == targetOffset {
+						entryIndex = i
+						break
+					}
+				} else {
+					entryIndex = i
+					break
+				}
+			}
+		}
+	}
+
+	if entryIndex == -1 {
+		http.Error(w, fmt.Sprintf("Entry at time '%s' not found", timeParam), http.StatusNotFound)
+		return
+	}
+
+	// Update entry at index
+	entries[entryIndex] = updatedEntry
+	config["entries"] = entries
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload scheduler
+	if err := ah.antSwitchScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload ant switch scheduler after update: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Entry updated successfully",
+	})
+}
+
+// handleDeleteAntSwitchEntry deletes an entry by time and optional offset
+func (ah *AdminHandler) handleDeleteAntSwitchEntry(w http.ResponseWriter, r *http.Request) {
+	timeParam := r.URL.Query().Get("time")
+	if timeParam == "" {
+		http.Error(w, "Time parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Get optional offset parameter for matching solar events with different offsets
+	offsetParam := r.URL.Query().Get("offset")
+	var targetOffset int
+	hasOffset := false
+	if offsetParam != "" {
+		var err error
+		targetOffset, err = strconv.Atoi(offsetParam)
+		if err != nil {
+			http.Error(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+		hasOffset = true
+	}
+
+	// Read current config
+	ah.antSwitchScheduler.mu.RLock()
+	schedulerPath := ah.antSwitchScheduler.configPath
+	ah.antSwitchScheduler.mu.RUnlock()
+
+	data, err := os.ReadFile(schedulerPath)
+	if err != nil {
+		http.Error(w, "Failed to read config file", http.StatusInternalServerError)
+		return
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get entries array
+	entries, ok := config["entries"].([]interface{})
+	if !ok {
+		http.Error(w, "Invalid config structure", http.StatusInternalServerError)
+		return
+	}
+
+	// Find entry by time AND offset (if offset is provided)
+	entryIndex := -1
+	for i, entryInterface := range entries {
+		if entryMap, ok := entryInterface.(map[string]interface{}); ok {
+			if t, ok := entryMap["time"].(string); ok && t == timeParam {
+				if hasOffset {
+					entryOffset := 0
+					if offset, ok := entryMap["offset"]; ok {
+						switch v := offset.(type) {
+						case int:
+							entryOffset = v
+						case float64:
+							entryOffset = int(v)
+						}
+					}
+					if entryOffset == targetOffset {
+						entryIndex = i
+						break
+					}
+				} else {
+					entryIndex = i
+					break
+				}
+			}
+		}
+	}
+
+	if entryIndex == -1 {
+		http.Error(w, fmt.Sprintf("Entry at time '%s' not found", timeParam), http.StatusNotFound)
+		return
+	}
+
+	// Remove entry at index
+	entries = append(entries[:entryIndex], entries[entryIndex+1:]...)
+	config["entries"] = entries
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload scheduler
+	if err := ah.antSwitchScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload ant switch scheduler after delete: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Entry deleted successfully",
+	})
+}
+
+// HandleAntSwitchSchedulerReload handles POST requests to reload the ant switch scheduler
+func (ah *AdminHandler) HandleAntSwitchSchedulerReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if ant switch scheduler exists
+	if ah.antSwitchScheduler == nil {
+		http.Error(w, "Ant switch scheduler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Reload the scheduler
+	if err := ah.antSwitchScheduler.Reload(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to reload scheduler: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Ant switch scheduler reloaded successfully",
+	})
+}
+
+// HandleAntSwitchSchedulerLogs handles GET requests to retrieve ant switch scheduler trigger logs
+func (ah *AdminHandler) HandleAntSwitchSchedulerLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if ant switch scheduler exists
+	if ah.antSwitchScheduler == nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"logs":  []interface{}{},
+			"count": 0,
+		})
+		return
+	}
+
+	// Get trigger logs
+	logs := ah.antSwitchScheduler.GetTriggerLogs()
+
+	response := map[string]interface{}{
+		"logs":  logs,
+		"count": len(logs),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding ant switch scheduler logs: %v", err)
+	}
+}
+
+// HandleAntSwitchSchedulerSolarEvents handles GET requests to list available solar events with today's times
+func (ah *AdminHandler) HandleAntSwitchSchedulerSolarEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var solarEvents []map[string]interface{}
+	if ah.antSwitchScheduler != nil {
+		solarEvents = ah.antSwitchScheduler.getAvailableSolarEventsWithTimes()
+	} else {
+		// Return events without times if scheduler not initialized
+		events := GetAvailableSolarEvents()
+		solarEvents = make([]map[string]interface{}, len(events))
+		for i, e := range events {
+			solarEvents[i] = map[string]interface{}{
+				"name":         e.Name,
+				"display_name": e.DisplayName,
+				"description":  e.Description,
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"solar_events": solarEvents,
+	})
 }
 
 // HandleLoadHistory returns the 60-minute load history data

@@ -1588,6 +1588,73 @@
                         <div class="spinner"></div>
                         <p>Loading antenna switch status...</p>
                     </div>
+                    <!-- Ant Switch Scheduler Section -->
+                    <div id="antSwitchSchedulerSection" style="display:none; margin-top: 30px;">
+                        <div class="config-section">
+                            <h3>📅 Antenna Switch Scheduler</h3>
+                            <div class="alert alert-info" style="margin-bottom: 15px;">
+                                ℹ️ <strong>Note:</strong> Scheduler changes take effect immediately without requiring a server restart.
+                            </div>
+                            <div id="antSwitchSchedulerConfig" class="loading">
+                                <div class="spinner"></div>
+                                <p>Loading scheduler configuration...</p>
+                            </div>
+                        </div>
+                        <!-- Add/Edit Entry Form -->
+                        <div id="addAntSwitchEntryForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                            <h3 id="antSwitchEntryFormTitle">Add Scheduled Entry</h3>
+                            <input type="hidden" id="editAntSwitchEntryTime" value="">
+                            <input type="hidden" id="editAntSwitchEntryOffset" value="">
+                            <div class="config-field">
+                                <label>Trigger Type</label>
+                                <select id="antSwitchEntryTriggerType" onchange="antSwitchHandleTriggerTypeChange()">
+                                    <option value="fixed">Fixed Time</option>
+                                    <option value="solar">Solar Event</option>
+                                </select>
+                                <small>Choose between fixed time or solar event trigger</small>
+                            </div>
+                            <div class="config-field" id="antSwitchFixedTimeField">
+                                <label>Time (UTC, 24-hour format)</label>
+                                <input type="time" id="antSwitchEntryTime">
+                                <small>Enter the time in UTC. The scheduler compares this against UTC clock time.</small>
+                            </div>
+                            <div class="config-field" id="antSwitchSolarEventField" style="display: none;">
+                                <label>Solar Event</label>
+                                <select id="antSwitchEntrySolarEvent" onchange="antSwitchHandleTriggerTypeChange()">
+                                    <option value="">Select event...</option>
+                                </select>
+                                <small id="antSwitchSolarEventDescription" style="color: #666; font-style: italic;"></small>
+                            </div>
+                            <div class="config-field" id="antSwitchOffsetField" style="display: none;">
+                                <label>Offset (minutes)</label>
+                                <input type="text" id="antSwitchEntryOffset" placeholder="0" value="0" pattern="[\+\-]?\d+">
+                                <small>Minutes before (-) or after the solar event (range: -120 to +120).</small>
+                            </div>
+                            <div class="config-field">
+                                <label>Action</label>
+                                <select id="antSwitchEntryAction" onchange="antSwitchHandleActionChange()">
+                                    <option value="select">Select Antenna</option>
+                                    <option value="ground">Ground All</option>
+                                </select>
+                                <small>Select a specific antenna or ground all antennas</small>
+                            </div>
+                            <div class="config-field" id="antSwitchAntennaField">
+                                <label>Antenna Number</label>
+                                <input type="number" id="antSwitchEntryAntenna" placeholder="1" min="1" max="16" step="1" value="1">
+                                <small>Antenna number to select (1–N)</small>
+                            </div>
+                            <div class="config-field">
+                                <label>Enabled</label>
+                                <select id="antSwitchEntryEnabled">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <small>Enable or disable this scheduled entry</small>
+                            </div>
+                            <button class="btn" onclick="saveAntSwitchEntry()">Save Entry</button>
+                            <button class="btn btn-secondary" onclick="cancelAntSwitchEntryForm()">Cancel</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="button-group" id="antSwitchButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadAntSwitchStatus()">Refresh</button>
@@ -3898,6 +3965,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const antSwitchBtns = document.getElementById('antSwitchButtons');
                 if (antSwitchBtns) antSwitchBtns.style.display = 'flex';
                 loadAntSwitchStatus();
+                // Show scheduler section and load it
+                const schedSection = document.getElementById('antSwitchSchedulerSection');
+                if (schedSection) schedSection.style.display = 'block';
+                loadAntSwitchSchedulerConfig();
             } else if (tab === 'chat') {
                 document.querySelector('.tab:nth-child(16)').classList.add('active');
                 document.getElementById('chatTab').classList.add('active');
@@ -20607,6 +20678,844 @@ const tooltipLine2 = timeStr;
         function antSwitchSelect(n)  { antSwitchCommand({command:'select', antenna:n}, `Selected antenna ${n}`); }
         function antSwitchGround()   { antSwitchCommand({command:'ground'}, 'All antennas grounded'); }
         function antSwitchSetThunderstorm(val) { antSwitchCommand({command:'set_thunderstorm',value:val}, val ? 'Thunderstorm mode enabled' : 'Thunderstorm mode disabled'); }
+
+        // ── Ant Switch Scheduler ─────────────────────────────────────────────────
+
+        let currentAntSwitchSchedulerConfig = null;
+        let antSwitchSolarEvents = [];
+        let currentAntSwitchLogs = [];
+        let antSwitchLogsCurrentPage = 1;
+        const antSwitchLogsPerPage = 10;
+
+        async function loadAntSwitchSchedulerConfig() {
+            try {
+                const response = await authenticatedFetch('/admin/ant-switch-scheduler-config');
+                if (!response) return;
+                if (!response.ok) throw new Error('Failed to load ant switch scheduler config');
+                const data = await response.json();
+                currentAntSwitchSchedulerConfig = data;
+                if (data.solar_events) antSwitchSolarEvents = data.solar_events;
+                renderAntSwitchScheduler();
+                loadAntSwitchSchedulerLogs();
+            } catch (error) {
+                const container = document.getElementById('antSwitchSchedulerConfig');
+                if (container) container.innerHTML = `<p style="color:#dc3545;">Error loading scheduler: ${error.message}</p>`;
+            }
+        }
+
+        function renderAntSwitchScheduler() {
+            const container = document.getElementById('antSwitchSchedulerConfig');
+            if (!container) return;
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            const cfg = currentAntSwitchSchedulerConfig || {};
+            const entries = cfg.entries || [];
+            const enabled = cfg.enabled === true;
+            const running = cfg.running === true;
+            const entryCount = entries.length;
+            const enabledCount = cfg.enabled_entry_count || 0;
+            const nextEntry = cfg.next_entry;
+
+            // Enabled toggle
+            const enabledDiv = document.createElement('div');
+            enabledDiv.className = 'config-field';
+            enabledDiv.innerHTML = '<label>Scheduler Enabled</label>';
+            const enabledSelect = document.createElement('select');
+            enabledSelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
+            enabledSelect.value = enabled ? 'true' : 'false';
+            enabledSelect.addEventListener('change', async (e) => {
+                currentAntSwitchSchedulerConfig.enabled = e.target.value === 'true';
+                try {
+                    const resp = await authenticatedFetch('/admin/ant-switch-scheduler-config', {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(currentAntSwitchSchedulerConfig)
+                    });
+                    if (!resp || !resp.ok) throw new Error('Failed to update');
+                    showAlert('Scheduler enabled state updated', 'success');
+                    await loadAntSwitchSchedulerConfig();
+                } catch (err) {
+                    showAlert('Error: ' + err.message, 'error');
+                    currentAntSwitchSchedulerConfig.enabled = !currentAntSwitchSchedulerConfig.enabled;
+                    enabledSelect.value = currentAntSwitchSchedulerConfig.enabled ? 'true' : 'false';
+                }
+            });
+            enabledDiv.appendChild(enabledSelect);
+            container.appendChild(enabledDiv);
+
+            // Status info
+            const statusDiv = document.createElement('div');
+            statusDiv.style.cssText = 'margin-bottom:15px;padding:10px;background:#fff;border-radius:5px;border:1px solid #dee2e6;font-size:13px;';
+            let statusHTML = `<strong>Status:</strong> ${running ? '<span style="color:#28a745;">Running</span>' : '<span style="color:#999;">Stopped</span>'}<br>`;
+            if (entryCount > 0 && enabledCount !== entryCount) {
+                statusHTML += `<strong>Scheduled Entries:</strong> ${enabledCount} enabled (${entryCount} total)<br>`;
+            } else {
+                statusHTML += `<strong>Scheduled Entries:</strong> ${entryCount}<br>`;
+            }
+            if (nextEntry) {
+                const actionLabel = nextEntry.action === 'ground' ? 'Ground All' : `Antenna ${nextEntry.antenna}`;
+                statusHTML += `<strong>Next:</strong> ${nextEntry.resolved_time || nextEntry.time} → ${actionLabel}`;
+            } else if (entryCount > 0) {
+                statusHTML += `<strong>Next:</strong> <em style="color:#999;">None (all entries passed for today)</em>`;
+            } else {
+                statusHTML += `<strong>Next:</strong> <em style="color:#999;">No entries configured</em>`;
+            }
+            statusDiv.innerHTML = statusHTML;
+            container.appendChild(statusDiv);
+
+            // Timeline visualization
+            const timelineContainer = document.createElement('div');
+            timelineContainer.style.marginBottom = '20px';
+            timelineContainer.style.padding = '20px';
+            timelineContainer.style.background = '#fff';
+            timelineContainer.style.borderRadius = '5px';
+            timelineContainer.style.border = '1px solid #dee2e6';
+
+            const checkboxContainer = document.createElement('div');
+            checkboxContainer.style.cssText = 'margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+            checkboxContainer.innerHTML = `
+                <input type="checkbox" id="antSwitchShowTriggersCheckbox" onchange="redrawAntSwitchTimelineWithTriggers()" checked style="width:18px;height:18px;cursor:pointer;">
+                <label for="antSwitchShowTriggersCheckbox" style="cursor:pointer;font-weight:500;color:#555;">Show Available Solar Event Triggers</label>
+                <span style="flex:1;"></span>
+                <span style="font-size:12px;color:#666;font-weight:500;">Timeline timezone:</span>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:#555;margin:0;">
+                    <input type="radio" name="antSwitchTimelineTimezone" id="antSwitchTimelineTimezoneUTC" value="utc" checked onchange="redrawAntSwitchTimelineWithTriggers()" style="cursor:pointer;margin:0;">
+                    UTC
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:#555;margin:0;">
+                    <input type="radio" name="antSwitchTimelineTimezone" id="antSwitchTimelineTimezoneLocal" value="local" onchange="redrawAntSwitchTimelineWithTriggers()" style="cursor:pointer;margin:0;">
+                    Local
+                </label>`;
+            timelineContainer.appendChild(checkboxContainer);
+
+            const timelineCanvas = document.createElement('canvas');
+            timelineCanvas.id = 'antSwitchTimeline';
+            timelineCanvas.style.cssText = 'width:100%;height:160px;display:block;';
+            timelineContainer.appendChild(timelineCanvas);
+            container.appendChild(timelineContainer);
+
+            setTimeout(() => {
+                drawAntSwitchTimeline(entries);
+                setupAntSwitchTimelineHover(timelineCanvas);
+            }, 0);
+
+            // Entries table
+            if (entries.length > 0) {
+                const table = document.createElement('table');
+                table.style.cssText = 'width:100%;border-collapse:collapse;margin-bottom:15px;font-size:13px;';
+                table.innerHTML = `<thead><tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">
+                    <th style="padding:12px;text-align:center;width:80px;">Enabled</th>
+                    <th style="padding:12px;text-align:left;">Trigger</th>
+                    <th style="padding:12px;text-align:left;">Resolved Time</th>
+                    <th style="padding:12px;text-align:left;">Action</th>
+                    <th style="padding:12px;text-align:center;">Actions</th>
+                </tr></thead>`;
+                const tbody = document.createElement('tbody');
+                entries.forEach((entry) => {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid #dee2e6';
+                    if (entry.enabled === false) row.style.opacity = '0.5';
+
+                    const isSolar = antSwitchSolarEvents.some(e => e.name === entry.time);
+                    let triggerDisplay;
+                    let resolvedTimeDisplay = '—';
+                    if (isSolar) {
+                        const ev = antSwitchSolarEvents.find(e => e.name === entry.time);
+                        let label = ev ? ev.display_name : entry.time;
+                        if (entry.offset && entry.offset !== 0) {
+                            const sign = entry.offset > 0 ? '+' : '';
+                            label += ` <span style="color:#666;font-size:11px;">(${sign}${entry.offset}m)</span>`;
+                        }
+                        triggerDisplay = `<span style="color:#ff9800;">☀️ ${label}</span>`;
+                        if (entry.resolved_time) {
+                            resolvedTimeDisplay = `<span style="color:#667eea;font-family:monospace;">${entry.resolved_time}</span>`;
+                        }
+                    } else {
+                        triggerDisplay = `<span style="font-family:monospace;">${entry.time}</span>`;
+                    }
+                    const actionLabel = entry.action === 'ground' ? '⏚ Ground All' : `📡 Antenna ${entry.antenna}`;
+                    const isEnabled = entry.enabled !== false;
+                    const enabledIcon = isEnabled ? '✓' : '✗';
+                    const enabledColor = isEnabled ? '#28a745' : '#dc3545';
+                    const toggleText = isEnabled ? 'Disable' : 'Enable';
+                    const toggleClass = isEnabled ? 'btn-secondary' : 'btn';
+
+                    row.innerHTML = `
+                        <td style="padding:12px;text-align:center;">
+                            <span style="color:${enabledColor};font-size:18px;font-weight:bold;">${enabledIcon}</span>
+                        </td>
+                        <td style="padding:12px;"><strong>${triggerDisplay}</strong></td>
+                        <td style="padding:12px;">${resolvedTimeDisplay}</td>
+                        <td style="padding:12px;">${actionLabel}</td>
+                        <td style="padding:12px;text-align:center;white-space:nowrap;">
+                            <button class="btn ${toggleClass}" style="padding:6px 12px;font-size:12px;margin-right:5px;"
+                                onclick="toggleAntSwitchEntryEnabled('${entry.time}', ${entry.offset || 0})">${toggleText}</button>
+                            <button class="btn" style="padding:6px 12px;font-size:12px;margin-right:5px;"
+                                onclick="editAntSwitchEntry('${entry.time}', ${entry.offset || 0})">Edit</button>
+                            <button class="btn btn-danger" style="padding:6px 12px;font-size:12px;"
+                                onclick="deleteAntSwitchEntry('${entry.time}', ${entry.offset || 0})">Delete</button>
+                        </td>`;
+
+                    row.addEventListener('mouseenter', function() {
+                        if (entry.enabled !== false) {
+                            const id = entry.offset ? `${entry.time}_${entry.offset}` : entry.time;
+                            drawAntSwitchTimeline(entries, id);
+                        }
+                    });
+                    row.addEventListener('mouseleave', function() {
+                        drawAntSwitchTimeline(entries);
+                    });
+
+                    tbody.appendChild(row);
+                });
+                table.appendChild(tbody);
+                container.appendChild(table);
+            } else {
+                const emptyMsg = document.createElement('p');
+                emptyMsg.style.cssText = 'color:#666;font-style:italic;margin-bottom:15px;';
+                emptyMsg.textContent = 'No scheduled entries configured. Click "+ Add Entry" to create one.';
+                container.appendChild(emptyMsg);
+            }
+
+            // Add entry button
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn';
+            addBtn.textContent = '+ Add Entry';
+            addBtn.onclick = showAddAntSwitchEntryForm;
+            container.appendChild(addBtn);
+
+            // Logs section
+            const logsSection = document.createElement('div');
+            logsSection.style.marginTop = '20px';
+            logsSection.innerHTML = `<h4 style="margin-bottom:10px;">📋 Trigger Log</h4>
+                <div id="antSwitchSchedulerLogsContainer" style="max-height:300px;overflow-y:auto;">
+                    <p style="color:#666;font-style:italic;">Loading logs...</p>
+                </div>`;
+            container.appendChild(logsSection);
+        }
+
+        // ── Ant-switch timeline helpers (own IDs so they don't conflict with rotator) ──
+
+        function antSwitchTimelineIsUTC() {
+            const utcRadio = document.getElementById('antSwitchTimelineTimezoneUTC');
+            return !utcRadio || utcRadio.checked;
+        }
+
+        function antSwitchDateToTimelineHours(date) {
+            if (antSwitchTimelineIsUTC()) {
+                return date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+            }
+            return date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
+        }
+
+        function antSwitchDateToTimelineStr(date) {
+            if (antSwitchTimelineIsUTC()) {
+                return String(date.getUTCHours()).padStart(2, '0') + ':' + String(date.getUTCMinutes()).padStart(2, '0');
+            }
+            return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        }
+
+        function antSwitchHhmmToTimelineHours(hhmmStr) {
+            const parts = hhmmStr.split(':');
+            const utcHours = parseInt(parts[0]);
+            const utcMinutes = parseInt(parts[1]);
+            if (antSwitchTimelineIsUTC()) {
+                return utcHours + utcMinutes / 60;
+            }
+            const now = new Date();
+            const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), utcHours, utcMinutes, 0));
+            return d.getHours() + d.getMinutes() / 60;
+        }
+
+        function redrawAntSwitchTimelineWithTriggers() {
+            const entries = (currentAntSwitchSchedulerConfig && currentAntSwitchSchedulerConfig.entries) || [];
+            drawAntSwitchTimeline(entries);
+        }
+
+        // Draw ant-switch timeline — same visual style as rotator timeline
+        function drawAntSwitchTimeline(entries, highlightTime = null) {
+            const canvas = document.getElementById('antSwitchTimeline');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width = canvas.offsetWidth;
+            const height = canvas.height = 160;
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+
+            const marginLeft = 50;
+            const marginRight = 50;
+            const marginTop = 50;
+            const marginBottom = 40;
+            const timelineY = height - marginBottom - 10;
+            const timelineWidth = width - marginLeft - marginRight;
+
+            // Day/night shading
+            let showTriggersCheckbox = document.getElementById('antSwitchShowTriggersCheckbox');
+            const showSunriseSunsetMarkers = !showTriggersCheckbox || !showTriggersCheckbox.checked;
+
+            if (window.suncalcData && window.suncalcData.sun && window.suncalcData.sun.times) {
+                const times = window.suncalcData.sun.times;
+                const sunrise = new Date(times.sunrise);
+                const sunset = new Date(times.sunset);
+                const sunriseHours = antSwitchDateToTimelineHours(sunrise);
+                const sunsetHours = antSwitchDateToTimelineHours(sunset);
+
+                if (sunriseHours > 0) {
+                    ctx.fillStyle = 'rgba(100, 100, 150, 0.15)';
+                    ctx.fillRect(marginLeft, marginTop, (sunriseHours / 24) * timelineWidth, timelineY - marginTop);
+                }
+                if (sunsetHours < 24) {
+                    const nightStart = (sunsetHours / 24) * timelineWidth;
+                    ctx.fillStyle = 'rgba(100, 100, 150, 0.15)';
+                    ctx.fillRect(marginLeft + nightStart, marginTop, timelineWidth - nightStart, timelineY - marginTop);
+                }
+
+                if (showSunriseSunsetMarkers) {
+                    const sunriseX = marginLeft + (sunriseHours / 24) * timelineWidth;
+                    const sunsetX  = marginLeft + (sunsetHours  / 24) * timelineWidth;
+
+                    ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 3]);
+                    ctx.beginPath(); ctx.moveTo(sunriseX, marginTop); ctx.lineTo(sunriseX, timelineY); ctx.stroke();
+                    ctx.strokeStyle = 'rgba(255, 140, 0, 0.5)';
+                    ctx.beginPath(); ctx.moveTo(sunsetX, marginTop); ctx.lineTo(sunsetX, timelineY); ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    ctx.fillStyle = 'rgba(255, 140, 0, 0.8)';
+                    ctx.font = '10px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.fillText('☀️ ' + antSwitchDateToTimelineStr(sunrise), sunriseX, marginTop - 15);
+                    ctx.fillText('🌙 ' + antSwitchDateToTimelineStr(sunset),  sunsetX,  marginTop - 15);
+                }
+            }
+
+            // Timeline base line
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, timelineY);
+            ctx.lineTo(marginLeft + timelineWidth, timelineY);
+            ctx.stroke();
+
+            // Hour notches and labels
+            ctx.fillStyle = '#333';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            for (let hour = 0; hour <= 24; hour++) {
+                const x = marginLeft + (hour / 24) * timelineWidth;
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(x, timelineY); ctx.lineTo(x, timelineY + 8); ctx.stroke();
+                if (hour % 3 === 0 && hour !== 0 && hour !== 24) {
+                    ctx.fillStyle = '#666';
+                    ctx.fillText(hour.toString().padStart(2, '0') + ':00', x, timelineY + 12);
+                }
+            }
+
+            // Enabled entries sorted by resolved time
+            const enabledEntries = entries
+                .filter(e => e.enabled !== false)
+                .map(e => {
+                    const timeStr = e.resolved_time || e.time;
+                    const timeInHours = antSwitchHhmmToTimelineHours(timeStr);
+                    return { ...e, timeInHours };
+                })
+                .sort((a, b) => a.timeInHours - b.timeInHours);
+
+            // Assign vertical levels to avoid label overlap
+            const minSpacing = 40;
+            const entriesWithLevels = [];
+            enabledEntries.forEach(e => {
+                const x = marginLeft + (e.timeInHours / 24) * timelineWidth;
+                let level = 0;
+                for (let i = entriesWithLevels.length - 1; i >= 0; i--) {
+                    const prev = entriesWithLevels[i];
+                    const prevX = marginLeft + (prev.timeInHours / 24) * timelineWidth;
+                    if (Math.abs(x - prevX) < minSpacing) {
+                        level = prev.level === 0 ? 1 : 0;
+                        break;
+                    }
+                }
+                entriesWithLevels.push({ ...e, x, level });
+            });
+
+            canvas.antSwitchEntries = entriesWithLevels;
+
+            // Draw entry markers
+            entriesWithLevels.forEach(e => {
+                const x = e.x;
+                const level = e.level;
+                const posId = e.offset ? `${e.time}_${e.offset}` : e.time;
+                const isHighlighted = highlightTime && posId === highlightTime;
+
+                const labelY   = level === 0 ? marginTop + 10 : marginTop + 40;
+                const lineTopY = level === 0 ? marginTop + 25 : marginTop + 55;
+
+                ctx.strokeStyle = isHighlighted ? '#ff6b6b' : '#28a745';
+                ctx.lineWidth = isHighlighted ? 3 : 2;
+                ctx.beginPath(); ctx.moveTo(x, timelineY); ctx.lineTo(x, lineTopY); ctx.stroke();
+
+                ctx.fillStyle = isHighlighted ? '#ff6b6b' : '#28a745';
+                ctx.beginPath();
+                ctx.arc(x, timelineY, isHighlighted ? 7 : 5, 0, 2 * Math.PI);
+                ctx.fill();
+
+                // Label: action abbreviation (A1, A2… or ⏚)
+                const label = e.action === 'ground' ? '⏚' : `A${e.antenna}`;
+                ctx.fillStyle = isHighlighted ? '#ff6b6b' : '#28a745';
+                ctx.font = isHighlighted ? 'bold 14px sans-serif' : 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, x, labelY);
+            });
+
+            // Current time marker
+            const now = new Date();
+            const currentHours = antSwitchDateToTimelineHours(now);
+            const currentX = marginLeft + (currentHours / 24) * timelineWidth;
+
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            const currentTimeStr = antSwitchDateToTimelineStr(now);
+            ctx.fillText('NOW', currentX, 2);
+            ctx.font = '9px sans-serif';
+            ctx.fillText(currentTimeStr, currentX, 14);
+
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(currentX, 26);
+            ctx.lineTo(currentX, timelineY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Start/end labels
+            ctx.fillStyle = '#999';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText('00:00', marginLeft - 25, timelineY + 12);
+            ctx.textAlign = 'right';
+            ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
+
+            // Timezone label
+            ctx.fillStyle = '#888';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(antSwitchTimelineIsUTC() ? '(UTC)' : '(Local)', marginLeft + timelineWidth / 2, timelineY + 26);
+
+            // Available solar event triggers overlay
+            showTriggersCheckbox = document.getElementById('antSwitchShowTriggersCheckbox');
+            if (showTriggersCheckbox && showTriggersCheckbox.checked && antSwitchSolarEvents && antSwitchSolarEvents.length > 0) {
+                const solarEventMarkers = antSwitchSolarEvents
+                    .filter(event => event.time)
+                    .map(event => {
+                        const timeInHours = antSwitchHhmmToTimelineHours(event.time);
+                        const x = marginLeft + (timeInHours / 24) * timelineWidth;
+                        return { ...event, x, timeInHours };
+                    })
+                    .sort((a, b) => a.timeInHours - b.timeInHours);
+
+                const minSpacingSolar = 45;
+                const eventsWithLevels = [];
+                solarEventMarkers.forEach(event => {
+                    let level = 0;
+                    for (let testLevel = 0; testLevel < 3; testLevel++) {
+                        let hasConflict = false;
+                        for (let i = 0; i < eventsWithLevels.length; i++) {
+                            const prevEvent = eventsWithLevels[i];
+                            if (prevEvent.level === testLevel && Math.abs(event.x - prevEvent.x) < minSpacingSolar) {
+                                hasConflict = true;
+                                break;
+                            }
+                        }
+                        if (!hasConflict) { level = testLevel; break; }
+                    }
+                    eventsWithLevels.push({ ...event, level });
+                });
+
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+
+                eventsWithLevels.forEach(event => {
+                    const x = event.x;
+                    const labelY = 30 + (event.level * 20);
+                    const lineStartY = labelY + 18;
+
+                    ctx.beginPath();
+                    ctx.moveTo(x, lineStartY);
+                    ctx.lineTo(x, timelineY);
+                    ctx.stroke();
+
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.font = '8px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(event.display_name, x, labelY);
+                    ctx.font = '7px sans-serif';
+                    ctx.fillText(event.time, x, labelY + 10);
+                });
+
+                ctx.setLineDash([]);
+            }
+        }
+
+        // Setup hover tooltip for ant-switch timeline
+        function setupAntSwitchTimelineHover(canvas) {
+            if (!canvas) return;
+
+            let lastHoverUpdate = 0;
+            const hoverThrottle = 100;
+
+            canvas.addEventListener('mousemove', function(e) {
+                const now = Date.now();
+                if (now - lastHoverUpdate < hoverThrottle) return;
+                lastHoverUpdate = now;
+
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+                const ctx = canvas.getContext('2d');
+                const marginLeft = 50;
+                const marginRight = 50;
+                const marginBottom = 40;
+                const timelineY = canvas.height - marginBottom - 10;
+                const timelineWidth = canvas.width - marginLeft - marginRight;
+
+                // Redraw to clear previous tooltip
+                const entries = (currentAntSwitchSchedulerConfig && currentAntSwitchSchedulerConfig.entries) || [];
+                drawAntSwitchTimeline(entries);
+
+                // Check if mouse is near any entry marker
+                const hoverRadius = 15;
+                let hoveredEntry = null;
+                if (canvas.antSwitchEntries) {
+                    for (const e of canvas.antSwitchEntries) {
+                        const dist = Math.sqrt(Math.pow(mouseX - e.x, 2) + Math.pow(mouseY - timelineY, 2));
+                        if (dist <= hoverRadius) { hoveredEntry = e; break; }
+                    }
+                }
+
+                if (hoveredEntry) {
+                    canvas.style.cursor = 'pointer';
+                    const posId = hoveredEntry.offset ? `${hoveredEntry.time}_${hoveredEntry.offset}` : hoveredEntry.time;
+                    drawAntSwitchTimeline(entries, posId);
+
+                    const actionLabel = hoveredEntry.action === 'ground' ? 'Ground All' : `Antenna ${hoveredEntry.antenna}`;
+                    const tooltipText = `${hoveredEntry.resolved_time || hoveredEntry.time} → ${actionLabel}`;
+                    ctx.font = '12px sans-serif';
+                    const textWidth = ctx.measureText(tooltipText).width;
+                    const tooltipWidth = textWidth + 16;
+                    const tooltipHeight = 24;
+
+                    let tooltipX = hoveredEntry.x - tooltipWidth / 2;
+                    const tooltipY = timelineY - 35;
+                    if (tooltipX < 5) tooltipX = 5;
+                    if (tooltipX + tooltipWidth > canvas.width - 5) tooltipX = canvas.width - tooltipWidth - 5;
+
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                    ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+                    ctx.strokeStyle = '#28a745';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+                    ctx.fillStyle = '#fff';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(tooltipText, tooltipX + tooltipWidth / 2, tooltipY + tooltipHeight / 2);
+                } else {
+                    canvas.style.cursor = 'default';
+                }
+            });
+
+            canvas.addEventListener('mouseleave', function() {
+                canvas.style.cursor = 'default';
+                const entries = (currentAntSwitchSchedulerConfig && currentAntSwitchSchedulerConfig.entries) || [];
+                drawAntSwitchTimeline(entries);
+            });
+        }
+
+        async function loadAntSwitchSchedulerLogs() {
+            try {
+                const resp = await authenticatedFetch('/admin/ant-switch-scheduler-logs');
+                if (!resp || !resp.ok) return;
+                const data = await resp.json();
+                currentAntSwitchLogs = data.logs || [];
+                antSwitchLogsCurrentPage = 1;
+                renderAntSwitchSchedulerLogs();
+            } catch (e) {
+                const c = document.getElementById('antSwitchSchedulerLogsContainer');
+                if (c) c.innerHTML = `<p style="color:#dc3545;">Error loading logs: ${e.message}</p>`;
+            }
+        }
+
+        function renderAntSwitchSchedulerLogs() {
+            const container = document.getElementById('antSwitchSchedulerLogsContainer');
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (currentAntSwitchLogs.length === 0) {
+                container.innerHTML = '<p style="color:#666;font-style:italic;padding:10px;">No trigger logs yet.</p>';
+                return;
+            }
+
+            const totalPages = Math.ceil(currentAntSwitchLogs.length / antSwitchLogsPerPage);
+            const startIndex = (antSwitchLogsCurrentPage - 1) * antSwitchLogsPerPage;
+            const endIndex = Math.min(startIndex + antSwitchLogsPerPage, currentAntSwitchLogs.length);
+            const pageData = currentAntSwitchLogs.slice(startIndex, endIndex);
+
+            const successCount = currentAntSwitchLogs.filter(l => l.success).length;
+            const failCount = currentAntSwitchLogs.length - successCount;
+            const summaryDiv = document.createElement('div');
+            summaryDiv.style.cssText = 'margin-bottom:10px;padding:8px;background:#e3f2fd;border-radius:5px;font-size:13px;';
+            summaryDiv.innerHTML = `<strong>Summary:</strong> ${currentAntSwitchLogs.length} trigger(s)
+                <span style="margin-left:15px;color:#28a745;">✓ ${successCount} successful</span>
+                <span style="margin-left:15px;color:#dc3545;">✗ ${failCount} failed</span>`;
+            container.appendChild(summaryDiv);
+
+            const table = document.createElement('table');
+            table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
+            table.innerHTML = `<thead><tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">
+                <th style="padding:6px;text-align:left;">Timestamp</th>
+                <th style="padding:6px;text-align:center;">Trigger</th>
+                <th style="padding:6px;text-align:center;">Action</th>
+                <th style="padding:6px;text-align:center;">Status</th>
+                <th style="padding:6px;text-align:left;">Error</th>
+            </tr></thead>`;
+            const tbody = document.createElement('tbody');
+            pageData.forEach(log => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                const ts = new Date(log.timestamp).toLocaleString();
+                const statusIcon = log.success ? '✓' : '✗';
+                const statusColor = log.success ? '#28a745' : '#dc3545';
+                const actionLabel = log.action === 'ground' ? 'Ground All' : `Antenna ${log.antenna}`;
+                const errorDisplay = log.error ? `<span style="color:#dc3545;font-style:italic;">${log.error}</span>` : '<em style="color:#999;">—</em>';
+                row.innerHTML = `
+                    <td style="padding:6px;white-space:nowrap;">${ts}</td>
+                    <td style="padding:6px;text-align:center;font-family:monospace;">${log.time}</td>
+                    <td style="padding:6px;text-align:center;">${actionLabel}</td>
+                    <td style="padding:6px;text-align:center;color:${statusColor};font-weight:bold;">${statusIcon}</td>
+                    <td style="padding:6px;">${errorDisplay}</td>`;
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+            container.appendChild(table);
+
+            if (totalPages > 1) {
+                const pagDiv = document.createElement('div');
+                pagDiv.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:10px;margin-top:10px;';
+                const prevBtn = document.createElement('button');
+                prevBtn.className = 'btn btn-secondary';
+                prevBtn.textContent = '← Prev';
+                prevBtn.style.cssText = 'padding:4px 10px;font-size:11px;';
+                prevBtn.disabled = antSwitchLogsCurrentPage === 1;
+                prevBtn.onclick = () => { antSwitchLogsCurrentPage--; renderAntSwitchSchedulerLogs(); };
+                const pageInfo = document.createElement('span');
+                pageInfo.style.fontSize = '12px';
+                pageInfo.textContent = `Page ${antSwitchLogsCurrentPage} of ${totalPages}`;
+                const nextBtn = document.createElement('button');
+                nextBtn.className = 'btn btn-secondary';
+                nextBtn.textContent = 'Next →';
+                nextBtn.style.cssText = 'padding:4px 10px;font-size:11px;';
+                nextBtn.disabled = antSwitchLogsCurrentPage === totalPages;
+                nextBtn.onclick = () => { antSwitchLogsCurrentPage++; renderAntSwitchSchedulerLogs(); };
+                pagDiv.appendChild(prevBtn);
+                pagDiv.appendChild(pageInfo);
+                pagDiv.appendChild(nextBtn);
+                container.appendChild(pagDiv);
+            }
+        }
+
+        function showAddAntSwitchEntryForm() {
+            document.getElementById('antSwitchEntryFormTitle').textContent = 'Add Scheduled Entry';
+            document.getElementById('editAntSwitchEntryTime').value = '';
+            document.getElementById('editAntSwitchEntryOffset').value = '';
+            document.getElementById('antSwitchEntryTriggerType').value = 'fixed';
+            document.getElementById('antSwitchEntryTime').value = '';
+            document.getElementById('antSwitchEntrySolarEvent').value = '';
+            document.getElementById('antSwitchEntryOffset').value = '0';
+            document.getElementById('antSwitchEntryAction').value = 'select';
+            document.getElementById('antSwitchEntryAntenna').value = '1';
+            document.getElementById('antSwitchEntryEnabled').value = 'true';
+            antSwitchPopulateSolarEventsDropdown();
+            antSwitchHandleTriggerTypeChange();
+            antSwitchHandleActionChange();
+            document.getElementById('addAntSwitchEntryForm').style.display = 'block';
+            document.getElementById('addAntSwitchEntryForm').scrollIntoView({behavior:'smooth', block:'nearest'});
+        }
+
+        function antSwitchPopulateSolarEventsDropdown() {
+            const select = document.getElementById('antSwitchEntrySolarEvent');
+            select.innerHTML = '<option value="">Select event...</option>';
+            antSwitchSolarEvents.forEach(event => {
+                const option = document.createElement('option');
+                option.value = event.name;
+                const timeDisplay = event.time ? ` (${event.time})` : '';
+                option.textContent = `${event.display_name}${timeDisplay}`;
+                option.dataset.description = event.description;
+                select.appendChild(option);
+            });
+        }
+
+        function antSwitchHandleTriggerTypeChange() {
+            const triggerType = document.getElementById('antSwitchEntryTriggerType').value;
+            document.getElementById('antSwitchFixedTimeField').style.display = triggerType === 'fixed' ? 'block' : 'none';
+            document.getElementById('antSwitchSolarEventField').style.display = triggerType === 'solar' ? 'block' : 'none';
+            document.getElementById('antSwitchOffsetField').style.display = triggerType === 'solar' ? 'block' : 'none';
+            if (triggerType === 'solar') {
+                const sel = document.getElementById('antSwitchEntrySolarEvent');
+                const desc = document.getElementById('antSwitchSolarEventDescription');
+                if (sel.selectedIndex > 0) {
+                    desc.textContent = sel.options[sel.selectedIndex].dataset.description || '';
+                } else {
+                    desc.textContent = '';
+                }
+            }
+        }
+
+        function antSwitchHandleActionChange() {
+            const action = document.getElementById('antSwitchEntryAction').value;
+            document.getElementById('antSwitchAntennaField').style.display = action === 'select' ? 'block' : 'none';
+        }
+
+        function cancelAntSwitchEntryForm() {
+            document.getElementById('addAntSwitchEntryForm').style.display = 'none';
+        }
+
+        async function editAntSwitchEntry(time, offset) {
+            const entries = (currentAntSwitchSchedulerConfig && currentAntSwitchSchedulerConfig.entries) || [];
+            const entry = entries.find(e => e.time === time && (e.offset || 0) === (offset || 0));
+            if (!entry) { showAlert('Entry not found', 'error'); return; }
+
+            document.getElementById('antSwitchEntryFormTitle').textContent = 'Edit Scheduled Entry';
+            document.getElementById('editAntSwitchEntryTime').value = time;
+            document.getElementById('editAntSwitchEntryOffset').value = offset || 0;
+
+            antSwitchPopulateSolarEventsDropdown();
+
+            const isSolar = antSwitchSolarEvents.some(e => e.name === time);
+            if (isSolar) {
+                document.getElementById('antSwitchEntryTriggerType').value = 'solar';
+                document.getElementById('antSwitchEntrySolarEvent').value = time;
+                document.getElementById('antSwitchEntryOffset').value = entry.offset || 0;
+            } else {
+                document.getElementById('antSwitchEntryTriggerType').value = 'fixed';
+                document.getElementById('antSwitchEntryTime').value = time;
+                document.getElementById('antSwitchEntryOffset').value = '0';
+            }
+
+            document.getElementById('antSwitchEntryAction').value = entry.action || 'select';
+            document.getElementById('antSwitchEntryAntenna').value = entry.antenna || 1;
+            document.getElementById('antSwitchEntryEnabled').value = entry.enabled !== false ? 'true' : 'false';
+
+            antSwitchHandleTriggerTypeChange();
+            antSwitchHandleActionChange();
+            document.getElementById('addAntSwitchEntryForm').style.display = 'block';
+            document.getElementById('addAntSwitchEntryForm').scrollIntoView({behavior:'smooth', block:'nearest'});
+        }
+
+        async function toggleAntSwitchEntryEnabled(time, offset) {
+            const entries = (currentAntSwitchSchedulerConfig && currentAntSwitchSchedulerConfig.entries) || [];
+            const entry = entries.find(e => e.time === time && (e.offset || 0) === (offset || 0));
+            if (!entry) { showAlert('Entry not found', 'error'); return; }
+            entry.enabled = !entry.enabled;
+            try {
+                const resp = await authenticatedFetch('/admin/ant-switch-scheduler-config', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(currentAntSwitchSchedulerConfig)
+                });
+                if (!resp || !resp.ok) throw new Error('Failed to update');
+                await loadAntSwitchSchedulerConfig();
+            } catch (err) {
+                showAlert('Error: ' + err.message, 'error');
+                entry.enabled = !entry.enabled;
+            }
+        }
+
+        async function deleteAntSwitchEntry(time, offset) {
+            if (!confirm(`Delete scheduled entry for "${time}"?`)) return;
+            try {
+                let url = `/admin/ant-switch-scheduler-entry?time=${encodeURIComponent(time)}`;
+                if (offset) url += `&offset=${offset}`;
+                const resp = await authenticatedFetch(url, {method: 'DELETE'});
+                if (!resp || !resp.ok) throw new Error('Failed to delete');
+                showAlert('Entry deleted', 'success');
+                await loadAntSwitchSchedulerConfig();
+            } catch (err) {
+                showAlert('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function saveAntSwitchEntry() {
+            const triggerType = document.getElementById('antSwitchEntryTriggerType').value;
+            const action = document.getElementById('antSwitchEntryAction').value;
+            const enabled = document.getElementById('antSwitchEntryEnabled').value === 'true';
+
+            let time, offset;
+            if (triggerType === 'solar') {
+                time = document.getElementById('antSwitchEntrySolarEvent').value;
+                offset = parseInt(document.getElementById('antSwitchEntryOffset').value) || 0;
+                if (!time) { showAlert('Please select a solar event', 'error'); return; }
+            } else {
+                time = document.getElementById('antSwitchEntryTime').value;
+                offset = 0;
+                if (!time) { showAlert('Please enter a time', 'error'); return; }
+            }
+
+            const entry = { time, action, enabled };
+            if (triggerType === 'solar' && offset !== 0) entry.offset = offset;
+            if (action === 'select') {
+                const antenna = parseInt(document.getElementById('antSwitchEntryAntenna').value);
+                if (!antenna || antenna < 1) { showAlert('Please enter a valid antenna number', 'error'); return; }
+                entry.antenna = antenna;
+            }
+
+            const editTime = document.getElementById('editAntSwitchEntryTime').value;
+            const editOffset = parseInt(document.getElementById('editAntSwitchEntryOffset').value) || 0;
+            const isEdit = editTime !== '';
+
+            try {
+                let resp;
+                if (isEdit) {
+                    let url = `/admin/ant-switch-scheduler-entry?time=${encodeURIComponent(editTime)}`;
+                    if (editOffset) url += `&offset=${editOffset}`;
+                    resp = await authenticatedFetch(url, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(entry)
+                    });
+                } else {
+                    resp = await authenticatedFetch('/admin/ant-switch-scheduler-entry', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(entry)
+                    });
+                }
+                if (!resp || !resp.ok) {
+                    const errText = await resp.text();
+                    throw new Error(errText || 'Failed to save entry');
+                }
+                showAlert(isEdit ? 'Entry updated' : 'Entry added', 'success');
+                cancelAntSwitchEntryForm();
+                await loadAntSwitchSchedulerConfig();
+            } catch (err) {
+                showAlert('Error: ' + err.message, 'error');
+            }
+        }
+
+        // ── End Ant Switch Scheduler ─────────────────────────────────────────────
 
         async function antSwitchTestConn() {
             const resultEl = document.getElementById('antSwitchTabTestResult');

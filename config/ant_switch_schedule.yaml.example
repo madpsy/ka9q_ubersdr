@@ -1,0 +1,92 @@
+# Antenna Switch Scheduler Configuration
+# This file configures scheduled antenna switching at specific times of day
+#
+# The scheduler will automatically switch to the specified antenna (or ground all)
+# at the configured times. This is useful for:
+# - Switching to a different antenna at sunrise/sunset for grey-line propagation
+# - Grounding all antennas during thunderstorm-prone hours
+# - Automated antenna selection for scheduled operations
+#
+# IMPORTANT:
+# - The scheduler only runs if ant_switch is enabled in the main config
+# - Times are in 24-hour UTC format (HH:MM)
+# - The scheduler checks every minute, so entries are executed within 1 minute of scheduled time
+# - Solar events require GPS lat/lon to be configured in the main config (admin.gps)
+#
+# Solar events available:
+#   sunrise, sunset, dawn, dusk, solarNoon, nadir,
+#   sunriseEnd, sunsetStart, goldenHour, goldenHourEnd,
+#   nauticalDawn, nauticalDusk, nightEnd, night
+#
+# Offset: minutes before (negative) or after (positive) a solar event.
+# Range: -120 to +120 minutes.
+
+# Enable or disable the scheduler
+enabled: false
+
+# List of scheduled entries
+entries:
+  # Switch to antenna 1 at 06:00 UTC
+  - time: "06:00"
+    antenna: 1
+    enabled: true
+
+  # Switch to antenna 2 at sunrise (grey-line propagation)
+  - time: "sunrise"
+    antenna: 2
+    enabled: true
+
+  # Switch to antenna 3 thirty minutes before sunset
+  - time: "sunset"
+    offset: -30
+    antenna: 3
+    enabled: true
+
+  # Ground all antennas at sunset (e.g. for lightning protection)
+  - time: "sunset"
+    action: "ground"
+    enabled: false
+
+  # Switch to antenna 1 at 22:00 UTC for night-time operation
+  - time: "22:00"
+    antenna: 1
+    enabled: true
+
+# Example configurations:
+
+# Example 1: Simple day/night antenna switching
+# entries:
+#   - time: "08:00"
+#     antenna: 1    # Vertical for daytime
+#     enabled: true
+#   - time: "20:00"
+#     antenna: 2    # Dipole for night-time
+#     enabled: true
+
+# Example 2: Grey-line switching at sunrise and sunset
+# entries:
+#   - time: "sunrise"
+#     offset: -15   # 15 minutes before sunrise
+#     antenna: 3    # Beam antenna for grey-line
+#     enabled: true
+#   - time: "sunrise"
+#     offset: 30    # 30 minutes after sunrise
+#     antenna: 1    # Back to vertical
+#     enabled: true
+#   - time: "sunset"
+#     offset: -15   # 15 minutes before sunset
+#     antenna: 3    # Beam antenna for grey-line
+#     enabled: true
+#   - time: "sunset"
+#     offset: 30    # 30 minutes after sunset
+#     antenna: 1    # Back to vertical
+#     enabled: true
+
+# Example 3: Ground all at night for lightning protection
+# entries:
+#   - time: "sunrise"
+#     antenna: 1    # Select antenna at sunrise
+#     enabled: true
+#   - time: "sunset"
+#     action: "ground"  # Ground all at sunset
+#     enabled: true

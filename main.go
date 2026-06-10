@@ -1955,6 +1955,7 @@ func main() {
 
 	// Initialize antenna switch handler if enabled
 	var antSwitchHandler *AntSwitchHandler
+	var antSwitchScheduler *AntSwitchScheduler
 	if config.AntSwitch.Enabled {
 		var err error
 		antSwitchHandler, err = NewAntSwitchHandler(&config.AntSwitch)
@@ -1963,6 +1964,24 @@ func main() {
 			antSwitchHandler = nil
 		} else {
 			log.Printf("Antenna switch API initialized (host: %s:%d)", config.AntSwitch.Host, config.AntSwitch.Port)
+
+			// Initialize ant switch scheduler
+			antSwitchSchedulerPath := "ant_switch_schedule.yaml"
+			if *configDir != "." {
+				antSwitchSchedulerPath = *configDir + "/ant_switch_schedule.yaml"
+			}
+			antSwitchScheduler, err = NewAntSwitchScheduler(antSwitchSchedulerPath, antSwitchHandler, config.Admin.GPS.Lat, config.Admin.GPS.Lon)
+			if err != nil {
+				log.Printf("Warning: Failed to initialize ant switch scheduler: %v", err)
+				antSwitchScheduler = nil
+			} else {
+				if err := antSwitchScheduler.Start(); err != nil {
+					log.Printf("Warning: Failed to start ant switch scheduler: %v", err)
+					antSwitchScheduler = nil
+				} else if antSwitchScheduler != nil {
+					defer antSwitchScheduler.Stop()
+				}
+			}
 		}
 	}
 
@@ -2064,7 +2083,7 @@ func main() {
 		instanceReporter.SetGPSDOMonitor(gpsdoMonitor)
 		instanceReporter.SetFrontendHistory(frontendHistory)
 	}
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler)
 
 	// Widget manager: in-memory cache + collector proxy.
 	// Must be created after adminHandler so configPath is resolved.
@@ -2447,6 +2466,11 @@ func main() {
 	http.HandleFunc("/admin/rotator-scheduler-position", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerPosition))
 	http.HandleFunc("/admin/rotator-scheduler-reload", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerReload))
 	http.HandleFunc("/admin/rotator-scheduler-logs", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerLogs))
+	http.HandleFunc("/admin/ant-switch-scheduler-config", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchSchedulerConfig))
+	http.HandleFunc("/admin/ant-switch-scheduler-entry", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchSchedulerEntry))
+	http.HandleFunc("/admin/ant-switch-scheduler-reload", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchSchedulerReload))
+	http.HandleFunc("/admin/ant-switch-scheduler-logs", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchSchedulerLogs))
+	http.HandleFunc("/admin/ant-switch-scheduler-solar-events", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchSchedulerSolarEvents))
 	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))

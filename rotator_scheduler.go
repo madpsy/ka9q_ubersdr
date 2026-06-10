@@ -478,8 +478,12 @@ func (rs *RotatorScheduler) schedulerLoop() {
 	log.Printf("Rotator scheduler: aligning to minute boundary (waiting %v until %s)",
 		initialDelay.Round(time.Second), nextMinute.Format("15:04:05"))
 
-	// Wait until the next minute boundary before starting ticker
-	time.Sleep(initialDelay)
+	// Wait until the next minute boundary, but honour stop requests during the sleep
+	select {
+	case <-time.After(initialDelay):
+	case <-rs.stopChan:
+		return
+	}
 
 	// Now create ticker that fires every minute (already aligned to :00 seconds)
 	ticker := time.NewTicker(1 * time.Minute)

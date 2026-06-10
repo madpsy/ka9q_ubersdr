@@ -20438,7 +20438,8 @@ const tooltipLine2 = timeStr;
             const grounded    = !!health.grounded;
             const allowMixing = !!health.allow_mixing;
             const thunderstorm= !!health.thunderstorm;
-            const defaultAnt  = cfg.default_antenna || 0;
+            // Prefer health.default_antenna (always fresh from server) over currentConfig
+            const defaultAnt  = health.default_antenna || cfg.default_antenna || 0;
 
             const IS  = 'width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;';
             const LS  = 'display:block;margin-bottom:4px;font-weight:500;color:#555;font-size:12px;';
@@ -20580,22 +20581,37 @@ const tooltipLine2 = timeStr;
             container.innerHTML = html;
         }
 
-        // Set/clear the default startup antenna (updates currentConfig and re-renders stars)
-        function antSwitchSetDefault(n) {
+        // Set/clear the default startup antenna — saves immediately to disk (no restart needed)
+        async function antSwitchSetDefault(n) {
             if (!currentConfig.ant_switch) currentConfig.ant_switch = {};
             const cur = currentConfig.ant_switch.default_antenna || 0;
             // Toggle: clicking the current default clears it
-            currentConfig.ant_switch.default_antenna = (cur === n) ? 0 : n;
-            // Re-render just the star buttons without a full reload
-            const cfg = currentConfig.ant_switch;
-            const numAntennas = cfg.num_antennas || 8;
+            const newVal = (cur === n) ? 0 : n;
+            currentConfig.ant_switch.default_antenna = newVal;
+
+            // Optimistically update the star buttons immediately
+            const numAntennas = currentConfig.ant_switch.num_antennas || 8;
             for (let i = 1; i <= numAntennas; i++) {
                 const btn = document.querySelector(`button[onclick="antSwitchSetDefault(${i})"]`);
                 if (!btn) continue;
-                const isDefault = cfg.default_antenna === i;
+                const isDefault = newVal === i;
                 btn.textContent = isDefault ? '⭐' : '☆';
                 btn.style.opacity = isDefault ? '1' : '0.3';
                 btn.title = isDefault ? 'Default on startup (click to clear)' : 'Set as default on startup';
+            }
+
+            // Persist via PUT (same mechanism as label auto-save — no restart needed)
+            try {
+                const resp = await authenticatedFetch('/admin/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentConfig)
+                });
+                if (!resp || !resp.ok) throw new Error('Save failed');
+            } catch (e) {
+                showAlert('Failed to save default antenna: ' + e.message, 'error');
+                // Revert in-memory value on failure
+                currentConfig.ant_switch.default_antenna = cur;
             }
         }
 
@@ -20692,6 +20708,8 @@ const tooltipLine2 = timeStr;
 
         async function loadAntSwitchSchedulerConfig() {
             try {
+                // Ensure suncalc data is available for day/night shading on the timeline
+                if (!window.suncalcData) await fetchSunCalcData();
                 const response = await authenticatedFetch('/admin/ant-switch-scheduler-config');
                 if (!response) return;
                 if (!response.ok) throw new Error('Failed to load ant switch scheduler config');
@@ -21090,18 +21108,32 @@ const tooltipLine2 = timeStr;
                 ctx.arc(x, timelineY, isHighlighted ? 7 : 5, 0, 2 * Math.PI);
                 ctx.fill();
 
-                // Label: action abbreviation (short label or ⏚)
-                const label = e.action === 'ground' ? '⏚' : (() => {
-                    const full = antSwitchGetAntennaLabel(e.antenna);
-                    // Use first word or up to 4 chars as abbreviation
-                    const parts = full.split(/[\s\-_/]+/);
-                    return parts[0].substring(0, 4);
-                })();
+                // Label: antenna name (wrapped to two lines) or ⏚
                 ctx.fillStyle = isHighlighted ? '#ff6b6b' : '#28a745';
-                ctx.font = isHighlighted ? 'bold 14px sans-serif' : 'bold 12px sans-serif';
+                ctx.font = isHighlighted ? 'bold 11px sans-serif' : 'bold 10px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(label, x, labelY);
+                if (e.action === 'ground') {
+                    ctx.fillText('⏚', x, labelY);
+                } else {
+                    const full = antSwitchGetAntennaLabel(e.antenna);
+                    // Split into words and wrap into at most two lines of ≤8 chars each
+                    const words = full.split(/\s+/);
+                    let line1 = '', line2 = '';
+                    for (const w of words) {
+                        if (!line1) { line1 = w; }
+                        else if ((line1 + ' ' + w).length <= 8) { line1 += ' ' + w; }
+                        else if (!line2) { line2 = w; }
+                        else { line2 += ' ' + w; }
+                    }
+                    const lineH = isHighlighted ? 13 : 11;
+                    if (line2) {
+                        ctx.fillText(line1, x, labelY - lineH / 2);
+                        ctx.fillText(line2, x, labelY + lineH / 2);
+                    } else {
+                        ctx.fillText(line1, x, labelY);
+                    }
+                }
             });
 
             // Current time marker

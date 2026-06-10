@@ -33,6 +33,7 @@ type Config struct {
 	InstanceReporting  InstanceReportingConfig   `yaml:"instance_reporting"`
 	FrequencyReference FrequencyReferenceConfig  `yaml:"frequency_reference"`
 	Rotctl             RotctlConfig              `yaml:"rotctl"`
+	AntSwitch          AntSwitchConfig           `yaml:"ant_switch"`
 	GeoIP              GeoIPConfig               `yaml:"geoip"`
 	SSHProxy           SSHProxyConfig            `yaml:"ssh_proxy"`
 	GPSDO              GPSDOConfig               `yaml:"gpsdo"`

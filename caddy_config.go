@@ -142,6 +142,12 @@ func generateHTTPCaddyfile() string {
         X-XSS-Protection "1; mode=block"
         Referrer-Policy "strict-origin-when-cross-origin"
     }
+
+    # Short TTL for static assets — set only if upstream did not already set Cache-Control
+    @static {
+        path *.js *.css *.png *.jpg *.jpeg *.gif *.svg *.ico *.woff *.woff2 *.webp *.html *.htm
+    }
+    header @static ?Cache-Control "public, max-age=300, must-revalidate"
     
     # Logging
     log {
@@ -194,35 +200,41 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 		// HTTP block serving content directly (no redirect)
 		httpBlock = `# HTTP (port 80) - respond to any host header
 :80 {
-    # Reverse proxy to ubersdr container
-    reverse_proxy ubersdr:8080 {
-        # Strip client-supplied proxy headers to prevent IP spoofing.
-        # X-Forwarded-For is NOT stripped so Caddy can append the real client IP to it.
-        header_up -X-Real-IP
-        header_up -X-Forwarded-Host
-        header_up -X-Forwarded-Proto
-    }
-    
-    # Enable compression
-    encode gzip
-    
-    # Security headers (no HSTS for HTTP)
-    header {
-        # Prevent clickjacking
-        X-Frame-Options "SAMEORIGIN"
-        # Prevent MIME type sniffing
-        X-Content-Type-Options "nosniff"
-        # Enable XSS protection
-        X-XSS-Protection "1; mode=block"
-        # Referrer policy
-        Referrer-Policy "strict-origin-when-cross-origin"
-    }
-    
-    # Logging
-    log {
-        output file /data/access.log
-        format json
-    }
+	   # Reverse proxy to ubersdr container
+	   reverse_proxy ubersdr:8080 {
+	       # Strip client-supplied proxy headers to prevent IP spoofing.
+	       # X-Forwarded-For is NOT stripped so Caddy can append the real client IP to it.
+	       header_up -X-Real-IP
+	       header_up -X-Forwarded-Host
+	       header_up -X-Forwarded-Proto
+	   }
+	   
+	   # Enable compression
+	   encode gzip
+	   
+	   # Security headers (no HSTS for HTTP)
+	   header {
+	       # Prevent clickjacking
+	       X-Frame-Options "SAMEORIGIN"
+	       # Prevent MIME type sniffing
+	       X-Content-Type-Options "nosniff"
+	       # Enable XSS protection
+	       X-XSS-Protection "1; mode=block"
+	       # Referrer policy
+	       Referrer-Policy "strict-origin-when-cross-origin"
+	   }
+
+	   # Short TTL for static assets — set only if upstream did not already set Cache-Control
+	   @static {
+	       path *.js *.css *.png *.jpg *.jpeg *.gif *.svg *.ico *.woff *.woff2 *.webp *.html *.htm
+	   }
+	   header @static ?Cache-Control "public, max-age=300, must-revalidate"
+	   
+	   # Logging
+	   log {
+	       output file /data/access.log
+	       format json
+	   }
 }`
 	}
 
@@ -269,6 +281,12 @@ https://%s {
         # Referrer policy
         Referrer-Policy "strict-origin-when-cross-origin"
     }
+
+    # Short TTL for static assets — set only if upstream did not already set Cache-Control
+    @static {
+        path *.js *.css *.png *.jpg *.jpeg *.gif *.svg *.ico *.woff *.woff2 *.webp *.html *.htm
+    }
+    header @static ?Cache-Control "public, max-age=300, must-revalidate"
     
     # Logging
     log {

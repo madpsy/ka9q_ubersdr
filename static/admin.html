@@ -523,7 +523,8 @@
         #monitor-decoder,
         #monitor-cwskimmer,
         #monitor-mqtt,
-        #monitor-rotctl {
+        #monitor-rotctl,
+        #monitor-ant-switch {
             scroll-margin-top: 52px;
         }
 
@@ -783,6 +784,7 @@
                     <button class="tab" onclick="switchTab('decoder')">Decoder</button>
                     <button class="tab" onclick="switchTab('cwskimmer')">CW Skimmer</button>
                     <button class="tab" id="rotatorTab" onclick="switchTab('rotator')" style="display: none;">Rotator Schedule</button>
+                    <button class="tab" id="antSwitchTab" onclick="switchTab('ant-switch')" style="display: none;">Switch</button>
                     <button class="tab" onclick="switchTab('chat')">Chat</button>
                     <button class="tab" onclick="switchTab('monitor')">Monitor</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
@@ -1578,6 +1580,17 @@
                     <button class="btn btn-secondary" onclick="loadRotatorSchedulerConfig()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportRotatorSchedule()">Export Schedule</button>
                     <button class="btn btn-secondary" onclick="importRotatorSchedule()">Import Schedule</button>
+                </div>
+
+                <!-- Antenna Switch Tab -->
+                <div id="antSwitchTabContent" class="tab-content">
+                    <div id="antSwitchTabBody" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading antenna switch status...</p>
+                    </div>
+                </div>
+                <div class="button-group" id="antSwitchButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadAntSwitchStatus()">Refresh</button>
                 </div>
 
                 <!-- Monitor Tab -->
@@ -3737,6 +3750,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             document.getElementById('uiButtons').style.display = 'none';
             const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
             if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'none';
+            const antSwitchButtonsEl = document.getElementById('antSwitchButtons');
+            if (antSwitchButtonsEl) antSwitchButtonsEl.style.display = 'none';
 
             // Stop rotator logs auto-refresh when leaving rotator tab
             if (tab !== 'rotator') {
@@ -3877,6 +3892,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'flex';
                 loadRotatorSchedulerConfig();
                 startRotatorLogsAutoRefresh();
+            } else if (tab === 'ant-switch') {
+                document.getElementById('antSwitchTab').classList.add('active');
+                document.getElementById('antSwitchTabContent').classList.add('active');
+                const antSwitchBtns = document.getElementById('antSwitchButtons');
+                if (antSwitchBtns) antSwitchBtns.style.display = 'flex';
+                loadAntSwitchStatus();
             } else if (tab === 'chat') {
                 document.querySelector('.tab:nth-child(16)').classList.add('active');
                 document.getElementById('chatTab').classList.add('active');
@@ -3911,6 +3932,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 updatePublicInstanceButton();
                 updateCallsignNameDisplay();
                 updateRotatorTabVisibility();
+                updateAntSwitchTabVisibility();
                 updateTerminalButtonVisibility();
                 updateRemoteLoggingCheckbox();
                 showAlert('Configuration loaded successfully', 'success');
@@ -3946,6 +3968,21 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
         function openGPSDONewTab() {
             window.open('/gpsdo/', '_blank');
+        }
+
+        // Update antenna switch tab visibility based on ant_switch enabled status
+        function updateAntSwitchTabVisibility() {
+            const tab = document.getElementById('antSwitchTab');
+            if (tab) {
+                if (currentConfig.ant_switch && currentConfig.ant_switch.enabled === true) {
+                    tab.style.display = 'inline-block';
+                } else {
+                    tab.style.display = 'none';
+                    if (currentTab === 'ant-switch') {
+                        switchTab('sessions');
+                    }
+                }
+            }
         }
 
         // Update rotator tab visibility based on rotctl enabled status
@@ -17964,7 +18001,7 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP and GPSDO health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO and ant-switch health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
@@ -17976,7 +18013,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/mqtt-health'),
                     authenticatedFetch('/admin/rotctl-health'),
                     authenticatedFetch('/admin/ntp-health'),
-                    authenticatedFetch('/admin/gpsdo-health')
+                    authenticatedFetch('/admin/gpsdo-health'),
+                    authenticatedFetch('/admin/ant-switch-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -17985,9 +18023,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -18004,17 +18042,18 @@ const tooltipLine2 = timeStr;
                 const rotctlHealth = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
                 const ntpHealth = (ntpResponse.ok || ntpResponse.status === 503) ? await ntpResponse.json() : null;
                 const gpsdoHealth = (gpsdoResponse.ok || gpsdoResponse.status === 503) ? await gpsdoResponse.json() : null;
+                const antSwitchHealth = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
                 lastGPSDOHealth = gpsdoHealth;
                 updateGPSDOTabVisibility();
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -18053,7 +18092,7 @@ const tooltipLine2 = timeStr;
 
         async function loadMonitorHealthDetailed() {
             try {
-                // Fetch tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, and rotctl detailed diagnostics
+                // Fetch tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl and ant-switch detailed diagnostics
                 const fetchPromises = [
                     authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health?detailed=true'),
@@ -18062,7 +18101,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/decoder-health?detailed=true'),
                     authenticatedFetch('/admin/cwskimmer-health?detailed=true'),
                     authenticatedFetch('/admin/mqtt-health'),
-                    authenticatedFetch('/admin/rotctl-health')
+                    authenticatedFetch('/admin/rotctl-health'),
+                    authenticatedFetch('/admin/ant-switch-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -18071,9 +18111,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse] = await Promise.all(fetchPromises);
+                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, antSwitchResponse] = await Promise.all(fetchPromises);
 
-                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse) return; // Auth failed, already handled
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !antSwitchResponse) return; // Auth failed, already handled
 
                 const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
@@ -18083,11 +18123,12 @@ const tooltipLine2 = timeStr;
                 const cwSkimmerDiag = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
                 const mqttDiag = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
                 const rotctlDiag = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
+                const antSwitchDiag = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag }, true);
+                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag, antSwitch: antSwitchDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -18332,11 +18373,12 @@ const tooltipLine2 = timeStr;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
+                const hasAntSwitchIssues = data.antSwitch && data.antSwitch.enabled && !data.antSwitch.healthy;
                 const hasNTPIssues = data.ntp && !data.ntp.healthy;
                 const hasGPSDOIssues = data.gpsdo && data.gpsdo.enabled && !data.gpsdo.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -18420,6 +18462,12 @@ const tooltipLine2 = timeStr;
                     if (hasRotctlIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Rotator Control:</strong> ' + (data.rotctl.issues && data.rotctl.issues.length > 0 ? data.rotctl.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasAntSwitchIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Antenna Switch:</strong> ' + (data.antSwitch.issues && data.antSwitch.issues.length > 0 ? data.antSwitch.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -18588,6 +18636,11 @@ const tooltipLine2 = timeStr;
                     renderRotctlHealth(container, data.rotctl);
                 }
 
+                // Render antenna switch health status
+                if (data.antSwitch) {
+                    renderAntSwitchHealth(container, data.antSwitch);
+                }
+
                 // Render GPSDO health status
                 if (data.gpsdo && data.gpsdo.enabled) {
                     renderGPSDOHealth(data.gpsdo);
@@ -18621,6 +18674,7 @@ const tooltipLine2 = timeStr;
                 { id: 'monitor-cwskimmer',         label: 'CW Skimmer' },
                 { id: 'monitor-mqtt',              label: 'MQTT' },
                 { id: 'monitor-rotctl',            label: 'Rotator' },
+                { id: 'monitor-ant-switch',        label: 'Ant Switch' },
             ];
 
             const visible = sections.filter(s => {
@@ -20114,6 +20168,442 @@ const tooltipLine2 = timeStr;
 
             container.appendChild(statusSection);
         }
+
+        function renderAntSwitchHealth(container, data) {
+            // Only render if antenna switch is enabled
+            if (!data.enabled) {
+                return;
+            }
+
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+            statusSection.id = 'monitor-ant-switch';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} Antenna Switch Health</h3>
+            `;
+
+            // Overall status card
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            const thunderstormHTML = data.thunderstorm
+                ? `<br><span style="color: #dc3545; font-size: 14px; font-weight: bold;">⚡ Thunderstorm mode active — switching disabled</span>`
+                : '';
+
+            const denySwitchingLabels = ['Everyone', 'Password required', 'Admin only'];
+            const denySwitchingLabel = denySwitchingLabels[data.deny_switching] || 'Unknown';
+
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Host: ${data.host || 'N/A'}:${data.port || 'N/A'}</span><br>
+                <span style="color: #666; font-size: 14px;">Timeout: ${data.timeout_ms || 'N/A'} ms</span><br>
+                <span style="color: #666; font-size: 14px;">Antennas: ${data.num_antennas || 'N/A'}</span><br>
+                <span style="color: #666; font-size: 14px;">Mode: ${data.allow_mixing ? 'Mixing' : 'Exclusive'}</span><br>
+                <span style="color: #666; font-size: 14px;">Public control: ${denySwitchingLabel}</span>
+                ${thunderstormHTML}
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Antenna state stats
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            const labels = data.antenna_labels || [];
+            const selectedSet = new Set(data.selected || []);
+            const numAntennas = data.num_antennas || labels.length || 8;
+
+            // Build selected display with labels: "1 (Vertical), 3 (Dipole)"
+            let selectedDisplay;
+            if (data.grounded) {
+                selectedDisplay = 'All grounded';
+            } else if (data.selected && data.selected.length > 0) {
+                selectedDisplay = data.selected.map(n => {
+                    const label = labels[n - 1];
+                    return label && label !== `Antenna ${n}` ? `${n} (${label})` : `${n}`;
+                }).join(', ');
+            } else {
+                selectedDisplay = '—';
+            }
+
+            // Summary stat cards
+            const stats = [
+                { label: 'Active Port(s)', value: selectedDisplay, icon: '📡' },
+                { label: 'All Grounded', value: data.grounded ? 'Yes' : 'No', icon: data.grounded ? '🟢' : '⚪' },
+                { label: 'Last Updated', value: data.last_update ? new Date(data.last_update).toLocaleTimeString() : 'N/A', icon: '🕐' }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 16px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Per-port status grid
+            if (numAntennas > 0) {
+                const portsDiv = document.createElement('div');
+                portsDiv.style.marginBottom = '20px';
+
+                const portsTitle = document.createElement('div');
+                portsTitle.style.fontWeight = 'bold';
+                portsTitle.style.marginBottom = '10px';
+                portsTitle.style.color = '#444';
+                portsTitle.textContent = 'Antenna Ports';
+                portsDiv.appendChild(portsTitle);
+
+                const portsGrid = document.createElement('div');
+                portsGrid.style.display = 'grid';
+                portsGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(160px, 1fr))';
+                portsGrid.style.gap = '8px';
+
+                for (let i = 1; i <= numAntennas; i++) {
+                    const label = labels[i - 1] || `Antenna ${i}`;
+                    const isActive = !data.grounded && selectedSet.has(i);
+                    const portCard = document.createElement('div');
+                    portCard.style.padding = '10px 12px';
+                    portCard.style.borderRadius = '5px';
+                    portCard.style.border = `2px solid ${isActive ? '#28a745' : '#dee2e6'}`;
+                    portCard.style.background = isActive ? '#d4edda' : '#f8f9fa';
+                    portCard.style.display = 'flex';
+                    portCard.style.alignItems = 'center';
+                    portCard.style.gap = '8px';
+                    portCard.innerHTML = `
+                        <span style="font-size: 16px;">${isActive ? '🟢' : '⚫'}</span>
+                        <div>
+                            <div style="font-weight: bold; font-size: 13px; color: ${isActive ? '#155724' : '#666'};">${label}</div>
+                            <div style="font-size: 11px; color: #999;">Port ${i}</div>
+                        </div>
+                    `;
+                    portsGrid.appendChild(portCard);
+                }
+                portsDiv.appendChild(portsGrid);
+                statusSection.appendChild(portsDiv);
+            }
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        // ─── Antenna Switch Tab ───────────────────────────────────────────────────
+
+        async function loadAntSwitchStatus() {
+            const body = document.getElementById('antSwitchTabBody');
+            if (!body) return;
+            body.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading antenna switch status...</p></div>';
+
+            try {
+                const [healthResp, testResp] = await Promise.all([
+                    authenticatedFetch('/admin/ant-switch-health'),
+                    authenticatedFetch('/admin/ant-switch-test')
+                ]);
+                if (!healthResp || !testResp) return;
+
+                const health = (healthResp.ok || healthResp.status === 503) ? await healthResp.json() : null;
+                const test   = (testResp.ok   || testResp.status === 502 || testResp.status === 503) ? await testResp.json() : null;
+
+                renderAntSwitchTab(body, health, test);
+            } catch (e) {
+                body.innerHTML = `<div class="alert" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:5px;padding:15px;">❌ Failed to load antenna switch status: ${e.message}</div>`;
+            }
+        }
+
+        function renderAntSwitchTab(container, health, test) {
+            if (!health) {
+                container.innerHTML = '<div class="alert" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:5px;padding:15px;">❌ Could not load antenna switch data.</div>';
+                return;
+            }
+
+            const labels        = health.antenna_labels || [];
+            const numAntennas   = health.num_antennas   || labels.length || 8;
+            const selectedSet   = new Set(health.selected || []);
+            const grounded      = !!health.grounded;
+            const allowMixing   = !!health.allow_mixing;
+            const thunderstorm  = !!health.thunderstorm;
+            const denySwitching = health.deny_switching || 0;
+            const denySwitchingLabels = ['Everyone', 'Password required', 'Admin only'];
+
+            // ── Connection status banner ──────────────────────────────────────────
+            const connOK    = test && test.success;
+            const connColor = connOK ? '#d4edda' : '#f8d7da';
+            const connBorder= connOK ? '#c3e6cb' : '#f5c6cb';
+            const connIcon  = connOK ? '✅' : '❌';
+            const connText  = connOK
+                ? `Connected — ${test.duration_ms}ms round-trip`
+                : (test ? `Connection failed: ${test.error || 'unknown error'}` : 'Connection test unavailable');
+
+            let html = `
+                <div style="padding:12px 15px;background:${connColor};border:1px solid ${connBorder};border-radius:5px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <span style="font-weight:bold;">${connIcon} ${connText}</span>
+                    <span style="font-size:12px;color:#666;">${health.host}:${health.port} &nbsp;·&nbsp; timeout ${health.timeout_ms}ms</span>
+                </div>`;
+
+            // ── Thunderstorm warning ──────────────────────────────────────────────
+            if (thunderstorm) {
+                html += `<div style="padding:12px 15px;background:#fff3cd;border:2px solid #ffc107;border-radius:5px;margin-bottom:20px;">
+                    ⚡ <strong>Thunderstorm mode is active.</strong> All antennas are grounded and public switching is disabled.
+                    <button class="btn btn-secondary" style="margin-left:15px;font-size:12px;" onclick="antSwitchSetThunderstorm(false)">Disable Thunderstorm Mode</button>
+                </div>`;
+            }
+
+            // ── Current state ─────────────────────────────────────────────────────
+            html += `<div class="config-section"><h3>📡 Current State</h3>`;
+
+            // Antenna port grid
+            html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:20px;">`;
+            for (let i = 1; i <= numAntennas; i++) {
+                const label    = labels[i-1] || `Antenna ${i}`;
+                const isActive = !grounded && selectedSet.has(i);
+                const bg       = isActive ? '#d4edda' : '#f8f9fa';
+                const border   = isActive ? '#28a745' : '#dee2e6';
+                const textCol  = isActive ? '#155724' : '#666';
+                html += `<div style="padding:10px 12px;border-radius:5px;border:2px solid ${border};background:${bg};display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:16px;">${isActive ? '🟢' : '⚫'}</span>
+                    <div>
+                        <div style="font-weight:bold;font-size:13px;color:${textCol};">${label}</div>
+                        <div style="font-size:11px;color:#999;">Port ${i}</div>
+                    </div>
+                </div>`;
+            }
+            html += `</div>`;
+
+            // Summary row
+            let stateText;
+            if (grounded) {
+                stateText = 'All antennas grounded';
+            } else if (health.selected && health.selected.length > 0) {
+                stateText = health.selected.map(n => {
+                    const lbl = labels[n-1];
+                    return lbl && lbl !== `Antenna ${n}` ? `${n} (${lbl})` : `${n}`;
+                }).join(', ');
+            } else {
+                stateText = 'No antenna selected';
+            }
+            const lastUpdate = health.last_update ? new Date(health.last_update).toLocaleTimeString() : 'N/A';
+            html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
+                <div style="padding:12px;background:#f8f9fa;border-radius:5px;text-align:center;">
+                    <div style="font-size:22px;margin-bottom:4px;">📡</div>
+                    <div style="font-weight:bold;color:#667eea;">${stateText}</div>
+                    <div style="font-size:12px;color:#666;">Active Port(s)</div>
+                </div>
+                <div style="padding:12px;background:#f8f9fa;border-radius:5px;text-align:center;">
+                    <div style="font-size:22px;margin-bottom:4px;">${grounded ? '🟢' : '⚪'}</div>
+                    <div style="font-weight:bold;color:#667eea;">${grounded ? 'Yes' : 'No'}</div>
+                    <div style="font-size:12px;color:#666;">All Grounded</div>
+                </div>
+                <div style="padding:12px;background:#f8f9fa;border-radius:5px;text-align:center;">
+                    <div style="font-size:22px;margin-bottom:4px;">🕐</div>
+                    <div style="font-weight:bold;color:#667eea;">${lastUpdate}</div>
+                    <div style="font-size:12px;color:#666;">Last Updated</div>
+                </div>
+                <div style="padding:12px;background:#f8f9fa;border-radius:5px;text-align:center;">
+                    <div style="font-size:22px;margin-bottom:4px;">${allowMixing ? '🔀' : '1️⃣'}</div>
+                    <div style="font-weight:bold;color:#667eea;">${allowMixing ? 'Mixing' : 'Exclusive'}</div>
+                    <div style="font-size:12px;color:#666;">Switch Mode</div>
+                </div>
+            </div>`;
+            html += `</div>`; // end config-section
+
+            // ── Controls ──────────────────────────────────────────────────────────
+            html += `<div class="config-section"><h3>🎛️ Controls</h3>`;
+
+            // Antenna select buttons
+            html += `<div style="margin-bottom:20px;">
+                <div style="font-weight:bold;margin-bottom:10px;color:#444;">Select Antenna</div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">`;
+            for (let i = 1; i <= numAntennas; i++) {
+                const label    = labels[i-1] || `Antenna ${i}`;
+                const isActive = !grounded && selectedSet.has(i);
+                const btnClass = isActive ? 'btn' : 'btn btn-secondary';
+                html += `<button class="${btnClass}" onclick="antSwitchSelect(${i})" title="Select ${label}">${i}: ${label}</button>`;
+            }
+            html += `</div>`;
+            if (allowMixing) {
+                html += `<small style="color:#666;">Mixing mode: clicking an active antenna will toggle it off. Multiple antennas can be active simultaneously.</small>`;
+            } else {
+                html += `<small style="color:#666;">Exclusive mode: selecting an antenna grounds all others first.</small>`;
+            }
+            html += `</div>`;
+
+            // Add / Remove (mixing mode only)
+            if (allowMixing) {
+                html += `<div style="margin-bottom:20px;display:grid;grid-template-columns:1fr 1fr;gap:15px;">
+                    <div>
+                        <div style="font-weight:bold;margin-bottom:8px;color:#444;">Add Antenna</div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="antSwitchAddSelect" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;">
+                                ${Array.from({length:numAntennas},(_,i)=>`<option value="${i+1}">${i+1}: ${labels[i]||'Antenna '+(i+1)}</option>`).join('')}
+                            </select>
+                            <button class="btn" onclick="antSwitchAdd()">Add</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-weight:bold;margin-bottom:8px;color:#444;">Remove Antenna</div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="antSwitchRemoveSelect" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;">
+                                ${Array.from({length:numAntennas},(_,i)=>`<option value="${i+1}">${i+1}: ${labels[i]||'Antenna '+(i+1)}</option>`).join('')}
+                            </select>
+                            <button class="btn btn-secondary" onclick="antSwitchRemove()">Remove</button>
+                        </div>
+                    </div>
+                </div>`;
+            }
+
+            // Ground all + Thunderstorm
+            html += `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
+                <button class="btn btn-secondary" onclick="antSwitchGround()">⏚ Ground All</button>
+                ${thunderstorm
+                    ? `<button class="btn btn-secondary" onclick="antSwitchSetThunderstorm(false)">⚡ Disable Thunderstorm Mode</button>`
+                    : `<button class="btn" style="background:#dc3545;border-color:#dc3545;" onclick="antSwitchSetThunderstorm(true)">⚡ Enable Thunderstorm Mode</button>`
+                }
+            </div>`;
+
+            // Test connection
+            html += `<div style="margin-bottom:10px;">
+                <button class="btn btn-secondary" onclick="antSwitchTestConn()">🔌 Test Connection</button>
+                <span id="antSwitchTabTestResult" style="margin-left:10px;font-size:13px;color:#666;"></span>
+            </div>`;
+
+            html += `</div>`; // end controls config-section
+
+            // ── Config summary ────────────────────────────────────────────────────
+            html += `<div class="config-section"><h3>⚙️ Configuration</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">
+                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
+                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Host</div>
+                        <div style="font-weight:bold;">${health.host}:${health.port}</div>
+                    </div>
+                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
+                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Timeout</div>
+                        <div style="font-weight:bold;">${health.timeout_ms} ms</div>
+                    </div>
+                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
+                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Antennas</div>
+                        <div style="font-weight:bold;">${numAntennas}</div>
+                    </div>
+                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
+                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Switch Mode</div>
+                        <div style="font-weight:bold;">${allowMixing ? 'Mixing' : 'Exclusive'}</div>
+                    </div>
+                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
+                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Public Control</div>
+                        <div style="font-weight:bold;">${denySwitchingLabels[denySwitching] || 'Unknown'}</div>
+                    </div>
+                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
+                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Thunderstorm Mode</div>
+                        <div style="font-weight:bold;color:${thunderstorm?'#dc3545':'#28a745'}">${thunderstorm ? '⚡ Active' : 'Inactive'}</div>
+                    </div>
+                </div>
+            </div>`;
+
+            // ── Issues ────────────────────────────────────────────────────────────
+            if (health.issues && health.issues.length > 0) {
+                html += `<div style="padding:15px;background:#fff3cd;border:1px solid #ffeaa7;border-radius:5px;margin-top:10px;">
+                    <strong>⚠️ Issues:</strong>
+                    <ul style="margin:8px 0 0 20px;">
+                        ${health.issues.map(i=>`<li>${i}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+
+            container.innerHTML = html;
+        }
+
+        // ── Antenna switch control helpers ────────────────────────────────────────
+
+        async function antSwitchCommand(payload, successMsg) {
+            try {
+                const resp = await authenticatedFetch('/admin/ant-switch-command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (!resp) return;
+                const data = await resp.json();
+                if (data.success || data.verified) {
+                    showAlert(successMsg || 'Command sent', 'success');
+                } else {
+                    showAlert('Command failed: ' + (data.error || JSON.stringify(data)), 'error');
+                }
+                // Refresh tab state
+                loadAntSwitchStatus();
+            } catch (e) {
+                showAlert('Error: ' + e.message, 'error');
+            }
+        }
+
+        function antSwitchSelect(n)  { antSwitchCommand({command:'select', antenna:n}, `Selected antenna ${n}`); }
+        function antSwitchGround()   { antSwitchCommand({command:'ground'}, 'All antennas grounded'); }
+        function antSwitchAdd()      { const n=parseInt(document.getElementById('antSwitchAddSelect')?.value); if(n) antSwitchCommand({command:'add',antenna:n},`Added antenna ${n}`); }
+        function antSwitchRemove()   { const n=parseInt(document.getElementById('antSwitchRemoveSelect')?.value); if(n) antSwitchCommand({command:'remove',antenna:n},`Removed antenna ${n}`); }
+        function antSwitchSetThunderstorm(val) { antSwitchCommand({command:'set_thunderstorm',value:val}, val ? 'Thunderstorm mode enabled' : 'Thunderstorm mode disabled'); }
+
+        async function antSwitchTestConn() {
+            const resultEl = document.getElementById('antSwitchTabTestResult');
+            if (resultEl) { resultEl.textContent = '⏳ Testing…'; resultEl.style.color = '#666'; }
+            try {
+                const resp = await authenticatedFetch('/admin/ant-switch-test');
+                if (!resp) return;
+                const data = await resp.json();
+                if (resultEl) {
+                    if (data.success) {
+                        resultEl.textContent = `✅ Connected in ${data.duration_ms}ms`;
+                        resultEl.style.color = '#28a745';
+                    } else {
+                        resultEl.textContent = `❌ Failed (${data.duration_ms}ms): ${data.error || 'unknown'}`;
+                        resultEl.style.color = '#dc3545';
+                    }
+                }
+            } catch (e) {
+                if (resultEl) { resultEl.textContent = `❌ ${e.message}`; resultEl.style.color = '#dc3545'; }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
 
         // Global variable to store tunnel users data for modal
         let currentTunnelUsers = [];

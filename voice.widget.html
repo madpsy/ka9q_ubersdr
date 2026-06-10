@@ -281,7 +281,7 @@
 
     var rows = activities.map(function (act) {
       var hz   = act.estimated_dial_freq || act.start_freq;
-      var freq = Math.round(hz / 1000);    // kHz, no decimal
+      var freq = (hz / 1e6).toFixed(3);    // MHz, 3 decimal places
       var mode = (act.mode || 'LSB').toUpperCase();
       var snr  = act.signal_above_noise;
       var snrStr = snr != null ? Math.round(snr) + ' dB' : '';

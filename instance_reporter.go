@@ -27,6 +27,7 @@ type InstanceReporter struct {
 	dxClusterWsHandler  *DXClusterWebSocketHandler // For getting chat user count
 	noiseFloorMonitor   *NoiseFloorMonitor         // For getting SNR measurements
 	rotctlHandler       *RotctlAPIHandler          // For getting rotator information
+	antSwitchHandler    *AntSwitchHandler          // For getting antenna switch information
 	freqRefMonitor      *FrequencyReferenceMonitor // For getting frequency reference information
 	addonsConfig        *AddonProxiesConfig        // For reporting enabled addon proxy names
 	multiDecoder        *MultiDecoder              // For getting WSPR SSB phone predictions
@@ -84,6 +85,7 @@ type InstanceReport struct {
 	SNR_0_30MHz                int                      `json:"snr_0_30_mhz"`                 // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
 	SNR_1_8_30MHz              int                      `json:"snr_1_8_30_mhz"`               // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
 	Rotator                    map[string]interface{}   `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
+	AntSwitch                  map[string]interface{}   `json:"ant_switch,omitempty"`         // Antenna switch information (omitted when disabled)
 	FrequencyReference         map[string]interface{}   `json:"frequency_reference"`          // Frequency reference tracking information
 	Frontend                   map[string]interface{}   `json:"frontend,omitempty"`           // SDR frontend status: if_power (dBFS) and input_power_dbm (omitted when unavailable)
 	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
@@ -147,6 +149,14 @@ func (ir *InstanceReporter) SetRotctlHandler(handler *RotctlAPIHandler) {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	ir.rotctlHandler = handler
+}
+
+// SetAntSwitchHandler sets the antenna switch handler for switch information
+// This must be called after the handler is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetAntSwitchHandler(handler *AntSwitchHandler) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.antSwitchHandler = handler
 }
 
 // SetFrequencyReferenceMonitor sets the frequency reference monitor for tracking information
@@ -400,6 +410,20 @@ func (ir *InstanceReporter) getRotatorInfo() map[string]interface{} {
 	}
 
 	return rotatorInfo
+}
+
+// getAntSwitchInfo returns the current antenna switch information (thread-safe).
+// Returns nil when disabled so the field is omitted from reports.
+func (ir *InstanceReporter) getAntSwitchInfo() map[string]interface{} {
+	ir.mu.RLock()
+	handler := ir.antSwitchHandler
+	ir.mu.RUnlock()
+
+	if handler == nil || !ir.config.AntSwitch.Enabled {
+		return nil
+	}
+
+	return handler.GetInfo()
 }
 
 // getFrequencyReferenceInfo returns the current frequency reference information (thread-safe)
@@ -698,6 +722,9 @@ func (ir *InstanceReporter) sendReport() error {
 	// Get rotator information (thread-safe)
 	rotatorInfo := ir.getRotatorInfo()
 
+	// Get antenna switch information (thread-safe, nil when disabled)
+	antSwitchInfo := ir.getAntSwitchInfo()
+
 	// Get frequency reference information (thread-safe)
 	freqRefInfo := ir.getFrequencyReferenceInfo()
 
@@ -737,6 +764,7 @@ func (ir *InstanceReporter) sendReport() error {
 		SNR_0_30MHz:                snr_0_30,
 		SNR_1_8_30MHz:              snr_1_8_30,
 		Rotator:                    rotatorInfo,
+		AntSwitch:                  antSwitchInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
@@ -1088,6 +1116,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	// Get rotator information (thread-safe)
 	rotatorInfo := ir.getRotatorInfo()
 
+	// Get antenna switch information (thread-safe, nil when disabled)
+	antSwitchInfo := ir.getAntSwitchInfo()
+
 	// Get frequency reference information (thread-safe)
 	freqRefInfo := ir.getFrequencyReferenceInfo()
 
@@ -1127,6 +1158,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		SNR_0_30MHz:                snr_0_30,
 		SNR_1_8_30MHz:              snr_1_8_30,
 		Rotator:                    rotatorInfo,
+		AntSwitch:                  antSwitchInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
@@ -1463,6 +1495,18 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			"azimuth":   -1,
 		}
 
+		// Antenna switch info not available at startup (handler not yet set)
+		// omit from startup report (nil = omitempty)
+		var antSwitchInfo map[string]interface{}
+		if config.AntSwitch.Enabled {
+			antSwitchInfo = map[string]interface{}{
+				"enabled":       true,
+				"grounded":      false,
+				"selected":      []int{},
+				"active_labels": []string{},
+			}
+		}
+
 		// Get frequency reference information
 		freqRefInfo := map[string]interface{}{
 			"enabled": false,
@@ -1530,6 +1574,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			SNR_0_30MHz:                snr_0_30,
 			SNR_1_8_30MHz:              snr_1_8_30,
 			Rotator:                    rotatorInfo,
+			AntSwitch:                  antSwitchInfo,
 			FrequencyReference:         freqRefInfo,
 			Spectrogram:                config.Spectrogram.IsEnabled(),
 			StartupReport:              true,

@@ -1470,6 +1470,97 @@ rotctl:
   #   - Thread-safe operations
 
 # ==============================================================================
+# Antenna Switch Control
+# ==============================================================================
+# Controls relay-based antenna switches via the ant-switch-daemon TCP protocol.
+# Connects to the ant-switch-daemon (xinetd service, default port 65000) running
+# on the switch host. Supports relay board backends: KMTronic, MS-S7-WEB,
+# Arduino NetShield, Snaptekk, BeagleBone GPIO, etc.
+#
+# The daemon listens on TCP port 65000 by default.
+#
+# Public API endpoints:
+#   GET  /api/ant-switch/status   - Current antenna state (always public, no auth)
+#   POST /api/ant-switch/command  - Control antennas (see deny_switching)
+#     Body: {"password":"optional","command":"select","antenna":3}
+#     Body: {"password":"optional","command":"ground"}
+#     Commands: "select" (antenna 1-N), "ground"
+#
+# Admin API endpoints (require admin authentication):
+#   GET  /admin/ant-switch-health   - Full diagnostic status
+#   POST /admin/ant-switch-command  - Control without password (admin auth)
+#     Body: {"command":"select","antenna":3}
+#     Body: {"command":"ground"}
+#     Body: {"command":"add","antenna":3}      (add without grounding others)
+#     Body: {"command":"remove","antenna":3}   (remove without grounding others)
+#     Body: {"command":"set_thunderstorm","value":true}
+#
+# HTTP response codes for control commands:
+#   200 = command sent and hardware state verified
+#   202 = command sent but hardware did not confirm within 3 retries
+#   503 = could not reach ant-switch-daemon
+#
+ant_switch:
+  # Enable antenna switch integration (default: false)
+  enabled: false
+
+  # Hostname or IP address of the machine running ant-switch-daemon
+  host: "localhost"
+
+  # TCP port of the ant-switch-daemon xinetd service (default: 65000)
+  port: 65000
+
+  # TCP operation timeout in milliseconds (default: 2000)
+  # How long to wait for the antenna switch daemon to respond.
+  # This covers the entire operation: connect + send command + read response.
+  # For a device on the local network, 500-1000ms is usually sufficient.
+  # Increase if your switch is on a slow or unreliable WiFi connection.
+  # With 3 retry attempts, the worst-case total wait is: 3 × timeout_ms
+  # e.g. 2000ms timeout → up to 6 seconds before a command fails
+  #      500ms timeout  → up to 1.5 seconds before a command fails
+  timeout_ms: 2000
+
+  # Number of antennas supported by your switch (1-10, default: 8)
+  # Note: the standard daemon wrapper supports antennas 1-8.
+  # Values 9-10 require a custom daemon wrapper extended to support them.
+  num_antennas: 8
+
+  # Antenna switching mode
+  # false = exclusive mode: selecting an antenna grounds all others first (safer for most setups)
+  # true  = mixing mode: antennas are toggled on/off independently
+  allow_mixing: false
+
+  # Access control for the public POST /api/ant-switch/command endpoint
+  # 0 = allow everyone (no password required)
+  # 1 = password required (set password below)
+  # 2 = admin only (public control endpoint returns 403 Forbidden)
+  # Default: 2 (admin only — safest default for public receivers)
+  deny_switching: 2
+
+  # Password for public control endpoint (only used when deny_switching: 1)
+  # Leave empty to disable password-based public control.
+  password: ""
+
+  # Thunderstorm mode: forces all antennas to ground and denies public switching.
+  # Admin can still override via /admin/ant-switch-command.
+  thunderstorm: false
+
+  # Antenna to select on startup (0 = no automatic selection)
+  default_antenna: 0
+
+  # Human-readable labels for each antenna (optional)
+  # Used in API responses. Number of entries should match num_antennas.
+  antenna_labels:
+    - "Antenna 1"
+    - "Antenna 2"
+    - "Antenna 3"
+    - "Antenna 4"
+    - "Antenna 5"
+    - "Antenna 6"
+    - "Antenna 7"
+    - "Antenna 8"
+
+# ==============================================================================
 # SSH Terminal Proxy Configuration
 # ==============================================================================
 # Web-based SSH terminal access via GoTTY container

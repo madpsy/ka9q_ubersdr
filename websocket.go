@@ -1793,6 +1793,51 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				continue
 			}
 
+			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
+			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
+
+			// Apply DSP noise-reduction insert if active.
+			// Hard guards: IQ modes are never routed through the DSP (they carry raw RF
+			// samples, not demodulated audio), and only 12000/24000 Hz are supported.
+			//
+			// Pipelined (non-blocking) design:
+			//   Send packet N to the DSP (non-blocking — drops if sendChan full).
+			//   Immediately read back whatever the DSP has already finished (also
+			//   non-blocking via default).  On the first few packets the pipeline is
+			//   empty so we fall through with the original PCM (inaudible); once
+			//   primed, processed audio flows continuously with zero added latency to
+			//   this loop.
+			//
+			// The old design used time.After(100ms) which blocked the entire
+			// streamAudio loop on every packet, causing AudioChan to back up and
+			// the client to hear a multi-second stutter whenever a filter was enabled.
+			//
+			// NOTE: DSP runs BEFORE the HTTP/WebSocket routing decision so that both
+			// the Android HTTP audio stream and the normal WebSocket path receive the
+			// same noise-reduced PCM.
+			pcmData := audioPacket.PCMData
+			session.dspInsertMu.RLock()
+			ins := session.dspInsert
+			session.dspInsertMu.RUnlock()
+			if ins != nil && !isIQMode && (session.SampleRate == 12000 || session.SampleRate == 24000) {
+				ins.Send(pcmData) // non-blocking; drops silently if sendChan full (fail-open)
+				// Read back whatever the DSP has already processed — non-blocking.
+				select {
+				case processed, ok := <-ins.Recv():
+					if ok && len(processed) > 0 {
+						pcmData = processed
+					}
+					// else: recvChan closed (DSP crashed) — use original pcmData
+				default:
+					// Pipeline not yet primed, or DSP running slightly behind —
+					// use original pcmData this packet (fail-open).
+				}
+			}
+			// Replace audioPacket.PCMData with the (possibly processed) pcmData so
+			// that both the HTTP stream tap and the WebSocket encoder paths below
+			// always operate on the same (noise-reduced) audio.
+			audioPacket.PCMData = pcmData
+
 			// HTTP audio stream tap: if an HTTP /audio/stream consumer is active for
 			// this session, forward the packet there instead of encoding it for the
 			// WebSocket binary connection.
@@ -1812,9 +1857,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			if hc != nil {
 				// Apply audio gate before forwarding to the HTTP stream (Android path).
 				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
-				httpIsIQMode := session.Mode == "iq" || session.Mode == "iq48" ||
-					session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
-				if !httpIsIQMode {
+				if !isIQMode {
 					var bbPower, ndDensity float32 = -999, -999
 					if wsh.sessions != nil && wsh.sessions.radiod != nil {
 						if cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC); cs != nil {
@@ -1829,55 +1872,16 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				}
 				select {
 				case hc <- audioPacket:
-					// Forwarded to HTTP stream — skip WebSocket audio encoding
-					// and skip updating lastAudioTime so the ticker keeps sending
-					// signal-quality packets over WebSocket.
+					// Forwarded to HTTP stream (audioPacket.PCMData already holds the
+					// DSP-processed bytes) — skip WebSocket audio encoding and skip
+					// updating lastAudioTime so the ticker keeps sending signal-quality
+					// packets over WebSocket.
 					continue
 				default:
 					// HTTP consumer is slow or the channel is full — fall through
 					// to the normal WebSocket path so the client still hears audio.
 				}
 			}
-
-			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
-			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
-
-			// Apply DSP noise-reduction insert if active.
-			// Hard guards: IQ modes are never routed through the DSP (they carry raw RF
-			// samples, not demodulated audio), and only 12000/24000 Hz are supported.
-			//
-			// Pipelined (non-blocking) design:
-			//   Send packet N to the DSP (non-blocking — drops if sendChan full).
-			//   Immediately read back whatever the DSP has already finished (also
-			//   non-blocking via default).  On the first few packets the pipeline is
-			//   empty so we fall through with the original PCM (inaudible); once
-			//   primed, processed audio flows continuously with zero added latency to
-			//   this loop.
-			//
-			// The old design used time.After(100ms) which blocked the entire
-			// streamAudio loop on every packet, causing AudioChan to back up and
-			// the client to hear a multi-second stutter whenever a filter was enabled.
-			pcmData := audioPacket.PCMData
-			session.dspInsertMu.RLock()
-			ins := session.dspInsert
-			session.dspInsertMu.RUnlock()
-			if ins != nil && !isIQMode && (session.SampleRate == 12000 || session.SampleRate == 24000) {
-				ins.Send(pcmData) // non-blocking; drops silently if sendChan full (fail-open)
-				// Read back whatever the DSP has already processed — non-blocking.
-				select {
-				case processed, ok := <-ins.Recv():
-					if ok && len(processed) > 0 {
-						pcmData = processed
-					}
-					// else: recvChan closed (DSP crashed) — use original pcmData
-				default:
-					// Pipeline not yet primed, or DSP running slightly behind —
-					// use original pcmData this packet (fail-open).
-				}
-			}
-			// Replace audioPacket.PCMData with the (possibly processed) pcmData for
-			// all encoder paths below.
-			audioPacket.PCMData = pcmData
 
 			// Determine which format to use for this packet
 			// If in IQ mode, fall back to lossless pcm-zstd

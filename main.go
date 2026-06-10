@@ -1953,10 +1953,26 @@ func main() {
 		}
 	}
 
+	// Initialize antenna switch handler if enabled
+	var antSwitchHandler *AntSwitchHandler
+	if config.AntSwitch.Enabled {
+		var err error
+		antSwitchHandler, err = NewAntSwitchHandler(&config.AntSwitch)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize antenna switch API: %v", err)
+			antSwitchHandler = nil
+		} else {
+			log.Printf("Antenna switch API initialized (host: %s:%d)", config.AntSwitch.Host, config.AntSwitch.Port)
+		}
+	}
+
 	// Set the rotctl handler in instance reporter for rotator information
 	// This must be done after both are initialized
 	if instanceReporter != nil && rotctlHandler != nil {
 		instanceReporter.SetRotctlHandler(rotctlHandler)
+	}
+	if instanceReporter != nil && antSwitchHandler != nil {
+		instanceReporter.SetAntSwitchHandler(antSwitchHandler)
 	}
 
 	// Set the frequency reference monitor in instance reporter for tracking information
@@ -2048,7 +2064,7 @@ func main() {
 		instanceReporter.SetGPSDOMonitor(gpsdoMonitor)
 		instanceReporter.SetFrontendHistory(frontendHistory)
 	}
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler)
 
 	// Widget manager: in-memory cache + collector proxy.
 	// Must be created after adminHandler so configPath is resolved.
@@ -2107,6 +2123,19 @@ func main() {
 		log.Printf("Rotctl API endpoints registered (disabled in configuration)")
 	}
 
+	// Register antenna switch API routes
+	if antSwitchHandler != nil {
+		RegisterAntSwitchRoutes(http.DefaultServeMux, antSwitchHandler)
+		log.Printf("Antenna switch API enabled at /api/ant-switch/* (host: %s:%d)", config.AntSwitch.Host, config.AntSwitch.Port)
+	} else {
+		RegisterAntSwitchRoutesDisabled(http.DefaultServeMux)
+		if config.AntSwitch.Enabled {
+			log.Printf("Antenna switch API endpoints registered (disabled - initialization failed)")
+		} else {
+			log.Printf("Antenna switch API endpoints registered (disabled in configuration)")
+		}
+	}
+
 	http.HandleFunc("/api/time", func(w http.ResponseWriter, r *http.Request) {
 		handleTimeAPI(w, r, config)
 	})
@@ -2114,7 +2143,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor, frontendHistory)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor, frontendHistory, antSwitchHandler)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -2411,6 +2440,9 @@ func main() {
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
 	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))
+	http.HandleFunc("/admin/ant-switch-health", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchHealth))
+	http.HandleFunc("/admin/ant-switch-command", adminHandler.AuthMiddleware(adminHandler.HandleAdminAntSwitchCommand))
+	http.HandleFunc("/admin/ant-switch-test", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchTest))
 	http.HandleFunc("/admin/rotator-scheduler-config", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerConfig))
 	http.HandleFunc("/admin/rotator-scheduler-position", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerPosition))
 	http.HandleFunc("/admin/rotator-scheduler-reload", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerReload))
@@ -3576,7 +3608,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -3637,6 +3669,12 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		rotatorInfo["connected"] = rotctlHandler.controller.client.IsConnected()
 		state := rotctlHandler.controller.GetState()
 		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5) // Round to nearest integer
+	}
+
+	// Get antenna switch information if enabled
+	var antSwitchInfo map[string]interface{}
+	if antSwitchHandler != nil && config.AntSwitch.Enabled {
+		antSwitchInfo = antSwitchHandler.GetInfo()
 	}
 
 	// Get frequency reference information if available
@@ -3745,6 +3783,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"cors_enabled":         config.Server.EnableCORS,
 		"rotator":              rotatorInfo,
 		"frequency_reference":  freqRefInfo,
+		"ant_switch":           antSwitchInfo,
 		"speech_to_text":       config.Whisper.Enabled,
 		"lookup_service":       config.LookupServices.Enabled,
 		"dsp":                  buildDSPInfo(&config.DSP),

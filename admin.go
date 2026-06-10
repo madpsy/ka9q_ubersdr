@@ -379,6 +379,7 @@ type AdminHandler struct {
 	mqttPublisher       *MQTTPublisher
 	rotctlHandler       *RotctlAPIHandler
 	rotatorScheduler    *RotatorScheduler
+	antSwitchHandler    *AntSwitchHandler
 	geoIPService        *GeoIPService
 	loginAttempts       *LoginAttemptTracker
 	loginHistory        *AdminLoginHistory
@@ -472,7 +473,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy, antSwitchHandler *AntSwitchHandler) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -509,6 +510,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		wsprRank:            wsprRank,
 		pskRank:             pskRank,
 		gpsdoProxy:          gpsdoProxy,
+		antSwitchHandler:    antSwitchHandler,
 	}
 }
 
@@ -7408,4 +7410,235 @@ func (ah *AdminHandler) HandleLookupTest(w http.ResponseWriter, r *http.Request)
 			Message:  fmt.Sprintf("unknown provider %q; supported: qrz", provider),
 		})
 	}
+}
+
+// HandleAntSwitchHealth handles GET /admin/ant-switch-health
+// Admin-only (wrapped by AuthMiddleware). Returns full diagnostic status.
+func (ah *AdminHandler) HandleAntSwitchHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	status := map[string]interface{}{
+		"enabled": ah.config.AntSwitch.Enabled,
+		"healthy": false,
+		"issues":  []string{},
+	}
+
+	if !ah.config.AntSwitch.Enabled {
+		status["issues"] = []string{"Antenna switch is not enabled"}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding ant-switch health status: %v", err)
+		}
+		return
+	}
+
+	if ah.antSwitchHandler == nil {
+		status["issues"] = []string{"Antenna switch handler not initialized"}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding ant-switch health status: %v", err)
+		}
+		return
+	}
+
+	h := ah.antSwitchHandler
+	state := h.getState()
+
+	status["host"] = ah.config.AntSwitch.Host
+	status["port"] = ah.config.AntSwitch.Port
+	status["timeout_ms"] = ah.config.AntSwitch.TimeoutMs
+	status["num_antennas"] = ah.config.AntSwitch.NumAntennas
+	status["allow_mixing"] = ah.config.AntSwitch.AllowMixing
+	status["deny_switching"] = ah.config.AntSwitch.DenySwitching
+	status["thunderstorm"] = ah.config.AntSwitch.Thunderstorm
+	status["selected"] = state.Selected
+	status["grounded"] = state.Grounded
+	status["last_update"] = state.LastUpdate
+	status["antenna_labels"] = h.buildLabels()
+
+	if state.Selected == nil {
+		status["selected"] = []int{}
+	}
+	if state.LastError != "" {
+		status["last_error"] = state.LastError
+		status["issues"] = append(status["issues"].([]string), state.LastError)
+	}
+
+	issues := status["issues"].([]string)
+	status["healthy"] = len(issues) == 0
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding ant-switch health status: %v", err)
+	}
+}
+
+// antSwitchAdminCommandRequest is the JSON body for POST /admin/ant-switch-command.
+// No password required — admin session cookie is the authentication.
+type antSwitchAdminCommandRequest struct {
+	// Command: "select", "ground", "add", "remove", "set_thunderstorm"
+	Command string `json:"command"`
+	// Antenna number (1-NumAntennas) — required for select/add/remove
+	Antenna int `json:"antenna,omitempty"`
+	// Value for set_thunderstorm command (true/false)
+	Value bool `json:"value,omitempty"`
+}
+
+// HandleAdminAntSwitchCommand handles POST /admin/ant-switch-command
+// Admin-only (wrapped by AuthMiddleware). No extra password required.
+// Supports all commands including add/remove and set_thunderstorm.
+func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if !ah.config.AntSwitch.Enabled || ah.antSwitchHandler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Antenna switch is not enabled or not initialized",
+		})
+		return
+	}
+
+	var req antSwitchAdminCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	h := ah.antSwitchHandler
+
+	switch req.Command {
+	case "select":
+		if req.Antenna < 1 || req.Antenna > ah.config.AntSwitch.NumAntennas {
+			http.Error(w, fmt.Sprintf("antenna must be 1-%d", ah.config.AntSwitch.NumAntennas), http.StatusBadRequest)
+			return
+		}
+		state, verified, err := h.selectAntenna(req.Antenna)
+		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
+			fmt.Sprintf("Selected antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
+		writeAntSwitchResult(w, result, tcpErr)
+
+	case "ground":
+		state, verified, err := h.groundAll()
+		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err, "Grounded all antennas")
+		writeAntSwitchResult(w, result, tcpErr)
+
+	case "add":
+		if req.Antenna < 1 || req.Antenna > ah.config.AntSwitch.NumAntennas {
+			http.Error(w, fmt.Sprintf("antenna must be 1-%d", ah.config.AntSwitch.NumAntennas), http.StatusBadRequest)
+			return
+		}
+		state, verified, err := h.addAntenna(req.Antenna)
+		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
+			fmt.Sprintf("Added antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
+		writeAntSwitchResult(w, result, tcpErr)
+
+	case "remove":
+		if req.Antenna < 1 || req.Antenna > ah.config.AntSwitch.NumAntennas {
+			http.Error(w, fmt.Sprintf("antenna must be 1-%d", ah.config.AntSwitch.NumAntennas), http.StatusBadRequest)
+			return
+		}
+		state, verified, err := h.removeAntenna(req.Antenna)
+		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
+			fmt.Sprintf("Removed antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
+		writeAntSwitchResult(w, result, tcpErr)
+
+	case "set_thunderstorm":
+		// Toggle thunderstorm mode — admin only
+		// When enabling, also ground all antennas immediately
+		ah.config.AntSwitch.Thunderstorm = req.Value
+		log.Printf("AntSwitch: Admin set thunderstorm mode to %v", req.Value)
+
+		var state AntSwitchState
+		var verified bool
+		var err error
+		if req.Value {
+			// Ground all antennas when entering thunderstorm mode
+			state, verified, err = h.groundAll()
+		} else {
+			// Just query current state when leaving thunderstorm mode
+			state, err = h.queryState()
+			verified = err == nil
+			if err == nil {
+				h.mu.Lock()
+				h.state = state
+				h.mu.Unlock()
+			}
+		}
+		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		msg := fmt.Sprintf("Thunderstorm mode set to %v", req.Value)
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err, msg)
+		writeAntSwitchResult(w, result, tcpErr)
+
+	default:
+		http.Error(w, fmt.Sprintf("Unknown command %q (valid: select, ground, add, remove, set_thunderstorm)", req.Command), http.StatusBadRequest)
+	}
+}
+
+// HandleAntSwitchTest handles GET /admin/ant-switch-test
+// Admin-only. Makes a live synchronous query to the switch daemon and returns
+// the result, round-trip duration, and any error. Does not modify switch state.
+func (ah *AdminHandler) HandleAntSwitchTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if !ah.config.AntSwitch.Enabled || ah.antSwitchHandler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Antenna switch is not enabled or not initialized",
+		})
+		return
+	}
+
+	h := ah.antSwitchHandler
+	start := time.Now()
+	state, err := h.queryState()
+	durationMs := time.Since(start).Milliseconds()
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":     false,
+			"error":       err.Error(),
+			"duration_ms": durationMs,
+			"host":        ah.config.AntSwitch.Host,
+			"port":        ah.config.AntSwitch.Port,
+		})
+		return
+	}
+
+	// Build selected list with labels
+	labels := ah.config.AntSwitch.AntennaLabels
+	selectedWithLabels := []map[string]interface{}{}
+	for _, n := range state.Selected {
+		entry := map[string]interface{}{"antenna": n}
+		if n >= 1 && n <= len(labels) {
+			entry["label"] = labels[n-1]
+		}
+		selectedWithLabels = append(selectedWithLabels, entry)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":              true,
+		"duration_ms":          durationMs,
+		"host":                 ah.config.AntSwitch.Host,
+		"port":                 ah.config.AntSwitch.Port,
+		"grounded":             state.Grounded,
+		"selected":             state.Selected,
+		"selected_with_labels": selectedWithLabels,
+		"last_update":          state.LastUpdate,
+	})
 }

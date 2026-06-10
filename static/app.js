@@ -14183,37 +14183,7 @@ function _dockApply() {
     }
 
     if (_dockIsMobile()) {
-        // On mobile: create a dedicated flex-row wrapper for bandwidth + SNR squelch
-        // + NR button. Insert it in place of #bandwidth-controls, then move the
-        // three elements into it. This avoids touching the parent .control-group
-        // which also contains mode buttons and bookmark search.
-        const bwEl = document.getElementById('bandwidth-controls');
-        if (bwEl && bwEl.parentElement) {
-            const wrapper = document.createElement('div');
-            wrapper.id = 'bw-squelch-row';
-            bwEl.parentElement.insertBefore(wrapper, bwEl);
-            wrapper.appendChild(bwEl);
-            const snrRow = document.getElementById('snr-squelch-row');
-            if (snrRow) {
-                // Reorder children of snrRow so label+span come before the slider,
-                // giving us: [Squelch] [Off] on line 1, [slider] on line 2.
-                // Original DOM order: label | input | span
-                const snrLabel = snrRow.querySelector('label');
-                const snrSlider = document.getElementById('snr-squelch-slider');
-                const snrValue = document.getElementById('snr-squelch-value');
-                if (snrLabel && snrSlider && snrValue) {
-                    // Move span to be right after label (before slider)
-                    snrRow.insertBefore(snrValue, snrSlider);
-                }
-                wrapper.appendChild(snrRow);
-            }
-            // Move NR button to the frequency input row (next to step dropdown/btns/wheel)
-            const nrBtn = document.getElementById('nr2-quick-toggle');
-            const freqScrollCtrl = document.getElementById('frequency-scroll-controls');
-            if (nrBtn && freqScrollCtrl && freqScrollCtrl.parentElement) {
-                freqScrollCtrl.parentElement.appendChild(nrBtn);
-            }
-        }
+        _dockApplyMobileLayout();
 
         // On mobile: CSS sets .spectrum-display-container to 100dvh.
         // We must also resize the actual waterfall *canvas* to fill the viewport,
@@ -14256,6 +14226,73 @@ function _dockApply() {
     }
 }
 
+// Apply mobile-specific DOM rearrangements (bandwidth + SNR squelch row, NR button).
+// Safe to call multiple times — guards against creating #bw-squelch-row twice.
+function _dockApplyMobileLayout() {
+    if (document.getElementById('bw-squelch-row')) return; // already applied
+    const bwEl = document.getElementById('bandwidth-controls');
+    if (bwEl && bwEl.parentElement) {
+        const mobileRow = document.createElement('div');
+        mobileRow.id = 'bw-squelch-row';
+        bwEl.parentElement.insertBefore(mobileRow, bwEl);
+        mobileRow.appendChild(bwEl);
+        const snrRow = document.getElementById('snr-squelch-row');
+        if (snrRow) {
+            // Reorder children of snrRow so label+span come before the slider,
+            // giving us: [Squelch] [Off] on line 1, [slider] on line 2.
+            // Original DOM order: label | [wrapper-div > input] | span
+            // snrSlider may be wrapped in a div by initSNRSquelch(); get the direct child.
+            const snrSlider = document.getElementById('snr-squelch-slider');
+            const snrValue  = document.getElementById('snr-squelch-value');
+            const sliderNode = snrSlider
+                ? (snrSlider.parentElement !== snrRow ? snrSlider.parentElement : snrSlider)
+                : null;
+            if (sliderNode && snrValue) {
+                // Move span to be right before the slider (or its wrapper)
+                snrRow.insertBefore(snrValue, sliderNode);
+            }
+            mobileRow.appendChild(snrRow);
+        }
+        // Move NR button to the frequency input row (next to step dropdown/btns/wheel)
+        const nrBtn = document.getElementById('nr2-quick-toggle');
+        const freqScrollCtrl = document.getElementById('frequency-scroll-controls');
+        if (nrBtn && freqScrollCtrl && freqScrollCtrl.parentElement) {
+            freqScrollCtrl.parentElement.appendChild(nrBtn);
+        }
+    }
+}
+
+// Undo mobile-specific DOM rearrangements. Safe to call when no mobile layout exists.
+function _dockRemoveMobileLayout() {
+    const bwSqRow = document.getElementById('bw-squelch-row');
+    if (bwSqRow) {
+        const bwEl = document.getElementById('bandwidth-controls');
+        if (bwEl) bwSqRow.parentElement.insertBefore(bwEl, bwSqRow);
+        bwSqRow.remove();
+    }
+    const snrRow     = document.getElementById('snr-squelch-row');
+    const volSqGroup = document.getElementById('volume-squelch-group');
+    if (snrRow && volSqGroup) {
+        // Always restore span to last position (original: label | [wrapper > slider] | span)
+        const snrValue = document.getElementById('snr-squelch-value');
+        if (snrValue) snrRow.appendChild(snrValue);
+        // Re-insert snrRow into volSqGroup after #volume-row (its original position)
+        if (snrRow.parentElement !== volSqGroup) {
+            const volumeRow = document.getElementById('volume-row');
+            if (volumeRow && volumeRow.nextSibling) {
+                volSqGroup.insertBefore(snrRow, volumeRow.nextSibling);
+            } else {
+                volSqGroup.appendChild(snrRow);
+            }
+        }
+    }
+    const nrBtn = document.getElementById('nr2-quick-toggle');
+    const audioBtnsGroup = document.getElementById('audio-buttons-group');
+    if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
+        audioBtnsGroup.appendChild(nrBtn);
+    }
+}
+
 function _dockRemove() {
     const wrapper = document.getElementById('dock-overlay-wrapper');
     const btn     = document.getElementById('dock-controls-button');
@@ -14278,32 +14315,8 @@ function _dockRemove() {
     // Remove the now-empty wrapper from <body>
     wrapper.remove();
 
-    // Remove mobile-only class and restore moved elements to their original parents
-    // Unwrap the mobile #bw-squelch-row wrapper: move #bandwidth-controls back to
-    // its original parent, restore #snr-squelch-row to #volume-squelch-group,
-    // restore #nr2-quick-toggle to #audio-buttons-group, then remove the wrapper.
-    const bwSqRow = document.getElementById('bw-squelch-row');
-    if (bwSqRow) {
-        const bwEl = document.getElementById('bandwidth-controls');
-        if (bwEl) bwSqRow.parentElement.insertBefore(bwEl, bwSqRow);
-        bwSqRow.remove();
-    }
-    const snrRow = document.getElementById('snr-squelch-row');
-    const volSqGroup = document.getElementById('volume-squelch-group');
-    if (snrRow && volSqGroup && snrRow.parentElement !== volSqGroup) {
-        // Restore span to original position: after the slider (label | slider | span)
-        const snrSlider = document.getElementById('snr-squelch-slider');
-        const snrValue = document.getElementById('snr-squelch-value');
-        if (snrSlider && snrValue && snrValue.previousSibling !== snrSlider) {
-            snrRow.appendChild(snrValue); // move span to end
-        }
-        volSqGroup.appendChild(snrRow);
-    }
-    const nrBtn = document.getElementById('nr2-quick-toggle');
-    const audioBtnsGroup = document.getElementById('audio-buttons-group');
-    if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
-        audioBtnsGroup.appendChild(nrBtn);
-    }
+    // Undo any mobile-specific DOM rearrangements
+    _dockRemoveMobileLayout();
 
     // Restore waterfall canvas height to the saved (pre-mobile) value
     if (window._dockSavedWaterfallHeight != null && window.spectrumDisplay &&
@@ -14361,7 +14374,10 @@ function initControlsDock() {
                 if (!wrapper) {
                     _dockApply();
                 } else {
-                    // Already docked — refresh waterfall canvas height only.
+                    // Already docked (e.g. was docked on desktop, now resized to mobile).
+                    // Apply mobile-specific DOM rearrangements if not already done.
+                    _dockApplyMobileLayout();
+                    // Refresh waterfall canvas height for the new viewport size.
                     // CSS handles the container height (100dvh).
                     requestAnimationFrame(() => {
                         const vh = window.innerHeight;
@@ -14371,11 +14387,19 @@ function initControlsDock() {
                     });
                 }
             } else {
-                // Desktop: dock only if the user preference says so.
-                if (wrapper && localStorage.getItem('controlsDocked') !== '1') {
-                    // Widened from mobile — undock unless preference is set.
-                    _dockRemove();
-                } else if (!wrapper && localStorage.getItem('controlsDocked') === '1') {
+                // Desktop: always undo mobile layout if it was applied, then re-dock
+                // if the user preference says so.
+                if (wrapper) {
+                    // Transitioning from mobile (or desktop-docked) to desktop.
+                    // Always remove the mobile DOM rearrangements first.
+                    _dockRemoveMobileLayout();
+                    if (localStorage.getItem('controlsDocked') !== '1') {
+                        // User didn't choose to dock on desktop — fully undock.
+                        _dockRemove();
+                    }
+                    // If controlsDocked === '1', keep the overlay wrapper but without
+                    // the mobile layout (desktop docking stays active).
+                } else if (localStorage.getItem('controlsDocked') === '1') {
                     // Re-dock when widening back above mobile threshold.
                     _dockApply();
                 }

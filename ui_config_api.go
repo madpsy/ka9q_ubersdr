@@ -91,6 +91,11 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		opacity = 0.3 // sensible default when not explicitly set
 	}
 
+	controlsOpacity := config.UI.ControlsOpacity
+	if controlsOpacity == 0 {
+		controlsOpacity = 0.50 // default: matches the hardcoded rgba(44,62,80,0.50) in style.css
+	}
+
 	bandColorIntensity := config.UI.BandColorIntensity
 	if bandColorIntensity < 0.5 {
 		bandColorIntensity = 0.5 // default: current pastel appearance (also clamps old out-of-range values)
@@ -156,6 +161,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"default_buffer":              defaultBuffer,
 		"spectrum_bg_image":           bgImageURL,
 		"spectrum_bg_opacity":         opacity,
+		"controls_opacity":            controlsOpacity,
 		"band_color_intensity":        bandColorIntensity,
 		"station_id_overlay":          config.UI.StationIdOverlay,
 		"station_id_color":            stationIdColor,
@@ -269,6 +275,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
+	// Validate controls_opacity range (0.0–1.0)
+	if parsed.UI.ControlsOpacity < 0 || parsed.UI.ControlsOpacity > 1 {
+		http.Error(w, "controls_opacity must be between 0.0 and 1.0", http.StatusBadRequest)
+		return
+	}
+
 	// Validate band_color_intensity range (0.5–1.0)
 	if parsed.UI.BandColorIntensity < 0.5 || parsed.UI.BandColorIntensity > 1 {
 		http.Error(w, "band_color_intensity must be between 0.5 and 1.0", http.StatusBadRequest)
@@ -303,13 +315,13 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Update in-memory config immediately — no restart needed
 	config.UI = parsed.UI
 
-	log.Printf("UI config updated: palette=%s, smeter_mode=%s, smeter_charts_visible=%v, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, mobile_tuning=%s, default_buffer=%s, bg_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
+	log.Printf("UI config updated: palette=%s, smeter_mode=%s, smeter_charts_visible=%v, contrast=%d, vu_meter=%s, gpu=%v, smooth=%v, hold=%v, linegraph=%v, bw_color=%s, mobile_tuning=%s, default_buffer=%s, bg_opacity=%.2f, controls_opacity=%.2f, band_color_intensity=%.2f, station_id_overlay=%v, station_id_color=%s, theme=%v",
 		config.UI.Palette.Default, config.UI.SMeterMode.Default, config.UI.SMeterChartsVisible.Default,
 		config.UI.Contrast.Default,
 		config.UI.VUMeterStyle.Default, config.UI.GPUScroll.Default, config.UI.Smoothing.Default,
 		config.UI.PeakHold.Default, config.UI.LineGraph.Default,
 		config.UI.BandwidthIndicatorColor.Default, config.UI.MobileTuningMode.Default, config.UI.DefaultBuffer.Default,
-		config.UI.SpectrumBgOpacity, config.UI.BandColorIntensity,
+		config.UI.SpectrumBgOpacity, config.UI.ControlsOpacity, config.UI.BandColorIntensity,
 		config.UI.StationIdOverlay, config.UI.StationIdColor, config.UI.Theme)
 
 	w.Header().Set("Content-Type", "application/json")

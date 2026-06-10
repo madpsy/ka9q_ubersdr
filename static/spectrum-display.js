@@ -2354,17 +2354,20 @@ class SpectrumDisplay {
      * Draw the station ID overlay in the top-right corner of the spectrum line graph.
      * Line 1 (bold 13px): "<callsign> - <name>"  or just callsign or just name
      * Line 2 (11px, 75% opacity): location
+     * Line 3 (11px, 75% opacity): active antenna name (only when ant_switch enabled)
      * Text colour comes from this.stationIdColor (set by loadStationIdConfig()).
      * A 1 px black drop-shadow is always added for legibility over any background.
      * Data comes from window.instanceDescription.receiver (populated by fetchSiteDescription()).
+     * Active antenna name comes from window.activeAntennaLabel (polled every 30 s by app.js).
      */
     drawStationIdOverlay(ctx, graphWidth, graphTopMargin) {
         const receiver = window.instanceDescription?.receiver;
         if (!receiver) return;
 
-        const callsign = (receiver.callsign || '').trim();
-        const name     = (receiver.name     || '').trim();
-        const location = (receiver.location || '').trim();
+        const callsign  = (receiver.callsign || '').trim();
+        const name      = (receiver.name     || '').trim();
+        const location  = (receiver.location || '').trim();
+        const antLabel  = (window.activeAntennaLabel || '').trim();
 
         // Nothing to show if both callsign and name are absent
         if (!callsign && !name) return;
@@ -2393,6 +2396,18 @@ class SpectrumDisplay {
             ctx.globalAlpha = 0.75;
             ctx.fillStyle   = col;
             ctx.fillText(location, rightX, topY + 16);
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Line 3: 11px — active antenna name at 75% opacity (ant_switch enabled only)
+        if (antLabel) {
+            const antY = location ? topY + 32 : topY + 16;
+            this._setFont(ctx, '11px sans-serif');
+            ctx.fillStyle   = 'rgba(0,0,0,0.55)';
+            ctx.fillText(antLabel, rightX + 1, antY + 1);
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle   = col;
+            ctx.fillText(antLabel, rightX, antY);
             ctx.globalAlpha = 1.0;
         }
 

@@ -26,6 +26,13 @@
  *   spectrum_bg_opacity       → (no localStorage key)         Opacity of the background image (0.0–1.0,
  *                                                              default 0.3). Read directly from
  *                                                              window.serverUIConfig by SpectrumDisplay.
+ *   controls_opacity          → (no localStorage key)         Opacity of the docked receiver controls
+ *                                                              overlay (0.0–1.0, default 0.50). The
+ *                                                              waterfall controls bar is always 15% more
+ *                                                              opaque (capped at 1.0). Applied as CSS
+ *                                                              custom properties --controls-opacity and
+ *                                                              --waterfall-controls-opacity on :root.
+ *                                                              Server-wide operator setting.
  *   station_id_overlay        → (no localStorage key)         Whether to show the station callsign/name/
  *                                                              location overlay on the spectrum line graph.
  *                                                              Server-side operator setting; default true.
@@ -338,6 +345,20 @@ function applyServerUIDefaults() {
             }
         }
     } catch (e) { /* ignore */ }
+
+    // ── Controls opacity ──────────────────────────────────────────────────────
+    // controls_opacity: opacity of #dock-overlay-wrapper (docked receiver controls overlay).
+    // The waterfall controls bar (.spectrum-display-controls) is always 15% more opaque, capped at 1.0.
+    // No localStorage key — server-side operator setting applied as CSS custom properties on :root.
+    // The :root defaults in style.css (0.50 / 0.65) reproduce the original hardcoded values exactly
+    // when no ui.yaml is configured, so this block is a no-op for unconfigured installs.
+    const controlsOpacity = (window.serverUIConfig && window.serverUIConfig.controls_opacity != null)
+        ? Math.max(0, Math.min(1, parseFloat(window.serverUIConfig.controls_opacity))) : 0.50;
+    const waterfallControlsOpacity = Math.min(controlsOpacity + 0.15, 1.0);
+    if (!isNaN(controlsOpacity)) {
+        document.documentElement.style.setProperty('--controls-opacity', controlsOpacity.toFixed(2));
+        document.documentElement.style.setProperty('--waterfall-controls-opacity', waterfallControlsOpacity.toFixed(2));
+    }
 
     // ── Theme colours ─────────────────────────────────────────────────────────
     // Applied as CSS custom properties on :root. No localStorage — this is a

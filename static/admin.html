@@ -2071,6 +2071,40 @@
                             </div>
                         </div>
 
+                        <!-- Controls Overlay Opacity -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🪟 Controls Overlay Opacity</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Controls the background opacity of two overlapping UI elements:
+                            </p>
+                            <ul style="margin: 0 0 12px 0; color: #666; font-size: 13px; padding-left: 20px; line-height: 1.7;">
+                                <li><strong>Docked controls panel</strong> — the receiver controls overlay that appears above the waterfall when docked. Set directly to this value.</li>
+                                <li><strong>Waterfall controls bar</strong> — the zoom/spectrum controls pinned to the bottom of the waterfall. Always set to this value <strong>+ 15%</strong> (capped at 100%), so it remains slightly more solid than the docked panel.</li>
+                            </ul>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                The current derived waterfall bar opacity is shown live next to the slider as you adjust.
+                                This is a server-wide setting; users cannot override it individually.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-controls-opacity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Controls Opacity: <span id="ui-controls-opacity-display" style="font-weight: bold; color: #667eea;">0.50</span>
+                                    &nbsp;<span id="ui-waterfall-controls-opacity-hint" style="font-size: 12px; color: #999;">(waterfall bar: 0.65)</span>
+                                </label>
+                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                    <input type="range" id="ui-controls-opacity" min="0" max="1" step="0.01" value="0.50"
+                                           style="width: 100%; max-width: 360px;"
+                                           oninput="updateControlsOpacityDisplay()">
+                                    <button class="btn btn-secondary" onclick="resetControlsOpacity()"
+                                            style="font-size: 12px; padding: 4px 10px; flex-shrink: 0;"
+                                            title="Reset to default (0.50)">↺ Reset</button>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; max-width: 360px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0.00 — Fully transparent</span>
+                                    <span>1.00 — Fully opaque</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Auto-Contrast Slider -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                             <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Default Auto-Contrast</h3>
@@ -3779,6 +3813,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             stopMonitorAutoRefresh();
             stopSystemAutoRefresh();
             stopRotatorLogsAutoRefresh();
+            stopAntSwitchAutoRefresh();
 
             try {
                 await fetch('/admin/logout', {
@@ -3823,6 +3858,11 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             // Stop rotator logs auto-refresh when leaving rotator tab
             if (tab !== 'rotator') {
                 stopRotatorLogsAutoRefresh();
+            }
+
+            // Stop ant-switch auto-refresh when leaving ant-switch tab
+            if (tab !== 'ant-switch') {
+                stopAntSwitchAutoRefresh();
             }
 
             // Stop sessions auto-refresh when leaving sessions tab
@@ -3969,6 +4009,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const schedSection = document.getElementById('antSwitchSchedulerSection');
                 if (schedSection) schedSection.style.display = 'block';
                 loadAntSwitchSchedulerConfig();
+                startAntSwitchAutoRefresh();
             } else if (tab === 'chat') {
                 document.querySelector('.tab:nth-child(16)').classList.add('active');
                 document.getElementById('chatTab').classList.add('active');
@@ -8827,6 +8868,16 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (bandIntensitySlider)  bandIntensitySlider.value       = bandIntensity;
                 if (bandIntensityDisplay) bandIntensityDisplay.textContent = bandIntensity.toFixed(3);
 
+                // Controls overlay opacity slider (range 0.0–1.0, default 0.50)
+                const controlsOpacitySlider  = document.getElementById('ui-controls-opacity');
+                const controlsOpacityDisplay = document.getElementById('ui-controls-opacity-display');
+                const rawControlsOpacity = (ui.controls_opacity !== undefined && ui.controls_opacity !== null)
+                    ? parseFloat(ui.controls_opacity) : 0.50;
+                const controlsOpacity = isNaN(rawControlsOpacity) ? 0.50 : Math.max(0, Math.min(1, rawControlsOpacity));
+                if (controlsOpacitySlider)  controlsOpacitySlider.value       = controlsOpacity;
+                if (controlsOpacityDisplay) controlsOpacityDisplay.textContent = controlsOpacity.toFixed(2);
+                updateControlsOpacityDisplay();
+
                 // Station ID overlay
                 const stationIdOverlayEl = document.getElementById('ui-station-id-overlay');
                 const stationIdColorEl   = document.getElementById('ui-station-id-color');
@@ -8895,6 +8946,31 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 magenta: '#ff00ff',
             };
             swatch.style.backgroundColor = colorMap[select.value] || '#00ff00';
+        }
+
+        /**
+         * Update the controls opacity display label and waterfall bar hint as the slider moves.
+         * Also called after loading the config to initialise the hint text.
+         */
+        function updateControlsOpacityDisplay() {
+            const slider  = document.getElementById('ui-controls-opacity');
+            const display = document.getElementById('ui-controls-opacity-display');
+            const hint    = document.getElementById('ui-waterfall-controls-opacity-hint');
+            if (!slider) return;
+            const v = parseFloat(slider.value);
+            if (display) display.textContent = v.toFixed(2);
+            if (hint)    hint.textContent    = '(waterfall bar: ' + Math.min(v + 0.15, 1.0).toFixed(2) + ')';
+        }
+
+        /**
+         * Reset the controls opacity slider to the default value (0.50).
+         */
+        function resetControlsOpacity() {
+            const slider = document.getElementById('ui-controls-opacity');
+            if (slider) {
+                slider.value = 0.50;
+                updateControlsOpacityDisplay();
+            }
         }
 
         // ── Theme colour helpers ──────────────────────────────────────────────────
@@ -9195,6 +9271,10 @@ function resetStationIdColor() {
                     peak_hold:            { default: peakHold  ? peakHold.checked  : true  },
                     line_graph:           { default: lineGraph ? lineGraph.checked : false },
                     spectrum_bg_opacity:  bgOpacity ? parseFloat(bgOpacity.value) : 0.30,
+                    controls_opacity: (() => {
+                        const el = document.getElementById('ui-controls-opacity');
+                        return el ? parseFloat(el.value) : 0.50;
+                    })(),
                     band_color_intensity: (() => {
                         const el = document.getElementById('ui-band-color-intensity');
                         return el ? parseFloat(el.value) : 0.50;
@@ -13935,6 +14015,33 @@ function resetStationIdColor() {
             if (rotatorLogsRefreshInterval) {
                 clearInterval(rotatorLogsRefreshInterval);
                 rotatorLogsRefreshInterval = null;
+            }
+        }
+
+        function startAntSwitchAutoRefresh() {
+            if (antSwitchRefreshInterval) {
+                clearInterval(antSwitchRefreshInterval);
+            }
+            // Poll every 5 seconds: refresh hardware state + trigger logs
+            antSwitchRefreshInterval = setInterval(async () => {
+                // Only refresh if the ant-switch tab is still active
+                if (currentTab !== 'ant-switch') {
+                    stopAntSwitchAutoRefresh();
+                    return;
+                }
+                try {
+                    await loadAntSwitchStatus();
+                } catch (e) { /* silent */ }
+                try {
+                    await loadAntSwitchSchedulerLogs();
+                } catch (e) { /* silent */ }
+            }, 5000);
+        }
+
+        function stopAntSwitchAutoRefresh() {
+            if (antSwitchRefreshInterval) {
+                clearInterval(antSwitchRefreshInterval);
+                antSwitchRefreshInterval = null;
             }
         }
 
@@ -20704,6 +20811,7 @@ const tooltipLine2 = timeStr;
         let currentAntSwitchLogs = [];
         let antSwitchLogsCurrentPage = 1;
         let antSwitchAntennaLabels = []; // populated from health.antenna_labels when tab loads
+        let antSwitchRefreshInterval = null;
         const antSwitchLogsPerPage = 10;
 
         async function loadAntSwitchSchedulerConfig() {

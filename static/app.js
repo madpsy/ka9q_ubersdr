@@ -2810,6 +2810,43 @@ function showTerminatedOverlay(message) {
     overlay.style.display = 'flex';
 }
 
+// ─── Antenna switch polling ───────────────────────────────────────────────────
+// Polls GET /api/ant-switch/status every 30 s and stores the active antenna
+// name in window.activeAntennaLabel so drawStationIdOverlay() can display it.
+let _antSwitchPollInterval = null;
+
+function startAntennaSwitchPolling() {
+    if (_antSwitchPollInterval) return; // guard against double-start
+
+    async function poll() {
+        try {
+            const resp = await fetch('/api/ant-switch/status');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (!data.enabled) return;
+
+            if (data.grounded) {
+                window.activeAntennaLabel = 'Grounded';
+            } else if (data.selected && data.selected.length > 0) {
+                const labels = data.selected.map(n => {
+                    const idx = n - 1;
+                    return (data.antenna_labels && data.antenna_labels[idx])
+                        ? data.antenna_labels[idx]
+                        : `Antenna ${n}`;
+                });
+                window.activeAntennaLabel = labels.join(', ');
+            } else {
+                window.activeAntennaLabel = null;
+            }
+        } catch (e) {
+            // Silently ignore — stale label stays displayed until next successful poll
+        }
+    }
+
+    poll(); // immediate first poll (supplements the seed from /api/description)
+    _antSwitchPollInterval = setInterval(poll, 30000);
+}
+
 // Fetch and display site description
 async function fetchSiteDescription() {
     try {
@@ -2819,6 +2856,16 @@ async function fetchSiteDescription() {
             
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;
+
+            // Seed active antenna label from description and start polling if ant_switch enabled
+            if (data.ant_switch && data.ant_switch.enabled) {
+                if (data.ant_switch.grounded) {
+                    window.activeAntennaLabel = 'Grounded';
+                } else if (data.ant_switch.active_labels && data.ant_switch.active_labels.length > 0) {
+                    window.activeAntennaLabel = data.ant_switch.active_labels.join(', ');
+                }
+                startAntennaSwitchPolling();
+            }
 
             // Show callsign lookup button if the server has the lookup service enabled
             const callsignLookupBtn = document.getElementById('callsign-lookup-button');

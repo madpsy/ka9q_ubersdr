@@ -628,6 +628,11 @@ type UIBoolSetting struct {
 //	BandwidthIndicatorColor:  bandwidthIndicatorColor     — bandwidth bar colour (green/red/cyan/white/yellow/orange/magenta)
 //	SpectrumBgEnabled:        spectrumBgEnabled           — whether a background image is set (read-only, set by upload)
 //	SpectrumBgOpacity:        spectrumBgOpacity           — background image opacity (0.0–1.0, default 0.3)
+//	ControlsOpacity:          (no localStorage key)       — opacity of the docked receiver controls overlay (0.0–1.0,
+//	                                                        default 0.50). The waterfall controls bar is always 15%
+//	                                                        more opaque (capped at 1.0). Applied as CSS custom properties
+//	                                                        --controls-opacity and --waterfall-controls-opacity on :root
+//	                                                        by ui-config.js. Server-wide operator setting.
 //	MobileTuningMode:         tuningMode                  — mobile frequency console default (buttons/wheel)
 //	DefaultBuffer:            audioBufferThreshold        — default audio buffer threshold in ms (50/100/150/200/300/500)
 //	Theme:                    (no localStorage key)       — CSS custom property overrides; map of token→hex colour.
@@ -649,6 +654,7 @@ type UIConfig struct {
 	MobileTuningMode          UISelectSetting   `yaml:"mobile_tuning_mode"         json:"mobile_tuning_mode"`
 	DefaultBuffer             UISelectSetting   `yaml:"default_buffer"             json:"default_buffer"`
 	SpectrumBgOpacity         float64           `yaml:"spectrum_bg_opacity"        json:"spectrum_bg_opacity"`
+	ControlsOpacity           float64           `yaml:"controls_opacity"           json:"controls_opacity"`
 	BandColorIntensity        float64           `yaml:"band_color_intensity"       json:"band_color_intensity"`
 	StationIdOverlay          bool              `yaml:"station_id_overlay"              json:"station_id_overlay"`
 	StationIdColor            string            `yaml:"station_id_color"                json:"station_id_color"`

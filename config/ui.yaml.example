@@ -134,6 +134,15 @@ ui:
   # No localStorage key — this is an operator setting; users cannot override it individually.
   band_color_intensity: 0.5
 
+  # Opacity of the docked receiver controls overlay (#dock-overlay-wrapper).
+  # The waterfall controls bar at the bottom of the waterfall (.spectrum-display-controls)
+  # is always 15% more opaque than this value, capped at 1.0.
+  # Valid range: 0.0–1.0.
+  # 0.50 = default (matches the original hardcoded appearance)
+  # Applied as CSS custom properties --controls-opacity and --waterfall-controls-opacity on :root.
+  # No localStorage key — this is a server-wide operator setting; users cannot override it individually.
+  controls_opacity: 0.50
+
   # Station ID overlay on the spectrum line graph
   # When enabled, shows "<callsign> - <name>" on the first line and "<location>" on the
   # second line, right-aligned in the top-right corner of the spectrum drawing area.

@@ -14,6 +14,12 @@
     --accent-end:   #764ba2; /* gradient end (always paired with --accent)       */
     --text-light:   #ecf0f1; /* text on dark backgrounds                         */
     --control-text: #495057; /* labels on light backgrounds (Volume, Left, etc.) */
+    /* Controls overlay opacity — set at runtime by ui-config.js from /api/ui-config.
+       --controls-opacity:           docked receiver controls (#dock-overlay-wrapper)
+       --waterfall-controls-opacity: waterfall controls bar (.spectrum-display-controls),
+                                     always 15% higher than --controls-opacity, capped at 1. */
+    --controls-opacity:           0.50;
+    --waterfall-controls-opacity: 0.65;
 }
 
 /* Digital Spots Country Badges on Main Page */
@@ -3379,7 +3385,7 @@ input[type="range"]::-moz-range-thumb {
     display: flex;
     gap: 10px; /* Reduced gap */
     padding: 5px 10px; /* Reduced padding for less height */
-    background: rgba(44, 62, 80, 0.65);
+    background: rgba(44, 62, 80, var(--waterfall-controls-opacity));
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
@@ -4837,7 +4843,7 @@ input[type="range"]::-moz-range-thumb {
     z-index: 800; /* below chat-panel and rotator-panel (z-index:900) so they render on top */
     /* More transparent than .spectrum-display-controls (rgba(44,62,80,0.65)) so the
        waterfall is visible behind the controls, but not fully transparent. */
-    background: rgba(44, 62, 80, 0.50);
+    background: rgba(44, 62, 80, var(--controls-opacity));
     overflow: hidden;
     max-height: 80vh;
     overflow-y: auto;

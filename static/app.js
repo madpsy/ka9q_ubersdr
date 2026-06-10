@@ -14299,7 +14299,13 @@ function _dockRemoveMobileLayout() {
 
     const audioBtnsGroup = document.getElementById('audio-buttons-group');
     if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
-        audioBtnsGroup.appendChild(nrBtn);
+        // Insert before #nb-quick-toggle to restore original order: Mute | NR | NB | ...
+        const nbBtn = document.getElementById('nb-quick-toggle');
+        if (nbBtn && nbBtn.parentElement === audioBtnsGroup) {
+            audioBtnsGroup.insertBefore(nrBtn, nbBtn);
+        } else {
+            audioBtnsGroup.appendChild(nrBtn);
+        }
     }
 }
 

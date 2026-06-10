@@ -1121,6 +1121,24 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Hot-update antenna labels and default antenna — these are purely cosmetic/
+	// startup-selection values that the handler reads from the config pointer on
+	// every request, so they take effect immediately without a restart.
+	if antSwitch, ok := newConfig["ant_switch"].(map[string]interface{}); ok {
+		if labelsRaw, ok := antSwitch["antenna_labels"].([]interface{}); ok {
+			labels := make([]string, len(labelsRaw))
+			for i, v := range labelsRaw {
+				if s, ok := v.(string); ok {
+					labels[i] = s
+				}
+			}
+			ah.config.AntSwitch.AntennaLabels = labels
+		}
+		if v, ok := antSwitch["default_antenna"].(float64); ok {
+			ah.config.AntSwitch.DefaultAntenna = int(v)
+		}
+	}
+
 	// Hot-update the GPSDO proxy so that host/port changes take effect
 	// immediately without a server restart.
 	if ah.gpsdoProxy != nil {

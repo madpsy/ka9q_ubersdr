@@ -20420,9 +20420,11 @@ const tooltipLine2 = timeStr;
                             value="${escapeHtml(cfgLabel || liveLabel)}"
                             placeholder="Antenna ${i}"
                             onclick="event.stopPropagation()"
+                            onblur="antSwitchSaveLabelOnBlur(${i-1}, this)"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
                             style="width:100%;padding:4px 6px;border:1px solid #ddd;border-radius:3px;font-size:12px;box-sizing:border-box;background:${isActive?'#f0faf3':'#fff'};">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:5px;">
-                            <span style="font-size:11px;color:#aaa;">Port ${i}</span>
+                            <span id="antCfgLabelTick_${i-1}" style="font-size:11px;color:#28a745;opacity:0;transition:opacity 0.3s;">✓</span>
                             <button onclick="antSwitchSetDefault(${i})" title="${isDefault?'Default on startup (click to clear)':'Set as default on startup'}"
                                 style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;line-height:1;opacity:${isDefault?'1':'0.3'};">${isDefault?'⭐':'☆'}</button>
                         </div>
@@ -20433,10 +20435,10 @@ const tooltipLine2 = timeStr;
 
             // hint text
             if (!thunderstorm) {
-                html += `<p style="font-size:12px;color:#888;margin:0 0 14px;">
+                html += `<p style="font-size:12px;color:#888;margin:0 0 10px;">
                     ${allowMixing
-                        ? 'Click the status area to toggle an antenna on or off. ⭐ marks the antenna selected on startup.'
-                        : 'Click the status area to select an antenna (grounds all others). ⭐ marks the antenna selected on startup.'}
+                        ? 'Click the status area to toggle an antenna on or off. ⭐ marks the antenna selected on startup. Label changes save automatically.'
+                        : 'Click the status area to select an antenna (grounds all others). ⭐ marks the antenna selected on startup. Label changes save automatically.'}
                 </p>`;
             }
 
@@ -20538,12 +20540,45 @@ const tooltipLine2 = timeStr;
             c.allow_mixing  = document.getElementById('antCfgAllowMixing')?.checked || false;
             c.default_antenna = parseInt(document.getElementById('antCfgDefaultAntenna')?.value) || 0;
             c.password      = document.getElementById('antCfgPassword')?.value || '';
+            // Also collect labels from the cards
             const labels = [];
             for (let i = 0; i < c.num_antennas; i++) {
                 labels.push(document.getElementById(`antCfgLabel_${i}`)?.value || '');
             }
             c.antenna_labels = labels;
             await _doSaveConfig(restart);
+        }
+
+        // Auto-save a single antenna label when the input loses focus or Enter is pressed.
+        // Shows a ✓ tick next to the input as feedback. No restart required.
+        async function antSwitchSaveLabelOnBlur(idx, inputEl) {
+            if (!currentConfig.ant_switch) currentConfig.ant_switch = {};
+            const c = currentConfig.ant_switch;
+            const numAntennas = c.num_antennas || parseInt(document.getElementById('antCfgNumAntennas')?.value) || 8;
+
+            // Collect all current label values
+            const labels = [];
+            for (let i = 0; i < numAntennas; i++) {
+                labels.push(document.getElementById(`antCfgLabel_${i}`)?.value || '');
+            }
+            c.antenna_labels = labels;
+
+            try {
+                const resp = await authenticatedFetch('/admin/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentConfig)
+                });
+                if (!resp || !resp.ok) return; // silent fail — user can use Save Settings if needed
+                // Show ✓ tick next to this input, fade out after 2s
+                const tick = document.getElementById(`antCfgLabelTick_${idx}`);
+                if (tick) {
+                    tick.style.opacity = '1';
+                    setTimeout(() => { tick.style.opacity = '0'; }, 2000);
+                }
+            } catch (e) {
+                // silent — don't interrupt the user with an alert for a background save
+            }
         }
 
         // ── Antenna switch control helpers ────────────────────────────────────────

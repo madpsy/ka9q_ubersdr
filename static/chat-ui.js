@@ -643,6 +643,7 @@ class ChatUI {
             .chat-messages {
                 flex: 1;
                 overflow-y: auto;
+                overscroll-behavior: contain;
                 padding: 8px;
                 background: rgba(30, 30, 30, 0.6);
                 color: #ddd;

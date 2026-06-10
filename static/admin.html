@@ -6965,9 +6965,29 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 fragment.appendChild(row);
             }
 
-            // Swap tbody content atomically — only rows change, nothing else redraws
-            tbody.innerHTML = '';
-            tbody.appendChild(fragment);
+            // ── Keyed in-place DOM update — zero flicker ─────────────────────────────
+            // Walk the new rows and either patch existing <tr> elements or append new
+            // ones; then trim any surplus rows.  The tbody is never emptied, so the
+            // browser never sees a blank table and there is no repaint flash.
+            const newRows = Array.from(fragment.children);
+            const oldRows = Array.from(tbody.children);
+            for (let i = 0; i < newRows.length; i++) {
+                if (i < oldRows.length) {
+                    // Only touch the DOM if something actually changed
+                    if (oldRows[i].innerHTML !== newRows[i].innerHTML) {
+                        oldRows[i].innerHTML = newRows[i].innerHTML;
+                    }
+                    if (oldRows[i].style.background !== newRows[i].style.background) {
+                        oldRows[i].style.background = newRows[i].style.background;
+                    }
+                } else {
+                    tbody.appendChild(newRows[i]);
+                }
+            }
+            // Remove surplus rows when session count decreases
+            while (tbody.children.length > newRows.length) {
+                tbody.removeChild(tbody.lastChild);
+            }
 
             // Count bypassed vs non-bypassed users
             let bypassedCount = 0;
@@ -7096,7 +7116,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 sessionHTML += `<span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>`;
                 sessionHTML += `<span style="margin-left: 20px;">• User sessions: ${userAudio} audio, ${userSpectrum} spectrum</span><br>`;
                 sessionHTML += `<span style="margin-left: 20px;">• <strong>Total user sessions: ${Object.keys(sessionsByUser).length}</strong></span>`;
-                sessionSummaryPanel.innerHTML = sessionHTML;
+                if (sessionSummaryPanel.innerHTML !== sessionHTML) sessionSummaryPanel.innerHTML = sessionHTML;
             }
 
             if (networkSummaryPanel) {
@@ -7111,7 +7131,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${formatThroughput(totalWaterfallKbps)}</strong></span><br>`;
                 networkHTML += `<span style="margin-left: 20px;">• <strong>Total DX cluster:</strong> <strong style="color: #667eea;">${formatThroughput(totalDXClusterKbps)}</strong></span><br>`;
                 networkHTML += `<span style="margin-left: 20px;">• <strong>Total throughput:</strong> <strong style="color: #28a745; font-size: 16px;">${formatThroughput(totalKbps)}</strong></span>`;
-                networkSummaryPanel.innerHTML = networkHTML;
+                if (networkSummaryPanel.innerHTML !== networkHTML) networkSummaryPanel.innerHTML = networkHTML;
             }
         }
 
@@ -20448,9 +20468,16 @@ const tooltipLine2 = timeStr;
                 ? `✅ Connected — ${test.duration_ms}ms`
                 : (test ? `❌ Connection failed: ${test.error || 'unknown error'}` : '❌ Connection test unavailable');
 
+            // Format last_update as a human-readable local time
+            let lastUpdateStr = '';
+            if (health.last_update) {
+                const lu = new Date(health.last_update);
+                lastUpdateStr = ` · Updated ${lu.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}`;
+            }
+
             let html = `<div style="padding:10px 14px;background:${connColor};border:1px solid ${connBorder};border-radius:5px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                 <span style="font-weight:bold;">${connText}</span>
-                <span style="font-size:12px;color:#555;">${health.host}:${health.port} · ${health.timeout_ms}ms · ${allowMixing ? 'Mixing' : 'Exclusive'} mode</span>
+                <span style="font-size:12px;color:#555;">${health.host}:${health.port} · ${health.timeout_ms}ms · ${allowMixing ? 'Mixing' : 'Exclusive'} mode${lastUpdateStr}</span>
             </div>`;
 
             // ── Thunderstorm warning ──────────────────────────────────────────────

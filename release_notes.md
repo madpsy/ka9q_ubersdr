@@ -1,5 +1,11 @@
 # Latest Stable - 0.1.53 - 8th Jun 2026
 
+## Version 0.1.54 - Testing
+
+### New Features
+- Added **Antenna Switch** control for use with KiwiSDR compatible switches such as the MS-S5 (complete API)
+- Added **Low Cache TTL** in Caddy for assets to help with version upgrades without explicit cache busting techniques
+
 ## Version 0.1.53 - Latest Stable
 
 ### Bug Fixes

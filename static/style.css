@@ -2385,10 +2385,10 @@ input[type="range"]::-moz-range-thumb {
         gap: 10px !important;
     }
 
-    /* Show vertical zoom slider on narrow screens, fixed 200px from top */
+    /* Show vertical zoom slider on narrow screens, fixed 225px from top */
     #spectrum-vzoom-slider {
         display: block !important;
-        top: 200px !important;
+        top: 225px !important;
         transform: rotate(-90deg) !important;
         transform-origin: center center;
     }

@@ -1530,15 +1530,11 @@ ant_switch:
   # true  = mixing mode: antennas are toggled on/off independently
   allow_mixing: false
 
-  # Access control for the public POST /api/ant-switch/command endpoint
-  # 0 = allow everyone (no password required)
-  # 1 = password required (set password below)
-  # 2 = admin only (public control endpoint returns 403 Forbidden)
-  # Default: 2 (admin only — safest default for public receivers)
-  deny_switching: 2
-
-  # Password for public control endpoint (only used when deny_switching: 1)
-  # Leave empty to disable password-based public control.
+  # Password for the public POST /api/ant-switch/command endpoint.
+  # When set, callers must include {"password":"..."} in the JSON body.
+  # When empty (default), the public control endpoint returns 401 Unauthorized
+  # and only the admin endpoint /admin/ant-switch-command is usable.
+  # Admin control via /admin/ant-switch-command never requires this password.
   password: ""
 
   # Thunderstorm mode: forces all antennas to ground and denies public switching.

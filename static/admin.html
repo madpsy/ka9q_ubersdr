@@ -20198,16 +20198,12 @@ const tooltipLine2 = timeStr;
                 ? `<br><span style="color: #dc3545; font-size: 14px; font-weight: bold;">⚡ Thunderstorm mode active — switching disabled</span>`
                 : '';
 
-            const denySwitchingLabels = ['Everyone', 'Password required', 'Admin only'];
-            const denySwitchingLabel = denySwitchingLabels[data.deny_switching] || 'Unknown';
-
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                 <span style="color: #666; font-size: 14px;">Host: ${data.host || 'N/A'}:${data.port || 'N/A'}</span><br>
                 <span style="color: #666; font-size: 14px;">Timeout: ${data.timeout_ms || 'N/A'} ms</span><br>
                 <span style="color: #666; font-size: 14px;">Antennas: ${data.num_antennas || 'N/A'}</span><br>
-                <span style="color: #666; font-size: 14px;">Mode: ${data.allow_mixing ? 'Mixing' : 'Exclusive'}</span><br>
-                <span style="color: #666; font-size: 14px;">Public control: ${denySwitchingLabel}</span>
+                <span style="color: #666; font-size: 14px;">Mode: ${data.allow_mixing ? 'Mixing' : 'Exclusive'}</span>
                 ${thunderstormHTML}
             `;
             statusSection.appendChild(statusDiv);
@@ -20364,8 +20360,6 @@ const tooltipLine2 = timeStr;
             const grounded      = !!health.grounded;
             const allowMixing   = !!health.allow_mixing;
             const thunderstorm  = !!health.thunderstorm;
-            const denySwitching = health.deny_switching || 0;
-            const denySwitchingLabels = ['Everyone', 'Password required', 'Admin only'];
 
             // ── Connection status banner ──────────────────────────────────────────
             const connOK    = test && test.success;
@@ -20528,10 +20522,6 @@ const tooltipLine2 = timeStr;
                     <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
                         <div style="font-size:11px;color:#999;margin-bottom:3px;">Switch Mode</div>
                         <div style="font-weight:bold;">${allowMixing ? 'Mixing' : 'Exclusive'}</div>
-                    </div>
-                    <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
-                        <div style="font-size:11px;color:#999;margin-bottom:3px;">Public Control</div>
-                        <div style="font-weight:bold;">${denySwitchingLabels[denySwitching] || 'Unknown'}</div>
                     </div>
                     <div style="padding:10px;background:#f8f9fa;border-radius:5px;">
                         <div style="font-size:11px;color:#999;margin-bottom:3px;">Thunderstorm Mode</div>

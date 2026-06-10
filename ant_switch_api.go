@@ -48,13 +48,10 @@ type AntSwitchConfig struct {
 	//   true  = mixing mode:    send "tN" (toggle antenna on/off independently)
 	AllowMixing bool `yaml:"allow_mixing"`
 
-	// DenySwitching controls public endpoint access:
-	//   0 = allow everyone (no password required)
-	//   1 = password required (set Password below)
-	//   2 = admin only (public control endpoint returns 403)
-	DenySwitching int `yaml:"deny_switching"`
-
-	// Password for public control endpoint (only used when DenySwitching == 1)
+	// Password for the public control endpoint POST /api/ant-switch/command.
+	// When set, callers must include {"password":"..."} in the JSON body.
+	// When empty, the public control endpoint returns 401 Unauthorized.
+	// Admin endpoint /admin/ant-switch-command never requires this password.
 	Password string `yaml:"password"`
 
 	// Thunderstorm: when true, forces all antennas to ground and denies
@@ -556,7 +553,6 @@ func (h *AntSwitchHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reques
 		"allow_mixing":   h.config.AllowMixing,
 		"num_antennas":   h.config.NumAntennas,
 		"antenna_labels": h.buildLabels(),
-		"deny_switching": h.config.DenySwitching,
 		"thunderstorm":   h.config.Thunderstorm,
 		"last_update":    state.LastUpdate,
 	}
@@ -594,12 +590,8 @@ type antSwitchPublicCommandRequest struct {
 }
 
 // HandlePublicCommand handles POST /api/ant-switch/command
-// Access is controlled by DenySwitching:
-//
-//	0 = allow everyone
-//	1 = password required (in JSON body)
-//	2 = admin only (returns 403)
-//
+// Requires a password in the JSON body ({"password":"..."}).
+// If no password is configured, the endpoint returns 401 Unauthorized.
 // Thunderstorm mode overrides all — returns 403 when active.
 func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -629,34 +621,22 @@ func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Admin-only mode
-	if h.config.DenySwitching == 2 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   "Antenna switching is restricted to admin only",
-		})
-		return
-	}
-
 	var req antSwitchPublicCommandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Password check (DenySwitching == 1)
-	if h.config.DenySwitching == 1 {
-		if h.config.Password == "" || req.Password != h.config.Password {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"error":   "Unauthorized — invalid password",
-			})
-			return
-		}
+	// Password is always required for the public endpoint.
+	// If no password is configured, deny all public access.
+	if h.config.Password == "" || req.Password != h.config.Password {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Unauthorized — password required",
+		})
+		return
 	}
 
 	switch req.Command {

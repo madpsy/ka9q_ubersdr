@@ -7449,7 +7449,6 @@ func (ah *AdminHandler) HandleAntSwitchHealth(w http.ResponseWriter, r *http.Req
 	status["timeout_ms"] = ah.config.AntSwitch.TimeoutMs
 	status["num_antennas"] = ah.config.AntSwitch.NumAntennas
 	status["allow_mixing"] = ah.config.AntSwitch.AllowMixing
-	status["deny_switching"] = ah.config.AntSwitch.DenySwitching
 	status["thunderstorm"] = ah.config.AntSwitch.Thunderstorm
 	status["selected"] = state.Selected
 	status["grounded"] = state.Grounded

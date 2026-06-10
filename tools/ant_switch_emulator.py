@@ -19,7 +19,7 @@ Only "s" produces a response line.
 Usage:
   python3 ant_switch_emulator.py [--host HOST] [--port PORT] [--antennas N]
 
-  Default: listen on 127.0.0.1:65000 with 8 antennas.
+  Default: listen on 0.0.0.0:65000 with 8 antennas (all interfaces).
 """
 
 import argparse
@@ -30,7 +30,7 @@ import threading
 
 def parse_args():
     p = argparse.ArgumentParser(description="Antenna switch daemon emulator")
-    p.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0 = all interfaces)")
     p.add_argument("--port", type=int, default=65000, help="TCP port (default: 65000)")
     p.add_argument("--antennas", type=int, default=8, help="Number of antennas (default: 8)")
     return p.parse_args()

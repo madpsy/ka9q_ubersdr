@@ -649,7 +649,10 @@ class ChatUI {
                 font-size: 12px;
                 display: flex;
                 flex-direction: column;
-                justify-content: flex-end;
+            }
+
+            .chat-messages > :first-child {
+                margin-top: auto;
             }
 
             .chat-message {

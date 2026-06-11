@@ -14221,11 +14221,21 @@ let _dockControlsAnchor      = null; // nextSibling of .controls before docking
 let _dockAudioControlsAnchor = null; // nextSibling of .audio-controls before docking
 let _dockBandBarAnchor        = null; // nextSibling of .band-status-bar before docking
 let _dockOriginalParent      = null; // parent of both nodes before docking
-let _dockResizeObserver      = null; // ResizeObserver for position updates (replaces rAF loop)
+let _dockRAF                 = null; // requestAnimationFrame handle for position updates
+let _dockLastPositionTime    = 0;    // timestamp of last position update (for throttling)
 
 // Reposition the fixed wrapper just above the .spectrum-display-controls bar.
-// Called once on dock and then only on resize/scroll — not in a rAF loop.
+// Throttled to ~10fps via rAF — enough to track layout changes smoothly while
+// avoiding the ~45% CPU cost of running getBoundingClientRect() at 60fps.
 function _dockPositionWrapper() {
+    const now = performance.now();
+    // Throttle: skip if less than 100ms since last update (~10fps)
+    if (now - _dockLastPositionTime < 100) {
+        _dockRAF = requestAnimationFrame(_dockPositionWrapper);
+        return;
+    }
+    _dockLastPositionTime = now;
+
     const wrapper  = document.getElementById('dock-overlay-wrapper');
     const bar      = document.querySelector('.spectrum-display-controls');
     if (!wrapper || !bar) return;
@@ -14239,6 +14249,8 @@ function _dockPositionWrapper() {
     wrapper.style.top    = (barRect.top - wrapperHeight) + 'px';
     wrapper.style.left   = barRect.left + 'px';
     wrapper.style.width  = barRect.width + 'px';
+
+    _dockRAF = requestAnimationFrame(_dockPositionWrapper);
 }
 
 function _dockApply() {
@@ -14263,15 +14275,11 @@ function _dockApply() {
     wrapper.appendChild(audio);
     document.body.appendChild(wrapper);
 
-    // Position once immediately, then keep in sync via ResizeObserver + events.
-    // This replaces the old rAF loop (which ran getBoundingClientRect 60×/sec).
+    // Start the rAF loop to keep the wrapper positioned above the controls bar
+    // (throttled to ~10fps inside _dockPositionWrapper to save CPU)
+    if (_dockRAF) cancelAnimationFrame(_dockRAF);
+    _dockLastPositionTime = 0; // force immediate first position
     _dockPositionWrapper();
-    if (_dockResizeObserver) _dockResizeObserver.disconnect();
-    _dockResizeObserver = new ResizeObserver(_dockPositionWrapper);
-    _dockResizeObserver.observe(bar);
-    _dockResizeObserver.observe(wrapper);
-    window.addEventListener('scroll', _dockPositionWrapper, { passive: true });
-    window.addEventListener('resize', _dockPositionWrapper, { passive: true });
 
     // Update button state (button is hidden on mobile via CSS but update anyway)
     if (btn) {
@@ -14412,10 +14420,8 @@ function _dockRemove() {
     const btn     = document.getElementById('dock-controls-button');
     if (!wrapper || !btn) return;
 
-    // Stop the positioning observers/listeners
-    if (_dockResizeObserver) { _dockResizeObserver.disconnect(); _dockResizeObserver = null; }
-    window.removeEventListener('scroll', _dockPositionWrapper);
-    window.removeEventListener('resize', _dockPositionWrapper);
+    // Stop the positioning loop
+    if (_dockRAF) { cancelAnimationFrame(_dockRAF); _dockRAF = null; }
 
     const controls = wrapper.querySelector('.controls');
     const audio    = wrapper.querySelector('.audio-controls');

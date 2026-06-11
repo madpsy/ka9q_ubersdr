@@ -1266,19 +1266,16 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // On desktop, re-focus after a short delay so any DOM changes
-                // that steal focus (scrollTop, hideMentionSuggestions) have
-                // settled.  On mobile/touch we skip the delayed focus because
-                // calling focus() outside the user-gesture window (even at
-                // setTimeout 0) causes Chrome to dismiss the virtual keyboard.
-                // The synchronous input.focus() inside sendMessage() handles
-                // mobile focus retention.
-                if (!('ontouchstart' in window)) {
-                    setTimeout(() => {
-                        const mi = document.getElementById('chat-message-input');
-                        if (mi) mi.focus();
-                    }, 50);
-                }
+                // Re-focus the input after DOM changes settle.
+                // On desktop 50ms is enough for scrollTop/DOM changes to settle.
+                // On mobile Chrome, the Enter key dismisses the keyboard at the
+                // OS level regardless of JS; we must call focus() again to bring
+                // it back.  Use a short delay so the browser has finished its
+                // own keyboard-dismiss animation before we re-show it.
+                setTimeout(() => {
+                    const mi = document.getElementById('chat-message-input');
+                    if (mi) mi.focus();
+                }, 'ontouchstart' in window ? 100 : 50);
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {

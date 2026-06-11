@@ -1207,6 +1207,43 @@ class ChatUI {
             this.sendMessage();
         });
 
+        // ── DEBUG: visible blur tracker (remove after diagnosis) ──────────────
+        {
+            const dbgOverlay = document.createElement('div');
+            dbgOverlay.id = 'chat-blur-debug';
+            dbgOverlay.style.cssText = [
+                'position:fixed', 'top:0', 'left:0', 'right:0',
+                'background:rgba(0,0,0,0.85)', 'color:#0f0',
+                'font:11px/1.4 monospace', 'padding:6px', 'z-index:99999',
+                'max-height:40vh', 'overflow-y:auto', 'pointer-events:none',
+                'display:none'
+            ].join(';');
+            document.body.appendChild(dbgOverlay);
+
+            const dbgLog = (msg) => {
+                dbgOverlay.style.display = 'block';
+                const line = document.createElement('div');
+                line.textContent = new Date().toISOString().slice(11,23) + ' ' + msg;
+                dbgOverlay.insertBefore(line, dbgOverlay.firstChild);
+                // Keep only last 20 lines
+                while (dbgOverlay.children.length > 20) {
+                    dbgOverlay.removeChild(dbgOverlay.lastChild);
+                }
+            };
+
+            const chatInput = document.getElementById('chat-message-input');
+            chatInput.addEventListener('blur', () => {
+                const ae = document.activeElement;
+                const tag = ae ? (ae.tagName + (ae.id ? '#'+ae.id : '') + (ae.className ? '.'+ae.className.split(' ').join('.') : '')) : 'null';
+                const stack = new Error().stack.split('\n').slice(1,4).join(' | ');
+                dbgLog('BLUR → ' + tag + ' | ' + stack);
+            });
+            chatInput.addEventListener('focus', () => {
+                dbgLog('FOCUS ←');
+            });
+        }
+        // ── END DEBUG ──────────────────────────────────────────────────────────
+
         // Message input - show mention suggestions as they type and update send button state
         const messageInput = document.getElementById('chat-message-input');
         messageInput.addEventListener('input', (e) => {

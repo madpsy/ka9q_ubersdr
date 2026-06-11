@@ -19,7 +19,7 @@ class DXClusterExtension extends DecoderExtension {
 
         this.spots = [];
         this.maxSpots = 500;
-        this.ageFilter = 10; // Default 10 minutes
+        this.ageFilter = 30; // Default 30 minutes
         this.bandFilter = 'all';
         this.callsignFilter = '';
         this.showMarkers = true; // Default: markers enabled

@@ -830,18 +830,13 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     onEnable() {
-        // Re-subscribe to DX spots when extension is enabled
-        // This ensures we receive new spots after closing and reopening the extension
+        // Server subscription is now done once at registration time (always-on markers).
+        // Re-subscribe to the JS callback if it was lost.
         if (!this.unsubscribe) {
             this.subscribeToDXSpots();
         }
 
-        // Subscribe to DX spots on server
-        if (window.dxClusterClient) {
-            window.dxClusterClient.subscribeToDXSpots();
-        }
-
-        // Restart monitoring intervals
+        // Restart monitoring intervals for the UI panel
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
         this.startAgeUpdates();
@@ -849,25 +844,11 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     onDisable() {
-        // Stop connection monitoring
+        // Stop UI-only intervals; keep server subscription alive so
+        // spectrum markers continue to render even when the panel is closed.
         this.stopConnectionMonitoring();
-
-        // Stop age updates
         this.stopAgeUpdates();
-
-        // Stop radio state monitoring
         this.stopRadioStateMonitoring();
-
-        // Unsubscribe from spots and clear the reference
-        if (this.unsubscribe) {
-            this.unsubscribe();
-            this.unsubscribe = null;
-        }
-
-        // Unsubscribe from DX spots on server
-        if (window.dxClusterClient) {
-            window.dxClusterClient.unsubscribeFromDXSpots();
-        }
     }
 
     // Required by DecoderExtension but not used for DX cluster
@@ -891,8 +872,10 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     // Get the DX cluster extension instance from global reference
     const dxExtension = dxClusterExtensionInstance;
 
-    // Only draw if extension exists, is enabled, has spots, AND showMarkers is enabled
-    if (!dxExtension || !dxExtension.enabled || !dxExtension.spots || dxExtension.spots.length === 0 || !dxExtension.showMarkers) {
+    // Only draw if extension exists, has spots, AND showMarkers is enabled.
+    // Note: we intentionally omit the dxExtension.enabled check so markers
+    // render even when the extension panel is closed (always-on markers).
+    if (!dxExtension || !dxExtension.spots || dxExtension.spots.length === 0 || !dxExtension.showMarkers) {
         dxSpotPositions = [];
         window.dxSpotPositions = dxSpotPositions;
         return;
@@ -1114,6 +1097,12 @@ if (window.decoderManager) {
     dxClusterExtensionInstance = new DXClusterExtension();
     window.decoderManager.register(dxClusterExtensionInstance);
     console.log('DX Cluster extension registered:', dxClusterExtensionInstance);
+
+    // Subscribe to DX spots on the server immediately so markers render
+    // even before the user opens the extension panel (always-on markers).
+    if (window.dxClusterClient) {
+        window.dxClusterClient.subscribeToDXSpots();
+    }
 } else {
     console.error('decoderManager not available for DX Cluster extension');
 }

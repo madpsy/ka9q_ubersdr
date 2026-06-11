@@ -1042,15 +1042,13 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     onEnable() {
+        // Server subscription is now done once at registration time (always-on markers).
+        // Re-subscribe to the JS callback if it was lost.
         if (!this.unsubscribe) {
             this.subscribeToCWSpots();
         }
 
-        // Subscribe to CW spots on server
-        if (window.dxClusterClient) {
-            window.dxClusterClient.subscribeToCWSpots();
-        }
-
+        // Restart UI-only intervals for the panel
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
         this.startAgeUpdates();
@@ -1072,32 +1070,18 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     onDisable() {
+        // Stop UI-only intervals; keep server subscription alive so
+        // spectrum markers continue to render even when the panel is closed.
         this.stopConnectionMonitoring();
         this.stopAgeUpdates();
         this.stopRadioStateMonitoring();
         this.stopFrequencyMonitoring();
         this.stopFrequencyPolling();
 
-        if (this.unsubscribe) {
-            this.unsubscribe();
-            this.unsubscribe = null;
-        }
-
-        // Unsubscribe from CW spots on server
-        if (window.dxClusterClient) {
-            window.dxClusterClient.unsubscribeFromCWSpots();
-        }
-
         // Hide badges when extension is disabled
         const container = document.getElementById('cw-spots-badges-main');
         if (container) {
             container.style.display = 'none';
-        }
-
-        // Invalidate spectrum marker cache to remove CW spot markers
-        if (window.spectrumDisplay) {
-            window.spectrumDisplay.invalidateMarkerCache();
-            window.spectrumDisplay.draw();
         }
     }
 
@@ -2172,21 +2156,13 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     onDisable() {
+        // Stop UI-only intervals; keep server subscription alive so
+        // spectrum markers continue to render even when the panel is closed.
         this.stopConnectionMonitoring();
         this.stopAgeUpdates();
         this.stopRadioStateMonitoring();
         this.stopFrequencyMonitoring();
         this.stopFrequencyPolling();
-
-        if (this.unsubscribe) {
-            this.unsubscribe();
-            this.unsubscribe = null;
-        }
-
-        // Unsubscribe from CW spots on server
-        if (window.dxClusterClient) {
-            window.dxClusterClient.unsubscribeFromCWSpots();
-        }
 
         // Stop morse relay if active (removes addEventListener before extension switches)
         if (this._morseBinaryListener) {
@@ -2209,12 +2185,6 @@ class CWSpotsExtension extends DecoderExtension {
         const container = document.getElementById('cw-spots-badges-main');
         if (container) {
             container.style.display = 'none';
-        }
-
-        // Invalidate spectrum marker cache to remove CW spot markers
-        if (window.spectrumDisplay) {
-            window.spectrumDisplay.invalidateMarkerCache();
-            window.spectrumDisplay.draw();
         }
     }
 
@@ -2549,6 +2519,12 @@ if (window.decoderManager) {
     cwSpotsExtensionInstance = new CWSpotsExtension();
     window.decoderManager.register(cwSpotsExtensionInstance);
     console.log('CW Spots extension registered:', cwSpotsExtensionInstance);
+
+    // Subscribe to CW spots on the server immediately so markers render
+    // even before the user opens the extension panel (always-on markers).
+    if (window.dxClusterClient) {
+        window.dxClusterClient.subscribeToCWSpots();
+    }
 } else {
     console.error('decoderManager not available for CW Spots extension');
 }
@@ -2590,11 +2566,8 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         return;
     }
 
-    if (!cwExtension.enabled) {
-        cwSpotPositions = [];
-        window.cwSpotPositions = cwSpotPositions;
-        return;
-    }
+    // Note: we intentionally omit the cwExtension.enabled check so markers
+    // render even when the extension panel is closed (always-on markers).
 
     if (!cwExtension.spots || cwExtension.spots.length === 0) {
         if (shouldLog) {

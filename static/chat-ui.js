@@ -2193,7 +2193,14 @@ class ChatUI {
     showEmojiPicker() {
         const picker = document.getElementById('chat-emoji-picker');
 
-        // Common emojis
+        // Build a reverse map: emoji char → shortcode, from EMOJI_SHORTCODES.
+        // Preserve display order by iterating the shortcodes map in definition order.
+        const reverseMap = {};
+        for (const [code, emoji] of Object.entries(ChatUI.EMOJI_SHORTCODES)) {
+            if (!reverseMap[emoji]) reverseMap[emoji] = code; // first shortcode wins
+        }
+
+        // Display order matches the original picker (same emojis, same grid layout)
         const emojis = [
             '😊', '😂', '🤣', '😍', '😎', '🤔', '👍', '👎',
             '❤️', '🎉', '🔥', '⭐', '✨', '💯', '🚀', '🎯',
@@ -2201,9 +2208,11 @@ class ChatUI {
             '🌟', '💡', '⚡', '🌈', '☀️', '🌙', '⚙️', '🔧'
         ];
 
-        picker.innerHTML = emojis.map(emoji =>
-            `<span onclick="chatUI.insertEmoji('${emoji}')">${emoji}</span>`
-        ).join('');
+        picker.innerHTML = emojis.map(emoji => {
+            const code = reverseMap[emoji];
+            const title = code ? `:${code}:` : emoji;
+            return `<span onclick="chatUI.insertEmoji('${emoji}')" title="${title}">${emoji}</span>`;
+        }).join('');
 
         picker.style.display = 'grid';
 

@@ -1,6 +1,20 @@
 {
   "addons": [
     {
+      "name": "lightning",
+      "status": "Stable",
+      "description": "VLF lightning sferic detector — connects to UberSDR in iq48 mode (48 kHz IQ, centred at 25 kHz, covering 1–49 kHz), detects lightning sferics using an adaptive IIR noise floor and threshold trigger, captures GPS-timestamped waveforms for TDOA cross-correlation, and serves a live dark-themed web UI with strike activity timeline, waveform gallery, and SNR statistics.",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_lightning/main/install.sh",
+      "host": "lightning",
+      "port": 6097,
+      "enabled": true,
+      "require_admin": false,
+      "strip_prefix": true,
+      "rewrite_origin": false,
+      "rate_limit": 100,
+      "allowed_ips": ["0.0.0.0/0"]
+    },
+    {
       "name": "doppler",
       "status": "Stable",
       "description": "Monitors ionospheric Doppler shift of standard time/frequency broadcast stations (WWV, WWVH, CHU etc.) in real time, logs minute-mean observations to CSV, and serves a live Chart.js web UI. Supports the HamSCI Doppler Experiment.",

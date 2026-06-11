@@ -6,6 +6,13 @@ class SignalMeter {
         // Display mode: 'dbfs', 'snr', 'dbfs-led', or 'snr-led'
         this.displayMode = localStorage.getItem('signalMeterDisplayMode') || 'dbfs';
 
+        // Dirty-check cache: skip DOM writes when display hasn't changed
+        this._lastDisplayText = '';
+        this._lastBarWidth = '';
+        this._lastBarColor = '';
+        this._lastTextColor = '';
+        this._lastLitCount = -1;
+
         // Peak history for smoothing
         this.peakHistory = [];
         this.peakHistoryMaxAge = 100; // 100ms window - reduced for faster response
@@ -308,8 +315,17 @@ class SignalMeter {
             color = sMeterColour(basebandPower);
         }
 
-        this.meterValue.textContent = displayText;
-        this.meterValue.style.color = color;
+        // Dirty-check: only write to DOM when values actually changed.
+        // This avoids triggering style recalculation + layout on every 100ms tick
+        // when the signal level is stable (which is most of the time).
+        if (displayText !== this._lastDisplayText) {
+            this.meterValue.textContent = displayText;
+            this._lastDisplayText = displayText;
+        }
+        if (color !== this._lastTextColor) {
+            this.meterValue.style.color = color;
+            this._lastTextColor = color;
+        }
 
         // Add flashing animation for extremely strong signals (only in dBFS bar mode)
         if (this.displayMode === 'dbfs' && basebandPower > DBFS_MAX) {
@@ -322,32 +338,41 @@ class SignalMeter {
             // ── LED mode ─────────────────────────────────────────────────────
             if (this._ledElements && this._ledElements.length === 10) {
                 const litCount = Math.round(percentage / 10); // 0–10 LEDs lit
-                for (let i = 0; i < 10; i++) {
-                    const led = this._ledElements[i];
-                    if (i < litCount) {
-                        // Compute this LED's intrinsic colour from its position on the scale
-                        let ledColor;
-                        if (isSnrMode) {
-                            const ledSnr = SNR_MIN + (i / 9) * (SNR_MAX - SNR_MIN);
-                            ledColor = snrColour(ledSnr);
+                // Skip LED updates if lit count hasn't changed
+                if (litCount !== this._lastLitCount) {
+                    this._lastLitCount = litCount;
+                    for (let i = 0; i < 10; i++) {
+                        const led = this._ledElements[i];
+                        if (i < litCount) {
+                            // Compute this LED's intrinsic colour from its position on the scale
+                            let ledColor;
+                            if (isSnrMode) {
+                                const ledSnr = SNR_MIN + (i / 9) * (SNR_MAX - SNR_MIN);
+                                ledColor = snrColour(ledSnr);
+                            } else {
+                                const ledDbfs = DBFS_MIN + (i / 9) * (DBFS_MAX - DBFS_MIN);
+                                ledColor = sMeterColour(ledDbfs);
+                            }
+                            led.style.background = ledColor;
+                            led.style.boxShadow = `0 0 5px ${ledColor}`;
+                            led.classList.add('lit');
                         } else {
-                            const ledDbfs = DBFS_MIN + (i / 9) * (DBFS_MAX - DBFS_MIN);
-                            ledColor = sMeterColour(ledDbfs);
+                            led.style.background = '';
+                            led.style.boxShadow = '';
+                            led.classList.remove('lit');
                         }
-                        led.style.background = ledColor;
-                        led.style.boxShadow = `0 0 5px ${ledColor}`;
-                        led.classList.add('lit');
-                    } else {
-                        led.style.background = '';
-                        led.style.boxShadow = '';
-                        led.classList.remove('lit');
                     }
                 }
             }
         } else {
             // ── Bar mode ──────────────────────────────────────────────────────
-            this.meterBar.style.width = percentage + '%';
-            this.meterBar.style.background = color;
+            const widthStr = percentage + '%';
+            if (widthStr !== this._lastBarWidth || color !== this._lastBarColor) {
+                this.meterBar.style.width = widthStr;
+                this.meterBar.style.background = color;
+                this._lastBarWidth = widthStr;
+                this._lastBarColor = color;
+            }
         }
     }
 

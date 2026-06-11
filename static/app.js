@@ -3696,23 +3696,28 @@ async function handleBinaryMessage(data) {
                     const timestamp = Date.now();
                     snrHistory.push({ value: snr, timestamp: timestamp });
 
-                    // Remove old entries (older than 10 seconds)
-                    snrHistory = snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                    // Remove old entries (older than 10 seconds) — in-place pruning
+                    // avoids creating a new array every 100ms (reduces GC pressure)
+                    const snrCutoff = timestamp - SNR_HISTORY_MAX_AGE;
+                    while (snrHistory.length > 0 && snrHistory[0].timestamp < snrCutoff) {
+                        snrHistory.shift();
+                    }
 
                     // Keep window reference in sync
                     window.snrHistory = snrHistory;
 
                     // Also track dBFS history for mini chart (store both baseband power and noise density)
                     dbfsHistory.push({ value: basebandPower, noise: noiseDensity, timestamp: timestamp });
-                    dbfsHistory = dbfsHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                    const dbfsCutoff = timestamp - SNR_HISTORY_MAX_AGE;
+                    while (dbfsHistory.length > 0 && dbfsHistory[0].timestamp < dbfsCutoff) {
+                        dbfsHistory.shift();
+                    }
                     window.dbfsHistory = dbfsHistory;
 
-                    // Update display if modal is open
+                    // Update display if modal is open + draw mini charts
+                    // (updateSignalQualityDisplay already calls drawDbfsHistoryChart
+                    //  and drawSnrHistoryChart, so no need to call them again here)
                     updateSignalQualityDisplay();
-
-                    // Always update mini charts (they live on the main page)
-                    drawDbfsHistoryChart();
-                    drawSnrHistoryChart();
 
                     // Keep the live SNR marker on the squelch slider in sync
                     if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
@@ -6482,9 +6487,25 @@ function snrSquelchThreshold(sliderVal) {
     return v <= SNR_SQUELCH_OFF_VAL ? SNR_SQUELCH_SENTINEL : v;
 }
 
+// Cached DOM references for updateSNRSquelchDisplay — avoids 3× getElementById per call.
+// Populated on first call; invalidated if elements are removed/recreated.
+let _snrSqSlider  = null;
+let _snrSqLabel   = null;
+let _snrSqMarker  = null;
+let _snrSqSliderWidth = 0; // cached offsetWidth — updated on resize, not every call
+let _snrSqSliderMin   = 0;
+let _snrSqSliderMax   = 80;
+
 function updateSNRSquelchDisplay() {
-    const sl  = document.getElementById('snr-squelch-slider');
-    const lbl = document.getElementById('snr-squelch-value');
+    // Lazy-init cached DOM refs (re-lookup if element was removed)
+    if (!_snrSqSlider || !_snrSqSlider.isConnected) {
+        _snrSqSlider = document.getElementById('snr-squelch-slider');
+    }
+    if (!_snrSqLabel || !_snrSqLabel.isConnected) {
+        _snrSqLabel = document.getElementById('snr-squelch-value');
+    }
+    const sl  = _snrSqSlider;
+    const lbl = _snrSqLabel;
     if (!sl || !lbl) return;
     const t = snrSquelchThreshold(sl.value);
     if (t <= SNR_SQUELCH_SENTINEL + 1) {
@@ -6498,21 +6519,31 @@ function updateSNRSquelchDisplay() {
     // ── Live SNR marker on the squelch slider track ────────────────────────
     // Shows a vertical line at the position corresponding to the current SNR
     // so the user can see at a glance where to set the squelch threshold.
-    const marker = document.getElementById('snr-squelch-snr-marker');
+    if (!_snrSqMarker || !_snrSqMarker.isConnected) {
+        _snrSqMarker = document.getElementById('snr-squelch-snr-marker');
+    }
+    const marker = _snrSqMarker;
     if (marker) {
         const bp  = window.currentBasebandPower;
         const nd  = window.currentNoiseDensity;
         const snr = (bp != null && nd != null && bp > -900 && nd > -900)
                     ? bp - nd : null;
         if (snr !== null) {
-            const sliderWidth = sl.offsetWidth;
+            // Use cached slider width — avoids forced layout reflow (offsetWidth)
+            // every 100ms. Cache is updated by ResizeObserver in initSNRSquelch().
+            let sliderWidth = _snrSqSliderWidth;
+            if (sliderWidth === 0) {
+                // First call or not yet observed — read once and cache
+                sliderWidth = sl.offsetWidth;
+                _snrSqSliderWidth = sliderWidth;
+            }
             // If the slider hasn't been laid out yet (width=0), defer to next frame
             if (sliderWidth === 0) {
                 requestAnimationFrame(() => updateSNRSquelchDisplay());
                 return;
             }
-            const MIN = parseFloat(sl.min);   // 24
-            const MAX = parseFloat(sl.max);   // 80
+            const MIN = _snrSqSliderMin || parseFloat(sl.min);   // 24
+            const MAX = _snrSqSliderMax || parseFloat(sl.max);   // 80
             // Account for browser thumb inset: the usable track is narrower than
             // the element width by one thumb-radius on each side (~8px typical).
             const thumbRadius = 8;
@@ -6580,9 +6611,19 @@ function initSNRSquelch() {
         wrapper.appendChild(marker);
 
         // Reposition marker whenever the slider is resized (e.g. window resize)
+        // Also update the cached offsetWidth so updateSNRSquelchDisplay() doesn't
+        // need to read it (which forces a synchronous layout reflow every 100ms).
         if (typeof ResizeObserver !== 'undefined') {
-            new ResizeObserver(() => updateSNRSquelchDisplay()).observe(sl);
+            new ResizeObserver(() => {
+                _snrSqSliderWidth = sl.offsetWidth; // update cache on resize
+                updateSNRSquelchDisplay();
+            }).observe(sl);
         }
+        // Cache slider min/max (they don't change after init)
+        _snrSqSliderMin = parseFloat(sl.min);
+        _snrSqSliderMax = parseFloat(sl.max);
+        // Initial width cache
+        _snrSqSliderWidth = sl.offsetWidth;
     }
     // ───────────────────────────────────────────────────────────────────────
 

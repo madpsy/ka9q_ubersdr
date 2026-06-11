@@ -1258,18 +1258,6 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // On desktop, DOM changes (hideMentionSuggestions, scrollTop in
-                // addChatMessage) can steal focus, so we need to re-focus the input.
-                // On mobile/touch devices, the input retains focus naturally from the
-                // Enter key, and any programmatic .focus() call (even via rAF) causes
-                // the virtual keyboard to briefly dismiss and reappear. So only
-                // re-focus on non-touch (desktop) devices.
-                if (!('ontouchstart' in window)) {
-                    requestAnimationFrame(() => {
-                        const mi = document.getElementById('chat-message-input');
-                        if (mi) mi.focus();
-                    });
-                }
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {
@@ -1725,12 +1713,12 @@ class ChatUI {
             sendBtn.disabled = true;
             sendBtn.style.opacity = '0.5';
             sendBtn.style.cursor = 'not-allowed';
-            // Re-focus the input — needed on desktop because tapping the Send button
-            // or DOM changes can steal focus. On mobile/touch devices, skip the
-            // programmatic focus to avoid virtual keyboard dismiss/reappear flash.
-            if (!('ontouchstart' in window)) {
-                input.focus();
-            }
+            // Re-focus the input synchronously. This runs within the user's
+            // keydown/click gesture so the browser keeps the virtual keyboard
+            // open on mobile.  The key is that this is synchronous — wrapping
+            // it in setTimeout or rAF would break the gesture context and
+            // cause the keyboard to flash.
+            input.focus();
         }
     }
 
@@ -1997,7 +1985,36 @@ class ChatUI {
         `;
 
         container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
+        this._scrollChatToBottom(container);
+    }
+
+    /**
+     * Scroll the chat container to the bottom without stealing focus from the
+     * message input on mobile.  On touch devices the simple assignment
+     * `container.scrollTop = container.scrollHeight` can trigger a layout
+     * recalc that blurs the active input, causing the virtual keyboard to
+     * briefly dismiss and reappear.  We work around this by saving and
+     * restoring the active element when necessary.
+     */
+    _scrollChatToBottom(container) {
+        const input = document.getElementById('chat-message-input');
+        const isTouchDevice = 'ontouchstart' in window;
+        const inputIsFocused = input && document.activeElement === input;
+
+        if (isTouchDevice && inputIsFocused) {
+            // Use requestAnimationFrame so the DOM append is
+            // fully painted before we touch scrollTop.
+            requestAnimationFrame(() => {
+                container.scrollTop = container.scrollHeight;
+                // If the scroll stole focus, restore it without
+                // re-opening the keyboard (preventScroll).
+                if (document.activeElement !== input) {
+                    input.focus({ preventScroll: true });
+                }
+            });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
     }
 
     /**
@@ -2272,7 +2289,7 @@ class ChatUI {
         div.className = 'chat-message chat-message-system';
         div.textContent = text;
         container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
+        this._scrollChatToBottom(container);
     }
 
     /**
@@ -2286,7 +2303,7 @@ class ChatUI {
             div.className = 'chat-message chat-message-error';
             div.textContent = 'Error: ' + error;
             container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
+            this._scrollChatToBottom(container);
         }
     }
 

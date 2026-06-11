@@ -1258,6 +1258,19 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
+                // Re-focus the input after a short delay.  On desktop, DOM
+                // changes (the echoed message arriving via WebSocket, scrollTop
+                // in addChatMessage, hideMentionSuggestions) can steal focus, so
+                // we need to re-focus after they settle.  On mobile/touch
+                // devices we skip this because the delayed focus() call breaks
+                // the user-gesture context and causes the virtual keyboard to
+                // briefly dismiss and reappear.
+                if (!('ontouchstart' in window)) {
+                    setTimeout(() => {
+                        const mi = document.getElementById('chat-message-input');
+                        if (mi) mi.focus();
+                    }, 50);
+                }
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {
@@ -1990,11 +2003,10 @@ class ChatUI {
 
     /**
      * Scroll the chat container to the bottom without stealing focus from the
-     * message input on mobile.  On touch devices the simple assignment
-     * `container.scrollTop = container.scrollHeight` can trigger a layout
-     * recalc that blurs the active input, causing the virtual keyboard to
-     * briefly dismiss and reappear.  We work around this by saving and
-     * restoring the active element when necessary.
+     * message input.  On touch devices the scrollTop assignment can trigger a
+     * layout recalc that blurs the active input, causing the virtual keyboard
+     * to briefly dismiss and reappear.  We work around this by always
+     * restoring focus after the scroll when the input was focused.
      */
     _scrollChatToBottom(container) {
         const input = document.getElementById('chat-message-input');
@@ -2002,10 +2014,10 @@ class ChatUI {
 
         container.scrollTop = container.scrollHeight;
 
-        // If the scrollTop assignment stole focus from the message input,
-        // restore it.  On touch devices use preventScroll so the virtual
-        // keyboard isn't dismissed and re-opened.
-        if (inputIsFocused && document.activeElement !== input) {
+        // Always restore focus after scroll if the input was focused before.
+        // Some browsers silently blur the input during scrollTop assignment
+        // without updating document.activeElement synchronously.
+        if (inputIsFocused) {
             const isTouchDevice = 'ontouchstart' in window;
             input.focus(isTouchDevice ? { preventScroll: true } : undefined);
         }

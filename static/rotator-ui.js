@@ -1190,21 +1190,10 @@ class RotatorUI {
             });
 
             if (resp.status === 401) {
-                // Wrong password or no password configured on server
+                // Wrong or missing password — clear saved value and re-prompt
                 this.antSwitchPassword = '';
                 localStorage.removeItem('ant_switch_password');
-
-                // Check if server has no password at all (permanent read-only)
-                const body = await resp.json().catch(() => ({}));
-                if (body.error && body.error.includes('password required') &&
-                    this.antSwitchStatus && !this.antSwitchStatus.thunderstorm) {
-                    // Server has no password configured — mark read-only permanently for this session
-                    this.antSwitchReadOnly = true;
-                    if (this.antSwitchStatus) this.updateAntSwitchBanner(this.antSwitchStatus);
-                } else {
-                    // Wrong password — show input again with error
-                    this._showAntPasswordRow('Incorrect password');
-                }
+                this._showAntPasswordRow('Incorrect password');
                 return;
             }
 

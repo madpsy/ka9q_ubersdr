@@ -1,22 +1,44 @@
 /**
- * UberSDR Rotator UI Component
- * Adds a collapsible rotator panel to the main page (left side)
- * Requires: rotator-display.js library
+ * UberSDR Control Panel UI
+ * Dual-purpose collapsible panel on the left edge of the main page.
+ * Supports rotator control (azimuthal map + compass) and/or antenna switch.
+ * Requires: rotator-display.js when rotator is enabled.
  */
 
 class RotatorUI {
-    constructor() {
+    /**
+     * @param {object} opts
+     * @param {boolean} [opts.rotatorEnabled=true]
+     * @param {boolean} [opts.antSwitchEnabled=false]
+     */
+    constructor(opts = {}) {
+        // Feature flags
+        this.rotatorEnabled   = opts.rotatorEnabled   !== false; // default true for back-compat
+        this.antSwitchEnabled = !!opts.antSwitchEnabled;
+
+        // ── Rotator state ──────────────────────────────────────────────────
         this.isExpanded = false;
         this.rotatorDisplay = null;
         this.statusUpdateTimer = null;
-        this.countriesData = []; // Store countries data for cone markers
-        this.savedPassword = localStorage.getItem('rotctl_password') || ''; // Load saved password
-        this.selectedCountry = null; // Track selected country to exclude from cone markers
+        this.countriesData = [];
+        this.savedPassword = localStorage.getItem('rotctl_password') || '';
+        this.selectedCountry = null;
 
-        // Load saved state from localStorage
+        // ── Ant switch state ───────────────────────────────────────────────
+        this.antSwitchStatus    = null;   // last fetched status object
+        this.antSwitchPassword  = localStorage.getItem('ant_switch_password') || '';
+        this.antSwitchReadOnly  = false;  // set true after confirmed 401 with no server password
+        this.antSwitchPollTimer = null;
+        this.antSwitchPendingAnt = null;  // antenna number awaiting password entry
+
+        // ── Active inner tab: 'rotator' | 'antswitch' ─────────────────────
+        this.activeTab = localStorage.getItem('control_panel_tab') ||
+            (this.rotatorEnabled ? 'rotator' : 'antswitch');
+
+        // Load saved expanded state
         const savedState = localStorage.getItem('ubersdr_rotator_expanded');
         this.isExpanded = savedState === 'true';
-        
+
         this.createRotatorPanel();
         this.setupEventHandlers();
 
@@ -25,18 +47,20 @@ class RotatorUI {
     }
     
     /**
-     * Start periodic status updates for the collapsed tab
+     * Start periodic status updates for the collapsed tab.
+     * Rotator: 1 s (bearing display). Ant switch: handled by startAntSwitchPoll().
      */
     startStatusUpdates() {
-        // Do an immediate fetch
-        this.fetchRotatorStatus();
-        
-        // Set up periodic updates every 1 second (same as rotator.html)
-        this.statusUpdateTimer = setInterval(() => {
+        if (this.rotatorEnabled) {
             this.fetchRotatorStatus();
-        }, 1000);
+            this.statusUpdateTimer = setInterval(() => this.fetchRotatorStatus(), 1000);
+        }
+        if (this.antSwitchEnabled) {
+            // 30 s when collapsed; will be sped up to 5 s when expanded on ant switch tab
+            this.startAntSwitchPoll(30000);
+        }
     }
-    
+
     /**
      * Stop periodic status updates
      */
@@ -45,52 +69,116 @@ class RotatorUI {
             clearInterval(this.statusUpdateTimer);
             this.statusUpdateTimer = null;
         }
+        this.stopAntSwitchPoll();
     }
     
     /**
-     * Create the rotator panel HTML and inject into page
+     * Create the panel HTML and inject into page.
+     * Supports rotator-only, ant-switch-only, or both (dual-tab).
      */
     createRotatorPanel() {
-        const rotatorHTML = `
-            <div id="rotator-panel" class="rotator-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
-                <!-- Rotator tab (always visible, on left edge) -->
-                <div id="rotator-header" class="rotator-header" onclick="rotatorUI.togglePanel()">
-                    <span id="rotator-tab-bearing" class="rotator-tab-bearing" style="display:${this.isExpanded ? 'none' : 'block'};">0°</span>
-                    <span>🧭</span>
-                    <span id="rotator-tab-status" class="rotator-tab-status disconnected" style="display:${this.isExpanded ? 'none' : 'block'};"></span>
-                    <span id="rotator-collapse-arrow" class="rotator-collapse-arrow" style="display:${this.isExpanded ? 'block' : 'none'};">←</span>
-                </div>
-                
-                <!-- Rotator content (slides out from left) -->
-                <div id="rotator-content" class="rotator-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
+        const hasBoth = this.rotatorEnabled && this.antSwitchEnabled;
+        const collapsed = !this.isExpanded;
+
+        // ── Inner tab bar (only when both features are enabled) ────────────
+        const tabBar = hasBoth ? `
+                <div id="cp-tab-bar" class="cp-tab-bar">
+                    <button class="cp-tab-btn${this.activeTab === 'rotator'   ? ' active' : ''}"
+                            onclick="rotatorUI.switchTab('rotator')">🧭 Rotator</button>
+                    <button class="cp-tab-btn${this.activeTab === 'antswitch' ? ' active' : ''}"
+                            onclick="rotatorUI.switchTab('antswitch')">📡 Antenna</button>
+                </div>` : '';
+
+        // ── Rotator pane ───────────────────────────────────────────────────
+        const rotatorPane = this.rotatorEnabled ? `
+                <div id="cp-rotator-pane" class="cp-pane"
+                     style="display:${(!hasBoth || this.activeTab === 'rotator') ? 'flex' : 'none'};flex-direction:column;align-items:center;position:relative;width:100%;height:100%;">
                     <div id="rotator-display-container" class="rotator-display-container">
-                        <!-- Rotator display will be injected here -->
                         <div id="rotator-location-display" class="rotator-location-display">Loading...</div>
                         <div id="rotator-azimuth-display" class="rotator-azimuth-display">0°</div>
                         <div id="rotator-status-indicator" class="rotator-status-indicator disconnected"></div>
-                        <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
-                            Controls
-                        </button>
+                        <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">Controls</button>
+                    </div>
+                </div>` : '';
+
+        // ── Ant switch pane ────────────────────────────────────────────────
+        const antPane = this.antSwitchEnabled ? `
+                <div id="cp-antswitch-pane" class="cp-pane"
+                     style="display:${(!hasBoth || this.activeTab === 'antswitch') ? 'flex' : 'none'};flex-direction:column;width:100%;height:100%;overflow:hidden;">
+                    <div class="cp-ant-inner">
+                        <div id="cp-ant-banner" class="cp-ant-banner" style="display:none;"></div>
+                        <div id="cp-ant-buttons" class="cp-ant-buttons"></div>
+                        <div class="cp-ant-ground-row">
+                            <button id="cp-ant-ground-btn" class="cp-ant-ground-btn"
+                                    onclick="rotatorUI.onGroundClick()">⏚ Ground all</button>
+                        </div>
+                        <div id="cp-ant-password-row" class="cp-ant-password-row" style="display:none;">
+                            <input id="cp-ant-password-input" type="password" placeholder="Password…"
+                                   class="cp-ant-password-input"
+                                   onkeydown="if(event.key==='Enter')rotatorUI.confirmAntPassword()"/>
+                            <button class="cp-ant-password-confirm"
+                                    onclick="rotatorUI.confirmAntPassword()">✓</button>
+                            <span id="cp-ant-password-error" class="cp-ant-password-error"></span>
+                        </div>
+                        <div class="cp-ant-status-row">
+                            <span id="cp-ant-status-text" class="cp-ant-status-text">Loading...</span>
+                        </div>
+                    </div>
+                </div>` : '';
+
+        // ── Collapsed tab strip content ────────────────────────────────────
+        const rotTabContent = this.rotatorEnabled ? `
+                        <span id="rotator-tab-bearing" class="rotator-tab-bearing">0°</span>
+                        <span>🧭</span>
+                        <span id="rotator-tab-status" class="rotator-tab-status disconnected"></span>` : '';
+
+        const antTabContent = this.antSwitchEnabled ? `
+                        <span id="cp-tab-ant-label" class="cp-tab-ant-label">📡</span>
+                        <span id="cp-tab-ant-status" class="rotator-tab-status disconnected"></span>` : '';
+
+        const rotatorHTML = `
+            <div id="rotator-panel" class="rotator-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
+                <!-- Left-edge tab strip (always visible) -->
+                <div id="rotator-header" class="rotator-header" onclick="rotatorUI.togglePanel()">
+                    <div id="cp-tab-collapsed"
+                         style="display:${collapsed ? 'flex' : 'none'};flex-direction:column;align-items:center;gap:4px;">
+                        ${rotTabContent}
+                        ${antTabContent}
+                    </div>
+                    <span id="rotator-collapse-arrow" class="rotator-collapse-arrow"
+                          style="display:${this.isExpanded ? 'block' : 'none'};">←</span>
+                </div>
+
+                <!-- Expandable content -->
+                <div id="rotator-content" class="rotator-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
+                    ${tabBar}
+                    <div class="cp-pane-wrapper">
+                        ${rotatorPane}
+                        ${antPane}
                     </div>
                 </div>
             </div>
         `;
-        
+
         // Inject CSS
         this.injectCSS();
-        
+
         // Inject HTML before time display (bottom left)
         const timeDisplay = document.getElementById('time-display');
         if (timeDisplay && timeDisplay.parentNode) {
             timeDisplay.insertAdjacentHTML('beforebegin', rotatorHTML);
         } else {
-            // Fallback: append to body
             document.body.insertAdjacentHTML('beforeend', rotatorHTML);
         }
-        
-        // Initialize rotator display if expanded on load
+
+        // Lazy-init on load if already expanded
         if (this.isExpanded) {
-            this.initializeRotatorDisplay();
+            if (this.rotatorEnabled && this.activeTab === 'rotator') {
+                this.initializeRotatorDisplay();
+            }
+            if (this.antSwitchEnabled) {
+                this.startAntSwitchPoll(this.activeTab === 'antswitch' ? 5000 : 30000);
+            }
         }
     }
     
@@ -124,7 +212,7 @@ class RotatorUI {
             
             .rotator-header {
                 width: 40px;
-                height: 100px;
+                min-height: 80px;
                 padding: 8px 0;
                 background: rgba(50, 50, 50, 0.7);
                 color: #fff;
@@ -134,7 +222,7 @@ class RotatorUI {
                 flex-direction: column;
                 justify-content: center;
                 align-items: center;
-                gap: 6px;
+                gap: 4px;
                 font-size: 20px;
                 border: 1px solid rgba(100, 100, 100, 0.5);
                 border-left: none;
@@ -185,17 +273,59 @@ class RotatorUI {
             }
             
             .rotator-collapse-arrow {
-                position: absolute;
-                bottom: 8px;
-                left: 50%;
-                transform: translateX(-50%);
                 font-size: 20px;
                 color: #fff;
                 font-weight: bold;
-                z-index: 10;
                 pointer-events: none;
             }
-            
+
+            /* Ant switch label on collapsed tab */
+            .cp-tab-ant-label {
+                font-size: 10px;
+                font-weight: 600;
+                color: #ccc;
+                line-height: 1;
+                max-width: 36px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                text-align: center;
+            }
+
+            /* Inner tab bar (shown when both rotator + ant switch enabled) */
+            .cp-tab-bar {
+                display: flex;
+                flex-direction: row;
+                background: rgba(30,30,30,0.9);
+                border-bottom: 1px solid rgba(100,100,100,0.4);
+                flex-shrink: 0;
+            }
+            .cp-tab-btn {
+                flex: 1;
+                padding: 8px 4px;
+                background: transparent;
+                color: #aaa;
+                border: none;
+                border-bottom: 2px solid transparent;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+                transition: color 0.2s, border-color 0.2s;
+            }
+            .cp-tab-btn:hover  { color: #fff; }
+            .cp-tab-btn.active { color: #fff; border-bottom-color: #4CAF50; }
+
+            /* Pane wrapper fills remaining height */
+            .cp-pane-wrapper {
+                flex: 1;
+                overflow: hidden;
+                position: relative;
+            }
+            .cp-pane {
+                position: absolute;
+                inset: 0;
+            }
+
             .rotator-content {
                 width: min(500px, calc(100vw - 40px));
                 max-width: 100%;
@@ -207,7 +337,130 @@ class RotatorUI {
                 order: 2;
                 flex-shrink: 0;
                 overflow: hidden;
+                display: flex;
+                flex-direction: column;
             }
+
+            /* ── Ant switch pane ──────────────────────────────────────── */
+            .cp-ant-inner {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 14px 12px;
+                height: 100%;
+                box-sizing: border-box;
+                overflow-y: auto;
+            }
+            .cp-ant-banner {
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                text-align: center;
+            }
+            .cp-ant-banner.thunderstorm {
+                background: rgba(255,152,0,0.2);
+                border: 1px solid rgba(255,152,0,0.6);
+                color: #ffb74d;
+            }
+            .cp-ant-banner.readonly {
+                background: rgba(100,100,100,0.15);
+                border: 1px solid rgba(150,150,150,0.4);
+                color: #aaa;
+            }
+            .cp-ant-buttons {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+                gap: 8px;
+            }
+            .cp-ant-btn {
+                padding: 10px 6px;
+                border-radius: 6px;
+                border: 1px solid rgba(100,100,100,0.5);
+                background: rgba(60,60,60,0.8);
+                color: #ddd;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                text-align: center;
+                transition: background 0.2s, border-color 0.2s, color 0.2s;
+                line-height: 1.3;
+                word-break: break-word;
+            }
+            .cp-ant-btn:hover:not(:disabled) {
+                background: rgba(76,175,80,0.3);
+                border-color: rgba(76,175,80,0.7);
+                color: #fff;
+            }
+            .cp-ant-btn.selected {
+                background: rgba(76,175,80,0.5);
+                border-color: #4CAF50;
+                color: #fff;
+                box-shadow: 0 0 8px rgba(76,175,80,0.4);
+            }
+            .cp-ant-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+            .cp-ant-ground-row { display: flex; justify-content: center; }
+            .cp-ant-ground-btn {
+                padding: 8px 20px;
+                border-radius: 6px;
+                border: 1px solid rgba(244,67,54,0.5);
+                background: rgba(244,67,54,0.2);
+                color: #ef9a9a;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.2s, border-color 0.2s;
+            }
+            .cp-ant-ground-btn:hover:not(:disabled) {
+                background: rgba(244,67,54,0.4);
+                border-color: rgba(244,67,54,0.8);
+                color: #fff;
+            }
+            .cp-ant-ground-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+            .cp-ant-ground-btn.selected {
+                background: rgba(244,67,54,0.5);
+                border-color: #f44336;
+                color: #fff;
+                box-shadow: 0 0 8px rgba(244,67,54,0.4);
+            }
+            .cp-ant-password-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                flex-wrap: wrap;
+            }
+            .cp-ant-password-input {
+                flex: 1;
+                min-width: 80px;
+                padding: 6px 8px;
+                border-radius: 5px;
+                border: 1px solid rgba(100,100,100,0.5);
+                background: rgba(30,30,30,0.8);
+                color: #fff;
+                font-size: 12px;
+            }
+            .cp-ant-password-input:focus {
+                outline: none;
+                border-color: rgba(76,175,80,0.7);
+            }
+            .cp-ant-password-confirm {
+                padding: 6px 10px;
+                border-radius: 5px;
+                border: 1px solid rgba(76,175,80,0.5);
+                background: rgba(76,175,80,0.3);
+                color: #fff;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            .cp-ant-password-confirm:hover { background: rgba(76,175,80,0.6); }
+            .cp-ant-password-error { font-size: 11px; color: #ef9a9a; width: 100%; }
+            .cp-ant-status-row {
+                margin-top: auto;
+                padding-top: 6px;
+                border-top: 1px solid rgba(100,100,100,0.3);
+            }
+            .cp-ant-status-text { font-size: 11px; color: #888; }
             
             .rotator-display-container {
                 width: 100%;
@@ -345,49 +598,81 @@ class RotatorUI {
     }
     
     /**
-     * Toggle rotator panel expanded/collapsed
+     * Toggle panel expanded/collapsed
      */
     togglePanel() {
         this.isExpanded = !this.isExpanded;
-        const panel = document.getElementById('rotator-panel');
+        const panel   = document.getElementById('rotator-panel');
         const content = document.getElementById('rotator-content');
-        const arrow = document.getElementById('rotator-collapse-arrow');
-        const tabBearing = document.getElementById('rotator-tab-bearing');
-        const tabStatus = document.getElementById('rotator-tab-status');
-        
+        const arrow   = document.getElementById('rotator-collapse-arrow');
+        const tabCol  = document.getElementById('cp-tab-collapsed');
+
         if (this.isExpanded) {
             panel.classList.remove('collapsed');
             panel.classList.add('expanded');
             content.style.display = 'flex';
-            if (arrow) arrow.style.display = 'block';
-            if (tabBearing) tabBearing.style.display = 'none';
-            if (tabStatus) tabStatus.style.display = 'none';
-            
-            // Initialize rotator display if not already done
-            if (!this.rotatorDisplay) {
-                this.initializeRotatorDisplay();
-            } else {
-                // Resume updates if already initialized
-                if (this.rotatorDisplay.updateTimer === null && this.rotatorDisplay.updateInterval > 0) {
-                    this.rotatorDisplay.startUpdates();
+            if (arrow)  arrow.style.display  = 'block';
+            if (tabCol) tabCol.style.display  = 'none';
+
+            // Lazy-init rotator display when first expanded
+            if (this.rotatorEnabled && this.activeTab === 'rotator') {
+                if (!this.rotatorDisplay) {
+                    this.initializeRotatorDisplay();
+                } else {
+                    this.fetchRotatorStatus();
                 }
-                // Do an immediate fetch
-                this.fetchRotatorStatus();
+            }
+            // Start ant switch polling at appropriate rate
+            if (this.antSwitchEnabled) {
+                this.startAntSwitchPoll(this.activeTab === 'antswitch' ? 5000 : 30000);
             }
         } else {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
             content.style.display = 'none';
-            if (arrow) arrow.style.display = 'none';
-            if (tabBearing) tabBearing.style.display = 'block';
-            if (tabStatus) tabStatus.style.display = 'block';
-            
-            // Keep updates running when collapsed to show bearing on tab
-            // (updates continue but map is hidden)
+            if (arrow)  arrow.style.display  = 'none';
+            if (tabCol) tabCol.style.display  = 'flex';
+
+            // Slow down ant switch poll when collapsed
+            if (this.antSwitchEnabled) {
+                this.startAntSwitchPoll(30000);
+            }
         }
-        
-        // Save state to localStorage
+
         localStorage.setItem('ubersdr_rotator_expanded', this.isExpanded.toString());
+    }
+
+    /**
+     * Switch the active inner tab ('rotator' | 'antswitch').
+     * Only relevant when both features are enabled.
+     */
+    switchTab(tab) {
+        this.activeTab = tab;
+        localStorage.setItem('control_panel_tab', tab);
+
+        // Update tab button styles
+        document.querySelectorAll('.cp-tab-btn').forEach(btn => {
+            btn.classList.toggle('active',
+                (tab === 'rotator'   && btn.textContent.includes('Rotator')) ||
+                (tab === 'antswitch' && btn.textContent.includes('Antenna'))
+            );
+        });
+
+        // Show/hide panes
+        const rotPane = document.getElementById('cp-rotator-pane');
+        const antPane = document.getElementById('cp-antswitch-pane');
+        if (rotPane) rotPane.style.display = tab === 'rotator'   ? 'flex' : 'none';
+        if (antPane) antPane.style.display = tab === 'antswitch' ? 'flex' : 'none';
+
+        // Lazy-init rotator display when switching to it
+        if (tab === 'rotator' && this.rotatorEnabled && !this.rotatorDisplay) {
+            this.initializeRotatorDisplay();
+        }
+
+        // Adjust ant switch poll rate based on visibility
+        if (this.antSwitchEnabled) {
+            this.startAntSwitchPoll(tab === 'antswitch' ? 5000 : 30000);
+        }
     }
     
     /**
@@ -441,7 +726,6 @@ class RotatorUI {
             const data = await response.json();
             this.handleStatusUpdate(data);
         } catch (error) {
-            console.error('[RotatorUI] Failed to fetch rotator status:', error);
             this.handleStatusUpdate({ connected: false });
         }
     }
@@ -514,7 +798,6 @@ class RotatorUI {
             } else {
                 className += ' disconnected';
             }
-            // Add moving class if rotator is moving
             if (data.moving) {
                 className += ' moving';
             }
@@ -656,7 +939,7 @@ class RotatorUI {
     openControls() {
         window.open('/rotator.html', '_blank');
     }
-    
+
     /**
      * Destroy the rotator display
      */
@@ -665,23 +948,270 @@ class RotatorUI {
             this.rotatorDisplay.destroy();
             this.rotatorDisplay = null;
         }
+        this.stopAntSwitchPoll();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Ant switch — polling
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Start (or restart) the ant switch poll at the given interval (ms).
+     * Clears any existing timer first so the rate can be changed dynamically.
+     */
+    startAntSwitchPoll(intervalMs) {
+        this.stopAntSwitchPoll();
+        // Immediate fetch
+        this.fetchAntSwitchStatus();
+        this.antSwitchPollTimer = setInterval(() => this.fetchAntSwitchStatus(), intervalMs);
+    }
+
+    stopAntSwitchPoll() {
+        if (this.antSwitchPollTimer) {
+            clearInterval(this.antSwitchPollTimer);
+            this.antSwitchPollTimer = null;
+        }
+    }
+
+    async fetchAntSwitchStatus() {
+        try {
+            const resp = await fetch('/api/ant-switch/status');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            this.handleAntSwitchStatus(data);
+        } catch { /* ignore — stale display stays */ }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Ant switch — status handling & UI rendering
+    // ═══════════════════════════════════════════════════════════════════════
+
+    handleAntSwitchStatus(data) {
+        this.antSwitchStatus = data;
+
+        // ── Update collapsed tab label ─────────────────────────────────────
+        const tabLabel = document.getElementById('cp-tab-ant-label');
+        if (tabLabel) {
+            let label = '📡';
+            if (data.grounded) {
+                label = '⏚';
+            } else if (data.selected && data.selected.length > 0) {
+                const idx = data.selected[0] - 1;
+                const raw = (data.antenna_labels && data.antenna_labels[idx])
+                    ? data.antenna_labels[idx]
+                    : `Ant ${data.selected[0]}`;
+                label = raw.length > 10 ? raw.slice(0, 9) + '…' : raw;
+            }
+            tabLabel.textContent = label;
+        }
+
+        // ── Update collapsed tab status dot ───────────────────────────────
+        const tabDot = document.getElementById('cp-tab-ant-status');
+        if (tabDot) {
+            tabDot.className = 'rotator-tab-status ' + (data.enabled ? 'connected' : 'disconnected');
+        }
+
+        // ── Render the ant switch pane (only if it exists in DOM) ─────────
+        const buttonsEl = document.getElementById('cp-ant-buttons');
+        if (!buttonsEl) return; // pane not yet in DOM
+
+        this.renderAntSwitchButtons(data);
+        this.updateAntSwitchBanner(data);
+        this.updateAntSwitchStatusText(data);
+    }
+
+    renderAntSwitchButtons(data) {
+        const buttonsEl = document.getElementById('cp-ant-buttons');
+        if (!buttonsEl) return;
+
+        const numAntennas = data.num_antennas || 8;
+        const labels      = data.antenna_labels || [];
+        const selected    = data.selected || [];
+        const disabled    = data.thunderstorm || this.antSwitchReadOnly;
+
+        // Only rebuild DOM if antenna count changed (avoids flicker)
+        if (buttonsEl.children.length !== numAntennas) {
+            buttonsEl.innerHTML = '';
+            for (let i = 1; i <= numAntennas; i++) {
+                const label = (labels[i - 1] && labels[i - 1] !== '') ? labels[i - 1] : `Antenna ${i}`;
+                const btn = document.createElement('button');
+                btn.className = 'cp-ant-btn';
+                btn.dataset.antenna = i;
+                btn.textContent = label;
+                btn.onclick = () => this.onAntButtonClick(i);
+                buttonsEl.appendChild(btn);
+            }
+        }
+
+        // Update selected state and disabled state on all buttons
+        Array.from(buttonsEl.children).forEach(btn => {
+            const n = parseInt(btn.dataset.antenna, 10);
+            btn.classList.toggle('selected', selected.includes(n));
+            btn.disabled = disabled;
+        });
+
+        // Ground button
+        const groundBtn = document.getElementById('cp-ant-ground-btn');
+        if (groundBtn) {
+            groundBtn.disabled = disabled;
+            groundBtn.classList.toggle('selected', !!data.grounded);
+        }
+    }
+
+    updateAntSwitchBanner(data) {
+        const banner = document.getElementById('cp-ant-banner');
+        if (!banner) return;
+
+        if (data.thunderstorm) {
+            banner.style.display = 'block';
+            banner.className = 'cp-ant-banner thunderstorm';
+            banner.textContent = '⚡ Thunderstorm mode — switching disabled';
+        } else if (this.antSwitchReadOnly) {
+            banner.style.display = 'block';
+            banner.className = 'cp-ant-banner readonly';
+            banner.textContent = '👁 View only — no password configured';
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+
+    updateAntSwitchStatusText(data) {
+        const el = document.getElementById('cp-ant-status-text');
+        if (!el) return;
+
+        if (data.grounded) {
+            el.textContent = 'Status: Grounded';
+        } else if (data.selected && data.selected.length > 0) {
+            const labels = (data.selected || []).map(n => {
+                const idx = n - 1;
+                return (data.antenna_labels && data.antenna_labels[idx])
+                    ? data.antenna_labels[idx]
+                    : `Antenna ${n}`;
+            });
+            el.textContent = 'Active: ' + labels.join(', ');
+        } else {
+            el.textContent = 'Status: Unknown';
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Ant switch — control actions
+    // ═══════════════════════════════════════════════════════════════════════
+
+    onAntButtonClick(antennaNum) {
+        if (!this.antSwitchPassword) {
+            // Show inline password prompt, remember which antenna was clicked
+            this.antSwitchPendingAnt = antennaNum;
+            this._showAntPasswordRow('');
+            return;
+        }
+        this._sendAntCommand({ command: 'select', antenna: antennaNum });
+    }
+
+    onGroundClick() {
+        if (!this.antSwitchPassword) {
+            this.antSwitchPendingAnt = 'ground';
+            this._showAntPasswordRow('');
+            return;
+        }
+        this._sendAntCommand({ command: 'ground' });
+    }
+
+    _showAntPasswordRow(errorMsg) {
+        const row = document.getElementById('cp-ant-password-row');
+        const err = document.getElementById('cp-ant-password-error');
+        const inp = document.getElementById('cp-ant-password-input');
+        if (row) row.style.display = 'flex';
+        if (err) err.textContent = errorMsg;
+        if (inp) { inp.value = ''; inp.focus(); }
+    }
+
+    _hideAntPasswordRow() {
+        const row = document.getElementById('cp-ant-password-row');
+        if (row) row.style.display = 'none';
+        this.antSwitchPendingAnt = null;
+    }
+
+    confirmAntPassword() {
+        const inp = document.getElementById('cp-ant-password-input');
+        if (!inp) return;
+        const pw = inp.value.trim();
+        if (!pw) return;
+
+        this.antSwitchPassword = pw;
+        localStorage.setItem('ant_switch_password', pw);
+
+        if (this.antSwitchPendingAnt === 'ground') {
+            this._sendAntCommand({ command: 'ground' });
+        } else if (this.antSwitchPendingAnt !== null) {
+            this._sendAntCommand({ command: 'select', antenna: this.antSwitchPendingAnt });
+        }
+        this._hideAntPasswordRow();
+    }
+
+    async _sendAntCommand(cmdObj) {
+        try {
+            const resp = await fetch('/api/ant-switch/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: this.antSwitchPassword, ...cmdObj })
+            });
+
+            if (resp.status === 401) {
+                // Wrong password or no password configured on server
+                this.antSwitchPassword = '';
+                localStorage.removeItem('ant_switch_password');
+
+                // Check if server has no password at all (permanent read-only)
+                const body = await resp.json().catch(() => ({}));
+                if (body.error && body.error.includes('password required') &&
+                    this.antSwitchStatus && !this.antSwitchStatus.thunderstorm) {
+                    // Server has no password configured — mark read-only permanently for this session
+                    this.antSwitchReadOnly = true;
+                    if (this.antSwitchStatus) this.updateAntSwitchBanner(this.antSwitchStatus);
+                } else {
+                    // Wrong password — show input again with error
+                    this._showAntPasswordRow('Incorrect password');
+                }
+                return;
+            }
+
+            if (resp.status === 403) {
+                // Thunderstorm — already shown in banner, nothing to do
+                return;
+            }
+
+            // Success (200 or 202) — re-fetch status immediately
+            const result = await resp.json().catch(() => ({}));
+            if (result.selected !== undefined) {
+                // Use the result directly to update UI without waiting for next poll
+                this.handleAntSwitchStatus({
+                    ...this.antSwitchStatus,
+                    selected:  result.selected,
+                    grounded:  result.grounded,
+                    enabled:   true,
+                });
+            } else {
+                this.fetchAntSwitchStatus();
+            }
+        } catch (err) {
+            console.error('[RotatorUI] Ant switch command failed:', err);
+        }
     }
 }
 
-// Global instance (will be initialized when rotator is enabled)
+// ─── Global instance ──────────────────────────────────────────────────────────
 let rotatorUI = null;
 
 /**
- * Initialize rotator UI
- * Call this after checking if rotator is enabled
+ * Initialize the control panel.
+ * Pass rotatorEnabled and antSwitchEnabled from /api/description.
+ * Not shown on mobile (overlaps docked controls).
  */
-function initializeRotatorUI() {
-    // Don't create the rotator panel on mobile — it overlaps the docked
-    // controls overlay and is not usable on a narrow screen.
+function initializeRotatorUI(opts = {}) {
     if (window.innerWidth <= 1024) return;
     if (!rotatorUI) {
-        rotatorUI = new RotatorUI();
-        // Expose globally for debugging and access
+        rotatorUI = new RotatorUI(opts);
         window.rotatorUI = rotatorUI;
     }
 }

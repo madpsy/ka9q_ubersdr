@@ -304,6 +304,8 @@ class RotatorUI {
                 gap: 2px;
             }
             .cp-tab-btn {
+                -webkit-appearance: none;
+                appearance: none;
                 padding: 7px 16px;
                 background: rgba(35,35,35,0.9);
                 color: #777;
@@ -312,10 +314,12 @@ class RotatorUI {
                 border-radius: 6px 6px 0 0;
                 cursor: pointer;
                 font-size: 12px;
+                font-family: inherit;
                 font-weight: 600;
+                outline: none;
                 transition: color 0.15s, background 0.15s;
                 position: relative;
-                bottom: -2px;  /* sits on top of the bar border */
+                bottom: -2px;
             }
             .cp-tab-btn:hover:not(.active) {
                 color: #bbb;
@@ -324,8 +328,8 @@ class RotatorUI {
             .cp-tab-btn.active {
                 color: #fff;
                 background: rgba(40,40,40,0.85);
-                border-color: rgba(76,175,80,0.5);
-                border-bottom: 2px solid rgba(40,40,40,0.85); /* hides the bar border */
+                border-color: rgba(100,100,100,0.6);
+                border-bottom: 2px solid rgba(40,40,40,0.85);
                 z-index: 1;
             }
 
@@ -388,55 +392,64 @@ class RotatorUI {
                 gap: 8px;
             }
             .cp-ant-btn {
+                -webkit-appearance: none;
+                appearance: none;
                 padding: 10px 6px;
                 border-radius: 6px;
                 border: 1px solid rgba(100,100,100,0.5);
-                background: rgba(60,60,60,0.8);
-                color: #ddd;
+                background: rgba(55,55,55,0.9);
+                color: #bbb;
                 font-size: 12px;
+                font-family: inherit;
                 font-weight: 600;
                 cursor: pointer;
                 text-align: center;
-                transition: background 0.2s, border-color 0.2s, color 0.2s;
+                outline: none;
+                transition: background 0.15s, border-color 0.15s, color 0.15s;
                 line-height: 1.3;
                 word-break: break-word;
             }
             .cp-ant-btn:hover:not(:disabled) {
-                background: rgba(76,175,80,0.3);
-                border-color: rgba(76,175,80,0.7);
+                background: rgba(70,70,70,0.9);
+                border-color: rgba(150,150,150,0.6);
                 color: #fff;
             }
             .cp-ant-btn.selected {
-                background: #2e7d32;
-                border-color: #4CAF50;
-                border-width: 2px;
-                color: #fff;
-                box-shadow: 0 0 10px rgba(76,175,80,0.6);
+                background: #1b5e20;
+                border: 2px solid #66bb6a;
+                color: #a5d6a7;
+                font-weight: 700;
+                box-shadow: inset 0 0 6px rgba(102,187,106,0.3);
             }
-            .cp-ant-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+            .cp-ant-btn:disabled { opacity: 0.35; cursor: not-allowed; }
             .cp-ant-ground-row { display: flex; justify-content: center; }
             .cp-ant-ground-btn {
+                -webkit-appearance: none;
+                appearance: none;
                 padding: 8px 20px;
                 border-radius: 6px;
-                border: 1px solid rgba(244,67,54,0.5);
-                background: rgba(244,67,54,0.2);
-                color: #ef9a9a;
+                border: 1px solid rgba(120,120,120,0.4);
+                background: rgba(55,55,55,0.9);
+                color: #aaa;
                 font-size: 13px;
+                font-family: inherit;
                 font-weight: 600;
                 cursor: pointer;
-                transition: background 0.2s, border-color 0.2s;
+                outline: none;
+                transition: background 0.15s, border-color 0.15s, color 0.15s;
             }
             .cp-ant-ground-btn:hover:not(:disabled) {
-                background: rgba(244,67,54,0.4);
-                border-color: rgba(244,67,54,0.8);
+                background: rgba(70,70,70,0.9);
+                border-color: rgba(150,150,150,0.6);
                 color: #fff;
             }
-            .cp-ant-ground-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+            .cp-ant-ground-btn:disabled { opacity: 0.35; cursor: not-allowed; }
             .cp-ant-ground-btn.selected {
-                background: rgba(244,67,54,0.5);
-                border-color: #f44336;
-                color: #fff;
-                box-shadow: 0 0 8px rgba(244,67,54,0.4);
+                background: #4a1010;
+                border: 2px solid #ef5350;
+                color: #ef9a9a;
+                font-weight: 700;
+                box-shadow: inset 0 0 6px rgba(239,83,80,0.3);
             }
             .cp-ant-password-row {
                 display: flex;

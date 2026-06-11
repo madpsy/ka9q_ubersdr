@@ -437,6 +437,11 @@ class RotatorUI {
                 font-weight: 700;
                 box-shadow: inset 0 0 6px rgba(102,187,106,0.3);
             }
+            .cp-ant-btn.selected:hover:not(:disabled) {
+                background: #2e7d32;
+                border-color: #81c784;
+                color: #c8e6c9;
+            }
             .cp-ant-btn:disabled { opacity: 0.35; cursor: not-allowed; }
             .cp-ant-ground-row { display: flex; justify-content: center; }
             .cp-ant-ground-btn {
@@ -560,6 +565,7 @@ class RotatorUI {
             .cp-ant-hist-src.admin { color: #ffb74d; }
             .cp-ant-hist-src.public { color: #90caf9; }
             .cp-ant-hist-src.startup { color: #81c784; }
+            .cp-ant-hist-src.scheduler { color: #ce93d8; }
             .cp-ant-history-empty { font-size: 11px; color: #555; text-align: center; padding: 8px 0; }
             
             .rotator-display-container {

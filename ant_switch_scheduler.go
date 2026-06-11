@@ -424,15 +424,33 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 
 	if action == "ground" {
 		log.Printf("Ant switch scheduler: executing ground all (time=%s)", entry.Time)
-		_, _, err := as.handler.groundAll()
+		state, _, err := as.handler.groundAll()
 		if err != nil {
 			triggerLog.Error = err.Error()
 			as.addTriggerLog(triggerLog)
+			as.handler.changeLog.Add(AntSwitchLogEntry{
+				Time:     triggerLog.Timestamp,
+				Action:   "ground",
+				Antenna:  0,
+				Label:    "Ground all (scheduler — failed: " + err.Error() + ")",
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "scheduler",
+			})
 			log.Printf("Ant switch scheduler: failed to ground all (time=%s): %v", entry.Time, err)
 			return
 		}
 		triggerLog.Success = true
 		as.addTriggerLog(triggerLog)
+		as.handler.changeLog.Add(AntSwitchLogEntry{
+			Time:     triggerLog.Timestamp,
+			Action:   "ground",
+			Antenna:  0,
+			Label:    "Ground all",
+			Selected: state.Selected,
+			Grounded: state.Grounded,
+			Source:   "scheduler",
+		})
 		log.Printf("Ant switch scheduler: successfully grounded all antennas")
 	} else {
 		// Guard: check antenna number is within the currently configured range
@@ -445,15 +463,33 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 			return
 		}
 		log.Printf("Ant switch scheduler: executing select antenna %d (time=%s)", entry.Antenna, entry.Time)
-		_, _, err := as.handler.selectAntenna(entry.Antenna)
+		state, _, err := as.handler.selectAntenna(entry.Antenna)
 		if err != nil {
 			triggerLog.Error = err.Error()
 			as.addTriggerLog(triggerLog)
+			as.handler.changeLog.Add(AntSwitchLogEntry{
+				Time:     triggerLog.Timestamp,
+				Action:   "select",
+				Antenna:  entry.Antenna,
+				Label:    as.handler.antennaLabel(entry.Antenna) + " (scheduler — failed: " + err.Error() + ")",
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "scheduler",
+			})
 			log.Printf("Ant switch scheduler: failed to select antenna %d (time=%s): %v", entry.Antenna, entry.Time, err)
 			return
 		}
 		triggerLog.Success = true
 		as.addTriggerLog(triggerLog)
+		as.handler.changeLog.Add(AntSwitchLogEntry{
+			Time:     triggerLog.Timestamp,
+			Action:   "select",
+			Antenna:  entry.Antenna,
+			Label:    as.handler.antennaLabel(entry.Antenna),
+			Selected: state.Selected,
+			Grounded: state.Grounded,
+			Source:   "scheduler",
+		})
 		log.Printf("Ant switch scheduler: successfully selected antenna %d", entry.Antenna)
 	}
 }

@@ -20609,7 +20609,7 @@ const tooltipLine2 = timeStr;
                     const ts = t.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
                     const actionIcon = {select:'📡',ground:'⏚',add:'➕',remove:'➖',default:'⭐',thunderstorm_on:'⚡',thunderstorm_off:'✅'}[e.action] || '•';
                     const result = e.grounded ? 'Grounded' : (e.selected && e.selected.length > 0 ? 'Ant ' + e.selected.join(', ') : '—');
-                    const srcColour = e.source === 'admin' ? '#ffb74d' : e.source === 'startup' ? '#81c784' : '#90caf9';
+                    const srcColour = e.source === 'admin' ? '#ffb74d' : e.source === 'startup' ? '#81c784' : e.source === 'scheduler' ? '#ce93d8' : '#90caf9';
                     html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
                         <td style="padding:5px 10px;color:#aaa;white-space:nowrap;">${escapeHtml(ts)}</td>
                         <td style="padding:5px 10px;">${actionIcon} ${escapeHtml(e.action)}</td>

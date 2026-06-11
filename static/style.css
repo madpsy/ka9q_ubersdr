@@ -3411,6 +3411,7 @@ input[type="range"]::-moz-range-thumb {
 .waterfall-pause-overlay {
     position: absolute;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     background: none;
@@ -3443,6 +3444,16 @@ input[type="range"]::-moz-range-thumb {
 .waterfall-pause-overlay-btn:hover {
     background: rgba(60, 80, 110, 0.95);
     border-color: rgba(255, 255, 255, 0.6);
+}
+
+.waterfall-pause-overlay-hint {
+    margin: 6px 0 0;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.65);
+    text-align: center;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    white-space: nowrap;
+    pointer-events: none;
 }
 
 /* Waterfall pause/play toggle button */

@@ -10875,6 +10875,7 @@ window.spectrumCenterFrequency = spectrumCenterFrequency;
 window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;
+window.toggleWaterfallPause = toggleWaterfallPause;
 
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {

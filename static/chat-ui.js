@@ -1257,10 +1257,15 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // Note: Do NOT call .focus() here in a setTimeout — on mobile browsers,
-                // programmatic focus outside the user-gesture context causes the virtual
-                // keyboard to briefly dismiss and reappear (flash). The input already
-                // retains focus from the Enter keypress, so no refocus is needed.
+                // Re-focus the input after DOM changes (hideMentionSuggestions, scrollTop
+                // in addChatMessage, etc.) which can steal focus on some browsers.
+                // Use requestAnimationFrame instead of setTimeout to stay within the
+                // user-gesture context — setTimeout breaks it on mobile, causing the
+                // virtual keyboard to briefly dismiss and reappear (flash).
+                requestAnimationFrame(() => {
+                    const mi = document.getElementById('chat-message-input');
+                    if (mi) mi.focus();
+                });
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {

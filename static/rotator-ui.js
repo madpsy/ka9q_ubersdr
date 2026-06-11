@@ -292,28 +292,42 @@ class RotatorUI {
                 text-align: center;
             }
 
-            /* Inner tab bar (shown when both rotator + ant switch enabled) */
+            /* Inner tab bar — browser-style tabs */
             .cp-tab-bar {
                 display: flex;
                 flex-direction: row;
-                background: rgba(30,30,30,0.9);
-                border-bottom: 1px solid rgba(100,100,100,0.4);
+                align-items: flex-end;
+                background: rgba(20,20,20,0.95);
+                border-bottom: 2px solid rgba(76,175,80,0.5);
                 flex-shrink: 0;
+                padding: 0 4px;
+                gap: 2px;
             }
             .cp-tab-btn {
-                flex: 1;
-                padding: 8px 4px;
-                background: transparent;
-                color: #aaa;
-                border: none;
-                border-bottom: 2px solid transparent;
+                padding: 7px 16px;
+                background: rgba(35,35,35,0.9);
+                color: #777;
+                border: 1px solid rgba(80,80,80,0.5);
+                border-bottom: none;
+                border-radius: 6px 6px 0 0;
                 cursor: pointer;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 600;
-                transition: color 0.2s, border-color 0.2s;
+                transition: color 0.15s, background 0.15s;
+                position: relative;
+                bottom: -2px;  /* sits on top of the bar border */
             }
-            .cp-tab-btn:hover  { color: #fff; }
-            .cp-tab-btn.active { color: #fff; border-bottom-color: #4CAF50; }
+            .cp-tab-btn:hover:not(.active) {
+                color: #bbb;
+                background: rgba(50,50,50,0.9);
+            }
+            .cp-tab-btn.active {
+                color: #fff;
+                background: rgba(40,40,40,0.85);
+                border-color: rgba(76,175,80,0.5);
+                border-bottom: 2px solid rgba(40,40,40,0.85); /* hides the bar border */
+                z-index: 1;
+            }
 
             /* Pane wrapper fills remaining height */
             .cp-pane-wrapper {
@@ -393,10 +407,11 @@ class RotatorUI {
                 color: #fff;
             }
             .cp-ant-btn.selected {
-                background: rgba(76,175,80,0.5);
+                background: #2e7d32;
                 border-color: #4CAF50;
+                border-width: 2px;
                 color: #fff;
-                box-shadow: 0 0 8px rgba(76,175,80,0.4);
+                box-shadow: 0 0 10px rgba(76,175,80,0.6);
             }
             .cp-ant-btn:disabled { opacity: 0.4; cursor: not-allowed; }
             .cp-ant-ground-row { display: flex; justify-content: center; }

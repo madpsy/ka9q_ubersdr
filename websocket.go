@@ -330,6 +330,8 @@ type ClientMessage struct {
 	// Valid range: -999 (disabled/sentinel) to +999.
 	MinSNR   *float32 `json:"min_snr,omitempty"`   // minimum SNR in dB (basebandPower − noiseDensity); -999 = disabled
 	MinPower *float32 `json:"min_power,omitempty"` // minimum baseband power in dBFS (e.g. -80.0); -999 = disabled
+	// Mute field (type: "set_mute") — true = mute audio, false = unmute.
+	Muted *bool `json:"muted,omitempty"`
 }
 
 // dspValidFilters is the set of known filter names.
@@ -1506,6 +1508,30 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				"min_power": powerSnapshot,
 			}})
 
+		case "set_mute":
+			// Client-requested mute/unmute.
+			// When muted, streamAudio() suppresses all audio packets (both WebSocket
+			// and HTTP paths) but continues sending signal-quality silence packets so
+			// the client can still display S-meter and SNR data.
+			if msg.Muted == nil {
+				wsh.sendError(conn, "set_mute requires 'muted' parameter (true/false)")
+				continue
+			}
+
+			currentSession.mu.Lock()
+			currentSession.Muted = *msg.Muted
+			currentSession.mu.Unlock()
+
+			if *msg.Muted {
+				log.Printf("Session %s muted by client", currentSession.ID)
+			} else {
+				log.Printf("Session %s unmuted by client", currentSession.ID)
+			}
+
+			wsh.sendMessage(conn, ServerMessage{Type: "mute_updated", Info: map[string]interface{}{
+				"muted": *msg.Muted,
+			}})
+
 		default:
 			log.Printf("Unknown message type: %s", msg.Type)
 		}
@@ -1837,6 +1863,17 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// that both the HTTP stream tap and the WebSocket encoder paths below
 			// always operate on the same (noise-reduced) audio.
 			audioPacket.PCMData = pcmData
+
+			// Client mute: suppress all audio when muted.
+			// Signal-quality silence packets from the ticker continue flowing.
+			// Placed after DSP (consistent with audio gate) so the DSP pipeline
+			// stays warm and both WebSocket and HTTP paths are covered.
+			session.mu.RLock()
+			isMuted := session.Muted
+			session.mu.RUnlock()
+			if isMuted {
+				continue // muted — skip audio, signal-quality ticker continues
+			}
 
 			// HTTP audio stream tap: if an HTTP /audio/stream consumer is active for
 			// this session, forward the packet there instead of encoding it for the

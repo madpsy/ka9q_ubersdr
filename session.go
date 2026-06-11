@@ -171,6 +171,13 @@ type Session struct {
 	AudioGateMinSNR     float32
 	AudioGateMinPower   float32
 	AudioGateLastOpenAt time.Time // zero = gate never opened; reset each time a packet passes
+
+	// Client-requested mute.  When true, streamAudio() suppresses all audio
+	// packets (both WebSocket and HTTP paths) but continues sending
+	// signal-quality silence packets so the client can still display S-meter
+	// and SNR data.  Default: false (unmuted).
+	// Protected by mu.
+	Muted bool
 }
 
 // SessionManager manages all active sessions

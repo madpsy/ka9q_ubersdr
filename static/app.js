@@ -784,6 +784,7 @@ window.ws = null;
 let audioQueue = [];
 let isPlaying = false;
 let isMuted = false;
+let isServerMuted = false; // Server-side mute (right-click on mute button)
 let currentVolume = (() => {
     try {
         const saved = localStorage.getItem('volume');
@@ -3948,6 +3949,13 @@ function handleMessage(msg) {
             // Squelch state update from server (informational only)
             // The server sends this when squelch opens/closes
             break;
+        case 'mute_updated':
+            // Server echoes back the current server-side mute state
+            if (msg.info && typeof msg.info.muted === 'boolean') {
+                isServerMuted = msg.info.muted;
+                _updateMuteButtonForServerMute();
+            }
+            break;
         case 'audio_gate_updated':
             // Server echoes back the current audio gate (SNR squelch) threshold
             if (msg.info && typeof msg.info.min_snr === 'number') {
@@ -6750,6 +6758,53 @@ function toggleMute() {
         }
     }
 }
+
+// Toggle server-side mute (right-click on mute button).
+// This sends a set_mute command to the server which suppresses audio at the
+// server level.  Signal-quality data continues flowing so the S-meter and
+// SNR display remain active.  The button icon updates to reflect the state.
+function toggleServerMute() {
+    isServerMuted = !isServerMuted;
+    if (wsManager && wsManager.isConnected()) {
+        wsManager.send({ type: 'set_mute', muted: isServerMuted });
+    }
+    _updateMuteButtonForServerMute();
+    log(isServerMuted ? 'Server muted' : 'Server unmuted');
+}
+
+// Update the mute button appearance to reflect server-side mute state.
+// Server mute uses a distinct icon (🔕/🔔) so the user can distinguish it
+// from client-side mute (🔇/🔊).
+function _updateMuteButtonForServerMute() {
+    const btn = document.getElementById('mute-btn');
+    if (!btn) return;
+    if (isServerMuted) {
+        btn.textContent = '🔕 Server Muted';
+        btn.style.backgroundColor = '#dc3545'; // red highlight
+    } else {
+        // Restore to normal client-side mute state
+        btn.textContent = isMuted ? '🔇 Unmute' : '🔊 Mute';
+        btn.style.backgroundColor = ''; // reset to default
+    }
+}
+
+// Attach right-click → toggle server-side mute on the mute button
+(function _initMuteRightClick() {
+    function _attach() {
+        const btn = document.getElementById('mute-btn');
+        if (!btn || btn._serverMuteRightClickBound) return;
+        btn._serverMuteRightClickBound = true;
+        btn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            toggleServerMute();
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _attach);
+    } else {
+        _attach();
+    }
+})();
 
 // Update channel selection (L/R checkboxes)
 function updateChannelSelection() {
@@ -10952,6 +11007,7 @@ window.getCurrentDialFrequency = function() {
 
 // Audio controls
 window.toggleMute = toggleMute;
+window.toggleServerMute = toggleServerMute;
 window.toggleNR2Quick = toggleNR2Quick;
 window.toggleNBQuick = toggleNBQuick;
 window.setNoiseReductionMode = setNoiseReductionMode;

@@ -429,7 +429,7 @@ class ChatUI {
                                               maxlength="250"
                                               rows="1"
                                               class="chat-input"
-                                              style="padding-right: 70px; resize: none; overflow: hidden;"></textarea>
+                                              style="resize: none; overflow: hidden;"></textarea>
                                     <span id="chat-freq-btn" class="chat-freq-btn" onclick="chatUI.shareFrequency()" title="Share current frequency">📻</span>
                                     <span id="chat-emoji-btn" class="chat-emoji-btn" onclick="chatUI.toggleEmojiPicker()" title="Insert emoji">😊</span>
                                     <div id="chat-emoji-picker" class="chat-emoji-picker" style="display:none;"></div>
@@ -723,6 +723,7 @@ class ChatUI {
             .chat-input {
                 width: 100%;
                 padding: 6px 8px;
+                padding-right: 70px; /* room for 📻 + 😊 buttons */
                 background: #1a1a1a;
                 border: 1px solid #555;
                 color: #fff;
@@ -777,13 +778,17 @@ class ChatUI {
 
             /* On touch devices (mobile/tablet) the OS keyboard has a built-in
                emoji picker, so hide our custom emoji button to save space.
-               The freq button shifts right to fill the gap. */
+               The freq button shifts right to fill the gap, and the textarea
+               padding-right shrinks to match (only 📻 button remains). */
             @media (hover: none) and (pointer: coarse) {
                 .chat-emoji-btn {
                     display: none;
                 }
                 .chat-freq-btn {
                     right: 8px;
+                }
+                .chat-input {
+                    padding-right: 38px; /* room for 📻 button only */
                 }
             }
 

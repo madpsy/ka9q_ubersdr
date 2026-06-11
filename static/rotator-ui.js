@@ -1071,9 +1071,12 @@ class RotatorUI {
             }
         }
 
-        // Update selected state and disabled state on all buttons
+        // Update label, selected state and disabled state on all buttons
         Array.from(buttonsEl.children).forEach(btn => {
             const n = parseInt(btn.dataset.antenna, 10);
+            const lbl = (labels[n - 1] && labels[n - 1] !== '') ? labels[n - 1] : `Antenna ${n}`;
+            // Only write textContent when it has changed to avoid unnecessary repaints
+            if (btn.textContent !== lbl) btn.textContent = lbl;
             btn.classList.toggle('selected', selected.includes(n));
             btn.disabled = disabled;
         });

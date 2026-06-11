@@ -10393,10 +10393,10 @@ function toggleWaterfallPause() {
             const canvas = document.getElementById('spectrum-display-canvas');
             if (canvas) {
                 const r = canvas.getBoundingClientRect();
-                overlay.style.left   = r.left   + 'px';
-                overlay.style.top    = r.top    + 'px';
-                overlay.style.width  = r.width  + 'px';
-                overlay.style.height = r.height + 'px';
+                // Centre horizontally over the canvas; 250px from top of document (scrolls away)
+                const centreX = r.left + r.width / 2 + window.scrollX;
+                overlay.style.left = centreX + 'px';
+                overlay.style.top  = (250 + window.scrollY) + 'px';
             }
             overlay.style.display = 'flex';
         }

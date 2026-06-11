@@ -3407,39 +3407,42 @@ input[type="range"]::-moz-range-thumb {
     touch-action: manipulation; /* Prevent double-tap browser zoom on mobile */
 }
 
-/* Waterfall pause overlay — centred play button shown over the frozen spectrum canvas */
+/* Waterfall pause badge — small floating resume pill near the top of the spectrum */
 .waterfall-pause-overlay {
-    position: fixed;
+    position: absolute;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.45);
+    background: none;
     z-index: 9999;
-    cursor: pointer;
-    pointer-events: all;
+    pointer-events: none; /* the button inside handles clicks */
+    transform: translateX(-50%);
 }
 
 .waterfall-pause-overlay-btn {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 10px;
-    background: rgba(255, 255, 255, 0.12);
-    border: 2px solid rgba(255, 255, 255, 0.55);
-    border-radius: 16px;
+    gap: 8px;
+    background: rgba(30, 40, 55, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 20px;
     color: #fff;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    padding: 22px 36px;
+    letter-spacing: 0.03em;
+    padding: 8px 18px 8px 14px;
     cursor: pointer;
-    pointer-events: none; /* clicks handled by parent overlay div */
-    transition: background 0.15s;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    pointer-events: all;
+    transition: background 0.15s, border-color 0.15s;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    white-space: nowrap;
 }
 
-.waterfall-pause-overlay:hover .waterfall-pause-overlay-btn {
-    background: rgba(255, 255, 255, 0.22);
+.waterfall-pause-overlay-btn:hover {
+    background: rgba(60, 80, 110, 0.95);
+    border-color: rgba(255, 255, 255, 0.6);
 }
 
 /* Waterfall pause/play toggle button */

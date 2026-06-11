@@ -10366,13 +10366,15 @@ function toggleWaterfallPause() {
     const pauseIcon = document.getElementById('waterfall-pause-icon');
     const playIcon  = document.getElementById('waterfall-play-icon');
 
-    if (sd.animationPaused) {
-        sd.resumeAnimation();
+    if (sd._drawingPaused) {
+        // Currently paused — resume drawing and reconnect WebSocket
+        sd.userResume();
         if (pauseIcon) pauseIcon.style.display = '';
         if (playIcon)  playIcon.style.display  = 'none';
         if (btn) { btn.setAttribute('aria-pressed', 'false'); btn.title = 'Pause waterfall'; }
     } else {
-        sd.pauseAnimation();
+        // Currently running — freeze canvas and disconnect WebSocket
+        sd.userPause();
         if (pauseIcon) pauseIcon.style.display = 'none';
         if (playIcon)  playIcon.style.display  = '';
         if (btn) { btn.setAttribute('aria-pressed', 'true'); btn.title = 'Resume waterfall'; }

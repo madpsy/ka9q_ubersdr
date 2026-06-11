@@ -672,6 +672,17 @@ function patchSpectrumDisplayWithWebGL(sd) {
         };
     }
 
+    // Also clear the ring buffer when the user manually resumes after a user-pause,
+    // since the WebSocket was closed and the server will replay buffered rows on reconnect.
+    const origUserResume = sd.userResume?.bind(sd);
+    if (origUserResume) {
+        sd.userResume = function() {
+            origUserResume();
+            wgl._createRingTexture();
+            console.log('[WaterfallWebGL] Ring buffer cleared on user resume');
+        };
+    }
+
     // Replace scrollWaterfallGPU() — called once per whole-pixel boundary crossed
     sd.scrollWaterfallGPU = function() {
         if (!sd.spectrumData || sd.spectrumData.length === 0) return;

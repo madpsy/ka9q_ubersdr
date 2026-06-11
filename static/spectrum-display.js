@@ -1126,6 +1126,10 @@ class SpectrumDisplay {
                 return;
             }
 
+            // User-triggered drawing pause: keep consuming data (S-meter, signal bar
+            // stay live) but skip all canvas drawing.
+            const drawingPaused = this._drawingPaused;
+
             // --- Frame rate throttle ---
             // Both CPU and GPU modes are throttled to 30fps. The GPU sub-pixel offset
             // accumulator uses elapsed wall-clock time, so smoothness is preserved at
@@ -1223,8 +1227,8 @@ class SpectrumDisplay {
                 }
             }
 
-            // --- Smooth scroll accumulator ---
-            if (this.lastSpectrumRow) {
+            // --- Smooth scroll accumulator (skipped when drawing is user-paused) ---
+            if (!drawingPaused && this.lastSpectrumRow) {
                 if (this.gpuScrollEnabled) {
                     // GPU mode: advance a float offset every tick.
                     // The offscreen canvas is stamped onto the visible canvas with a fractional
@@ -1253,12 +1257,14 @@ class SpectrumDisplay {
             }
 
             // --- Redraw line graph only when new data arrived (avoids 60fps CPU spike) ---
-            if (newDataArrived && this.spectrumData) {
+            if (!drawingPaused && newDataArrived && this.spectrumData) {
                 this.drawLineGraph();
             }
 
             // --- Redraw overlay (cursor, bookmarks) every rendered frame ---
-            this.drawTunedFrequencyCursor();
+            if (!drawingPaused) {
+                this.drawTunedFrequencyCursor();
+            }
         };
 
         requestAnimationFrame(processFrame);
@@ -1320,6 +1326,42 @@ class SpectrumDisplay {
         if (!this.animationPaused) return;
         this.animationPaused = false;
         console.log('Spectrum animation resumed');
+    }
+
+    // User-triggered pause: freeze the waterfall/spectrum canvas but keep the
+    // WebSocket open and keep consuming data so the S-meter and signal bar stay live.
+    // Also closes the WebSocket to stop the server sending spectrum data (saves bandwidth).
+    userPause() {
+        if (this._drawingPaused) return;
+        this._drawingPaused = true;
+        // Reset scroll accumulators so resume doesn't try to catch up
+        this.scrollAccumulator = 0;
+        this.gpuScrollOffset = 0;
+        // Close WebSocket — scheduleReconnect() will skip auto-reconnect because
+        // we set _userPaused before closing.
+        this._userPaused = true;
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('User paused — closing spectrum WebSocket');
+            this.ws.close();
+        }
+        console.log('Spectrum drawing paused by user');
+    }
+
+    // User-triggered resume: unfreeze the canvas and reconnect the WebSocket.
+    userResume() {
+        if (!this._drawingPaused) return;
+        this._drawingPaused = false;
+        this._userPaused = false;
+        // Reset timing so the first resumed frame doesn't jump
+        this.lastRafTime = null;
+        this.scrollAccumulator = 0;
+        this.gpuScrollOffset = 0;
+        // Reconnect immediately (no backoff)
+        this.reconnectAttempts = 0;
+        this.connect().catch(err => {
+            console.error('User resume reconnect failed:', err);
+        });
+        console.log('Spectrum drawing resumed by user');
     }
 
     // Display a spectrum frame (legacy entry point — delegates to _consumeNewFrame).
@@ -1588,6 +1630,11 @@ class SpectrumDisplay {
         // the visibility handler will reconnect when the page becomes visible again.
         if (this._visibilityDisconnected) {
             console.log('Skipping spectrum reconnect - page hidden (will reconnect on visibility)');
+            return;
+        }
+
+        if (this._userPaused) {
+            console.log('Skipping spectrum reconnect - user paused (will reconnect on resume)');
             return;
         }
 

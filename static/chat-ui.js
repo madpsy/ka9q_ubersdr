@@ -1998,22 +1998,16 @@ class ChatUI {
      */
     _scrollChatToBottom(container) {
         const input = document.getElementById('chat-message-input');
-        const isTouchDevice = 'ontouchstart' in window;
         const inputIsFocused = input && document.activeElement === input;
 
-        if (isTouchDevice && inputIsFocused) {
-            // Use requestAnimationFrame so the DOM append is
-            // fully painted before we touch scrollTop.
-            requestAnimationFrame(() => {
-                container.scrollTop = container.scrollHeight;
-                // If the scroll stole focus, restore it without
-                // re-opening the keyboard (preventScroll).
-                if (document.activeElement !== input) {
-                    input.focus({ preventScroll: true });
-                }
-            });
-        } else {
-            container.scrollTop = container.scrollHeight;
+        container.scrollTop = container.scrollHeight;
+
+        // If the scrollTop assignment stole focus from the message input,
+        // restore it.  On touch devices use preventScroll so the virtual
+        // keyboard isn't dismissed and re-opened.
+        if (inputIsFocused && document.activeElement !== input) {
+            const isTouchDevice = 'ontouchstart' in window;
+            input.focus(isTouchDevice ? { preventScroll: true } : undefined);
         }
     }
 

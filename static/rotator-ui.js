@@ -472,6 +472,11 @@ class RotatorUI {
                 font-weight: 700;
                 box-shadow: inset 0 0 6px rgba(239,83,80,0.3);
             }
+            .cp-ant-ground-btn.selected:hover:not(:disabled) {
+                background: #6d1a1a;
+                border-color: #ef9a9a;
+                color: #ffcdd2;
+            }
             .cp-ant-password-row {
                 display: flex;
                 align-items: center;
@@ -1281,7 +1286,7 @@ class RotatorUI {
                 return;
             }
 
-            // Success (200 or 202) — re-fetch status immediately
+            // Success (200 or 202) — re-fetch status and history immediately
             const result = await resp.json().catch(() => ({}));
             if (result.selected !== undefined) {
                 // Use the result directly to update UI without waiting for next poll
@@ -1294,6 +1299,7 @@ class RotatorUI {
             } else {
                 this.fetchAntSwitchStatus();
             }
+            this.fetchAntHistory();
         } catch (err) {
             console.error('[RotatorUI] Ant switch command failed:', err);
         }

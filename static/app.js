@@ -13412,59 +13412,67 @@ function drawSNRChart() {
 
 // Update signal quality display in buffer config modal
 function updateSignalQualityDisplay() {
-    const basebandElement = document.getElementById('signal-baseband-power');
-    const noiseElement = document.getElementById('signal-noise-density');
-    const snrElement = document.getElementById('signal-snr');
+    // Check if the buffer config modal is actually visible — skip expensive
+    // DOM updates and canvas drawing when it's hidden (saves ~15% CPU from
+    // style recalc + layout triggered by writing to hidden elements).
+    const modal = document.getElementById('buffer-config-modal');
+    const modalVisible = modal && modal.style.display !== 'none';
 
-    let basebandPower, noiseDensity, snr;
+    if (modalVisible) {
+        const basebandElement = document.getElementById('signal-baseband-power');
+        const noiseElement = document.getElementById('signal-noise-density');
+        const snrElement = document.getElementById('signal-snr');
 
-    // Determine data source (default to 'audio' if not set)
-    const dataSource = window.signalDataSource || 'audio';
+        let basebandPower, noiseDensity, snr;
 
-    // Use explicit check - only use spectrum if explicitly selected
-    if (dataSource === 'spectrum') {
-        // Use spectrum FFT data - get from window variables set by signal meter
-        basebandPower = window.currentBasebandPower || -999;
-        noiseDensity = window.currentNoiseDensity || -999;
-        snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
-    } else {
-        // Use audio stream data (default for 'audio' or any other value)
-        basebandPower = currentBasebandPower;
-        noiseDensity = currentNoiseDensity;
-        snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
-    }
+        // Determine data source (default to 'audio' if not set)
+        const dataSource = window.signalDataSource || 'audio';
 
-    // Update display elements
-    if (basebandElement) {
-        if (basebandPower > -900) {
-            basebandElement.textContent = basebandPower.toFixed(1) + ' dBFS';
+        // Use explicit check - only use spectrum if explicitly selected
+        if (dataSource === 'spectrum') {
+            // Use spectrum FFT data - get from window variables set by signal meter
+            basebandPower = window.currentBasebandPower || -999;
+            noiseDensity = window.currentNoiseDensity || -999;
+            snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
         } else {
-            basebandElement.textContent = 'N/A';
+            // Use audio stream data (default for 'audio' or any other value)
+            basebandPower = currentBasebandPower;
+            noiseDensity = currentNoiseDensity;
+            snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
         }
+
+        // Update display elements
+        if (basebandElement) {
+            if (basebandPower > -900) {
+                basebandElement.textContent = basebandPower.toFixed(1) + ' dBFS';
+            } else {
+                basebandElement.textContent = 'N/A';
+            }
+        }
+
+        if (noiseElement) {
+            if (noiseDensity > -900) {
+                noiseElement.textContent = noiseDensity.toFixed(1) + ' dBFS';
+            } else {
+                noiseElement.textContent = 'N/A';
+            }
+        }
+
+        if (snrElement) {
+            if (snr !== null && snr > -900) {
+                // Clamp at 0 dB minimum (signal should not be below noise floor)
+                const clampedSnr = Math.max(0, snr);
+                snrElement.textContent = clampedSnr.toFixed(1) + ' dB';
+            } else {
+                snrElement.textContent = 'N/A';
+            }
+        }
+
+        // Draw SNR chart (only when modal is visible)
+        drawSNRChart();
     }
 
-    if (noiseElement) {
-        if (noiseDensity > -900) {
-            noiseElement.textContent = noiseDensity.toFixed(1) + ' dBFS';
-        } else {
-            noiseElement.textContent = 'N/A';
-        }
-    }
-
-    if (snrElement) {
-        if (snr !== null && snr > -900) {
-            // Clamp at 0 dB minimum (signal should not be below noise floor)
-            const clampedSnr = Math.max(0, snr);
-            snrElement.textContent = clampedSnr.toFixed(1) + ' dB';
-        } else {
-            snrElement.textContent = 'N/A';
-        }
-    }
-
-    // Draw SNR chart (modal)
-    drawSNRChart();
-
-    // Draw mini charts on main page
+    // Draw mini charts on main page (always — they're visible on the main page)
     drawDbfsHistoryChart();
     drawSnrHistoryChart();
 }

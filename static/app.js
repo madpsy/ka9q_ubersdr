@@ -3716,6 +3716,15 @@ async function handleBinaryMessage(data) {
 
                     // Keep the live SNR marker on the squelch slider in sync
                     if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
+
+                    // Update signal bar and needle meter directly from audio data.
+                    // signalMeter.updateDisplay() reads window.currentBasebandPower /
+                    // window.currentNoiseDensity (already set above) and also calls
+                    // sMeterNeedle.update() internally — so one call drives both meters
+                    // regardless of whether the spectrum WebSocket is connected.
+                    if (window.spectrumDisplay && window.spectrumDisplay.signalMeter) {
+                        window.spectrumDisplay.signalMeter.updateDisplay(basebandPower);
+                    }
                 }
             }
         }

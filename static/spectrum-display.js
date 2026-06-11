@@ -1283,9 +1283,6 @@ class SpectrumDisplay {
             this.updateTooltip();
         }
 
-        // Update signal meter
-        this.updateSignalMeter();
-
         // Process spectrum data for decoder extensions
         if (window.decoderManager) {
             const spectrumDataForExtensions = {

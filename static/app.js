@@ -14221,21 +14221,12 @@ let _dockControlsAnchor      = null; // nextSibling of .controls before docking
 let _dockAudioControlsAnchor = null; // nextSibling of .audio-controls before docking
 let _dockBandBarAnchor        = null; // nextSibling of .band-status-bar before docking
 let _dockOriginalParent      = null; // parent of both nodes before docking
-let _dockRAF                 = null; // requestAnimationFrame handle for position updates
-let _dockLastPositionTime    = 0;    // timestamp of last position update (for throttling)
+let _dockInterval            = null; // setInterval handle for position updates
 
 // Reposition the fixed wrapper just above the .spectrum-display-controls bar.
-// Throttled to ~10fps via rAF — enough to track layout changes smoothly while
+// Called at 10fps via setInterval — enough to track layout changes smoothly while
 // avoiding the ~45% CPU cost of running getBoundingClientRect() at 60fps.
 function _dockPositionWrapper() {
-    const now = performance.now();
-    // Throttle: skip if less than 100ms since last update (~10fps)
-    if (now - _dockLastPositionTime < 100) {
-        _dockRAF = requestAnimationFrame(_dockPositionWrapper);
-        return;
-    }
-    _dockLastPositionTime = now;
-
     const wrapper  = document.getElementById('dock-overlay-wrapper');
     const bar      = document.querySelector('.spectrum-display-controls');
     if (!wrapper || !bar) return;
@@ -14249,8 +14240,6 @@ function _dockPositionWrapper() {
     wrapper.style.top    = (barRect.top - wrapperHeight) + 'px';
     wrapper.style.left   = barRect.left + 'px';
     wrapper.style.width  = barRect.width + 'px';
-
-    _dockRAF = requestAnimationFrame(_dockPositionWrapper);
 }
 
 function _dockApply() {
@@ -14275,11 +14264,11 @@ function _dockApply() {
     wrapper.appendChild(audio);
     document.body.appendChild(wrapper);
 
-    // Start the rAF loop to keep the wrapper positioned above the controls bar
-    // (throttled to ~10fps inside _dockPositionWrapper to save CPU)
-    if (_dockRAF) cancelAnimationFrame(_dockRAF);
-    _dockLastPositionTime = 0; // force immediate first position
-    _dockPositionWrapper();
+    // Start polling to keep the wrapper positioned above the controls bar.
+    // 100ms interval (~10fps) is enough to track layout changes smoothly.
+    if (_dockInterval) clearInterval(_dockInterval);
+    _dockPositionWrapper(); // position immediately
+    _dockInterval = setInterval(_dockPositionWrapper, 100);
 
     // Update button state (button is hidden on mobile via CSS but update anyway)
     if (btn) {
@@ -14420,8 +14409,8 @@ function _dockRemove() {
     const btn     = document.getElementById('dock-controls-button');
     if (!wrapper || !btn) return;
 
-    // Stop the positioning loop
-    if (_dockRAF) { cancelAnimationFrame(_dockRAF); _dockRAF = null; }
+    // Stop the positioning interval
+    if (_dockInterval) { clearInterval(_dockInterval); _dockInterval = null; }
 
     const controls = wrapper.querySelector('.controls');
     const audio    = wrapper.querySelector('.audio-controls');

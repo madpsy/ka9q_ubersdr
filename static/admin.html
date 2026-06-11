@@ -20590,6 +20590,38 @@ const tooltipLine2 = timeStr;
                 </div>`;
             }
 
+            // ── Change log ────────────────────────────────────────────────────────
+            const historyEntries = (health.history && health.history.length > 0) ? health.history : [];
+            html += `<div class="config-section"><h3>📋 Change Log</h3>`;
+            if (historyEntries.length === 0) {
+                html += `<p style="color:#888;font-size:13px;margin:0;">No antenna changes recorded yet.</p>`;
+            } else {
+                html += `<div style="overflow-x:auto;overflow-y:auto;max-height:320px;border:1px solid rgba(255,255,255,0.08);border-radius:4px;"><table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="background:rgba(0,0,0,0.2);text-align:left;">
+                        <th style="padding:6px 10px;border-bottom:1px solid #444;">Time</th>
+                        <th style="padding:6px 10px;border-bottom:1px solid #444;">Action</th>
+                        <th style="padding:6px 10px;border-bottom:1px solid #444;">Antenna</th>
+                        <th style="padding:6px 10px;border-bottom:1px solid #444;">Result</th>
+                        <th style="padding:6px 10px;border-bottom:1px solid #444;">Source</th>
+                    </tr></thead><tbody>`;
+                historyEntries.forEach(e => {
+                    const t = new Date(e.time);
+                    const ts = t.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+                    const actionIcon = {select:'📡',ground:'⏚',add:'➕',remove:'➖',default:'⭐',thunderstorm_on:'⚡',thunderstorm_off:'✅'}[e.action] || '•';
+                    const result = e.grounded ? 'Grounded' : (e.selected && e.selected.length > 0 ? 'Ant ' + e.selected.join(', ') : '—');
+                    const srcColour = e.source === 'admin' ? '#ffb74d' : e.source === 'startup' ? '#81c784' : '#90caf9';
+                    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:5px 10px;color:#aaa;white-space:nowrap;">${escapeHtml(ts)}</td>
+                        <td style="padding:5px 10px;">${actionIcon} ${escapeHtml(e.action)}</td>
+                        <td style="padding:5px 10px;">${escapeHtml(e.label || '—')}</td>
+                        <td style="padding:5px 10px;color:#ccc;">${escapeHtml(result)}</td>
+                        <td style="padding:5px 10px;"><span style="color:${srcColour};font-size:11px;font-weight:600;">${escapeHtml(e.source)}</span></td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+            html += `</div>`;
+
             // ── Connection / behaviour settings ───────────────────────────────────
             html += `<div class="config-section"><h3>⚙️ Settings</h3>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">

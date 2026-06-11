@@ -73,12 +73,60 @@ type AntSwitchState struct {
 	LastError  string    // last error string (empty if none)
 }
 
+// AntSwitchLogEntry records a single antenna change event.
+type AntSwitchLogEntry struct {
+	Time     time.Time `json:"time"`
+	Action   string    `json:"action"`   // "select", "ground", "add", "remove", "default"
+	Antenna  int       `json:"antenna"`  // 0 for ground/default
+	Label    string    `json:"label"`    // human-readable antenna name, or "Ground all"
+	Selected []int     `json:"selected"` // resulting selected antennas after the change
+	Grounded bool      `json:"grounded"` // resulting grounded state
+	Source   string    `json:"source"`   // "public", "admin", "startup"
+}
+
+// AntSwitchChangeLog is a fixed-capacity ring buffer of antenna change events.
+type AntSwitchChangeLog struct {
+	mu      sync.RWMutex
+	entries []AntSwitchLogEntry
+	cap     int
+}
+
+// newAntSwitchChangeLog creates a new change log with the given capacity.
+func newAntSwitchChangeLog(capacity int) *AntSwitchChangeLog {
+	return &AntSwitchChangeLog{
+		entries: make([]AntSwitchLogEntry, 0, capacity),
+		cap:     capacity,
+	}
+}
+
+// Add appends an entry, evicting the oldest if at capacity.
+func (cl *AntSwitchChangeLog) Add(e AntSwitchLogEntry) {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if len(cl.entries) >= cl.cap {
+		cl.entries = cl.entries[1:]
+	}
+	cl.entries = append(cl.entries, e)
+}
+
+// Snapshot returns a copy of all entries, newest first.
+func (cl *AntSwitchChangeLog) Snapshot() []AntSwitchLogEntry {
+	cl.mu.RLock()
+	defer cl.mu.RUnlock()
+	out := make([]AntSwitchLogEntry, len(cl.entries))
+	for i, e := range cl.entries {
+		out[len(cl.entries)-1-i] = e
+	}
+	return out
+}
+
 // AntSwitchHandler manages the antenna switch TCP connection and HTTP API.
 type AntSwitchHandler struct {
 	config      *AntSwitchConfig
 	mu          sync.RWMutex
 	state       AntSwitchState
 	rateLimiter *AntSwitchRateLimiter
+	changeLog   *AntSwitchChangeLog
 }
 
 // AntSwitchRateLimiter is a per-IP rate limiter for ant-switch endpoints.
@@ -146,6 +194,7 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 	h := &AntSwitchHandler{
 		config:      config,
 		rateLimiter: NewAntSwitchRateLimiter(),
+		changeLog:   newAntSwitchChangeLog(100),
 	}
 
 	// Default to 8 antennas if not configured
@@ -160,7 +209,7 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		log.Printf("AntSwitch: Warning: num_antennas=%d — the standard daemon wrapper only supports 1-8. Ensure your daemon wrapper has been extended to support higher antenna numbers.", config.NumAntennas)
 	}
 
-	// Initial state query
+	// Initial state query — always record as the first history entry
 	if state, err := h.queryState(); err != nil {
 		log.Printf("AntSwitch: Warning: initial state query failed: %v", err)
 	} else {
@@ -168,6 +217,29 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		h.state = state
 		h.mu.Unlock()
 		log.Printf("AntSwitch: Initial state: selected=%v grounded=%v", state.Selected, state.Grounded)
+
+		// Build a human-readable label for the initial state
+		var startLabel string
+		if state.Grounded {
+			startLabel = "Startup: Grounded"
+		} else if len(state.Selected) > 0 {
+			names := make([]string, 0, len(state.Selected))
+			for _, n := range state.Selected {
+				names = append(names, h.antennaLabel(n))
+			}
+			startLabel = "Startup: " + strings.Join(names, ", ")
+		} else {
+			startLabel = "Startup: Unknown"
+		}
+		h.changeLog.Add(AntSwitchLogEntry{
+			Time:     time.Now(),
+			Action:   "startup",
+			Antenna:  0,
+			Label:    startLabel,
+			Selected: state.Selected,
+			Grounded: state.Grounded,
+			Source:   "startup",
+		})
 	}
 
 	// Select default antenna on startup if configured
@@ -177,9 +249,19 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 				config.DefaultAntenna, config.NumAntennas)
 		} else {
 			log.Printf("AntSwitch: Selecting default antenna %d on startup", config.DefaultAntenna)
-			if _, _, err := h.selectAntenna(config.DefaultAntenna); err != nil {
+			if state, verified, err := h.selectAntenna(config.DefaultAntenna); err != nil {
 				log.Printf("AntSwitch: Warning: failed to select default antenna %d: %v",
 					config.DefaultAntenna, err)
+			} else if verified {
+				h.changeLog.Add(AntSwitchLogEntry{
+					Time:     time.Now(),
+					Action:   "default",
+					Antenna:  config.DefaultAntenna,
+					Label:    h.antennaLabel(config.DefaultAntenna),
+					Selected: state.Selected,
+					Grounded: state.Grounded,
+					Source:   "startup",
+				})
 			}
 		}
 	}
@@ -647,6 +729,17 @@ func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Re
 		}
 		state, verified, err := h.selectAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "select",
+				Antenna:  req.Antenna,
+				Label:    h.antennaLabel(req.Antenna),
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "public",
+			})
+		}
 		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
 			fmt.Sprintf("Selected antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
 		writeAntSwitchResult(w, result, tcpErr)
@@ -654,12 +747,50 @@ func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Re
 	case "ground":
 		state, verified, err := h.groundAll()
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "ground",
+				Antenna:  0,
+				Label:    "Ground all",
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "public",
+			})
+		}
 		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err, "Grounded all antennas")
 		writeAntSwitchResult(w, result, tcpErr)
 
 	default:
 		http.Error(w, fmt.Sprintf("Unknown command %q (valid: select, ground)", req.Command), http.StatusBadRequest)
 	}
+}
+
+// HandleGetHistory handles GET /api/ant-switch/history
+// Always public — returns the rolling 100-entry change log, newest first.
+func (h *AntSwitchHandler) HandleGetHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	entries := h.changeLog.Snapshot()
+	if entries == nil {
+		entries = []AntSwitchLogEntry{}
+	}
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": entries,
+		"count":   len(entries),
+	}); err != nil {
+		log.Printf("AntSwitch: error encoding history: %v", err)
+	}
+}
+
+// HandleGetHistoryDisabled handles GET /api/ant-switch/history when disabled.
+func HandleGetHistoryDisabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled": false,
+		"history": []interface{}{},
+		"count":   0,
+	})
 }
 
 // HandlePublicCommandDisabled handles POST /api/ant-switch/command when disabled.
@@ -692,6 +823,13 @@ func RegisterAntSwitchRoutes(mux *http.ServeMux, handler *AntSwitchHandler) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	mux.HandleFunc("/api/ant-switch/history", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			handler.HandleGetHistory(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 }
 
 // RegisterAntSwitchRoutesDisabled registers ant-switch API routes that return "not enabled" responses.
@@ -706,6 +844,13 @@ func RegisterAntSwitchRoutesDisabled(mux *http.ServeMux) {
 	mux.HandleFunc("/api/ant-switch/command", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			HandlePublicCommandDisabled(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/ant-switch/history", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			HandleGetHistoryDisabled(w, r)
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}

@@ -30,6 +30,8 @@ class RotatorUI {
         this.antSwitchReadOnly  = false;  // set true after confirmed 401 with no server password
         this.antSwitchPollTimer = null;
         this.antSwitchPendingAnt = null;  // antenna number awaiting password entry
+        this.antHistoryPage     = 0;      // current history page (0-based)
+        this.antHistoryEntries  = [];     // cached history entries
 
         // ── Active inner tab: 'rotator' | 'antswitch' ─────────────────────
         this.activeTab = localStorage.getItem('control_panel_tab') ||
@@ -122,6 +124,19 @@ class RotatorUI {
                         </div>
                         <div class="cp-ant-status-row">
                             <span id="cp-ant-status-text" class="cp-ant-status-text">Loading...</span>
+                        </div>
+                        <div class="cp-ant-history-section">
+                            <div class="cp-ant-history-header">
+                                <span class="cp-ant-history-title">📋 History</span>
+                                <div class="cp-ant-history-nav">
+                                    <button class="cp-ant-history-btn" id="cp-ant-hist-prev"
+                                            onclick="rotatorUI.antHistoryPage--; rotatorUI.renderAntHistory()">‹</button>
+                                    <span id="cp-ant-hist-page" class="cp-ant-hist-page">1/1</span>
+                                    <button class="cp-ant-history-btn" id="cp-ant-hist-next"
+                                            onclick="rotatorUI.antHistoryPage++; rotatorUI.renderAntHistory()">›</button>
+                                </div>
+                            </div>
+                            <div id="cp-ant-history-list" class="cp-ant-history-list"></div>
                         </div>
                     </div>
                 </div>` : '';
@@ -485,11 +500,67 @@ class RotatorUI {
             .cp-ant-password-confirm:hover { background: rgba(76,175,80,0.6); }
             .cp-ant-password-error { font-size: 11px; color: #ef9a9a; width: 100%; }
             .cp-ant-status-row {
-                margin-top: auto;
                 padding-top: 6px;
                 border-top: 1px solid rgba(100,100,100,0.3);
             }
             .cp-ant-status-text { font-size: 11px; color: #888; }
+
+            /* ── Ant switch history ───────────────────────────────────── */
+            .cp-ant-history-section {
+                margin-top: 8px;
+                border-top: 1px solid rgba(100,100,100,0.3);
+                padding-top: 8px;
+            }
+            .cp-ant-history-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 6px;
+            }
+            .cp-ant-history-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: #aaa;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .cp-ant-history-nav {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .cp-ant-history-btn {
+                -webkit-appearance: none;
+                appearance: none;
+                padding: 2px 7px;
+                border-radius: 4px;
+                border: 1px solid rgba(100,100,100,0.4);
+                background: rgba(50,50,50,0.8);
+                color: #ccc;
+                font-size: 13px;
+                cursor: pointer;
+                line-height: 1;
+            }
+            .cp-ant-history-btn:disabled { opacity: 0.3; cursor: default; }
+            .cp-ant-hist-page { font-size: 11px; color: #888; min-width: 28px; text-align: center; }
+            .cp-ant-history-list { display: flex; flex-direction: column; gap: 3px; }
+            .cp-ant-history-row {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+                font-size: 11px;
+                padding: 3px 4px;
+                border-radius: 4px;
+                background: rgba(255,255,255,0.03);
+            }
+            .cp-ant-history-row:nth-child(even) { background: rgba(255,255,255,0.06); }
+            .cp-ant-hist-time { color: #666; white-space: nowrap; flex-shrink: 0; }
+            .cp-ant-hist-label { color: #ccc; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .cp-ant-hist-src { font-size: 10px; flex-shrink: 0; }
+            .cp-ant-hist-src.admin { color: #ffb74d; }
+            .cp-ant-hist-src.public { color: #90caf9; }
+            .cp-ant-hist-src.startup { color: #81c784; }
+            .cp-ant-history-empty { font-size: 11px; color: #555; text-align: center; padding: 8px 0; }
             
             .rotator-display-container {
                 width: 100%;
@@ -1009,6 +1080,8 @@ class RotatorUI {
             const data = await resp.json();
             this.handleAntSwitchStatus(data);
         } catch { /* ignore — stale display stays */ }
+        // Refresh history alongside every status poll
+        this.fetchAntHistory();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1218,6 +1291,63 @@ class RotatorUI {
         } catch (err) {
             console.error('[RotatorUI] Ant switch command failed:', err);
         }
+    }
+    // ═══════════════════════════════════════════════════════════════════════
+    // Ant switch — change history
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async fetchAntHistory() {
+        try {
+            const resp = await fetch('/api/ant-switch/history');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (Array.isArray(data.history)) {
+                this.antHistoryEntries = data.history;
+                this.renderAntHistory();
+            }
+        } catch { /* ignore */ }
+    }
+
+    renderAntHistory() {
+        const list = document.getElementById('cp-ant-history-list');
+        const pageEl = document.getElementById('cp-ant-hist-page');
+        const prevBtn = document.getElementById('cp-ant-hist-prev');
+        const nextBtn = document.getElementById('cp-ant-hist-next');
+        if (!list) return;
+
+        const entries = this.antHistoryEntries;
+        const perPage = 10;
+        const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
+
+        // Clamp page
+        if (this.antHistoryPage < 0) this.antHistoryPage = 0;
+        if (this.antHistoryPage >= totalPages) this.antHistoryPage = totalPages - 1;
+
+        if (pageEl) pageEl.textContent = `${this.antHistoryPage + 1}/${totalPages}`;
+        if (prevBtn) prevBtn.disabled = this.antHistoryPage === 0;
+        if (nextBtn) nextBtn.disabled = this.antHistoryPage >= totalPages - 1;
+
+        if (entries.length === 0) {
+            list.innerHTML = '<div class="cp-ant-history-empty">No changes recorded yet</div>';
+            return;
+        }
+
+        const start = this.antHistoryPage * perPage;
+        const page  = entries.slice(start, start + perPage);
+
+        const actionIcon = { select:'📡', ground:'⏚', add:'➕', remove:'➖', default:'⭐', thunderstorm_on:'⚡', thunderstorm_off:'✅' };
+
+        list.innerHTML = page.map(e => {
+            const t = new Date(e.time);
+            const ts = t.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const icon = actionIcon[e.action] || '•';
+            const srcClass = e.source || 'public';
+            return `<div class="cp-ant-history-row">
+                <span class="cp-ant-hist-time">${ts}</span>
+                <span class="cp-ant-hist-label">${icon} ${e.label || e.action}</span>
+                <span class="cp-ant-hist-src ${srcClass}">${e.source}</span>
+            </div>`;
+        }).join('');
     }
 }
 

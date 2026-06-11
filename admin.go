@@ -7960,6 +7960,7 @@ func (ah *AdminHandler) HandleAntSwitchHealth(w http.ResponseWriter, r *http.Req
 	status["grounded"] = state.Grounded
 	status["last_update"] = state.LastUpdate
 	status["antenna_labels"] = h.buildLabels()
+	status["history"] = h.changeLog.Snapshot()
 
 	if state.Selected == nil {
 		status["selected"] = []int{}
@@ -8024,6 +8025,17 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		}
 		state, verified, err := h.selectAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "select",
+				Antenna:  req.Antenna,
+				Label:    h.antennaLabel(req.Antenna),
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "admin",
+			})
+		}
 		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
 			fmt.Sprintf("Selected antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
 		writeAntSwitchResult(w, result, tcpErr)
@@ -8031,6 +8043,17 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 	case "ground":
 		state, verified, err := h.groundAll()
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "ground",
+				Antenna:  0,
+				Label:    "Ground all",
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "admin",
+			})
+		}
 		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err, "Grounded all antennas")
 		writeAntSwitchResult(w, result, tcpErr)
 
@@ -8041,6 +8064,17 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		}
 		state, verified, err := h.addAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "add",
+				Antenna:  req.Antenna,
+				Label:    h.antennaLabel(req.Antenna),
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "admin",
+			})
+		}
 		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
 			fmt.Sprintf("Added antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
 		writeAntSwitchResult(w, result, tcpErr)
@@ -8052,6 +8086,17 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		}
 		state, verified, err := h.removeAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "remove",
+				Antenna:  req.Antenna,
+				Label:    h.antennaLabel(req.Antenna),
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "admin",
+			})
+		}
 		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
 			fmt.Sprintf("Removed antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
 		writeAntSwitchResult(w, result, tcpErr)
@@ -8077,6 +8122,23 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 				h.state = state
 				h.mu.Unlock()
 			}
+		}
+		if verified {
+			action := "thunderstorm_on"
+			label := "Thunderstorm ON"
+			if !req.Value {
+				action = "thunderstorm_off"
+				label = "Thunderstorm OFF"
+			}
+			h.changeLog.Add(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   action,
+				Antenna:  0,
+				Label:    label,
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "admin",
+			})
 		}
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		msg := fmt.Sprintf("Thunderstorm mode set to %v", req.Value)

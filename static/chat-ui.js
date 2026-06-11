@@ -1716,9 +1716,11 @@ class ChatUI {
             sendBtn.disabled = true;
             sendBtn.style.opacity = '0.5';
             sendBtn.style.cursor = 'not-allowed';
-            // Note: Do NOT call input.focus() here — the input already has focus
-            // from the user's keypress or button tap. On mobile, a redundant .focus()
-            // call can cause the virtual keyboard to briefly dismiss and reappear.
+            // Re-focus synchronously — needed because tapping the Send button
+            // or DOM changes from the incoming message can steal focus from the input.
+            // This is safe on mobile because it runs synchronously within the
+            // user-gesture context (unlike a setTimeout which would cause keyboard flash).
+            input.focus();
         }
     }
 

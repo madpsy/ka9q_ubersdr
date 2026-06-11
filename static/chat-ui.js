@@ -410,6 +410,7 @@ class ChatUI {
                                     <input type="text" id="chat-message-input"
                                            placeholder="Type message..."
                                            maxlength="250"
+                                           enterkeyhint="send"
                                            class="chat-input"
                                            style="padding-right: 70px;">
                                     <span id="chat-freq-btn" class="chat-freq-btn" onclick="chatUI.shareFrequency()" title="Share current frequency">📻</span>
@@ -503,7 +504,7 @@ class ChatUI {
                 display: flex;
                 flex-direction: row;
                 align-items: flex-end;
-                transition: all 0.3s ease;
+                transition: width 0.3s ease;
             }
 
             .chat-panel.collapsed {

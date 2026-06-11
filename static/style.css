@@ -3407,6 +3407,41 @@ input[type="range"]::-moz-range-thumb {
     touch-action: manipulation; /* Prevent double-tap browser zoom on mobile */
 }
 
+/* Waterfall pause overlay — centred play button shown over the frozen canvas */
+.waterfall-pause-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 10;
+    cursor: pointer;
+}
+
+.waterfall-pause-overlay-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    border-radius: 16px;
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 22px 36px;
+    cursor: pointer;
+    pointer-events: none; /* clicks handled by parent overlay div */
+    transition: background 0.15s;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+}
+
+.waterfall-pause-overlay:hover .waterfall-pause-overlay-btn {
+    background: rgba(255, 255, 255, 0.22);
+}
+
 /* Waterfall pause/play toggle button */
 .waterfall-pause-btn {
     display: flex;

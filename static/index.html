@@ -760,6 +760,15 @@
                 <div style="position: relative;">
                     <canvas id="waterfall-canvas" width="2048" height="400"></canvas>
                     <canvas id="waterfall-overlay-canvas" width="2048" height="400" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+                    <!-- Pause overlay — shown when waterfall is user-paused -->
+                    <div id="waterfall-pause-overlay" class="waterfall-pause-overlay" style="display:none;" onclick="toggleWaterfallPause()" title="Click to resume waterfall">
+                        <button class="waterfall-pause-overlay-btn" aria-label="Resume waterfall">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <path d="M3 2.5l10 5.5-10 5.5V2.5z"/>
+                            </svg>
+                            <span>Resume</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="waterfall-controls">
                     <div class="waterfall-control-group">

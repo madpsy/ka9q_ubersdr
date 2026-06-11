@@ -202,7 +202,7 @@ class RotatorUI {
             }
             
             .rotator-panel.collapsed {
-                width: 40px;
+                width: 48px;
             }
             
             .rotator-panel.expanded {
@@ -211,7 +211,7 @@ class RotatorUI {
             }
             
             .rotator-header {
-                width: 40px;
+                width: 48px;
                 min-height: 80px;
                 padding: 8px 0;
                 background: rgba(50, 50, 50, 0.7);
@@ -285,10 +285,9 @@ class RotatorUI {
                 font-weight: 600;
                 color: #ccc;
                 line-height: 1.2;
-                max-width: 36px;
+                max-width: 44px;
                 white-space: normal;
-                overflow-wrap: break-word;
-                word-break: break-word;
+                word-break: break-all;
                 text-align: center;
                 overflow: hidden;
                 display: block;
@@ -347,7 +346,7 @@ class RotatorUI {
             }
 
             .rotator-content {
-                width: min(500px, calc(100vw - 40px));
+                width: min(500px, calc(100vw - 48px));
                 max-width: 100%;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);

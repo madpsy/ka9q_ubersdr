@@ -1257,15 +1257,18 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // Re-focus the input after DOM changes (hideMentionSuggestions, scrollTop
-                // in addChatMessage, etc.) which can steal focus on some browsers.
-                // Use requestAnimationFrame instead of setTimeout to stay within the
-                // user-gesture context — setTimeout breaks it on mobile, causing the
-                // virtual keyboard to briefly dismiss and reappear (flash).
-                requestAnimationFrame(() => {
-                    const mi = document.getElementById('chat-message-input');
-                    if (mi) mi.focus();
-                });
+                // On desktop, DOM changes (hideMentionSuggestions, scrollTop in
+                // addChatMessage) can steal focus, so we need to re-focus the input.
+                // On mobile/touch devices, the input retains focus naturally from the
+                // Enter key, and any programmatic .focus() call (even via rAF) causes
+                // the virtual keyboard to briefly dismiss and reappear. So only
+                // re-focus on non-touch (desktop) devices.
+                if (!('ontouchstart' in window)) {
+                    requestAnimationFrame(() => {
+                        const mi = document.getElementById('chat-message-input');
+                        if (mi) mi.focus();
+                    });
+                }
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {
@@ -1721,11 +1724,12 @@ class ChatUI {
             sendBtn.disabled = true;
             sendBtn.style.opacity = '0.5';
             sendBtn.style.cursor = 'not-allowed';
-            // Re-focus synchronously — needed because tapping the Send button
-            // or DOM changes from the incoming message can steal focus from the input.
-            // This is safe on mobile because it runs synchronously within the
-            // user-gesture context (unlike a setTimeout which would cause keyboard flash).
-            input.focus();
+            // Re-focus the input — needed on desktop because tapping the Send button
+            // or DOM changes can steal focus. On mobile/touch devices, skip the
+            // programmatic focus to avoid virtual keyboard dismiss/reappear flash.
+            if (!('ontouchstart' in window)) {
+                input.focus();
+            }
         }
     }
 

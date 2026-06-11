@@ -1257,10 +1257,10 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // Refocus after a short delay to ensure message is sent first
-                setTimeout(() => {
-                    document.getElementById('chat-message-input').focus();
-                }, 10);
+                // Note: Do NOT call .focus() here in a setTimeout — on mobile browsers,
+                // programmatic focus outside the user-gesture context causes the virtual
+                // keyboard to briefly dismiss and reappear (flash). The input already
+                // retains focus from the Enter keypress, so no refocus is needed.
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {
@@ -1716,7 +1716,9 @@ class ChatUI {
             sendBtn.disabled = true;
             sendBtn.style.opacity = '0.5';
             sendBtn.style.cursor = 'not-allowed';
-            input.focus();
+            // Note: Do NOT call input.focus() here — the input already has focus
+            // from the user's keypress or button tap. On mobile, a redundant .focus()
+            // call can cause the virtual keyboard to briefly dismiss and reappear.
         }
     }
 

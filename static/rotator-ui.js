@@ -286,8 +286,9 @@ class RotatorUI {
                 color: #ccc;
                 line-height: 1.2;
                 max-width: 36px;
-                word-break: break-all;
                 white-space: normal;
+                overflow-wrap: break-word;
+                word-break: break-word;
                 text-align: center;
                 overflow: hidden;
                 display: block;

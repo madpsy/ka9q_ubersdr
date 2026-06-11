@@ -1469,12 +1469,12 @@ button:disabled {
     transform: none;
 }
 
-button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digital-spots-button) {
+button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digital-spots-button):not(.cp-tab-btn):not(.cp-ant-btn):not(.cp-ant-ground-btn):not(.cp-ant-password-confirm):not(.rotator-controls-button) {
     background: #28a745;
     color: white;
 }
 
-button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digital-spots-button):hover {
+button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digital-spots-button):not(.cp-tab-btn):not(.cp-ant-btn):not(.cp-ant-ground-btn):not(.cp-ant-password-confirm):not(.rotator-controls-button):hover {
     background: #218838;
     transform: translateY(-2px);
 }

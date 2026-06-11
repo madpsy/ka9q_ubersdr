@@ -410,7 +410,6 @@ class ChatUI {
                                     <input type="text" id="chat-message-input"
                                            placeholder="Type message..."
                                            maxlength="250"
-                                           enterkeyhint="send"
                                            class="chat-input"
                                            style="padding-right: 70px;">
                                     <span id="chat-freq-btn" class="chat-freq-btn" onclick="chatUI.shareFrequency()" title="Share current frequency">📻</span>
@@ -1258,23 +1257,15 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // Re-focus the input after DOM changes settle.  On desktop we
-                // use setTimeout(50) because the WebSocket echo + scrollTop can
-                // steal focus asynchronously.  On mobile/touch we use
-                // queueMicrotask which runs before the browser paints, keeping
-                // the focus restoration within the user-gesture window so the
-                // virtual keyboard stays up without flashing.
-                if ('ontouchstart' in window) {
-                    queueMicrotask(() => {
-                        const mi = document.getElementById('chat-message-input');
-                        if (mi) mi.focus();
-                    });
-                } else {
-                    setTimeout(() => {
-                        const mi = document.getElementById('chat-message-input');
-                        if (mi) mi.focus();
-                    }, 50);
-                }
+                // Re-focus the input after DOM changes settle.
+                // Something in the send flow (input.value='', button disable,
+                // hideMentionSuggestions) causes the input to lose focus.
+                // We restore it with a minimal setTimeout so the browser has
+                // finished processing the DOM changes.
+                setTimeout(() => {
+                    const mi = document.getElementById('chat-message-input');
+                    if (mi) mi.focus();
+                }, 0);
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {

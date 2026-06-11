@@ -7,6 +7,12 @@ class IdleDetector {
         this.INACTIVITY_TIMEOUT = null; // Will be (session_timeout - 30) seconds
         this.CONFIRMATION_TIMEOUT = 30 * 1000; // 30 seconds in milliseconds (fixed)
         this.sessionTimeout = null; // Server's session_timeout value in seconds
+
+        // Mobile-only: auto-pause the waterfall after 5 minutes of idle.
+        // Independent of the session-timeout idle detection above.
+        this.MOBILE_WATERFALL_PAUSE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+        this.mobileWaterfallPauseTimer = null;
+        this._mobileAutoPaused = false; // true when we auto-paused the waterfall
         
         this.inactivityTimer = null;
         this.confirmationTimer = null;
@@ -39,6 +45,9 @@ class IdleDetector {
         this.activityEvents.forEach(event => {
             document.addEventListener(event, () => this.handleActivity(), true);
         });
+
+        // Mobile waterfall auto-pause: start the timer now (independent of session timeout)
+        this._resetMobileWaterfallPauseTimer();
         
         // Handle visibility changes (tab switching)
         document.addEventListener('visibilitychange', () => {
@@ -207,6 +216,13 @@ class IdleDetector {
         if (this.isTimedOut) {
             return;
         }
+
+        // Mobile waterfall auto-pause: resume the waterfall if we auto-paused it,
+        // then restart the idle timer regardless.
+        if (this._mobileAutoPaused) {
+            this._mobileWaterfallResume();
+        }
+        this._resetMobileWaterfallPauseTimer();
         
         // If confirmation is showing, user activity confirms presence
         if (this.isShowingConfirmation) {
@@ -267,6 +283,96 @@ class IdleDetector {
         this.resetInactivityTimer();
     }
     
+    // ── Mobile waterfall auto-pause ──────────────────────────────────────────
+
+    /**
+     * Returns true when the page is running on a real mobile device.
+     * Uses window._isMobile set by app.js (UA + touch-points detection),
+     * which is the same flag used for the 📱/🖥️ device emoji on the map overlay.
+     */
+    _isMobileDevice() {
+        return !!window._isMobile;
+    }
+
+    /**
+     * Start (or restart) the 5-minute idle timer that auto-pauses the waterfall
+     * on mobile.  Safe to call at any time — clears any existing timer first.
+     */
+    _resetMobileWaterfallPauseTimer() {
+        if (this.mobileWaterfallPauseTimer) {
+            clearTimeout(this.mobileWaterfallPauseTimer);
+            this.mobileWaterfallPauseTimer = null;
+        }
+        // Only arm the timer on real mobile devices
+        if (!this._isMobileDevice()) return;
+
+        this.mobileWaterfallPauseTimer = setTimeout(() => {
+            this._mobileWaterfallAutoPause();
+        }, this.MOBILE_WATERFALL_PAUSE_TIMEOUT);
+    }
+
+    /** Auto-pause the waterfall after 5 minutes of mobile idle. */
+    _mobileWaterfallAutoPause() {
+        if (!this._isMobileDevice()) return;
+
+        const sd = window.spectrumDisplay;
+        if (!sd) return;
+
+        // Don't double-pause if already paused (user may have paused manually)
+        if (sd._drawingPaused) return;
+
+        console.log('[IdleDetector] Mobile idle 5 min — auto-pausing waterfall');
+        this._mobileAutoPaused = true;
+
+        // Pause via the same path as the manual pause button
+        sd.userPause();
+
+        // Sync the pause button UI (mirrors toggleWaterfallPause() in app.js)
+        const pauseIcon = document.getElementById('waterfall-pause-icon');
+        const playIcon  = document.getElementById('waterfall-play-icon');
+        const btn       = document.getElementById('waterfall-pause-btn');
+        const overlay   = document.getElementById('waterfall-pause-overlay');
+        if (pauseIcon) pauseIcon.style.display = 'none';
+        if (playIcon)  playIcon.style.display  = '';
+        if (btn) { btn.setAttribute('aria-pressed', 'true'); btn.title = 'Resume waterfall'; }
+        if (overlay) {
+            const canvas = document.getElementById('spectrum-display-canvas');
+            if (canvas) {
+                const r = canvas.getBoundingClientRect();
+                const centreX = r.left + r.width / 2 + window.scrollX;
+                overlay.style.left = centreX + 'px';
+                overlay.style.top  = (250 + window.scrollY) + 'px';
+            }
+            overlay.style.display = 'flex';
+        }
+
+    }
+
+    /** Resume the waterfall that was auto-paused by mobile idle detection. */
+    _mobileWaterfallResume() {
+        if (!this._mobileAutoPaused) return;
+        this._mobileAutoPaused = false;
+
+        const sd = window.spectrumDisplay;
+        if (!sd || !sd._drawingPaused) return;
+
+        console.log('[IdleDetector] User active — resuming auto-paused waterfall');
+        sd.userResume();
+
+        // Sync the pause button UI
+        const pauseIcon = document.getElementById('waterfall-pause-icon');
+        const playIcon  = document.getElementById('waterfall-play-icon');
+        const btn       = document.getElementById('waterfall-pause-btn');
+        const overlay   = document.getElementById('waterfall-pause-overlay');
+        if (pauseIcon) pauseIcon.style.display = '';
+        if (playIcon)  playIcon.style.display  = 'none';
+        if (btn) { btn.setAttribute('aria-pressed', 'false'); btn.title = 'Pause waterfall'; }
+        if (overlay)   overlay.style.display   = 'none';
+
+    }
+
+    // ── End mobile waterfall auto-pause ──────────────────────────────────────
+
     resetInactivityTimer() {
         // Don't start timer if idle detection is disabled (session_timeout = 0)
         if (this.INACTIVITY_TIMEOUT === null) {
@@ -525,11 +631,15 @@ class IdleDetector {
         if (this.inactivityLogTimer) {
             clearInterval(this.inactivityLogTimer);
         }
+        if (this.mobileWaterfallPauseTimer) {
+            clearTimeout(this.mobileWaterfallPauseTimer);
+        }
         
         // Remove overlay
         if (this.overlay && this.overlay.parentNode) {
             this.overlay.parentNode.removeChild(this.overlay);
         }
+
     }
 }
 

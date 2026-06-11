@@ -777,6 +777,8 @@ function _unmuteAudioContextForHttpStream() {
 // Mobile device detection — used for UI display (device emoji)
 const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
                   navigator.maxTouchPoints > 1;
+// Expose for other scripts (e.g. idle-detector.js) that load independently
+window._isMobile = _isMobile;
 // Expose audioContext globally for recorder
 window.audioContext = null;
 // Expose ws globally for compatibility (will be set by wsManager)

@@ -407,11 +407,12 @@ class ChatUI {
                             <!-- Message input (shown when logged in) -->
                             <div id="chat-message-input-area" class="chat-input-area" style="display:none;">
                                 <div style="position: relative; flex: 1;">
-                                    <input type="text" id="chat-message-input"
-                                           placeholder="Type message..."
-                                           maxlength="250"
-                                           class="chat-input"
-                                           style="padding-right: 70px;">
+                                    <textarea id="chat-message-input"
+                                              placeholder="Type message..."
+                                              maxlength="250"
+                                              rows="1"
+                                              class="chat-input"
+                                              style="padding-right: 70px; resize: none; overflow: hidden;"></textarea>
                                     <span id="chat-freq-btn" class="chat-freq-btn" onclick="chatUI.shareFrequency()" title="Share current frequency">📻</span>
                                     <span id="chat-emoji-btn" class="chat-emoji-btn" onclick="chatUI.toggleEmojiPicker()" title="Insert emoji">😊</span>
                                     <div id="chat-emoji-picker" class="chat-emoji-picker" style="display:none;"></div>
@@ -710,6 +711,14 @@ class ChatUI {
                 color: #fff;
                 border-radius: 4px;
                 font-size: 12px;
+                font-family: Arial, sans-serif;
+                /* textarea-specific: keep it single-line in appearance */
+                box-sizing: border-box;
+                line-height: 1.4;
+                vertical-align: middle;
+                resize: none;
+                overflow: hidden;
+                display: block;
             }
 
             .chat-input:focus {

@@ -1258,14 +1258,18 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // Re-focus the input after a short delay.  On desktop, DOM
-                // changes (the echoed message arriving via WebSocket, scrollTop
-                // in addChatMessage, hideMentionSuggestions) can steal focus, so
-                // we need to re-focus after they settle.  On mobile/touch
-                // devices we skip this because the delayed focus() call breaks
-                // the user-gesture context and causes the virtual keyboard to
-                // briefly dismiss and reappear.
-                if (!('ontouchstart' in window)) {
+                // Re-focus the input after DOM changes settle.  On desktop we
+                // use setTimeout(50) because the WebSocket echo + scrollTop can
+                // steal focus asynchronously.  On mobile/touch we use
+                // queueMicrotask which runs before the browser paints, keeping
+                // the focus restoration within the user-gesture window so the
+                // virtual keyboard stays up without flashing.
+                if ('ontouchstart' in window) {
+                    queueMicrotask(() => {
+                        const mi = document.getElementById('chat-message-input');
+                        if (mi) mi.focus();
+                    });
+                } else {
                     setTimeout(() => {
                         const mi = document.getElementById('chat-message-input');
                         if (mi) mi.focus();
@@ -2014,12 +2018,15 @@ class ChatUI {
 
         container.scrollTop = container.scrollHeight;
 
-        // Always restore focus after scroll if the input was focused before.
-        // Some browsers silently blur the input during scrollTop assignment
-        // without updating document.activeElement synchronously.
-        if (inputIsFocused) {
-            const isTouchDevice = 'ontouchstart' in window;
-            input.focus(isTouchDevice ? { preventScroll: true } : undefined);
+        // On desktop, restore focus after scroll if the input was focused
+        // before — scrollTop on the container can steal focus in some browsers.
+        // On mobile/touch devices, do NOT call focus() here because this runs
+        // outside a user-gesture context (e.g. from a WebSocket callback) and
+        // calling focus() outside a gesture dismisses the virtual keyboard.
+        // The scrollTop assignment on the *container* element should not blur
+        // the *input* element on mobile browsers.
+        if (inputIsFocused && !('ontouchstart' in window)) {
+            input.focus();
         }
     }
 

@@ -298,7 +298,7 @@ class RotatorUI {
                 flex-direction: row;
                 align-items: flex-end;
                 background: rgba(20,20,20,0.95);
-                border-bottom: 2px solid rgba(76,175,80,0.5);
+                border-bottom: 2px solid rgba(80,80,80,0.6);
                 flex-shrink: 0;
                 padding: 0 4px;
                 gap: 2px;

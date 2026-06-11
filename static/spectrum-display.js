@@ -1126,11 +1126,13 @@ class SpectrumDisplay {
                 return;
             }
 
-            // User-triggered waterfall pause: the WebSocket is closed so the frame
-            // queue will always be empty while paused. Skip all per-tick work and
-            // just keep the rAF alive so resume is instant. This drops the ~48% CPU
-            // cost of the processFrame loop body running 30×/sec for nothing.
-            if (this._drawingPaused && this.frameQueue.length === 0) {
+            // User-triggered waterfall pause: the WebSocket is closed so no new
+            // frames will arrive. Skip ALL per-tick work — frame queue management,
+            // audio sync calculations, scroll accumulator, drawing — and just keep
+            // the rAF alive so resume is instant. Any residual queued frames are
+            // discarded; they will be stale by the time the user resumes anyway.
+            if (this._drawingPaused) {
+                this.frameQueue = []; // discard stale frames accumulated before pause
                 requestAnimationFrame(processFrame);
                 return;
             }

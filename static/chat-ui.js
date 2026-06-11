@@ -1207,43 +1207,6 @@ class ChatUI {
             this.sendMessage();
         });
 
-        // ── DEBUG: visible blur tracker (remove after diagnosis) ──────────────
-        {
-            const dbgOverlay = document.createElement('div');
-            dbgOverlay.id = 'chat-blur-debug';
-            dbgOverlay.style.cssText = [
-                'position:fixed', 'top:0', 'left:0', 'right:0',
-                'background:rgba(0,0,0,0.85)', 'color:#0f0',
-                'font:11px/1.4 monospace', 'padding:6px', 'z-index:99999',
-                'max-height:40vh', 'overflow-y:auto', 'pointer-events:none',
-                'display:none'
-            ].join(';');
-            document.body.appendChild(dbgOverlay);
-
-            const dbgLog = (msg) => {
-                dbgOverlay.style.display = 'block';
-                const line = document.createElement('div');
-                line.textContent = new Date().toISOString().slice(11,23) + ' ' + msg;
-                dbgOverlay.insertBefore(line, dbgOverlay.firstChild);
-                // Keep only last 20 lines
-                while (dbgOverlay.children.length > 20) {
-                    dbgOverlay.removeChild(dbgOverlay.lastChild);
-                }
-            };
-
-            const chatInput = document.getElementById('chat-message-input');
-            chatInput.addEventListener('blur', () => {
-                const ae = document.activeElement;
-                const tag = ae ? (ae.tagName + (ae.id ? '#'+ae.id : '') + (ae.className ? '.'+ae.className.split(' ').join('.') : '')) : 'null';
-                const stack = new Error().stack.split('\n').slice(1,4).join(' | ');
-                dbgLog('BLUR → ' + tag + ' | ' + stack);
-            });
-            chatInput.addEventListener('focus', () => {
-                dbgLog('FOCUS ←');
-            });
-        }
-        // ── END DEBUG ──────────────────────────────────────────────────────────
-
         // Message input - show mention suggestions as they type and update send button state
         const messageInput = document.getElementById('chat-message-input');
         messageInput.addEventListener('input', (e) => {
@@ -1294,15 +1257,19 @@ class ChatUI {
                 this.tabCompletionIndex = -1;
                 this.tabCompletionMatches = [];
                 this.hideMentionSuggestions();
-                // Re-focus the input after DOM changes settle.
-                // Something in the send flow (input.value='', button disable,
-                // hideMentionSuggestions) causes the input to lose focus.
-                // We restore it with a minimal setTimeout so the browser has
-                // finished processing the DOM changes.
-                setTimeout(() => {
-                    const mi = document.getElementById('chat-message-input');
-                    if (mi) mi.focus();
-                }, 0);
+                // On desktop, re-focus after a short delay so any DOM changes
+                // that steal focus (scrollTop, hideMentionSuggestions) have
+                // settled.  On mobile/touch we skip the delayed focus because
+                // calling focus() outside the user-gesture window (even at
+                // setTimeout 0) causes Chrome to dismiss the virtual keyboard.
+                // The synchronous input.focus() inside sendMessage() handles
+                // mobile focus retention.
+                if (!('ontouchstart' in window)) {
+                    setTimeout(() => {
+                        const mi = document.getElementById('chat-message-input');
+                        if (mi) mi.focus();
+                    }, 50);
+                }
             } else if (e.key === 'Tab') {
                 e.preventDefault();
                 if (hasSuggestions && this.tabCompletionMatches.length > 0) {
@@ -2035,26 +2002,43 @@ class ChatUI {
 
     /**
      * Scroll the chat container to the bottom without stealing focus from the
-     * message input.  On touch devices the scrollTop assignment can trigger a
-     * layout recalc that blurs the active input, causing the virtual keyboard
-     * to briefly dismiss and reappear.  We work around this by always
-     * restoring focus after the scroll when the input was focused.
+     * message input.
+     *
+     * Chrome on Android has a known behaviour where assigning scrollTop on a
+     * scrollable container dismisses the virtual keyboard even when an input
+     * element retains focus.  Firefox mobile does not have this issue.
+     *
+     * Work-around: when the chat input is focused on a Chrome-like touch
+     * browser, scroll the *last child element* into view instead of touching
+     * scrollTop.  scrollIntoView does not trigger the keyboard dismissal.
+     * For all other cases (desktop, Firefox mobile) use the fast scrollTop
+     * assignment and restore focus if it was stolen.
      */
     _scrollChatToBottom(container) {
         const input = document.getElementById('chat-message-input');
         const inputIsFocused = input && document.activeElement === input;
 
-        container.scrollTop = container.scrollHeight;
+        // Detect Chrome/Chromium on a touch device (Android Chrome, Samsung
+        // Internet, Edge Android, etc.) — these share the Blink engine bug.
+        const isChromeMobile = inputIsFocused &&
+            ('ontouchstart' in window) &&
+            /Chrome\//.test(navigator.userAgent) &&
+            !/Firefox\//.test(navigator.userAgent);
 
-        // On desktop, restore focus after scroll if the input was focused
-        // before — scrollTop on the container can steal focus in some browsers.
-        // On mobile/touch devices, do NOT call focus() here because this runs
-        // outside a user-gesture context (e.g. from a WebSocket callback) and
-        // calling focus() outside a gesture dismisses the virtual keyboard.
-        // The scrollTop assignment on the *container* element should not blur
-        // the *input* element on mobile browsers.
-        if (inputIsFocused && !('ontouchstart' in window)) {
-            input.focus();
+        if (isChromeMobile) {
+            // Use scrollIntoView on the last message — avoids touching
+            // scrollTop so Chrome doesn't dismiss the virtual keyboard.
+            const lastChild = container.lastElementChild;
+            if (lastChild) {
+                lastChild.scrollIntoView({ block: 'end', inline: 'nearest' });
+            }
+        } else {
+            container.scrollTop = container.scrollHeight;
+            // On desktop, restore focus if scrollTop stole it.
+            if (inputIsFocused && !('ontouchstart' in window) &&
+                    document.activeElement !== input) {
+                input.focus();
+            }
         }
     }
 

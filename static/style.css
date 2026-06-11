@@ -3407,6 +3407,31 @@ input[type="range"]::-moz-range-thumb {
     touch-action: manipulation; /* Prevent double-tap browser zoom on mobile */
 }
 
+/* Waterfall pause/play toggle button */
+.waterfall-pause-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 7px;
+    background: transparent;
+    border: 1px solid var(--accent, #667eea);
+    border-radius: 4px;
+    color: var(--text-light, #ccc);
+    cursor: pointer;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s;
+}
+
+.waterfall-pause-btn:hover {
+    background: var(--accent, #667eea);
+    color: #fff;
+}
+
+.waterfall-pause-btn[aria-pressed="true"] {
+    background: var(--accent, #667eea);
+    color: #fff;
+}
+
 #spectrum-btn-center {
     margin-right: 8px;
 }

@@ -10358,6 +10358,27 @@ function updateSpectrumColorScheme() {
     log(`Spectrum color scheme changed to ${scheme}`);
 }
 
+function toggleWaterfallPause() {
+    const sd = window.spectrumDisplay;
+    if (!sd) return;
+
+    const btn       = document.getElementById('waterfall-pause-btn');
+    const pauseIcon = document.getElementById('waterfall-pause-icon');
+    const playIcon  = document.getElementById('waterfall-play-icon');
+
+    if (sd.animationPaused) {
+        sd.resumeAnimation();
+        if (pauseIcon) pauseIcon.style.display = '';
+        if (playIcon)  playIcon.style.display  = 'none';
+        if (btn) { btn.setAttribute('aria-pressed', 'false'); btn.title = 'Pause waterfall'; }
+    } else {
+        sd.pauseAnimation();
+        if (pauseIcon) pauseIcon.style.display = 'none';
+        if (playIcon)  playIcon.style.display  = '';
+        if (btn) { btn.setAttribute('aria-pressed', 'true'); btn.title = 'Resume waterfall'; }
+    }
+}
+
 function updateSpectrumRange() {
     if (!spectrumDisplay) return;
 

@@ -284,12 +284,12 @@ class RotatorUI {
                 font-size: 10px;
                 font-weight: 600;
                 color: #ccc;
-                line-height: 1;
+                line-height: 1.2;
                 max-width: 36px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                word-break: break-all;
+                white-space: normal;
                 text-align: center;
+                overflow: hidden;
             }
 
             /* Inner tab bar — browser-style tabs */

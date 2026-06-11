@@ -20445,6 +20445,11 @@ const tooltipLine2 = timeStr;
                 body.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading antenna switch status...</p></div>';
             }
 
+            // Skip auto-refresh rebuild if the user is actively typing in this tab
+            if (antSwitchTabBuilt && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') {
+                return;
+            }
+
             try {
                 const [healthResp, testResp] = await Promise.all([
                     authenticatedFetch('/admin/ant-switch-health'),

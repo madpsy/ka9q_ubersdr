@@ -3407,16 +3407,16 @@ input[type="range"]::-moz-range-thumb {
     touch-action: manipulation; /* Prevent double-tap browser zoom on mobile */
 }
 
-/* Waterfall pause overlay — centred play button shown over the frozen canvas */
+/* Waterfall pause overlay — centred play button shown over the frozen spectrum canvas */
 .waterfall-pause-overlay {
-    position: absolute;
-    inset: 0;
+    position: fixed;
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.45);
-    z-index: 10;
+    z-index: 9999;
     cursor: pointer;
+    pointer-events: all;
 }
 
 .waterfall-pause-overlay-btn {

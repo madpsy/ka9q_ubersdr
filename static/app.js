@@ -10389,7 +10389,17 @@ function toggleWaterfallPause() {
         if (pauseIcon) pauseIcon.style.display = 'none';
         if (playIcon)  playIcon.style.display  = '';
         if (btn) { btn.setAttribute('aria-pressed', 'true'); btn.title = 'Resume waterfall'; }
-        if (overlay)   overlay.style.display   = '';
+        if (overlay) {
+            const canvas = document.getElementById('spectrum-display-canvas');
+            if (canvas) {
+                const r = canvas.getBoundingClientRect();
+                overlay.style.left   = r.left   + 'px';
+                overlay.style.top    = r.top    + 'px';
+                overlay.style.width  = r.width  + 'px';
+                overlay.style.height = r.height + 'px';
+            }
+            overlay.style.display = 'flex';
+        }
     }
 }
 

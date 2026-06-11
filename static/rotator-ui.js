@@ -290,6 +290,7 @@ class RotatorUI {
                 white-space: normal;
                 text-align: center;
                 overflow: hidden;
+                display: block;
             }
 
             /* Inner tab bar — browser-style tabs */
@@ -1028,7 +1029,7 @@ class RotatorUI {
                 const raw = (data.antenna_labels && data.antenna_labels[idx])
                     ? data.antenna_labels[idx]
                     : `Ant ${data.selected[0]}`;
-                label = raw.length > 10 ? raw.slice(0, 9) + '…' : raw;
+                label = raw.length > 15 ? raw.slice(0, 14) + '…' : raw;
             }
             tabLabel.textContent = label;
         }

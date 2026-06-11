@@ -775,6 +775,18 @@ class ChatUI {
                 opacity: 1;
             }
 
+            /* On touch devices (mobile/tablet) the OS keyboard has a built-in
+               emoji picker, so hide our custom emoji button to save space.
+               The freq button shifts right to fill the gap. */
+            @media (hover: none) and (pointer: coarse) {
+                .chat-emoji-btn {
+                    display: none;
+                }
+                .chat-freq-btn {
+                    right: 8px;
+                }
+            }
+
             .chat-emoji-picker {
                 position: absolute;
                 bottom: 100%;

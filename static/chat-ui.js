@@ -5,6 +5,22 @@
  */
 
 class ChatUI {
+    // Map of shortcode names (without colons) to emoji characters.
+    // These match the emojis shown in the picker so both entry methods are consistent.
+    static EMOJI_SHORTCODES = {
+        'grin':       '😁',  'smile':      '😊',  'laugh':      '😂',
+        'rofl':       '🤣',  'heart_eyes': '😍',  'sunglasses': '😎',
+        'thinking':   '🤔',  'thumbsup':   '👍',  'thumbsdown': '👎',
+        'heart':      '❤️',  'tada':       '🎉',  'fire':       '🔥',
+        'star':       '⭐',  'sparkles':   '✨',  'hundred':    '💯',
+        'rocket':     '🚀',  'target':     '🎯',  'wave':       '👋',
+        'pray':       '🙏',  'muscle':     '💪',  'handshake':  '🤝',
+        'clap':       '👏',  'music':      '🎵',  'radio':      '📻',
+        'satellite':  '📡',  'glowing_star':'🌟', 'bulb':       '💡',
+        'zap':        '⚡',  'rainbow':    '🌈',  'sun':        '☀️',
+        'moon':       '🌙',  'gear':       '⚙️',  'wrench':     '🔧',
+    };
+
     constructor(websocket) {
         this.chat = new UberSDRChat(websocket);
         this.isExpanded = false;
@@ -30,7 +46,8 @@ class ChatUI {
         this.hasMentions = false; // Track if there are unread mentions
         this.isReceivingHistory = true; // Track if we're receiving initial message history
         this.tabCompletionIndex = -1; // Track current tab completion index
-        this.tabCompletionMatches = []; // Store matching usernames for tab completion
+        this.tabCompletionMatches = []; // Store matching usernames/shortcodes for tab completion
+        this.tabCompletionMode = 'mention'; // 'mention' | 'emoji'
         this.audioContext = null; // Web Audio API context for notification sounds
         this.soundsMuted = false; // Track if notification sounds are muted
         this.lastSeenMessageTime = 0; // Track last message timestamp we've seen
@@ -1718,7 +1735,12 @@ class ChatUI {
     sendMessage() {
         const input = document.getElementById('chat-message-input');
         const sendBtn = document.getElementById('chat-send-btn');
-        const message = input.value.trim();
+
+        // Expand any remaining :shortcode: patterns that weren't tab-completed
+        const rawMessage = input.value.replace(/:(\w+):/g, (m, code) =>
+            ChatUI.EMOJI_SHORTCODES[code] !== undefined ? ChatUI.EMOJI_SHORTCODES[code] : m
+        );
+        const message = rawMessage.trim();
 
         // Don't send empty messages
         if (message.length === 0) {
@@ -1741,64 +1763,94 @@ class ChatUI {
     }
 
     /**
-     * Update mention suggestions dropdown as user types
+     * Update mention/emoji suggestions dropdown as user types
      */
     updateMentionSuggestions() {
         const input = document.getElementById('chat-message-input');
         const text = input.value;
         const cursorPos = input.selectionStart;
 
-        // Find the word before the cursor that starts with @
         const textBeforeCursor = text.substring(0, cursorPos);
-        const match = textBeforeCursor.match(/@(\w*)$/);
 
-        if (!match) {
-            this.hideMentionSuggestions();
+        // --- @mention completion ---
+        const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+        if (mentionMatch) {
+            this.tabCompletionMode = 'mention';
+            const partialUsername = mentionMatch[1].toLowerCase();
+
+            // Find matching usernames (exclude our own username)
+            const ourUsername = this.chat.username;
+            this.tabCompletionMatches = this.chat.activeUsers
+                .map(u => u.username)
+                .filter(username =>
+                    username !== ourUsername &&
+                    username.toLowerCase().startsWith(partialUsername)
+                )
+                .sort();
+
+            if (this.tabCompletionMatches.length === 0) {
+                this.hideMentionSuggestions();
+                return;
+            }
+
+            // Reset index if matches changed
+            if (this.tabCompletionIndex >= this.tabCompletionMatches.length) {
+                this.tabCompletionIndex = 0;
+            } else if (this.tabCompletionIndex < 0) {
+                this.tabCompletionIndex = 0;
+            }
+
+            this.showMentionSuggestions();
             return;
         }
 
-        const partialUsername = match[1].toLowerCase();
+        // --- :shortcode: emoji completion ---
+        // Trigger after the user types a colon followed by at least one word character
+        const emojiMatch = textBeforeCursor.match(/:(\w+)$/);
+        if (emojiMatch) {
+            this.tabCompletionMode = 'emoji';
+            const partial = emojiMatch[1].toLowerCase();
+            this.tabCompletionMatches = Object.keys(ChatUI.EMOJI_SHORTCODES)
+                .filter(code => code.startsWith(partial))
+                .sort();
 
-        // Find matching usernames (exclude our own username)
-        const ourUsername = this.chat.username;
-        this.tabCompletionMatches = this.chat.activeUsers
-            .map(u => u.username)
-            .filter(username =>
-                username !== ourUsername &&
-                username.toLowerCase().startsWith(partialUsername)
-            )
-            .sort();
+            if (this.tabCompletionMatches.length === 0) {
+                this.hideMentionSuggestions();
+                return;
+            }
 
-        if (this.tabCompletionMatches.length === 0) {
-            this.hideMentionSuggestions();
+            if (this.tabCompletionIndex < 0 || this.tabCompletionIndex >= this.tabCompletionMatches.length) {
+                this.tabCompletionIndex = 0;
+            }
+
+            this.showMentionSuggestions();
             return;
         }
 
-        // Reset index if matches changed
-        if (this.tabCompletionIndex >= this.tabCompletionMatches.length) {
-            this.tabCompletionIndex = 0;
-        } else if (this.tabCompletionIndex < 0) {
-            this.tabCompletionIndex = 0;
-        }
-
-        // Show suggestions
-        this.showMentionSuggestions();
+        this.hideMentionSuggestions();
     }
 
     /**
-     * Show mention suggestions dropdown
+     * Show mention/emoji suggestions dropdown
      */
     showMentionSuggestions() {
         const suggestionsDiv = document.getElementById('chat-mention-suggestions');
         suggestionsDiv.innerHTML = '';
 
-        this.tabCompletionMatches.forEach((username, index) => {
+        this.tabCompletionMatches.forEach((match, index) => {
             const item = document.createElement('div');
             item.className = 'chat-mention-suggestion-item';
             if (index === this.tabCompletionIndex) {
                 item.classList.add('selected');
             }
-            item.textContent = '@' + username;
+
+            if (this.tabCompletionMode === 'emoji') {
+                const emoji = ChatUI.EMOJI_SHORTCODES[match];
+                item.textContent = `${emoji}  :${match}:`;
+            } else {
+                item.textContent = '@' + match;
+            }
+
             item.onclick = () => {
                 this.tabCompletionIndex = index;
                 this.completeMention();
@@ -1810,17 +1862,18 @@ class ChatUI {
     }
 
     /**
-     * Hide mention suggestions dropdown
+     * Hide mention/emoji suggestions dropdown
      */
     hideMentionSuggestions() {
         const suggestionsDiv = document.getElementById('chat-mention-suggestions');
         suggestionsDiv.style.display = 'none';
         this.tabCompletionIndex = -1;
         this.tabCompletionMatches = [];
+        this.tabCompletionMode = 'mention';
     }
 
     /**
-     * Complete the mention with the selected username
+     * Complete the mention or emoji shortcode with the selected item
      */
     completeMention() {
         if (this.tabCompletionMatches.length === 0 || this.tabCompletionIndex < 0) {
@@ -1830,24 +1883,36 @@ class ChatUI {
         const input = document.getElementById('chat-message-input');
         const text = input.value;
         const cursorPos = input.selectionStart;
-
-        // Find the @ mention before cursor
         const textBeforeCursor = text.substring(0, cursorPos);
-        const match = textBeforeCursor.match(/@(\w*)$/);
-
-        if (!match) {
-            return;
-        }
-
-        const atPosition = match.index;
-        const completedUsername = this.tabCompletionMatches[this.tabCompletionIndex];
         const textAfterCursor = text.substring(cursorPos);
-        const newText = text.substring(0, atPosition) + '@' + completedUsername + ' ' + textAfterCursor;
 
-        input.value = newText;
-        // Set cursor position after the completed username and space
-        const newCursorPos = atPosition + completedUsername.length + 2; // +2 for @ and space
-        input.setSelectionRange(newCursorPos, newCursorPos);
+        if (this.tabCompletionMode === 'emoji') {
+            // Find the opening colon + partial word before cursor
+            const match = textBeforeCursor.match(/:(\w+)$/);
+            if (!match) return;
+
+            const colonPos = match.index;
+            const code = this.tabCompletionMatches[this.tabCompletionIndex];
+            const emoji = ChatUI.EMOJI_SHORTCODES[code];
+
+            // Replace ":partial" with the actual emoji character
+            input.value = text.substring(0, colonPos) + emoji + textAfterCursor;
+            const newPos = colonPos + emoji.length;
+            input.setSelectionRange(newPos, newPos);
+        } else {
+            // @mention completion
+            const match = textBeforeCursor.match(/@(\w*)$/);
+            if (!match) return;
+
+            const atPosition = match.index;
+            const completedUsername = this.tabCompletionMatches[this.tabCompletionIndex];
+            const newText = text.substring(0, atPosition) + '@' + completedUsername + ' ' + textAfterCursor;
+
+            input.value = newText;
+            // Set cursor position after the completed username and space
+            const newCursorPos = atPosition + completedUsername.length + 2; // +2 for @ and space
+            input.setSelectionRange(newCursorPos, newCursorPos);
+        }
 
         this.hideMentionSuggestions();
     }

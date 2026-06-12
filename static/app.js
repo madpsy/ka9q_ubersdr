@@ -7183,6 +7183,12 @@ function pixelToFrequency(pixel, canvasWidth) {
 let lastVUMeterUpdate = 0;
 const vuMeterUpdateInterval = 33; // 30 fps (1000ms / 30 = 33ms) - matches oscilloscope
 
+// Cached mobile-layout query — same breakpoint as the CSS @media (max-width: 1024px).
+// Used to skip VU meter and S-meter updates when those elements are hidden on mobile.
+const _mobileMediaQuery = window.matchMedia('(max-width: 1024px)');
+let _isMobileLayout = _mobileMediaQuery.matches;
+_mobileMediaQuery.addEventListener('change', e => { _isMobileLayout = e.matches; });
+
 
 function startVisualization() {
     if (!analyser) return;
@@ -7197,7 +7203,9 @@ function startVisualization() {
 
         // Update VU meter at 30fps — matches spectrum display rate and avoids
         // triggering style recalc + layout on every 60fps animation frame.
-        if (now - lastVUMeterUpdate >= vuMeterUpdateInterval) {
+        // Skip entirely on mobile: the compact VU meter may not be visible and
+        // the S-meter + mini charts are hidden by CSS, so the work is wasted.
+        if (!_isMobileLayout && now - lastVUMeterUpdate >= vuMeterUpdateInterval) {
             updateVUMeter();
             lastVUMeterUpdate = now;
         }
@@ -13589,9 +13597,12 @@ function updateSignalQualityDisplay() {
         drawSNRChart();
     }
 
-    // Draw mini charts on main page (always — they're visible on the main page)
-    drawDbfsHistoryChart();
-    drawSnrHistoryChart();
+    // Draw mini charts on main page — skip on mobile where .smeter-control-group
+    // is hidden by CSS (display:none), so drawing is wasted CPU.
+    if (typeof _isMobileLayout === 'undefined' || !_isMobileLayout) {
+        drawDbfsHistoryChart();
+        drawSnrHistoryChart();
+    }
 }
 
 // Expose signal quality update function globally

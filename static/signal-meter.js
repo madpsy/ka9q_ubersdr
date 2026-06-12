@@ -247,8 +247,12 @@ class SignalMeter {
             }
         }
 
-        // Update S-meter needle if it exists
-        if (typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {
+        // Update S-meter needle if it exists and is visible.
+        // On mobile the .smeter-control-group is hidden via CSS (display:none), so
+        // skip the canvas redraw and DOM style writes — they're wasted CPU.
+        // _isMobileLayout is a cached matchMedia result maintained by app.js.
+        const _smeterMobile = typeof _isMobileLayout !== 'undefined' && _isMobileLayout;
+        if (!_smeterMobile && typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {
             // Guard against NaN/non-finite values from getFloat32() on malformed packets,
             // and against the -999 sentinel used when audio hasn't arrived yet.
             const bpValid = isFinite(basebandPower) && basebandPower !== -999;

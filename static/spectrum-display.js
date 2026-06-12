@@ -200,6 +200,7 @@ class SpectrumDisplay {
         this.overlayDiv = document.createElement('div');
         this.overlayDiv.className = 'spectrum-frequency-overlay';
         this.overlayDiv.style.position = 'fixed';
+        this.overlayDiv.style.height = '75px'; // 45px bookmarks + 30px frequency scale — fixed, never changes
         this.overlayDiv.style.pointerEvents = 'none'; // Let clicks pass through to elements below
         // Position and size will be set dynamically based on canvas position
 
@@ -3029,10 +3030,15 @@ class SpectrumDisplay {
             this._overlayRectCache = sourceCanvas.getBoundingClientRect();
         }
         const r = this._overlayRectCache;
-        this.overlayDiv.style.top    = r.top    + 'px';
-        this.overlayDiv.style.left   = r.left   + 'px';
-        this.overlayDiv.style.width  = r.width  + 'px';
-        this.overlayDiv.style.height = '75px'; // 45px bookmarks + 30px frequency scale
+        // Guard each write — setting .style properties triggers Recalculate Style + Layout
+        // even when the value is unchanged. At 30fps this was ~440ms per profiling window.
+        // The overlay position only changes on resize/scroll; height never changes (set at init).
+        const top   = r.top   + 'px';
+        const left  = r.left  + 'px';
+        const width = r.width + 'px';
+        if (this.overlayDiv.style.top   !== top)   this.overlayDiv.style.top   = top;
+        if (this.overlayDiv.style.left  !== left)  this.overlayDiv.style.left  = left;
+        if (this.overlayDiv.style.width !== width) this.overlayDiv.style.width = width;
     }
 
     // Draw cursor showing currently tuned frequency and bandwidth on overlay canvas

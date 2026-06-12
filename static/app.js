@@ -1172,6 +1172,7 @@ let vuMeterBarCompact = null;
 let vuMeterPeakCompact = null;
 let vuMeterLedsCompact = null;       // LED canvas element
 let vuMeterLedsCtx = null;           // LED canvas 2D context
+let vuMeterLedsCachedWidth = 0;      // ResizeObserver-cached CSS width (avoids offsetWidth reflow)
 let vuMeterStyle = 'bar'; // 'bar' or 'led' — set properly in DOMContentLoaded after server UI config is fetched
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visibility)
@@ -1992,6 +1993,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const rect = vuMeterLedsCompact.getBoundingClientRect();
         vuMeterLedsCompact.width = rect.width > 0 ? Math.floor(rect.width) : 450;
         vuMeterLedsCompact.height = 40;
+
+        // Cache the canvas CSS width via ResizeObserver so updateVUMeter() never
+        // needs to read offsetWidth (a layout-forcing property) on every frame.
+        vuMeterLedsCachedWidth = vuMeterLedsCompact.width;
+        new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const w = Math.floor(entry.contentRect.width);
+                if (w > 0) vuMeterLedsCachedWidth = w;
+            }
+        }).observe(vuMeterLedsCompact);
     }
 
     // Apply initial VU meter style visibility
@@ -7184,8 +7195,12 @@ function startVisualization() {
         // Always check for clipping (independent of visualization state)
         checkClipping();
 
-        // Update VU meter every frame (no throttling) to match oscilloscope responsiveness
-        updateVUMeter();
+        // Update VU meter at 30fps — matches spectrum display rate and avoids
+        // triggering style recalc + layout on every 60fps animation frame.
+        if (now - lastVUMeterUpdate >= vuMeterUpdateInterval) {
+            updateVUMeter();
+            lastVUMeterUpdate = now;
+        }
 
         // Only update other visualizations if the section is expanded (performance optimization)
         if (audioVisualizationEnabled && !audioVisualizationPaused) {
@@ -7490,10 +7505,13 @@ function updateVUMeter() {
         if (vuMeterLedsCtx && vuMeterLedsCompact) {
             const canvas = vuMeterLedsCompact;
 
-            // Ensure canvas pixel size matches its CSS layout size
-            const cssWidth = canvas.offsetWidth;
+            // Ensure canvas pixel size matches its CSS layout size.
+            // Use the ResizeObserver-cached width — reading offsetWidth every frame
+            // forces a synchronous layout reflow (~134ms per profiling window).
+            const cssWidth = vuMeterLedsCachedWidth || canvas.width;
             if (cssWidth > 0 && canvas.width !== cssWidth) {
                 canvas.width = cssWidth;
+                vuMeterLedsCachedWidth = cssWidth;
             }
 
             const W = canvas.width;

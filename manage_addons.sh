@@ -335,7 +335,8 @@ api_add_addon_proxy() {
         return 1
     fi
 
-    # Build the JSON payload matching the addonProxyJSON struct
+    # Build the JSON payload matching the addonProxyJSON struct.
+    # If the allow list opens up all of IPv4, open up IPv6 too.
     local payload
     payload=$(echo "$addon" | jq '{
         name:           .name,
@@ -346,7 +347,9 @@ api_add_addon_proxy() {
         require_admin:  .require_admin,
         rewrite_origin: .rewrite_origin,
         rate_limit:     .rate_limit,
-        allowed_ips:    .allowed_ips
+        allowed_ips:    (.allowed_ips
+                         | if index("0.0.0.0/0") and (index("::/0") | not)
+                           then . + ["::/0"] else . end)
     }')
 
     echo "Registering addon proxy '$name' with UberSDR..."
@@ -369,6 +372,13 @@ api_update_addon_proxy() {
         return 1
     fi
 
+    # Preserve the allowed_ips currently set on the live proxy so updating an
+    # addon never clobbers IPs added since installation. Fall back to the
+    # addons.json defaults only if the live proxy can't be read.
+    local live_ips=""
+    live_ips=$(_api_curl GET "/admin/addon-proxies" \
+        | jq -c --arg name "$name" '.[] | select(.name == $name) | .allowed_ips // empty') || live_ips=""
+
     local payload
     payload=$(echo "$addon" | jq '{
         name:           .name,
@@ -381,6 +391,13 @@ api_update_addon_proxy() {
         rate_limit:     .rate_limit,
         allowed_ips:    .allowed_ips
     }')
+    if [[ -n "$live_ips" ]]; then
+        payload=$(echo "$payload" | jq --argjson ips "$live_ips" '.allowed_ips = $ips')
+    fi
+    # If the allow list opens up all of IPv4, open up IPv6 too.
+    payload=$(echo "$payload" | jq '.allowed_ips |=
+        (if index("0.0.0.0/0") and (index("::/0") | not)
+         then . + ["::/0"] else . end)')
 
     echo "Updating addon proxy '$name' in UberSDR..."
     local response

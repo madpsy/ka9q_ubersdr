@@ -8,13 +8,13 @@ import (
 // AudioExtensionParams contains audio stream parameters (from session, not user-configurable)
 type AudioExtensionParams struct {
 	SampleRate    int // Hz (e.g., 48000)
-	Channels      int // Always 1 (mono)
+	Channels      int // 1 = mono (SSB/AM/FM), 2 = stereo IQ (iq48/iq96/iq192/iq384 modes)
 	BitsPerSample int // Always 16
 }
 
 // AudioSample contains PCM audio data with timing information
 type AudioSample struct {
-	PCMData      []int16 // PCM audio samples (mono, int16)
+	PCMData      []int16 // PCM audio samples (int16); stereo IQ = interleaved [I0,Q0,I1,Q1,...]
 	RTPTimestamp uint32  // RTP timestamp from radiod (for jitter/loss detection)
 	GPSTimeNs    int64   // GPS-synchronized Unix time in nanoseconds (packet arrival time)
 }

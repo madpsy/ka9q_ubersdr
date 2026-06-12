@@ -119,11 +119,13 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		return aem.sendErrorSafe(nil, conn, "no active audio session found")
 	}
 
-	// Get audio parameters from session
+	// Get audio parameters from session.
+	// Channels is 1 for mono modes (USB, LSB, AM, FM, etc.) and 2 for IQ modes
+	// (iq48, iq96, iq192, iq384) where the audio tap delivers stereo interleaved I/Q.
 	audioParams := AudioExtensionParams{
 		SampleRate:    session.GetSampleRate(),
-		Channels:      1,  // Always mono
-		BitsPerSample: 16, // Always 16-bit
+		Channels:      session.Channels, // 1 = mono, 2 = stereo IQ
+		BitsPerSample: 16,               // Always 16-bit
 	}
 
 	// Add receiver locator and CTY database to extension params

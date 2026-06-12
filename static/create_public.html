@@ -101,6 +101,45 @@
                         <strong>⚠️ Invalid Callsign</strong>
                         <p id="callsignErrorMessage" style="margin: 5px 0 0 0;"></p>
                     </div>
+
+                    <!-- Migration panel: shown when callsign is taken by a different instance -->
+                    <div id="migrationPanel" style="display: none; margin-top: 15px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
+                        <strong>🔄 Moving to a new machine?</strong>
+                        <p style="margin: 8px 0 12px 0; font-size: 14px;">If this callsign belongs to your old instance, you can migrate it to this new machine. Your registration history, email verification, and public URL will all be preserved. <strong>Your old instance will no longer be registered.</strong></p>
+
+                        <div id="migrationInputArea">
+                            <label style="font-size: 14px; font-weight: bold; display: block; margin-bottom: 5px;">Your existing instance UUID <span style="color: #dc3545;">*</span></label>
+                            <small style="display: block; margin-bottom: 8px; color: #666;">Found in your old machine's config file under <code>instance_reporting.instance_uuid</code></small>
+                            <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                <input type="text" id="migrationOldUUID" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="flex: 1; font-family: monospace; font-size: 13px; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <button type="button" onclick="verifyMigrationUUID()" id="migrationVerifyBtn" style="padding: 8px 16px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; white-space: nowrap;">Verify UUID</button>
+                            </div>
+                            <div id="migrationVerifyError" style="display: none; margin-top: 8px; padding: 8px 10px; background: #f8d7da; border-left: 3px solid #dc3545; border-radius: 4px; color: #721c24; font-size: 13px;"></div>
+                        </div>
+
+                        <!-- Shown after successful UUID verification -->
+                        <div id="migrationConfirmArea" style="display: none; margin-top: 12px; padding: 12px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px;">
+                            <strong style="color: #155724;">✅ UUID verified — this belongs to:</strong>
+                            <table style="margin: 10px 0 0 0; font-size: 14px; border-collapse: collapse; width: 100%;">
+                                <tr><td style="padding: 3px 10px 3px 0; color: #555; white-space: nowrap;">Callsign:</td><td id="migrationVerifiedCallsign" style="font-weight: bold;"></td></tr>
+                                <tr><td style="padding: 3px 10px 3px 0; color: #555; white-space: nowrap;">Last seen:</td><td id="migrationVerifiedLastSeen"></td></tr>
+                                <tr><td style="padding: 3px 10px 3px 0; color: #555; white-space: nowrap;">Email verified:</td><td id="migrationVerifiedEmail"></td></tr>
+                            </table>
+                            <div style="margin-top: 12px; padding: 10px; background: #fff3cd; border-left: 3px solid #ffc107; border-radius: 4px; font-size: 13px; color: #856404;">
+                                ⚠️ <strong>Your old instance will be immediately disconnected and will no longer appear in the public registry.</strong> Only proceed if you are replacing it with this new machine.
+                            </div>
+                            <div style="margin-top: 12px; display: flex; gap: 8px;">
+                                <button type="button" onclick="cancelMigration()" style="padding: 8px 16px; background: white; color: #6c757d; border: 1px solid #6c757d; border-radius: 4px; cursor: pointer; font-size: 14px;">Cancel</button>
+                                <button type="button" onclick="confirmMigration()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;">✓ Confirm Migration</button>
+                            </div>
+                        </div>
+
+                        <!-- Shown after migration is confirmed -->
+                        <div id="migrationConfirmedBadge" style="display: none; margin-top: 12px; padding: 10px 14px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724; font-size: 14px;">
+                            ✅ <strong>Migration confirmed.</strong> Your callsign and registration history will transfer to this machine when you click <em>Enable Public Reporting</em>.
+                            <button type="button" onclick="cancelMigration()" style="margin-left: 12px; padding: 3px 10px; background: white; color: #6c757d; border: 1px solid #6c757d; border-radius: 4px; cursor: pointer; font-size: 12px;">Undo</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="form-group" id="useTunnelField">
@@ -274,6 +313,13 @@
                         <span class="review-label">Instance UUID:</span>
                         <span class="review-value" id="reviewUUID">Loading...</span>
                     </div>
+                </div>
+
+                <!-- Migration notice — shown only when migration is confirmed -->
+                <div id="reviewMigrationNotice" style="display: none; margin-bottom: 20px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
+                    <strong>🔄 Instance Migration</strong>
+                    <p style="margin: 8px 0 4px 0; font-size: 14px;">Your callsign and registration history will be transferred from your old instance to this new machine when you click <em>Enable Public Reporting</em>.</p>
+                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #856404;"><strong>⚠️ Your old instance will be immediately disconnected and will no longer appear in the public registry.</strong></p>
                 </div>
 
                 <div class="review-section">

@@ -4,6 +4,10 @@ let currentConfig = {};
 let testPassed = false;
 let generatedUUID = null;
 
+// Migration state — set when user confirms they are migrating from an old instance
+let migrationOldUUID = null;       // old secret UUID to migrate from
+let migrationConfirmed = false;    // true once user clicks "Confirm Migration"
+
 // Initialize wizard on page load
 document.addEventListener('DOMContentLoaded', async () => {
     await loadCurrentConfig();
@@ -125,7 +129,16 @@ function setupEventListeners() {
     document.getElementById('adminEmail').addEventListener('blur', validateAdminEmail);
     
     // Admin callsign validation
-    document.getElementById('adminCallsign').addEventListener('input', validateAdminCallsign);
+    document.getElementById('adminCallsign').addEventListener('input', function() {
+        // Reset migration state when callsign changes
+        if (migrationConfirmed || migrationOldUUID) {
+            migrationOldUUID = null;
+            migrationConfirmed = false;
+            const panel = document.getElementById('migrationPanel');
+            if (panel) panel.style.display = 'none';
+        }
+        validateAdminCallsign();
+    });
     document.getElementById('adminCallsign').addEventListener('blur', async function() {
         // First validate format
         if (validateAdminCallsign()) {
@@ -522,6 +535,12 @@ function updateReviewSection() {
     }
     document.getElementById('reviewUUID').textContent = uuid;
 
+    // Show migration notice if migration has been confirmed
+    const migrationNotice = document.getElementById('reviewMigrationNotice');
+    if (migrationNotice) {
+        migrationNotice.style.display = migrationConfirmed ? 'block' : 'none';
+    }
+
     // Show tunnel status (only if tunnel is selected)
     if (useTunnel) {
         document.getElementById('reviewTunnelItem').style.display = 'flex';
@@ -824,12 +843,18 @@ async function validateCallsignAvailability() {
             // Callsign exists - need to check if it's ours
             const registryData = await response.json();
             
+            // If migration has already been confirmed, treat callsign as ours
+            if (migrationConfirmed && migrationOldUUID) {
+                showCallsignStatus('success', 'This is your registered callsign (migration confirmed)');
+                return true;
+            }
+
             // Step 2: Get our SECRET UUID from config (this is the private instance_uuid)
             const ourSecretUUID = currentConfig.instance_reporting?.instance_uuid;
             
             if (!ourSecretUUID) {
-                // We don't have a UUID yet (new instance) but callsign is taken
-                showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`);
+                // We don't have a UUID yet (new instance) but callsign is taken — offer migration
+                showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`, true);
                 return false;
             }
             
@@ -847,14 +872,14 @@ async function validateCallsignAvailability() {
                     showCallsignStatus('success', 'This is your registered callsign');
                     return true;
                 } else {
-                    // Different instance owns this callsign
-                    showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`);
+                    // Different instance owns this callsign — offer migration
+                    showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`, true);
                     return false;
                 }
             } else {
                 // Our secret UUID not found in registry yet (first time setup)
-                // But callsign is already taken by someone else
-                showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`);
+                // But callsign is already taken by someone else — offer migration
+                showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`, true);
                 return false;
             }
         }
@@ -870,11 +895,12 @@ async function validateCallsignAvailability() {
     }
 }
 
-function showCallsignStatus(type, message) {
+function showCallsignStatus(type, message, showMigrationPanel) {
     const errorDiv = document.getElementById('callsignValidationError');
     const errorMessage = document.getElementById('callsignErrorMessage');
     const callsignInput = document.getElementById('adminCallsign');
     const alertBox = document.getElementById('alertBox');
+    const migrationPanel = document.getElementById('migrationPanel');
     
     if (type === 'error') {
         errorDiv.style.display = 'block';
@@ -882,9 +908,14 @@ function showCallsignStatus(type, message) {
         errorDiv.style.borderLeft = '4px solid #dc3545';
         errorMessage.textContent = message;
         callsignInput.style.borderColor = '#dc3545';
+        // Show migration panel when callsign is taken (but not for format errors)
+        if (migrationPanel) {
+            migrationPanel.style.display = showMigrationPanel ? 'block' : 'none';
+        }
     } else if (type === 'success') {
         errorDiv.style.display = 'none';
         callsignInput.style.borderColor = '#28a745';
+        if (migrationPanel) migrationPanel.style.display = 'none';
         // Clear any alert messages when validation succeeds
         if (alertBox) {
             alertBox.style.display = 'none';
@@ -895,7 +926,106 @@ function showCallsignStatus(type, message) {
         errorDiv.style.borderLeft = '4px solid #ffc107';
         errorMessage.textContent = message;
         callsignInput.style.borderColor = '#ffc107';
+        if (migrationPanel) migrationPanel.style.display = 'none';
     }
+}
+
+// ---------------------------------------------------------------------------
+// Migration helpers
+// ---------------------------------------------------------------------------
+
+// Called when user clicks "Verify UUID" in the migration panel
+async function verifyMigrationUUID() {
+    const uuidInput = document.getElementById('migrationOldUUID');
+    const verifyBtn = document.getElementById('migrationVerifyBtn');
+    const errorDiv = document.getElementById('migrationVerifyError');
+    const confirmArea = document.getElementById('migrationConfirmArea');
+    const callsign = document.getElementById('adminCallsign').value.trim().toUpperCase();
+
+    const oldUUID = uuidInput.value.trim();
+    errorDiv.style.display = 'none';
+    confirmArea.style.display = 'none';
+
+    // Basic UUID format check
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(oldUUID)) {
+        errorDiv.textContent = 'Please enter a valid UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)';
+        errorDiv.style.display = 'block';
+        return;
+    }
+
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = '⏳ Verifying...';
+
+    try {
+        const resp = await fetch(`https://instances.ubersdr.org/api/lookup/${oldUUID}`);
+        if (resp.status === 404) {
+            errorDiv.textContent = 'UUID not found in the registry. Please check you copied it correctly.';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        if (!resp.ok) {
+            errorDiv.textContent = 'Unable to verify UUID — please try again.';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        const data = await resp.json();
+        const serverCallsign = (data.callsign || '').toUpperCase();
+
+        // Confirm the UUID belongs to the callsign the user entered
+        if (serverCallsign !== callsign) {
+            errorDiv.textContent = `That UUID belongs to callsign ${serverCallsign}, not ${callsign}. Please check you entered the correct UUID.`;
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        // Show confirmation panel with verified details
+        document.getElementById('migrationVerifiedCallsign').textContent = serverCallsign;
+        const lastSeen = data.last_seen ? new Date(data.last_seen).toLocaleString() : 'Unknown';
+        document.getElementById('migrationVerifiedLastSeen').textContent = lastSeen;
+        document.getElementById('migrationVerifiedEmail').textContent = data.email_verified ? '✅ Yes' : '❌ No';
+
+        // Store the old UUID for use during migration
+        migrationOldUUID = oldUUID;
+        confirmArea.style.display = 'block';
+
+    } catch (err) {
+        errorDiv.textContent = 'Network error — unable to verify UUID. Please check your connection and try again.';
+        errorDiv.style.display = 'block';
+    } finally {
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify UUID';
+    }
+}
+
+// Called when user clicks "Confirm Migration"
+function confirmMigration() {
+    migrationConfirmed = true;
+    document.getElementById('migrationConfirmArea').style.display = 'none';
+    document.getElementById('migrationInputArea').style.display = 'none';
+    document.getElementById('migrationConfirmedBadge').style.display = 'block';
+
+    // Callsign is now "ours" via migration — clear the error state and allow progression
+    const callsignInput = document.getElementById('adminCallsign');
+    callsignInput.style.borderColor = '#28a745';
+    document.getElementById('callsignValidationError').style.display = 'none';
+}
+
+// Called when user clicks "Cancel" or "Undo" in the migration panel
+function cancelMigration() {
+    migrationOldUUID = null;
+    migrationConfirmed = false;
+    document.getElementById('migrationConfirmArea').style.display = 'none';
+    document.getElementById('migrationConfirmedBadge').style.display = 'none';
+    document.getElementById('migrationInputArea').style.display = 'block';
+    document.getElementById('migrationOldUUID').value = '';
+    document.getElementById('migrationVerifyError').style.display = 'none';
+
+    // Re-show the callsign error
+    const callsignInput = document.getElementById('adminCallsign');
+    callsignInput.style.borderColor = '#dc3545';
+    document.getElementById('callsignValidationError').style.display = 'block';
 }
 
 // Validation
@@ -915,7 +1045,12 @@ async function validateCurrentStep() {
 
         // Validate callsign availability third (async)
         if (!await validateCallsignAvailability()) {
-            showAlert('This callsign is already registered to another instance. Please use a different callsign.', 'error');
+            if (migrationConfirmed) {
+                // Should not happen, but guard anyway
+                showAlert('Migration state error — please refresh and try again.', 'error');
+            } else {
+                showAlert('This callsign is already registered. Use a different callsign, or enter your existing UUID below to migrate to this machine.', 'error');
+            }
             return false;
         }
 
@@ -1174,7 +1309,90 @@ async function finishWizard() {
         
         const result = await response.json();
         showAlert(result.message || 'Configuration saved successfully! Server is restarting...', 'success');
-        
+
+        // ── Migration: call collector and (if needed) tunnel migration APIs ──
+        // Must happen AFTER config is saved so the new UUID is written to disk.
+        // Collector migration must happen BEFORE tunnel migration (tunnel verifies
+        // the new UUID against the collector on first connect).
+        if (migrationConfirmed && migrationOldUUID) {
+            const newUUID = updatedConfig.instance_reporting.instance_uuid;
+            const callsignForMigration = adminCallsign;
+
+            // Determine collector and tunnel base URLs from config
+            const collectorBase = 'https://instances.ubersdr.org';
+            let tunnelBase = 'https://tunnel.ubersdr.org';
+            if (currentConfig.instance_reporting?.tunnel_server_host) {
+                tunnelBase = 'https://' + currentConfig.instance_reporting.tunnel_server_host;
+            }
+
+            // Build a status panel to show per-step results
+            // We inject it above the alertBox so it persists through the countdown
+            let migStatusEl = document.getElementById('migrationStatusPanel');
+            if (!migStatusEl) {
+                migStatusEl = document.createElement('div');
+                migStatusEl.id = 'migrationStatusPanel';
+                migStatusEl.style.cssText = 'margin: 15px 0; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; font-size: 14px;';
+                const alertBox = document.getElementById('alertBox');
+                alertBox.parentNode.insertBefore(migStatusEl, alertBox);
+            }
+
+            const setMigStatus = (html) => { migStatusEl.innerHTML = '<strong>🔄 Migration status:</strong><br>' + html; };
+            setMigStatus('⏳ Contacting registry...');
+
+            // Track results for final summary
+            let collectorOK = false;
+            let tunnelOK = null; // null = not attempted
+
+            // 1. Collector migration (always required)
+            try {
+                const collectorMigResp = await fetch(`${collectorBase}/api/migrate/${migrationOldUUID}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_uuid: newUUID, callsign: callsignForMigration })
+                });
+                if (collectorMigResp.ok) {
+                    collectorOK = true;
+                    setMigStatus('✅ Registry: migrated successfully' + (useTunnel ? '<br>⏳ Contacting tunnel server...' : ''));
+                } else {
+                    const errData = await collectorMigResp.json().catch(() => ({}));
+                    const errMsg = errData.error || `HTTP ${collectorMigResp.status}`;
+                    console.warn('Collector migration failed:', errMsg);
+                    setMigStatus(`❌ Registry: migration failed — ${errMsg}<br><small style="color:#856404">Your instance will still start. Contact support if the callsign conflict persists.</small>`);
+                }
+            } catch (migErr) {
+                console.warn('Collector migration network error:', migErr);
+                setMigStatus('❌ Registry: could not connect — ' + migErr.message + '<br><small style="color:#856404">Your instance will still start. You may need to retry migration later.</small>');
+            }
+
+            // 2. Tunnel migration (only if tunnel service is selected)
+            if (useTunnel) {
+                tunnelOK = false;
+                try {
+                    const tunnelMigResp = await fetch(`${tunnelBase}/migrate/${migrationOldUUID}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ new_uuid: newUUID, callsign: callsignForMigration })
+                    });
+                    if (tunnelMigResp.ok) {
+                        tunnelOK = true;
+                    } else {
+                        const errData = await tunnelMigResp.json().catch(() => ({}));
+                        console.warn('Tunnel migration failed:', errData.error || tunnelMigResp.status);
+                    }
+                } catch (migErr) {
+                    console.warn('Tunnel migration network error:', migErr);
+                }
+
+                // Update panel with both results
+                const collectorLine = collectorOK ? '✅ Registry: migrated' : '❌ Registry: failed (see above)';
+                const tunnelLine = tunnelOK
+                    ? '✅ Tunnel: migrated — old instance disconnected'
+                    : '⚠️ Tunnel: migration failed — your instance will reconnect automatically once it starts';
+                setMigStatus(collectorLine + '<br>' + tunnelLine);
+            }
+        }
+        // ── End migration ──
+
         // Show restart countdown and redirect to admin panel
         setTimeout(() => {
             showRestartCountdown();

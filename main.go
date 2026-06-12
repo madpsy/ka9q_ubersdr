@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/drm"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/freedv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
@@ -1609,6 +1610,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: freedv v%s", freedvInfo["version"].(string))
+
+	// Register DRM extension
+	drmInfo := drm.GetInfo()
+
+	drmFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		drmParams := drm.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		drmExt, err := drm.Factory(drmParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &drmExtensionWrapper{ext: drmExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"drm",
+		drmFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        drmInfo["name"].(string),
+			Description: drmInfo["description"].(string),
+			Version:     drmInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: drm v%s", drmInfo["version"].(string))
 
 	// Create audio extension manager (pass receiver locator and CTY database for enrichment)
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
@@ -6011,6 +6041,43 @@ func (w *freedvExtensionWrapper) GetName() string {
 
 // CrashChan implements CrashReporter — delegates to the inner FreeDVExtension.
 func (w *freedvExtensionWrapper) CrashChan() <-chan error {
+	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return cr.CrashChan()
+	}
+	return nil
+}
+
+// drmExtensionWrapper wraps a drm.AudioExtension to implement main.AudioExtension
+type drmExtensionWrapper struct {
+	ext drm.AudioExtension
+}
+
+func (w *drmExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to drm.AudioSample
+	drmChan := make(chan drm.AudioSample, cap(audioChan))
+	go func() {
+		defer close(drmChan)
+		for sample := range audioChan {
+			drmChan <- drm.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(drmChan, resultChan)
+}
+
+func (w *drmExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *drmExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// CrashChan implements CrashReporter — delegates to the inner DRMExtension.
+func (w *drmExtensionWrapper) CrashChan() <-chan error {
 	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
 		return cr.CrashChan()
 	}

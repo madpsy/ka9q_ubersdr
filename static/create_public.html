@@ -109,7 +109,7 @@
 
                         <div id="migrationInputArea">
                             <label style="font-size: 14px; font-weight: bold; display: block; margin-bottom: 5px;">Your existing instance UUID <span style="color: #dc3545;">*</span></label>
-                            <small style="display: block; margin-bottom: 8px; color: #666;">Found in your old machine's config file under <code>instance_reporting.instance_uuid</code></small>
+                            <small style="display: block; margin-bottom: 8px; color: #666;">On your old machine: <strong>Admin → Config → Instance Reporting → Instance UUID</strong></small>
                             <div style="display: flex; gap: 8px; align-items: flex-start;">
                                 <input type="text" id="migrationOldUUID" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="flex: 1; font-family: monospace; font-size: 13px; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px;">
                                 <button type="button" onclick="verifyMigrationUUID()" id="migrationVerifyBtn" style="padding: 8px 16px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; white-space: nowrap;">Verify UUID</button>

@@ -312,6 +312,10 @@
                             <input type="checkbox" id="spectrum-hold-enable" checked>
                             <span>Hold</span>
                         </label>
+                        <label id="spectrum-label-autopause" style="display: none; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" title="Auto-pause waterfall after 5 minutes of inactivity (mobile only)">
+                            <input type="checkbox" id="spectrum-autopause-enable" checked onchange="onWaterfallAutoPauseToggle(this)">
+                            <span>Pause</span>
+                        </label>
                     </div>
                     <div id="spectrum-control-group-manual" class="spectrum-control-group">
                         <label id="spectrum-label-manual" style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">

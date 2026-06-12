@@ -10527,6 +10527,33 @@ function toggleWaterfallPause() {
     }
 }
 
+/**
+ * Called when the mobile "Pause" checkbox (auto-pause waterfall after 5 min idle) is toggled.
+ * Saves the preference to localStorage and arms/disarms the idle timer accordingly.
+ */
+function onWaterfallAutoPauseToggle(cb) {
+    const enabled = cb.checked;
+    localStorage.setItem('waterfallAutoPause', String(enabled));
+
+    const detector = window.idleDetector;
+    if (!detector) return;
+
+    if (enabled) {
+        // Re-arm the timer from now
+        detector._resetMobileWaterfallPauseTimer();
+    } else {
+        // Disarm any pending timer and cancel any in-progress auto-pause
+        if (detector.mobileWaterfallPauseTimer) {
+            clearTimeout(detector.mobileWaterfallPauseTimer);
+            detector.mobileWaterfallPauseTimer = null;
+        }
+        // If the waterfall was already auto-paused, resume it
+        if (detector._mobileAutoPaused) {
+            detector._mobileWaterfallResume();
+        }
+    }
+}
+
 function updateSpectrumRange() {
     if (!spectrumDisplay) return;
 
@@ -11024,6 +11051,7 @@ window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;
 window.toggleWaterfallPause = toggleWaterfallPause;
+window.onWaterfallAutoPauseToggle = onWaterfallAutoPauseToggle;
 
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {

@@ -46,7 +46,9 @@ class IdleDetector {
             document.addEventListener(event, () => this.handleActivity(), true);
         });
 
-        // Mobile waterfall auto-pause: start the timer now (independent of session timeout)
+        // Mobile waterfall auto-pause: show the Pause checkbox on mobile and
+        // restore the saved preference, then start the timer.
+        this._initAutoPauseCheckbox();
         this._resetMobileWaterfallPauseTimer();
         
         // Handle visibility changes (tab switching)
@@ -295,6 +297,39 @@ class IdleDetector {
     }
 
     /**
+     * Initialise the "Pause" checkbox that controls whether the 5-minute
+     * mobile auto-pause is active.  Only shown on mobile devices.
+     * Preference is persisted in localStorage under 'waterfallAutoPause'.
+     */
+    _initAutoPauseCheckbox() {
+        if (!this._isMobileDevice()) return;
+
+        const label = document.getElementById('spectrum-label-autopause');
+        const cb    = document.getElementById('spectrum-autopause-enable');
+        if (!label || !cb) return;
+
+        // Restore saved preference (default: enabled)
+        const saved = localStorage.getItem('waterfallAutoPause');
+        const enabled = saved === null ? true : saved === 'true';
+        cb.checked = enabled;
+
+        // Show the label (hidden by default so it never appears on desktop)
+        label.style.display = 'flex';
+    }
+
+    /**
+     * Returns true when the user has the auto-pause feature enabled.
+     * Defaults to true if no preference has been saved yet.
+     */
+    _isAutoPauseEnabled() {
+        const cb = document.getElementById('spectrum-autopause-enable');
+        if (cb) return cb.checked;
+        // Fall back to localStorage if the DOM element isn't available yet
+        const saved = localStorage.getItem('waterfallAutoPause');
+        return saved === null ? true : saved === 'true';
+    }
+
+    /**
      * Start (or restart) the 5-minute idle timer that auto-pauses the waterfall
      * on mobile.  Safe to call at any time — clears any existing timer first.
      */
@@ -303,8 +338,9 @@ class IdleDetector {
             clearTimeout(this.mobileWaterfallPauseTimer);
             this.mobileWaterfallPauseTimer = null;
         }
-        // Only arm the timer on real mobile devices
+        // Only arm the timer on real mobile devices with auto-pause enabled
         if (!this._isMobileDevice()) return;
+        if (!this._isAutoPauseEnabled()) return;
 
         this.mobileWaterfallPauseTimer = setTimeout(() => {
             this._mobileWaterfallAutoPause();
@@ -314,6 +350,7 @@ class IdleDetector {
     /** Auto-pause the waterfall after 5 minutes of mobile idle. */
     _mobileWaterfallAutoPause() {
         if (!this._isMobileDevice()) return;
+        if (!this._isAutoPauseEnabled()) return;
 
         const sd = window.spectrumDisplay;
         if (!sd) return;

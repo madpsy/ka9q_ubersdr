@@ -229,7 +229,7 @@ class RotatorUI {
                 width: 48px;
                 min-height: 80px;
                 padding: 8px 0;
-                background: rgba(50, 50, 50, 0.7);
+                background: rgba(50, 50, 50, 0.92);
                 color: #fff;
                 cursor: pointer;
                 user-select: none;
@@ -284,7 +284,7 @@ class RotatorUI {
             }
 
             .rotator-header:hover {
-                background: rgba(70, 70, 70, 0.6);
+                background: rgba(70, 70, 70, 0.95);
             }
             
             .rotator-collapse-arrow {
@@ -365,7 +365,7 @@ class RotatorUI {
                 width: min(500px, calc(100vw - 48px));
                 max-width: 100%;
                 height: 500px;
-                background: rgba(40, 40, 40, 0.7);
+                background: rgba(40, 40, 40, 0.92);
                 border: 1px solid rgba(100, 100, 100, 0.6);
                 border-left: none;
                 border-radius: 0 8px 8px 0;

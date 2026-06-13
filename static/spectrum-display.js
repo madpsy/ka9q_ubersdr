@@ -23,20 +23,22 @@ class SpectrumDisplay {
         this.lineGraphMaxHistoryMaxAge = 20000; // 20 second window for maximum (handles FT8 cycles)
 
         // Line graph EMA smoothing (replaces box-filter history).
-        // Always-on light EMA keeps the trace clean even with Smooth off;
-        // the checkbox switches to a heavier fall time constant for longer averaging.
+        // Always-on; checkbox switches to a heavier multiplier for longer averaging.
         //
+        // Algorithm matches VibeSDR signalProcessor.ts step 5:
         //   fallAlpha = min(0.95, 1 - exp(-dtSec / tcFall))
         //   riseAlpha = min(0.95, fallAlpha * 4)   ← derived, guarantees 4× ratio
-        // Rise is NOT a separate time constant — it is always fallAlpha * 4.
-        this.specEma = null;           // Float32Array, lazily allocated per bin count
-        this.specEmaLastFrameTime = 0; // wall-clock ms of last drawLineGraph call
-
-        // Fall time constants only (rise = fallAlpha * 4, capped 0.95):
-        //   LIGHT (Smooth OFF): ~3-frame decay tail — removes single-frame spikes only
-        //   HEAVY (Smooth ON):  ~18-frame decay    — true time-averaging look
-        this.EMA_TC_LIGHT_FALL = 0.10; // 100ms fall — near-instant feel
-        this.EMA_TC_HEAVY_FALL = 0.60; // 600ms fall — smoothingFrames=5
+        //
+        // tcFall is ADAPTIVE: it scales with the measured data frame interval so the
+        // trace always flows smoothly between frames regardless of server divisor.
+        //   LIGHT (Smooth OFF): tcFall = 1× avgDataFrameMs → settles in ~1 frame
+        //   HEAVY (Smooth ON):  tcFall = 4× avgDataFrameMs → averages over ~4 frames
+        this.specEma = null;              // Float32Array, lazily allocated per bin count
+        this.specEmaLastFrameTime = 0;    // wall-clock ms of last drawLineGraph rAF tick
+        this.avgDataFrameMs = 100;        // EMA of inter-data-frame interval (ms), seed 100ms
+        this.lastDataFrameTime = 0;       // wall-clock ms of last _consumeNewFrame call
+        this.EMA_TC_LIGHT_MULTIPLIER = 1.0; // 1× frame interval — near-instant, no jump
+        this.EMA_TC_HEAVY_MULTIPLIER = 4.0; // 4× frame interval — true averaging look
 
         // Peak hold line - tracks maximum values with slow decay
         this.peakHoldData = null;
@@ -1304,7 +1306,16 @@ class SpectrumDisplay {
     _consumeNewFrame(data) {
         this.spectrumData = data;
         this.lastSpectrumRow = data;
-        this.lastUpdate = Date.now();
+        const now = Date.now();
+        this.lastUpdate = now;
+
+        // Track inter-frame interval for adaptive EMA time constant.
+        // EMA with α=0.2 gives a ~5-frame smoothed estimate — stable but responsive.
+        if (this.lastDataFrameTime > 0) {
+            const dt = Math.min(2000, Math.max(20, now - this.lastDataFrameTime));
+            this.avgDataFrameMs = this.avgDataFrameMs * 0.8 + dt * 0.2;
+        }
+        this.lastDataFrameTime = now;
 
         // Update tooltip with new data even if mouse hasn't moved
         if (this.mouseX >= 0 && this.mouseY >= 0 && !this.isDragging) {
@@ -2280,10 +2291,14 @@ class SpectrumDisplay {
             this.specEma = new Float32Array(this.spectrumData);
         }
 
-        // Pick fall time constant: light (Smooth OFF) vs heavy (Smooth ON).
-        // Rise is derived as fallAlpha * 4 (capped 0.95):
-        //   riseAlpha = min(0.95, fallAlpha * 4)  (signalProcessor.ts:273)
-        const tcFall    = this.smoothingEnabled ? this.EMA_TC_HEAVY_FALL : this.EMA_TC_LIGHT_FALL;
+        // Adaptive fall time constant: scales with the measured data frame interval
+        // so the trace always flows smoothly between frames regardless of divisor.
+        //   LIGHT (Smooth OFF): tcFall = 1× avgDataFrameMs → settles in ~1 frame interval
+        //   HEAVY (Smooth ON):  tcFall = 4× avgDataFrameMs → averages over ~4 frames
+        // Rise is derived as fallAlpha * 4 (capped 0.95) — VibeSDR signalProcessor.ts:273.
+        const frameIntervalSec = Math.min(1.0, Math.max(0.05, this.avgDataFrameMs / 1000));
+        const mul    = this.smoothingEnabled ? this.EMA_TC_HEAVY_MULTIPLIER : this.EMA_TC_LIGHT_MULTIPLIER;
+        const tcFall = frameIntervalSec * mul;
         const alphaFall = Math.min(0.95, 1.0 - Math.exp(-dtSec / tcFall));
         const alphaRise = Math.min(0.95, alphaFall * 4); // 4× faster attack, same cap
 

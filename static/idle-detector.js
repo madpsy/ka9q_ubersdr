@@ -13,6 +13,13 @@ class IdleDetector {
         this.MOBILE_WATERFALL_PAUSE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
         this.mobileWaterfallPauseTimer = null;
         this._mobileAutoPaused = false; // true when we auto-paused the waterfall
+
+        // All devices: drop spectrum to divisor=3 after 1 minute of idle.
+        // Restores the correct divisor (1 if spectrum visible, 3 if hidden) on
+        // any user activity.  Works on top of the mobile 5-min full pause.
+        this.IDLE_RATE_THROTTLE_TIMEOUT = 60 * 1000; // 1 minute
+        this.idleRateThrottleTimer = null;
+        this._idleThrottled = false; // true while we have dropped to divisor=3
         
         this.inactivityTimer = null;
         this.confirmationTimer = null;
@@ -50,6 +57,10 @@ class IdleDetector {
         // restore the saved preference, then start the timer.
         this._initAutoPauseCheckbox();
         this._resetMobileWaterfallPauseTimer();
+
+        // All-device idle rate throttle: start the 1-minute countdown from init.
+        this._resetIdleRateThrottleTimer();
+        console.log('[IdleDetector] Idle rate throttle armed: spectrum drops to divisor=3 after 1 min idle (all devices)');
         
         // Handle visibility changes (tab switching)
         document.addEventListener('visibilitychange', () => {
@@ -225,6 +236,13 @@ class IdleDetector {
             this._mobileWaterfallResume();
         }
         this._resetMobileWaterfallPauseTimer();
+
+        // All-device idle rate throttle: restore full rate if we throttled it,
+        // then restart the 1-minute countdown.
+        if (this._idleThrottled) {
+            this._idleRateRestore();
+        }
+        this._resetIdleRateThrottleTimer();
         
         // If confirmation is showing, user activity confirms presence
         if (this.isShowingConfirmation) {
@@ -346,6 +364,61 @@ class IdleDetector {
             this._mobileWaterfallAutoPause();
         }, this.MOBILE_WATERFALL_PAUSE_TIMEOUT);
     }
+
+    // ── All-device idle rate throttle ────────────────────────────────────────
+
+    /**
+     * Start (or restart) the 1-minute idle timer that drops the spectrum
+     * frame-rate divisor to 3 on all devices.
+     * Safe to call at any time — clears any existing timer first.
+     */
+    _resetIdleRateThrottleTimer() {
+        if (this.idleRateThrottleTimer) {
+            clearTimeout(this.idleRateThrottleTimer);
+            this.idleRateThrottleTimer = null;
+        }
+        this.idleRateThrottleTimer = setTimeout(() => {
+            this._idleRateThrottle();
+        }, this.IDLE_RATE_THROTTLE_TIMEOUT);
+        // No log here — this is called on every activity event (mousemove etc.)
+        // and would spam the console. Transition logs are in _idleRateThrottle /
+        // _idleRateRestore which fire only on actual state changes.
+    }
+
+    /**
+     * Drop the spectrum WebSocket to divisor=3 after 1 minute of idle.
+     * Only acts if the spectrum is currently at full rate (divisor=1, i.e.
+     * the line graph is visible) — if it's already at 3 there's nothing to do.
+     */
+    _idleRateThrottle() {
+        const sd = window.spectrumDisplay;
+        if (!sd) return;
+        const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
+        if (!lineGraphEnabled) {
+            console.log('[IdleDetector] 1 min idle — spectrum already at divisor=3 (line graph hidden), no change');
+            return;
+        }
+        console.log('[IdleDetector] 1 min idle — throttling spectrum from divisor=1 → divisor=3');
+        this._idleThrottled = true;
+        sd.setRate(3);
+    }
+
+    /**
+     * Restore the spectrum frame rate to the correct divisor for the current
+     * line-graph visibility state.  Called when the user becomes active again.
+     */
+    _idleRateRestore() {
+        if (!this._idleThrottled) return;
+        this._idleThrottled = false;
+        const sd = window.spectrumDisplay;
+        if (!sd) return;
+        const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
+        const divisor = lineGraphEnabled ? 1 : 3;
+        console.log(`[IdleDetector] User active after idle throttle — restoring spectrum to divisor=${divisor} (line graph ${lineGraphEnabled ? 'visible' : 'hidden'})`);
+        sd.setRate(divisor);
+    }
+
+    // ── End all-device idle rate throttle ────────────────────────────────────
 
     /** Auto-pause the waterfall after 5 minutes of mobile idle. */
     _mobileWaterfallAutoPause() {
@@ -670,6 +743,9 @@ class IdleDetector {
         }
         if (this.mobileWaterfallPauseTimer) {
             clearTimeout(this.mobileWaterfallPauseTimer);
+        }
+        if (this.idleRateThrottleTimer) {
+            clearTimeout(this.idleRateThrottleTimer);
         }
         
         // Remove overlay

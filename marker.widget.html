@@ -2,13 +2,19 @@
      UberSDR Current Marker Widget
      • Wide-screen only (hidden ≤1024px)
      • Shows the name of any marker (bookmark / CW spot / DX spot)
-       sitting at the current dial frequency + mode
-     • Auto-hides itself whenever no marker matches; reappears as
-       soon as one does (unless the user closed it via ✕)
-     • Reuses the host app's window.findMatchingMarker() logic
-       (same matcher as the dial-wheel overlay), with an inline
-       fallback that mirrors it if the host hasn't exposed it
-     • Shrinks/grows to fit the marker name; long names ellipsize
+       sitting at the current dial frequency + mode, plus the
+       neighbouring markers below (prev) and above (next) the dial
+     • Prev/next are clickable — tapping tunes to that marker's
+       freq + mode (same as the dial-wheel edge arrows)
+     • Prev/next labels sit on a row ABOVE the current name so the
+       text never overlaps, mirroring the dial-wheel overlay layout
+     • Auto-hides itself only when there is NO current AND NO prev
+       AND NO next marker; reappears as soon as any exists (unless
+       the user closed it via ✕)
+     • Reuses the host app's window.findMarkers() logic (same
+       matcher as the dial-wheel overlay), with an inline fallback
+       that mirrors it if the host hasn't exposed it
+     • Shrinks/grows to fit the marker names; long names ellipsize
      • Drag widget to reposition
      ═══════════════════════════════════════════════════════════ -->
 
@@ -77,7 +83,61 @@
   transform: none !important;
 }
 
-/* ── Marker name ── */
+/* ── Prev/next neighbour row ──
+   Sits ABOVE the current name so the neighbour labels never overlap the
+   prominent current marker — mirroring the dial-wheel overlay, where the
+   prev/next labels are offset from the centre marker. */
+#sdr-marker-nav {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+#sdr-marker-nav .sdr-marker-navbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 160px;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: #9fb3c8 !important;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer !important;
+  transform: none !important;
+  box-shadow: none !important;
+  transition: color 0.15s !important;
+}
+#sdr-marker-nav .sdr-marker-navbtn:hover {
+  color: #ecf0f1 !important;
+  background: none !important;
+  transform: none !important;
+}
+
+/* Prev hugs the left, next hugs the right */
+#sdr-marker-prev { text-align: left; }
+#sdr-marker-next { text-align: right; margin-left: auto; }
+
+.sdr-marker-nav-arrow {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.sdr-marker-nav-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Marker name (current) ── */
 #sdr-marker-name {
   font-size: 16px;
   font-weight: 600;
@@ -86,14 +146,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 340px;
+  text-align: center;
 }
 </style>
 
-<!-- Hidden until a marker matches the current dial freq + mode -->
+<!-- Hidden until a current / prev / next marker exists for the dial freq + mode -->
 <div id="sdr-marker-widget" style="display:none">
   <div id="sdr-marker-titlebar">
     <span id="sdr-marker-title">📍 Marker</span>
     <button id="sdr-marker-close-btn" title="Hide widget">✕</button>
+  </div>
+  <!-- Prev/next neighbour jump — tapping tunes to that marker's freq + mode.
+       Sits above the current name so the labels never overlap it. -->
+  <div id="sdr-marker-nav" style="display:none">
+    <button type="button" id="sdr-marker-prev" class="sdr-marker-navbtn" style="display:none" title="Tune to previous marker">
+      <span class="sdr-marker-nav-arrow">‹</span>
+      <span id="sdr-marker-prev-text" class="sdr-marker-nav-text"></span>
+    </button>
+    <button type="button" id="sdr-marker-next" class="sdr-marker-navbtn" style="display:none" title="Tune to next marker">
+      <span id="sdr-marker-next-text" class="sdr-marker-nav-text"></span>
+      <span class="sdr-marker-nav-arrow">›</span>
+    </button>
   </div>
   <div id="sdr-marker-name"></div>
 </div>
@@ -108,15 +181,26 @@
   // matcher is a sub-millisecond scan, so polling at 4 Hz is effectively free.
   const POLL_MS = 250;
 
-  const widget = document.getElementById('sdr-marker-widget');
-  const nameEl = document.getElementById('sdr-marker-name');
+  const widget  = document.getElementById('sdr-marker-widget');
+  const nameEl  = document.getElementById('sdr-marker-name');
+  const navRow  = document.getElementById('sdr-marker-nav');
+  const prevBtn = document.getElementById('sdr-marker-prev');
+  const nextBtn = document.getElementById('sdr-marker-next');
+  const prevText = document.getElementById('sdr-marker-prev-text');
+  const nextText = document.getElementById('sdr-marker-next-text');
 
   let userClosed = false; // set once the user dismisses via ✕; stays hidden after
 
+  // The prev/next neighbour markers currently shown, kept so the click
+  // handlers know where to tune. { freq, mode, name } | null.
+  let _prevMarker = null;
+  let _nextMarker = null;
+
   // ── Marker matching ────────────────────────────────────────────────
   // Prefer the host app's exposed matcher (single source of truth, same
-  // logic as the dial-wheel overlay). Fall back to an inline replica so
-  // the widget still works if the host build hasn't exposed it.
+  // logic as the dial-wheel overlay — returns { current, prev, next }).
+  // Fall back to an inline replica so the widget still works if the host
+  // build hasn't exposed it.
   const MARKER_FREQ_TOLERANCE_HZ = 100;
 
   function modeFamily(m) {
@@ -127,36 +211,65 @@
     return m; // usb, lsb, drm, etc.
   }
 
-  function dxSpotModeFamily(spot) {
+  // The specific, tunable mode an extension applies when you jump to a marker
+  // (cwl/cwu and lsb/usb below/above 10 MHz) — mirrors the host helpers.
+  function cwModeForFreq(hz)    { return hz < 10000000 ? 'cwl' : 'cwu'; }
+  function voiceModeForFreq(hz) { return hz < 10000000 ? 'lsb' : 'usb'; }
+
+  function dxSpotMode(spot) {
     const comment = (spot.comment || '').toUpperCase();
-    if (comment.includes('CW')) return 'cw';
     if (comment.includes('FT8') || comment.includes('FT4')) return 'usb';
-    return (spot.frequency / 1e6) >= 10 ? 'usb' : 'lsb';
+    if (comment.includes('CW')) return cwModeForFreq(spot.frequency);
+    return voiceModeForFreq(spot.frequency);
   }
 
-  function fallbackFind(dialHz, mode) {
-    if (dialHz === null) return null;
-    const fam = modeFamily(mode);
-    let dist = Infinity, name = null;
-    const consider = (list, freqOf, famOf, nameOf) => {
+  // Flatten every marker into { freq, mode, family, name, priority }. Spots get
+  // priority 1, bookmarks 0, so spots win when two markers share a frequency.
+  function collectMarkers() {
+    const out = [];
+    const add = (list, freqOf, modeOf, famOf, nameOf, priority) => {
       for (const item of list) {
         const f = freqOf(item);
         if (typeof f !== 'number' || isNaN(f)) continue;
-        const d = Math.abs(f - dialHz);
-        if (d > MARKER_FREQ_TOLERANCE_HZ || d >= dist) continue;
-        const itemFam = famOf(item);
-        if (itemFam && itemFam !== fam) continue;
-        dist = d;
-        name = nameOf(item);
+        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority });
       }
     };
     const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
     const dxSpots = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
-    consider(cwSpots, s => s.frequency, () => 'cw',               s => s.dx_call);
-    consider(dxSpots, s => s.frequency, s => dxSpotModeFamily(s), s => s.dx_call);
-    if (name) return name;
-    consider(window.bookmarks || [], b => b.frequency, b => (b.mode ? modeFamily(b.mode) : null), b => b.name);
-    return name;
+    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',                s => s.dx_call, 1);
+    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),          s => s.dx_call, 1);
+    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0);
+    return out;
+  }
+
+  // Locate the current / prev / next markers relative to the dial freq+mode.
+  // Faithful replica of the host's findMarkers().
+  function fallbackFindMarkers(dialHz, mode) {
+    const result = { current: null, prev: null, next: null };
+    if (dialHz === null) return result;
+    const fam = modeFamily(mode);
+    const markers = collectMarkers();
+    let current = null, currentDist = Infinity, prev = null, next = null;
+    for (const m of markers) {
+      const d = Math.abs(m.freq - dialHz);
+      if (d <= MARKER_FREQ_TOLERANCE_HZ) {
+        const modeMatch = (m.family === null || m.family === fam);
+        if (modeMatch && (!current || m.priority > current.priority ||
+            (m.priority === current.priority && d < currentDist))) {
+          current = m;
+          currentDist = d;
+        }
+      } else if (m.freq < dialHz) {
+        if (!prev || m.freq > prev.freq || (m.freq === prev.freq && m.priority > prev.priority)) prev = m;
+      } else {
+        if (!next || m.freq < next.freq || (m.freq === next.freq && m.priority > next.priority)) next = m;
+      }
+    }
+    const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name } : null;
+    result.current = strip(current);
+    result.prev    = strip(prev);
+    result.next    = strip(next);
+    return result;
   }
 
   function getDialHz() {
@@ -166,34 +279,79 @@
     return isNaN(hz) ? null : hz;
   }
 
-  function currentMarkerName(dialHz, mode) {
-    if (typeof window.findMatchingMarker === 'function') {
-      return window.findMatchingMarker(dialHz, mode);
+  function getMarkers() {
+    const dialHz = getDialHz();
+    const mode = window.currentMode;
+    if (typeof window.findMarkers === 'function') {
+      return window.findMarkers(dialHz, mode);
     }
-    return fallbackFind(dialHz, mode);
+    return fallbackFindMarkers(dialHz, mode);
+  }
+
+  // Tune to a { freq, mode } neighbour (prev/next tap), mirroring the dial-wheel
+  // edge arrows: set frequency first, then the marker's own mode.
+  function tuneToMarker(marker) {
+    if (!marker || typeof marker.freq !== 'number') return;
+    if (typeof window.setFrequency === 'function') window.setFrequency(marker.freq);
+    if (marker.mode && typeof window.setMode === 'function') window.setMode(marker.mode, false);
+    update();
   }
 
   // ── Render ─────────────────────────────────────────────────────────
   let _lastName = undefined;
 
+  // Show/hide one neighbour button and label it. Returns true if shown.
+  function updateNavButton(btn, textEl, marker) {
+    if (!marker) {
+      if (btn.style.display !== 'none') btn.style.display = 'none';
+      return false;
+    }
+    if (textEl.textContent !== marker.name) {
+      textEl.textContent = marker.name;
+      btn.title = 'Tune to ' + marker.name;
+    }
+    if (btn.style.display === 'none') btn.style.display = '';
+    return true;
+  }
+
   function update() {
     if (userClosed) return;
-    const name = currentMarkerName(getDialHz(), window.currentMode);
+    const { current, prev, next } = getMarkers();
+    _prevMarker = prev;
+    _nextMarker = next;
+    const name = current ? current.name : null;
 
-    // No marker at the current freq + mode → hide the widget entirely.
-    if (!name) {
+    // Hide the widget only when there is NO current, prev AND next marker.
+    if (!name && !prev && !next) {
       if (widget.style.display !== 'none') widget.style.display = 'none';
       _lastName = null;
       return;
     }
 
     if (widget.style.display === 'none') widget.style.display = '';
-    if (name !== _lastName) {
-      _lastName = name;
-      nameEl.textContent = name;
-      nameEl.title = name;
+
+    // ── Prev/next neighbours (row above the current name) ──
+    const hasPrev = updateNavButton(prevBtn, prevText, prev);
+    const hasNext = updateNavButton(nextBtn, nextText, next);
+    navRow.style.display = (hasPrev || hasNext) ? '' : 'none';
+
+    // ── Current marker name ──
+    if (!name) {
+      if (nameEl.style.display !== 'none') nameEl.style.display = 'none';
+      _lastName = null;
+    } else {
+      if (nameEl.style.display === 'none') nameEl.style.display = '';
+      if (name !== _lastName) {
+        _lastName = name;
+        nameEl.textContent = name;
+        nameEl.title = name;
+      }
     }
   }
+
+  // ── Prev/next click handlers ───────────────────────────────────────
+  prevBtn.addEventListener('click', e => { e.stopPropagation(); tuneToMarker(_prevMarker); });
+  nextBtn.addEventListener('click', e => { e.stopPropagation(); tuneToMarker(_nextMarker); });
 
   // ── Close button ───────────────────────────────────────────────────
   document.getElementById('sdr-marker-close-btn').addEventListener('click', () => {

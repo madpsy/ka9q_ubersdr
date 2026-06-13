@@ -14077,6 +14077,10 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     const stepLabel  = document.getElementById('tuning-wheel-step-label');
     const markerBox  = document.getElementById('tuning-wheel-marker');
     const markerText = document.getElementById('tuning-wheel-marker-text');
+    const prevNav    = document.getElementById('tuning-wheel-prev');
+    const nextNav    = document.getElementById('tuning-wheel-next');
+    const prevText   = document.getElementById('tuning-wheel-prev-text');
+    const nextText   = document.getElementById('tuning-wheel-next-text');
 
     // Only wire up if the toggle is present (it's hidden on desktop but still in DOM)
     if (!modeToggle || !radioBtns || !radioWheel || !tuningBtns || !wheelCont) return;
@@ -14089,6 +14093,11 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // applyTuningModeFromStorage() can call updateWheelMarkerLabel() during init,
     // which would otherwise hit a temporal-dead-zone error on this `let`.
     let _lastMarkerName = null;
+
+    // The prev/next neighbour markers currently shown at the wheel edges, kept
+    // so the arrow click handlers know where to tune. { freq, mode, name } | null.
+    let _prevMarker = null;
+    let _nextMarker = null;
 
     // Detect mobile: use matchMedia to match the same breakpoint as the CSS
     const mobileQuery = window.matchMedia('(max-width: 1024px)');
@@ -14217,13 +14226,20 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         return m; // usb, lsb, drm, etc.
     }
 
-    // Derive a DX cluster spot's mode family from its comment / frequency,
-    // mirroring the logic in dx-cluster/main.js tuneToSpot().
-    function dxSpotModeFamily(spot) {
+    // Precise, tunable mode for a marker at a given frequency — the actual mode
+    // the extensions set when you tune to a spot (cwl/cwu below/above 10 MHz,
+    // lsb/usb below/above 10 MHz). Marker `family` is derived from these via
+    // modeFamily() so there is one source of truth and no lossy "family" path.
+    function cwModeForFreq(hz)    { return hz < 10000000 ? 'cwl' : 'cwu'; }
+    function voiceModeForFreq(hz) { return hz < 10000000 ? 'lsb' : 'usb'; }
+
+    // Derive a DX cluster spot's mode from its comment / frequency, mirroring
+    // the logic in dx-cluster/main.js tuneToSpot().
+    function dxSpotMode(spot) {
         const comment = (spot.comment || '').toUpperCase();
-        if (comment.includes('CW')) return 'cw';
         if (comment.includes('FT8') || comment.includes('FT4')) return 'usb';
-        return (spot.frequency / 1e6) >= 10 ? 'usb' : 'lsb';
+        if (comment.includes('CW')) return cwModeForFreq(spot.frequency);
+        return voiceModeForFreq(spot.frequency);
     }
 
     function getDialHz() {
@@ -14233,55 +14249,128 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         return isNaN(hz) ? null : hz;
     }
 
-    // Find the closest marker at the current dial freq+mode. CW/DX spots win
-    // over bookmarks: if any spot matches we never fall through to bookmarks.
-    function findMatchingMarker(dialHz, mode) {
-        if (dialHz === null) return null;
-        const fam = modeFamily(mode);
-
-        // Scan a list, keeping the nearest match within tolerance. `dist`/`name`
-        // are shared across calls so lists scanned together compete fairly, and
-        // a later group can be skipped entirely by resetting before it runs.
-        let dist = Infinity, name = null;
-        const consider = (list, freqOf, famOf, nameOf) => {
+    // Gather every marker (CW spot, DX spot, bookmark) into a flat list of
+    // { freq, mode, family, name, priority } objects. `family` is the collapsed
+    // mode family used for at-dial matching (null = wildcard, i.e. a bookmark
+    // with no mode); `mode` is the marker's own specific mode for tuning. Spots
+    // get priority 1 and bookmarks 0 so spots win when two markers share a
+    // frequency, mirroring the original "spots beat bookmarks" rule.
+    function collectMarkers() {
+        const out = [];
+        const add = (list, freqOf, modeOf, famOf, nameOf, priority) => {
             for (const item of list) {
                 const f = freqOf(item);
                 if (typeof f !== 'number' || isNaN(f)) continue;
-                const d = Math.abs(f - dialHz);
-                if (d > MARKER_FREQ_TOLERANCE_HZ || d >= dist) continue;
-                const itemFam = famOf(item);
-                if (itemFam && itemFam !== fam) continue; // null family = wildcard
-                dist = d;
-                name = nameOf(item);
+                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority });
             }
         };
 
-        // 1. Spots (priority). CW + DX compete on the same accumulator; if either
-        // matches we never fall through to bookmarks.
         const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
         const dxSpots = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
-        consider(cwSpots, s => s.frequency, () => 'cw',               s => s.dx_call);
-        consider(dxSpots, s => s.frequency, s => dxSpotModeFamily(s), s => s.dx_call);
-        if (name) return name;
+        add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1);
+        add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1);
+        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0);
+        return out;
+    }
 
-        // 2. Bookmarks (server + local) — only reached when no spot matched.
-        consider(window.bookmarks || [], b => b.frequency, b => (b.mode ? modeFamily(b.mode) : null), b => b.name);
-        return name;
+    // Locate markers relative to the current dial freq+mode. Returns
+    // { current, prev, next } where each entry is a { freq, mode, name } marker
+    // (or null) — letting callers both label the current freq and step to the
+    // neighbouring markers:
+    //   current — closest marker within MARKER_FREQ_TOLERANCE_HZ *and* matching
+    //             the current mode family. Spots take absolute priority over
+    //             bookmarks here (the original rule); ties go to the nearest.
+    //   prev    — nearest marker below the dial (outside the tolerance window),
+    //             across *all* modes — its own mode is returned for tuning.
+    //   next    — nearest marker above the dial (outside the tolerance window),
+    //             across *all* modes — its own mode is returned for tuning.
+    function findMarkers(dialHz, mode) {
+        const result = { current: null, prev: null, next: null };
+        if (dialHz === null) return result;
+
+        const fam = modeFamily(mode);
+        const markers = collectMarkers();
+
+        let current = null, currentDist = Infinity, prev = null, next = null;
+        for (const m of markers) {
+            const d = Math.abs(m.freq - dialHz);
+            if (d <= MARKER_FREQ_TOLERANCE_HZ) {
+                // At the dial: only label it when the mode family matches (null
+                // family = wildcard). Spot beats bookmark outright, else nearest.
+                const modeMatch = (m.family === null || m.family === fam);
+                if (modeMatch && (!current || m.priority > current.priority ||
+                    (m.priority === current.priority && d < currentDist))) {
+                    current = m;
+                    currentDist = d;
+                }
+            } else if (m.freq < dialHz) {
+                // Below the dial (any mode): keep the highest (nearest) freq, spot wins ties.
+                if (!prev || m.freq > prev.freq ||
+                    (m.freq === prev.freq && m.priority > prev.priority)) {
+                    prev = m;
+                }
+            } else {
+                // Above the dial (any mode): keep the lowest (nearest) freq, spot wins ties.
+                if (!next || m.freq < next.freq ||
+                    (m.freq === next.freq && m.priority > next.priority)) {
+                    next = m;
+                }
+            }
+        }
+
+        const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name } : null;
+        result.current = strip(current);
+        result.prev    = strip(prev);
+        result.next    = strip(next);
+        return result;
+    }
+
+    // Closest marker name at the current dial freq+mode (or null). Thin wrapper
+    // over findMarkers() kept for existing callers (wheel overlay, MediaSession).
+    function findMatchingMarker(dialHz, mode) {
+        const cur = findMarkers(dialHz, mode).current;
+        return cur ? cur.name : null;
     }
 
     // Expose so other features (e.g. MediaSession album name) can reuse the same
     // freq+mode marker-matching logic used by the dial wheel overlay.
+    // findMarkers() additionally exposes the prev/next neighbours for
+    // marker-to-marker navigation.
     window.findMatchingMarker = findMatchingMarker;
+    window.findMarkers = findMarkers;
+
+    // Show/hide a prev/next edge button and label it with its neighbour marker.
+    function updateNavButton(btn, textEl, marker) {
+        if (!btn || !textEl) return;
+        if (!marker) {
+            btn.classList.remove('visible');
+            return;
+        }
+        if (textEl.textContent !== marker.name) textEl.textContent = marker.name;
+        btn.classList.add('visible');
+    }
 
     function updateWheelMarkerLabel() {
         if (!markerBox || !markerText) return;
         // Only relevant while the wheel is actually visible.
         if (wheelCont.style.display === 'none' || !wheelCont.offsetParent) {
             if (markerBox.classList.contains('visible')) markerBox.classList.remove('visible');
+            _prevMarker = _nextMarker = null;
+            updateNavButton(prevNav, prevText, null);
+            updateNavButton(nextNav, nextText, null);
             return;
         }
 
-        const name = findMatchingMarker(getDialHz(), window.currentMode);
+        const { current, prev, next } = findMarkers(getDialHz(), window.currentMode);
+
+        // ── Prev/next neighbours at the edges ─────────────────────────────────
+        _prevMarker = prev;
+        _nextMarker = next;
+        updateNavButton(prevNav, prevText, prev);
+        updateNavButton(nextNav, nextText, next);
+
+        // ── Current marker name in the centre overlay ─────────────────────────
+        const name = current ? current.name : null;
 
         if (!name) {
             markerBox.classList.remove('visible');
@@ -14315,6 +14404,27 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
         markerBox.classList.add('visible');
     }
+
+    // Tune to a { freq, mode } marker (prev/next arrow tap). Mirrors how the
+    // spot extensions tune: set frequency first, then apply the marker's own
+    // mode with its bandwidth defaults.
+    function tuneToMarker(marker) {
+        if (!marker || typeof marker.freq !== 'number') return;
+        setFrequency(marker.freq);
+        if (marker.mode) setMode(marker.mode, false);
+        updateWheelMarkerLabel();
+    }
+
+    // Wire the edge arrows. stopPropagation on pointerdown stops the wheel from
+    // treating the tap as the start of a drag.
+    [[prevNav, () => _prevMarker], [nextNav, () => _nextMarker]].forEach(([btn, get]) => {
+        if (!btn) return;
+        btn.addEventListener('pointerdown', e => e.stopPropagation());
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            tuneToMarker(get());
+        });
+    });
 
     let active  = false;
     let lastX   = 0;

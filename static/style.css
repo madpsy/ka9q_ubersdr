@@ -1322,6 +1322,51 @@ body {
     to   { transform: translateX(var(--marker-scroll-dist, 0)); }
 }
 
+/* Prev/next marker jump buttons — pinned to the wheel edges, with the
+   neighbouring marker name stacked directly above the arrow. Unlike the centre
+   marker overlay these are interactive (pointer-events: auto) so a tap tunes to
+   the marker. z-index 4 keeps them above the edge fades and centre marker. */
+.tuning-wheel-nav {
+    position: absolute;
+    top: 5px;
+    display: none;            /* shown by JS only when a neighbour exists */
+    flex-direction: column;
+    gap: 1px;
+    max-width: 30%;
+    margin: 0;
+    padding: 0 2px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    pointer-events: auto;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.tuning-wheel-nav.visible {
+    display: flex;
+    opacity: 1;
+}
+
+.tuning-wheel-nav-prev { left: 4px;  align-items: flex-start; text-align: left;  }
+.tuning-wheel-nav-next { right: 4px; align-items: flex-end;   text-align: right; }
+
+/* Truncate long neighbour names rather than scrolling them (the centre marker
+   keeps the marquee). Reuses .tuning-wheel-marker-text for identical styling. */
+.tuning-wheel-nav .tuning-wheel-marker-text {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tuning-wheel-nav-arrow {
+    font-size: 1.15em;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.82);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
 /* Step label overlaid inside the wheel — takes no extra vertical space */
 .tuning-wheel-step-label {
     position: absolute;

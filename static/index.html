@@ -481,6 +481,16 @@
                         <div id="tuning-wheel-marker" class="tuning-wheel-marker">
                             <span id="tuning-wheel-marker-text" class="tuning-wheel-marker-text"></span>
                         </div>
+                        <!-- Prev/next marker jump: arrow at the wheel edge with the neighbouring
+                             marker name stacked above it. Tapping tunes to that marker's freq+mode. -->
+                        <button type="button" id="tuning-wheel-prev" class="tuning-wheel-nav tuning-wheel-nav-prev" aria-label="Tune to previous marker">
+                            <span id="tuning-wheel-prev-text" class="tuning-wheel-marker-text"></span>
+                            <span class="tuning-wheel-nav-arrow">‹</span>
+                        </button>
+                        <button type="button" id="tuning-wheel-next" class="tuning-wheel-nav tuning-wheel-nav-next" aria-label="Tune to next marker">
+                            <span id="tuning-wheel-next-text" class="tuning-wheel-marker-text"></span>
+                            <span class="tuning-wheel-nav-arrow">›</span>
+                        </button>
                     </div>
                     <div id="tuning-wheel-step-label" class="tuning-wheel-step-label">drag to tune</div>
                 </div>

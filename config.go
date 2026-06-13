@@ -1180,6 +1180,24 @@ func LoadConfig(filename string) (*Config, error) {
 			{Value: "sonar-orange", Label: "Sonar 2"},
 			{Value: "night-vision", Label: "Night"},
 		}
+	} else {
+		// Merge any built-in palettes that are missing from an existing ui.yaml.
+		// This ensures new palettes added in code appear in the admin UI without
+		// requiring the operator to manually edit their ui.yaml.
+		builtinPalettes := []UIOptionItem{
+			{Value: "sonar-green", Label: "Sonar 1"},
+			{Value: "sonar-orange", Label: "Sonar 2"},
+			{Value: "night-vision", Label: "Night"},
+		}
+		existing := make(map[string]bool, len(config.UI.Palette.Available))
+		for _, p := range config.UI.Palette.Available {
+			existing[p.Value] = true
+		}
+		for _, p := range builtinPalettes {
+			if !existing[p.Value] {
+				config.UI.Palette.Available = append(config.UI.Palette.Available, p)
+			}
+		}
 	}
 	// Contrast: auto-range symmetric dB offset, range 0-20 (matches UI slider in index.html).
 	// Default is 10 (matches the HTML default value="10").

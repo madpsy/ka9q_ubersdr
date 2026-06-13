@@ -1283,7 +1283,7 @@ body {
        little overlap into the fade so long names have room to scroll. */
     left: 14%;
     right: 14%;
-    height: 16px;
+    height: 20px;            /* a touch taller so descenders (g, p, y) aren't clipped */
     overflow: hidden;
     text-align: center;
     pointer-events: none;

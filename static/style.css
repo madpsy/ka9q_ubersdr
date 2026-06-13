@@ -1287,7 +1287,7 @@ body {
     overflow: hidden;
     text-align: center;
     pointer-events: none;
-    z-index: 3;
+    z-index: 5;              /* above the step label so it's never clipped by it */
     opacity: 0;
     transition: opacity 0.25s ease;
 }

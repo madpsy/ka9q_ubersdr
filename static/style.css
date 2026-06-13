@@ -1328,15 +1328,22 @@ body {
    the marker. z-index 4 keeps them above the edge fades and centre marker. */
 /* ID-scoped (#tuning-wheel) so these beat the generic `button { }` chrome —
    we want bare arrows + text floating on the drum, no button background. */
+/* The button is a FIXED-WIDTH hit strip pinned to the wheel edge — its tap
+   area never changes with the marker name length, so the central drag region
+   stays large and the edge buttons are hard to hit by accident. The neighbour
+   name label can spill inward beyond this width but is pointer-events:none
+   (see below), so only this constant strip actually triggers the jump. */
 #tuning-wheel .tuning-wheel-nav {
     position: absolute;
-    top: 5px;
-    display: none;            /* shown by JS only when a neighbour exists */
+    top: 0;
+    bottom: 0;               /* full wheel height — easy to hit on purpose */
+    width: 40px;             /* constant hit area, regardless of label length */
+    display: none;           /* shown by JS only when a neighbour exists */
     flex-direction: column;
+    justify-content: center; /* arrow vertically centred in the strip */
     gap: 1px;
-    max-width: 30%;
     margin: 0;
-    padding: 0 2px;
+    padding: 0;
     border: none;
     background: transparent;
     box-shadow: none;
@@ -1344,6 +1351,7 @@ body {
     appearance: none;
     cursor: pointer;
     pointer-events: auto;
+    overflow: visible;       /* let the name label overflow the strip inward */
     z-index: 4;
 }
 
@@ -1363,11 +1371,14 @@ body {
 .tuning-wheel-nav-next { right: 4px; align-items: flex-end;   text-align: right; }
 
 /* Truncate long neighbour names rather than scrolling them (the centre marker
-   keeps the marquee). Reuses .tuning-wheel-marker-text for identical styling. */
+   keeps the marquee). Reuses .tuning-wheel-marker-text for identical styling.
+   The label overflows the fixed-width hit strip inward, but pointer-events:none
+   makes taps on it fall through to the wheel — only the strip jumps markers. */
 .tuning-wheel-nav .tuning-wheel-marker-text {
-    max-width: 100%;
+    max-width: 34vw;        /* cap very long names; still readable, never huge */
     overflow: hidden;
     text-overflow: ellipsis;
+    pointer-events: none;
 }
 
 .tuning-wheel-nav-arrow {

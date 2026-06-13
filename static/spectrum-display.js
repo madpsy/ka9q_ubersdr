@@ -1279,8 +1279,13 @@ class SpectrumDisplay {
                 }
             }
 
-            // --- Redraw line graph only when new data arrived (avoids 60fps CPU spike) ---
-            if (!drawingPaused && newDataArrived && this.spectrumData) {
+            // --- Redraw line graph every rAF tick (30fps) so the EMA trace flows
+            // smoothly between data frames regardless of the server divisor.
+            // The EMA buffer (specEma) interpolates toward the latest spectrumData
+            // each tick — identical to how the waterfall scroll accumulator repaints
+            // at 30fps using lastSpectrumRow between data arrivals.
+            // Cost: drawLineGraph() is a canvas 2D path draw — not expensive at 30fps.
+            if (!drawingPaused && this.spectrumData) {
                 this.drawLineGraph();
             }
 

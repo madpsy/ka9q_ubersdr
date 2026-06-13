@@ -203,6 +203,37 @@ func handleAdminGetUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		return
 	}
 
+	// Merge any built-in palettes that are missing from the on-disk ui.yaml.
+	// config.UI.Palette.Available already has the merged list (set by config.go).
+	// We patch the raw map so the admin UI sees all palettes without requiring
+	// the operator to manually edit ui.yaml or save from the admin UI first.
+	if uiMap, ok := rawConfig["ui"].(map[string]interface{}); ok {
+		if paletteMap, ok := uiMap["palette"].(map[string]interface{}); ok {
+			// Build set of values already in the on-disk available list
+			existing := make(map[string]bool)
+			if avail, ok := paletteMap["available"].([]interface{}); ok {
+				for _, item := range avail {
+					if m, ok := item.(map[string]interface{}); ok {
+						if v, ok := m["value"].(string); ok {
+							existing[v] = true
+						}
+					}
+				}
+			}
+			// Append any missing built-in palettes from the in-memory config
+			avail, _ := paletteMap["available"].([]interface{})
+			for _, p := range config.UI.Palette.Available {
+				if !existing[p.Value] {
+					avail = append(avail, map[string]interface{}{
+						"value": p.Value,
+						"label": p.Label,
+					})
+				}
+			}
+			paletteMap["available"] = avail
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(rawConfig); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)

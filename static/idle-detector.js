@@ -398,9 +398,11 @@ class IdleDetector {
             console.log('[IdleDetector] 1 min idle — spectrum already at divisor=3 (line graph hidden), no change');
             return;
         }
-        console.log('[IdleDetector] 1 min idle — throttling spectrum from divisor=1 → divisor=3');
+        // Use divisor=2 when spectrum line is visible — less aggressive than 3,
+        // keeps the trace responsive while still saving bandwidth when idle.
+        console.log('[IdleDetector] 1 min idle — throttling spectrum from divisor=1 → divisor=2 (line graph visible)');
         this._idleThrottled = true;
-        sd.setRate(3);
+        sd.setRate(2);
     }
 
     /**

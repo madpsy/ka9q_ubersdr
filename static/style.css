@@ -1278,7 +1278,7 @@ body {
    (z-index 2) but stays out of the way of dragging (pointer-events: none). */
 .tuning-wheel-marker {
     position: absolute;
-    top: 14px;
+    top: 18px;
     /* Keep clear of the curved-edge gradients (28% each side) but allow a
        little overlap into the fade so long names have room to scroll. */
     left: 14%;

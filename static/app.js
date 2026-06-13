@@ -719,6 +719,7 @@ function _destroyHttpAudioStream() {
     _httpStreamPlaying = false;
     _lastMediaSessionTitle  = null;
     _lastMediaSessionArtist = null;
+    _lastMediaSessionAlbum  = null;
 
     // Tell the server to immediately resume WebSocket audio.  Without this,
     // the server keeps httpAudioChan non-nil until the HTTP connection times
@@ -1255,6 +1256,7 @@ function updatePageTitle() {
 // Called whenever frequency or mode changes so the lock screen stays current.
 let _lastMediaSessionTitle = null;
 let _lastMediaSessionArtist = null;
+let _lastMediaSessionAlbum = null;
 function updateMediaSession() {
     if (!('mediaSession' in navigator)) return;
 
@@ -1310,12 +1312,21 @@ function updateMediaSession() {
     const newTitle  = callsign ? `UberSDR — ${callsign}` : 'UberSDR';
     const newArtist = [freqMHz, modeStr].filter(Boolean).join(' ');
 
+    // Album shows the marker name (bookmark / CW spot / DX spot) sitting at the
+    // current freq+mode, reusing the same matching logic as the dial-wheel
+    // overlay. Falls back to the generic 'Live SDR' label when nothing matches.
+    const markerName = (typeof window.findMatchingMarker === 'function')
+        ? window.findMatchingMarker(freq, currentMode)
+        : null;
+    const newAlbum  = markerName || 'Live SDR';
+
     // Only replace the MediaMetadata object when the content actually changes.
     // Chrome fetches all artwork URLs every time metadata is replaced — even if
     // the URLs are identical.
-    if (newTitle !== _lastMediaSessionTitle || newArtist !== _lastMediaSessionArtist) {
+    if (newTitle !== _lastMediaSessionTitle || newArtist !== _lastMediaSessionArtist || newAlbum !== _lastMediaSessionAlbum) {
         _lastMediaSessionTitle  = newTitle;
         _lastMediaSessionArtist = newArtist;
+        _lastMediaSessionAlbum  = newAlbum;
 
         // Use blob: URLs for artwork to eliminate Chrome's artwork fetch storm.
         // Chrome re-fetches all artwork URLs on every internal waiting→playing
@@ -1332,7 +1343,7 @@ function updateMediaSession() {
         navigator.mediaSession.metadata = new MediaMetadata({
             title:  newTitle,
             artist: newArtist,
-            album:  'Live SDR',
+            album:  newAlbum,
             artwork
         });
 
@@ -1340,12 +1351,12 @@ function updateMediaSession() {
         // once they're ready (will be a no-op if content hasn't changed again).
         if (!_artworkBlobUrls) {
             _ensureArtworkBlobUrls().then(blobArtwork => {
-                // Re-apply metadata with blob URLs (only if title/artist unchanged)
-                if (_lastMediaSessionTitle === newTitle && _lastMediaSessionArtist === newArtist) {
+                // Re-apply metadata with blob URLs (only if title/artist/album unchanged)
+                if (_lastMediaSessionTitle === newTitle && _lastMediaSessionArtist === newArtist && _lastMediaSessionAlbum === newAlbum) {
                     navigator.mediaSession.metadata = new MediaMetadata({
                         title:  newTitle,
                         artist: newArtist,
-                        album:  'Live SDR',
+                        album:  newAlbum,
                         artwork: blobArtwork
                     });
                 }
@@ -12117,6 +12128,7 @@ async function setMediaSessionEnabled(enabled) {
         // Also reset the dedup cache so re-enabling forces a fresh metadata set.
         _lastMediaSessionTitle  = null;
         _lastMediaSessionArtist = null;
+        _lastMediaSessionAlbum  = null;
         if ('mediaSession' in navigator) {
             try { navigator.mediaSession.metadata = null; } catch (_) {}
             try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
@@ -14250,6 +14262,10 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         consider(window.bookmarks || [], b => b.frequency, b => (b.mode ? modeFamily(b.mode) : null), b => b.name);
         return name;
     }
+
+    // Expose so other features (e.g. MediaSession album name) can reuse the same
+    // freq+mode marker-matching logic used by the dial wheel overlay.
+    window.findMatchingMarker = findMatchingMarker;
 
     let _lastMarkerName = null;
 

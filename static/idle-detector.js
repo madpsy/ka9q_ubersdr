@@ -14,10 +14,13 @@ class IdleDetector {
         this.mobileWaterfallPauseTimer = null;
         this._mobileAutoPaused = false; // true when we auto-paused the waterfall
 
-        // All devices: drop spectrum to divisor=3 after 1 minute of idle.
-        // Restores the correct divisor (1 if spectrum visible, 3 if hidden) on
-        // any user activity.  Works on top of the mobile 5-min full pause.
-        this.IDLE_RATE_THROTTLE_TIMEOUT = 60 * 1000; // 1 minute
+        // All devices: drop spectrum to divisor=2 after an idle period.
+        // Mobile idles faster (2.5 min) than desktop (5 min) since mobile data
+        // is more bandwidth-sensitive.  Restores the correct divisor (1 if
+        // spectrum visible, 3 if hidden) on any user activity.  Works on top of
+        // the mobile full pause.
+        this.IDLE_RATE_THROTTLE_TIMEOUT_MOBILE  = 2.5 * 60 * 1000; // 2.5 minutes
+        this.IDLE_RATE_THROTTLE_TIMEOUT_DESKTOP = 5 * 60 * 1000;   // 5 minutes
         this.idleRateThrottleTimer = null;
         this._idleThrottled = false; // true while we have dropped to divisor=3
         
@@ -58,9 +61,10 @@ class IdleDetector {
         this._initAutoPauseCheckbox();
         this._resetMobileWaterfallPauseTimer();
 
-        // All-device idle rate throttle: start the 1-minute countdown from init.
+        // All-device idle rate throttle: start the idle countdown from init.
         this._resetIdleRateThrottleTimer();
-        console.log('[IdleDetector] Idle rate throttle armed: spectrum drops to divisor=3 after 1 min idle (all devices)');
+        const throttleMins = this._idleRateThrottleTimeout() / 60000;
+        console.log(`[IdleDetector] Idle rate throttle armed: spectrum drops to divisor=2 after ${throttleMins} min idle (${this._isMobileDevice() ? 'mobile' : 'desktop'})`);
         
         // Handle visibility changes (tab switching)
         document.addEventListener('visibilitychange', () => {
@@ -368,8 +372,19 @@ class IdleDetector {
     // ── All-device idle rate throttle ────────────────────────────────────────
 
     /**
-     * Start (or restart) the 1-minute idle timer that drops the spectrum
-     * frame-rate divisor to 3 on all devices.
+     * The idle period before the spectrum is throttled, in milliseconds.
+     * 2.5 minutes on mobile (only when auto-pause is enabled), 5 minutes on
+     * desktop and on mobile with auto-pause disabled.
+     */
+    _idleRateThrottleTimeout() {
+        return (this._isMobileDevice() && this._isAutoPauseEnabled())
+            ? this.IDLE_RATE_THROTTLE_TIMEOUT_MOBILE
+            : this.IDLE_RATE_THROTTLE_TIMEOUT_DESKTOP;
+    }
+
+    /**
+     * Start (or restart) the idle timer that drops the spectrum frame-rate
+     * divisor to 2 (2.5 min on mobile, 5 min on desktop).
      * Safe to call at any time — clears any existing timer first.
      */
     _resetIdleRateThrottleTimer() {
@@ -379,7 +394,7 @@ class IdleDetector {
         }
         this.idleRateThrottleTimer = setTimeout(() => {
             this._idleRateThrottle();
-        }, this.IDLE_RATE_THROTTLE_TIMEOUT);
+        }, this._idleRateThrottleTimeout());
         // No log here — this is called on every activity event (mousemove etc.)
         // and would spam the console. Transition logs are in _idleRateThrottle /
         // _idleRateRestore which fire only on actual state changes.
@@ -393,14 +408,15 @@ class IdleDetector {
     _idleRateThrottle() {
         const sd = window.spectrumDisplay;
         if (!sd) return;
+        const throttleMins = this._idleRateThrottleTimeout() / 60000;
         const lineGraphEnabled = localStorage.getItem('spectrumLineGraphEnabled') === 'true';
         if (!lineGraphEnabled) {
-            console.log('[IdleDetector] 1 min idle — spectrum already at divisor=3 (line graph hidden), no change');
+            console.log(`[IdleDetector] ${throttleMins} min idle — spectrum already at divisor=3 (line graph hidden), no change`);
             return;
         }
         // Use divisor=2 when spectrum line is visible — less aggressive than 3,
         // keeps the trace responsive while still saving bandwidth when idle.
-        console.log('[IdleDetector] 1 min idle — throttling spectrum from divisor=1 → divisor=2 (line graph visible)');
+        console.log(`[IdleDetector] ${throttleMins} min idle — throttling spectrum from divisor=1 → divisor=2 (line graph visible)`);
         this._idleThrottled = true;
         sd.setRate(2);
     }

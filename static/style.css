@@ -1326,7 +1326,9 @@ body {
    neighbouring marker name stacked directly above the arrow. Unlike the centre
    marker overlay these are interactive (pointer-events: auto) so a tap tunes to
    the marker. z-index 4 keeps them above the edge fades and centre marker. */
-.tuning-wheel-nav {
+/* ID-scoped (#tuning-wheel) so these beat the generic `button { }` chrome —
+   we want bare arrows + text floating on the drum, no button background. */
+#tuning-wheel .tuning-wheel-nav {
     position: absolute;
     top: 5px;
     display: none;            /* shown by JS only when a neighbour exists */
@@ -1336,17 +1338,25 @@ body {
     margin: 0;
     padding: 0 2px;
     border: none;
-    background: none;
+    background: transparent;
+    box-shadow: none;
+    -webkit-appearance: none;
+    appearance: none;
     cursor: pointer;
     pointer-events: auto;
     z-index: 4;
-    opacity: 0;
-    transition: opacity 0.25s ease;
 }
 
-.tuning-wheel-nav.visible {
+#tuning-wheel .tuning-wheel-nav.visible {
     display: flex;
-    opacity: 1;
+}
+
+#tuning-wheel .tuning-wheel-nav:hover,
+#tuning-wheel .tuning-wheel-nav:active,
+#tuning-wheel .tuning-wheel-nav:focus {
+    background: transparent;
+    box-shadow: none;
+    outline: none;
 }
 
 .tuning-wheel-nav-prev { left: 4px;  align-items: flex-start; text-align: left;  }

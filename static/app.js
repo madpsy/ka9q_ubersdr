@@ -14063,6 +14063,8 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     const wheel      = document.getElementById('tuning-wheel');
     const drum       = document.getElementById('tuning-wheel-drum');
     const stepLabel  = document.getElementById('tuning-wheel-step-label');
+    const markerBox  = document.getElementById('tuning-wheel-marker');
+    const markerText = document.getElementById('tuning-wheel-marker-text');
 
     // Only wire up if the toggle is present (it's hidden on desktop but still in DOM)
     if (!modeToggle || !radioBtns || !radioWheel || !tuningBtns || !wheelCont) return;
@@ -14100,6 +14102,8 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (mode === 'wheel') {
             tuningBtns.style.display = 'none';
             wheelCont.style.display  = 'block';
+            // Refresh the marker overlay for the freq/mode we're opening on.
+            if (typeof updateWheelMarkerLabel === 'function') updateWheelMarkerLabel();
             // Enable edge tune so the spectrum follows the wheel.
             // Save the previous localStorage value so we can restore it later.
             if (edgeTuneStateBeforeWheel === null) {
@@ -14180,6 +14184,118 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (stepLabel) stepLabel.textContent = formatHz(getCurrentStepHz()) + ' / step';
     }
 
+    // ── Marker overlay (bookmark / CW spot / DX spot at the current freq) ──────
+    // Shows the name of any marker sitting at the current dial frequency + mode,
+    // subtly overlaid on the wheel. CW/DX spots take priority over bookmarks for
+    // the same freq/mode. Long names scroll horizontally.
+    const MARKER_FREQ_TOLERANCE_HZ = 100; // how close the dial must sit to a marker
+
+    // Collapse mode variants into a family so cwu/cwl, am/sam and fm/nfm match.
+    function modeFamily(m) {
+        m = (m || '').toLowerCase();
+        if (m === 'cw' || m === 'cwu' || m === 'cwl') return 'cw';
+        if (m === 'am' || m === 'sam')                return 'am';
+        if (m === 'fm' || m === 'nfm')                return 'fm';
+        return m; // usb, lsb, drm, etc.
+    }
+
+    // Derive a DX cluster spot's mode family from its comment / frequency,
+    // mirroring the logic in dx-cluster/main.js tuneToSpot().
+    function dxSpotModeFamily(spot) {
+        const comment = (spot.comment || '').toUpperCase();
+        if (comment.includes('CW')) return 'cw';
+        if (comment.includes('FT8') || comment.includes('FT4')) return 'usb';
+        return (spot.frequency / 1e6) >= 10 ? 'usb' : 'lsb';
+    }
+
+    function getDialHz() {
+        const freqInput = document.getElementById('frequency');
+        if (!freqInput) return null;
+        const hz = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+        return isNaN(hz) ? null : hz;
+    }
+
+    // Find the closest marker at the current dial freq+mode. CW/DX spots win
+    // over bookmarks: if any spot matches we never fall through to bookmarks.
+    function findMatchingMarker(dialHz, mode) {
+        if (dialHz === null) return null;
+        const fam = modeFamily(mode);
+
+        // Scan a list, keeping the nearest match within tolerance. `dist`/`name`
+        // are shared across calls so lists scanned together compete fairly, and
+        // a later group can be skipped entirely by resetting before it runs.
+        let dist = Infinity, name = null;
+        const consider = (list, freqOf, famOf, nameOf) => {
+            for (const item of list) {
+                const f = freqOf(item);
+                if (typeof f !== 'number' || isNaN(f)) continue;
+                const d = Math.abs(f - dialHz);
+                if (d > MARKER_FREQ_TOLERANCE_HZ || d >= dist) continue;
+                const itemFam = famOf(item);
+                if (itemFam && itemFam !== fam) continue; // null family = wildcard
+                dist = d;
+                name = nameOf(item);
+            }
+        };
+
+        // 1. Spots (priority). CW + DX compete on the same accumulator; if either
+        // matches we never fall through to bookmarks.
+        const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
+        const dxSpots = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
+        consider(cwSpots, s => s.frequency, () => 'cw',               s => s.dx_call);
+        consider(dxSpots, s => s.frequency, s => dxSpotModeFamily(s), s => s.dx_call);
+        if (name) return name;
+
+        // 2. Bookmarks (server + local) — only reached when no spot matched.
+        consider(window.bookmarks || [], b => b.frequency, b => (b.mode ? modeFamily(b.mode) : null), b => b.name);
+        return name;
+    }
+
+    let _lastMarkerName = null;
+
+    function updateWheelMarkerLabel() {
+        if (!markerBox || !markerText) return;
+        // Only relevant while the wheel is actually visible.
+        if (wheelCont.style.display === 'none' || !wheelCont.offsetParent) {
+            if (markerBox.classList.contains('visible')) markerBox.classList.remove('visible');
+            return;
+        }
+
+        const name = findMatchingMarker(getDialHz(), window.currentMode);
+
+        if (!name) {
+            markerBox.classList.remove('visible');
+            _lastMarkerName = null;
+            return;
+        }
+
+        if (name !== _lastMarkerName) {
+            _lastMarkerName = name;
+            markerText.textContent = name;
+            // Reset any prior scroll animation before re-measuring.
+            markerText.classList.remove('scrolling');
+            markerBox.classList.remove('scrolling');
+            markerText.style.removeProperty('--marker-scroll-dist');
+            markerText.style.removeProperty('--marker-scroll-dur');
+
+            // Measure overflow on the next frame (after layout) and enable the
+            // marquee only when the name is too long to fit.
+            requestAnimationFrame(() => {
+                if (markerText.textContent !== name) return; // changed again meanwhile
+                const overflow = markerText.scrollWidth - markerBox.clientWidth;
+                if (overflow > 2) {
+                    markerText.style.setProperty('--marker-scroll-dist', (-overflow) + 'px');
+                    // ~30 px/sec, min 3s, so longer names scroll proportionally.
+                    markerText.style.setProperty('--marker-scroll-dur', Math.max(3, overflow / 30) + 's');
+                    markerBox.classList.add('scrolling');
+                    markerText.classList.add('scrolling');
+                }
+            });
+        }
+
+        markerBox.classList.add('visible');
+    }
+
     let active  = false;
     let lastX   = 0;
     let accumPx = 0;
@@ -14255,6 +14371,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             updateBandButtons(newHz);
             updateBandSelector();
             updateURL();
+            updateWheelMarkerLabel();
 
             // ── Network send: coalesced to ≤1 WebSocket message per rAF frame ─
             scheduleTune();
@@ -14272,13 +14389,20 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         wheel.style.cursor = 'grab';
         // Flush any pending tune so the final frequency is always committed
         flushTune();
+        updateWheelMarkerLabel();
     });
 
     wheel.addEventListener('pointercancel', function () {
         active = false;
         wheel.style.cursor = 'grab';
         flushTune();
+        updateWheelMarkerLabel();
     });
+
+    // Catch freq/mode changes from other controls (band buttons, spot clicks)
+    // and newly-arrived spots/bookmarks while the wheel is on screen. Cheap
+    // early-out keeps this idle when the wheel is hidden (e.g. on desktop).
+    setInterval(updateWheelMarkerLabel, 1000);
 })();
 
 // ── Browser zoom buttons (narrow/mobile view only) ────────────────────────────

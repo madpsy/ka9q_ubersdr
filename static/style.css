@@ -1273,6 +1273,55 @@ body {
     );
 }
 
+/* Marker overlay — subtly shows the bookmark / CW / DX spot at the current
+   dial freq+mode, near the top of the wheel. Sits above the edge gradients
+   (z-index 2) but stays out of the way of dragging (pointer-events: none). */
+.tuning-wheel-marker {
+    position: absolute;
+    top: 5px;
+    /* Keep clear of the curved-edge gradients (28% each side) but allow a
+       little overlap into the fade so long names have room to scroll. */
+    left: 14%;
+    right: 14%;
+    height: 16px;
+    overflow: hidden;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.tuning-wheel-marker.visible {
+    opacity: 1;
+}
+
+.tuning-wheel-marker-text {
+    display: inline-block;
+    white-space: nowrap;
+    font-size: 0.74em;
+    font-weight: 500;
+    line-height: 16px;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.82);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
+/* Only animates when JS detects the name overflows the container. The scroll
+   distance + duration are set inline per-name; alternate avoids a jump-back. */
+.tuning-wheel-marker.scrolling {
+    text-align: left;
+}
+
+.tuning-wheel-marker-text.scrolling {
+    animation: tuningWheelMarkerScroll var(--marker-scroll-dur, 5s) ease-in-out infinite alternate;
+}
+
+@keyframes tuningWheelMarkerScroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(var(--marker-scroll-dist, 0)); }
+}
+
 /* Step label overlaid inside the wheel — takes no extra vertical space */
 .tuning-wheel-step-label {
     position: absolute;

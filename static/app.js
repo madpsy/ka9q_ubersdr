@@ -14084,6 +14084,12 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // Track the edge-tune state before wheel mode was activated so we can restore it
     let edgeTuneStateBeforeWheel = null;
 
+    // Name of the marker currently shown in the wheel overlay (dedup guard).
+    // Declared here — not next to updateWheelMarkerLabel() below — because
+    // applyTuningModeFromStorage() can call updateWheelMarkerLabel() during init,
+    // which would otherwise hit a temporal-dead-zone error on this `let`.
+    let _lastMarkerName = null;
+
     // Detect mobile: use matchMedia to match the same breakpoint as the CSS
     const mobileQuery = window.matchMedia('(max-width: 1024px)');
 
@@ -14266,8 +14272,6 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // Expose so other features (e.g. MediaSession album name) can reuse the same
     // freq+mode marker-matching logic used by the dial wheel overlay.
     window.findMatchingMarker = findMatchingMarker;
-
-    let _lastMarkerName = null;
 
     function updateWheelMarkerLabel() {
         if (!markerBox || !markerText) return;

@@ -56,6 +56,12 @@ ui:
         label: "Viridis"
       - value: "plasma"
         label: "Plasma"
+      - value: "sonar-green"
+        label: "Sonar 1"
+      - value: "sonar-orange"
+        label: "Sonar 2"
+      - value: "night-vision"
+        label: "Night"
 
   # Default auto-contrast value for new visitors
   # Symmetric dB offset applied to the auto-range window:

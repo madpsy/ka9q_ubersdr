@@ -1176,6 +1176,9 @@ func LoadConfig(filename string) (*Config, error) {
 			{Value: "turbo", Label: "Turbo"},
 			{Value: "viridis", Label: "Viridis"},
 			{Value: "plasma", Label: "Plasma"},
+			{Value: "sonar-green", Label: "Sonar 1"},
+			{Value: "sonar-orange", Label: "Sonar 2"},
+			{Value: "night-vision", Label: "Night"},
 		}
 	}
 	// Contrast: auto-range symmetric dB offset, range 0-20 (matches UI slider in index.html).

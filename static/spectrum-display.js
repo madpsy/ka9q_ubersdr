@@ -24,19 +24,19 @@ class SpectrumDisplay {
 
         // Line graph EMA smoothing (replaces box-filter history).
         // Always-on light EMA keeps the trace clean even with Smooth off;
-        // the checkbox switches to a heavier time constant for longer averaging.
-        // Algorithm mirrors VibeSDR signalProcessor.ts: asymmetric EMA with
-        // fast attack (rise) and slow decay (fall), time-normalised by dtSec.
+        // the checkbox switches to a heavier fall time constant for longer averaging.
+        //
+        //   fallAlpha = min(0.95, 1 - exp(-dtSec / tcFall))
+        //   riseAlpha = min(0.95, fallAlpha * 4)   ← derived, guarantees 4× ratio
+        // Rise is NOT a separate time constant — it is always fallAlpha * 4.
         this.specEma = null;           // Float32Array, lazily allocated per bin count
         this.specEmaLastFrameTime = 0; // wall-clock ms of last drawLineGraph call
 
-        // Time constants (seconds) — tuned to match VibeSDR's feel:
-        //   LIGHT (Smooth OFF): near-instant rise, ~3-frame decay tail
-        //   HEAVY (Smooth ON):  ~5-frame rise, ~18-frame decay — true averaging
-        this.EMA_TC_LIGHT_RISE = 0.03; // 30ms  — essentially one frame at 30fps
-        this.EMA_TC_LIGHT_FALL = 0.10; // 100ms — removes single-frame spikes only
-        this.EMA_TC_HEAVY_RISE = 0.15; // 150ms — signals take ~5 frames to appear
-        this.EMA_TC_HEAVY_FALL = 0.60; // 600ms — ~18 frames to release (averaged look)
+        // Fall time constants only (rise = fallAlpha * 4, capped 0.95):
+        //   LIGHT (Smooth OFF): ~3-frame decay tail — removes single-frame spikes only
+        //   HEAVY (Smooth ON):  ~18-frame decay    — true time-averaging look
+        this.EMA_TC_LIGHT_FALL = 0.10; // 100ms fall — near-instant feel
+        this.EMA_TC_HEAVY_FALL = 0.60; // 600ms fall — smoothingFrames=5
 
         // Peak hold line - tracks maximum values with slow decay
         this.peakHoldData = null;
@@ -2261,12 +2261,13 @@ class SpectrumDisplay {
         }
 
         // Apply asymmetric EMA smoothing (always on; checkbox controls time constant).
-        // Mirrors VibeSDR signalProcessor.ts step 5: time-normalised so the result
-        // looks identical at any server frame rate (5–20 Hz).
+        //   - dtSec clamped min 0.01 / default 0.1 (matches signalProcessor.ts:152-154)
+        //   - fallAlpha = 1 - exp(-dtSec / tcFall), capped at 0.95
+        //   - riseAlpha = min(0.95, fallAlpha * 4)  ← derived from fall, guarantees 4× ratio
         const now = Date.now();
         const dtSec = this.specEmaLastFrameTime
-            ? Math.min(0.5, Math.max(0.005, (now - this.specEmaLastFrameTime) / 1000))
-            : 0.033; // assume ~30fps on first call
+            ? Math.min(0.5, Math.max(0.01, (now - this.specEmaLastFrameTime) / 1000))
+            : 0.1; // conservative first-call default
         this.specEmaLastFrameTime = now;
 
         // Allocate / resize EMA buffer (primed from real data — zero settling delay)
@@ -2274,13 +2275,12 @@ class SpectrumDisplay {
             this.specEma = new Float32Array(this.spectrumData);
         }
 
-        // Pick time constants: light (Smooth OFF) vs heavy (Smooth ON)
-        const tcRise = this.smoothingEnabled ? this.EMA_TC_HEAVY_RISE : this.EMA_TC_LIGHT_RISE;
-        const tcFall = this.smoothingEnabled ? this.EMA_TC_HEAVY_FALL : this.EMA_TC_LIGHT_FALL;
-
-        // Compute per-direction alphas from time constants
-        const alphaRise = Math.min(0.99, 1.0 - Math.exp(-dtSec / tcRise));
-        const alphaFall = Math.min(0.99, 1.0 - Math.exp(-dtSec / tcFall));
+        // Pick fall time constant: light (Smooth OFF) vs heavy (Smooth ON).
+        // Rise is derived as fallAlpha * 4 (capped 0.95):
+        //   riseAlpha = min(0.95, fallAlpha * 4)  (signalProcessor.ts:273)
+        const tcFall    = this.smoothingEnabled ? this.EMA_TC_HEAVY_FALL : this.EMA_TC_LIGHT_FALL;
+        const alphaFall = Math.min(0.95, 1.0 - Math.exp(-dtSec / tcFall));
+        const alphaRise = Math.min(0.95, alphaFall * 4); // 4× faster attack, same cap
 
         // Per-bin asymmetric EMA: fast attack (signal rising), slow decay (signal falling)
         const smoothedData = new Float32Array(this.spectrumData.length);

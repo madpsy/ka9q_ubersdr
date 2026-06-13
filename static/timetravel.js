@@ -1615,11 +1615,27 @@ function ttSetupHover() {
   if (!wrap || !c || !tt) return;
 
   /* ── Scroll-wheel frequency zoom ──────────────────────────────────────── */
+  /* Accumulator for normalising trackpad vs mouse wheel delta across devices.
+     Trackpad fires many small pixel-mode events; mouse fires one large event.
+     Accumulate until ≥ WHEEL_STEP_PX pixels scrolled, then act once.        */
+  var ttWheelAccumulator = 0;
+  var TT_WHEEL_STEP_PX = 50;
+
   wrap.addEventListener('wheel', function(e) {
     /* Only zoom when not over the scrubber */
     var sw = document.getElementById('tt-scrubber-wrap');
     if (sw && sw.contains(e.target)) return;
     e.preventDefault();
+
+    /* ── Normalise delta across all device types ─────────────────────────── */
+    var normalizedDelta = e.deltaY;
+    if (e.deltaMode === 1) normalizedDelta *= 16;   /* lines → pixels */
+    if (e.deltaMode === 2) normalizedDelta *= 400;  /* pages → pixels */
+    ttWheelAccumulator += normalizedDelta;
+    if (Math.abs(ttWheelAccumulator) < TT_WHEEL_STEP_PX) return;
+    var ttWheelDirection = ttWheelAccumulator < 0 ? -1 : 1;
+    ttWheelAccumulator = 0;
+    /* ── End normalisation ───────────────────────────────────────────────── */
 
     var rect = c.getBoundingClientRect();
     /* Cursor position as fraction [0,1] across the canvas front edge */
@@ -1627,7 +1643,7 @@ function ttSetupHover() {
     /* Map cursor screen fraction to full-range fraction */
     var cursorFullFrac = ttFreqStart + cursorFrac * (ttFreqEnd - ttFreqStart);
 
-    var factor = e.deltaY < 0 ? 0.75 : 1 / 0.75; /* zoom in / out */
+    var factor = ttWheelDirection < 0 ? 0.75 : 1 / 0.75; /* zoom in / out */
     var newSpan = (ttFreqEnd - ttFreqStart) * factor;
     newSpan = Math.max(0.01, Math.min(1.0, newSpan));
 

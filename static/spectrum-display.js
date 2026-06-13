@@ -4451,6 +4451,10 @@ class SpectrumDisplay {
     setupScrollHandler() {
         // Throttle variables for scroll wheel
         let lastScrollTime = 0;
+        // Accumulator for normalising trackpad vs mouse wheel delta across all devices.
+        // Trackpad fires many small pixel-mode events; mouse fires one large event.
+        // We accumulate until ≥ WHEEL_STEP_PX pixels have been scrolled, then act once.
+        let wheelAccumulator = 0;
 
         // Setup checkbox handlers
         const scrollCheckbox = document.getElementById('spectrum-scroll-enable');
@@ -4773,6 +4777,22 @@ class SpectrumDisplay {
 
             e.preventDefault();
 
+            // ── Normalise wheel delta across all device types ──────────────────
+            // deltaMode 0 = pixels (trackpad / high-res mouse), 1 = lines, 2 = pages.
+            // Accumulate until ≥ WHEEL_STEP_PX pixels have been scrolled, then act
+            // once.  A standard mouse click (~100–120 px) always clears the threshold
+            // immediately; a trackpad swipe accumulates across many small events.
+            // Reset to 0 (not remainder) to avoid "scroll debt" after fast swipes.
+            const WHEEL_STEP_PX = 50;
+            let normalizedDelta = e.deltaY;
+            if (e.deltaMode === 1) normalizedDelta *= 16;   // lines → pixels
+            if (e.deltaMode === 2) normalizedDelta *= 400;  // pages → pixels
+            wheelAccumulator += normalizedDelta;
+            if (Math.abs(wheelAccumulator) < WHEEL_STEP_PX) return;
+            const wheelDirection = wheelAccumulator < 0 ? -1 : 1; // -1 = up/in
+            wheelAccumulator = 0;
+            // ── End normalisation ──────────────────────────────────────────────
+
             const now = Date.now();
 
             // Get throttle delay from global configuration (set by dropdown in app.js)
@@ -4795,7 +4815,7 @@ class SpectrumDisplay {
 
             if (useZoomMode) {
                 // Zoom mode: scroll up = zoom in, scroll down = zoom out
-                if (e.deltaY < 0) {
+                if (wheelDirection < 0) {
                     this.zoomIn();
                 } else {
                     this.zoomOut();
@@ -4835,10 +4855,10 @@ class SpectrumDisplay {
                 const step = window.frequencyScrollStep || 100; // Default to 100 Hz if not set
                 const delay = window.frequencyScrollDelay || 100; // Default to 100ms if not set
 
-                console.log(`Scroll: deltaY=${e.deltaY}, step=${step}Hz, delay=${delay}ms`);
+                console.log(`Scroll: wheelDirection=${wheelDirection}, step=${step}Hz, delay=${delay}ms`);
 
                 // Scroll up = increase frequency, scroll down = decrease frequency
-                const delta = e.deltaY < 0 ? step : -step;
+                const delta = wheelDirection < 0 ? step : -step;
                 let newFreq = currentFreq + delta;
 
                 // Round to nearest step size for clean values

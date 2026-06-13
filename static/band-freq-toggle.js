@@ -55,10 +55,26 @@ function updateFrequencyReadout() {
 function setupFrequencyDigitInteraction() {
     const digits = document.querySelectorAll('.freq-digit');
 
+    // Accumulator for normalising trackpad vs mouse wheel delta.
+    // Trackpad fires many small pixel-mode events; mouse fires one large event.
+    // We accumulate until ≥ WHEEL_STEP_PX pixels have been scrolled, then act once.
+    let wheelAccumulator = 0;
+    const WHEEL_STEP_PX = 50;
+
     digits.forEach(digit => {
         // Mouse wheel scroll - increment/decrement at this digit's step
         digit.addEventListener('wheel', (e) => {
             e.preventDefault(); // Prevent page scroll
+
+            // ── Normalise delta across all device types ──────────────────────
+            let normalizedDelta = e.deltaY;
+            if (e.deltaMode === 1) normalizedDelta *= 16;   // lines → pixels
+            if (e.deltaMode === 2) normalizedDelta *= 400;  // pages → pixels
+            wheelAccumulator += normalizedDelta;
+            if (Math.abs(wheelAccumulator) < WHEEL_STEP_PX) return;
+            const wheelDirection = wheelAccumulator < 0 ? -1 : 1;
+            wheelAccumulator = 0;
+            // ── End normalisation ─────────────────────────────────────────────
 
             // Throttle wheel events
             const now = Date.now();
@@ -66,7 +82,7 @@ function setupFrequencyDigitInteraction() {
             lastFreqChangeTime = now;
 
             const step = parseInt(digit.getAttribute('data-step'));
-            const increment = e.deltaY < 0; // Scroll up = increment, scroll down = decrement
+            const increment = wheelDirection < 0; // Scroll up = increment, scroll down = decrement
 
             changeFrequencyByStep(step, increment);
         }, { passive: false });

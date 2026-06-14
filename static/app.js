@@ -14384,16 +14384,18 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         const dxSpots = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
 
         // Voice activity markers come from the shared service's latest snapshot.
-        // Each activity carries its own dial freq + mode; label is the spotted
-        // callsign when known, otherwise "Voice".
+        // Use the ALL-bands list (not just the active band) so prev/next can
+        // step to voice activity on other bands too. Each activity carries its
+        // own dial freq + mode; label is the spotted callsign, else "Voice".
         const vaState = window.VoiceActivityService && window.VoiceActivityService.getLatest();
-        const voiceActs = (vaState && vaState.enabled && Array.isArray(vaState.activities)) ? vaState.activities : [];
+        const voiceActs = (vaState && vaState.enabled && typeof window.VoiceActivityService.getAllActivities === 'function')
+            ? window.VoiceActivityService.getAllActivities() : [];
         const vaFreq = a => a.estimated_dial_freq || a.start_freq;
         const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
 
         add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1, 'cw');
         add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1, 'dx');
-        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || 'Voice'), 1, 'voice');
+        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))), 1, 'voice');
         add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0, 'bookmark');
         return out;
     }

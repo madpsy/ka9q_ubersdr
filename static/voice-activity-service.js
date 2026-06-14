@@ -32,6 +32,7 @@
   var subscribers = [];        // array of callbacks
   var latest      = null;      // last emitted state object
   var currentBand = null;
+  var latestBands = null;      // last fetched { bandName: [activities] } map
 
   var pollTimer   = null;
   var watchTimer  = null;
@@ -95,7 +96,11 @@
         var b = getCurrentBand();
         if (b !== lastWatched) {
           lastWatched = b;
-          fetchAndEmit();
+          // We already hold every band's activity from the last fetch, so a
+          // band change just re-derives the current-band slice instantly — no
+          // extra request (the next poll refreshes the underlying data).
+          if (latestBands) emitFromBands(latestBands, b);
+          else fetchAndEmit();
         }
       }, BAND_WATCH_MS);
     });
@@ -108,20 +113,55 @@
   }
 
   // ── Fetch & emit ──────────────────────────────────────────────────────────
+  // Flatten the all-bands { bandName: [activities] } map into one array.
+  function flattenBands(bands) {
+    var out = [];
+    if (!bands) return out;
+    for (var name in bands) {
+      if (!Object.prototype.hasOwnProperty.call(bands, name)) continue;
+      if (Array.isArray(bands[name])) out = out.concat(bands[name]);
+    }
+    return out;
+  }
+
+  // Build & emit a state object from the cached all-bands map for the active
+  // band. `activities` is the current band's slice (the voice widget + markers
+  // render this); `allActivities` spans every band so marker prev/next
+  // navigation can reach voice activity on other bands too.
+  function emitFromBands(bands, band) {
+    latestBands = bands || {};
+    // Tag each activity with the band it belongs to (the all-bands map is keyed
+    // by band, but the activity objects themselves don't carry it) so marker
+    // labels can show e.g. "Voice 20m" when there's no callsign.
+    for (var bn in latestBands) {
+      if (!Object.prototype.hasOwnProperty.call(latestBands, bn)) continue;
+      var arr = latestBands[bn];
+      if (Array.isArray(arr)) {
+        for (var i = 0; i < arr.length; i++) {
+          if (arr[i] && typeof arr[i] === 'object') arr[i].band = bn;
+        }
+      }
+    }
+    emit({
+      enabled: true,
+      band: band,
+      activities: (band && latestBands[band]) ? latestBands[band] : [],
+      allActivities: flattenBands(latestBands),
+      data: latestBands,
+      error: null,
+      timestamp: Date.now()
+    });
+  }
+
   function fetchAndEmit() {
     if (inFlight) return;
     var band = getCurrentBand();
     currentBand = band;
 
-    if (!band) {
-      emit({ enabled: true, band: null, activities: [], data: null,
-             error: null, timestamp: Date.now() });
-      return;
-    }
-
+    // Fetch every band at once (single endpoint, same rate-limit bucket). The
+    // current-band slice is derived locally, so no per-band request is needed.
     inFlight = true;
-    fetch('/api/noisefloor/voice-activity?band=' + encodeURIComponent(band) +
-          '&min_confidence=' + MIN_CONFIDENCE)
+    fetch('/api/noisefloor/voice-activity/all?min_confidence=' + MIN_CONFIDENCE)
       .then(function (r) {
         if (r.status === 429) return null;            // rate limited — keep last
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -129,21 +169,22 @@
       })
       .then(function (data) {
         if (!data) return;                            // 429: leave existing state
-        emit({ enabled: true, band: band, activities: data.activities || [],
-               data: data, error: null, timestamp: Date.now() });
+        emitFromBands(data.bands || {}, getCurrentBand());
       })
       .catch(function (err) {
-        emit({ enabled: true, band: band, activities: [], data: null,
-               error: err.message, timestamp: Date.now() });
+        emit({ enabled: true, band: band, activities: [], allActivities: [],
+               data: null, error: err.message, timestamp: Date.now() });
       })
       .finally(function () { inFlight = false; });
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
   window.VoiceActivityService = {
-    subscribe:       subscribe,
-    getLatest:       function () { return latest; },
-    getCurrentBand:  getCurrentBand,
-    MIN_CONFIDENCE:  MIN_CONFIDENCE
+    subscribe:        subscribe,
+    getLatest:        function () { return latest; },
+    // Flattened voice activity across ALL bands (for marker prev/next nav).
+    getAllActivities: function () { return latest ? (latest.allActivities || []) : []; },
+    getCurrentBand:   getCurrentBand,
+    MIN_CONFIDENCE:   MIN_CONFIDENCE
   };
 })();

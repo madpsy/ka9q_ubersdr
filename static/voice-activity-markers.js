@@ -39,7 +39,9 @@
   // ── Data accessors ─────────────────────────────────────────────────────────
   function activityFreq(act)  { return act.estimated_dial_freq || act.start_freq; }
   function activityMode(act)  { return (act.mode || 'LSB').toLowerCase(); }
-  function activityLabel(act) { return act.dx_callsign || 'Voice'; }
+  // Spotted callsign when known; otherwise "Voice" suffixed with the band
+  // (e.g. "Voice 20m") so multi-band views distinguish them.
+  function activityLabel(act) { return act.dx_callsign || ('Voice' + (act.band ? ' ' + act.band : '')); }
 
   function normCall(call) { return call ? String(call).trim().toUpperCase() : ''; }
 
@@ -64,7 +66,10 @@
       // On a transient fetch error keep the last markers (the backend's own
       // persistence means it's just a missed poll, not a real disappearance).
       if (state && state.error) return;
-      latestActivities = (state && state.enabled && state.activities) ? state.activities : [];
+      // Use the ALL-bands list, not just the active band: when zoomed out the
+      // spectrum spans multiple bands, and draw() already clips to the visible
+      // frequency range — so this shows voice markers for every visible band.
+      latestActivities = (state && state.enabled && Array.isArray(state.allActivities)) ? state.allActivities : [];
 
       // Redraw only when the marker-relevant data actually changed, to avoid
       // needless marker-cache rebuilds on every (5s) poll.

@@ -223,32 +223,43 @@
     return voiceModeForFreq(spot.frequency);
   }
 
-  // Flatten every marker into { freq, mode, family, name, priority }. Spots get
-  // priority 1, bookmarks 0, so spots win when two markers share a frequency.
+  // Flatten every marker into { freq, mode, family, name, priority, type }. Spots
+  // get priority 1, bookmarks 0, so spots win when two markers share a frequency.
+  // `type` (cw/dx/voice/bookmark) drives the prev/next navTypes filter.
   function collectMarkers() {
     const out = [];
-    const add = (list, freqOf, modeOf, famOf, nameOf, priority) => {
+    const add = (list, freqOf, modeOf, famOf, nameOf, priority, type) => {
       for (const item of list) {
         const f = freqOf(item);
         if (typeof f !== 'number' || isNaN(f)) continue;
-        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority });
+        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority, type });
       }
     };
     const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
     const dxSpots = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
-    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',                s => s.dx_call, 1);
-    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),          s => s.dx_call, 1);
-    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0);
+    const vaState = window.VoiceActivityService && window.VoiceActivityService.getLatest();
+    const voiceActs = (vaState && vaState.enabled && typeof window.VoiceActivityService.getAllActivities === 'function')
+      ? window.VoiceActivityService.getAllActivities() : [];
+    const vaFreq = a => a.estimated_dial_freq || a.start_freq;
+    const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
+    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',                s => s.dx_call, 1, 'cw');
+    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),          s => s.dx_call, 1, 'dx');
+    add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))), 1, 'voice');
+    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0, 'bookmark');
     return out;
   }
 
   // Locate the current / prev / next markers relative to the dial freq+mode.
-  // Faithful replica of the host's findMarkers().
-  function fallbackFindMarkers(dialHz, mode) {
+  // Faithful replica of the host's findMarkers(). navTypes optionally restricts
+  // which marker types may become the prev/next neighbours (null = all);
+  // `current` is never filtered.
+  function fallbackFindMarkers(dialHz, mode, navTypes) {
     const result = { current: null, prev: null, next: null };
     if (dialHz === null) return result;
     const fam = modeFamily(mode);
     const markers = collectMarkers();
+    const navFilter = Array.isArray(navTypes) ? new Set(navTypes) : null;
+    const navAllowed = m => !navFilter || navFilter.has(m.type);
     let current = null, currentDist = Infinity, prev = null, next = null;
     for (const m of markers) {
       const d = Math.abs(m.freq - dialHz);
@@ -260,9 +271,9 @@
           currentDist = d;
         }
       } else if (m.freq < dialHz) {
-        if (!prev || m.freq > prev.freq || (m.freq === prev.freq && m.priority > prev.priority)) prev = m;
+        if (navAllowed(m) && (!prev || m.freq > prev.freq || (m.freq === prev.freq && m.priority > prev.priority))) prev = m;
       } else {
-        if (!next || m.freq < next.freq || (m.freq === next.freq && m.priority > next.priority)) next = m;
+        if (navAllowed(m) && (!next || m.freq < next.freq || (m.freq === next.freq && m.priority > next.priority))) next = m;
       }
     }
     const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name } : null;
@@ -282,10 +293,13 @@
   function getMarkers() {
     const dialHz = getDialHz();
     const mode = window.currentMode;
+    // Honour the host's prev/next marker-type preference (Audio Settings), so the
+    // widget arrows step through the same markers as the dial wheel. null = all.
+    const navTypes = Array.isArray(window.markerNavTypes) ? window.markerNavTypes : null;
     if (typeof window.findMarkers === 'function') {
-      return window.findMarkers(dialHz, mode);
+      return window.findMarkers(dialHz, mode, navTypes);
     }
-    return fallbackFindMarkers(dialHz, mode);
+    return fallbackFindMarkers(dialHz, mode, navTypes);
   }
 
   // Tune to a { freq, mode } neighbour (prev/next tap), mirroring the dial-wheel

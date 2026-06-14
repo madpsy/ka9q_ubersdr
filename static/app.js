@@ -12849,6 +12849,7 @@ window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
 window.loadBufferThreshold = loadBufferThreshold; // needed by ui-config.js applyServerUIDefaults()
 window.setMediaSessionEnabled = setMediaSessionEnabled;
+window.setMediaSessionSkipMode = setMediaSessionSkipMode;
 window.setSignalDataSource = setSignalDataSource;
 window.populateOutputDevices = populateOutputDevices;
 window.setOutputDevice = setOutputDevice;

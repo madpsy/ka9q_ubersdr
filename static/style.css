@@ -3025,9 +3025,10 @@ input[type="range"]::-moz-range-thumb {
 
 
 .equalizer-bands {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 6px;
     padding: 15px;
     background: var(--panel-dark);
     border-radius: 6px;
@@ -3036,7 +3037,28 @@ input[type="range"]::-moz-range-thumb {
 .eq-band {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+/* Preset buttons live as a vertically-stacked column to the left of the first
+   band slider (the rotated sliders are narrow enough to free up the room). */
+.equalizer-bands .eq-presets {
+    flex: 0 0 auto;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    margin-right: 8px;
+}
+
+.equalizer-bands .eq-presets .eq-reset-btn {
+    margin: 0;            /* drop the default margin-top:15px in this stacked layout */
+    padding: 6px 12px;
+    font-size: 0.85em;
+    min-width: 64px;
 }
 
 .eq-label {
@@ -3044,53 +3066,7 @@ input[type="range"]::-moz-range-thumb {
     color: var(--text-light);
     font-weight: bold;
     text-align: center;
-}
-
-.eq-slider {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    height: 6px;
-    background: linear-gradient(to right,
-        #2ecc71 0%,
-        #2ecc71 33.33%,
-        #f39c12 33.33%,
-        #f39c12 50%,
-        #e74c3c 50%,
-        #e74c3c 100%);
-    border-radius: 3px;
-    outline: none;
-    cursor: pointer;
-}
-
-.eq-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--text-light);
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-    border: 2px solid var(--panel-mid);
-}
-
-.eq-slider::-webkit-slider-thumb:hover {
-    background: #fff;
-}
-
-.eq-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--text-light);
-    cursor: pointer;
-    border: 2px solid var(--panel-mid);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-}
-
-.eq-slider::-moz-range-thumb:hover {
-    background: #fff;
+    order: 3;            /* label below the slider */
 }
 
 .eq-value {
@@ -3098,6 +3074,83 @@ input[type="range"]::-moz-range-thumb {
     font-weight: bold;
     color: #3498db;
     text-align: center;
+    order: 1;            /* value above the slider */
+}
+
+/* Vertical sliders are built from a normal horizontal range input rotated -90°
+   inside a fixed-size slot, the same technique used by eq.widget.html. This
+   avoids the cross-browser breakage of appearance:slider-vertical / writing-mode.
+   NB: every layout rule is scoped under .equalizer-bands on purpose. The host
+   page styles `input[type="range"]` (specificity 0,1,1 — width:200px, height:6px),
+   which would beat a bare `.eq-slider` class (0,1,0) and blow the rotated sliders
+   out to 200px tall. The descendant prefix (0,2,0) guarantees we win. */
+.equalizer-bands .eq-slot {
+    position: relative;
+    width: 30px;
+    height: 150px;
+    order: 2;
+}
+
+.equalizer-bands .eq-slider {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    /* !important: the @media (max-width:1024px) rule
+       `input[type="range"]:not(#spectrum-vzoom-slider){width:100%}` has an id in
+       its :not() (specificity 1,1,1) and cannot be beaten by classes alone; it
+       would otherwise collapse the rotated slider's vertical travel. */
+    width: 150px !important;   /* becomes the vertical travel once rotated; keep == slot height */
+    height: 30px !important;
+    transform: translate(-50%, -50%) rotate(-90deg);
+    margin: 0;
+    writing-mode: horizontal-tb;   /* override the stale slider-vertical block above */
+    -webkit-appearance: none;
+    appearance: none;
+    /* "to right" maps to "to top" after the -90° rotation: green (boost) on top. */
+    background: linear-gradient(to right, #e74c3c 0%, #f39c12 50%, #2ecc71 100%);
+    border-radius: 6px;
+    outline: none;
+    cursor: pointer;
+}
+
+.equalizer-bands .eq-slider::-webkit-slider-runnable-track {
+    background: transparent;
+    border: none;
+}
+
+.equalizer-bands .eq-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 30px;
+    border-radius: 6px;
+    background: var(--text-light);
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+    border: 2px solid var(--panel-mid);
+}
+
+.equalizer-bands .eq-slider::-webkit-slider-thumb:hover {
+    background: #fff;
+}
+
+.equalizer-bands .eq-slider::-moz-range-track {
+    background: transparent;
+    border: none;
+}
+
+.equalizer-bands .eq-slider::-moz-range-thumb {
+    width: 14px;
+    height: 30px;
+    border-radius: 6px;
+    background: var(--text-light);
+    cursor: pointer;
+    border: 2px solid var(--panel-mid);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.equalizer-bands .eq-slider::-moz-range-thumb:hover {
+    background: #fff;
 }
 
 .eq-reset-btn {

@@ -329,15 +329,36 @@
   }
   window.addEventListener('resize', sizeCanvases);
 
-  // ── Heatmap (blue → cyan → green → yellow → red → white) ────────────────────
+  // ── Heatmap ─────────────────────────────────────────────────────────────────
+  // Multi-stop colour ramp tuned so the noise floor stays dark (peaks pop) and
+  // pure white is reserved for only the very top of the range — the old ramp
+  // started at full-bright blue and turned white across its whole upper quarter,
+  // which washed the loud end out and hid where the real peaks were.
+  var HEAT_STOPS = [
+    [0.00, [  0,   0,   0]],  // floor → black
+    [0.14, [  0,   0,  80]],  // dark blue
+    [0.30, [  0,  60, 190]],  // blue
+    [0.46, [  0, 190, 210]],  // cyan
+    [0.60, [  0, 200,  70]],  // green
+    [0.73, [210, 220,   0]],  // yellow
+    [0.85, [255, 130,   0]],  // orange
+    [0.94, [255,  30,   0]],  // red
+    [1.00, [255, 255, 255]]   // peak → white (narrow band only)
+  ];
   function heat(m) {
-    m = m < 0 ? 0 : m > 255 ? 255 : m;
-    var t = m / 255, r, g, b;
-    if (t < 0.25)      { var u = t / 0.25;            r = 0;            g = Math.round(u * 255); b = 255; }
-    else if (t < 0.5)  { var u = (t - 0.25) / 0.25;   r = 0;            g = 255;                 b = Math.round((1 - u) * 255); }
-    else if (t < 0.75) { var u = (t - 0.5) / 0.25;    r = Math.round(u * 255); g = 255;          b = 0; }
-    else               { var u = (t - 0.75) / 0.25;   r = 255;          g = Math.round(u * 255);  b = Math.round(u * 255); }
-    return [r, g, b];
+    var t = m < 0 ? 0 : m > 255 ? 1 : m / 255;
+    for (var i = 1; i < HEAT_STOPS.length; i++) {
+      if (t <= HEAT_STOPS[i][0]) {
+        var lo = HEAT_STOPS[i - 1], hi = HEAT_STOPS[i];
+        var u = (t - lo[0]) / (hi[0] - lo[0]);
+        return [
+          Math.round(lo[1][0] + (hi[1][0] - lo[1][0]) * u),
+          Math.round(lo[1][1] + (hi[1][1] - lo[1][1]) * u),
+          Math.round(lo[1][2] + (hi[1][2] - lo[1][2]) * u)
+        ];
+      }
+    }
+    return HEAT_STOPS[HEAT_STOPS.length - 1][1];
   }
 
   // ── Oscilloscope draw ──────────────────────────────────────────────────────
@@ -476,10 +497,10 @@
     // Derive this line's low/high reference from percentiles (robust to a lone
     // hot carrier or a dead bin), then ease the smoothed levels toward them.
     var sorted = Array.prototype.slice.call(mags).sort(function (a, b) { return a - b; });
-    var loIdx = Math.floor(0.05 * (w - 1));
-    var hiIdx = Math.floor(0.95 * (w - 1));
+    var loIdx = Math.floor(0.10 * (w - 1));
+    var hiIdx = Math.floor(0.98 * (w - 1));
     var curFloor = sorted[loIdx];
-    var curCeil = Math.max(sorted[hiIdx], curFloor + 16); // keep a minimum span
+    var curCeil = Math.max(sorted[hiIdx], curFloor + 24); // keep a minimum span
     if (!wfAdaptInit) {
       wfFloor = curFloor; wfCeil = curCeil; wfAdaptInit = true;
     } else {

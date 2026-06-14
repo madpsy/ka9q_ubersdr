@@ -1084,72 +1084,72 @@
                         <input type="range" id="equalizer-makeup-gain" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
                     </div>
                     <div class="equalizer-bands">
+                        <div class="eq-presets">
+                            <button onclick="resetEqualizer()" class="eq-reset-btn" title="Reset all bands to flat">Reset</button>
+                            <button onclick="applyEQPreset('voice')" class="eq-reset-btn" title="Optimized for SSB voice communications">Voice</button>
+                            <button onclick="applyEQPreset('cw')" class="eq-reset-btn" title="Optimized for CW (Morse code) reception">CW</button>
+                            <button onclick="applyEQPreset('music')" class="eq-reset-btn" title="Optimized for music / wideband audio">Music</button>
+                        </div>
                         <div class="eq-band">
                     <label class="eq-label">60 Hz</label>
-                    <input type="range" class="eq-slider" id="eq-60" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-60" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-60-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">170 Hz</label>
-                    <input type="range" class="eq-slider" id="eq-170" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-170" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-170-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">310 Hz</label>
-                    <input type="range" class="eq-slider" id="eq-310" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-310" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-310-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">600 Hz</label>
-                    <input type="range" class="eq-slider" id="eq-600" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-600" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-600-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">1 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-1000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-1000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-1000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">1.5 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-1500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-1500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-1500-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">2 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-2000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-2000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-2000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">2.5 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-2500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-2500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-2500-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">3 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-3000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-3000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-3000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">4 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-4000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-4000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-4000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">6 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-6000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-6000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-6000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">8 kHz</label>
-                    <input type="range" class="eq-slider" id="eq-8000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-8000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-8000-value">0 dB</span>
                         </div>
-                    </div>
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px;">
-                        <button onclick="resetEqualizer()" class="eq-reset-btn">Reset</button>
-                        <button onclick="applyEQPreset('voice')" class="eq-reset-btn" style="margin-left: 20px;" title="Optimized for SSB voice communications">Voice</button>
-                        <button onclick="applyEQPreset('cw')" class="eq-reset-btn" title="Optimized for CW (Morse code) reception">CW</button>
-                        <button onclick="applyEQPreset('music')" class="eq-reset-btn" title="Optimized for music / wideband audio">Music</button>
                     </div>
                 </div>
             </div>

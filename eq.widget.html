@@ -107,38 +107,54 @@
     white-space: nowrap;
   }
 
-  .eqw-slider {
-    -webkit-appearance: slider-vertical;
-    appearance: slider-vertical;
-    writing-mode: vertical-lr;
-    direction: rtl;
+  /* Vertical sliders are built from a normal horizontal range input rotated
+     -90° inside a fixed-size slot. This avoids the cross-browser breakage of
+     appearance:slider-vertical / writing-mode (rogue track lines, collapsed
+     height) and gives full control over track and thumb.
+     NB: every rule is scoped under #eqw-widget on purpose. The host page styles
+     `input[type="range"]` (specificity 0,1,1 — width:200px, grey background),
+     which would otherwise beat a bare `.eqw-slider` class (0,1,0) and blow the
+     rotated sliders up to 200px tall. The ID prefix guarantees we win. */
+  #eqw-widget .eqw-slot {
+    position: relative;
     width: 16px;
-    height: 84px;
+    height: 64px;
+  }
+  #eqw-widget .eqw-slider {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 64px;   /* becomes the vertical travel once rotated; keep == slot height */
+    height: 16px;
+    transform: translate(-50%, -50%) rotate(-90deg);
     margin: 0;
     cursor: pointer;
-    accent-color: rgba(0, 230, 118, 0.85);
+    -webkit-appearance: none;
+    appearance: none;
     background: transparent;
+    border-radius: 0;
+    outline: none;
   }
-  /* WebKit track/thumb (used when slider-vertical isn't honoured) */
-  .eqw-slider::-webkit-slider-runnable-track {
-    width: 4px;
+  #eqw-widget .eqw-slider::-webkit-slider-runnable-track {
+    height: 4px;
     background: rgba(255,255,255,0.18);
     border-radius: 2px;
   }
-  .eqw-slider::-webkit-slider-thumb {
+  #eqw-widget .eqw-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
+    margin-top: -5px;
     width: 12px;
     height: 12px;
     border-radius: 50%;
     background: rgba(0, 230, 118, 0.9);
     border: 1px solid rgba(0,0,0,0.3);
   }
-  .eqw-slider::-moz-range-track {
-    width: 4px;
+  #eqw-widget .eqw-slider::-moz-range-track {
+    height: 4px;
     background: rgba(255,255,255,0.18);
     border-radius: 2px;
   }
-  .eqw-slider::-moz-range-thumb {
+  #eqw-widget .eqw-slider::-moz-range-thumb {
     width: 12px;
     height: 12px;
     border-radius: 50%;
@@ -269,6 +285,9 @@
       val.className = 'eqw-val';
       val.textContent = '0';
 
+      var slot = document.createElement('div');
+      slot.className = 'eqw-slot';
+
       var slider = document.createElement('input');
       slider.type = 'range';
       slider.className = 'eqw-slider';
@@ -277,6 +296,7 @@
       slider.step = '0.5';
       slider.value = '0';
       slider.title = b.label + ' Hz';
+      slot.appendChild(slider);
 
       var label = document.createElement('div');
       label.className = 'eqw-label';
@@ -292,7 +312,7 @@
       });
 
       col.appendChild(val);
-      col.appendChild(slider);
+      col.appendChild(slot);
       col.appendChild(label);
       bandsWrap.appendChild(col);
 

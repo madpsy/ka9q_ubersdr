@@ -2879,6 +2879,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 #squelch-controls,
+#audio-gate-controls,
 #bandpass-controls,
 #notch-controls,
 #compressor-controls,

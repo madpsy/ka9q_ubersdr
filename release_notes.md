@@ -1,12 +1,13 @@
-# Latest Stable - 0.1.53 - 8th Jun 2026
+# Latest Stable - 0.1.54 - 14th Jun 2026
 
-## Version 0.1.54 - Testing
+## Version 0.1.54 - Latest Stable
 
 ### New Features
 - Added **Antenna Switch** control for use with KiwiSDR compatible switches such as the MS-S5 (complete API)
 - Added **Low Cache TTL** in Caddy for assets to help with version upgrades without explicit cache busting techniques
+- Added **Marker Tuning** in Media Session and Dial Wheel (on mobile). Skip Prev/Next can either frequency step tune or by marker
 
-## Version 0.1.53 - Latest Stable
+## Version 0.1.53
 
 ### Bug Fixes
 - Waterfall fix for clearing on vertical height change (still has to clear on width change)

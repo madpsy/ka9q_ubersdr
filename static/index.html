@@ -960,10 +960,10 @@
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="squelch-enable" onchange="toggleAudioGate()">
-                            Squelch (Audio Gate)
+                            Audio Gate
                         </label>
                     </div>
-                    <div id="squelch-controls">
+                    <div id="audio-gate-controls">
                         <div class="control-group">
                             <label for="squelch-threshold">Threshold: <span id="squelch-threshold-value">-35 dB</span></label>
                             <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateAudioGate()">
@@ -999,7 +999,7 @@
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="compressor-enable" onchange="toggleCompressor()">
-                            Audio Compressor (AGC)
+                            Compressor
                         </label>
                     </div>
                     <div id="compressor-controls">

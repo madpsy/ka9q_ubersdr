@@ -303,6 +303,26 @@ let mediaSessionEnabled = _isApple
 let mediaSessionSkipMode = localStorage.getItem('mediaSessionSkipMode') === 'marker'
     ? 'marker' : 'freq';
 
+// Which marker types prev/next navigation steps through. Applies to BOTH the
+// dial-wheel edge arrows and the Media Session ⏮/⏭ marker-skip mode (a single
+// source of truth so both behave identically). Stored as a short mode key that
+// resolves to a findMarkers() navTypes allow-list (or null = all types, the
+// default / original behaviour). window.markerNavTypes is what the in-scope
+// findMarkers() callers read.
+function markerNavTypesFor(mode) {
+    switch (mode) {
+        case 'cw':       return ['cw'];
+        case 'dx':       return ['dx'];
+        case 'voice':    return ['voice'];
+        case 'bookmark': return ['bookmark'];
+        case 'spots':    return ['cw', 'dx', 'voice'];
+        case 'all':
+        default:         return null; // all types
+    }
+}
+let markerNavMode = localStorage.getItem('markerNavMode') || 'all';
+window.markerNavTypes = markerNavTypesFor(markerNavMode);
+
 // ── MediaSession artwork blob URL cache ─────────────────────────────────────
 // Chrome re-fetches all artwork URLs from MediaMetadata on every internal
 // waiting→playing state transition of the associated <audio> element during
@@ -12110,6 +12130,9 @@ function openBufferConfigModal() {
         const skipSelect = document.getElementById('media-session-skip-mode');
         if (skipSelect) skipSelect.value = mediaSessionSkipMode;
         updateMediaSessionSkipModeRow();
+        // Sync the marker prev/next type selector (dial wheel + media session)
+        const navSelect = document.getElementById('marker-nav-mode');
+        if (navSelect) navSelect.value = markerNavMode;
 
         modal.style.display = 'flex';
     }
@@ -12153,6 +12176,22 @@ function setMediaSessionSkipMode(mode) {
     mediaSessionSkipMode = (mode === 'marker') ? 'marker' : 'freq';
     localStorage.setItem('mediaSessionSkipMode', mediaSessionSkipMode);
     log(`Media Session track-skip: ${mediaSessionSkipMode === 'marker' ? 'previous/next marker' : 'frequency steps'}`);
+}
+
+/**
+ * Persist and apply which marker types prev/next navigation steps through.
+ * Resolves the mode key to a findMarkers() navTypes allow-list on
+ * window.markerNavTypes, which both the dial-wheel edge arrows and the Media
+ * Session ⏮/⏭ marker-skip handler read live — so no re-wiring is needed.
+ * Default 'all' restores the original "every marker type" behaviour.
+ */
+function setMarkerNavMode(mode) {
+    markerNavMode = mode;
+    localStorage.setItem('markerNavMode', mode);
+    window.markerNavTypes = markerNavTypesFor(mode);
+    // Refresh the wheel overlay edge arrows immediately if it's visible.
+    if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
+    log(`Marker navigation: ${mode}`);
 }
 
 /** Grey out the track-skip-mode selector while Media Session is disabled. */
@@ -12850,6 +12889,7 @@ window.setBufferThreshold = setBufferThreshold;
 window.loadBufferThreshold = loadBufferThreshold; // needed by ui-config.js applyServerUIDefaults()
 window.setMediaSessionEnabled = setMediaSessionEnabled;
 window.setMediaSessionSkipMode = setMediaSessionSkipMode;
+window.setMarkerNavMode = setMarkerNavMode;
 window.setSignalDataSource = setSignalDataSource;
 window.populateOutputDevices = populateOutputDevices;
 window.setOutputDevice = setOutputDevice;
@@ -14332,11 +14372,11 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // bookmarks" rule.
     function collectMarkers() {
         const out = [];
-        const add = (list, freqOf, modeOf, famOf, nameOf, priority) => {
+        const add = (list, freqOf, modeOf, famOf, nameOf, priority, type) => {
             for (const item of list) {
                 const f = freqOf(item);
                 if (typeof f !== 'number' || isNaN(f)) continue;
-                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority });
+                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority, type });
             }
         };
 
@@ -14351,10 +14391,10 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         const vaFreq = a => a.estimated_dial_freq || a.start_freq;
         const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
 
-        add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1);
-        add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1);
-        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || 'Voice'), 1);
-        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0);
+        add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1, 'cw');
+        add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1, 'dx');
+        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || 'Voice'), 1, 'voice');
+        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0, 'bookmark');
         return out;
     }
 
@@ -14369,12 +14409,23 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     //             across *all* modes — its own mode is returned for tuning.
     //   next    — nearest marker above the dial (outside the tolerance window),
     //             across *all* modes — its own mode is returned for tuning.
-    function findMarkers(dialHz, mode) {
+    //
+    // navTypes optionally restricts which marker *types* are eligible to become
+    // the prev/next neighbours — an array drawn from findMarkers.NAV_TYPES
+    // (e.g. ['dx', 'bookmark']). Omit / pass null/undefined for all types
+    // (the default, original behaviour). This NEVER affects `current`: the dial
+    // freq is still labelled with the name of any marker type sitting on it.
+    function findMarkers(dialHz, mode, navTypes) {
         const result = { current: null, prev: null, next: null };
         if (dialHz === null) return result;
 
         const fam = modeFamily(mode);
         const markers = collectMarkers();
+
+        // Prev/next type filter (current is intentionally exempt). A non-array
+        // navTypes means "all types"; an array is treated as an allow-list.
+        const navFilter = Array.isArray(navTypes) ? new Set(navTypes) : null;
+        const navAllowed = m => !navFilter || navFilter.has(m.type);
 
         let current = null, currentDist = Infinity, prev = null, next = null;
         for (const m of markers) {
@@ -14390,14 +14441,14 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
                 }
             } else if (m.freq < dialHz) {
                 // Below the dial (any mode): keep the highest (nearest) freq, spot wins ties.
-                if (!prev || m.freq > prev.freq ||
-                    (m.freq === prev.freq && m.priority > prev.priority)) {
+                if (navAllowed(m) && (!prev || m.freq > prev.freq ||
+                    (m.freq === prev.freq && m.priority > prev.priority))) {
                     prev = m;
                 }
             } else {
                 // Above the dial (any mode): keep the lowest (nearest) freq, spot wins ties.
-                if (!next || m.freq < next.freq ||
-                    (m.freq === next.freq && m.priority > next.priority)) {
+                if (navAllowed(m) && (!next || m.freq < next.freq ||
+                    (m.freq === next.freq && m.priority > next.priority))) {
                     next = m;
                 }
             }
@@ -14424,6 +14475,14 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     window.findMatchingMarker = findMatchingMarker;
     window.findMarkers = findMarkers;
 
+    // The marker types findMarkers() is aware of, for callers building a
+    // prev/next navTypes allow-list rather than hard-coding the set.
+    findMarkers.NAV_TYPES = ['cw', 'dx', 'voice', 'bookmark'];
+
+    // Let the audio-settings marker-nav dropdown refresh the wheel edge arrows
+    // the moment the preference changes (no-op while the wheel is hidden).
+    window.refreshMarkerNav = function () { updateWheelMarkerLabel(); };
+
     // Show/hide a prev/next edge button and label it with its neighbour marker.
     function updateNavButton(btn, textEl, marker) {
         if (!btn || !textEl) return;
@@ -14446,7 +14505,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             return;
         }
 
-        const { current, prev, next } = findMarkers(getDialHz(), window.currentMode);
+        const { current, prev, next } = findMarkers(getDialHz(), window.currentMode, window.markerNavTypes);
 
         // ── Prev/next neighbours at the edges ─────────────────────────────────
         _prevMarker = prev;
@@ -14505,7 +14564,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // ⏮/⏭ handlers (marker skip mode). direction: -1 = previous, +1 = next.
     // Returns true if a marker was found and tuned, false otherwise.
     window.skipToAdjacentMarker = function (direction) {
-        const { prev, next } = findMarkers(getDialHz(), window.currentMode);
+        const { prev, next } = findMarkers(getDialHz(), window.currentMode, window.markerNavTypes);
         const marker = direction < 0 ? prev : next;
         if (!marker) return false;
         tuneToMarker(marker);

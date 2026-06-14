@@ -1,0 +1,434 @@
+<!--
+  Equalizer Widget
+  ================
+  A compact, self-contained 12-band EQ with vertical sliders, preset buttons
+  and an on/off toggle. It is a thin remote control for the main UI's equaliser:
+  it drives the page's existing #eq-<freq> sliders / #equalizer-enable checkbox
+  and calls the host functions (window.toggleEqualizer / updateEqualizer /
+  resetEqualizer / applyEQPreset), so changes here and on the main panel stay in
+  sync. Nothing audio-related lives in the widget itself.
+
+  - 12 vertical band sliders (60 Hz … 8 kHz), -12…+12 dB.
+  - Voice / CW / Music presets and a Flat (reset) button.
+  - ON/OFF toggle in the header mirrors the main equaliser enable.
+  - Drag to reposition; position saved in localStorage.
+  - Close with the × button.
+-->
+
+<style>
+  #eqw-widget {
+    position: fixed;
+    top: 340px;
+    right: 44px;
+    z-index: 9500;
+    pointer-events: auto;
+    background: rgba(20, 28, 38, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(0, 230, 118, 0.6);
+    user-select: none;
+  }
+
+  #eqw-widget.eqw-dragging { box-shadow: 0 4px 20px rgba(0,0,0,0.8); }
+
+  #eqw-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px 4px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+    cursor: grab;
+  }
+  #eqw-widget.eqw-dragging #eqw-header { cursor: grabbing; }
+
+  #eqw-title {
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+    margin-right: auto;
+  }
+
+  #eqw-power {
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: rgba(255,255,255,0.55);
+    background: rgba(255,255,255,0.06);
+    transition: color 0.15s, background 0.15s;
+  }
+  #eqw-power:hover { color: #fff; background: rgba(255,255,255,0.14); }
+  #eqw-power.eqw-on { color: #051; background: rgba(0, 230, 118, 0.85); }
+
+  #eqw-close {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  #eqw-close:hover { color: #fff; background: rgba(0,0,0,0.3); }
+
+  #eqw-body { padding: 7px 7px 6px; }
+
+  #eqw-bands {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+  }
+
+  .eqw-band {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 19px;
+  }
+
+  .eqw-val {
+    font-size: 8px;
+    line-height: 1;
+    height: 9px;
+    color: rgba(0, 230, 118, 0.9);
+    margin-bottom: 3px;
+    white-space: nowrap;
+  }
+
+  .eqw-slider {
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 16px;
+    height: 84px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: rgba(0, 230, 118, 0.85);
+    background: transparent;
+  }
+  /* WebKit track/thumb (used when slider-vertical isn't honoured) */
+  .eqw-slider::-webkit-slider-runnable-track {
+    width: 4px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 2px;
+  }
+  .eqw-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(0, 230, 118, 0.9);
+    border: 1px solid rgba(0,0,0,0.3);
+  }
+  .eqw-slider::-moz-range-track {
+    width: 4px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 2px;
+  }
+  .eqw-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(0, 230, 118, 0.9);
+    border: 1px solid rgba(0,0,0,0.3);
+  }
+
+  .eqw-label {
+    font-size: 8px;
+    line-height: 1;
+    margin-top: 4px;
+    color: rgba(255,255,255,0.6);
+    white-space: nowrap;
+  }
+
+  #eqw-presets {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+  }
+
+  .eqw-preset {
+    flex: 1;
+    text-align: center;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 4px 0;
+    border-radius: 3px;
+    cursor: pointer;
+    color: rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.08);
+    transition: color 0.15s, background 0.15s;
+  }
+  .eqw-preset:hover { color: #fff; background: rgba(255,255,255,0.18); }
+  .eqw-preset.eqw-flat:hover { background: rgba(255, 90, 90, 0.35); }
+
+  #eqw-waiting {
+    padding: 14px 9px;
+    font-size: 11px;
+    font-weight: bold;
+    text-align: center;
+    color: rgba(255,255,255,0.55);
+  }
+
+  #eqw-widget.eqw-off #eqw-bands,
+  #eqw-widget.eqw-off #eqw-presets { opacity: 0.45; }
+
+  @media (max-width: 768px) {
+    #eqw-widget { display: none !important; }
+  }
+</style>
+
+<div id="eqw-widget" class="eqw-off">
+  <div id="eqw-header">
+    <span id="eqw-title">EQ</span>
+    <span id="eqw-power" title="Toggle equaliser on/off">OFF</span>
+    <span id="eqw-close" title="Dismiss">&#x2715;</span>
+  </div>
+  <div id="eqw-body">
+    <div id="eqw-waiting">Waiting for equaliser…</div>
+    <div id="eqw-bands" style="display:none;"></div>
+    <div id="eqw-presets" style="display:none;">
+      <span class="eqw-preset" data-preset="voice" title="SSB voice">Voice</span>
+      <span class="eqw-preset" data-preset="cw" title="CW / Morse">CW</span>
+      <span class="eqw-preset" data-preset="music" title="Music / wideband">Music</span>
+      <span class="eqw-preset eqw-flat" data-preset="flat" title="Reset to flat">Flat</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var LS_POS_KEY = 'eqw_widget_pos';
+  var DRAG_THRESHOLD = 5;
+
+  // Band frequencies must match the host UI's #eq-<freq> sliders (filters.js).
+  var BANDS = [
+    { hz: 60,   label: '60'   },
+    { hz: 170,  label: '170'  },
+    { hz: 310,  label: '310'  },
+    { hz: 600,  label: '600'  },
+    { hz: 1000, label: '1k'   },
+    { hz: 1500, label: '1.5k' },
+    { hz: 2000, label: '2k'   },
+    { hz: 2500, label: '2.5k' },
+    { hz: 3000, label: '3k'   },
+    { hz: 4000, label: '4k'   },
+    { hz: 6000, label: '6k'   },
+    { hz: 8000, label: '8k'   }
+  ];
+
+  var widget   = document.getElementById('eqw-widget');
+  var header   = document.getElementById('eqw-header');
+  var closeEl  = document.getElementById('eqw-close');
+  var powerEl  = document.getElementById('eqw-power');
+  var waiting  = document.getElementById('eqw-waiting');
+  var bandsWrap = document.getElementById('eqw-bands');
+  var presets  = document.getElementById('eqw-presets');
+
+  var dragState = null;
+  var wasDragged = false;
+  var ready = false;
+  var sliders = {}; // hz -> { slider, val } widget elements
+
+  // ── Host accessors ──────────────────────────────────────────────────────────
+  // The widget never owns EQ state; it reads/writes the host UI's controls.
+  function hostEnableBox()    { return document.getElementById('equalizer-enable'); }
+  function hostBandSlider(hz) { return document.getElementById('eq-' + hz); }
+  function hostReady() {
+    return !!(hostEnableBox() && hostBandSlider(60) &&
+              typeof window.updateEqualizer === 'function');
+  }
+
+  function fmtDb(v) {
+    if (v === 0) return '0';
+    return (v > 0 ? '+' : '') + (Math.round(v * 10) / 10);
+  }
+
+  // ── Build band sliders ──────────────────────────────────────────────────────
+  function buildBands() {
+    BANDS.forEach(function (b) {
+      var col = document.createElement('div');
+      col.className = 'eqw-band';
+
+      var val = document.createElement('div');
+      val.className = 'eqw-val';
+      val.textContent = '0';
+
+      var slider = document.createElement('input');
+      slider.type = 'range';
+      slider.className = 'eqw-slider';
+      slider.min = '-12';
+      slider.max = '12';
+      slider.step = '0.5';
+      slider.value = '0';
+      slider.title = b.label + ' Hz';
+
+      var label = document.createElement('div');
+      label.className = 'eqw-label';
+      label.textContent = b.label;
+
+      slider.addEventListener('input', function () {
+        var host = hostBandSlider(b.hz);
+        if (host) {
+          host.value = slider.value;
+          if (typeof window.updateEqualizer === 'function') window.updateEqualizer();
+        }
+        val.textContent = fmtDb(parseFloat(slider.value));
+      });
+
+      col.appendChild(val);
+      col.appendChild(slider);
+      col.appendChild(label);
+      bandsWrap.appendChild(col);
+
+      sliders[b.hz] = { slider: slider, val: val };
+    });
+  }
+
+  // ── Sync widget controls from the host UI ───────────────────────────────────
+  function syncFromHost() {
+    if (!ready) return;
+    BANDS.forEach(function (b) {
+      var host = hostBandSlider(b.hz);
+      var w = sliders[b.hz];
+      if (host && w && w.slider.value !== host.value) {
+        w.slider.value = host.value;
+        w.val.textContent = fmtDb(parseFloat(host.value));
+      }
+    });
+    var box = hostEnableBox();
+    var on = !!(box && box.checked);
+    powerEl.textContent = on ? 'ON' : 'OFF';
+    powerEl.classList.toggle('eqw-on', on);
+    widget.classList.toggle('eqw-off', !on);
+  }
+
+  // ── Power toggle (mirrors the host enable checkbox) ─────────────────────────
+  powerEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var box = hostEnableBox();
+    if (!box) return;
+    box.checked = !box.checked;
+    if (typeof window.toggleEqualizer === 'function') window.toggleEqualizer();
+    syncFromHost();
+  });
+
+  // ── Presets / flat ──────────────────────────────────────────────────────────
+  presets.addEventListener('click', function (e) {
+    var btn = e.target.closest('.eqw-preset');
+    if (!btn) return;
+    e.stopPropagation();
+    var preset = btn.getAttribute('data-preset');
+    if (preset === 'flat') {
+      if (typeof window.resetEqualizer === 'function') window.resetEqualizer();
+    } else if (typeof window.applyEQPreset === 'function') {
+      window.applyEQPreset(preset); // also enables the equaliser
+    }
+    syncFromHost();
+  });
+
+  // ── Ready / waiting state ───────────────────────────────────────────────────
+  function applyReady() {
+    var now = hostReady();
+    if (now === ready) { if (ready) syncFromHost(); return; }
+    ready = now;
+    waiting.style.display = ready ? 'none' : '';
+    bandsWrap.style.display = ready ? '' : 'none';
+    presets.style.display = ready ? '' : 'none';
+    if (ready) syncFromHost();
+  }
+
+  // ── Position restore ────────────────────────────────────────────────────────
+  (function restorePosition() {
+    try {
+      var pos = JSON.parse(localStorage.getItem(LS_POS_KEY) || 'null');
+      if (pos && typeof pos.top === 'number' && typeof pos.left === 'number') {
+        widget.style.top   = pos.top + 'px';
+        widget.style.right = 'auto';
+        widget.style.left  = pos.left + 'px';
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Drag (from header only) ─────────────────────────────────────────────────
+  header.addEventListener('mousedown', function (e) {
+    if (e.target === closeEl || closeEl.contains(e.target)) return;
+    if (e.target === powerEl) return;
+    if (e.button !== 0) return;
+    var rect = widget.getBoundingClientRect();
+    dragState = { startX: e.clientX, startY: e.clientY, origTop: rect.top, origLeft: rect.left };
+    wasDragged = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!wasDragged && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+      wasDragged = true;
+      widget.classList.add('eqw-dragging');
+      widget.style.right = 'auto';
+    }
+    if (wasDragged) {
+      var newTop  = Math.max(0, Math.min(dragState.origTop  + dy, window.innerHeight - widget.offsetHeight));
+      var newLeft = Math.max(0, Math.min(dragState.origLeft + dx, window.innerWidth  - widget.offsetWidth));
+      widget.style.top  = newTop  + 'px';
+      widget.style.left = newLeft + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragState) return;
+    widget.classList.remove('eqw-dragging');
+    if (wasDragged) {
+      try {
+        localStorage.setItem(LS_POS_KEY, JSON.stringify({
+          top:  parseInt(widget.style.top,  10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    dragState = null;
+    setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // ── Close ───────────────────────────────────────────────────────────────────
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    widget.style.display = 'none';
+    if (pollId) { clearInterval(pollId); pollId = null; }
+  });
+
+  // ── Start ───────────────────────────────────────────────────────────────────
+  var pollId = null;
+  function start() {
+    buildBands();
+    applyReady();
+    // Poll keeps the widget in step with the main panel (presets applied there,
+    // saved-settings load, the quick-toggle button, etc.) and waits for the EQ
+    // controls/audio graph to come up.
+    pollId = setInterval(applyReady, 400);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+</script>

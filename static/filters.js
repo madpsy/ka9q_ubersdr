@@ -149,6 +149,62 @@ let eqMakeupGain = null;
 let eqAnalyser = null;
 let eqClipping = false;
 let eqClipIndicatorTimeout = null;
+// Mirrors the live EQ for the quick-toggle button's Off→Voice→CW→Music cycle;
+// kept current by syncEQQuickButton from every path that changes the EQ.
+let eqQuickState = 'off'; // 'off' | 'on' (custom) | 'voice' | 'cw' | 'music'
+
+// Band centre frequencies, shared by every EQ helper below and the #eq-<freq>
+// sliders in the markup.
+const EQ_FREQUENCIES = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
+
+// Single source of truth for the named presets — used both to apply a preset
+// and to detect (from the current slider values) which preset, if any, is live.
+const EQ_PRESET_VALUES = {
+    voice: { 60: -6, 170: -3, 310: 0, 600: 2, 1000: 3, 1500: 4, 2000: 4, 2500: 3, 3000: 2, 4000: 0, 6000: -3, 8000: -6 },
+    cw:    { 60: -12, 170: -12, 310: -6, 600: 6, 1000: 6, 1500: 0, 2000: -6, 2500: -9, 3000: -12, 4000: -12, 6000: -12, 8000: -12 },
+    music: { 60: 4, 170: 3, 310: -2, 600: -3, 1000: -2, 1500: 0, 2000: 2, 2500: 3, 3000: 4, 4000: 3, 6000: 2, 8000: 1 }
+};
+
+// Visual state for the main-page quick-toggle button (#eq-quick-toggle).
+const EQ_QUICK_BUTTON_STATES = {
+    off:   { label: 'EQ',    color: '#6c757d' }, // grey: disabled
+    on:    { label: 'EQ ✓',  color: '#20c997' }, // teal: enabled, custom (no named preset)
+    voice: { label: 'Voice', color: '#28a745' }, // green
+    cw:    { label: 'CW',    color: '#17a2b8' }, // cyan
+    music: { label: 'Music', color: '#fd7e14' }  // orange
+};
+
+// Compare the live band sliders against each preset; return its name or null.
+function detectEQPreset() {
+    const names = Object.keys(EQ_PRESET_VALUES);
+    for (const name of names) {
+        const preset = EQ_PRESET_VALUES[name];
+        let match = true;
+        for (const freq of EQ_FREQUENCIES) {
+            const slider = document.getElementById(`eq-${freq}`);
+            if (!slider || parseFloat(slider.value) !== preset[freq]) { match = false; break; }
+        }
+        if (match) return name;
+    }
+    return null;
+}
+
+// Reconcile the quick-toggle button (label/colour and the eqQuickState used by
+// its off→Voice→CW→Music cycle) with the real EQ state. Called from every path
+// that changes the EQ — toggle, slider edits, presets, reset — so the button,
+// the main EQ card and the EQ widget always agree, no matter which one drove the
+// change.
+function syncEQQuickButton() {
+    const button = document.getElementById('eq-quick-toggle');
+    if (!button) return;
+    const checkbox = document.getElementById('equalizer-enable');
+    const enabled = checkbox ? checkbox.checked : equalizerEnabled;
+    const state = !enabled ? 'off' : (detectEQPreset() || 'on');
+    eqQuickState = state;
+    const v = EQ_QUICK_BUTTON_STATES[state] || EQ_QUICK_BUTTON_STATES.off;
+    button.textContent = v.label;
+    button.style.backgroundColor = v.color;
+}
 
 function initializeEqualizer() {
     if (!window.audioContext) return;
@@ -193,6 +249,7 @@ function toggleEqualizer() {
         console.log('Equalizer disabled');
     }
     updateAllLatencyDisplays();
+    syncEQQuickButton();
     saveFilterSettings();
 }
 
@@ -214,11 +271,12 @@ function updateEqualizer() {
         eqMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
         makeupGainDisplay.textContent = `${makeupGainDb > 0 ? '+' : ''}${makeupGainDb.toFixed(1)} dB`;
     }
+    syncEQQuickButton();
     saveFilterSettings();
 }
 
 function resetEqualizer() {
-    const frequencies = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
+    const frequencies = EQ_FREQUENCIES;
     frequencies.forEach((freq, index) => {
         const slider = document.getElementById(`eq-${freq}`);
         const valueDisplay = document.getElementById(`eq-${freq}-value`);
@@ -239,6 +297,7 @@ function resetEqualizer() {
     if (eqMakeupGain) {
         eqMakeupGain.gain.value = 1.0;
     }
+    syncEQQuickButton();
     console.log('Equalizer reset');
 }
 
@@ -252,60 +311,9 @@ function applyEQPreset(presetName) {
         }
     }
 
-    const frequencies = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
-    let presetValues = {};
-
-    if (presetName === 'voice') {
-        // Voice preset: Optimized for SSB voice communications
-        // Roll off low frequencies, boost speech intelligibility range (300-3000 Hz)
-        presetValues = {
-            60: -6,      // Roll off very low frequencies
-            170: -3,     // Reduce low rumble
-            310: 0,      // Start of voice range
-            600: 2,      // Boost lower voice fundamentals
-            1000: 3,     // Boost mid-range for clarity
-            1500: 4,     // Boost upper mid for intelligibility
-            2000: 4,     // Peak boost for consonants
-            2500: 3,     // Maintain presence
-            3000: 2,     // Start rolling off
-            4000: 0,     // Reduce sibilance
-            6000: -3,    // Roll off high frequencies
-            8000: -6     // Reduce noise and hiss
-        };
-    } else if (presetName === 'cw') {
-        // CW preset: Narrow bandpass centered around typical CW tones (600-800 Hz)
-        // Very aggressive filtering to isolate CW signals
-        presetValues = {
-            60: -12,     // Eliminate very low frequencies
-            170: -12,    // Eliminate low frequencies
-            310: -6,     // Reduce below CW range
-            600: 6,      // Boost CW fundamental range
-            1000: 6,     // Boost CW range
-            1500: 0,     // Neutral above CW range
-            2000: -6,    // Reduce harmonics
-            2500: -9,    // Reduce high frequencies
-            3000: -12,   // Eliminate high frequencies
-            4000: -12,   // Eliminate very high frequencies
-            6000: -12,   // Eliminate very high frequencies
-            8000: -12    // Eliminate very high frequencies
-        };
-    } else if (presetName === 'music') {
-        // Music preset: punchy bass, scooped mids, upper-mid presence boost
-        presetValues = {
-            60:   4,     // Bass body
-            170:  3,     // Bass warmth
-            310: -2,     // Cut mud / boxiness
-            600: -3,     // Mid scoop
-            1000: -2,    // Continue mid scoop
-            1500:  0,    // Neutral transition
-            2000:  2,    // Presence begins
-            2500:  3,    // Clarity / bite
-            3000:  4,    // Upper-mid presence peak
-            4000:  3,    // Attack / detail
-            6000:  2,    // Shimmer
-            8000:  1     // Air / treble extension
-        };
-    } else {
+    const frequencies = EQ_FREQUENCIES;
+    const presetValues = EQ_PRESET_VALUES[presetName];
+    if (!presetValues) {
         console.error('Unknown EQ preset:', presetName);
         return;
     }
@@ -350,47 +358,32 @@ function applyEQPreset(presetName) {
     console.log(`Applied ${presetName} EQ preset with ${makeupGainCompensation.toFixed(1)} dB makeup gain compensation`);
 }
 
-// EQ Quick Toggle - cycles through Off -> Voice -> CW -> Off
-let eqQuickState = 'off'; // 'off', 'voice', 'cw'
-
+// EQ Quick Toggle — advances the EQ through Off → Voice → CW → Music → Off.
+// eqQuickState (declared with the other EQ state above) mirrors the live EQ, so
+// the next step is always relative to what's actually playing — including
+// changes made from the main card or the EQ widget — and the button's
+// label/colour are owned entirely by syncEQQuickButton.
 function toggleEQQuick() {
     const button = document.getElementById('eq-quick-toggle');
     const checkbox = document.getElementById('equalizer-enable');
-    
     if (!button || !checkbox) return;
-    
-    // Cycle through states: off -> voice -> cw -> off
-    if (eqQuickState === 'off') {
-        // Enable EQ and apply Voice preset
-        eqQuickState = 'voice';
-        applyEQPreset('voice');
-        button.textContent = 'Voice';
-        button.style.backgroundColor = '#28a745'; // Green
-        console.log('EQ Quick Toggle: Voice preset enabled');
-    } else if (eqQuickState === 'voice') {
-        // Apply CW preset
-        eqQuickState = 'cw';
-        applyEQPreset('cw');
-        button.textContent = 'CW';
-        button.style.backgroundColor = '#17a2b8'; // Cyan
-        console.log('EQ Quick Toggle: CW preset enabled');
-    } else if (eqQuickState === 'cw') {
-        // Apply Music preset
-        eqQuickState = 'music';
-        applyEQPreset('music');
-        button.textContent = 'Music';
-        button.style.backgroundColor = '#fd7e14'; // Orange
-        console.log('EQ Quick Toggle: Music preset enabled');
-    } else {
-        // Disable EQ
-        eqQuickState = 'off';
+
+    // From the current state, pick the next step in the cycle. A custom ('on')
+    // state behaves like the tail of the cycle: the next press turns EQ off.
+    const next = { off: 'voice', voice: 'cw', cw: 'music' };
+    const step = next[eqQuickState] || 'off';
+
+    if (step === 'off') {
         if (checkbox.checked) {
             checkbox.checked = false;
-            toggleEqualizer();
+            toggleEqualizer(); // syncs the button to 'off'
+        } else {
+            syncEQQuickButton();
         }
-        button.textContent = 'EQ';
-        button.style.backgroundColor = '#6c757d'; // Gray
         console.log('EQ Quick Toggle: EQ disabled');
+    } else {
+        applyEQPreset(step); // enables EQ + syncs the button to the preset
+        console.log(`EQ Quick Toggle: ${step} preset enabled`);
     }
 }
 
@@ -398,17 +391,12 @@ function toggleEQQuick() {
  * Turn EQ off immediately — used by right-click on the EQ button.
  */
 function _eqTurnOff() {
-    if (eqQuickState === 'off') return; // already off
-    const button = document.getElementById('eq-quick-toggle');
     const checkbox = document.getElementById('equalizer-enable');
-    eqQuickState = 'off';
     if (checkbox && checkbox.checked) {
         checkbox.checked = false;
-        toggleEqualizer();
-    }
-    if (button) {
-        button.textContent = 'EQ';
-        button.style.backgroundColor = '#6c757d';
+        toggleEqualizer(); // syncs the button to 'off'
+    } else {
+        syncEQQuickButton();
     }
     if (typeof showNotification === 'function') {
         showNotification('EQ off', 'info', 1500);

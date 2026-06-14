@@ -1324,6 +1324,17 @@
                         Shows playback controls on the lock screen and in the OS media tray.
                         Disable if you experience issues with audio visualisations. Takes effect immediately.
                     </p>
+                    <!-- Track-skip behaviour for the ⏮/⏭ lock-screen buttons -->
+                    <div id="media-session-skip-mode-row" style="margin: 10px 0 0 26px;">
+                        <label for="media-session-skip-mode" style="display: block; font-size: 0.85em; color: #bbb; margin-bottom: 4px;">
+                            Previous / next track buttons:
+                        </label>
+                        <select id="media-session-skip-mode" onchange="setMediaSessionSkipMode(this.value)"
+                            style="width: 100%; max-width: 280px; padding: 6px; background: #2c3e50; color: #ecf0f1; border: 1px solid #444; border-radius: 4px; cursor: pointer;">
+                            <option value="freq">Step frequency</option>
+                            <option value="marker">Previous / next marker (spots &amp; bookmarks)</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px;">

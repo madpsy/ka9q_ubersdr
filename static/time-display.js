@@ -90,6 +90,24 @@ function setSessionInfo(maxSessionTime) {
 // Expose function globally so app.js can call it
 window.setSessionInfo = setSessionInfo;
 
+// Expose current session timing so other modules (e.g. Media Session) can
+// align with the bottom-left session countdown. Returns null until known.
+// maxTime: seconds (0 = unlimited), startTime: epoch ms, remaining: seconds.
+window.getSessionTiming = function getSessionTiming() {
+    if (sessionMaxTime === null || sessionStartTime === null) return null;
+    const elapsedSeconds = Math.floor((Date.now() - sessionStartTime) / 1000);
+    const remaining = sessionMaxTime === 0
+        ? 0
+        : Math.max(0, sessionMaxTime - elapsedSeconds);
+    return {
+        maxTime: sessionMaxTime,
+        startTime: sessionStartTime,
+        unlimited: sessionMaxTime === 0,
+        elapsed: elapsedSeconds,
+        remaining: remaining
+    };
+};
+
 // Initialize time display
 document.addEventListener('DOMContentLoaded', () => {
     // Update immediately

@@ -296,6 +296,13 @@ let mediaSessionEnabled = _isApple
     ? localStorage.getItem('mediaSessionEnabled') !== 'false'  // Apple:  default ON
     : localStorage.getItem('mediaSessionEnabled') === 'true';  // Others: default OFF
 
+// What the ⏮/⏭ (previoustrack/nexttrack) lock-screen buttons do while Media
+// Session is enabled:
+//   'freq'   — step the dial by the current frequency scroll step (default)
+//   'marker' — jump to the previous/next spot/bookmark marker
+let mediaSessionSkipMode = localStorage.getItem('mediaSessionSkipMode') === 'marker'
+    ? 'marker' : 'freq';
+
 // ── MediaSession artwork blob URL cache ─────────────────────────────────────
 // Chrome re-fetches all artwork URLs from MediaMetadata on every internal
 // waiting→playing state transition of the associated <audio> element during
@@ -1744,8 +1751,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // fetch storm during <audio> buffering.
                 _ensureArtworkBlobUrls().catch(() => {});
 
-                const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
-                const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
+                const tuneDown = () => mediaSessionStep(-1);
+                const tuneUp   = () => mediaSessionStep( 1);
 
                 if (_useMediaSessionBridge) {
                     // ── Bridge path (Apple/Firefox) ───────────────────────────────────
@@ -1798,14 +1805,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     navigator.mediaSession.setActionHandler('seekbackward', () => tuneDown());
                     navigator.mediaSession.setActionHandler('seekforward',  () => tuneUp());
-                    // Set a fake position state so Chrome enables the seek buttons.
-                    // Duration is large (24h); position advances with real time.
-                    const _msStartTime = Date.now();
-                    navigator.mediaSession.setPositionState({
-                        duration: 86400,
-                        playbackRate: 1,
-                        position: 0
-                    });
+                    // Set a position state so Chrome enables the seek buttons.
+                    // For a time-limited session, mirror the bottom-left session
+                    // countdown: duration = total session length, position advances
+                    // toward the end. For an unlimited session, fall back to a large
+                    // fake "live" duration (24h) that advances with wall-clock time.
+                    const _msFallbackStart = Date.now();
+                    const _computeMediaPosition = () => {
+                        const t = (typeof window.getSessionTiming === 'function')
+                            ? window.getSessionTiming()
+                            : null;
+                        if (t && !t.unlimited && t.maxTime > 0) {
+                            return {
+                                duration: t.maxTime,
+                                playbackRate: 1,
+                                position: Math.min(Math.max(0, t.elapsed), t.maxTime)
+                            };
+                        }
+                        // Unlimited (or session info not yet known): fake live position.
+                        const elapsed = (Date.now() - _msFallbackStart) / 1000;
+                        return {
+                            duration: 86400,
+                            playbackRate: 1,
+                            position: Math.min(elapsed, 86399)
+                        };
+                    };
+                    navigator.mediaSession.setPositionState(_computeMediaPosition());
                     // Periodically update position so Chrome doesn't think playback stalled.
                     if (!window._mediaSessionPositionInterval) {
                         window._mediaSessionPositionInterval = setInterval(() => {
@@ -1815,12 +1840,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 return;
                             }
                             try {
-                                const elapsed = (Date.now() - _msStartTime) / 1000;
-                                navigator.mediaSession.setPositionState({
-                                    duration: 86400,
-                                    playbackRate: 1,
-                                    position: Math.min(elapsed, 86399)
-                                });
+                                navigator.mediaSession.setPositionState(_computeMediaPosition());
                             } catch (_) {}
                         }, 5000);
                     }
@@ -12086,6 +12106,10 @@ function openBufferConfigModal() {
         // Sync MediaSession checkbox to current setting
         const msCheckbox = document.getElementById('media-session-enabled');
         if (msCheckbox) msCheckbox.checked = mediaSessionEnabled;
+        // Sync the track-skip-mode selector and grey it out when MS is off
+        const skipSelect = document.getElementById('media-session-skip-mode');
+        if (skipSelect) skipSelect.value = mediaSessionSkipMode;
+        updateMediaSessionSkipModeRow();
 
         modal.style.display = 'flex';
     }
@@ -12104,9 +12128,45 @@ function openBufferConfigModal() {
  *
  * Disabling: tears down the bridge or HTTP stream (if any); clears OS notification.
  */
+/**
+ * Drive the ⏮/⏭ (and seek) lock-screen buttons. direction: -1 = previous/down,
+ * +1 = next/up. Honours the user's mediaSessionSkipMode preference:
+ *   'marker' — jump to the adjacent spot/bookmark (falls back to a frequency
+ *              step when there is no marker in that direction)
+ *   'freq'   — step the dial by the current frequency scroll step (default)
+ */
+function mediaSessionStep(direction) {
+    if (mediaSessionSkipMode === 'marker' &&
+        typeof window.skipToAdjacentMarker === 'function' &&
+        window.skipToAdjacentMarker(direction)) {
+        return;
+    }
+    const step = window.frequencyScrollStep || frequencyScrollStep || 500;
+    adjustFrequency(direction * step);
+}
+
+/**
+ * Persist and apply the user's choice of what ⏮/⏭ do (lock-screen track-skip).
+ * The action handlers read mediaSessionSkipMode live, so no re-wiring is needed.
+ */
+function setMediaSessionSkipMode(mode) {
+    mediaSessionSkipMode = (mode === 'marker') ? 'marker' : 'freq';
+    localStorage.setItem('mediaSessionSkipMode', mediaSessionSkipMode);
+    log(`Media Session track-skip: ${mediaSessionSkipMode === 'marker' ? 'previous/next marker' : 'frequency steps'}`);
+}
+
+/** Grey out the track-skip-mode selector while Media Session is disabled. */
+function updateMediaSessionSkipModeRow() {
+    const row = document.getElementById('media-session-skip-mode-row');
+    const sel = document.getElementById('media-session-skip-mode');
+    if (row) row.style.opacity = mediaSessionEnabled ? '1' : '0.45';
+    if (sel) sel.disabled = !mediaSessionEnabled;
+}
+
 async function setMediaSessionEnabled(enabled) {
     mediaSessionEnabled = enabled;
     localStorage.setItem('mediaSessionEnabled', enabled ? 'true' : 'false');
+    updateMediaSessionSkipModeRow();
 
     if (!enabled) {
         // ── Tear down Apple bridge (if active) ───────────────────────────────
@@ -12197,8 +12257,8 @@ async function setMediaSessionEnabled(enabled) {
                 navigator.mediaSession.playbackState = 'playing';
             }
 
-            const tuneDown = () => adjustFrequency(-(window.frequencyScrollStep || frequencyScrollStep || 500));
-            const tuneUp   = () => adjustFrequency( (window.frequencyScrollStep || frequencyScrollStep || 500));
+            const tuneDown = () => mediaSessionStep(-1);
+            const tuneUp   = () => mediaSessionStep( 1);
             navigator.mediaSession.setActionHandler('previoustrack', tuneDown);
             navigator.mediaSession.setActionHandler('nexttrack',     tuneUp);
             // seekbackward / seekforward — tune frequency on seek button press.
@@ -12206,12 +12266,29 @@ async function setMediaSessionEnabled(enabled) {
             try {
                 navigator.mediaSession.setActionHandler('seekbackward', () => tuneDown());
                 navigator.mediaSession.setActionHandler('seekforward',  () => tuneUp());
-                const _msStartTime = Date.now();
-                navigator.mediaSession.setPositionState({
-                    duration: 86400,
-                    playbackRate: 1,
-                    position: 0
-                });
+                // For a time-limited session, mirror the bottom-left session countdown:
+                // duration = total session length, position advances toward the end.
+                // For an unlimited session, fall back to a large fake "live" duration.
+                const _msFallbackStart = Date.now();
+                const _computeMediaPosition = () => {
+                    const t = (typeof window.getSessionTiming === 'function')
+                        ? window.getSessionTiming()
+                        : null;
+                    if (t && !t.unlimited && t.maxTime > 0) {
+                        return {
+                            duration: t.maxTime,
+                            playbackRate: 1,
+                            position: Math.min(Math.max(0, t.elapsed), t.maxTime)
+                        };
+                    }
+                    const elapsed = (Date.now() - _msFallbackStart) / 1000;
+                    return {
+                        duration: 86400,
+                        playbackRate: 1,
+                        position: Math.min(elapsed, 86399)
+                    };
+                };
+                navigator.mediaSession.setPositionState(_computeMediaPosition());
                 if (!window._mediaSessionPositionInterval) {
                     window._mediaSessionPositionInterval = setInterval(() => {
                         if (!mediaSessionEnabled || !('mediaSession' in navigator)) {
@@ -12220,12 +12297,7 @@ async function setMediaSessionEnabled(enabled) {
                             return;
                         }
                         try {
-                            const elapsed = (Date.now() - _msStartTime) / 1000;
-                            navigator.mediaSession.setPositionState({
-                                duration: 86400,
-                                playbackRate: 1,
-                                position: Math.min(elapsed, 86399)
-                            });
+                            navigator.mediaSession.setPositionState(_computeMediaPosition());
                         } catch (_) {}
                     }, 5000);
                 }
@@ -14426,6 +14498,18 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (marker.mode) setMode(marker.mode, false);
         updateWheelMarkerLabel();
     }
+
+    // Jump to the adjacent spot/bookmark marker, reusing the same prev/next
+    // neighbour logic as the wheel edge arrows. Exposed for the MediaSession
+    // ⏮/⏭ handlers (marker skip mode). direction: -1 = previous, +1 = next.
+    // Returns true if a marker was found and tuned, false otherwise.
+    window.skipToAdjacentMarker = function (direction) {
+        const { prev, next } = findMarkers(getDialHz(), window.currentMode);
+        const marker = direction < 0 ? prev : next;
+        if (!marker) return false;
+        tuneToMarker(marker);
+        return true;
+    };
 
     // Wire the edge arrows. stopPropagation on pointerdown stops the wheel from
     // treating the tap as the start of a drag.

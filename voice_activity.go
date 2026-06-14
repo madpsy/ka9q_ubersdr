@@ -19,8 +19,9 @@ import (
 // CachedVoiceActivity stores a detected activity with timestamp and detection count
 type CachedVoiceActivity struct {
 	Activity       VoiceActivity
-	Timestamp      time.Time
-	DetectionCount int // Number of times detected
+	Timestamp      time.Time // last time this frequency was detected
+	DetectionCount int       // Number of times detected
+	Confirmed      bool      // once true, kept in results until it expires (sticky)
 }
 
 // VoiceActivityCache provides stable results by requiring multiple detections
@@ -111,10 +112,44 @@ func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []Voice
 		// Round dial freq to 500 Hz for grouping (same station)
 		key := (activity.EstimatedDialFreq / 500) * 500
 
+		// Snap to a nearby existing bin (within one 500 Hz step) when the exact
+		// bin is empty. The estimated dial frequency jitters by a few hundred Hz
+		// between scans; without this, a station sitting near a 500 Hz boundary
+		// hops between two bins, splitting into duplicates and never confirming —
+		// which is what makes the markers bouncy. Snapping refreshes the one
+		// existing entry instead, keeping it alive and stable.
+		if _, ok := bandCache[key]; !ok {
+			candidates := []uint64{key + 500}
+			if key >= 500 {
+				candidates = append(candidates, key-500)
+			}
+			bestKey, bestDist, found := uint64(0), uint64(0), false
+			for _, nk := range candidates {
+				if _, ok := bandCache[nk]; !ok {
+					continue
+				}
+				var dist uint64
+				if activity.EstimatedDialFreq > nk {
+					dist = activity.EstimatedDialFreq - nk
+				} else {
+					dist = nk - activity.EstimatedDialFreq
+				}
+				if !found || dist < bestDist {
+					bestKey, bestDist, found = nk, dist, true
+				}
+			}
+			if found {
+				key = bestKey
+			}
+		}
+
 		if existing, ok := bandCache[key]; ok {
 			// Already seen this frequency - increment count and update
 			existing.DetectionCount++
 			existing.Timestamp = now
+			if existing.DetectionCount >= 2 {
+				existing.Confirmed = true // sticky: stays in results until expiry
+			}
 			// Update with newer/better data
 			if activity.Confidence > existing.Activity.Confidence {
 				existing.Activity = activity
@@ -129,10 +164,12 @@ func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []Voice
 		}
 	}
 
-	// Return only activities detected at least 2 times
+	// Return confirmed activities. Membership is sticky: once a frequency has
+	// been confirmed it is returned until its entry expires (90s with no
+	// detection), so results don't bounce on a single missed scan.
 	result := []VoiceActivity{}
 	for _, ca := range bandCache {
-		if ca.DetectionCount >= 2 {
+		if ca.Confirmed {
 			result = append(result, ca.Activity)
 		}
 	}

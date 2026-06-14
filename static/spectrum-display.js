@@ -407,7 +407,37 @@ class SpectrumDisplay {
                 }
             }
 
-            // No bookmark, DX spot, or CW spot under mouse, hide tooltip
+            // Check if mouse is over a voice activity marker
+            if (window.voiceActivityPositions && window.voiceActivityPositions.length > 0) {
+                for (let i = window.voiceActivityPositions.length - 1; i >= 0; i--) {
+                    const pos = window.voiceActivityPositions[i];
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+
+                        const act = pos.activity || {};
+                        const freqStr = this.formatFrequency(pos.frequency);
+                        const modeStr = (pos.mode || '').toUpperCase();
+                        let tooltipText = `${pos.label}: ${freqStr}`;
+                        if (modeStr) tooltipText += `<br>Mode: ${modeStr}`;
+                        if (act.signal_above_noise != null) {
+                            tooltipText += `<br>SNR: ${Math.round(act.signal_above_noise)} dB`;
+                        }
+                        if (act.confidence != null) {
+                            tooltipText += `<br>Confidence: ${Math.round(act.confidence * 100)}%`;
+                        }
+                        this.tooltip.innerHTML = tooltipText;
+
+                        this.tooltip.style.left = (e.clientX + 15) + 'px';
+                        this.tooltip.style.top = (e.clientY - 10) + 'px';
+                        this.tooltip.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+
+            // No bookmark, DX spot, CW spot, or voice marker under mouse, hide tooltip
             this.hideTooltip();
         });
 
@@ -530,6 +560,39 @@ class SpectrumDisplay {
                                 );
                                 window._callsignLookupWindow.focus();
                             }
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Check if click is on a voice activity marker (iterate in reverse)
+            if (window.voiceActivityPositions && window.voiceActivityPositions.length > 0) {
+                for (let i = window.voiceActivityPositions.length - 1; i >= 0; i--) {
+                    const pos = window.voiceActivityPositions[i];
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+
+                        // Tune to the marker's frequency and mode
+                        if (typeof window.tuneToChannel === 'function') {
+                            window.tuneToChannel(pos.frequency, pos.mode);
+                        }
+
+                        // If a callsign is known and the lookup popup is open, update it
+                        const callsign = pos.activity && pos.activity.dx_callsign;
+                        if (callsign && window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
+                            const parts = callsign.split('/');
+                            const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+                            const uuid = window.userSessionID || '';
+                            window._callsignLookupWindow.postMessage(
+                                { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                                window.location.origin
+                            );
+                            window._callsignLookupWindow.focus();
+                        } else if (callsign && typeof window.lookupCallsign === 'function') {
+                            window.lookupCallsign(callsign);
                         }
                         return;
                     }
@@ -3134,6 +3197,11 @@ class SpectrumDisplay {
             // Draw CW spots to cache
             if (typeof window.drawCWSpotsOnSpectrum === 'function') {
                 window.drawCWSpotsOnSpectrum(this, console.log);
+            }
+
+            // Draw voice activity markers to cache
+            if (typeof window.drawVoiceActivityOnSpectrum === 'function') {
+                window.drawVoiceActivityOnSpectrum(this, console.log);
             }
 
             // Restore original context

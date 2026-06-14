@@ -2,7 +2,9 @@
   Voice Activity Widget
   =====================
   Shows voice activity for the currently active band.
-  Polls /api/noisefloor/voice-activity every 5 seconds.
+  Consumes data from the shared window.VoiceActivityService (voice-activity-service.js),
+  which centralises polling of /api/noisefloor/voice-activity. The widget is just one
+  subscriber; other UI can subscribe to the same service.
   Drag to reposition; position saved in localStorage.
   Click a row to tune to that frequency.
 -->
@@ -146,8 +148,6 @@
 
   var LS_POS_KEY     = 'va_widget_pos';
   var DRAG_THRESHOLD = 5;
-  var POLL_MS        = 5000;
-  var MIN_CONFIDENCE = 0.7;
 
   var widget    = document.getElementById('va-widget');
   var titleEl   = document.getElementById('va-widget-title');
@@ -157,7 +157,7 @@
 
   var dismissed   = false;
   var currentBand = null;
-  var pollTimer   = null;
+  var unsubscribe = null;
   var dragState   = null;
   var wasDragged  = false;
 
@@ -225,20 +225,20 @@
     e.stopPropagation();
     dismissed = true;
     widget.style.display = 'none';
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   });
 
-  // ── Band detection ───────────────────────────────────────────────────────
-  function getCurrentBand() {
-    var btn = document.querySelector('.band-status-badge.active');
-    return btn ? btn.getAttribute('data-band') : null;
-  }
-
-  // ── Fetch & render ───────────────────────────────────────────────────────
-  function fetchAndRender() {
+  // ── Render from service state ─────────────────────────────────────────────
+  function onState(state) {
     if (dismissed) return;
-    var band = getCurrentBand();
 
+    if (!state.enabled) {
+      bandEl.textContent = '';
+      bodyEl.innerHTML = '<div id="va-widget-empty">Voice activity unavailable</div>';
+      return;
+    }
+
+    var band = state.band;
     if (!band) {
       bandEl.textContent = '';
       bodyEl.innerHTML = '<div id="va-widget-empty">No band selected</div>';
@@ -250,25 +250,15 @@
       bandEl.textContent = band;
     }
 
-    fetch('/api/noisefloor/voice-activity?band=' + encodeURIComponent(band) +
-          '&min_confidence=' + MIN_CONFIDENCE)
-      .then(function (r) {
-        if (r.status === 429) return null; // rate limited — keep existing display
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data) return;
-        renderData(data, band);
-      })
-      .catch(function (err) {
-        console.warn('[VA Widget] fetch error:', err.message);
-      });
+    if (state.error) {
+      console.warn('[VA Widget] service error:', state.error);
+      return; // keep existing display
+    }
+
+    renderData(state.activities || [], band);
   }
 
-  function renderData(data, band) {
-    var activities = data.activities || [];
-
+  function renderData(activities, band) {
     if (activities.length === 0) {
       bodyEl.innerHTML = '<div id="va-widget-empty">No activity on ' + band + '</div>';
       return;
@@ -354,26 +344,21 @@
     if (typeof window.setMode === 'function') window.setMode(mode, false);
   }
 
-  // ── Poll ─────────────────────────────────────────────────────────────────
-  // Also watch for band changes
-  var lastBandCheck = null;
-  setInterval(function () {
-    var b = getCurrentBand();
-    if (b !== lastBandCheck) {
-      lastBandCheck = b;
-      fetchAndRender();
+  // ── Subscribe to the shared voice-activity service ─────────────────────────
+  function start() {
+    if (dismissed) return;
+    if (!window.VoiceActivityService) {
+      // Service script not ready yet — retry shortly.
+      setTimeout(start, 200);
+      return;
     }
-  }, 500);
-
-  function startPolling() {
-    fetchAndRender();
-    pollTimer = setInterval(fetchAndRender, POLL_MS);
+    unsubscribe = window.VoiceActivityService.subscribe(onState);
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startPolling);
+    document.addEventListener('DOMContentLoaded', start);
   } else {
-    startPolling();
+    start();
   }
 
 })();

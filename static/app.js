@@ -1312,9 +1312,10 @@ function updateMediaSession() {
     const newTitle  = callsign ? `UberSDR — ${callsign}` : 'UberSDR';
     const newArtist = [freqMHz, modeStr].filter(Boolean).join(' ');
 
-    // Album shows the marker name (bookmark / CW spot / DX spot) sitting at the
-    // current freq+mode, reusing the same matching logic as the dial-wheel
-    // overlay. Falls back to the generic 'Live SDR' label when nothing matches.
+    // Album shows the marker name (bookmark / CW spot / DX spot / voice activity)
+    // sitting at the current freq+mode, reusing the same matching logic as the
+    // dial-wheel overlay. Falls back to the generic 'Live SDR' label when nothing
+    // matches.
     const markerName = (typeof window.findMatchingMarker === 'function')
         ? window.findMatchingMarker(freq, currentMode)
         : null;
@@ -14211,10 +14212,10 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (stepLabel) stepLabel.textContent = formatHz(getCurrentStepHz()) + ' / step';
     }
 
-    // ── Marker overlay (bookmark / CW spot / DX spot at the current freq) ──────
+    // ── Marker overlay (bookmark / CW spot / DX spot / voice at the current freq) ─
     // Shows the name of any marker sitting at the current dial frequency + mode,
-    // subtly overlaid on the wheel. CW/DX spots take priority over bookmarks for
-    // the same freq/mode. Long names scroll horizontally.
+    // subtly overlaid on the wheel. CW/DX spots and voice activity take priority
+    // over bookmarks for the same freq/mode. Long names scroll horizontally.
     const MARKER_FREQ_TOLERANCE_HZ = 100; // how close the dial must sit to a marker
 
     // Collapse mode variants into a family so cwu/cwl, am/sam and fm/nfm match.
@@ -14249,12 +14250,13 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         return isNaN(hz) ? null : hz;
     }
 
-    // Gather every marker (CW spot, DX spot, bookmark) into a flat list of
-    // { freq, mode, family, name, priority } objects. `family` is the collapsed
-    // mode family used for at-dial matching (null = wildcard, i.e. a bookmark
-    // with no mode); `mode` is the marker's own specific mode for tuning. Spots
-    // get priority 1 and bookmarks 0 so spots win when two markers share a
-    // frequency, mirroring the original "spots beat bookmarks" rule.
+    // Gather every marker (CW spot, DX spot, voice activity, bookmark) into a
+    // flat list of { freq, mode, family, name, priority } objects. `family` is
+    // the collapsed mode family used for at-dial matching (null = wildcard, i.e.
+    // a bookmark with no mode); `mode` is the marker's own specific mode for
+    // tuning. Spots and voice activity get priority 1 and bookmarks 0 so live
+    // markers win when two share a frequency, mirroring the original "spots beat
+    // bookmarks" rule.
     function collectMarkers() {
         const out = [];
         const add = (list, freqOf, modeOf, famOf, nameOf, priority) => {
@@ -14267,8 +14269,18 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
         const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
         const dxSpots = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
+
+        // Voice activity markers come from the shared service's latest snapshot.
+        // Each activity carries its own dial freq + mode; label is the spotted
+        // callsign when known, otherwise "Voice".
+        const vaState = window.VoiceActivityService && window.VoiceActivityService.getLatest();
+        const voiceActs = (vaState && vaState.enabled && Array.isArray(vaState.activities)) ? vaState.activities : [];
+        const vaFreq = a => a.estimated_dial_freq || a.start_freq;
+        const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
+
         add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1);
         add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1);
+        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || 'Voice'), 1);
         add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0);
         return out;
     }

@@ -161,6 +161,19 @@
   var dragState = null;
   var wasDragged = false;
 
+  // The widget is hidden by CSS on narrow screens (@media max-width:768px). Track
+  // that with matchMedia so the render loop can skip the FFT reads + canvas draws
+  // entirely while hidden — no point burning CPU on visuals nobody can see.
+  var narrowMQ = window.matchMedia('(max-width: 768px)');
+  var hiddenByWidth = narrowMQ.matches;
+  function onWidthChange(e) {
+    hiddenByWidth = e.matches;
+    // Force a clean resize/redraw when it becomes visible again.
+    if (!hiddenByWidth) { lastReady = false; }
+  }
+  if (narrowMQ.addEventListener) narrowMQ.addEventListener('change', onWidthChange);
+  else if (narrowMQ.addListener) narrowMQ.addListener(onWidthChange); // older Safari
+
   // Which views are enabled.
   var views = { scope: true, wf: true };
 
@@ -499,7 +512,7 @@
   var lastReady = false;
   function frame(ts) {
     rafId = requestAnimationFrame(frame);
-    if (dismissed) return;
+    if (dismissed || hiddenByWidth) return; // hidden on narrow screens — skip FFT + draw
     if (ts - lastFrameTs < FRAME_INTERVAL) return;
     lastFrameTs = ts;
 

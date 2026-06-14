@@ -37,7 +37,7 @@ function updateSessionCountdown(sessionTimeEl) {
 
     // If we don't have session info yet, show loading
     if (sessionMaxTime === null) {
-        sessionTimeEl.textContent = '--:--:-- Session';
+        sessionTimeEl.textContent = '--:--:-- Max';
         sessionTimeEl.style.color = '';
         return;
     }
@@ -51,7 +51,7 @@ function updateSessionCountdown(sessionTimeEl) {
 
     // Calculate time remaining
     if (!sessionStartTime) {
-        sessionTimeEl.textContent = '--:--:-- Session';
+        sessionTimeEl.textContent = '--:--:-- Max';
         sessionTimeEl.style.color = '';
         return;
     }
@@ -65,7 +65,7 @@ function updateSessionCountdown(sessionTimeEl) {
     const minutes = Math.floor((remainingSeconds % 3600) / 60);
     const seconds = remainingSeconds % 60;
 
-    const timeString = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} Session`;
+    const timeString = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} Max`;
     sessionTimeEl.textContent = timeString;
 
     // Turn red if less than 5 minutes remaining

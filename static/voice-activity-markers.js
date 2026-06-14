@@ -29,10 +29,33 @@
   var voiceActivityPositions = [];
   window.voiceActivityPositions = voiceActivityPositions;
 
+  // A voice marker that has been correlated to a callsign is suppressed when a
+  // DX-cluster spot already marks that same callsign nearby, so the two layers
+  // don't stack a green + purple pair on the same station. DX wins because its
+  // callsign is human-confirmed; voice draws last so dxSpotPositions is already
+  // populated for this cache rebuild by the time we get here.
+  var DEDUP_FREQ_TOLERANCE_HZ = 500;
+
   // ── Data accessors ─────────────────────────────────────────────────────────
   function activityFreq(act)  { return act.estimated_dial_freq || act.start_freq; }
   function activityMode(act)  { return (act.mode || 'LSB').toLowerCase(); }
   function activityLabel(act) { return act.dx_callsign || 'Voice'; }
+
+  function normCall(call) { return call ? String(call).trim().toUpperCase() : ''; }
+
+  // True when a DX-cluster spot already covers this callsign within tolerance.
+  function dxSpotCovers(callsign, freq) {
+    var call = normCall(callsign);
+    if (!call) return false; // uncorrelated "Voice" markers never dedupe
+    var positions = window.dxSpotPositions;
+    if (!positions || positions.length === 0) return false;
+    return positions.some(function (pos) {
+      var spot = pos && pos.spot;
+      if (!spot || normCall(spot.dx_call) !== call) return false;
+      if (freq == null || spot.frequency == null) return true; // call match, no usable freq
+      return Math.abs(spot.frequency - freq) <= DEDUP_FREQ_TOLERANCE_HZ;
+    });
+  }
 
   // ── Subscribe to the shared service ────────────────────────────────────────
   function init() {
@@ -83,6 +106,9 @@
     latestActivities.forEach(function (act) {
       var freq = activityFreq(act);
       if (freq == null || freq < startFreq || freq > endFreq) return;
+
+      // Defer to the DX-cluster marker when it already covers this callsign.
+      if (dxSpotCovers(act.dx_callsign, freq)) return;
 
       var label = activityLabel(act);
       var x = ((freq - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;

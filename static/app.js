@@ -1229,7 +1229,7 @@ let nb = null; // Noise blanker instance
 const bandRanges = {
     '160m': { min: 1810000, max: 2000000 },  // UK: 1.81-2.0 MHz
     '80m': { min: 3500000, max: 4000000 },   // Extended to 4.0 MHz
-    '60m': { min: 5258500, max: 5406500 },   // UK: 5.2585-5.4065 MHz
+    '60m': { min: 5250000, max: 5450000 },   // Matches backend voice activity span (5.25-5.45 MHz)
     '40m': { min: 7000000, max: 7300000 },   // Extended to 7.3 MHz
     '30m': { min: 10100000, max: 10150000 }, // UK: 10.1-10.15 MHz (WARC band)
     '20m': { min: 14000000, max: 14350000 }, // UK: 14.0-14.35 MHz

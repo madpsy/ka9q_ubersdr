@@ -509,7 +509,7 @@ function updateBandBadgeActiveStates() {
     const bandRanges = window.bandRanges || {
         '160m': { min: 1810000, max: 2000000 },
         '80m': { min: 3500000, max: 4000000 },
-        '60m': { min: 5258500, max: 5406500 },
+        '60m': { min: 5250000, max: 5450000 },
         '40m': { min: 7000000, max: 7300000 },
         '30m': { min: 10100000, max: 10150000 },
         '20m': { min: 14000000, max: 14350000 },

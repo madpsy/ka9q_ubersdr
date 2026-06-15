@@ -442,8 +442,7 @@
           var existing = cache.get(base);
           if (!existing || !existing.data) {
             var imageUrl = (data.image || '').trim();
-            var imageBlobUrl = (existing && existing.imageBlobUrl) || null;
-            cache.set(base, { data: data, imageUrl: imageUrl, imageBlobUrl: imageBlobUrl });
+            cache.set(base, { data: data, imageUrl: imageUrl });
             if (typeof window._refreshCallsignDisplays === 'function') {
               window._refreshCallsignDisplays();
             }

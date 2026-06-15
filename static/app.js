@@ -1300,19 +1300,17 @@ let _lastMediaSessionImageUrl = null; // tracks QRZ photo URL so artwork updates
 // (qrz_lookup.widget.html) so a single API call populates both.
 //
 // Keyed by normalised callsign (uppercase). Values:
-//   undefined  — not yet looked up
-//   null       — looked up, no result (not found / error / service disabled)
-//   { data, imageUrl, imageBlobUrl }  — successful lookup
+//   undefined        — not yet looked up
+//   null             — looked up, no result (not found / error / service disabled)
+//   { data, imageUrl } — successful lookup
 //
-// data         — full raw API response object (all QRZ fields).
-// imageUrl     — raw QRZ photo URL ('' if no photo).  Used on mobile so
-//                Bluetooth AVRCP can fetch it directly from qrz.com.
-// imageBlobUrl — blob: URL created from the QRZ photo (null if no photo or on
-//                mobile).  Used on desktop Chrome to stop the re-fetch storm
-//                (Chrome re-fetches all artwork on every audio rebuffer event;
-//                blob: URLs are served from memory with no network round-trip).
-//                blob: URLs are NOT used on mobile because Bluetooth AVRCP
-//                cannot resolve them outside the browser context.
+// data     — full raw API response object (all QRZ fields).
+// imageUrl — raw QRZ photo URL ('' if no photo).  Used directly in MediaSession
+//            artwork on both desktop and mobile.  We do NOT blob-fetch the photo:
+//            QRZ's CDN does not send CORS headers so fetch()-to-blob fails
+//            silently.  Using the URL directly works fine — MediaSession and
+//            Bluetooth AVRCP both accept cross-origin image URLs.
+//
 // The cache lives for the page session; the server-side QRZ cache handles the
 // 24-hour deduplication against the QRZ API.
 const _callsignLookupCache = new Map();
@@ -1365,29 +1363,14 @@ function _fetchCallsignForMediaSession(callsign) {
             const data     = await resp.json();
             const imageUrl = (data.image || '').trim();
 
-            // On desktop Chrome: fetch the QRZ photo once and convert to a blob: URL.
-            // Chrome re-fetches all artwork on every audio rebuffer event; blob: URLs
-            // are served from memory with no network round-trip, stopping the storm.
-            // On mobile (Android Chrome / Apple): skip the blob fetch — blob: URLs
-            // are not resolvable by Bluetooth AVRCP stacks outside the browser.
-            // The raw imageUrl is used directly on mobile instead.
-            const isMobileDevice = _isMobileChrome || _isApple;
-            let imageBlobUrl = null;
-            if (imageUrl && !isMobileDevice) {
-                try {
-                    const imgResp = await fetch(imageUrl);
-                    if (imgResp.ok) {
-                        const blob = await imgResp.blob();
-                        imageBlobUrl = URL.createObjectURL(blob);
-                    }
-                } catch (_) {
-                    // Photo fetch failed — fall back to standard artwork.
-                }
-            }
-
             // Store the full API response so the QRZ lookup widget can render all
             // fields (name, nickname, grid, etc.) from cache without a second fetch.
-            _callsignLookupCache.set(callsign, { data, imageUrl, imageBlobUrl });
+            // We do NOT attempt to blob-fetch the QRZ photo: QRZ's CDN does not
+            // send CORS headers, so fetch() would fail silently with a CORS error.
+            // Using imageUrl directly works fine — <img src> and MediaSession both
+            // accept cross-origin URLs without CORS.  The re-fetch storm concern
+            // only applies to our own server's logo artwork (already blobbed).
+            _callsignLookupCache.set(callsign, { data, imageUrl });
             // Re-run all callsign-aware displays so the enriched data is applied.
             _refreshCallsignDisplays();
         } catch (_) {
@@ -1538,18 +1521,19 @@ function updateMediaSession() {
     const newAlbum = currentMarker ? (_enrichMarkerName(currentMarker) || 'Live SDR') : 'Live SDR';
 
     // ── Artwork strategy ─────────────────────────────────────────────────────
-    // Desktop (non-mobile Chrome, non-Apple):
-    //   • Standard artwork: blob: URLs (pre-fetched once; stops Chrome's
-    //     re-fetch storm on every audio rebuffer event).
-    //   • QRZ photo: blob: URL (fetched once in _fetchCallsignForMediaSession,
-    //     stored in cache as imageBlobUrl).  Blob URLs are fine on desktop —
-    //     no Bluetooth concern, and Chrome serves them from memory instantly.
+    // Standard UberSDR logo artwork:
+    //   Desktop: blob: URLs (pre-fetched once; stops Chrome's re-fetch storm
+    //            on every audio rebuffer event — Chrome re-fetches all artwork
+    //            on every waiting→playing transition of the <audio> element).
+    //   Mobile:  real HTTPS URLs — Bluetooth AVRCP fetches artwork outside the
+    //            browser context and cannot resolve blob: URLs.
     //
-    // Mobile (Android Chrome / Apple iOS/macOS):
-    //   • Standard artwork: real HTTPS URLs from our server — Bluetooth AVRCP
-    //     can fetch them directly.  Blob URLs would break Bluetooth artwork.
-    //   • QRZ photo: raw QRZ image URL (imageUrl) — QRZ does not block
-    //     hotlinking, so Bluetooth AVRCP can fetch it directly from qrz.com.
+    // QRZ operator photo (both desktop and mobile):
+    //   Always use the raw imageUrl directly.  QRZ's CDN does not send CORS
+    //   headers, so fetch()-to-blob fails silently.  Using the URL directly
+    //   works fine: MediaSession and Bluetooth AVRCP both accept cross-origin
+    //   image URLs.  The re-fetch storm concern only applies to our own server's
+    //   logo artwork (already handled by blobs above).
     const isMobile = _isMobileChrome || _isApple;
 
     // Standard UberSDR logo artwork.
@@ -1566,14 +1550,15 @@ function updateMediaSession() {
               })));
 
     // QRZ operator photo for the artwork array.
-    // Desktop: use blob URL (no network round-trip on rebuffer).
-    // Mobile:  use raw imageUrl (Bluetooth AVRCP can fetch it from qrz.com).
+    // We use the raw imageUrl directly on both desktop and mobile — QRZ's CDN
+    // does not send CORS headers so fetch()-to-blob fails silently.  Using the
+    // URL directly works fine: MediaSession accepts cross-origin image URLs and
+    // Bluetooth AVRCP can fetch them from qrz.com directly.  The re-fetch storm
+    // concern only applies to our own server's logo artwork (already blobbed).
     const cachedCallsign = (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type))
         ? (_callsignLookupCache.get(_normaliseCallsign(currentMarker.name)) || null)
         : null;
-    const callsignImageUrl = cachedCallsign
-        ? (isMobile ? (cachedCallsign.imageUrl || null) : (cachedCallsign.imageBlobUrl || null))
-        : null;
+    const callsignImageUrl = cachedCallsign ? (cachedCallsign.imageUrl || null) : null;
 
     // Only replace the MediaMetadata object when the content actually changes.
     // Chrome fetches all artwork URLs every time metadata is replaced — even if

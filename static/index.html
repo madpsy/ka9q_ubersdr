@@ -465,15 +465,15 @@
                     </div>
                 </div>
                 <div class="tuning-buttons">
-                    <button id="tuning-btn-marker-prev" onclick="skipToAdjacentMarker(-1)" title="Tune to previous marker (spots & bookmarks)" class="tuning-btn-marker">‹</button>
-                    <button onclick="adjustFrequency(-1000)" title="Down 1 kHz (Left Arrow ←)">◄◄</button>
+                    <button id="tuning-btn-marker-prev" onclick="tuningSkipStep(-1)" title="Previous marker / step frequency down (Left Arrow ←)" class="tuning-btn-marker">‹</button>
+                    <button onclick="adjustFrequency(-1000)" title="Down 1 kHz">◄◄</button>
                     <button onclick="adjustFrequency(-100)" title="Down 100 Hz (A key)">◄</button>
                     <button onclick="adjustFrequency(-10)" title="Down 10 Hz">◂</button>
                     <button onclick="roundToNearestKHz()" title="Round to nearest 1 kHz" class="tuning-btn-snap">●</button>
                     <button onclick="adjustFrequency(10)" title="Up 10 Hz">▸</button>
                     <button onclick="adjustFrequency(100)" title="Up 100 Hz (D key)">►</button>
-                    <button onclick="adjustFrequency(1000)" title="Up 1 kHz (Right Arrow →)">►►</button>
-                    <button id="tuning-btn-marker-next" onclick="skipToAdjacentMarker(1)" title="Tune to next marker (spots & bookmarks)" class="tuning-btn-marker">›</button>
+                    <button onclick="adjustFrequency(1000)" title="Up 1 kHz">►►</button>
+                    <button id="tuning-btn-marker-next" onclick="tuningSkipStep(1)" title="Next marker / step frequency up (Right Arrow →)" class="tuning-btn-marker">›</button>
                 </div>
                 <!-- Mobile tuning wheel (shown/hidden by JS based on Buttons/Wheel radio toggle) -->
                 <div id="tuning-wheel-container" class="tuning-wheel-container">

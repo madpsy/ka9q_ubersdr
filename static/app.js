@@ -1504,15 +1504,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 volumeSlider.dispatchEvent(new Event('input'));
             }
         }
-        // Left arrow: -1 kHz
+        // Left arrow: previous marker / step frequency down (follows skip-mode)
         else if (e.key === 'ArrowLeft') {
             e.preventDefault();
-            adjustFrequency(-1000);
+            tuningSkipStep(-1);
         }
-        // Right arrow: +1 kHz
+        // Right arrow: next marker / step frequency up (follows skip-mode)
         else if (e.key === 'ArrowRight') {
             e.preventDefault();
-            adjustFrequency(1000);
+            tuningSkipStep(1);
         }
         // A key: -100 Hz
         else if (e.key === 'a' || e.key === 'A') {
@@ -12212,12 +12212,32 @@ function mediaSessionStep(direction) {
 }
 
 /**
+ * Drive the tuning-bar ‹ › buttons. Honours the same skip-mode preference as
+ * the Media Session ⏮/⏭ buttons (mediaSessionSkipMode):
+ *   'marker' — jump to the adjacent spot/bookmark
+ *   'freq'   — step the dial by the current frequency step (step dropdown)
+ * direction: -1 = previous/down, +1 = next/up.
+ */
+function tuningSkipStep(direction) {
+    if (mediaSessionSkipMode === 'marker') {
+        if (typeof window.skipToAdjacentMarker === 'function') window.skipToAdjacentMarker(direction);
+        return;
+    }
+    const step = window.frequencyScrollStep || frequencyScrollStep || 500;
+    adjustFrequency(direction * step);
+}
+window.tuningSkipStep = tuningSkipStep;
+
+/**
  * Persist and apply the user's choice of what ⏮/⏭ do (lock-screen track-skip).
  * The action handlers read mediaSessionSkipMode live, so no re-wiring is needed.
  */
 function setMediaSessionSkipMode(mode) {
     mediaSessionSkipMode = (mode === 'marker') ? 'marker' : 'freq';
     localStorage.setItem('mediaSessionSkipMode', mediaSessionSkipMode);
+    // The tuning-bar ‹ › buttons follow this preference too — refresh their
+    // greyed state right away (freq mode never greys them).
+    updateMarkerNavButtons();
     log(`Media Session track-skip: ${mediaSessionSkipMode === 'marker' ? 'previous/next marker' : 'frequency steps'}`);
 }
 
@@ -12237,12 +12257,13 @@ function setMarkerNavMode(mode) {
     log(`Marker navigation: ${mode}`);
 }
 
-/** Grey out the track-skip-mode selector while Media Session is disabled. */
+/** The track-skip-mode selector stays enabled regardless of Media Session
+ *  state, since its value is also used outside the lock-screen controls. */
 function updateMediaSessionSkipModeRow() {
     const row = document.getElementById('media-session-skip-mode-row');
     const sel = document.getElementById('media-session-skip-mode');
-    if (row) row.style.opacity = mediaSessionEnabled ? '1' : '0.45';
-    if (sel) sel.disabled = !mediaSessionEnabled;
+    if (row) row.style.opacity = '1';
+    if (sel) sel.disabled = false;
 }
 
 async function setMediaSessionEnabled(enabled) {
@@ -13141,7 +13162,17 @@ function setFrequencyInputValue(hzValue) {
 function updateMarkerNavButtons() {
     const prevBtn = document.getElementById('tuning-btn-marker-prev');
     const nextBtn = document.getElementById('tuning-btn-marker-next');
-    if (!prevBtn || !nextBtn || typeof window.findMarkers !== 'function') return;
+    if (!prevBtn || !nextBtn) return;
+
+    // In frequency-step mode the ‹ › buttons always step the dial, so they're
+    // never greyed — there's always a frequency to step to.
+    if (mediaSessionSkipMode !== 'marker') {
+        prevBtn.disabled = false;
+        nextBtn.disabled = false;
+        return;
+    }
+
+    if (typeof window.findMarkers !== 'function') return;
 
     const freqInput = document.getElementById('frequency');
     const dialHz = freqInput

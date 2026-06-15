@@ -2302,6 +2302,9 @@ input[type="range"]::-moz-range-thumb {
         overflow: visible !important;
         overflow-y: visible !important;
         padding-bottom: 12px !important;
+        /* On mobile the whole docked panel captures taps so they never fall
+           through the transparent gaps to the waterfall behind it. */
+        pointer-events: auto !important;
     }
 
     /* Hide the waterfall drag-resize handle on mobile — waterfall fills full
@@ -5184,6 +5187,7 @@ input[type="range"]::-moz-range-thumb {
 #dock-overlay-wrapper .s-meter-container,
 #dock-overlay-wrapper .smeter-charts-panel,
 #dock-overlay-wrapper canvas,
+#dock-overlay-wrapper #vu-meter-compact,
 #dock-overlay-wrapper #snr-squelch-value,
 #dock-overlay-wrapper #squelch-value {
     pointer-events: auto;

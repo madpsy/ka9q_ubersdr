@@ -1371,6 +1371,11 @@ function _fetchCallsignForMediaSession(callsign) {
             // accept cross-origin URLs without CORS.  The re-fetch storm concern
             // only applies to our own server's logo artwork (already blobbed).
             _callsignLookupCache.set(callsign, { data, imageUrl });
+            // Notify lookup widgets immediately with the resolved callsign so they
+            // can auto-populate without knowing which callsign was being fetched.
+            window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
+                detail: { callsign, data, imageUrl, cache: window._callsignLookupCache }
+            }));
             // Re-run all callsign-aware displays so the enriched data is applied.
             _refreshCallsignDisplays();
         } catch (_) {
@@ -1400,13 +1405,6 @@ function _refreshCallsignDisplays() {
     // now pick up the enriched name from _enrichMarkerName().
     if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
 
-    // Notify any lookup widget (e.g. qrz_lookup.widget.html) that a callsign
-    // result has just been stored in the shared cache.  Widgets listen for this
-    // event and pull from window._callsignLookupCache — no polling required and
-    // no coupling to any specific trigger source (cw/dx/voice/manual all converge here).
-    window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
-        detail: { cache: window._callsignLookupCache }
-    }));
 }
 // Expose so the QRZ lookup widget (injected HTML) can trigger a refresh after
 // populating the shared cache with a user-initiated lookup.

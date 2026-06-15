@@ -1505,7 +1505,6 @@ function updateMediaSession() {
     const callsign = window.instanceDescription?.receiver?.callsign || '';
 
     const newTitle  = callsign ? `UberSDR • ${callsign}` : 'UberSDR';
-    const newArtist = [freqMHz, modeStr].filter(Boolean).join(' ');
 
     // Album shows the marker name (bookmark / CW spot / DX spot / voice activity)
     // sitting at the current freq+mode, reusing the same matching logic as the
@@ -1519,6 +1518,13 @@ function updateMediaSession() {
         ? window.findMarkers(freq, currentMode).current
         : null;
     const newAlbum = currentMarker ? (_enrichMarkerName(currentMarker) || 'Live SDR') : 'Live SDR';
+
+    // Artist: "freq mode" — append the raw callsign when tuned to a callsign-type
+    // marker (CW spot / DX spot / voice activity) so it's visible in the track line.
+    const markerCallsign = (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type))
+        ? currentMarker.name
+        : '';
+    const newArtist = [freqMHz, modeStr, markerCallsign].filter(Boolean).join(' • ');
 
     // ── Artwork strategy ─────────────────────────────────────────────────────
     // Standard UberSDR logo artwork:

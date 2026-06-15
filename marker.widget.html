@@ -196,6 +196,13 @@
   let _prevMarker = null;
   let _nextMarker = null;
 
+  // The current marker at the dial frequency — kept so the nameEl click handler
+  // can read its type and name without re-running the matcher.
+  let _currentMarker = null;
+
+  // Marker types whose name is a callsign and should trigger a lookup on click.
+  const CALLSIGN_TYPES = new Set(['cw', 'dx', 'voice']);
+
   // ── Marker matching ────────────────────────────────────────────────
   // Prefer the host app's exposed matcher (single source of truth, same
   // logic as the dial-wheel overlay — returns { current, prev, next }).
@@ -333,6 +340,7 @@
     const { current, prev, next } = getMarkers();
     _prevMarker = prev;
     _nextMarker = next;
+    _currentMarker = current;
     const name = current ? current.name : null;
 
     // Hide the widget only when there is NO current, prev AND next marker.
@@ -353,12 +361,18 @@
     if (!name) {
       if (nameEl.style.display !== 'none') nameEl.style.display = 'none';
       _lastName = null;
+      nameEl.style.cursor = '';
+      nameEl.title = '';
     } else {
       if (nameEl.style.display === 'none') nameEl.style.display = '';
+      // Show a pointer cursor and tooltip when the marker is a callsign type
+      // so the user knows it's clickable for a lookup.
+      const isCallsign = current && CALLSIGN_TYPES.has(current.type);
+      nameEl.style.cursor = isCallsign ? 'pointer' : '';
+      nameEl.title = isCallsign ? 'Click to look up ' + name : name;
       if (name !== _lastName) {
         _lastName = name;
         nameEl.textContent = name;
-        nameEl.title = name;
       }
     }
   }
@@ -366,6 +380,20 @@
   // ── Prev/next click handlers ───────────────────────────────────────
   prevBtn.addEventListener('click', e => { e.stopPropagation(); tuneToMarker(_prevMarker); });
   nextBtn.addEventListener('click', e => { e.stopPropagation(); tuneToMarker(_nextMarker); });
+
+  // ── Current marker name click → callsign lookup ────────────────────
+  // When the current marker is a CW/DX/voice spot (i.e. its name is a
+  // callsign), clicking the name triggers a lookup in any registered
+  // lookup widget (e.g. qrz_lookup.widget.html) via window.lookupCallsign().
+  nameEl.addEventListener('click', () => {
+    if (!_currentMarker) return;
+    if (!CALLSIGN_TYPES.has(_currentMarker.type)) return;
+    const callsign = _currentMarker.name;
+    if (!callsign) return;
+    if (typeof window.lookupCallsign === 'function') {
+      window.lookupCallsign(callsign);
+    }
+  });
 
   // ── Close button ───────────────────────────────────────────────────
   document.getElementById('sdr-marker-close-btn').addEventListener('click', () => {

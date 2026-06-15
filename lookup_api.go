@@ -27,8 +27,9 @@ type lookupErrorResponse struct {
 // Behaviour:
 //  1. Reject if lookup services are disabled.
 //  2. Validate uuid — must correspond to an active audio session (not spectrum-only).
-//  3. Apply per-UUID rate limiting (bypassed users are exempt).
-//  4. Validate and normalise the callsign.
+//  3. Validate and normalise the callsign.
+//  4. Apply per-UUID rate limiting (bypassed users are exempt).
+//     Cache hits are granted 10× the normal rate (no outbound API call needed).
 //  5. Delegate to the active lookup provider and return JSON.
 func handleLookup(
 	w http.ResponseWriter,
@@ -69,14 +70,7 @@ func handleLookup(
 		return
 	}
 
-	// ── 3. Rate limiting (bypassed users are exempt) ──────────────────────────
-	bypassed := sessions.IsUUIDBypassedByAnySession(rawUUID)
-	if !bypassed && rateLimiter != nil && !rateLimiter.AllowRequest(rawUUID) {
-		writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
-		return
-	}
-
-	// ── 5. Callsign validation ────────────────────────────────────────────────
+	// ── 3. Callsign validation (before rate limiting so we can check the cache) ──
 	rawCallsign := strings.TrimSpace(r.URL.Query().Get("callsign"))
 	if rawCallsign == "" {
 		writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "callsign parameter is required"})
@@ -92,7 +86,27 @@ func handleLookup(
 		return
 	}
 
-	// ── 6. Provider dispatch ──────────────────────────────────────────────────
+	// ── 4. Rate limiting (bypassed users are exempt) ──────────────────────────
+	// If the callsign is already in the local cache, or a fetch for it is
+	// already in flight (singleflight will share the result — no extra API
+	// call), we allow 10× the normal rate.
+	bypassed := sessions.IsUUIDBypassedByAnySession(rawUUID)
+	if !bypassed && rateLimiter != nil {
+		cheapRequest := globalQRZService != nil &&
+			(globalQRZService.CacheHas(normalised) || globalQRZService.IsInFlight(normalised))
+		var allowed bool
+		if cheapRequest {
+			allowed = rateLimiter.AllowCachedRequest(rawUUID)
+		} else {
+			allowed = rateLimiter.AllowRequest(rawUUID)
+		}
+		if !allowed {
+			writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
+			return
+		}
+	}
+
+	// ── 5. Provider dispatch ──────────────────────────────────────────────────
 	// The handler is intentionally provider-agnostic: it calls whichever global
 	// service was initialised at startup.  Adding a new provider only requires
 	// wiring it up in main.go — this file does not need to change.

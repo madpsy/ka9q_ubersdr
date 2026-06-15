@@ -408,33 +408,6 @@ let _httpStreamPlaying = false;
 // Toggle this flag to quickly switch between the two approaches for testing.
 const _useMSEForHttpStream = true;
 
-// ── Local-capture (client DSP) toggle ────────────────────────────────────────
-// When true, the Android lock-screen <audio> element is fed audio captured from
-// the *post-DSP* AudioContext output (MediaStreamDestination → MediaRecorder →
-// MSE SourceBuffer) instead of the server's pre-DSP Opus stream.  This makes the
-// EQ, notch and other client-side filters audible on Android — the server HTTP
-// stream path cannot do this because the server taps PCM before any client DSP.
-//
-// The <audio> element is still a real, blob-URL-backed MSE media element, so the
-// lock-screen / notification media widget behaves exactly as on the server path.
-// Only the *source* of the bytes changes (locally-encoded DSP'd audio vs server
-// Opus).  No server changes are involved.
-//
-// Set to false to revert to the server HTTP stream (no client DSP on Android).
-const _useLocalCaptureForHttpStream = true;
-
-let _httpCaptureRecorder = null;   // MediaRecorder encoding the DSP'd output
-let _httpCaptureDest = null;       // MediaStreamDestination tapping the graph
-let _httpCaptureWaitingForBuffer = false; // true until the startup pre-buffer is filled
-// Pre-buffer this many seconds before starting playback of the capture element.
-// The MSE feed is live (1× realtime), so the element would otherwise play right
-// at the live edge with no headroom and underrun (crackle) on the slightest
-// jitter.  Starting ~0.5s behind gives a steady jitter cushion.
-const _HTTP_CAPTURE_START_BUFFER_SEC = 0.5;
-// If latency ever creeps above this (e.g. clock drift building up), nudge the
-// element forward to the live edge to claw it back.  Kept high so it's rare.
-const _HTTP_CAPTURE_MAX_LATENCY_SEC = 2.0;
-
 /**
  * Create (or reuse) the hidden <audio> element that anchors the Android Chrome
  * lock-screen / notification media widget.
@@ -460,27 +433,6 @@ async function _ensureHttpAudioStream() {
     if (_httpAudioElement) return; // already active
 
     const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
-
-    // Local-capture path: encode the post-DSP AudioContext output locally and
-    // feed it into the same MSE <audio> element so EQ/notch/etc. are audible.
-    // Requires an AudioContext plus MSE and MediaRecorder support for opus/webm.
-    const canUseLocalCapture = _useLocalCaptureForHttpStream &&
-        audioContext &&
-        typeof MediaSource !== 'undefined' &&
-        MediaSource.isTypeSupported('audio/webm; codecs=opus') &&
-        typeof MediaRecorder !== 'undefined' &&
-        MediaRecorder.isTypeSupported('audio/webm; codecs=opus');
-
-    if (canUseLocalCapture) {
-        try {
-            await _ensureHttpAudioStreamLocalCapture();
-            return;
-        } catch (e) {
-            console.error('[MediaSession/Local] Local capture failed, falling back to server stream:', e.message);
-            _destroyHttpAudioStream();
-            // fall through to the server HTTP stream below
-        }
-    }
 
     // Check if MSE is available and enabled
     const canUseMSE = _useMSEForHttpStream &&
@@ -670,25 +622,6 @@ function _flushMSEBufferQueue() {
 function _onMSEUpdateEnd() {
     _httpMSEAppending = false;
     _flushMSEBufferQueue();
-
-    // Capture path: gate playback on the startup pre-buffer, and keep latency
-    // bounded if clock drift slowly inflates it.
-    if (_httpCaptureRecorder) {
-        _maybeStartCapturePlayback();
-        if (!_httpCaptureWaitingForBuffer && _httpAudioElement && _httpSourceBuffer) {
-            try {
-                const b = _httpSourceBuffer.buffered;
-                if (b.length > 0) {
-                    const liveEdge = b.end(b.length - 1);
-                    const latency = liveEdge - _httpAudioElement.currentTime;
-                    if (latency > _HTTP_CAPTURE_MAX_LATENCY_SEC) {
-                        // Jump close to the live edge to reclaim accumulated latency.
-                        _httpAudioElement.currentTime = liveEdge - _HTTP_CAPTURE_START_BUFFER_SEC;
-                    }
-                }
-            } catch (_) {}
-        }
-    }
 }
 
 /**
@@ -762,143 +695,6 @@ async function _ensureHttpAudioStreamDirect(url) {
     }
 }
 
-/**
- * Local-capture path: feed the lock-screen <audio> element with audio captured
- * from the *post-DSP* AudioContext output instead of the server's pre-DSP Opus.
- *
- * Pipeline:
- *   AudioContext graph (post EQ/notch/volume/stereo) → MediaStreamDestination
- *     → MediaRecorder(opus/webm) → MSE SourceBuffer → <audio> element → speakers
- *
- * The <audio> element is the single audible source (the AudioContext is NOT also
- * routed to audioContext.destination while _localCaptureDest is set — see the
- * routing in playAudioBuffer's "Final output" step — so there is no double audio).
- * Because the element is a blob-URL-backed MSE element, the lock-screen widget
- * behaves identically to the server HTTP stream path.
- *
- * Reuses the shared MSE queue helpers (_flushMSEBufferQueue / _onMSEUpdateEnd /
- * _trimMSEBuffer) and the shared teardown (_destroyHttpAudioStream).
- *
- * Throws on failure so the caller can fall back to the server HTTP stream.
- */
-async function _ensureHttpAudioStreamLocalCapture() {
-    const ms = new MediaSource();
-    _httpMediaSource = ms;
-
-    // Attach sourceopen listener BEFORE assigning el.src (see MSE path notes).
-    const sourceOpenPromise = new Promise((resolve, reject) => {
-        ms.addEventListener('sourceopen', resolve, { once: true });
-        ms.addEventListener('error', () => reject(new Error('MediaSource error')), { once: true });
-        setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 10000);
-    });
-
-    const el = document.createElement('audio');
-    el.setAttribute('playsinline', '');
-    el.style.display = 'none';
-    document.body.appendChild(el);
-    _httpAudioElement = el;
-
-    el._errorHandler = (e) => {
-        if (el.error?.code === 4) return; // intentional teardown
-        console.error('[MediaSession/Local] Audio element error:', el.error?.code, el.error?.message);
-        _onHttpAudioStreamEnded();
-    };
-    el.addEventListener('ended', _onHttpAudioStreamEnded);
-    el.addEventListener('error', el._errorHandler);
-    el.addEventListener('abort', _onHttpAudioStreamEnded);
-    el.addEventListener('playing', () => {
-        console.log('[MediaSession/Local] Audio element playing (DSP capture)');
-        _httpStreamPlaying = true;
-        // IMPORTANT: do NOT mute the AudioContext output here.  The capture tap
-        // lives at the end of the DSP graph and routes to a MediaStreamDestination
-        // *instead of* audioContext.destination, so there is no double audio.
-        // Muting (gain=0) would silence the very signal we are recording.
-        if ('mediaSession' in navigator && mediaSessionEnabled) {
-            updateMediaSession();
-        }
-    }, { once: true });
-
-    // Keep the element playing — Chrome dismisses the widget on a true pause.
-    el.addEventListener('pause', () => {
-        if (_httpAudioElement === el) {
-            console.log('[MediaSession/Local] Auto-resuming after Chrome pause');
-            el.play().catch(() => {});
-        }
-    });
-
-    el.src = URL.createObjectURL(ms);
-    await sourceOpenPromise;
-    if (ms.readyState !== 'open') {
-        throw new Error(`MediaSource not open (state: ${ms.readyState})`);
-    }
-
-    const sb = ms.addSourceBuffer('audio/webm; codecs=opus');
-    _httpSourceBuffer = sb;
-    sb.mode = 'sequence';
-    sb.addEventListener('updateend', _onMSEUpdateEnd);
-
-    // Tap the post-DSP output.  Setting audioContext._localCaptureDest makes
-    // playAudioBuffer route the final processed node here on the next buffer
-    // (and stop driving audioContext.destination), so we capture EQ/notch/volume.
-    const dest = audioContext.createMediaStreamDestination();
-    _httpCaptureDest = dest;
-    audioContext._localCaptureDest = dest;
-
-    const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm; codecs=opus' });
-    _httpCaptureRecorder = recorder;
-    recorder.ondataavailable = async (ev) => {
-        if (!ev.data || ev.data.size === 0) return;
-        if (!_httpSourceBuffer) return; // torn down mid-flight
-        try {
-            const buf = await ev.data.arrayBuffer();
-            _httpMSEBufferQueue.push(new Uint8Array(buf));
-            _flushMSEBufferQueue();
-            _trimMSEBuffer(2);
-        } catch (_) {
-            // element/buffer may have been detached during teardown — ignore
-        }
-    };
-    recorder.onerror = (ev) => {
-        console.error('[MediaSession/Local] MediaRecorder error:', ev.error?.message || ev.error);
-        _onHttpAudioStreamEnded();
-    };
-
-    // Emit a chunk every 100ms so the SourceBuffer is fed at low latency.
-    recorder.start(100);
-
-    // Do NOT play yet — accumulate a startup pre-buffer first so the live feed has
-    // jitter headroom (see _maybeStartCapturePlayback, driven from _onMSEUpdateEnd).
-    // Playing immediately sits at the live edge and underruns → crackle.
-    _httpCaptureWaitingForBuffer = true;
-
-    console.log('[MediaSession/Local] DSP capture started — pre-buffering before playback');
-}
-
-/**
- * Start playback of the capture <audio> element once the startup pre-buffer has
- * accumulated.  Called from _onMSEUpdateEnd after each append completes.  No-op
- * unless we're in the capture path and still waiting.
- */
-function _maybeStartCapturePlayback() {
-    if (!_httpCaptureWaitingForBuffer) return;
-    const el = _httpAudioElement;
-    const sb = _httpSourceBuffer;
-    if (!el || !sb) return;
-    try {
-        const b = sb.buffered;
-        if (b.length === 0) return;
-        // Element hasn't played yet (currentTime ≈ 0), so buffered span ≈ depth.
-        const depth = b.end(b.length - 1) - b.start(0);
-        if (depth >= _HTTP_CAPTURE_START_BUFFER_SEC) {
-            _httpCaptureWaitingForBuffer = false;
-            el.play().catch(e => console.warn('[MediaSession/Local] play() rejected:', e.message));
-            console.log(`[MediaSession/Local] Pre-buffer ready (${depth.toFixed(2)}s) — playback started`);
-        }
-    } catch (_) {
-        // buffer may have been detached during teardown — ignore
-    }
-}
-
 /** Called when the HTTP audio stream ends or errors — restore AudioContext audio. */
 function _onHttpAudioStreamEnded() {
     console.log('[MediaSession] HTTP audio stream ended — restoring AudioContext audio');
@@ -907,25 +703,6 @@ function _onHttpAudioStreamEnded() {
 
 /** Tear down the HTTP audio stream (MSE or direct) and restore AudioContext output. */
 function _destroyHttpAudioStream() {
-    // ── Local-capture cleanup ────────────────────────────────────────────────
-    // Stop the recorder first so no further chunks are queued, then drop the
-    // capture destination.  Nulling _localCaptureDest makes the next buffer route
-    // back to audioContext.destination so normal (WebSocket) playback resumes.
-    if (_httpCaptureRecorder) {
-        try {
-            if (_httpCaptureRecorder.state !== 'inactive') _httpCaptureRecorder.stop();
-        } catch (_) {}
-        _httpCaptureRecorder.ondataavailable = null;
-        _httpCaptureRecorder.onerror = null;
-        _httpCaptureRecorder = null;
-    }
-    if (audioContext) audioContext._localCaptureDest = null;
-    if (_httpCaptureDest) {
-        try { _httpCaptureDest.disconnect(); } catch (_) {}
-        _httpCaptureDest = null;
-    }
-    _httpCaptureWaitingForBuffer = false;
-
     // ── MSE cleanup ──────────────────────────────────────────────────────────
     // Abort the fetch reader (MSE path)
     if (_httpFetchAbortController) {
@@ -1515,6 +1292,80 @@ function updatePageTitle() {
 let _lastMediaSessionTitle = null;
 let _lastMediaSessionArtist = null;
 let _lastMediaSessionAlbum = null;
+
+// ── Callsign lookup cache for MediaSession album enrichment ──────────────────
+// Keyed by normalised callsign (uppercase). Values:
+//   undefined  — not yet looked up
+//   null       — looked up, no result (not found / error / service disabled)
+//   { fname, country, imageBlobUrl }  — successful lookup
+//
+// imageBlobUrl is a blob: URL created from the QRZ photo (or null if no photo).
+// The cache lives for the page session; the server-side QRZ cache handles the
+// 24-hour deduplication against the QRZ API.
+const _callsignLookupCache = new Map();
+
+// Set of callsigns currently being fetched — prevents duplicate in-flight requests.
+const _callsignLookupPending = new Set();
+
+// Marker types whose name field is a callsign and should trigger a lookup.
+const _CALLSIGN_MARKER_TYPES = new Set(['cw', 'dx', 'voice']);
+
+/**
+ * Fetch callsign data from /api/lookup and populate _callsignLookupCache.
+ * Fires updateMediaSession() once the result is stored so the album updates.
+ * No-ops if a fetch is already in progress for this callsign.
+ */
+async function _fetchCallsignForMediaSession(callsign) {
+    if (_callsignLookupPending.has(callsign)) return;
+    _callsignLookupPending.add(callsign);
+    try {
+        const uuid = window.userSessionID || '';
+        if (!uuid) {
+            _callsignLookupCache.set(callsign, null);
+            return;
+        }
+        const url = `/api/lookup?callsign=${encodeURIComponent(callsign)}&uuid=${encodeURIComponent(uuid)}`;
+        const resp = await fetch(url);
+        if (resp.status === 429) {
+            // Rate limited — do NOT cache so we retry next time the marker is seen.
+            return;
+        }
+        if (!resp.ok) {
+            // 404 (not found), 503 (disabled), 401 (no audio session), etc. — cache null.
+            _callsignLookupCache.set(callsign, null);
+            return;
+        }
+        const data = await resp.json();
+        const fname   = (data.fname   || '').trim();
+        const country = (data.country || '').trim();
+        const imageUrl = data.image || '';
+
+        // Fetch the QRZ photo and convert to a blob: URL so Chrome doesn't
+        // re-fetch it on every MediaSession metadata update.
+        let imageBlobUrl = null;
+        if (imageUrl) {
+            try {
+                const imgResp = await fetch(imageUrl);
+                if (imgResp.ok) {
+                    const blob = await imgResp.blob();
+                    imageBlobUrl = URL.createObjectURL(blob);
+                }
+            } catch (_) {
+                // Photo fetch failed — fall back to standard artwork.
+            }
+        }
+
+        _callsignLookupCache.set(callsign, { fname, country, imageBlobUrl });
+        // Re-run updateMediaSession so the enriched album + artwork are applied.
+        if ('mediaSession' in navigator && mediaSessionEnabled) updateMediaSession();
+    } catch (_) {
+        // Network error — cache null so we don't spam retries on every freq change.
+        _callsignLookupCache.set(callsign, null);
+    } finally {
+        _callsignLookupPending.delete(callsign);
+    }
+}
+
 function updateMediaSession() {
     if (!('mediaSession' in navigator)) return;
 
@@ -1567,17 +1418,43 @@ function updateMediaSession() {
     const modeStr = currentMode ? currentMode.toUpperCase() : '';
     const callsign = window.instanceDescription?.receiver?.callsign || '';
 
-    const newTitle  = callsign ? `UberSDR — ${callsign}` : 'UberSDR';
+    const newTitle  = callsign ? `UberSDR • ${callsign}` : 'UberSDR';
     const newArtist = [freqMHz, modeStr].filter(Boolean).join(' ');
 
     // Album shows the marker name (bookmark / CW spot / DX spot / voice activity)
     // sitting at the current freq+mode, reusing the same matching logic as the
     // dial-wheel overlay. Falls back to the generic 'Live SDR' label when nothing
     // matches.
-    const markerName = (typeof window.findMatchingMarker === 'function')
-        ? window.findMatchingMarker(freq, currentMode)
+    //
+    // For callsign-type markers (CW spot, DX spot, voice activity) we enrich the
+    // album with the operator's first name and country from /api/lookup, and use
+    // their QRZ photo as artwork when available.  The lookup is async: the album
+    // shows just the callsign immediately, then updates once the fetch resolves.
+    const currentMarker = (typeof window.findMarkers === 'function')
+        ? window.findMarkers(freq, currentMode).current
         : null;
-    const newAlbum  = markerName || 'Live SDR';
+    const markerName = currentMarker ? currentMarker.name : null;
+    const isCallsignMarker = currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type);
+
+    // Build the album string and determine artwork.
+    let newAlbum = markerName || 'Live SDR';
+    let callsignImageBlobUrl = null;
+
+    if (isCallsignMarker && markerName) {
+        const cached = _callsignLookupCache.get(markerName);
+        if (cached === undefined) {
+            // Not yet fetched — fire async lookup; album shows callsign for now.
+            _fetchCallsignForMediaSession(markerName);
+        } else if (cached !== null) {
+            // Successful lookup — enrich album and use QRZ photo if available.
+            const parts = [markerName];
+            if (cached.fname)   parts.push(cached.fname);
+            if (cached.country) parts.push(cached.country);
+            newAlbum = parts.join(' • ');
+            callsignImageBlobUrl = cached.imageBlobUrl || null;
+        }
+        // cached === null means lookup failed/not found — album stays as callsign.
+    }
 
     // Only replace the MediaMetadata object when the content actually changes.
     // Chrome fetches all artwork URLs every time metadata is replaced — even if
@@ -1587,17 +1464,17 @@ function updateMediaSession() {
         _lastMediaSessionArtist = newArtist;
         _lastMediaSessionAlbum  = newAlbum;
 
-        // Use blob: URLs for artwork to eliminate Chrome's artwork fetch storm.
-        // Chrome re-fetches all artwork URLs on every internal waiting→playing
-        // state transition during <audio> buffering.  With blob: URLs the
-        // "fetches" resolve instantly from memory — zero network traffic.
-        // If blob URLs aren't cached yet, use HTTP URLs as a one-time fallback
-        // and kick off the pre-fetch so the next metadata update uses blobs.
-        const artwork = _artworkBlobUrls
+        // Build artwork array.  When a QRZ photo blob URL is available, prepend it
+        // so the OS shows the operator's photo on the lock screen / Now Playing widget.
+        // The standard UberSDR icons are always included as fallback entries.
+        const standardArtwork = _artworkBlobUrls
             ? _artworkBlobUrls
             : _artworkPaths.map(({ path, sizes, type }) => ({
                 src: `${window.location.origin}${path}`, sizes, type
             }));
+        const artwork = callsignImageBlobUrl
+            ? [{ src: callsignImageBlobUrl, sizes: '300x300', type: 'image/jpeg' }, ...standardArtwork]
+            : standardArtwork;
 
         navigator.mediaSession.metadata = new MediaMetadata({
             title:  newTitle,
@@ -1606,17 +1483,20 @@ function updateMediaSession() {
             artwork
         });
 
-        // If we used HTTP fallback URLs, pre-fetch blobs now and re-set metadata
-        // once they're ready (will be a no-op if content hasn't changed again).
+        // If we used HTTP fallback URLs for the standard artwork, pre-fetch blobs
+        // now and re-set metadata once they're ready (no-op if content changed again).
         if (!_artworkBlobUrls) {
             _ensureArtworkBlobUrls().then(blobArtwork => {
                 // Re-apply metadata with blob URLs (only if title/artist/album unchanged)
                 if (_lastMediaSessionTitle === newTitle && _lastMediaSessionArtist === newArtist && _lastMediaSessionAlbum === newAlbum) {
+                    const updatedArtwork = callsignImageBlobUrl
+                        ? [{ src: callsignImageBlobUrl, sizes: '300x300', type: 'image/jpeg' }, ...blobArtwork]
+                        : blobArtwork;
                     navigator.mediaSession.metadata = new MediaMetadata({
                         title:  newTitle,
                         artist: newArtist,
                         album:  newAlbum,
-                        artwork: blobArtwork
+                        artwork: updatedArtwork
                     });
                 }
             });
@@ -5464,13 +5344,7 @@ function playAudioBuffer(buffer) {
     //   1. Firefox HTMLMediaElement sink path (_sinkGain + specific device selected)
     //   2. MediaSession bridge (_mediaStreamDest) — enables lock-screen controls and keeps audio alive
     //   3. Direct audioContext.destination (fallback)
-    if (audioContext._localCaptureDest && audioContext._localCaptureDest.context === audioContext) {
-        // Android DSP-capture path: route the fully-processed audio to the capture
-        // MediaStreamDestination (recorded → MSE <audio> element which plays it).
-        // Deliberately NOT connected to audioContext.destination as well, so there
-        // is no double audio — the <audio> element is the single audible source.
-        outputNode.connect(audioContext._localCaptureDest);
-    } else if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
+    if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
     } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
         // MediaSession path: connect ONLY to the media element bridge.
@@ -14813,7 +14687,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             }
         }
 
-        const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name } : null;
+        const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name, type: m.type } : null;
         result.current = strip(current);
         result.prev    = strip(prev);
         result.next    = strip(next);

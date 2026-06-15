@@ -950,6 +950,37 @@ func (lrl *LookupRateLimiter) AllowRequest(uuid string) bool {
 	return limiter.Allow()
 }
 
+// AllowCachedRequest is like AllowRequest but applies a 10× higher effective
+// rate limit.  It should be called when the requested callsign is already
+// present in the local cache, because no outbound API call will be made and
+// the cost of serving the request is negligible.
+//
+// Internally it draws from a separate per-UUID bucket (keyed as uuid+"__cached")
+// whose capacity and refill rate are both 10× the base rate.
+func (lrl *LookupRateLimiter) AllowCachedRequest(uuid string) bool {
+	if lrl.ratePerMinute <= 0 {
+		return true
+	}
+
+	key := uuid + "__cached"
+	lrl.mu.Lock()
+	defer lrl.mu.Unlock()
+
+	limiter, exists := lrl.limiters[key]
+	if !exists {
+		rpm := lrl.ratePerMinute * 10
+		refillRate := rpm / 60.0
+		limiter = &RateLimiter{
+			tokens:     rpm,
+			maxTokens:  rpm,
+			refillRate: refillRate,
+			lastRefill: time.Now(),
+		}
+		lrl.limiters[key] = limiter
+	}
+	return limiter.Allow()
+}
+
 // Cleanup removes stale per-UUID limiters that have not been used in the last 10 minutes.
 // Should be called periodically (e.g. from the main cleanup ticker).
 func (lrl *LookupRateLimiter) Cleanup() {

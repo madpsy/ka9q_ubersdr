@@ -181,6 +181,13 @@ type QRZService struct {
 	// so waiters sharing a flight never consume a slot.
 	fetchSem chan struct{}
 
+	// inFlight tracks callsigns that are currently being fetched from QRZ
+	// (i.e. a singleflight is in progress).  This lets the rate-limit logic
+	// in the HTTP handler treat concurrent waiters the same as cache hits —
+	// no extra outbound API call will be made for them.
+	inFlightMu sync.RWMutex
+	inFlight   map[string]struct{}
+
 	httpClient *http.Client
 }
 
@@ -193,6 +200,7 @@ func NewQRZService(cfg QRZConfig, cacheMaxSize int) *QRZService {
 		cfg:          cfg,
 		cacheMaxSize: cacheMaxSize,
 		cache:        make(map[string]*qrzCacheEntry),
+		inFlight:     make(map[string]struct{}),
 		// sf is a zero-value singleflight.Group — no initialisation needed.
 		fetchSem: make(chan struct{}, qrzMaxConcurrentFetches),
 		httpClient: &http.Client{
@@ -315,6 +323,14 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 	//     the cache write to avoid redundant lock contention.
 	//   • If the leader's goroutine panics, singleflight re-panics in all
 	//     waiters — this is the correct behaviour for an unrecoverable error.
+	//
+	// Mark the callsign as in-flight before entering sf.Do so that concurrent
+	// HTTP handler goroutines can detect it and apply the relaxed (cached) rate
+	// limit — they will wait for this flight rather than making a new API call.
+	s.inFlightMu.Lock()
+	s.inFlight[call] = struct{}{}
+	s.inFlightMu.Unlock()
+
 	v, err, _ := s.sf.Do(call, func() (interface{}, error) {
 		// Re-check the cache inside the flight: a previous flight for this
 		// key may have just finished and populated the cache while we were
@@ -341,6 +357,11 @@ func (s *QRZService) Lookup(rawCallsign string) (*QRZCallsign, error) {
 		s.cachePut(call, result)
 		return &lookupResult{cs: result}, nil
 	})
+
+	// Flight is complete — remove from the in-flight set regardless of outcome.
+	s.inFlightMu.Lock()
+	delete(s.inFlight, call)
+	s.inFlightMu.Unlock()
 
 	if err != nil {
 		return nil, err
@@ -424,6 +445,28 @@ func (s *QRZService) CacheSize() int {
 	s.cacheMu.RLock()
 	defer s.cacheMu.RUnlock()
 	return len(s.cache)
+}
+
+// CacheHas returns true if the given (already-normalised) callsign has a
+// valid, non-expired entry in the cache.  It does NOT trigger a network fetch.
+// This is used by the lookup handler to apply a relaxed rate limit when the
+// result can be served entirely from cache.
+func (s *QRZService) CacheHas(call string) bool {
+	_, hit := s.cacheGet(call)
+	return hit
+}
+
+// IsInFlight returns true if a singleflight fetch for the given
+// (already-normalised) callsign is currently in progress.  When this returns
+// true the caller will block inside sf.Do and share the result of the
+// in-progress HTTP request — no additional outbound API call will be made.
+// The lookup handler uses this to apply the same relaxed (10×) rate limit as
+// for cache hits, because the cost to the QRZ API is identical (zero).
+func (s *QRZService) IsInFlight(call string) bool {
+	s.inFlightMu.RLock()
+	_, ok := s.inFlight[call]
+	s.inFlightMu.RUnlock()
+	return ok
 }
 
 // ---------------------------------------------------------------------------

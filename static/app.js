@@ -1574,8 +1574,10 @@ function updateMediaSession() {
         _lastMediaSessionAlbum    = newAlbum;
         _lastMediaSessionImageUrl = callsignImageUrl;
 
+        // QRZ photo declared at 800x800 so Chrome's size-selection algorithm
+        // prefers it over the 512x512 UberSDR logo blob in standardArtwork.
         const artwork = callsignImageUrl
-            ? [{ src: callsignImageUrl, sizes: '300x300', type: 'image/jpeg' }, ...standardArtwork]
+            ? [{ src: callsignImageUrl, sizes: '800x800', type: 'image/jpeg' }, ...standardArtwork]
             : standardArtwork;
 
         navigator.mediaSession.metadata = new MediaMetadata({

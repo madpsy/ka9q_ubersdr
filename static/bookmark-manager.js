@@ -242,21 +242,29 @@ async function loadBookmarks() {
     }
 }
 
+// Merge server + local bookmarks into window.bookmarks (the array read by click
+// detection, the dial-wheel/VU-meter marker overlay and Media Session album).
+// Kept synchronous so callers reacting to a bookmark change can refresh
+// marker-derived UI immediately, without waiting for the next spectrum render.
+function rebuildMergedBookmarks() {
+    const localBookmarks = window.localBookmarksUI ? window.localBookmarksUI.manager.getAll() : [];
+    const allBookmarks = [
+        ...bookmarks.map(b => ({...b, source: 'server'})),
+        ...localBookmarks.map(b => ({...b, source: 'local'}))
+    ];
+    window.bookmarks = allBookmarks;
+    return allBookmarks;
+}
+window.rebuildMergedBookmarks = rebuildMergedBookmarks;
+
 // Draw bookmark flags on the spectrum display (expose on window for spectrum-display.js access)
 function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Note: Band backgrounds are now drawn separately in spectrum-display.js
     // to control z-index ordering with chat markers
     // drawAmateurBandBackgrounds(spectrumDisplay); // Commented out - drawn separately
 
-    // Merge server and local bookmarks
-    const localBookmarks = window.localBookmarksUI ? window.localBookmarksUI.manager.getAll() : [];
-    const allBookmarks = [
-        ...bookmarks.map(b => ({...b, source: 'server'})),
-        ...localBookmarks.map(b => ({...b, source: 'local'}))
-    ];
-
-    // Update window.bookmarks to include local bookmarks for click detection
-    window.bookmarks = allBookmarks;
+    // Merge server and local bookmarks (updates window.bookmarks for click detection)
+    const allBookmarks = rebuildMergedBookmarks();
 
     if (!spectrumDisplay || !allBookmarks || allBookmarks.length === 0) {
         bookmarkPositions = [];

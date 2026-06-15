@@ -297,11 +297,14 @@ let mediaSessionEnabled = _isApple
     : localStorage.getItem('mediaSessionEnabled') === 'true';  // Others: default OFF
 
 // What the ⏮/⏭ (previoustrack/nexttrack) lock-screen buttons do while Media
-// Session is enabled:
+// Session is enabled, and how the main-UI ‹ › / dial-wheel edge arrows behave:
 //   'freq'   — step the dial by the current frequency scroll step (default)
 //   'marker' — jump to the previous/next spot/bookmark marker
-let mediaSessionSkipMode = localStorage.getItem('mediaSessionSkipMode') === 'marker'
-    ? 'marker' : 'freq';
+//   'none'   — main-UI ‹ › buttons step frequency; dial-wheel edge arrows hidden
+let mediaSessionSkipMode = (function () {
+    const m = localStorage.getItem('mediaSessionSkipMode');
+    return (m === 'marker' || m === 'none') ? m : 'freq';
+})();
 
 // Which marker types prev/next navigation steps through. Applies to BOTH the
 // dial-wheel edge arrows and the Media Session ⏮/⏭ marker-skip mode (a single
@@ -405,6 +408,24 @@ let _httpStreamPlaying = false;
 // Toggle this flag to quickly switch between the two approaches for testing.
 const _useMSEForHttpStream = true;
 
+// ── Local-capture (client DSP) toggle ────────────────────────────────────────
+// When true, the Android lock-screen <audio> element is fed audio captured from
+// the *post-DSP* AudioContext output (MediaStreamDestination → MediaRecorder →
+// MSE SourceBuffer) instead of the server's pre-DSP Opus stream.  This makes the
+// EQ, notch and other client-side filters audible on Android — the server HTTP
+// stream path cannot do this because the server taps PCM before any client DSP.
+//
+// The <audio> element is still a real, blob-URL-backed MSE media element, so the
+// lock-screen / notification media widget behaves exactly as on the server path.
+// Only the *source* of the bytes changes (locally-encoded DSP'd audio vs server
+// Opus).  No server changes are involved.
+//
+// Set to false to revert to the server HTTP stream (no client DSP on Android).
+const _useLocalCaptureForHttpStream = true;
+
+let _httpCaptureRecorder = null;   // MediaRecorder encoding the DSP'd output
+let _httpCaptureDest = null;       // MediaStreamDestination tapping the graph
+
 /**
  * Create (or reuse) the hidden <audio> element that anchors the Android Chrome
  * lock-screen / notification media widget.
@@ -430,6 +451,27 @@ async function _ensureHttpAudioStream() {
     if (_httpAudioElement) return; // already active
 
     const url = `/audio/stream?session=${encodeURIComponent(userSessionID)}`;
+
+    // Local-capture path: encode the post-DSP AudioContext output locally and
+    // feed it into the same MSE <audio> element so EQ/notch/etc. are audible.
+    // Requires an AudioContext plus MSE and MediaRecorder support for opus/webm.
+    const canUseLocalCapture = _useLocalCaptureForHttpStream &&
+        audioContext &&
+        typeof MediaSource !== 'undefined' &&
+        MediaSource.isTypeSupported('audio/webm; codecs=opus') &&
+        typeof MediaRecorder !== 'undefined' &&
+        MediaRecorder.isTypeSupported('audio/webm; codecs=opus');
+
+    if (canUseLocalCapture) {
+        try {
+            await _ensureHttpAudioStreamLocalCapture();
+            return;
+        } catch (e) {
+            console.error('[MediaSession/Local] Local capture failed, falling back to server stream:', e.message);
+            _destroyHttpAudioStream();
+            // fall through to the server HTTP stream below
+        }
+    }
 
     // Check if MSE is available and enabled
     const canUseMSE = _useMSEForHttpStream &&
@@ -692,6 +734,117 @@ async function _ensureHttpAudioStreamDirect(url) {
     }
 }
 
+/**
+ * Local-capture path: feed the lock-screen <audio> element with audio captured
+ * from the *post-DSP* AudioContext output instead of the server's pre-DSP Opus.
+ *
+ * Pipeline:
+ *   AudioContext graph (post EQ/notch/volume/stereo) → MediaStreamDestination
+ *     → MediaRecorder(opus/webm) → MSE SourceBuffer → <audio> element → speakers
+ *
+ * The <audio> element is the single audible source (the AudioContext is NOT also
+ * routed to audioContext.destination while _localCaptureDest is set — see the
+ * routing in playAudioBuffer's "Final output" step — so there is no double audio).
+ * Because the element is a blob-URL-backed MSE element, the lock-screen widget
+ * behaves identically to the server HTTP stream path.
+ *
+ * Reuses the shared MSE queue helpers (_flushMSEBufferQueue / _onMSEUpdateEnd /
+ * _trimMSEBuffer) and the shared teardown (_destroyHttpAudioStream).
+ *
+ * Throws on failure so the caller can fall back to the server HTTP stream.
+ */
+async function _ensureHttpAudioStreamLocalCapture() {
+    const ms = new MediaSource();
+    _httpMediaSource = ms;
+
+    // Attach sourceopen listener BEFORE assigning el.src (see MSE path notes).
+    const sourceOpenPromise = new Promise((resolve, reject) => {
+        ms.addEventListener('sourceopen', resolve, { once: true });
+        ms.addEventListener('error', () => reject(new Error('MediaSource error')), { once: true });
+        setTimeout(() => reject(new Error('MediaSource sourceopen timeout')), 10000);
+    });
+
+    const el = document.createElement('audio');
+    el.setAttribute('playsinline', '');
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    _httpAudioElement = el;
+
+    el._errorHandler = (e) => {
+        if (el.error?.code === 4) return; // intentional teardown
+        console.error('[MediaSession/Local] Audio element error:', el.error?.code, el.error?.message);
+        _onHttpAudioStreamEnded();
+    };
+    el.addEventListener('ended', _onHttpAudioStreamEnded);
+    el.addEventListener('error', el._errorHandler);
+    el.addEventListener('abort', _onHttpAudioStreamEnded);
+    el.addEventListener('playing', () => {
+        console.log('[MediaSession/Local] Audio element playing (DSP capture)');
+        _httpStreamPlaying = true;
+        // IMPORTANT: do NOT mute the AudioContext output here.  The capture tap
+        // lives at the end of the DSP graph and routes to a MediaStreamDestination
+        // *instead of* audioContext.destination, so there is no double audio.
+        // Muting (gain=0) would silence the very signal we are recording.
+        if ('mediaSession' in navigator && mediaSessionEnabled) {
+            updateMediaSession();
+        }
+    }, { once: true });
+
+    // Keep the element playing — Chrome dismisses the widget on a true pause.
+    el.addEventListener('pause', () => {
+        if (_httpAudioElement === el) {
+            console.log('[MediaSession/Local] Auto-resuming after Chrome pause');
+            el.play().catch(() => {});
+        }
+    });
+
+    el.src = URL.createObjectURL(ms);
+    await sourceOpenPromise;
+    if (ms.readyState !== 'open') {
+        throw new Error(`MediaSource not open (state: ${ms.readyState})`);
+    }
+
+    const sb = ms.addSourceBuffer('audio/webm; codecs=opus');
+    _httpSourceBuffer = sb;
+    sb.mode = 'sequence';
+    sb.addEventListener('updateend', _onMSEUpdateEnd);
+
+    // Tap the post-DSP output.  Setting audioContext._localCaptureDest makes
+    // playAudioBuffer route the final processed node here on the next buffer
+    // (and stop driving audioContext.destination), so we capture EQ/notch/volume.
+    const dest = audioContext.createMediaStreamDestination();
+    _httpCaptureDest = dest;
+    audioContext._localCaptureDest = dest;
+
+    const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm; codecs=opus' });
+    _httpCaptureRecorder = recorder;
+    recorder.ondataavailable = async (ev) => {
+        if (!ev.data || ev.data.size === 0) return;
+        if (!_httpSourceBuffer) return; // torn down mid-flight
+        try {
+            const buf = await ev.data.arrayBuffer();
+            _httpMSEBufferQueue.push(new Uint8Array(buf));
+            _flushMSEBufferQueue();
+            _trimMSEBuffer(2);
+        } catch (_) {
+            // element/buffer may have been detached during teardown — ignore
+        }
+    };
+    recorder.onerror = (ev) => {
+        console.error('[MediaSession/Local] MediaRecorder error:', ev.error?.message || ev.error);
+        _onHttpAudioStreamEnded();
+    };
+
+    // Emit a chunk every 100ms so the SourceBuffer is fed at low latency.
+    recorder.start(100);
+
+    el.play().catch(e => {
+        console.warn('[MediaSession/Local] play() rejected:', e.message);
+    });
+
+    console.log('[MediaSession/Local] DSP capture started — EQ/filters now audible on lock-screen path');
+}
+
 /** Called when the HTTP audio stream ends or errors — restore AudioContext audio. */
 function _onHttpAudioStreamEnded() {
     console.log('[MediaSession] HTTP audio stream ended — restoring AudioContext audio');
@@ -700,6 +853,24 @@ function _onHttpAudioStreamEnded() {
 
 /** Tear down the HTTP audio stream (MSE or direct) and restore AudioContext output. */
 function _destroyHttpAudioStream() {
+    // ── Local-capture cleanup ────────────────────────────────────────────────
+    // Stop the recorder first so no further chunks are queued, then drop the
+    // capture destination.  Nulling _localCaptureDest makes the next buffer route
+    // back to audioContext.destination so normal (WebSocket) playback resumes.
+    if (_httpCaptureRecorder) {
+        try {
+            if (_httpCaptureRecorder.state !== 'inactive') _httpCaptureRecorder.stop();
+        } catch (_) {}
+        _httpCaptureRecorder.ondataavailable = null;
+        _httpCaptureRecorder.onerror = null;
+        _httpCaptureRecorder = null;
+    }
+    if (audioContext) audioContext._localCaptureDest = null;
+    if (_httpCaptureDest) {
+        try { _httpCaptureDest.disconnect(); } catch (_) {}
+        _httpCaptureDest = null;
+    }
+
     // ── MSE cleanup ──────────────────────────────────────────────────────────
     // Abort the fetch reader (MSE path)
     if (_httpFetchAbortController) {
@@ -5238,7 +5409,13 @@ function playAudioBuffer(buffer) {
     //   1. Firefox HTMLMediaElement sink path (_sinkGain + specific device selected)
     //   2. MediaSession bridge (_mediaStreamDest) — enables lock-screen controls and keeps audio alive
     //   3. Direct audioContext.destination (fallback)
-    if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
+    if (audioContext._localCaptureDest && audioContext._localCaptureDest.context === audioContext) {
+        // Android DSP-capture path: route the fully-processed audio to the capture
+        // MediaStreamDestination (recorded → MSE <audio> element which plays it).
+        // Deliberately NOT connected to audioContext.destination as well, so there
+        // is no double audio — the <audio> element is the single audible source.
+        outputNode.connect(audioContext._localCaptureDest);
+    } else if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
     } else if (audioContext._mediaStreamDest && audioContext._mediaStreamDest.context === audioContext && mediaElement) {
         // MediaSession path: connect ONLY to the media element bridge.
@@ -10218,6 +10395,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         populateLocalBookmarkSelector();
     });
 
+    // When a local bookmark is added/edited/removed, the marker list changes but
+    // the current freq+mode hasn't, so the marker-derived labels won't refresh on
+    // their own (they only re-evaluate on tuning). Force them to re-resolve now so
+    // a freshly-saved/renamed bookmark at the current dial position is reflected
+    // immediately — Media Session album, VU-meter overlay and wheel nav arrows.
+    window.addEventListener('localBookmarksUpdated', () => {
+        // window.bookmarks (read by the marker matcher) is normally only re-merged
+        // as a side-effect of the async spectrum render, so rebuild it now to be
+        // sure the matcher sees the just-saved bookmark before we re-evaluate.
+        if (typeof window.rebuildMergedBookmarks === 'function') window.rebuildMergedBookmarks();
+        if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
+        if (typeof window.refreshVUMeterMarker === 'function') window.refreshVUMeterMarker(true);
+        if ('mediaSession' in navigator && mediaSessionEnabled) updateMediaSession();
+    });
+
     // Fallback: If module is already loaded before event listener is attached
     if (window.localBookmarksUI) {
         console.log('[app.js] localBookmarksUI already available, populating immediately');
@@ -12233,12 +12425,18 @@ window.tuningSkipStep = tuningSkipStep;
  * The action handlers read mediaSessionSkipMode live, so no re-wiring is needed.
  */
 function setMediaSessionSkipMode(mode) {
-    mediaSessionSkipMode = (mode === 'marker') ? 'marker' : 'freq';
+    mediaSessionSkipMode = (mode === 'marker' || mode === 'none') ? mode : 'freq';
     localStorage.setItem('mediaSessionSkipMode', mediaSessionSkipMode);
     // The tuning-bar ‹ › buttons follow this preference too — refresh their
-    // greyed state right away (freq mode never greys them).
+    // greyed state right away (freq/none modes never grey them).
     updateMarkerNavButtons();
-    log(`Media Session track-skip: ${mediaSessionSkipMode === 'marker' ? 'previous/next marker' : 'frequency steps'}`);
+    // The dial-wheel edge arrows show/hide based on this too ('none' hides them) —
+    // refresh them immediately if the wheel is visible.
+    if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
+    const label = mediaSessionSkipMode === 'marker' ? 'previous/next marker'
+        : mediaSessionSkipMode === 'none' ? 'none (dial-wheel arrows hidden)'
+        : 'frequency steps';
+    log(`Media Session track-skip: ${label}`);
 }
 
 /**
@@ -14620,10 +14818,13 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         const { current, prev, next } = findMarkers(getDialHz(), window.currentMode, window.markerNavTypes);
 
         // ── Prev/next neighbours at the edges ─────────────────────────────────
-        _prevMarker = prev;
-        _nextMarker = next;
-        updateNavButton(prevNav, prevText, prev);
-        updateNavButton(nextNav, nextText, next);
+        // 'none' skip mode hides the dial-wheel edge arrows entirely (nulling the
+        // neighbours also makes a stray click a no-op via tuneToMarker(null)).
+        const navOff = mediaSessionSkipMode === 'none';
+        _prevMarker = navOff ? null : prev;
+        _nextMarker = navOff ? null : next;
+        updateNavButton(prevNav, prevText, _prevMarker);
+        updateNavButton(nextNav, nextText, _nextMarker);
 
         // ── Current marker name in the centre overlay ─────────────────────────
         const name = current ? current.name : null;

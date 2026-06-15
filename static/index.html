@@ -465,6 +465,7 @@
                     </div>
                 </div>
                 <div class="tuning-buttons">
+                    <button id="tuning-btn-marker-prev" onclick="skipToAdjacentMarker(-1)" title="Tune to previous marker (spots & bookmarks)" class="tuning-btn-marker">‹</button>
                     <button onclick="adjustFrequency(-1000)" title="Down 1 kHz (Left Arrow ←)">◄◄</button>
                     <button onclick="adjustFrequency(-100)" title="Down 100 Hz (A key)">◄</button>
                     <button onclick="adjustFrequency(-10)" title="Down 10 Hz">◂</button>
@@ -472,6 +473,7 @@
                     <button onclick="adjustFrequency(10)" title="Up 10 Hz">▸</button>
                     <button onclick="adjustFrequency(100)" title="Up 100 Hz (D key)">►</button>
                     <button onclick="adjustFrequency(1000)" title="Up 1 kHz (Right Arrow →)">►►</button>
+                    <button id="tuning-btn-marker-next" onclick="skipToAdjacentMarker(1)" title="Tune to next marker (spots & bookmarks)" class="tuning-btn-marker">›</button>
                 </div>
                 <!-- Mobile tuning wheel (shown/hidden by JS based on Buttons/Wheel radio toggle) -->
                 <div id="tuning-wheel-container" class="tuning-wheel-container">
@@ -662,6 +664,12 @@
                     </div>
                 </div>
                 <canvas id="vu-meter-leds-compact" class="vu-meter-leds-compact" style="display:none;"></canvas>
+                <!-- Marker name overlay — shown centred over the meter when the dial
+                     sits on a marker's freq+mode, obscuring the dB notches behind it
+                     (same logic as the dial-wheel marker label). -->
+                <div id="vu-meter-marker" class="vu-meter-marker">
+                    <span id="vu-meter-marker-text" class="vu-meter-marker-text"></span>
+                </div>
             </div>
         </div>
 
@@ -1350,6 +1358,8 @@
                             <option value="dx">DX spots only</option>
                             <option value="voice">Voice activity only</option>
                             <option value="bookmark">Bookmarks only</option>
+                            <option value="bookmark-server">Server bookmarks only</option>
+                            <option value="bookmark-local">Local bookmarks only</option>
                         </select>
                         <p style="font-size: 0.82em; color: #888; margin: 6px 0 0 0;">
                             Which markers the dial-wheel ‹ › arrows and lock-screen ⏮ ⏭ step through.
@@ -1697,13 +1707,6 @@
                     <select id="rmnoise-filter-select" class="rmnoise-select" onchange="rmNoise_onFilterChanged()">
                         <option value="1">(connect to load filters…)</option>
                     </select>
-                </div>
-                <div class="rmnoise-row">
-                    <label class="rmnoise-label">Mix</label>
-                    <input type="range" id="rmnoise-mix-slider" min="0" max="100" value="100"
-                           oninput="rmNoise_onMixChanged(this.value)"
-                           style="flex:1; accent-color:#6f42c1;">
-                    <span id="rmnoise-mix-value" style="min-width:82px; text-align:right; font-size:12px; color:#cdd6e0;">100% Filtered</span>
                 </div>
             </div>
 

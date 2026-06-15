@@ -948,7 +948,6 @@ function rmNoise_saveCredentials() {
     localStorage.setItem('rmnoise_username', username);
     localStorage.setItem('rmnoise_password', password);
     localStorage.setItem('rmnoise_filter',   rmNoise.filterNumber);
-    localStorage.setItem('rmnoise_mix',      Math.round(rmNoise.mixRatio * 100));
     rmNoise_log('Credentials saved');
 }
 
@@ -956,7 +955,6 @@ function rmNoise_loadCredentials() {
     const username = localStorage.getItem('rmnoise_username') || '';
     const password = localStorage.getItem('rmnoise_password') || '';
     const filter   = parseInt(localStorage.getItem('rmnoise_filter') || '1', 10);
-    const mix      = parseInt(localStorage.getItem('rmnoise_mix')    || '100', 10);
 
     const uEl = document.getElementById('rmnoise-username');
     const pEl = document.getElementById('rmnoise-password');
@@ -964,26 +962,10 @@ function rmNoise_loadCredentials() {
     if (pEl) pEl.value = password;
 
     rmNoise.filterNumber = isNaN(filter) ? 1 : filter;
-    rmNoise.mixRatio     = isNaN(mix)    ? 1.0 : mix / 100;
+    rmNoise.mixRatio     = 1.0;   // always 100% filtered
 
     const sel    = document.getElementById('rmnoise-filter-select');
     if (sel) sel.value = rmNoise.filterNumber;
-
-    const mixSlider = document.getElementById('rmnoise-mix-slider');
-    const mixLabel  = document.getElementById('rmnoise-mix-value');
-    const mixPct    = Math.round(rmNoise.mixRatio * 100);
-    if (mixSlider) mixSlider.value = mixPct;
-    if (mixLabel)  mixLabel.textContent = mixPct + '% Filtered';
-}
-
-// ── Mix slider ─────────────────────────────────────────────────────────────────
-
-function rmNoise_onMixChanged(value) {
-    const pct = parseInt(value, 10);
-    rmNoise.mixRatio = pct / 100;
-    localStorage.setItem('rmnoise_mix', pct);
-    const el = document.getElementById('rmnoise-mix-value');
-    if (el) el.textContent = pct + '% Filtered';
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────────
@@ -1204,7 +1186,6 @@ window.openRMNoiseModal     = openRMNoiseModal;
 window.closeRMNoiseModal    = closeRMNoiseModal;
 window.rmNoise_saveCredentials      = rmNoise_saveCredentials;
 window.rmNoise_onFilterChanged      = rmNoise_onFilterChanged;
-window.rmNoise_onMixChanged         = rmNoise_onMixChanged;
 window.rmNoise_process              = rmNoise_process;
 window.rmNoise_onSampleRateChange   = rmNoise_onSampleRateChange;
 window.rmNoise_updateModeSupport    = rmNoise_updateModeSupport;

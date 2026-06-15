@@ -311,13 +311,15 @@ let mediaSessionSkipMode = localStorage.getItem('mediaSessionSkipMode') === 'mar
 // findMarkers() callers read.
 function markerNavTypesFor(mode) {
     switch (mode) {
-        case 'cw':       return ['cw'];
-        case 'dx':       return ['dx'];
-        case 'voice':    return ['voice'];
-        case 'bookmark': return ['bookmark'];
-        case 'spots':    return ['cw', 'dx', 'voice'];
+        case 'cw':              return ['cw'];
+        case 'dx':              return ['dx'];
+        case 'voice':           return ['voice'];
+        case 'bookmark':        return ['bookmark-server', 'bookmark-local'];
+        case 'bookmark-server': return ['bookmark-server'];
+        case 'bookmark-local':  return ['bookmark-local'];
+        case 'spots':           return ['cw', 'dx', 'voice'];
         case 'all':
-        default:         return null; // all types
+        default:                return null; // all types
     }
 }
 let markerNavMode = localStorage.getItem('markerNavMode') || 'all';
@@ -1201,6 +1203,9 @@ let vuMeterPeakCompact = null;
 let vuMeterLedsCompact = null;       // LED canvas element
 let vuMeterLedsCtx = null;           // LED canvas 2D context
 let vuMeterLedsCachedWidth = 0;      // ResizeObserver-cached CSS width (avoids offsetWidth reflow)
+let vuMeterMarker = null;            // Marker-name overlay box on the compact VU meter
+let vuMeterMarkerText = null;        // Inner span holding the marker name
+let _vuMarkerLastKey = null;         // 'freq|mode' dedup guard for the overlay
 let vuMeterStyle = 'bar'; // 'bar' or 'led' — set properly in DOMContentLoaded after server UI config is fetched
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visibility)
@@ -2037,6 +2042,8 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterBarCompact = document.getElementById('vu-meter-bar-compact');
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
     vuMeterLedsCompact = document.getElementById('vu-meter-leds-compact');
+    vuMeterMarker = document.getElementById('vu-meter-marker');
+    vuMeterMarkerText = document.getElementById('vu-meter-marker-text');
 
     // Set up LED canvas — size it to match its CSS display size
     if (vuMeterLedsCompact) {
@@ -7495,7 +7502,38 @@ function updateVUMeterTooltip(container) {
     container.title = `Click to cycle audio meter style (currently: ${label})`;
 }
 
+// Show/hide the marker name centred over the compact VU meter. Mirrors the
+// dial-wheel marker label: when the dial sits on a marker's freq+mode, the
+// name appears (obscuring the dB notches behind it). Cheap to call every frame
+// — it only re-evaluates findMatchingMarker() when freq or mode actually
+// changed (or when forced after the marker list updates).
+function refreshVUMeterMarker(force) {
+    if (!vuMeterMarker || !vuMeterMarkerText) return;
+    if (typeof window.findMatchingMarker !== 'function') return;
+
+    const freqInput = document.getElementById('frequency');
+    const freq = freqInput
+        ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value)
+        : 0;
+    const mode = window.currentMode;
+    const key = freq + '|' + mode;
+    if (!force && key === _vuMarkerLastKey) return;
+    _vuMarkerLastKey = key;
+
+    const name = (freq > 0) ? (window.findMatchingMarker(freq, mode) || null) : null;
+    if (name) {
+        if (vuMeterMarkerText.textContent !== name) vuMeterMarkerText.textContent = name;
+        vuMeterMarker.classList.add('visible');
+    } else {
+        vuMeterMarker.classList.remove('visible');
+    }
+}
+window.refreshVUMeterMarker = refreshVUMeterMarker;
+
 function updateVUMeter() {
+    // Keep the marker-name overlay in sync with the current dial freq+mode.
+    refreshVUMeterMarker();
+
     // Use dedicated VU analyser (after all processing) if available, otherwise fall back to main analyser
     const activeAnalyser = vuAnalyser || analyser;
     if (!activeAnalyser) return;
@@ -13085,7 +13123,32 @@ function setFrequencyInputValue(hzValue) {
     // CRITICAL: Ensure the attribute is still set after display update
     // (in case updateFrequencyDisplay somehow clears it)
     freqInput.setAttribute('data-hz-value', roundedHz);
+
+    // Keep the ‹ › marker-jump buttons greyed when there's nowhere to jump.
+    updateMarkerNavButtons();
 }
+
+// Grey out the ‹ › prev/next marker-jump tuning buttons when there is no
+// neighbouring spot/bookmark to jump to (respecting the audio-settings
+// marker-type filter via window.markerNavTypes). Mirrors how the dial-wheel
+// ‹ › edge arrows hide themselves. Safe to call before the tuning-wheel IIFE
+// has exposed window.findMarkers.
+function updateMarkerNavButtons() {
+    const prevBtn = document.getElementById('tuning-btn-marker-prev');
+    const nextBtn = document.getElementById('tuning-btn-marker-next');
+    if (!prevBtn || !nextBtn || typeof window.findMarkers !== 'function') return;
+
+    const freqInput = document.getElementById('frequency');
+    const dialHz = freqInput
+        ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value)
+        : NaN;
+    if (isNaN(dialHz)) return;
+
+    const { prev, next } = window.findMarkers(dialHz, window.currentMode, window.markerNavTypes);
+    prevBtn.disabled = !prev;
+    nextBtn.disabled = !next;
+}
+window.updateMarkerNavButtons = updateMarkerNavButtons;
 
 // Convert displayed value to Hz when input changes
 function convertDisplayedFrequencyToHz() {
@@ -14372,11 +14435,15 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // bookmarks" rule.
     function collectMarkers() {
         const out = [];
+        // `type` may be a fixed string or a per-item function (item => type),
+        // letting one list yield more than one marker type (e.g. bookmarks split
+        // into server vs local for prev/next navigation filtering).
         const add = (list, freqOf, modeOf, famOf, nameOf, priority, type) => {
             for (const item of list) {
                 const f = freqOf(item);
                 if (typeof f !== 'number' || isNaN(f)) continue;
-                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority, type });
+                const t = typeof type === 'function' ? type(item) : type;
+                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority, type: t });
             }
         };
 
@@ -14396,7 +14463,8 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1, 'cw');
         add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1, 'dx');
         add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))), 1, 'voice');
-        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0, 'bookmark');
+        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0,
+            b => (b.source === 'local' ? 'bookmark-local' : 'bookmark-server'));
         return out;
     }
 
@@ -14479,11 +14547,17 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
     // The marker types findMarkers() is aware of, for callers building a
     // prev/next navTypes allow-list rather than hard-coding the set.
-    findMarkers.NAV_TYPES = ['cw', 'dx', 'voice', 'bookmark'];
+    findMarkers.NAV_TYPES = ['cw', 'dx', 'voice', 'bookmark-server', 'bookmark-local'];
 
     // Let the audio-settings marker-nav dropdown refresh the wheel edge arrows
     // the moment the preference changes (no-op while the wheel is hidden).
-    window.refreshMarkerNav = function () { updateWheelMarkerLabel(); };
+    window.refreshMarkerNav = function () {
+        updateWheelMarkerLabel();
+        updateMarkerNavButtons();
+        // Marker list may have changed (new/removed spot at the current freq) —
+        // force the VU-meter overlay to re-evaluate even if freq/mode are unchanged.
+        if (typeof window.refreshVUMeterMarker === 'function') window.refreshVUMeterMarker(true);
+    };
 
     // Show/hide a prev/next edge button and label it with its neighbour marker.
     function updateNavButton(btn, textEl, marker) {
@@ -14690,7 +14764,12 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // Catch freq/mode changes from other controls (band buttons, spot clicks)
     // and newly-arrived spots/bookmarks while the wheel is on screen. Cheap
     // early-out keeps this idle when the wheel is hidden (e.g. on desktop).
-    setInterval(updateWheelMarkerLabel, 1000);
+    setInterval(function () {
+        updateWheelMarkerLabel();
+        updateMarkerNavButtons();
+    }, 1000);
+    // Initial paint of the button greyed-state now that findMarkers is exposed.
+    updateMarkerNavButtons();
 })();
 
 // ── Browser zoom buttons (narrow/mobile view only) ────────────────────────────

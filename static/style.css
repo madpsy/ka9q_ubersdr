@@ -1431,21 +1431,21 @@ body {
 }
 
 /* Different styling for different step sizes */
-.tuning-buttons button:nth-child(1),
-.tuning-buttons button:nth-child(7) {
+.tuning-buttons button:nth-child(2),
+.tuning-buttons button:nth-child(8) {
     /* Coarse tuning (1 kHz) - larger, more prominent */
     font-size: 1.1em;
     background: #d4d8dd;
 }
 
-.tuning-buttons button:nth-child(2),
-.tuning-buttons button:nth-child(6) {
+.tuning-buttons button:nth-child(3),
+.tuning-buttons button:nth-child(7) {
     /* Fine tuning (100 Hz) - medium */
     font-size: 1em;
 }
 
-.tuning-buttons button:nth-child(3),
-.tuning-buttons button:nth-child(5) {
+.tuning-buttons button:nth-child(4),
+.tuning-buttons button:nth-child(6) {
     /* Ultra-fine tuning (10 Hz) - smaller */
     font-size: 0.9em;
     padding: 8px 10px;
@@ -1456,6 +1456,29 @@ body {
     min-width: 20px !important;
     padding: 8px 5px !important;
     font-size: 0.65em !important;
+}
+
+/* Thin prev/next marker-jump buttons at the outer edges — mirror the dial
+   wheel ‹ › edge arrows. Kept narrow like the snap button so they barely
+   add width. */
+.tuning-btn-marker {
+    min-width: 20px !important;
+    padding: 8px 5px !important;
+    font-size: 1.1em !important;
+}
+
+/* Greyed out when there's no neighbouring marker to jump to */
+.tuning-btn-marker:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.tuning-btn-marker:disabled:hover {
+    background: #e9ecef;
+    color: inherit;
+    border-color: #dee2e6;
+    transform: none;
+    box-shadow: none;
 }
 
 .bandwidth-control {
@@ -1622,6 +1645,49 @@ button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digita
     align-items: center;
     max-width: 450px;
     cursor: pointer;
+    position: relative;   /* anchor for the centred marker-name overlay */
+}
+
+/* Marker-name overlay on the compact VU meter — mirrors the dial-wheel marker
+   label. Sits centred over the meter and, via the backing pill, obscures the
+   dB notch values it overlaps. Drop-shadow keeps it legible over the moving
+   bar / LEDs. pointer-events:none so clicks still cycle the meter style. */
+.vu-meter-marker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    z-index: 6;           /* above the .vu-meter-scale dB notches */
+}
+
+.vu-meter-marker.visible {
+    opacity: 1;
+}
+
+.vu-meter-marker-text {
+    display: inline-block;   /* required for max-width + ellipsis to apply */
+    max-width: 90%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.74em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+    /* Near-opaque backing so the dB notches the name overlaps are fully hidden,
+       not just dimmed — notches outside the pill stay visible. */
+    background: rgba(0, 0, 0, 0.9);
+    padding: 1px 8px;
+    border-radius: 4px;
 }
 
 .vu-meter-compact-container .vu-meter {

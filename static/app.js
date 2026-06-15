@@ -7521,11 +7521,16 @@ function refreshVUMeterMarker(force) {
     _vuMarkerLastKey = key;
 
     const name = (freq > 0) ? (window.findMatchingMarker(freq, mode) || null) : null;
+    const container = vuMeterMarker.parentElement;
     if (name) {
         if (vuMeterMarkerText.textContent !== name) vuMeterMarkerText.textContent = name;
         vuMeterMarker.classList.add('visible');
+        // Fade out the dB notches so the name doesn't have to fully paint over
+        // them — lets the backing pill stay subtle instead of opaque black.
+        if (container) container.classList.add('marker-active');
     } else {
         vuMeterMarker.classList.remove('visible');
+        if (container) container.classList.remove('marker-active');
     }
 }
 window.refreshVUMeterMarker = refreshVUMeterMarker;
@@ -14632,6 +14637,25 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (!marker || typeof marker.freq !== 'number') return;
         setFrequency(marker.freq);
         if (marker.mode) setMode(marker.mode, false);
+
+        // setFrequency()/setMode() retune the receiver but don't move the spectrum
+        // view — setFrequency() actually suppresses edge detection for 2s, so the
+        // waterfall stays put. Mirror how a bookmark-dropdown selection recentres:
+        // send an explicit pan request to the spectrum WebSocket (works regardless
+        // of zoom level / edge-tune state) and keep edge detection suppressed so it
+        // doesn't fight the pan.
+        const sd = window.spectrumDisplay;
+        if (sd && sd.connected && sd.ws) {
+            sd.skipEdgeDetectionTemporary = true;
+            setTimeout(() => {
+                if (window.spectrumDisplay) {
+                    window.spectrumDisplay.skipEdgeDetectionTemporary = false;
+                }
+            }, 2000);
+            sd.ws.send(JSON.stringify({ type: 'pan', frequency: marker.freq }));
+        }
+        updateSpectrumCursor();
+
         updateWheelMarkerLabel();
     }
 

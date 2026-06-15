@@ -1683,9 +1683,11 @@ button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digita
     letter-spacing: 0.02em;
     color: rgba(255, 255, 255, 0.95);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
-    /* Near-opaque backing so the dB notches the name overlaps are fully hidden,
-       not just dimmed — notches outside the pill stay visible. */
-    background: rgba(0, 0, 0, 0.9);
+    /* Subtle backing tinted with the meter's own track colour (--panel-dark)
+       rather than harsh black — blends with the meter and lifts the name off
+       the moving bar without looking garish. The dB notches are faded out
+       separately (see #vu-meter-compact.marker-active) so this can stay light. */
+    background: rgba(44, 62, 80, 0.7);
     padding: 1px 8px;
     border-radius: 4px;
 }
@@ -1931,6 +1933,13 @@ input[type="range"]::-moz-range-thumb {
     align-items: center;
     padding: 0 10px;
     pointer-events: none;
+    transition: opacity 0.25s ease;   /* fade with the marker overlay */
+}
+
+/* Hide the dB notches while a marker name is shown over the compact meter, so
+   the name's backing pill can stay subtle rather than fully painting over them. */
+#vu-meter-compact.marker-active .vu-meter-scale {
+    opacity: 0;
 }
 
 .vu-meter-scale span {

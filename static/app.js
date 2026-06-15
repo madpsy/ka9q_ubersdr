@@ -1399,6 +1399,14 @@ function _refreshCallsignDisplays() {
     // refreshMarkerNav() calls updateWheelMarkerLabel() internally, which will
     // now pick up the enriched name from _enrichMarkerName().
     if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
+
+    // Notify any lookup widget (e.g. qrz_lookup.widget.html) that a callsign
+    // result has just been stored in the shared cache.  Widgets listen for this
+    // event and pull from window._callsignLookupCache — no polling required and
+    // no coupling to any specific trigger source (cw/dx/voice/manual all converge here).
+    window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
+        detail: { cache: window._callsignLookupCache }
+    }));
 }
 // Expose so the QRZ lookup widget (injected HTML) can trigger a refresh after
 // populating the shared cache with a user-initiated lookup.

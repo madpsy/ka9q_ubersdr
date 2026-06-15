@@ -525,5 +525,65 @@
     doLookup();
   };
 
+  // ── Auto-populate from the shared lookup event bus ────────────────────────
+  // app.js fires 'callsign_lookup_complete' on window every time a callsign
+  // fetch resolves (triggered by any source: cw/dx/voice marker tune, manual
+  // widget entry, spectrum click, etc.).  We check whether the callsign that
+  // just landed in the cache matches what is currently shown in the input, and
+  // if so re-render from cache — no extra network request needed.
+  window.addEventListener('callsign_lookup_complete', function () {
+    var current = inputEl.value.trim().toUpperCase();
+    if (!current) return;
+
+    // Normalise the same way doLookup() does.
+    var base;
+    if (typeof window._normaliseCallsign === 'function') {
+      base = window._normaliseCallsign(current);
+    } else {
+      var segs = current.split('/').map(function (s) { return s.trim(); }).filter(Boolean);
+      base = segs.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+    }
+    if (!base) return;
+
+    var cache = window._callsignLookupCache;
+    if (!cache) return;
+    var result = cache.get(base);
+    if (result && result.data) {
+      renderResult(base, result.data);
+    }
+  });
+
+  // ── Latch to any new callsign the system looks up automatically ───────────
+  // When a marker is tuned to (cw/dx/voice) app.js calls
+  // _fetchCallsignForMediaSession() which fires 'callsign_lookup_complete'
+  // once the result is cached.  We also want the widget to *show* the callsign
+  // that was just looked up (not just re-render if it already matches the
+  // input).  For that we listen for a second, lighter event that carries the
+  // callsign being looked up so we can pre-fill the input and trigger a render.
+  //
+  // app.js exposes _fetchCallsignForMediaSession on window; we wrap it once so
+  // we can intercept the callsign argument without modifying app.js further.
+  (function patchFetchCallsign() {
+    var orig = window._fetchCallsignForMediaSession;
+    if (typeof orig !== 'function') {
+      // app.js may not have loaded yet — retry once it does.
+      window.addEventListener('callsign_lookup_complete', function patchOnce() {
+        window.removeEventListener('callsign_lookup_complete', patchOnce);
+        patchFetchCallsign();
+      });
+      return;
+    }
+    window._fetchCallsignForMediaSession = function (callsign) {
+      // Pre-fill the widget input so the user can see which callsign is being
+      // looked up, then let the 'callsign_lookup_complete' event render the result.
+      if (callsign && widget.style.display !== 'none') {
+        inputEl.value = callsign.toUpperCase();
+        showStatus('Looking up ' + callsign.toUpperCase() + '\u2026');
+        resultEl.style.display = 'none';
+      }
+      return orig.call(this, callsign);
+    };
+  })();
+
 })();
 </script>

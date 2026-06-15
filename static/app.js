@@ -425,6 +425,15 @@ const _useLocalCaptureForHttpStream = true;
 
 let _httpCaptureRecorder = null;   // MediaRecorder encoding the DSP'd output
 let _httpCaptureDest = null;       // MediaStreamDestination tapping the graph
+let _httpCaptureWaitingForBuffer = false; // true until the startup pre-buffer is filled
+// Pre-buffer this many seconds before starting playback of the capture element.
+// The MSE feed is live (1× realtime), so the element would otherwise play right
+// at the live edge with no headroom and underrun (crackle) on the slightest
+// jitter.  Starting ~0.5s behind gives a steady jitter cushion.
+const _HTTP_CAPTURE_START_BUFFER_SEC = 0.5;
+// If latency ever creeps above this (e.g. clock drift building up), nudge the
+// element forward to the live edge to claw it back.  Kept high so it's rare.
+const _HTTP_CAPTURE_MAX_LATENCY_SEC = 2.0;
 
 /**
  * Create (or reuse) the hidden <audio> element that anchors the Android Chrome
@@ -661,6 +670,25 @@ function _flushMSEBufferQueue() {
 function _onMSEUpdateEnd() {
     _httpMSEAppending = false;
     _flushMSEBufferQueue();
+
+    // Capture path: gate playback on the startup pre-buffer, and keep latency
+    // bounded if clock drift slowly inflates it.
+    if (_httpCaptureRecorder) {
+        _maybeStartCapturePlayback();
+        if (!_httpCaptureWaitingForBuffer && _httpAudioElement && _httpSourceBuffer) {
+            try {
+                const b = _httpSourceBuffer.buffered;
+                if (b.length > 0) {
+                    const liveEdge = b.end(b.length - 1);
+                    const latency = liveEdge - _httpAudioElement.currentTime;
+                    if (latency > _HTTP_CAPTURE_MAX_LATENCY_SEC) {
+                        // Jump close to the live edge to reclaim accumulated latency.
+                        _httpAudioElement.currentTime = liveEdge - _HTTP_CAPTURE_START_BUFFER_SEC;
+                    }
+                }
+            } catch (_) {}
+        }
+    }
 }
 
 /**
@@ -838,11 +866,37 @@ async function _ensureHttpAudioStreamLocalCapture() {
     // Emit a chunk every 100ms so the SourceBuffer is fed at low latency.
     recorder.start(100);
 
-    el.play().catch(e => {
-        console.warn('[MediaSession/Local] play() rejected:', e.message);
-    });
+    // Do NOT play yet — accumulate a startup pre-buffer first so the live feed has
+    // jitter headroom (see _maybeStartCapturePlayback, driven from _onMSEUpdateEnd).
+    // Playing immediately sits at the live edge and underruns → crackle.
+    _httpCaptureWaitingForBuffer = true;
 
-    console.log('[MediaSession/Local] DSP capture started — EQ/filters now audible on lock-screen path');
+    console.log('[MediaSession/Local] DSP capture started — pre-buffering before playback');
+}
+
+/**
+ * Start playback of the capture <audio> element once the startup pre-buffer has
+ * accumulated.  Called from _onMSEUpdateEnd after each append completes.  No-op
+ * unless we're in the capture path and still waiting.
+ */
+function _maybeStartCapturePlayback() {
+    if (!_httpCaptureWaitingForBuffer) return;
+    const el = _httpAudioElement;
+    const sb = _httpSourceBuffer;
+    if (!el || !sb) return;
+    try {
+        const b = sb.buffered;
+        if (b.length === 0) return;
+        // Element hasn't played yet (currentTime ≈ 0), so buffered span ≈ depth.
+        const depth = b.end(b.length - 1) - b.start(0);
+        if (depth >= _HTTP_CAPTURE_START_BUFFER_SEC) {
+            _httpCaptureWaitingForBuffer = false;
+            el.play().catch(e => console.warn('[MediaSession/Local] play() rejected:', e.message));
+            console.log(`[MediaSession/Local] Pre-buffer ready (${depth.toFixed(2)}s) — playback started`);
+        }
+    } catch (_) {
+        // buffer may have been detached during teardown — ignore
+    }
 }
 
 /** Called when the HTTP audio stream ends or errors — restore AudioContext audio. */
@@ -870,6 +924,7 @@ function _destroyHttpAudioStream() {
         try { _httpCaptureDest.disconnect(); } catch (_) {}
         _httpCaptureDest = null;
     }
+    _httpCaptureWaitingForBuffer = false;
 
     // ── MSE cleanup ──────────────────────────────────────────────────────────
     // Abort the fetch reader (MSE path)

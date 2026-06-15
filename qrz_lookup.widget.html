@@ -371,18 +371,53 @@
     var raw = inputEl.value.trim().toUpperCase();
     if (!raw) return;
 
-    // Normalise: strip /suffix and prefix/, keep longest segment
-    var segments = raw.split('/').map(function (s) { return s.trim(); }).filter(Boolean);
-    var base = segments.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+    // Normalise: strip /suffix and prefix/, keep longest segment.
+    // Use app.js helper if available (keeps logic in one place).
+    var base;
+    if (typeof window._normaliseCallsign === 'function') {
+      base = window._normaliseCallsign(raw);
+    } else {
+      var segments = raw.split('/').map(function (s) { return s.trim(); }).filter(Boolean);
+      base = segments.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+    }
     if (!base) return;
 
-    // Check lookup service availability
+    // ── Cache hit: render immediately without any network call ────────────
+    var cache = window._callsignLookupCache;
+    if (cache) {
+      var cached = cache.get(base);
+      if (cached && cached.data) {
+        renderResult(base, cached.data);
+        return;
+      }
+    }
+
+    // ── Delegate to app.js internal fetch (preferred) ─────────────────────
+    // _fetchCallsignForMediaSession handles rate limiting, dedup, blob fetch
+    // and cache population — no need to duplicate that logic here.
+    if (typeof window._fetchCallsignForMediaSession === 'function') {
+      showStatus('Looking up ' + base + '…');
+      resultEl.style.display = 'none';
+      window._fetchCallsignForMediaSession(base).then(function () {
+        var result = cache && cache.get(base);
+        if (result && result.data) {
+          renderResult(base, result.data);
+        } else if (result === null) {
+          showStatus(base + ' not found');
+        } else {
+          // Still undefined means lookup service disabled or no session
+          showStatus('Lookup unavailable');
+        }
+      });
+      return;
+    }
+
+    // ── Fallback: direct fetch (app.js not loaded) ────────────────────────
     var lookupEnabled = window.instanceDescription && window.instanceDescription.lookup_service === true;
     if (!lookupEnabled) {
       showStatus('Lookup service not available');
       return;
     }
-
     var uuid = window.userSessionID || '';
     if (!uuid) {
       showStatus('No session ID');
@@ -402,6 +437,18 @@
       })
       .then(function (data) {
         if (data.error) throw new Error(data.error);
+        // Populate shared cache if available so MediaSession can use it.
+        if (cache) {
+          var existing = cache.get(base);
+          if (!existing || !existing.data) {
+            var imageUrl = (data.image || '').trim();
+            var imageBlobUrl = (existing && existing.imageBlobUrl) || null;
+            cache.set(base, { data: data, imageUrl: imageUrl, imageBlobUrl: imageBlobUrl });
+            if (typeof window._refreshCallsignDisplays === 'function') {
+              window._refreshCallsignDisplays();
+            }
+          }
+        }
         renderResult(base, data);
       })
       .catch(function (err) {

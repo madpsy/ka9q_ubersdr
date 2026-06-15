@@ -749,9 +749,10 @@ function _destroyHttpAudioStream() {
     // updateMediaSession() is called from the 'playing' handler, it will
     // unconditionally push fresh metadata to Chrome (not skip due to cache hit).
     _httpStreamPlaying = false;
-    _lastMediaSessionTitle  = null;
-    _lastMediaSessionArtist = null;
-    _lastMediaSessionAlbum  = null;
+    _lastMediaSessionTitle    = null;
+    _lastMediaSessionArtist   = null;
+    _lastMediaSessionAlbum    = null;
+    _lastMediaSessionImageUrl = null;
 
     // Tell the server to immediately resume WebSocket audio.  Without this,
     // the server keeps httpAudioChan non-nil until the HTTP connection times
@@ -1292,20 +1293,36 @@ function updatePageTitle() {
 let _lastMediaSessionTitle = null;
 let _lastMediaSessionArtist = null;
 let _lastMediaSessionAlbum = null;
+let _lastMediaSessionImageUrl = null; // tracks QRZ photo URL so artwork updates when photo arrives
 
-// ── Callsign lookup cache for MediaSession album enrichment ──────────────────
+// ── Callsign lookup cache for callsign enrichment ────────────────────────────
+// Shared between MediaSession enrichment (app.js) and the QRZ lookup widget
+// (qrz_lookup.widget.html) so a single API call populates both.
+//
 // Keyed by normalised callsign (uppercase). Values:
 //   undefined  — not yet looked up
 //   null       — looked up, no result (not found / error / service disabled)
-//   { fname, country, imageBlobUrl }  — successful lookup
+//   { data, imageUrl, imageBlobUrl }  — successful lookup
 //
-// imageBlobUrl is a blob: URL created from the QRZ photo (or null if no photo).
+// data         — full raw API response object (all QRZ fields).
+// imageUrl     — raw QRZ photo URL ('' if no photo).  Used on mobile so
+//                Bluetooth AVRCP can fetch it directly from qrz.com.
+// imageBlobUrl — blob: URL created from the QRZ photo (null if no photo or on
+//                mobile).  Used on desktop Chrome to stop the re-fetch storm
+//                (Chrome re-fetches all artwork on every audio rebuffer event;
+//                blob: URLs are served from memory with no network round-trip).
+//                blob: URLs are NOT used on mobile because Bluetooth AVRCP
+//                cannot resolve them outside the browser context.
 // The cache lives for the page session; the server-side QRZ cache handles the
 // 24-hour deduplication against the QRZ API.
 const _callsignLookupCache = new Map();
+// Expose on window so the QRZ lookup widget (injected HTML) can read/write it.
+window._callsignLookupCache = _callsignLookupCache;
 
-// Set of callsigns currently being fetched — prevents duplicate in-flight requests.
-const _callsignLookupPending = new Set();
+// Map of callsign → in-flight Promise.  Prevents duplicate fetches AND lets
+// any number of concurrent callers (widget + MediaSession) await the same
+// single network request — the second caller gets the same Promise back.
+const _callsignLookupPending = new Map();
 
 // Marker types whose name field is a callsign and should trigger a lookup.
 const _CALLSIGN_MARKER_TYPES = new Set(['cw', 'dx', 'voice']);
@@ -1313,57 +1330,143 @@ const _CALLSIGN_MARKER_TYPES = new Set(['cw', 'dx', 'voice']);
 /**
  * Fetch callsign data from /api/lookup and populate _callsignLookupCache.
  * Fires updateMediaSession() once the result is stored so the album updates.
- * No-ops if a fetch is already in progress for this callsign.
+ *
+ * If a fetch for this callsign is already in flight, returns the same Promise
+ * so all concurrent callers (e.g. the widget and MediaSession) share one
+ * network request and all resolve together when it completes.
  */
-async function _fetchCallsignForMediaSession(callsign) {
-    if (_callsignLookupPending.has(callsign)) return;
-    _callsignLookupPending.add(callsign);
-    try {
-        const uuid = window.userSessionID || '';
-        if (!uuid) {
-            _callsignLookupCache.set(callsign, null);
-            return;
-        }
-        const url = `/api/lookup?callsign=${encodeURIComponent(callsign)}&uuid=${encodeURIComponent(uuid)}`;
-        const resp = await fetch(url);
-        if (resp.status === 429) {
-            // Rate limited — do NOT cache so we retry next time the marker is seen.
-            return;
-        }
-        if (!resp.ok) {
-            // 404 (not found), 503 (disabled), 401 (no audio session), etc. — cache null.
-            _callsignLookupCache.set(callsign, null);
-            return;
-        }
-        const data = await resp.json();
-        const fname   = (data.fname   || '').trim();
-        const country = (data.country || '').trim();
-        const imageUrl = data.image || '';
-
-        // Fetch the QRZ photo and convert to a blob: URL so Chrome doesn't
-        // re-fetch it on every MediaSession metadata update.
-        let imageBlobUrl = null;
-        if (imageUrl) {
-            try {
-                const imgResp = await fetch(imageUrl);
-                if (imgResp.ok) {
-                    const blob = await imgResp.blob();
-                    imageBlobUrl = URL.createObjectURL(blob);
-                }
-            } catch (_) {
-                // Photo fetch failed — fall back to standard artwork.
-            }
-        }
-
-        _callsignLookupCache.set(callsign, { fname, country, imageBlobUrl });
-        // Re-run updateMediaSession so the enriched album + artwork are applied.
-        if ('mediaSession' in navigator && mediaSessionEnabled) updateMediaSession();
-    } catch (_) {
-        // Network error — cache null so we don't spam retries on every freq change.
+function _fetchCallsignForMediaSession(callsign) {
+    // Skip immediately if the server has the lookup service disabled.
+    if (!window._lookupServiceEnabled) {
         _callsignLookupCache.set(callsign, null);
-    } finally {
-        _callsignLookupPending.delete(callsign);
+        return Promise.resolve();
     }
+    // Return the existing in-flight promise so concurrent callers share it.
+    if (_callsignLookupPending.has(callsign)) return _callsignLookupPending.get(callsign);
+
+    const promise = (async () => {
+        try {
+            const uuid = window.userSessionID || '';
+            if (!uuid) {
+                _callsignLookupCache.set(callsign, null);
+                return;
+            }
+            const url = `/api/lookup?callsign=${encodeURIComponent(callsign)}&uuid=${encodeURIComponent(uuid)}`;
+            const resp = await fetch(url);
+            if (resp.status === 429) {
+                // Rate limited — do NOT cache so we retry next time the marker is seen.
+                return;
+            }
+            if (!resp.ok) {
+                // 404 (not found), 503 (disabled), 401 (no audio session), etc. — cache null.
+                _callsignLookupCache.set(callsign, null);
+                return;
+            }
+            const data     = await resp.json();
+            const imageUrl = (data.image || '').trim();
+
+            // On desktop Chrome: fetch the QRZ photo once and convert to a blob: URL.
+            // Chrome re-fetches all artwork on every audio rebuffer event; blob: URLs
+            // are served from memory with no network round-trip, stopping the storm.
+            // On mobile (Android Chrome / Apple): skip the blob fetch — blob: URLs
+            // are not resolvable by Bluetooth AVRCP stacks outside the browser.
+            // The raw imageUrl is used directly on mobile instead.
+            const isMobileDevice = _isMobileChrome || _isApple;
+            let imageBlobUrl = null;
+            if (imageUrl && !isMobileDevice) {
+                try {
+                    const imgResp = await fetch(imageUrl);
+                    if (imgResp.ok) {
+                        const blob = await imgResp.blob();
+                        imageBlobUrl = URL.createObjectURL(blob);
+                    }
+                } catch (_) {
+                    // Photo fetch failed — fall back to standard artwork.
+                }
+            }
+
+            // Store the full API response so the QRZ lookup widget can render all
+            // fields (name, nickname, grid, etc.) from cache without a second fetch.
+            _callsignLookupCache.set(callsign, { data, imageUrl, imageBlobUrl });
+            // Re-run all callsign-aware displays so the enriched data is applied.
+            _refreshCallsignDisplays();
+        } catch (_) {
+            // Network error — cache null so we don't spam retries on every freq change.
+            _callsignLookupCache.set(callsign, null);
+        } finally {
+            _callsignLookupPending.delete(callsign);
+        }
+    })();
+
+    _callsignLookupPending.set(callsign, promise);
+    return promise;
+}
+// Expose so the QRZ lookup widget can call this directly instead of making its
+// own /api/lookup fetch.  The widget awaits this, then reads from the cache.
+window._fetchCallsignForMediaSession = _fetchCallsignForMediaSession;
+
+/**
+ * Re-run all UI elements that display enriched callsign data after a lookup
+ * completes.  Called by _fetchCallsignForMediaSession() once the cache is
+ * populated.
+ */
+function _refreshCallsignDisplays() {
+    if ('mediaSession' in navigator && mediaSessionEnabled) updateMediaSession();
+    if (typeof window.refreshVUMeterMarker === 'function') window.refreshVUMeterMarker(true);
+    // refreshMarkerNav() calls updateWheelMarkerLabel() internally, which will
+    // now pick up the enriched name from _enrichMarkerName().
+    if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
+}
+// Expose so the QRZ lookup widget (injected HTML) can trigger a refresh after
+// populating the shared cache with a user-initiated lookup.
+window._refreshCallsignDisplays = _refreshCallsignDisplays;
+
+/**
+ * Given a marker {name, type}, return the enriched display string.
+ * If the marker is a callsign type and the lookup cache has a result,
+ * returns "CALL • FirstName • Country" (omitting empty parts).
+ * Otherwise returns marker.name unchanged.
+ * Also fires a background fetch if the callsign hasn't been looked up yet.
+ */
+// Loose callsign pattern: 3–12 alphanumeric chars with optional single slash.
+// Rejects "Voice 40m", "Voice", plain numbers, etc. before a fetch is attempted.
+// The backend applies stricter normalisation; this is just a cheap pre-filter.
+const _reCallsignLike = /^[A-Z0-9]{3,10}$/;
+
+/**
+ * Normalise a raw callsign the same way callsign_lookup.html does:
+ * split on '/', pick the longest segment (the base callsign).
+ * e.g. "EA8/MM3NDH" → "MM3NDH", "MM3NDH/P" → "MM3NDH", "MM3NDH" → "MM3NDH".
+ * Returns the normalised uppercase string, or '' if nothing valid remains.
+ * Exposed on window so the QRZ lookup widget (injected HTML) can use it.
+ */
+function _normaliseCallsign(raw) {
+    const parts = raw.trim().toUpperCase().split('/');
+    return parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+}
+window._normaliseCallsign = _normaliseCallsign;
+
+function _enrichMarkerName(marker) {
+    if (!marker) return null;
+    if (!_CALLSIGN_MARKER_TYPES.has(marker.type)) return marker.name;
+    const rawCallsign = marker.name;
+    // Normalise: strip /P, /M, /QRP suffixes and EA8/ prefixes — pick longest segment.
+    const callsign = _normaliseCallsign(rawCallsign);
+    // Skip lookup for names that clearly aren't callsigns (e.g. "Voice 40m").
+    if (!_reCallsignLike.test(callsign)) return rawCallsign;
+    const cached = _callsignLookupCache.get(callsign);
+    if (cached === undefined) {
+        _fetchCallsignForMediaSession(callsign);
+        return rawCallsign; // show original name immediately while fetch is in progress
+    }
+    if (!cached) return rawCallsign; // null = not found / error
+    // Read fname/country from the full data object stored by the cache.
+    const fname   = (cached.data && cached.data.fname)   ? cached.data.fname.trim()   : '';
+    const country = (cached.data && cached.data.country) ? cached.data.country.trim() : '';
+    const parts = [rawCallsign];
+    if (fname)   parts.push(fname);
+    if (country) parts.push(country);
+    return parts.join(' • ');
 }
 
 function updateMediaSession() {
@@ -1426,54 +1529,68 @@ function updateMediaSession() {
     // dial-wheel overlay. Falls back to the generic 'Live SDR' label when nothing
     // matches.
     //
-    // For callsign-type markers (CW spot, DX spot, voice activity) we enrich the
-    // album with the operator's first name and country from /api/lookup, and use
-    // their QRZ photo as artwork when available.  The lookup is async: the album
-    // shows just the callsign immediately, then updates once the fetch resolves.
+    // For callsign-type markers (CW spot, DX spot, voice activity) _enrichMarkerName()
+    // appends the operator's first name and country from the lookup cache, and fires
+    // a background fetch if the callsign hasn't been looked up yet.
     const currentMarker = (typeof window.findMarkers === 'function')
         ? window.findMarkers(freq, currentMode).current
         : null;
-    const markerName = currentMarker ? currentMarker.name : null;
-    const isCallsignMarker = currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type);
+    const newAlbum = currentMarker ? (_enrichMarkerName(currentMarker) || 'Live SDR') : 'Live SDR';
 
-    // Build the album string and determine artwork.
-    let newAlbum = markerName || 'Live SDR';
-    let callsignImageBlobUrl = null;
+    // ── Artwork strategy ─────────────────────────────────────────────────────
+    // Desktop (non-mobile Chrome, non-Apple):
+    //   • Standard artwork: blob: URLs (pre-fetched once; stops Chrome's
+    //     re-fetch storm on every audio rebuffer event).
+    //   • QRZ photo: blob: URL (fetched once in _fetchCallsignForMediaSession,
+    //     stored in cache as imageBlobUrl).  Blob URLs are fine on desktop —
+    //     no Bluetooth concern, and Chrome serves them from memory instantly.
+    //
+    // Mobile (Android Chrome / Apple iOS/macOS):
+    //   • Standard artwork: real HTTPS URLs from our server — Bluetooth AVRCP
+    //     can fetch them directly.  Blob URLs would break Bluetooth artwork.
+    //   • QRZ photo: raw QRZ image URL (imageUrl) — QRZ does not block
+    //     hotlinking, so Bluetooth AVRCP can fetch it directly from qrz.com.
+    const isMobile = _isMobileChrome || _isApple;
 
-    if (isCallsignMarker && markerName) {
-        const cached = _callsignLookupCache.get(markerName);
-        if (cached === undefined) {
-            // Not yet fetched — fire async lookup; album shows callsign for now.
-            _fetchCallsignForMediaSession(markerName);
-        } else if (cached !== null) {
-            // Successful lookup — enrich album and use QRZ photo if available.
-            const parts = [markerName];
-            if (cached.fname)   parts.push(cached.fname);
-            if (cached.country) parts.push(cached.country);
-            newAlbum = parts.join(' • ');
-            callsignImageBlobUrl = cached.imageBlobUrl || null;
-        }
-        // cached === null means lookup failed/not found — album stays as callsign.
-    }
+    // Standard UberSDR logo artwork.
+    const standardArtwork = isMobile
+        // Mobile: always real HTTPS URLs so Bluetooth AVRCP can fetch them.
+        ? _artworkPaths.map(({ path, sizes, type }) => ({
+            src: `${window.location.origin}${path}`, sizes, type
+          }))
+        // Desktop: blob URLs (cached after first enable) to stop re-fetch storm.
+        : (_artworkBlobUrls
+            ? _artworkBlobUrls
+            : _artworkPaths.map(({ path, sizes, type }) => ({
+                src: `${window.location.origin}${path}`, sizes, type
+              })));
+
+    // QRZ operator photo for the artwork array.
+    // Desktop: use blob URL (no network round-trip on rebuffer).
+    // Mobile:  use raw imageUrl (Bluetooth AVRCP can fetch it from qrz.com).
+    const cachedCallsign = (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type))
+        ? (_callsignLookupCache.get(_normaliseCallsign(currentMarker.name)) || null)
+        : null;
+    const callsignImageUrl = cachedCallsign
+        ? (isMobile ? (cachedCallsign.imageUrl || null) : (cachedCallsign.imageBlobUrl || null))
+        : null;
 
     // Only replace the MediaMetadata object when the content actually changes.
     // Chrome fetches all artwork URLs every time metadata is replaced — even if
     // the URLs are identical.
-    if (newTitle !== _lastMediaSessionTitle || newArtist !== _lastMediaSessionArtist || newAlbum !== _lastMediaSessionAlbum) {
-        _lastMediaSessionTitle  = newTitle;
-        _lastMediaSessionArtist = newArtist;
-        _lastMediaSessionAlbum  = newAlbum;
+    // Also re-set when the QRZ photo URL changes (e.g. photo arrives after album text was set).
+    if (newTitle !== _lastMediaSessionTitle ||
+        newArtist !== _lastMediaSessionArtist ||
+        newAlbum !== _lastMediaSessionAlbum ||
+        callsignImageUrl !== _lastMediaSessionImageUrl) {
 
-        // Build artwork array.  When a QRZ photo blob URL is available, prepend it
-        // so the OS shows the operator's photo on the lock screen / Now Playing widget.
-        // The standard UberSDR icons are always included as fallback entries.
-        const standardArtwork = _artworkBlobUrls
-            ? _artworkBlobUrls
-            : _artworkPaths.map(({ path, sizes, type }) => ({
-                src: `${window.location.origin}${path}`, sizes, type
-            }));
-        const artwork = callsignImageBlobUrl
-            ? [{ src: callsignImageBlobUrl, sizes: '300x300', type: 'image/jpeg' }, ...standardArtwork]
+        _lastMediaSessionTitle    = newTitle;
+        _lastMediaSessionArtist   = newArtist;
+        _lastMediaSessionAlbum    = newAlbum;
+        _lastMediaSessionImageUrl = callsignImageUrl;
+
+        const artwork = callsignImageUrl
+            ? [{ src: callsignImageUrl, sizes: '300x300', type: 'image/jpeg' }, ...standardArtwork]
             : standardArtwork;
 
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -1483,20 +1600,18 @@ function updateMediaSession() {
             artwork
         });
 
-        // If we used HTTP fallback URLs for the standard artwork, pre-fetch blobs
-        // now and re-set metadata once they're ready (no-op if content changed again).
-        if (!_artworkBlobUrls) {
+        // Desktop only: if blob URLs aren't cached yet, pre-fetch them now and
+        // re-apply metadata once ready (no-op if content changed again meanwhile).
+        if (!isMobile && !_artworkBlobUrls) {
             _ensureArtworkBlobUrls().then(blobArtwork => {
-                // Re-apply metadata with blob URLs (only if title/artist/album unchanged)
-                if (_lastMediaSessionTitle === newTitle && _lastMediaSessionArtist === newArtist && _lastMediaSessionAlbum === newAlbum) {
-                    const updatedArtwork = callsignImageBlobUrl
-                        ? [{ src: callsignImageBlobUrl, sizes: '300x300', type: 'image/jpeg' }, ...blobArtwork]
-                        : blobArtwork;
+                if (_lastMediaSessionTitle === newTitle &&
+                    _lastMediaSessionArtist === newArtist &&
+                    _lastMediaSessionAlbum === newAlbum) {
                     navigator.mediaSession.metadata = new MediaMetadata({
-                        title:  newTitle,
-                        artist: newArtist,
-                        album:  newAlbum,
-                        artwork: updatedArtwork
+                        title:   newTitle,
+                        artist:  newArtist,
+                        album:   newAlbum,
+                        artwork: blobArtwork
                     });
                 }
             });
@@ -3046,10 +3161,13 @@ async function fetchSiteDescription() {
                 startAntennaSwitchPolling();
             }
 
-            // Show callsign lookup button if the server has the lookup service enabled
+            // Show callsign lookup button if the server has the lookup service enabled.
+            // Also store the flag so _fetchCallsignForMediaSession() can skip the API
+            // call entirely when the service is disabled.
+            window._lookupServiceEnabled = data.lookup_service === true;
             const callsignLookupBtn = document.getElementById('callsign-lookup-button');
             if (callsignLookupBtn) {
-                callsignLookupBtn.style.display = data.lookup_service === true ? '' : 'none';
+                callsignLookupBtn.style.display = window._lookupServiceEnabled ? '' : 'none';
             }
 
             // Start WSPR prediction polling if WSPR is an available digital mode
@@ -7615,7 +7733,7 @@ function updateVUMeterTooltip(container) {
 // changed (or when forced after the marker list updates).
 function refreshVUMeterMarker(force) {
     if (!vuMeterMarker || !vuMeterMarkerText) return;
-    if (typeof window.findMatchingMarker !== 'function') return;
+    if (typeof window.findMarkers !== 'function') return;
 
     const freqInput = document.getElementById('frequency');
     const freq = freqInput
@@ -7626,7 +7744,9 @@ function refreshVUMeterMarker(force) {
     if (!force && key === _vuMarkerLastKey) return;
     _vuMarkerLastKey = key;
 
-    const name = (freq > 0) ? (window.findMatchingMarker(freq, mode) || null) : null;
+    const marker = (freq > 0) ? (window.findMarkers(freq, mode).current || null) : null;
+    // Enrich callsign markers with fname • country from the lookup cache.
+    const name = marker ? _enrichMarkerName(marker) : null;
     const container = vuMeterMarker.parentElement;
     if (name) {
         if (vuMeterMarkerText.textContent !== name) vuMeterMarkerText.textContent = name;
@@ -12417,9 +12537,10 @@ async function setMediaSessionEnabled(enabled) {
         if (indicator) indicator.style.display = 'none';
         // Clear MediaSession metadata so the OS removes the notification.
         // Also reset the dedup cache so re-enabling forces a fresh metadata set.
-        _lastMediaSessionTitle  = null;
-        _lastMediaSessionArtist = null;
-        _lastMediaSessionAlbum  = null;
+        _lastMediaSessionTitle    = null;
+        _lastMediaSessionArtist   = null;
+        _lastMediaSessionAlbum    = null;
+        _lastMediaSessionImageUrl = null;
         if ('mediaSession' in navigator) {
             try { navigator.mediaSession.metadata = null; } catch (_) {}
             try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
@@ -14756,7 +14877,9 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         updateNavButton(nextNav, nextText, _nextMarker);
 
         // ── Current marker name in the centre overlay ─────────────────────────
-        const name = current ? current.name : null;
+        // Enrich callsign markers (CW/DX/voice) with fname • country from the
+        // lookup cache.  Falls back to the raw callsign while a fetch is pending.
+        const name = current ? _enrichMarkerName(current) : null;
 
         if (!name) {
             markerBox.classList.remove('visible');

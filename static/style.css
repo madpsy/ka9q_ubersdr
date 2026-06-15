@@ -2417,8 +2417,8 @@ input[type="range"]::-moz-range-thumb {
         box-sizing: border-box !important;
     }
 
-    /* NR button moved to frequency input row on mobile — no special sizing needed,
-       the parent flex row handles alignment. Hide NB button. */
+    /* NR + EQ buttons moved to frequency input row on mobile — no special sizing
+       needed, the parent flex row handles alignment. Hide NB button. */
     #nb-quick-toggle {
         display: none !important;
     }

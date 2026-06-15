@@ -15000,7 +15000,7 @@ function _dockApply() {
     }
 }
 
-// Apply mobile-specific DOM rearrangements (bandwidth + SNR squelch row, NR button).
+// Apply mobile-specific DOM rearrangements (bandwidth + SNR squelch row, NR + EQ buttons).
 // Safe to call multiple times — guards against creating #bw-squelch-row twice.
 function _dockApplyMobileLayout() {
     if (document.getElementById('bw-squelch-row')) return; // already applied
@@ -15027,11 +15027,16 @@ function _dockApplyMobileLayout() {
             }
             mobileRow.appendChild(snrRow);
         }
-        // Move NR button to the frequency input row (next to step dropdown/btns/wheel)
+        // Move NR + EQ buttons to the frequency input row (next to step dropdown/btns/wheel).
+        // They live in #audio-buttons-group, which is hidden on mobile (.audio-controls
+        // is display:none), so relocating them out of that panel also makes them visible.
         const nrBtn = document.getElementById('nr2-quick-toggle');
+        const eqBtn = document.getElementById('eq-quick-toggle');
         const freqScrollCtrl = document.getElementById('frequency-scroll-controls');
-        if (nrBtn && freqScrollCtrl && freqScrollCtrl.parentElement) {
-            freqScrollCtrl.parentElement.appendChild(nrBtn);
+        if (freqScrollCtrl && freqScrollCtrl.parentElement) {
+            // Append in order so they read NR | EQ at the end of the row.
+            if (nrBtn) freqScrollCtrl.parentElement.appendChild(nrBtn);
+            if (eqBtn) freqScrollCtrl.parentElement.appendChild(eqBtn);
         }
     }
 }
@@ -15044,6 +15049,7 @@ function _dockRemoveMobileLayout() {
     const snrRow     = document.getElementById('snr-squelch-row');
     const volSqGroup = document.getElementById('volume-squelch-group');
     const nrBtn      = document.getElementById('nr2-quick-toggle');
+    const eqBtn      = document.getElementById('eq-quick-toggle');
 
     if (bwSqRow) {
         const bwEl = document.getElementById('bandwidth-controls');
@@ -15079,6 +15085,15 @@ function _dockRemoveMobileLayout() {
             audioBtnsGroup.insertBefore(nrBtn, nbBtn);
         } else {
             audioBtnsGroup.appendChild(nrBtn);
+        }
+    }
+    if (eqBtn && audioBtnsGroup && eqBtn.parentElement !== audioBtnsGroup) {
+        // Insert before #rec-btn to restore original order: ... | RMN | EQ | Rec
+        const recBtn = document.getElementById('rec-btn');
+        if (recBtn && recBtn.parentElement === audioBtnsGroup) {
+            audioBtnsGroup.insertBefore(eqBtn, recBtn);
+        } else {
+            audioBtnsGroup.appendChild(eqBtn);
         }
     }
 }

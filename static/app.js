@@ -2091,9 +2091,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (_useMediaSessionBridge) {
                     // ── Bridge path (Apple/Firefox) ───────────────────────────────────
                     // Uses MediaStreamDestination → <audio> bridge for zero-latency
-                    // MediaSession support.  Apple (Safari) has its own bridge mechanism;
-                    // Firefox needs the MediaStreamDestination bridge.
-                    if (!_isApple && !mediaElement && audioContext) {
+                    // MediaSession support.  Apple (iOS/macOS Safari) requires a playing
+                    // media element for lock-screen / Control Center controls to appear;
+                    // Firefox needs the bridge because it lacks AudioContext.setSinkId.
+                    // Apple does NOT use the HTTP audio endpoint — it worked via this
+                    // bridge long before that endpoint existed.
+                    if (!mediaElement && audioContext) {
                         try {
                             const dest = audioContext.createMediaStreamDestination();
                             audioContext._mediaStreamDest = dest;

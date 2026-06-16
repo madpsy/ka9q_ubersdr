@@ -121,7 +121,7 @@
                      <li><strong>Resume</strong> — restarts the live display from the current moment</li>
                    </ul>
                    <p>Useful for studying a signal without the display scrolling away, or for saving bandwidth.</p>`,
-            position: 'bottom',
+            position: 'left',
             mobilePosition: 'center',
             platform: 'both'
         },
@@ -164,7 +164,7 @@
                      <li><strong>Undocked</strong> — controls sit in the normal page flow below the waterfall</li>
                    </ul>
                    <p>Useful when you want more waterfall visible at once.</p>`,
-            position: 'bottom',
+            position: 'left',
             platform: 'desktop'
         },
         {

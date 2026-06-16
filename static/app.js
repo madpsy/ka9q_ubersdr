@@ -5550,7 +5550,23 @@ function playAudioBuffer(buffer) {
     }
     // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
     else if ((nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
-        lastDroppedFrameTime = performance.now(); // Record drop time for buffer indicator
+        // Only record a drop if we're playing real audio — not silence injected by the
+        // server when the SNR gate is closed or the session is muted.  Silence frames
+        // arrive at full rate and will always overflow the buffer; flagging those as
+        // "dropped frames" is misleading and causes the buffer indicator to show red
+        // constantly while squelch is active.
+        const _snrGateActive = (() => {
+            const sl = document.getElementById('snr-squelch-slider');
+            if (!sl) return false;
+            const t = snrSquelchThreshold(sl.value);
+            if (t <= SNR_SQUELCH_SENTINEL + 1) return false; // gate disabled
+            const snr = (currentBasebandPower > -900 && currentNoiseDensity > -900)
+                ? currentBasebandPower - currentNoiseDensity : 0;
+            return snr < t;
+        })();
+        if (!isMuted && !isServerMuted && !_snrGateActive) {
+            lastDroppedFrameTime = performance.now(); // Record drop time for buffer indicator
+        }
         return; // Exit without scheduling this buffer
     }
 

@@ -140,6 +140,11 @@ class ChatUI {
             console.error('Failed to save mute preference:', e);
         }
 
+        // Haptic confirmation on unmute (sounds turning ON) — tests Vibration API via user gesture
+        if (!this.soundsMuted && navigator.vibrate) {
+            navigator.vibrate(100);
+        }
+
         // Show feedback message
         this.addSystemMessage(this.soundsMuted ? 'Notification sounds muted' : 'Notification sounds enabled');
     }

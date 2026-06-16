@@ -141,8 +141,13 @@ class ChatUI {
         }
 
         // Haptic confirmation on unmute (sounds turning ON) — tests Vibration API via user gesture
-        if (!this.soundsMuted && navigator.vibrate) {
-            navigator.vibrate(100);
+        if (!this.soundsMuted) {
+            if (navigator.vibrate) {
+                const result = navigator.vibrate(500);
+                this.addSystemMessage(`Haptic test: vibrate API present, returned ${result}, hidden=${document.hidden}`);
+            } else {
+                this.addSystemMessage('Haptic test: navigator.vibrate not available on this device');
+            }
         }
 
         // Show feedback message

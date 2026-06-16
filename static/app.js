@@ -1371,11 +1371,8 @@ function _fetchCallsignForMediaSession(callsign) {
             // accept cross-origin URLs without CORS.  The re-fetch storm concern
             // only applies to our own server's logo artwork (already blobbed).
             _callsignLookupCache.set(callsign, { data, imageUrl });
-            // Notify lookup widgets immediately with the resolved callsign so they
-            // can auto-populate without knowing which callsign was being fetched.
-            window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
-                detail: { callsign, data, imageUrl, cache: window._callsignLookupCache }
-            }));
+            // Notify all lookup surfaces (inline widget + popup window).
+            _broadcastCallsignLookup(callsign, data, imageUrl);
             // Re-run all callsign-aware displays so the enriched data is applied.
             _refreshCallsignDisplays();
         } catch (_) {
@@ -1411,10 +1408,36 @@ function _refreshCallsignDisplays() {
 window._refreshCallsignDisplays = _refreshCallsignDisplays;
 
 /**
+ * Broadcast a callsign lookup result to all lookup surfaces:
+ *   1. 'callsign_lookup_complete' CustomEvent on window  → inline widgets (qrz_lookup.widget.html etc.)
+ *   2. postMessage to window._callsignLookupWindow       → the callsign_lookup.html popup (if open)
+ *
+ * Called both when a fresh fetch completes and when a cache hit is detected
+ * during marker navigation (skip buttons, wheel arrows, marker widget prev/next).
+ */
+function _broadcastCallsignLookup(callsign, data, imageUrl) {
+    // 1. Inline widget event bus
+    window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
+        detail: { callsign, data, imageUrl, cache: _callsignLookupCache }
+    }));
+
+    // 2. Popup window (callsign_lookup.html) — only if it's open and not closed
+    const lw = window._callsignLookupWindow;
+    if (lw && !lw.closed) {
+        const uuid = window.userSessionID || '';
+        try {
+            lw.postMessage(
+                { type: 'callsign_lookup', callsign, uuid },
+                window.location.origin
+            );
+        } catch (_) { /* cross-origin or closed race — ignore */ }
+    }
+}
+
+/**
  * If a marker is a callsign type (cw/dx/voice) and its lookup result is already
- * in the cache, dispatch 'callsign_lookup_complete' immediately so lookup widgets
- * (e.g. qrz_lookup.widget.html) are notified even when _fetchCallsignForMediaSession
- * returns early due to a cache hit (and therefore never fires the event itself).
+ * in the cache, broadcast to all lookup surfaces immediately so they are notified
+ * even when _fetchCallsignForMediaSession returns early due to a cache hit.
  *
  * Called after any navigation that tunes to a new marker: skip buttons, dial-wheel
  * edge arrows, marker.widget.html prev/next buttons, etc.
@@ -1426,12 +1449,10 @@ function _notifyLookupWidgetIfCached(marker) {
     if (!callsign) return;
     const cached = _callsignLookupCache.get(callsign);
     if (cached && cached.data) {
-        window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
-            detail: { callsign, data: cached.data, imageUrl: cached.imageUrl, cache: _callsignLookupCache }
-        }));
+        _broadcastCallsignLookup(callsign, cached.data, cached.imageUrl);
     }
     // If not cached yet, _fetchCallsignForMediaSession (called via _enrichMarkerName)
-    // will fire the event once the fetch completes — nothing extra needed.
+    // will broadcast once the fetch completes — nothing extra needed.
 }
 window._notifyLookupWidgetIfCached = _notifyLookupWidgetIfCached;
 

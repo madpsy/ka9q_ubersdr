@@ -166,7 +166,8 @@ func buildWebMHeader(sampleRate int, channels int) []byte {
 // writeWebMCluster writes a WebM Cluster containing one SimpleBlock (one Opus frame).
 // timecodeMs is the cluster timestamp in milliseconds.
 // opusData is the raw Opus frame bytes.
-func writeWebMCluster(w http.ResponseWriter, timecodeMs uint64, opusData []byte) error {
+// Returns the number of bytes written to w and any write error.
+func writeWebMCluster(w http.ResponseWriter, timecodeMs uint64, opusData []byte) (int, error) {
 	// SimpleBlock: track number (VINT) + relative timecode (int16 BE) + flags + data
 	// Relative timecode within cluster = 0 (one frame per cluster)
 	trackVINT := ebmlVINT(1) // track 1
@@ -185,8 +186,8 @@ func writeWebMCluster(w http.ResponseWriter, timecodeMs uint64, opusData []byte)
 	clusterData := concat(timecodeElem, simpleBlockElem)
 	cluster := ebmlElem([]byte{0x1F, 0x43, 0xB6, 0x75}, clusterData)
 
-	_, err := w.Write(cluster)
-	return err
+	n, err := w.Write(cluster)
+	return n, err
 }
 
 // concat concatenates byte slices.
@@ -329,13 +330,20 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 				}
 
 				opusData, err := enc.EncodeBinary(pkt.PCMData)
-				if err != nil || len(opusData) == 0 {
-					continue
-				}
-
-				if err := writeWebMCluster(w, timecodeMs, opusData); err != nil {
-					return
-				}
+					if err != nil || len(opusData) == 0 {
+						continue
+					}
+	
+					n, err := writeWebMCluster(w, timecodeMs, opusData)
+					if err != nil {
+						return
+					}
+					// Count HTTP audio bytes in the session so the admin panel
+					// audio_kbps figure remains accurate when HTTP audio is active.
+					// HTTP/1.1 chunked transfer has lower per-frame overhead than
+					// WebSocket framing, but we apply the same 1.33× factor used
+					// by AddAudioBytes for consistency across transports.
+					session.AddAudioBytes(uint64(n))
 
 				// Advance timecode by frame duration in ms
 				// PCMData is big-endian int16 (2 bytes per sample per channel)

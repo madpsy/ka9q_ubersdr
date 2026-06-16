@@ -2782,6 +2782,13 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 		info["waterfall_kbps"] = waterfallKbps
 		info["total_kbps"] = audioKbps + waterfallKbps
 
+		// Indicate whether audio is currently being delivered over HTTP rather
+		// than the WebSocket binary channel.  The admin panel uses this to show
+		// a badge next to the audio kbps figure.
+		session.httpAudioMu.Lock()
+		info["http_audio_active"] = session.httpAudioChan != nil
+		session.httpAudioMu.Unlock()
+
 		// Add DX cluster connection status and throughput if handler is available and user has a session ID
 		if session.UserSessionID != "" && sm.dxClusterWsHandler != nil {
 			// Type assert to get the handler (using interface to avoid import cycle)

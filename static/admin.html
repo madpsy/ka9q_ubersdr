@@ -6840,7 +6840,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                             <th style="padding: 12px; text-align: left;">First Seen</th>
                             <th style="padding: 12px; text-align: left;">Last Seen</th>
                             <th style="padding: 12px; text-align: center; width: 80px;" title="Total connected time from this IP in the rolling 24-hour window">24h Time</th>
-                            <th style="padding: 12px; text-align: center; width: 80px;">Audio (kbps)</th>
+                            <th style="padding: 12px; text-align: center; width: 110px;">Audio (kbps)</th>
                             <th style="padding: 12px; text-align: center; width: 80px;">Spectrum (kbps)</th>
                             <th style="padding: 12px; text-align: center; width: 80px;">DX (kbps)</th>
                             <th style="padding: 12px; text-align: center; width: 70px;" title="Normalised CPU% across all this user's radiod channels (audio + spectrum)">CPU%</th>
@@ -6933,7 +6933,16 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (userSessionID !== 'N/A') actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="kickUser('${userSessionID}')">Kick</button>`;
                 if (clientIP !== 'N/A')      actionButtons += `<button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="banUser('${clientIP}')">Ban IP</button>`;
 
-                const audioThroughput    = sessions.audio.length    > 0 ? (sessions.audio[0].audio_kbps    || 0).toString() : '—';
+                const audioKbpsVal = sessions.audio.length > 0 ? (sessions.audio[0].audio_kbps || 0) : null;
+                const httpAudioActive = sessions.audio.length > 0 && sessions.audio[0].http_audio_active === true;
+                let audioThroughput;
+                if (audioKbpsVal === null) {
+                    audioThroughput = '—';
+                } else if (httpAudioActive) {
+                    audioThroughput = `${audioKbpsVal} <span style="background:#1976d2;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;cursor:default;" title="Audio is being delivered over HTTP (WebM/Opus stream) rather than the WebSocket binary channel. This is used by Android Chrome for lock-screen media controls. The kbps figure includes both the HTTP audio and any WebSocket metadata.">HTTP</span>`;
+                } else {
+                    audioThroughput = audioKbpsVal.toString();
+                }
                 const spectrumThroughput = sessions.spectrum.length > 0 ? (sessions.spectrum[0].waterfall_kbps || 0).toString() : '—';
                 const dxSess = sessions.audio.find(s => s.dxcluster_kbps !== undefined) || sessions.spectrum.find(s => s.dxcluster_kbps !== undefined);
                 const dxClusterThroughput = dxSess ? (dxSess.dxcluster_kbps || 0).toString() : '—';
@@ -6956,7 +6965,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
                     <td style="padding: 12px; font-size: 12px; text-align: center; white-space: nowrap;">${dailyTimeDisplay}</td>
-                    <td style="padding: 12px; font-size: 12px; text-align: center;">${audioThroughput}</td>
+                    <td style="padding: 12px; font-size: 12px; text-align: center; white-space: nowrap;">${audioThroughput}</td>
                     <td style="padding: 12px; font-size: 12px; text-align: center;">${spectrumThroughput}</td>
                     <td style="padding: 12px; font-size: 12px; text-align: center;">${dxClusterThroughput}</td>
                     <td style="padding: 12px; font-size: 12px; text-align: center;">${cpuNormDisplay}</td>

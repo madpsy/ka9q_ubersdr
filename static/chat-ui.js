@@ -2678,10 +2678,15 @@ class ChatUI {
     triggerHaptic(isMention = false) {
         if (!navigator.vibrate) return;
         if (!this.chat || !this.chat.isJoined()) return;
+        // navigator.vibrate returns false (and does nothing) when the document
+        // is hidden (screen off / app backgrounded). Nothing we can do in that
+        // case from the page — a service-worker push notification would be
+        // needed for true background haptics.
+        if (document.hidden) return;
         if (isMention) {
-            navigator.vibrate([100, 50, 100]); // double-buzz for @mentions
+            navigator.vibrate([150, 60, 150]); // double-buzz for @mentions
         } else {
-            navigator.vibrate(40);             // short tap for regular messages
+            navigator.vibrate(100);            // 100ms tap — long enough to feel
         }
     }
 

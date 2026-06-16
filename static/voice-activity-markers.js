@@ -77,18 +77,33 @@
         return (activityFreq(a) || '') + ':' + activityLabel(a) + ':' + activityMode(a);
       }).join('|');
       if (sig === lastSignature) return;
+
+      // Detect whether any callsign is present in the new state (covers both
+      // "callsign appeared for the first time" and "callsign changed").  When
+      // true, refresh the marker overlay, VU-meter and MediaSession so the
+      // enriched name propagates without requiring a retune.
+      var callsignChanged = latestActivities.some(function (a) { return !!a.dx_callsign; });
+
       lastSignature = sig;
-      requestRedraw();
+      requestRedraw(callsignChanged);
     });
   }
 
   // Invalidate the spectrum marker cache and redraw so new data shows promptly.
-  function requestRedraw() {
+  // When callsignChanged is true, also refresh the marker overlay, VU-meter and
+  // MediaSession so the enriched callsign name (fname • country) propagates to
+  // all surfaces without requiring a retune.
+  function requestRedraw(callsignChanged) {
     var sd = window.spectrumDisplay;
-    if (!sd || typeof sd.invalidateMarkerCache !== 'function') return;
-    sd.invalidateMarkerCache();
-    if (sd.spectrumData && sd.spectrumData.length > 0 && typeof sd.draw === 'function') {
-      sd.draw();
+    if (sd && typeof sd.invalidateMarkerCache === 'function') {
+      sd.invalidateMarkerCache();
+      if (sd.spectrumData && sd.spectrumData.length > 0 && typeof sd.draw === 'function') {
+        sd.draw();
+      }
+    }
+    if (callsignChanged) {
+      if (typeof window.refreshMarkerNav === 'function') window.refreshMarkerNav();
+      if (typeof window.refreshVUMeterMarker === 'function') window.refreshVUMeterMarker(true);
     }
   }
 

@@ -299,6 +299,30 @@
             platform: 'desktop'
         },
         {
+            target: '#tuning-mode-toggle',
+            title: '🎛️ Tuning Mode',
+            body: `<p>Switch between two tuning styles:</p>
+                   <ul>
+                     <li><strong>Btns</strong> — tap step buttons (±1 Hz, ±10 Hz, etc.) to nudge the frequency</li>
+                     <li><strong>Wheel</strong> — drag the rotary tuning wheel for smooth continuous tuning</li>
+                   </ul>
+                   <p>Pick whichever feels more natural for your style of operating.</p>`,
+            position: 'top',
+            platform: 'mobile',
+            condition: () => {
+                const el = document.getElementById('tuning-mode-toggle');
+                return !!el;
+            }
+        },
+        {
+            target: '#spectrum-vzoom-slider',
+            title: '🔍 Vertical Zoom',
+            body: `<p>The <strong>vertical zoom slider</strong> on the right edge of the waterfall adjusts how much of the signal amplitude range is shown.</p>
+                   <p>Drag it up to zoom in on weak signals, or down to see the full dynamic range.</p>`,
+            position: 'left',
+            platform: 'mobile'
+        },
+        {
             target: null,
             title: '🎉 You\'re all set!',
             body: `<p>That covers the main controls. A few more tips:</p>

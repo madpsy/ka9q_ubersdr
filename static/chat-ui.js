@@ -2683,6 +2683,7 @@ class ChatUI {
     triggerHaptic(isMention = false) {
         if (!navigator.vibrate) return;
         if (!this.chat || !this.chat.isJoined()) return;
+        if (this.soundsMuted) return; // respect the mute toggle
         // navigator.vibrate returns false (and does nothing) when the document
         // is hidden (screen off / app backgrounded). Nothing we can do in that
         // case from the page — a service-worker push notification would be

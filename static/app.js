@@ -229,19 +229,17 @@ const wsManager = new WebSocketManager({
             }
 
             // Restore SNR squelch slider display after reconnect.
-            // The actual gate value was already sent to the server via the min_snr URL
-            // parameter in the WebSocket URL — we only need to update the UI here.
-            // NOTE: audio_gate_updated is NOT sent by the server on connect, only in
-            // response to set_audio_gate, so we must restore the slider here directly.
-            if (typeof _savedSNRSquelchValue === 'number' && _savedSNRSquelchValue !== null &&
-                _savedSNRSquelchValue > SNR_SQUELCH_OFF_VAL) {
+            // _lastUserSNRSliderValue tracks the last value the user set (updated in
+            // sendSNRSquelch). The server already has the correct gate value from the
+            // min_snr URL parameter — we only need to restore the UI here.
+            if (typeof _lastUserSNRSliderValue === 'number' &&
+                _lastUserSNRSliderValue > SNR_SQUELCH_OFF_VAL) {
                 const sl = document.getElementById('snr-squelch-slider');
                 if (sl) {
-                    sl.value = _savedSNRSquelchValue;
+                    sl.value = _lastUserSNRSliderValue;
                     if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
-                    log(`Restored SNR squelch display: ${_savedSNRSquelchValue} dB`);
+                    log(`Restored SNR squelch display: ${_lastUserSNRSliderValue} dB`);
                 }
-                _savedSNRSquelchValue = null;
             }
         }, 0);
     },
@@ -249,17 +247,11 @@ const wsManager = new WebSocketManager({
         log('Disconnected');
         updateConnectionStatus('disconnected');
         stopStatsUpdates();
-        // Save SNR squelch value before resetting so onConnect can restore it.
-        // Only save on the FIRST disconnect — onDisconnect fires on every reconnect
-        // attempt failure too, and by then the slider has already been reset to Off,
-        // so subsequent saves would overwrite the correct saved value with 24 (Off).
+        // Reset the SNR squelch slider to Off on disconnect.
+        // The last user-set value is preserved in _lastUserSNRSliderValue (updated
+        // whenever the user moves the slider) and restored in onConnect.
         const snrSl = document.getElementById('snr-squelch-slider');
         if (snrSl && typeof SNR_SQUELCH_OFF_VAL !== 'undefined') {
-            if (_savedSNRSquelchValue === null) {
-                // First disconnect: save the real slider value before resetting.
-                _savedSNRSquelchValue = parseFloat(snrSl.value);
-            }
-            // Always reset the slider to Off on disconnect.
             snrSl.value = SNR_SQUELCH_OFF_VAL;
             if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
         }
@@ -3706,20 +3698,13 @@ async function connect() {
     const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
     const mode = currentMode;
 
-    // Read current SNR squelch threshold so the server can apply it immediately on connect.
-    // If _savedSNRSquelchValue is set, the slider was reset to Off by onDisconnect — use
-    // the saved value instead so reconnect restores the gate correctly.
+    // Read the last user-set SNR squelch value so the server can apply it immediately
+    // on connect. _lastUserSNRSliderValue is updated whenever the user moves the slider
+    // and is never reset on disconnect, so it always reflects the user's intent.
     // snrSquelchThreshold() returns SNR_SQUELCH_SENTINEL (-999) when the gate is disabled.
-    let minSNR = -999;
-    if (typeof _savedSNRSquelchValue === 'number' && _savedSNRSquelchValue !== null &&
-        _savedSNRSquelchValue > SNR_SQUELCH_OFF_VAL) {
-        minSNR = _savedSNRSquelchValue;
-    } else {
-        const snrSl = document.getElementById('snr-squelch-slider');
-        minSNR = (snrSl && typeof snrSquelchThreshold === 'function')
-            ? snrSquelchThreshold(snrSl.value)
-            : -999;
-    }
+    const minSNR = (typeof _lastUserSNRSliderValue === 'number' && typeof snrSquelchThreshold === 'function')
+        ? snrSquelchThreshold(_lastUserSNRSliderValue)
+        : -999;
 
     await wsManager.connect({
         frequency: frequency,
@@ -4360,28 +4345,18 @@ function handleMessage(msg) {
                 _updateMuteButtonForServerMute();
             }
             break;
-        case 'audio_gate_updated': {
+        case 'audio_gate_updated':
             // Server echoes back the current audio gate (SNR squelch) threshold.
-            // If we have a saved value from a disconnect/reconnect cycle, restore it
-            // now — the server already has the correct value from the min_snr URL
-            // parameter, so we only need to update the UI.
-            // Otherwise, sync the slider to whatever the server reports.
-            const _snrGateSl = document.getElementById('snr-squelch-slider');
-            if (_snrGateSl) {
-                if (typeof _savedSNRSquelchValue === 'number' && _savedSNRSquelchValue !== null &&
-                    _savedSNRSquelchValue > SNR_SQUELCH_OFF_VAL) {
-                    _snrGateSl.value = _savedSNRSquelchValue;
-                    updateSNRSquelchDisplay();
-                    log(`Restored SNR squelch display: ${_savedSNRSquelchValue} dB`);
-                    _savedSNRSquelchValue = null;
-                } else if (msg.info && typeof msg.info.min_snr === 'number') {
+            // Sync the slider to whatever the server reports.
+            if (msg.info && typeof msg.info.min_snr === 'number') {
+                const _snrGateSl = document.getElementById('snr-squelch-slider');
+                if (_snrGateSl) {
                     const serverVal = msg.info.min_snr;
                     _snrGateSl.value = (serverVal <= SNR_SQUELCH_SENTINEL + 1) ? SNR_SQUELCH_OFF_VAL : serverVal;
                     updateSNRSquelchDisplay();
                 }
             }
             break;
-        }
 
         // ── Server-side DSP noise reduction ──────────────────────────────────
         case 'dsp_filters':
@@ -5710,9 +5685,8 @@ function tune() {
 
     // Keep lastConnectionParams current so reconnect uses the right freq/mode/BW/SNR.
     // Without this, reconnect always uses the original page-load parameters.
-    const _snrSlForTune = document.getElementById('snr-squelch-slider');
-    const _minSNRForTune = (_snrSlForTune && typeof snrSquelchThreshold === 'function')
-        ? snrSquelchThreshold(_snrSlForTune.value)
+    const _minSNRForTune = (typeof _lastUserSNRSliderValue === 'number' && typeof snrSquelchThreshold === 'function')
+        ? snrSquelchThreshold(_lastUserSNRSliderValue)
         : -999;
     wsManager.lastConnectionParams = { frequency, mode, bandwidthLow, bandwidthHigh, minSNR: _minSNRForTune };
 
@@ -6928,9 +6902,10 @@ window.updateSquelch = updateSquelch;
 // ── SNR Squelch (audio gate via set_audio_gate WebSocket message) ─────────
 const SNR_SQUELCH_OFF_VAL  = 24;    // slider far-left position = disabled
 const SNR_SQUELCH_SENTINEL = -999;  // value sent to server when disabled
-// Saved slider value across disconnect/reconnect cycles.
-// Set in onDisconnect (before slider is reset to Off), consumed in onConnect.
-let _savedSNRSquelchValue = null;
+// Last slider value explicitly set by the user (updated in sendSNRSquelch).
+// Never reset on disconnect — used to restore the gate on reconnect.
+// Initialised to SNR_SQUELCH_OFF_VAL so the gate starts disabled.
+let _lastUserSNRSliderValue = SNR_SQUELCH_OFF_VAL;
 
 function snrSquelchThreshold(sliderVal) {
     const v = parseFloat(sliderVal);
@@ -7019,6 +6994,8 @@ function sendSNRSquelch() {
     _snrSquelchTimer = setTimeout(() => {
         const sl = document.getElementById('snr-squelch-slider');
         if (!sl) return;
+        // Track the last user-set slider value for reconnect restore.
+        _lastUserSNRSliderValue = parseFloat(sl.value);
         const t = snrSquelchThreshold(sl.value);
         if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
             wsManager.send({ type: 'set_audio_gate', min_snr: t });

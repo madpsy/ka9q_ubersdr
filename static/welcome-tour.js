@@ -77,19 +77,6 @@
             platform: 'both'
         },
         {
-            target: '.spectrum-display-panel',
-            title: '📡 Waterfall & Spectrum',
-            body: `<p>This is the <strong>waterfall display</strong> — it shows the full HF spectrum
-                   in real time. Brighter colours mean stronger signals.</p>
-                   <ul>
-                     <li><strong>Click</strong> anywhere to tune to that frequency</li>
-                     <li><strong>Scroll</strong> to zoom in/out (or use the zoom buttons)</li>
-                     <li><strong>Drag</strong> to pan when zoomed in</li>
-                   </ul>`,
-            position: 'bottom',
-            platform: 'both'
-        },
-        {
             target: '.spectrum-display-controls',
             title: '🎛️ Waterfall Controls',
             body: `<p>These controls let you customise the waterfall display:</p>
@@ -145,38 +132,6 @@
                    <p>The <strong>voice activity</strong> button (🔊) shows live voice signals
                    on the current band.</p>`,
             position: 'bottom',
-            platform: 'both'
-        },
-        {
-            target: '#frequency',
-            title: '🔢 Frequency Input',
-            body: `<p>Type a frequency here and press <kbd>Enter</kbd> (or the ► button) to tune.
-                   Click the unit label to switch between <strong>Hz / kHz / MHz</strong>.</p>
-                   <p>Keyboard shortcuts: <kbd>F</kbd> focuses this box, <kbd>A</kbd>/<kbd>D</kbd>
-                   step ±100 Hz, arrow keys step through markers.</p>`,
-            position: 'right',
-            platform: 'desktop'
-        },
-        {
-            target: '#frequency',
-            title: '🔢 Frequency Input',
-            body: `<p>Tap the frequency box and type a frequency, then tap ► to tune.
-                   Tap the unit label to switch between <strong>Hz / kHz / MHz</strong>.</p>
-                   <p>Use the <strong>tuning wheel</strong> below to fine-tune by dragging.</p>`,
-            position: 'bottom',
-            platform: 'mobile'
-        },
-        {
-            target: '.preset-buttons',
-            title: '📻 Demodulation Modes',
-            body: `<p>Select your demodulation mode here:</p>
-                   <ul>
-                     <li><strong>LSB / USB</strong> — Single sideband (voice, most HF)</li>
-                     <li><strong>CWL / CWU</strong> — Morse code (lower/upper)</li>
-                     <li><strong>AM / SAM</strong> — Amplitude modulation / Synchronous AM</li>
-                     <li><strong>FM / NFM</strong> — Wide and narrow FM</li>
-                   </ul>`,
-            position: 'right',
             platform: 'both'
         },
         {
@@ -314,19 +269,6 @@
             condition: () => !!document.getElementById('chat-header')
         },
         {
-            target: '#bookmark-selector',
-            title: '🔖 Bookmarks',
-            body: `<p>Jump to pre-configured frequencies using the bookmark dropdowns:</p>
-                   <ul>
-                     <li><strong>📡 Server Bookmarks</strong> — set by the station operator</li>
-                     <li><strong>⭐ My Bookmarks</strong> — your personal saved frequencies
-                         (stored locally in your browser)</li>
-                   </ul>
-                   <p>Use the search box above to filter bookmarks by name.</p>`,
-            position: 'right',
-            platform: 'both'
-        },
-        {
             target: '#extensions-dropdown',
             title: '🧩 Extensions',
             body: `<p>Extensions add extra functionality to the receiver:</p>
@@ -346,7 +288,7 @@
                    provided by the station operator.</p>
                    <p>Select an addon from this dropdown to open it in a new tab or panel.</p>`,
             position: 'right',
-            platform: 'both',
+            platform: 'desktop',
             // Only include this step when the addons dropdown is actually visible
             condition: () => {
                 const el = document.getElementById('addons-dropdown');

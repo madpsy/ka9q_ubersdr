@@ -1,0 +1,436 @@
+/* =============================================================================
+   UberSDR Welcome Tour & Announcements — Styles
+   ============================================================================= */
+
+/* ---------------------------------------------------------------------------
+   TOUR OVERLAY — full-screen dark backdrop with spotlight cut-out
+   --------------------------------------------------------------------------- */
+.wt-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99000;
+    /* The spotlight is punched out via clip-path on the spotlight child.
+       We use a semi-transparent background on the overlay itself and rely on
+       the spotlight element's box-shadow to create the darkened surround. */
+    pointer-events: all;
+    background: transparent;
+}
+
+/* The spotlight is an absolutely-positioned box whose box-shadow creates the
+   dark surround. The box itself is transparent so the target element shows
+   through clearly. */
+.wt-spotlight {
+    position: fixed;
+    border-radius: 6px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.72);
+    transition: top 0.3s ease, left 0.3s ease, width 0.3s ease, height 0.3s ease;
+    pointer-events: none;
+    z-index: 99001;
+}
+
+/* ---------------------------------------------------------------------------
+   TOUR CARD — the tooltip/modal that appears next to each highlighted element
+   --------------------------------------------------------------------------- */
+.wt-card {
+    position: fixed;
+    z-index: 99100;
+    width: 340px;
+    max-width: calc(100vw - 32px);
+    background: #1e2d3d;
+    border: 1px solid rgba(102, 126, 234, 0.5);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(102, 126, 234, 0.2);
+    color: #ecf0f1;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.55;
+    overflow: hidden;
+    animation: wt-card-in 0.22s ease;
+}
+
+.wt-card-center {
+    /* Centred modal — no arrow needed */
+    width: 420px;
+}
+
+@keyframes wt-card-in {
+    from { opacity: 0; transform: scale(0.94) translateY(6px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0);   }
+}
+
+/* Progress dots */
+.wt-dots {
+    display: flex;
+    gap: 5px;
+    padding: 10px 16px 0;
+    justify-content: center;
+}
+
+.wt-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: background 0.2s;
+}
+
+.wt-dot-active {
+    background: #667eea;
+    box-shadow: 0 0 6px rgba(102, 126, 234, 0.7);
+}
+
+/* Card header */
+.wt-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px 6px;
+}
+
+.wt-card-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+    flex: 1;
+}
+
+/* Card body */
+.wt-card-body {
+    padding: 4px 16px 12px;
+    color: #cdd6e0;
+}
+
+.wt-card-body p {
+    margin: 0 0 8px;
+}
+
+.wt-card-body p:last-child {
+    margin-bottom: 0;
+}
+
+.wt-card-body ul {
+    margin: 6px 0 8px 0;
+    padding-left: 18px;
+}
+
+.wt-card-body li {
+    margin-bottom: 4px;
+}
+
+.wt-card-body kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #ecf0f1;
+}
+
+/* Card footer */
+.wt-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 8px;
+}
+
+.wt-counter {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+}
+
+.wt-btn-group {
+    display: flex;
+    gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   BUTTONS
+   --------------------------------------------------------------------------- */
+.wt-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 7px 16px;
+    border: none;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+
+.wt-btn:hover  { opacity: 0.88; }
+.wt-btn:active { transform: scale(0.97); }
+
+.wt-btn-primary {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+}
+
+.wt-btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ecf0f1;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* × close button in card header */
+.wt-btn-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    border-radius: 3px;
+    transition: color 0.15s;
+    font-family: inherit;
+    flex-shrink: 0;
+    margin-top: -2px;
+}
+
+.wt-btn-close:hover {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* "Skip Tour" button in the footer button row */
+.wt-btn-skip-footer {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    font-family: inherit;
+    font-weight: 500;
+}
+
+.wt-btn-skip-footer:hover {
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* ---------------------------------------------------------------------------
+   ANNOUNCEMENTS PANEL — slides in from bottom-right
+   --------------------------------------------------------------------------- */
+.wt-announcement-panel {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 98000;
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    /* Hidden by default — JS adds .wt-panel-show */
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    pointer-events: none;
+}
+
+.wt-announcement-panel.wt-panel-show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: all;
+}
+
+.wt-announcement-panel.wt-panel-hide {
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none;
+}
+
+/* Panel header row */
+.wt-ann-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(30, 45, 61, 0.95);
+    border-radius: 8px 8px 0 0;
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-bottom: none;
+}
+
+.wt-ann-panel-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #ecf0f1;
+}
+
+.wt-ann-dismiss-all {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: color 0.15s;
+    font-family: inherit;
+}
+
+.wt-ann-dismiss-all:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Individual announcement card */
+.wt-announcement {
+    background: #1e2d3d;
+    border-radius: 8px;
+    border-left: 4px solid #667eea;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    transition: opacity 0.3s ease, transform 0.3s ease, max-height 0.3s ease;
+    max-height: 400px;
+}
+
+/* First card connects to panel header */
+.wt-ann-panel-header + .wt-announcement {
+    border-radius: 0 0 8px 8px;
+    border-top: none;
+}
+
+.wt-announcement.wt-ann-dismissed {
+    opacity: 0;
+    transform: translateX(20px);
+    max-height: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+}
+
+/* Type colour coding */
+.wt-announcement-info        { border-left-color: #4a9eff; }
+.wt-announcement-success     { border-left-color: #28a745; }
+.wt-announcement-warning     { border-left-color: #ffc107; }
+.wt-announcement-new-feature { border-left-color: #667eea; }
+
+/* Announcement header */
+.wt-ann-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px 6px;
+}
+
+.wt-ann-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+}
+
+.wt-ann-date {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    white-space: nowrap;
+    padding-top: 2px;
+}
+
+.wt-ann-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: 3px;
+    transition: color 0.15s;
+    font-family: inherit;
+    flex-shrink: 0;
+}
+
+.wt-ann-close:hover {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* Announcement body */
+.wt-ann-body {
+    padding: 0 12px 12px;
+    color: #cdd6e0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.wt-ann-body p {
+    margin: 0 0 8px;
+}
+
+.wt-ann-body p:last-child {
+    margin-bottom: 0;
+}
+
+.wt-ann-tour-btn {
+    margin-top: 10px;
+    width: 100%;
+    justify-content: center;
+    padding: 8px 16px;
+    font-size: 13px;
+}
+
+/* ---------------------------------------------------------------------------
+   SCROLLBAR STYLING for announcement panel
+   --------------------------------------------------------------------------- */
+.wt-announcement-panel::-webkit-scrollbar {
+    width: 5px;
+}
+
+.wt-announcement-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.wt-announcement-panel::-webkit-scrollbar-thumb {
+    background: rgba(102, 126, 234, 0.4);
+    border-radius: 3px;
+}
+
+/* ---------------------------------------------------------------------------
+   RESPONSIVE — narrow screens
+   --------------------------------------------------------------------------- */
+@media (max-width: 480px) {
+    .wt-card,
+    .wt-card-center {
+        width: calc(100vw - 24px);
+        max-width: none;
+        left: 12px !important;
+        right: 12px;
+        transform: none !important;
+    }
+
+    .wt-card-center {
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+    }
+
+    .wt-announcement-panel {
+        bottom: 12px;
+        right: 12px;
+        left: 12px;
+        width: auto;
+    }
+}

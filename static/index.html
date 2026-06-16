@@ -15,6 +15,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="welcome-tour.css">
     <!-- Set waterfall height CSS variable immediately from localStorage to avoid layout flash -->
     <script>
         (function() {
@@ -1784,6 +1785,10 @@
             });
         }
     </script>
+    <!-- Welcome Tour & Announcements -->
+    <script src="welcome-tour.js"></script>
+    <script>WelcomeTour.init();</script>
+
     <!-- Waterfall pause overlay — position: fixed, positioned over spectrum canvas by JS -->
     <div id="waterfall-pause-overlay" class="waterfall-pause-overlay" style="display:none;">
         <button class="waterfall-pause-overlay-btn" onclick="toggleWaterfallPause()" aria-label="Resume waterfall" title="Click to resume waterfall">

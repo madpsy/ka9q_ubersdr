@@ -118,7 +118,7 @@
   <div id="aviz-header">
     <span id="aviz-title">Audio</span>
     <span id="aviz-tabs">
-      <span class="aviz-tab aviz-on" id="aviz-tab-scope" title="Toggle oscilloscope">Scope</span>
+      <span class="aviz-tab" id="aviz-tab-scope" title="Toggle oscilloscope">Scope</span>
       <span class="aviz-tab aviz-on" id="aviz-tab-wf" title="Toggle waterfall">Waterfall</span>
     </span>
     <span id="aviz-close" title="Dismiss">&#x2715;</span>
@@ -175,7 +175,7 @@
   else if (narrowMQ.addListener) narrowMQ.addListener(onWidthChange); // older Safari
 
   // Which views are enabled.
-  var views = { scope: true, wf: true };
+  var views = { scope: false, wf: true };
 
   // Map the waterfall to the currently-set audio passband. Mirrors the main
   // visualiser's getFrequencyBinMapping(): FFT bins are always positive, so we

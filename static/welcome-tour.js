@@ -122,6 +122,7 @@
                    </ul>
                    <p>Useful for studying a signal without the display scrolling away, or for saving bandwidth.</p>`,
             position: 'bottom',
+            mobilePosition: 'center',
             platform: 'both'
         },
         {
@@ -216,7 +217,7 @@
                    after 5 minutes of inactivity.</p>
                    <p>When paused, the waterfall stops updating — saving battery and data on
                    mobile. Tap anywhere on the waterfall to resume.</p>`,
-            position: 'bottom',
+            position: 'center',
             platform: 'mobile',
             // Only shown when the auto-pause label is visible (mobile CSS makes it flex)
             condition: () => {
@@ -678,7 +679,9 @@
 
         // Allow layout to settle before positioning
         requestAnimationFrame(() => {
-            positionTooltipCard(card, rect, step.position);
+            const isMobile = window.innerWidth <= 768;
+            const pos = (isMobile && step.mobilePosition) ? step.mobilePosition : step.position;
+            positionTooltipCard(card, rect, pos);
         });
     }
 

@@ -513,19 +513,25 @@ class SpectrumDisplay {
                         // Tune to the DX spot
                         if (window.dxClusterExtensionInstance) {
                             window.dxClusterExtensionInstance.tuneToSpot(pos.spot);
-                            // If the lookup popup is already open (opened by any extension or toolbar button),
-                            // update it with this callsign without opening a new window
+                        }
+                        // Notify all callsign lookup surfaces (inline QRZ widget + popup).
+                        // lookupCallsign() handles both cache hits (renders immediately) and
+                        // cache misses (fires fetch → broadcasts 'callsign_lookup_complete').
+                        // The popup-window path is checked first so we don't open a second window.
+                        const dxCallsign = (pos.spot && pos.spot.dx_call) || '';
+                        if (dxCallsign) {
                             if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
-                                const callsign = pos.spot.dx_call || '';
-                                const parts = callsign.split('/');
+                                const parts = dxCallsign.split('/');
                                 const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
                                 const ext = window.dxClusterExtensionInstance;
-                                const uuid = ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
+                                const uuid = ext && ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
                                 window._callsignLookupWindow.postMessage(
                                     { type: 'callsign_lookup', callsign: baseCallsign, uuid },
                                     window.location.origin
                                 );
                                 window._callsignLookupWindow.focus();
+                            } else if (typeof window.lookupCallsign === 'function') {
+                                window.lookupCallsign(dxCallsign);
                             }
                         }
                         return;
@@ -546,19 +552,25 @@ class SpectrumDisplay {
                         // Tune to the CW spot
                         if (window.cwSpotsExtensionInstance) {
                             window.cwSpotsExtensionInstance.tuneToSpot(pos.spot);
-                            // If the lookup popup is already open (opened by any extension or toolbar button),
-                            // update it with this callsign without opening a new window
+                        }
+                        // Notify all callsign lookup surfaces (inline QRZ widget + popup).
+                        // lookupCallsign() handles both cache hits (renders immediately) and
+                        // cache misses (fires fetch → broadcasts 'callsign_lookup_complete').
+                        // The popup-window path is checked first so we don't open a second window.
+                        const cwCallsign = (pos.spot && pos.spot.dx_call) || '';
+                        if (cwCallsign) {
                             if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
-                                const callsign = pos.spot.dx_call || '';
-                                const parts = callsign.split('/');
+                                const parts = cwCallsign.split('/');
                                 const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
                                 const ext = window.cwSpotsExtensionInstance;
-                                const uuid = ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
+                                const uuid = ext && ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
                                 window._callsignLookupWindow.postMessage(
                                     { type: 'callsign_lookup', callsign: baseCallsign, uuid },
                                     window.location.origin
                                 );
                                 window._callsignLookupWindow.focus();
+                            } else if (typeof window.lookupCallsign === 'function') {
+                                window.lookupCallsign(cwCallsign);
                             }
                         }
                         return;

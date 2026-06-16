@@ -316,6 +316,12 @@
     if (typeof window.setFrequency === 'function') window.setFrequency(marker.freq);
     if (marker.mode && typeof window.setMode === 'function') window.setMode(marker.mode, false);
     update();
+    // Notify lookup widgets if the callsign result is already cached.
+    // _fetchCallsignForMediaSession returns early on a cache hit and won't fire
+    // 'callsign_lookup_complete', so we do it explicitly here.
+    if (typeof window._notifyLookupWidgetIfCached === 'function') {
+      window._notifyLookupWidgetIfCached(marker);
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────

@@ -1411,6 +1411,31 @@ function _refreshCallsignDisplays() {
 window._refreshCallsignDisplays = _refreshCallsignDisplays;
 
 /**
+ * If a marker is a callsign type (cw/dx/voice) and its lookup result is already
+ * in the cache, dispatch 'callsign_lookup_complete' immediately so lookup widgets
+ * (e.g. qrz_lookup.widget.html) are notified even when _fetchCallsignForMediaSession
+ * returns early due to a cache hit (and therefore never fires the event itself).
+ *
+ * Called after any navigation that tunes to a new marker: skip buttons, dial-wheel
+ * edge arrows, marker.widget.html prev/next buttons, etc.
+ */
+function _notifyLookupWidgetIfCached(marker) {
+    if (!marker) return;
+    if (!_CALLSIGN_MARKER_TYPES.has(marker.type)) return;
+    const callsign = _normaliseCallsign(marker.name || '');
+    if (!callsign) return;
+    const cached = _callsignLookupCache.get(callsign);
+    if (cached && cached.data) {
+        window.dispatchEvent(new CustomEvent('callsign_lookup_complete', {
+            detail: { callsign, data: cached.data, imageUrl: cached.imageUrl, cache: _callsignLookupCache }
+        }));
+    }
+    // If not cached yet, _fetchCallsignForMediaSession (called via _enrichMarkerName)
+    // will fire the event once the fetch completes — nothing extra needed.
+}
+window._notifyLookupWidgetIfCached = _notifyLookupWidgetIfCached;
+
+/**
  * Given a marker {name, type}, return the enriched display string.
  * If the marker is a callsign type and the lookup cache has a result,
  * returns "CALL • FirstName • Country" (omitting empty parts).
@@ -14944,6 +14969,11 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         updateSpectrumCursor();
 
         updateWheelMarkerLabel();
+
+        // Notify lookup widgets if the callsign result is already cached
+        // (avoids the case where _fetchCallsignForMediaSession returns early
+        // on a cache hit and never fires 'callsign_lookup_complete').
+        _notifyLookupWidgetIfCached(marker);
     }
 
     // Jump to the adjacent spot/bookmark marker, reusing the same prev/next
@@ -14954,7 +14984,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         const { prev, next } = findMarkers(getDialHz(), window.currentMode, window.markerNavTypes);
         const marker = direction < 0 ? prev : next;
         if (!marker) return false;
-        tuneToMarker(marker);
+        tuneToMarker(marker); // _notifyLookupWidgetIfCached is called inside tuneToMarker
         return true;
     };
 

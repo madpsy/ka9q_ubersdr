@@ -12699,7 +12699,10 @@ async function setMediaSessionEnabled(enabled) {
         try {
             if (_useMediaSessionBridge) {
                 // ── Bridge path (Apple/Firefox) ──────────────────────────────
-                if (!_isApple && !mediaElement) {
+                // Apple (iOS/macOS Safari) requires a playing media element for
+                // lock-screen / Control Center controls; create it for all
+                // bridge-path browsers (the outer guard already scopes this).
+                if (!mediaElement) {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._mediaStreamDest = dest;
                     mediaElement = document.createElement('audio');

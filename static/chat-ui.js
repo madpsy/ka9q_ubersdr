@@ -1348,6 +1348,7 @@ class ChatUI {
             const messageTime = new Date(data.timestamp).getTime();
             if (!this.isExpanded && messageTime > this.lastSeenMessageTime) {
                 this.incrementUnread(isMention);
+                this.triggerHaptic(isMention);
             }
 
             // Play sound if we were mentioned (and it's a new message)
@@ -2665,6 +2666,22 @@ class ChatUI {
             if (mentionIndicator) {
                 mentionIndicator.style.display = 'block';
             }
+        }
+    }
+
+    /**
+     * Trigger haptic feedback on devices that support the Vibration API.
+     * Only fires when the user is logged in to chat.
+     * Silently does nothing on iOS and desktop where the API is unavailable.
+     * @param {boolean} isMention - Use a stronger pattern for @mentions
+     */
+    triggerHaptic(isMention = false) {
+        if (!navigator.vibrate) return;
+        if (!this.chat || !this.chat.isJoined()) return;
+        if (isMention) {
+            navigator.vibrate([100, 50, 100]); // double-buzz for @mentions
+        } else {
+            navigator.vibrate(40);             // short tap for regular messages
         }
     }
 

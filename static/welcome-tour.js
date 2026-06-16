@@ -288,7 +288,6 @@
             title: '🎉 You\'re all set!',
             body: `<p>That covers the main controls. A few more tips:</p>
                    <ul>
-                     <li>Press <kbd>?</kbd> or <kbd>H</kbd> to see all keyboard shortcuts</li>
                      <li>The <strong>Audio Filters</strong> section has notch, bandpass,
                          compressor and stereo virtualiser</li>
                      <li>The <strong>Audio Visualisation</strong> section has an oscilloscope
@@ -321,19 +320,6 @@
             body: `<p>The <strong>vertical zoom slider</strong> on the right edge of the waterfall adjusts how much of the signal amplitude range is shown.</p>
                    <p>Drag it up to zoom in on weak signals, or down to see the full dynamic range.</p>`,
             position: 'left',
-            platform: 'mobile'
-        },
-        {
-            target: null,
-            title: '🎉 You\'re all set!',
-            body: `<p>That covers the main controls. A few more tips:</p>
-                   <ul>
-                     <li>Tap the <strong>band badges</strong> to jump to a band quickly</li>
-                     <li>Use the <strong>tuning wheel</strong> to fine-tune your frequency</li>
-                     <li>The <strong>Audio Filters</strong> section below has advanced DSP tools</li>
-                   </ul>
-                   <p>Enjoy the bands! 73 de UberSDR 📻</p>`,
-            position: 'center',
             platform: 'mobile'
         }
     ];

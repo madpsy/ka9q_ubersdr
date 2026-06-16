@@ -182,19 +182,6 @@
             platform: 'desktop'
         },
         {
-            target: '.audio-controls',
-            title: '🔊 Audio Controls',
-            body: `<p>Control your listening experience here:</p>
-                   <ul>
-                     <li><strong>Mute</strong> — silence audio instantly</li>
-                     <li><strong>NR</strong> — noise reduction</li>
-                     <li><strong>NB</strong> — noise blanker</li>
-                     <li><strong>Rec</strong> — record audio</li>
-                   </ul>`,
-            position: 'top',
-            platform: 'mobile'
-        },
-        {
             target: '#nr2-quick-toggle',
             title: '🔇 Noise Reduction (NR)',
             body: `<p>The <strong>NR</strong> button cycles through noise reduction modes:</p>

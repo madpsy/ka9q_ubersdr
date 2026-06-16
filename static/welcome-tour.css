@@ -413,18 +413,13 @@
    RESPONSIVE — narrow screens
    --------------------------------------------------------------------------- */
 @media (max-width: 480px) {
-    .wt-card,
+    /* Center modal stays centred; positioned cards are handled by JS */
     .wt-card-center {
-        width: calc(100vw - 24px);
-        max-width: none;
-        left: 12px !important;
-        right: 12px;
-        transform: none !important;
-    }
-
-    .wt-card-center {
+        width: calc(100vw - 24px) !important;
+        max-width: none !important;
+        left: 50% !important;
         top: 50% !important;
-        transform: translateY(-50%) !important;
+        transform: translate(-50%, -50%) !important;
     }
 
     .wt-announcement-panel {

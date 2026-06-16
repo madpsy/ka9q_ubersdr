@@ -566,9 +566,10 @@
     }
 
     function positionTooltipCard(card, rect, position) {
-        const margin = 18;
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
+        const margin   = 14;
+        const vw       = window.innerWidth;
+        const vh       = window.innerHeight;
+        const isMobile = vw <= 768;
 
         card.style.cssText = '';
 
@@ -582,32 +583,67 @@
 
         card.classList.remove('wt-card-center');
 
-        const cw = card.offsetWidth  || 340;
-        const ch = card.offsetHeight || 260;
-
-        let top, left;
-
-        switch (position) {
-            case 'bottom':
-                top  = rect.top + rect.height + margin;
-                left = rect.left + rect.width / 2 - cw / 2;
-                break;
-            case 'top':
-                top  = rect.top - ch - margin;
-                left = rect.left + rect.width / 2 - cw / 2;
-                break;
-            case 'right':
-                top  = rect.top + rect.height / 2 - ch / 2;
-                left = rect.left + rect.width + margin;
-                break;
-            case 'left':
-                top  = rect.top + rect.height / 2 - ch / 2;
-                left = rect.left - cw - margin;
-                break;
-            default:
-                top  = rect.top + rect.height + margin;
-                left = rect.left + rect.width / 2 - cw / 2;
+        // On mobile, cap card width so it doesn't span the full screen and
+        // cover narrow elements (e.g. the vzoom slider on the right edge).
+        if (isMobile) {
+            card.style.maxWidth = Math.min(vw - margin * 2, 300) + 'px';
         }
+
+        const cw = card.offsetWidth  || (isMobile ? 280 : 340);
+        const ch = card.offsetHeight || 240;
+
+        // Helper: compute top/left for a given side
+        function calcPos(side) {
+            switch (side) {
+                case 'bottom': return { top: rect.top + rect.height + margin,
+                                        left: rect.left + rect.width / 2 - cw / 2 };
+                case 'top':    return { top: rect.top - ch - margin,
+                                        left: rect.left + rect.width / 2 - cw / 2 };
+                case 'right':  return { top: rect.top + rect.height / 2 - ch / 2,
+                                        left: rect.left + rect.width + margin };
+                case 'left':   return { top: rect.top + rect.height / 2 - ch / 2,
+                                        left: rect.left - cw - margin };
+                default:       return { top: rect.top + rect.height + margin,
+                                        left: rect.left + rect.width / 2 - cw / 2 };
+            }
+        }
+
+        // On mobile, auto-flip the preferred side if it would go off-screen or
+        // overlap the spotlight rect.  Try the requested side first, then
+        // fall back through alternatives in priority order.
+        let resolvedSide = position;
+        if (isMobile) {
+            const fallbackOrder = {
+                'bottom': ['bottom', 'top', 'right', 'left'],
+                'top':    ['top', 'bottom', 'right', 'left'],
+                'right':  ['right', 'left', 'bottom', 'top'],
+                'left':   ['left', 'right', 'bottom', 'top']
+            };
+            const order = fallbackOrder[position] || ['bottom', 'top', 'right', 'left'];
+            for (const side of order) {
+                const p = calcPos(side);
+                const fitsH = p.left >= margin && p.left + cw <= vw - margin;
+                const fitsV = p.top  >= margin && p.top  + ch <= vh - margin;
+                // Also check the card doesn't overlap the spotlight rect
+                const overlapsSpot = !(
+                    p.left + cw < rect.left - margin ||
+                    p.left      > rect.left + rect.width  + margin ||
+                    p.top  + ch < rect.top  - margin ||
+                    p.top       > rect.top  + rect.height + margin
+                );
+                if (fitsH && fitsV && !overlapsSpot) {
+                    resolvedSide = side;
+                    break;
+                }
+                // Accept a side that fits spatially even if it slightly overlaps
+                if (fitsH && fitsV) {
+                    resolvedSide = side;
+                    break;
+                }
+            }
+        }
+
+        let { top, left } = calcPos(resolvedSide);
 
         // Clamp to viewport
         left = Math.max(margin, Math.min(left, vw - cw - margin));

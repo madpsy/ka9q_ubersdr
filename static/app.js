@@ -218,17 +218,45 @@ const wsManager = new WebSocketManager({
                 autoTune();
                 log('Re-synced frequency/mode/bandwidth after connect');
             }
+
+            // Restore SNR squelch if it was active before the disconnect.
+            // _savedSNRSquelchValue is set in onDisconnect before the slider is reset.
+            if (typeof _savedSNRSquelchValue !== 'undefined' && _savedSNRSquelchValue !== null) {
+                const snrSl = document.getElementById('snr-squelch-slider');
+                if (snrSl && typeof SNR_SQUELCH_OFF_VAL !== 'undefined' &&
+                    _savedSNRSquelchValue > SNR_SQUELCH_OFF_VAL) {
+                    snrSl.value = _savedSNRSquelchValue;
+                    if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
+                    // Re-send the gate threshold to the server
+                    if (typeof snrSquelchThreshold === 'function') {
+                        const t = snrSquelchThreshold(_savedSNRSquelchValue);
+                        wsManager.send({ type: 'set_audio_gate', min_snr: t });
+                        log(`Restored SNR squelch threshold: ${t} dB`);
+                    }
+                }
+                _savedSNRSquelchValue = null;
+            }
+
+            // Restore server-side NR (DSP) if it was active before the disconnect.
+            // _lastDspStatus is the last dsp_status message received from the server.
+            if (typeof _lastDspStatus !== 'undefined' && _lastDspStatus &&
+                _lastDspStatus.info && _lastDspStatus.info.enabled && _lastDspStatus.info.filter) {
+                const filter = _lastDspStatus.info.filter;
+                wsManager.send({ type: 'set_dsp', enabled: true, filter: filter, params: {} });
+                log(`Restored server NR: ${filter.toUpperCase()}`);
+            }
         }, 0);
     },
     onDisconnect: () => {
         log('Disconnected');
         updateConnectionStatus('disconnected');
         stopStatsUpdates();
-        // Reset SNR squelch slider to "Off" position on disconnect
+        // Save SNR squelch value before resetting so onConnect can restore it.
         const snrSl = document.getElementById('snr-squelch-slider');
-        if (snrSl) {
+        if (snrSl && typeof SNR_SQUELCH_OFF_VAL !== 'undefined') {
+            _savedSNRSquelchValue = parseFloat(snrSl.value);
             snrSl.value = SNR_SQUELCH_OFF_VAL;
-            updateSNRSquelchDisplay();
+            if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
         }
     },
     onError: (error) => {
@@ -6865,6 +6893,9 @@ window.updateSquelch = updateSquelch;
 // ── SNR Squelch (audio gate via set_audio_gate WebSocket message) ─────────
 const SNR_SQUELCH_OFF_VAL  = 24;    // slider far-left position = disabled
 const SNR_SQUELCH_SENTINEL = -999;  // value sent to server when disabled
+// Saved slider value across disconnect/reconnect cycles.
+// Set in onDisconnect (before slider is reset to Off), consumed in onConnect.
+let _savedSNRSquelchValue = null;
 
 function snrSquelchThreshold(sliderVal) {
     const v = parseFloat(sliderVal);

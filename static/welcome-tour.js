@@ -231,7 +231,6 @@
             title: '🔊 Audio Controls',
             body: `<p>Control your listening experience here:</p>
                    <ul>
-                     <li><strong>Volume</strong> — master output level</li>
                      <li><strong>Mute</strong> — silence audio instantly</li>
                      <li><strong>NR</strong> — noise reduction</li>
                      <li><strong>NB</strong> — noise blanker</li>
@@ -286,6 +285,35 @@
             }
         },
         {
+            target: '#audio-buffer-display',
+            title: '🔊 Audio Settings',
+            body: `<p>This indicator in the bottom-right shows the <strong>audio buffer level</strong>.
+                   Click it to open the <strong>Audio Settings</strong> modal where you can:</p>
+                   <ul>
+                     <li><strong>Buffer size</strong> — set the maximum audio buffer (50–500ms); lower = less latency, higher = smoother playback on slow connections</li>
+                     <li><strong>Output device</strong> — choose which speaker or headphone output to use</li>
+                     <li><strong>Media Session</strong> — enable lock-screen playback controls</li>
+                     <li><strong>SNR history</strong> — view a live signal quality chart</li>
+                   </ul>`,
+            position: 'left',
+            platform: 'both'
+        },
+        {
+            target: '#chat-header',
+            title: '💬 Live Chat',
+            body: `<p>This instance has <strong>live chat</strong> enabled. Click the tab on the
+                   right edge of the screen to open the chat panel.</p>
+                   <ul>
+                     <li>Choose a username and click <strong>Join</strong> to start chatting</li>
+                     <li>Share your current frequency with the 📻 button</li>
+                     <li>Click another user's callsign to <strong>sync</strong> to their frequency</li>
+                   </ul>`,
+            position: 'left',
+            platform: 'both',
+            // Only shown when the chat panel has been injected into the DOM (chat_enabled = true)
+            condition: () => !!document.getElementById('chat-header')
+        },
+        {
             target: '#bookmark-selector',
             title: '🔖 Bookmarks',
             body: `<p>Jump to pre-configured frequencies using the bookmark dropdowns:</p>
@@ -309,7 +337,7 @@
                    </ul>
                    <p>Select an extension from the dropdown to open its panel.</p>`,
             position: 'right',
-            platform: 'both'
+            platform: 'desktop'
         },
         {
             target: '#addons-dropdown',
@@ -367,15 +395,6 @@
     //   platform — 'both' (default) | 'desktop' | 'mobile'
     // =========================================================================
     const ANNOUNCEMENTS = [
-        {
-            id: 'welcome-v1',
-            title: '👋 Welcome to UberSDR',
-            body: `<p>Thanks for using UberSDR! Take the <strong>Welcome Tour</strong> to learn
-                   about all the features available to you.</p>`,
-            type: 'info',
-            date: '2025-01-01',
-            platform: 'both'
-        }
         // -----------------------------------------------------------------------
         // Add new announcements here. Give each a unique `id`.
         // The `platform` field controls which devices see the announcement:

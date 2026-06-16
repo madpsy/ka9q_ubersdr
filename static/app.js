@@ -233,15 +233,19 @@ const wsManager = new WebSocketManager({
             // parameter in the WebSocket URL — we only need to update the UI here.
             // NOTE: audio_gate_updated is NOT sent by the server on connect, only in
             // response to set_audio_gate, so we must restore the slider here directly.
+            console.log('[SNR-DEBUG] onConnect setTimeout: _savedSNRSquelchValue=', _savedSNRSquelchValue, 'SNR_SQUELCH_OFF_VAL=', SNR_SQUELCH_OFF_VAL);
             if (typeof _savedSNRSquelchValue === 'number' && _savedSNRSquelchValue !== null &&
                 _savedSNRSquelchValue > SNR_SQUELCH_OFF_VAL) {
                 const sl = document.getElementById('snr-squelch-slider');
+                console.log('[SNR-DEBUG] onConnect setTimeout: restoring slider, sl found=', !!sl, 'value to set=', _savedSNRSquelchValue);
                 if (sl) {
                     sl.value = _savedSNRSquelchValue;
                     if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
                     log(`Restored SNR squelch display: ${_savedSNRSquelchValue} dB`);
                 }
                 _savedSNRSquelchValue = null;
+            } else {
+                console.log('[SNR-DEBUG] onConnect setTimeout: NOT restoring - condition failed. typeof=', typeof _savedSNRSquelchValue, 'value=', _savedSNRSquelchValue, '> OFF_VAL?', _savedSNRSquelchValue > SNR_SQUELCH_OFF_VAL);
             }
         }, 0);
     },
@@ -251,11 +255,13 @@ const wsManager = new WebSocketManager({
         stopStatsUpdates();
         // Save SNR squelch value before resetting so onConnect can restore it.
         const snrSl = document.getElementById('snr-squelch-slider');
+        console.log('[SNR-DEBUG] onDisconnect: slider found=', !!snrSl, 'slider.value=', snrSl ? snrSl.value : 'N/A', 'SNR_SQUELCH_OFF_VAL defined=', typeof SNR_SQUELCH_OFF_VAL !== 'undefined', 'SNR_SQUELCH_OFF_VAL=', typeof SNR_SQUELCH_OFF_VAL !== 'undefined' ? SNR_SQUELCH_OFF_VAL : 'UNDEF');
         if (snrSl && typeof SNR_SQUELCH_OFF_VAL !== 'undefined') {
             _savedSNRSquelchValue = parseFloat(snrSl.value);
             snrSl.value = SNR_SQUELCH_OFF_VAL;
             if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
         }
+        console.log('[SNR-DEBUG] onDisconnect: _savedSNRSquelchValue after save=', _savedSNRSquelchValue);
     },
     onError: (error) => {
         if (error.type === 'connection_rejected' || error.type === 'reconnection_blocked') {

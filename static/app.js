@@ -228,17 +228,21 @@ const wsManager = new WebSocketManager({
                 log(`Restored server NR: ${filter.toUpperCase()}`);
             }
 
-            // Restore SNR squelch slider display after reconnect.
+            // Restore SNR squelch slider display and server gate after reconnect.
             // _lastUserSNRSliderValue tracks the last value the user set (updated in
-            // sendSNRSquelch). The server already has the correct gate value from the
-            // min_snr URL parameter — we only need to restore the UI here.
+            // sendSNRSquelch). We restore both the UI and explicitly send set_audio_gate
+            // to the server — the URL param alone is not reliable enough.
             if (typeof _lastUserSNRSliderValue === 'number' &&
                 _lastUserSNRSliderValue > SNR_SQUELCH_OFF_VAL) {
                 const sl = document.getElementById('snr-squelch-slider');
                 if (sl) {
                     sl.value = _lastUserSNRSliderValue;
                     if (typeof updateSNRSquelchDisplay === 'function') updateSNRSquelchDisplay();
-                    log(`Restored SNR squelch display: ${_lastUserSNRSliderValue} dB`);
+                    const t = (typeof snrSquelchThreshold === 'function')
+                        ? snrSquelchThreshold(_lastUserSNRSliderValue)
+                        : _lastUserSNRSliderValue;
+                    wsManager.send({ type: 'set_audio_gate', min_snr: t });
+                    log(`Restored SNR squelch: ${t} dB`);
                 }
             }
         }, 0);

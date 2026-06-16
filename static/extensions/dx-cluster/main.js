@@ -280,6 +280,31 @@ class DXClusterExtension extends DecoderExtension {
                 this.initialMarkerTimeout = null;
             }, 1000);
         }
+
+        // If this is a live (non-buffered) spot that matches the currently tuned
+        // frequency+mode, refresh the marker overlay, VU-meter label and MediaSession
+        // metadata immediately so the callsign lookup fires and the lock-screen /
+        // callsign_lookup.html popup updates without requiring a retune.
+        if (isNewSpot && this.isCurrentSpot(spot)) {
+            this._refreshCurrentSpotDisplays();
+        }
+    }
+
+    // Trigger all marker/MediaSession surfaces to re-evaluate the current dial
+    // position.  Mirrors what app.js does for the localBookmarksUpdated event.
+    // updateMediaSession is defined in app.js function scope so it isn't on
+    // window — we reach it via window.refreshMarkerNav which calls
+    // updateWheelMarkerLabel → _enrichMarkerName → _fetchCallsignForMediaSession,
+    // and _refreshCallsignDisplays() calls updateMediaSession() once the lookup
+    // resolves.  refreshVUMeterMarker(true) forces the VU-meter overlay to
+    // re-evaluate immediately with the new spot name.
+    _refreshCurrentSpotDisplays() {
+        if (typeof window.refreshMarkerNav === 'function') {
+            window.refreshMarkerNav();
+        }
+        if (typeof window.refreshVUMeterMarker === 'function') {
+            window.refreshVUMeterMarker(true);
+        }
     }
 
     ensureMarkersDrawn() {
@@ -734,13 +759,19 @@ class DXClusterExtension extends DecoderExtension {
         
         if (!currentFreq || !currentMode) return false;
         
-        // Determine expected mode for this spot
+        // Determine expected mode for this spot — mirrors tuneToSpot() logic exactly.
         const freqMHz = spot.frequency / 1000000;
         const comment = (spot.comment || '').toUpperCase();
-        const isCW = comment.includes('CW');
+        const isCW      = comment.includes('CW');
+        const isFT8     = comment.includes('FT8');
+        const isFT4     = comment.includes('FT4');
+        const isDigital = isFT8 || isFT4;
         
         let expectedMode;
-        if (isCW) {
+        if (isDigital) {
+            // FT8/FT4 always use USB on all bands
+            expectedMode = 'usb';
+        } else if (isCW) {
             expectedMode = freqMHz >= 10 ? 'cwu' : 'cwl';
         } else {
             expectedMode = freqMHz >= 10 ? 'usb' : 'lsb';

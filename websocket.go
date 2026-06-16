@@ -1864,15 +1864,23 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// always operate on the same (noise-reduced) audio.
 			audioPacket.PCMData = pcmData
 
-			// Client mute: suppress all audio when muted.
-			// Signal-quality silence packets from the ticker continue flowing.
-			// Placed after DSP (consistent with audio gate) so the DSP pipeline
-			// stays warm and both WebSocket and HTTP paths are covered.
+			// Client mute: substitute silence when muted so the media session stays
+			// alive (Web Audio API / MediaSession require a continuous stream).
+			// Signal-quality silence packets from the ticker continue flowing because
+			// sendingSilence=true prevents lastAudioTime from being updated below.
+			// Placed after DSP so the DSP pipeline stays warm and both WebSocket and
+			// HTTP paths are covered.
 			session.mu.RLock()
 			isMuted := session.Muted
 			session.mu.RUnlock()
+			// sendingSilence tracks whether this packet carries injected silence
+			// (gate closed or muted) rather than real demodulated audio.
+			// Used below to suppress lastAudioTime updates so the signal-quality
+			// ticker keeps firing even while audio is being streamed.
+			sendingSilence := false
 			if isMuted {
-				continue // muted — skip audio, signal-quality ticker continues
+				audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
+				sendingSilence = true
 			}
 
 			// HTTP audio stream tap: if an HTTP /audio/stream consumer is active for
@@ -1903,8 +1911,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						}
 					}
 					if !audioGateAllows(session, bbPower, ndDensity) {
-						// Gate closed — drop packet for both HTTP and WebSocket paths.
-						continue
+						// Gate closed — substitute silence so the media session stays alive.
+						// Zeroing the PCM data keeps packet timing intact (no gaps) which
+						// prevents Web Audio API stalls and MediaSession dismissal.
+						// Do NOT update lastAudioTime so the signal-quality ticker keeps firing.
+						audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
 					}
 				}
 				select {
@@ -1977,8 +1988,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// Audio gate: 3 dB hysteresis + 500 ms hang timer.
 				// IQ modes carry raw RF samples — gating makes no sense there.
 				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
+				// When the gate is closed we substitute silence (all-zero PCM) rather than
+				// dropping the packet entirely.  This keeps the media session alive — the
+				// Web Audio API and MediaSession API both require a continuous audio stream.
+				// lastAudioTime is NOT updated for silence frames so the signal-quality
+				// ticker continues to fire and the client S-meter / SNR display stays live.
 				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
-					continue // gate closed — suppress audio, signal-quality ticker continues
+					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
+					sendingSilence = true
 				}
 
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
@@ -2019,8 +2036,13 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					copy(packet[13:], opusData)
 				}
 
-				// Track that real audio was sent (gate passed) — keeps the silence ticker quiet.
-				lastAudioTime = time.Now()
+				// Only update lastAudioTime when real audio was sent (gate open, not muted).
+				// When sendingSilence is true we sent silence to keep the media session alive,
+				// but we deliberately leave lastAudioTime stale so the signal-quality
+				// ticker continues to fire and the client S-meter / SNR display stays live.
+				if !sendingSilence {
+					lastAudioTime = time.Now()
+				}
 
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()
@@ -2089,8 +2111,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// Audio gate: 3 dB hysteresis + 500 ms hang timer.
 				// IQ modes carry raw RF samples — gating makes no sense there.
 				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
+				// When the gate is closed we substitute silence (all-zero PCM) rather than
+				// dropping the packet entirely.  This keeps the media session alive — the
+				// Web Audio API and MediaSession API both require a continuous audio stream.
+				// lastAudioTime is NOT updated for silence frames so the signal-quality
+				// ticker continues to fire and the client S-meter / SNR display stays live.
 				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
-					continue // gate closed — suppress audio, signal-quality ticker continues
+					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
+					sendingSilence = true
 				}
 
 				// Encode PCM packet with hybrid header strategy.
@@ -2115,8 +2143,13 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					continue
 				}
 
-				// Track that real audio was sent (gate passed) — keeps the silence ticker quiet.
-				lastAudioTime = time.Now()
+				// Only update lastAudioTime when real audio was sent (gate open, not muted).
+				// When sendingSilence is true we sent silence to keep the media session alive,
+				// but we deliberately leave lastAudioTime stale so the signal-quality
+				// ticker continues to fire and the client S-meter / SNR display stays live.
+				if !sendingSilence {
+					lastAudioTime = time.Now()
+				}
 
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()

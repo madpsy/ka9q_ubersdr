@@ -5550,7 +5550,6 @@ function playAudioBuffer(buffer) {
     }
     // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
     else if ((nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
-        console.log(`Dropping audio packet: buffer at ${((nextPlayTime - currentTime) * 1000).toFixed(0)}ms (max ${maxBufferMs}ms)`);
         lastDroppedFrameTime = performance.now(); // Record drop time for buffer indicator
         return; // Exit without scheduling this buffer
     }

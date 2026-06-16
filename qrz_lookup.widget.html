@@ -205,11 +205,43 @@
   @media (max-width: 768px) {
     #qrz-widget { display: none !important; }
   }
+
+  /* Mobile-only photo toast — top-left corner, 3-second auto-hide */
+  #qrz-mobile-photo-toast {
+    display: none;
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    width: 160px;
+    height: 160px;
+    border: 1px solid rgba(255,255,255,0.4);
+    border-radius: 5px;
+    overflow: hidden;
+    z-index: 9500;
+    opacity: 1;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+    background: #000;
+  }
+  #qrz-mobile-photo-toast img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  @media (min-width: 769px) {
+    #qrz-mobile-photo-toast { display: none !important; }
+  }
 </style>
 
 <!-- Photo modal — appended to body so it overlays everything -->
 <div id="qrz-photo-modal" role="dialog" aria-modal="true" aria-label="Photo enlarged">
   <img id="qrz-modal-img" src="#" alt="" />
+</div>
+
+<!-- Mobile photo toast — top-left, visible only on ≤768px screens -->
+<div id="qrz-mobile-photo-toast">
+  <img id="qrz-mobile-photo-img" src="#" alt="" />
 </div>
 
 <div id="qrz-widget" style="display:none;">
@@ -550,6 +582,46 @@
     inputEl.value = cs.toUpperCase();
     renderResult(cs.toUpperCase(), data);
   });
+
+  // ── Mobile photo toast ────────────────────────────────────────────────────
+  // On screens ≤768px the main widget is hidden; instead show a small photo
+  // box in the top-left corner for 3 seconds whenever a lookup with a photo
+  // completes (from any source — cw spots, dx cluster, manual entry, etc.).
+  (function () {
+    var toast     = document.getElementById('qrz-mobile-photo-toast');
+    var toastImg  = document.getElementById('qrz-mobile-photo-img');
+    var hideTimer = null;
+
+    function showMobilePhoto(src, alt) {
+      if (window.innerWidth > 768) return; // full widget handles desktop
+      if (hideTimer) clearTimeout(hideTimer);
+
+      // Hide the img until the new src is loaded to avoid flashing the old image.
+      toastImg.style.visibility = 'hidden';
+      toastImg.alt = alt || '';
+      toastImg.onload = function () {
+        toastImg.style.visibility = '';
+      };
+      toastImg.onerror = function () {
+        toast.style.display = 'none';
+      };
+      toastImg.src = src;
+
+      toast.style.opacity = '1';
+      toast.style.display = 'block';
+      hideTimer = setTimeout(function () {
+        toast.style.opacity = '0';
+        setTimeout(function () { toast.style.display = 'none'; }, 400);
+      }, 3000);
+    }
+
+    window.addEventListener('callsign_lookup_complete', function (e) {
+      var imageUrl = (e.detail && (e.detail.imageUrl || (e.detail.data && e.detail.data.image))) || '';
+      if (!imageUrl) return;
+      var cs = (e.detail && e.detail.callsign) || '';
+      showMobilePhoto(imageUrl, cs);
+    });
+  })();
 
 })();
 </script>

@@ -1614,40 +1614,37 @@ function updateMediaSession() {
     const newArtist = [freqMHz, modeStr, markerCallsign].filter(Boolean).join(' • ');
 
     // ── Artwork strategy ─────────────────────────────────────────────────────
-    // Standard UberSDR logo artwork:
-    //   Desktop: blob: URLs (pre-fetched once; stops Chrome's re-fetch storm
-    //            on every audio rebuffer event — Chrome re-fetches all artwork
-    //            on every waiting→playing transition of the <audio> element).
-    //   Mobile:  real HTTPS URLs — Bluetooth AVRCP fetches artwork outside the
-    //            browser context and cannot resolve blob: URLs.
+    // Standard UberSDR logo artwork: always use blob: URLs on all platforms.
     //
-    // QRZ operator photo (both desktop and mobile):
-    //   Always use the raw imageUrl directly.  QRZ's CDN does not send CORS
-    //   headers, so fetch()-to-blob fails silently.  Using the URL directly
-    //   works fine: MediaSession and Bluetooth AVRCP both accept cross-origin
-    //   image URLs.  The re-fetch storm concern only applies to our own server's
-    //   logo artwork (already handled by blobs above).
-    const isMobile = _isMobileChrome || _isApple;
+    // The browser fetches the artwork URL and passes the image data to the OS
+    // media session / Bluetooth stack — the car/OS never makes an independent
+    // network request.  This is the same mechanism Spotify uses.  blob: URLs
+    // are same-origin and always resolvable by the browser regardless of
+    // server certificate or network topology.
+    //
+    // Using absolute HTTPS URLs on mobile was a mistake: if the server uses a
+    // self-signed cert or a local IP, the browser silently refuses to fetch the
+    // artwork for the OS media session, resulting in no artwork on Bluetooth.
+    //
+    // blob: URLs also stop Chrome's re-fetch storm (hundreds of fetches during
+    // the audio buffering phase) on all platforms.
+    //
+    // QRZ operator photo: always use the raw imageUrl directly.  QRZ's CDN
+    // does not send CORS headers so fetch()-to-blob fails silently.  The
+    // browser can still pass the URL to the OS media session as a cross-origin
+    // URL — the OS fetches it via the phone's internet connection.
 
-    // Standard UberSDR logo artwork.
-    const standardArtwork = isMobile
-        // Mobile: always real HTTPS URLs so Bluetooth AVRCP can fetch them.
-        ? _artworkPaths.map(({ path, sizes, type }) => ({
+    // Standard UberSDR logo artwork — blob: URLs for all platforms.
+    const standardArtwork = _artworkBlobUrls
+        ? _artworkBlobUrls
+        : _artworkPaths.map(({ path, sizes, type }) => ({
             src: `${window.location.origin}${path}`, sizes, type
-          }))
-        // Desktop: blob URLs (cached after first enable) to stop re-fetch storm.
-        : (_artworkBlobUrls
-            ? _artworkBlobUrls
-            : _artworkPaths.map(({ path, sizes, type }) => ({
-                src: `${window.location.origin}${path}`, sizes, type
-              })));
+          }));
 
     // QRZ operator photo for the artwork array.
-    // We use the raw imageUrl directly on both desktop and mobile — QRZ's CDN
-    // does not send CORS headers so fetch()-to-blob fails silently.  Using the
-    // URL directly works fine: MediaSession accepts cross-origin image URLs and
-    // Bluetooth AVRCP can fetch them from qrz.com directly.  The re-fetch storm
-    // concern only applies to our own server's logo artwork (already blobbed).
+    // We use the raw imageUrl directly — QRZ's CDN does not send CORS headers
+    // so fetch()-to-blob fails silently.  The re-fetch storm concern only
+    // applies to our own server's logo artwork (already handled by blobs above).
     const cachedCallsign = (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type))
         ? (_callsignLookupCache.get(_normaliseCallsign(currentMarker.name)) || null)
         : null;
@@ -1684,9 +1681,11 @@ function updateMediaSession() {
             artwork
         });
 
-        // Desktop only: if blob URLs aren't cached yet, pre-fetch them now and
-        // re-apply metadata once ready (no-op if content changed again meanwhile).
-        if (!isMobile && !_artworkBlobUrls) {
+        // If blob URLs aren't cached yet, pre-fetch them now and re-apply
+        // metadata once ready (no-op if content changed again meanwhile).
+        // Applies to all platforms — blob: URLs are the correct approach
+        // everywhere (the browser fetches and passes image data to the OS).
+        if (!_artworkBlobUrls && !callsignImageUrl) {
             _ensureArtworkBlobUrls().then(blobArtwork => {
                 if (_lastMediaSessionTitle === newTitle &&
                     _lastMediaSessionArtist === newArtist &&

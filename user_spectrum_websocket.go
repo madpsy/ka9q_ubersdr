@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -145,6 +146,22 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	mode := query.Get("mode")
 	useBinary8 := mode == "binary8"
 
+	// Optional initial view parameters — client passes these on reconnect so the
+	// session starts at the correct frequency/zoom immediately, with no post-connect
+	// zoom/pan round-trip needed.
+	var initialFreq uint64
+	var initialBinBW float64
+	if freqStr := query.Get("frequency"); freqStr != "" {
+		if f, err := strconv.ParseFloat(freqStr, 64); err == nil && f > 0 {
+			initialFreq = uint64(f + 0.5)
+		}
+	}
+	if bwStr := query.Get("bin_bandwidth"); bwStr != "" {
+		if bw, err := strconv.ParseFloat(bwStr, 64); err == nil && bw > 0 {
+			initialBinBW = bw
+		}
+	}
+
 	if !useBinary8 {
 		log.Printf("Using binary spectrum mode (32-bit float) with delta encoding")
 	}
@@ -254,7 +271,28 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		log.Printf("Spectrum WebSocket session created: %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
 	}
 
-	// Send initial status
+	// Apply optional initial view parameters supplied by the client on reconnect.
+	// This lets the session start at the correct frequency/zoom immediately so the
+	// first config message already carries the right values — no post-connect
+	// zoom/pan round-trip is needed and there is no race with the initial config.
+	if initialFreq > 0 || initialBinBW > 0 {
+		freq := session.Frequency
+		bw := session.BinBandwidth
+		if initialFreq > 0 {
+			freq = initialFreq
+		}
+		if initialBinBW > 0 {
+			bw = initialBinBW
+		}
+		if err := swsh.sessions.UpdateSpectrumSession(session.ID, freq, bw, session.BinCount); err != nil {
+			log.Printf("Spectrum WebSocket: failed to apply initial view params (freq=%d, binBW=%f): %v", initialFreq, initialBinBW, err)
+			// Non-fatal — continue with server defaults
+		} else {
+			log.Printf("Spectrum WebSocket: applied initial view params freq=%d Hz, binBW=%f Hz/bin", freq, bw)
+		}
+	}
+
+	// Send initial status (reflects initial view params if supplied)
 	swsh.sendStatus(conn, session)
 
 	// Initialize spectrum state for delta encoding (always used in binary mode)

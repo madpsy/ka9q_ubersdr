@@ -208,6 +208,17 @@ const wsManager = new WebSocketManager({
                 }
             }
         }
+
+        // Re-sync frequency/mode/bandwidth with the server after every connect/reconnect.
+        // The server may have reset to defaults; push the current UI state back so the
+        // audio channel is always tuned to what the user last selected.
+        // Use setTimeout so autoTune() (defined later in the file) is available.
+        setTimeout(() => {
+            if (typeof autoTune === 'function') {
+                autoTune();
+                log('Re-synced frequency/mode/bandwidth after connect');
+            }
+        }, 0);
     },
     onDisconnect: () => {
         log('Disconnected');
@@ -5637,6 +5648,11 @@ function tune() {
     };
 
     wsManager.send(msg);
+
+    // Keep lastConnectionParams current so reconnect uses the right freq/mode/BW.
+    // Without this, reconnect always uses the original page-load parameters.
+    wsManager.lastConnectionParams = { frequency, mode, bandwidthLow, bandwidthHigh };
+
     log(`Tuning to ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)...`);
 
     // Reset noise reduction state when frequency changes

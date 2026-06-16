@@ -1532,6 +1532,17 @@ class SpectrumDisplay {
         // Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
         wsUrl += `&mode=binary8`;
 
+        // Pass current view state so the server starts the session at the correct
+        // frequency/zoom immediately — no post-connect zoom/pan round-trip needed
+        // and no race with the server's initial config message.
+        if (this.centerFreq > 0) {
+            wsUrl += `&frequency=${Math.round(this.centerFreq)}`;
+        }
+        const _lastZoom = this._lastSentByType && this._lastSentByType.zoom;
+        if (_lastZoom && _lastZoom.msg && _lastZoom.msg.binBandwidth > 0) {
+            wsUrl += `&bin_bandwidth=${_lastZoom.msg.binBandwidth}`;
+        }
+
         console.log('Connecting to spectrum WebSocket:', wsUrl);
 
         // Store connection URL params for external use (user_session_id, password, mode)

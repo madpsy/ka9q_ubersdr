@@ -2767,8 +2767,8 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
 
     sortedByRow.forEach(item => {
         const { spot, x, labelWidth, row } = item;
-        // Row 0 at y=32, Row 1 at y=17 (32 - 15) - matches bookmark positioning
-        const labelY = 32 - (row * rowSpacing);
+        // Row 0 at y=30, Row 1 at y=15 (30 - 15) - shifted up 2px to clear the black freq notch at y=45
+        const labelY = 30 - (row * rowSpacing);
 
         // Draw spot label
         ctx.font = 'bold 10px monospace';
@@ -2790,7 +2790,7 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;
-        const arrowTipY = 32 + labelHeight + arrowLength; // Always point to same baseline (adjusted for new position)
+        const arrowTipY = 30 + labelHeight + arrowLength; // Always point to same baseline
         ctx.fillStyle = 'rgba(23, 162, 184, 0.95)';
         ctx.beginPath();
         ctx.moveTo(x, arrowTipY); // Arrow tip at baseline

@@ -169,7 +169,7 @@
     sortedByRow.forEach(function (item) {
       var x = item.x;
       var labelWidth = item.labelWidth;
-      var labelY = 32 - (item.row * rowSpacing);
+      var labelY = 30 - (item.row * rowSpacing);
 
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
@@ -188,7 +188,7 @@
 
       // Downward arrow to the baseline
       var arrowStartY = labelY + labelHeight;
-      var arrowTipY   = 32 + labelHeight + arrowLength;
+      var arrowTipY   = 30 + labelHeight + arrowLength;
       ctx.fillStyle = BG_COLOR;
       ctx.beginPath();
       ctx.moveTo(x, arrowTipY);

@@ -495,8 +495,12 @@
       const hasSstv = addons.some(name => name.toLowerCase() === 'sstv');
       console.log('[sstv-widget] addons:', addons, '| hasSstv:', hasSstv);
       if (!hasSstv) {
-        console.log('[sstv-widget] SSTV addon not listed — widget hidden');
-        widget.style.display = 'none';
+        console.log('[sstv-widget] SSTV addon not listed — showing install prompt');
+        placeholder.textContent = 'This widget requires the SSTV Addon. Install via Admin → Addons';
+        placeholder.style.display = '';
+        imgEl.style.display = 'none';
+        infoEl.innerHTML = '';
+        document.getElementById('sdr-sstv-footer').style.display = 'none';
         return;
       }
       console.log('[sstv-widget] SSTV addon active — starting poll');

@@ -311,12 +311,23 @@
         clearInterval(timer);
         if (desc.lookup_service === true) {
           widget.style.display = '';
+        } else {
+          // Lookup service not configured — show widget with an install prompt
+          widget.style.display = '';
+          document.getElementById('qrz-widget-search').style.display = 'none';
+          statusEl.textContent = 'This widget requires the Callsign Lookup service. Enable via Admin → Config → Lookup Services';
+          statusEl.style.display = '';
         }
-        // If lookup_service is false/absent, widget stays hidden permanently
         return;
       }
       // Give up after ~10 seconds (20 × 500ms)
-      if (attempts >= 20) clearInterval(timer);
+      if (attempts >= 20) {
+        clearInterval(timer);
+        widget.style.display = '';
+        document.getElementById('qrz-widget-search').style.display = 'none';
+        statusEl.textContent = 'This widget requires the Callsign Lookup service. Enable via Admin → Config → Lookup Services';
+        statusEl.style.display = '';
+      }
     }, 500);
   })();
 

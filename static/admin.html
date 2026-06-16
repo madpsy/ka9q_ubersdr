@@ -6941,7 +6941,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 } else if (httpAudioActive) {
                     audioThroughput = `${audioKbpsVal} <span style="background:#1976d2;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;cursor:default;" title="Audio is being delivered over HTTP (WebM/Opus stream) rather than the WebSocket binary channel. This is used by Android Chrome for lock-screen media controls. The kbps figure includes both the HTTP audio and any WebSocket metadata.">HTTP</span>`;
                 } else {
-                    audioThroughput = audioKbpsVal.toString();
+                    audioThroughput = `${audioKbpsVal} <span style="background:#388e3c;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;cursor:default;" title="Audio is being delivered over the WebSocket binary channel.">WS</span>`;
                 }
                 const spectrumThroughput = sessions.spectrum.length > 0 ? (sessions.spectrum[0].waterfall_kbps || 0).toString() : '—';
                 const dxSess = sessions.audio.find(s => s.dxcluster_kbps !== undefined) || sessions.spectrum.find(s => s.dxcluster_kbps !== undefined);

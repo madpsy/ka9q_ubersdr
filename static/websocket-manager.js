@@ -74,7 +74,7 @@ export class WebSocketManager {
 
     // Connect to WebSocket
     async connect(params) {
-        const { frequency, mode, bandwidthLow, bandwidthHigh } = params;
+        const { frequency, mode, bandwidthLow, bandwidthHigh, minSNR } = params;
 
         // Clear any pending reconnection timer
         if (this.reconnectTimer) {
@@ -83,7 +83,7 @@ export class WebSocketManager {
         }
 
         // Store connection parameters for reconnection
-        this.lastConnectionParams = { frequency, mode, bandwidthLow, bandwidthHigh };
+        this.lastConnectionParams = { frequency, mode, bandwidthLow, bandwidthHigh, minSNR };
 
         // Check if connection will be allowed
         const checkResult = await this.checkConnection();
@@ -122,6 +122,11 @@ export class WebSocketManager {
         // Add bypass password if available
         if (window.bypassPassword) {
             wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
+        }
+
+        // Add SNR gate if active (> -998 means not the disabled sentinel)
+        if (typeof minSNR === 'number' && minSNR > -998) {
+            wsUrl += `&min_snr=${minSNR}`;
         }
 
         // Always request Opus format (will gracefully fallback to PCM if server doesn't support it)

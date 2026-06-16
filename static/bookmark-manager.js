@@ -419,7 +419,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Set font once outside the loop — avoids repeated style recalculation
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
+    ctx.textBaseline = 'middle';
 
     sortedBookmarks.forEach(item => {
         const { bookmark, x, labelWidth, row } = item;
@@ -442,7 +442,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
         // Label text
         ctx.fillStyle = textColor;
-        ctx.fillText(bookmark.name, x, labelY + 2);
+        ctx.fillText(bookmark.name, x, labelY + labelHeight / 2);
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;

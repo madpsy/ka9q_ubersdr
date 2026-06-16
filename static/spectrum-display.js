@@ -3358,7 +3358,7 @@ class SpectrumDisplay {
         const freqLabel = mhz.toFixed(5);
         this._setFont(this.overlayCtx, 'bold 12px monospace');
         this.overlayCtx.textAlign = 'center';
-        this.overlayCtx.textBaseline = 'top';
+        this.overlayCtx.textBaseline = 'middle';
 
         // Background for label
         const labelWidth = this.overlayCtx.measureText(freqLabel).width + 6;
@@ -3375,7 +3375,7 @@ class SpectrumDisplay {
 
         // Label text
         this.overlayCtx.fillStyle = '#ffffff';
-        this.overlayCtx.fillText(freqLabel, x, labelY + 2);
+        this.overlayCtx.fillText(freqLabel, x, labelY + labelHeight / 2);
 
         // Draw longer downward arrow below label - extends to top of frequency scale (y=45)
         const arrowY = labelY + labelHeight;
@@ -3553,7 +3553,7 @@ class SpectrumDisplay {
             const chatLabel = channel.chat_username;
             this._setFont(this.overlayCtx, 'bold 12px monospace');
             this.overlayCtx.textAlign = 'center';
-            this.overlayCtx.textBaseline = 'top';
+            this.overlayCtx.textBaseline = 'middle';
 
             // Background for label - purple
             const labelWidth = this.overlayCtx.measureText(chatLabel).width + 6;
@@ -3570,7 +3570,7 @@ class SpectrumDisplay {
 
             // Label text
             this.overlayCtx.fillStyle = '#ffffff';
-            this.overlayCtx.fillText(chatLabel, x, labelY + 2);
+            this.overlayCtx.fillText(chatLabel, x, labelY + labelHeight / 2);
 
             // Draw longer downward arrow below label - extends to top of frequency scale (y=45)
             const arrowY = labelY + labelHeight;

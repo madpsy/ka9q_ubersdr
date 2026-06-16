@@ -1071,7 +1071,7 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         // Draw spot label
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
+        ctx.textBaseline = 'middle';
 
         // Background for label
         ctx.fillStyle = 'rgba(40, 167, 69, 0.95)'; // Green background
@@ -1084,7 +1084,7 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
 
         // Label text
         ctx.fillStyle = '#FFFFFF'; // White text on green background
-        ctx.fillText(spot.dx_call, x, labelY + 2);
+        ctx.fillText(spot.dx_call, x, labelY + labelHeight / 2);
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;

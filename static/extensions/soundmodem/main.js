@@ -1463,12 +1463,12 @@ class SoundModemExtension extends DecoderExtension {
             ctx.save();
             ctx.font         = 'bold 12px monospace';
             ctx.textAlign    = 'center';
-            ctx.textBaseline = 'top';
+            ctx.textBaseline = 'middle';
             const labelW = ctx.measureText(chName).width + 8;
             ctx.fillStyle = 'rgba(0,0,0,0.8)';
             ctx.fillRect(xCtr - labelW / 2, 2, labelW, 16);
             ctx.fillStyle = color;
-            ctx.fillText(chName, xCtr, 3);
+            ctx.fillText(chName, xCtr, 10);
             ctx.restore();
         });
 

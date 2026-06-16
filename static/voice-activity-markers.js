@@ -173,7 +173,7 @@
 
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
+      ctx.textBaseline = 'middle';
 
       // Label background + border
       ctx.fillStyle = BG_COLOR;
@@ -184,7 +184,7 @@
 
       // Label text
       ctx.fillStyle = TEXT_COLOR;
-      ctx.fillText(item.label, x, labelY + 2);
+      ctx.fillText(item.label, x, labelY + labelHeight / 2);
 
       // Downward arrow to the baseline
       var arrowStartY = labelY + labelHeight;

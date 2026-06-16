@@ -2773,7 +2773,7 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         // Draw spot label
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
+        ctx.textBaseline = 'middle';
 
         // Background for label - use cyan/blue for CW spots (different from DX cluster green)
         ctx.fillStyle = 'rgba(23, 162, 184, 0.95)'; // Cyan background for CW
@@ -2786,7 +2786,7 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
 
         // Label text
         ctx.fillStyle = '#FFFFFF'; // White text
-        ctx.fillText(spot.dx_call, x, labelY + 2);
+        ctx.fillText(spot.dx_call, x, labelY + labelHeight / 2);
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;

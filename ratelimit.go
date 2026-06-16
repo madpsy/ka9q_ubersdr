@@ -198,14 +198,14 @@ func (icrl *IPConnectionRateLimiter) GetStats() int {
 }
 
 // AggregateRateLimiter manages rate limiters for aggregate endpoint requests per IP
-// Limits to 1 request per 5 seconds per IP
+// Limits to 2 requests per second per IP
 type AggregateRateLimiter struct {
 	limiters map[string]*RateLimiter
 	mu       sync.RWMutex
 }
 
 // NewAggregateRateLimiter creates a new aggregate endpoint rate limiter
-// Fixed at 1 request per 5 seconds (0.2 requests per second)
+// Fixed at 2 requests per second
 func NewAggregateRateLimiter() *AggregateRateLimiter {
 	return &AggregateRateLimiter{
 		limiters: make(map[string]*RateLimiter),
@@ -218,11 +218,11 @@ func (arl *AggregateRateLimiter) AllowRequest(ip string) bool {
 	arl.mu.Lock()
 	limiter, exists := arl.limiters[ip]
 	if !exists {
-		// Create a rate limiter with 1 token max, refilling at 0.2 tokens/sec (1 per 5 seconds)
+		// Create a rate limiter with 2 tokens max, refilling at 2 tokens/sec (2 per second)
 		limiter = &RateLimiter{
-			tokens:     1.0,
-			maxTokens:  1.0,
-			refillRate: 0.2, // 1 request per 5 seconds
+			tokens:     2.0,
+			maxTokens:  2.0,
+			refillRate: 2.0, // 2 requests per second
 			lastRefill: time.Now(),
 		}
 		arl.limiters[ip] = limiter

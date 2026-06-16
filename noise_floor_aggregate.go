@@ -46,13 +46,13 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 		return
 	}
 
-	// Check rate limit (1 request per 5 seconds per IP)
+	// Check rate limit (2 requests per second per IP)
 	clientIP := getClientIP(r)
 	if !rateLimiter.AllowRequest(clientIP) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Rate limit exceeded. Please wait 5 seconds between aggregate requests.",
+			"error": "Rate limit exceeded. Maximum 2 aggregate requests per second.",
 		})
 
 		// Record rate limit error in Prometheus

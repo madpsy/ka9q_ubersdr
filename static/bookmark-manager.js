@@ -201,7 +201,7 @@ let _measureCtx = null;
 function _getMeasureCtx() {
     if (!_measureCtx) {
         _measureCtx = document.createElement('canvas').getContext('2d');
-        _measureCtx.font = 'bold 10px monospace';
+        _measureCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
     }
     return _measureCtx;
 }
@@ -417,7 +417,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     });
 
     // Set font once outside the loop — avoids repeated style recalculation
-    ctx.font = 'bold 10px monospace';
+    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 

@@ -998,7 +998,7 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         const x = ((spot.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
 
         // Measure label width
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
         const labelWidth = ctx.measureText(spot.dx_call).width + 8;
 
         visibleSpots.push({
@@ -1069,7 +1069,7 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         const labelY = 30 - (row * rowSpacing);
 
         // Draw spot label
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 

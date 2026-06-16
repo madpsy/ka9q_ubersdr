@@ -3356,7 +3356,7 @@ class SpectrumDisplay {
         // Draw frequency label at top (without unit)
         const mhz = this.currentTunedFreq / 1e6;
         const freqLabel = mhz.toFixed(5);
-        this._setFont(this.overlayCtx, 'bold 12px monospace');
+        this._setFont(this.overlayCtx, 'bold 12px system-ui, -apple-system, sans-serif');
         this.overlayCtx.textAlign = 'center';
         this.overlayCtx.textBaseline = 'middle';
 
@@ -3551,7 +3551,7 @@ class SpectrumDisplay {
 
             // Draw chat username label at top
             const chatLabel = channel.chat_username;
-            this._setFont(this.overlayCtx, 'bold 12px monospace');
+            this._setFont(this.overlayCtx, 'bold 12px system-ui, -apple-system, sans-serif');
             this.overlayCtx.textAlign = 'center';
             this.overlayCtx.textBaseline = 'middle';
 

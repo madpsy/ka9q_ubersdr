@@ -132,7 +132,7 @@
 
       var label = activityLabel(act);
       var x = ((freq - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
-      ctx.font = 'bold 10px monospace';
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
       var labelWidth = ctx.measureText(label).width + 8;
       visible.push({ act: act, label: label, x: x, labelWidth: labelWidth, row: 0 });
     });
@@ -171,7 +171,7 @@
       var labelWidth = item.labelWidth;
       var labelY = 30 - (item.row * rowSpacing);
 
-      ctx.font = 'bold 10px monospace';
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 

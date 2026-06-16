@@ -5169,7 +5169,10 @@ input[type="range"]::-moz-range-thumb {
     background: rgba(44, 62, 80, var(--controls-opacity));
     overflow: hidden;
     max-height: 80vh;
-    overflow-y: auto;
+    /* overflow-y: auto removed — using hidden to prevent Firefox from showing a classic
+       scrollbar when band badge .active state (scale+border change) momentarily increases
+       content height. Firefox classic scrollbars steal layout width, causing a reflow
+       "shake". The docked overlay is not intended to be user-scrollable. */
     pointer-events: none;
 }
 

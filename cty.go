@@ -170,8 +170,10 @@ func parseEntityLine(line string) (*CTYEntity, error) {
 	}
 
 	// Time offset (column 61-69)
+	// CTY.DAT uses West-positive convention (same as longitude): negative = east of UTC.
+	// Negate so that TimeOffset matches standard UTC+/- convention.
 	if offset, err := strconv.ParseFloat(strings.TrimSpace(parts[6]), 64); err == nil {
-		entity.TimeOffset = offset
+		entity.TimeOffset = -offset
 	}
 
 	// Primary prefix (column 70-75)
@@ -267,11 +269,12 @@ func parsePrefixLine(line string, entity *CTYEntity) []*CTYPrefix {
 		}
 
 		// ~#~ = Time offset override
+		// CTY.DAT uses West-positive convention: negate to get standard UTC+/- offset.
 		if idx := strings.Index(part, "~"); idx != -1 {
 			endIdx := strings.LastIndex(part, "~")
 			if endIdx > idx {
 				if offset, err := strconv.ParseFloat(part[idx+1:endIdx], 64); err == nil {
-					pfx.TimeOffset = offset
+					pfx.TimeOffset = -offset
 					pfx.HasOffset = true
 				}
 				part = part[:idx] + part[endIdx+1:]

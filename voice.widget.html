@@ -231,6 +231,50 @@
     color: rgba(255,255,255,0.55);
   }
 
+  /* ── Row tooltip ────────────────────────────────────────────────────────── */
+  #va-row-tooltip {
+    position: fixed;
+    z-index: 10100;
+    pointer-events: none;
+    background: rgba(10, 30, 15, 0.97);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 5px;
+    padding: 6px 9px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.9);
+    white-space: normal;   /* allow wrapping */
+    box-shadow: 0 3px 12px rgba(0,0,0,0.7);
+    display: none;
+    line-height: 1.6;
+    max-width: 200px;
+    width: max-content;    /* shrink-wrap when content is short */
+  }
+
+  #va-row-tooltip.va-tt-visible {
+    display: block;
+  }
+
+  .va-tt-row {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start; /* keep label top-aligned when value wraps */
+  }
+
+  .va-tt-label {
+    color: rgba(255,255,255,0.45);
+    min-width: 60px;
+    flex-shrink: 0;
+    white-space: nowrap;   /* label never wraps */
+  }
+
+  .va-tt-value {
+    color: #fff;
+    font-weight: bold;
+    white-space: normal;   /* value wraps, indented to label width via flex */
+    word-break: break-word;
+  }
+
   /* ── Country badges ─────────────────────────────────────────────────────── */
   #va-widget-badges {
     display: flex;
@@ -309,6 +353,7 @@
   </div>
   <div id="va-widget-badges"></div>
 </div>
+<div id="va-row-tooltip"></div>
 
 <script>
 (function () {
@@ -323,6 +368,7 @@
   var bandEl     = document.getElementById('va-widget-band');
   var bodyEl     = document.getElementById('va-widget-body');
   var badgesEl   = document.getElementById('va-widget-badges');
+  var tooltipEl  = document.getElementById('va-row-tooltip');
   var closeEl    = document.getElementById('va-widget-close');
 
   // Filter elements
@@ -752,8 +798,19 @@
         ? '<span class="va-snr" style="color:rgba(255,220,100,0.9);font-weight:bold;">' + callsign + '</span>'
         : (snrStr ? '<span class="va-snr ' + snrClass + '">' + snrStr + '</span>' : '');
 
+      // Encode DX tooltip data as data attributes (only when callsign present)
+      var ttAttrs = '';
+      if (callsign) {
+        ttAttrs += ' data-tt-callsign="' + callsign.replace(/"/g, '&quot;') + '"';
+        if (act.dx_country)    ttAttrs += ' data-tt-country="'   + act.dx_country.replace(/"/g, '&quot;') + '"';
+        if (act.dx_continent)  ttAttrs += ' data-tt-continent="' + act.dx_continent + '"';
+        if (act.dx_time_offset != null && act.dx_time_offset !== 0)
+          ttAttrs += ' data-tt-offset="' + act.dx_time_offset + '"';
+        if (snrStr)            ttAttrs += ' data-tt-snr="'       + snrStr + '"';
+      }
+
       return '<div class="va-row" data-freq="' + hz + '" data-mode="' + mode.toLowerCase() + '"' +
-               (callsign ? ' data-callsign="' + callsign + '"' : '') + '>' +
+               (callsign ? ' data-callsign="' + callsign + '"' : '') + ttAttrs + '>' +
                '<span class="va-freq">' + freq + '</span>' +
                rightCol +
              '</div>';
@@ -772,7 +829,139 @@
           window.lookupCallsign(callsign);
         }
       });
+
+      // Tooltip on hover — only for rows with DX callsign data
+      if (row.getAttribute('data-tt-callsign')) {
+        row.addEventListener('mouseenter', function (e) {
+          showRowTooltip(row, e);
+        });
+        row.addEventListener('mousemove', function (e) {
+          positionTooltip(e);
+        });
+        row.addEventListener('mouseleave', function () {
+          hideRowTooltip();
+        });
+      }
     });
+  }
+
+  // ── Tooltip helpers ──────────────────────────────────────────────────────
+  var tooltipCallsign = ''; // tracks which callsign the tooltip is currently showing
+
+  function buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid) {
+    var contName = continent ? (CONTINENT_NAMES[continent] || continent) : '';
+    var lines = [];
+    if (callsign)  lines.push(['Callsign', escTT(callsign)]);
+    if (fname)     lines.push(['Name',     escTT(fname)]);
+    if (country)   lines.push(['Country',  escTT(country)]);
+    if (contName)  lines.push(['Continent', escTT(contName)]);
+    if (grid)      lines.push(['Grid',     escTT(grid)]);
+    if (offset != null && offset !== '') {
+      var off = parseFloat(offset);
+      var offStr = (off >= 0 ? 'UTC+' : 'UTC') + off;
+      lines.push(['Time zone', offStr]);
+    }
+    if (snr)       lines.push(['SNR', escTT(snr)]);
+
+    var rowsHTML = lines.map(function (pair) {
+      return '<div class="va-tt-row">' +
+             '<span class="va-tt-label">' + pair[0] + '</span>' +
+             '<span class="va-tt-value">' + pair[1] + '</span>' +
+             '</div>';
+    }).join('');
+
+    var imgHTML = '';
+    if (imageUrl) {
+      imgHTML = '<img src="' + escTT(imageUrl) + '" alt="' + escTT(callsign) + '" ' +
+                'style="display:block;max-width:100%;max-height:80px;border-radius:3px;' +
+                'margin-top:5px;border:1px solid rgba(255,255,255,0.15);object-fit:cover;" ' +
+                'onerror="this.style.display=\'none\'" />';
+    }
+
+    return rowsHTML + imgHTML;
+  }
+
+  function escTT(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showRowTooltip(row, e) {
+    var callsign  = row.getAttribute('data-tt-callsign') || '';
+    var country   = row.getAttribute('data-tt-country')   || '';
+    var continent = row.getAttribute('data-tt-continent') || '';
+    var offset    = row.getAttribute('data-tt-offset');
+    var snr       = row.getAttribute('data-tt-snr')       || '';
+
+    if (!callsign) return;
+    tooltipCallsign = callsign;
+
+    // ── 1. Show immediately with CTY data only ───────────────────────────
+    var fname    = '';
+    var imageUrl = '';
+
+    // Check cache for already-fetched QRZ data
+    var cache = window._callsignLookupCache;
+    if (cache) {
+      var cached = cache.get(callsign);
+      if (cached && cached.data) {
+        var d = cached.data;
+        fname = d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' ');
+        imageUrl = cached.imageUrl || d.image || '';
+      }
+    }
+
+    tooltipEl.innerHTML = buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl);
+    tooltipEl.classList.add('va-tt-visible');
+    positionTooltip(e);
+
+    // ── 2. If lookup service enabled and not yet cached, fetch in background ─
+    if (!fname && window.instanceDescription && window.instanceDescription.lookup_service === true) {
+      if (typeof window._fetchCallsignForMediaSession === 'function') {
+        var fetchFor = callsign;
+        window._fetchCallsignForMediaSession(callsign).then(function () {
+          // Only update if tooltip is still showing this callsign
+          if (tooltipCallsign !== fetchFor) return;
+          if (!tooltipEl.classList.contains('va-tt-visible')) return;
+          var result = cache && cache.get(fetchFor);
+          if (result && result.data) {
+            var d2 = result.data;
+            var fn = d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' ');
+            var iu = result.imageUrl || d2.image || '';
+            if (fn || iu) {
+              tooltipEl.innerHTML = buildTooltipHTML(fetchFor, country, continent, offset, snr, fn, iu);
+              // Re-position in case size changed
+              positionTooltip(window._lastTooltipEvent || e);
+            }
+          }
+        }).catch(function () { /* ignore lookup failures */ });
+      }
+    }
+  }
+
+  function positionTooltip(e) {
+    window._lastTooltipEvent = e; // store for async re-position
+    var ttW = tooltipEl.offsetWidth;
+    var ttH = tooltipEl.offsetHeight;
+    var x = e.clientX + 14;
+    var y = e.clientY - ttH / 2;
+
+    // Keep within viewport
+    if (x + ttW > window.innerWidth  - 8) x = e.clientX - ttW - 10;
+    if (y < 4)                            y = 4;
+    if (y + ttH > window.innerHeight - 4) y = window.innerHeight - ttH - 4;
+
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top  = y + 'px';
+  }
+
+  function hideRowTooltip() {
+    tooltipEl.classList.remove('va-tt-visible');
+    tooltipCallsign = '';
+    window._lastTooltipEvent = null;
   }
 
   function tuneToFrequency(hz, mode) {

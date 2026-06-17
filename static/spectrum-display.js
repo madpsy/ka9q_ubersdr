@@ -5570,9 +5570,14 @@ class SpectrumDisplay {
         const rect = e.target.getBoundingClientRect();
         const x = e.clientX - rect.left;
 
-        // Frequency at the cursor position — always computed, used by "Add DX Spot"
+        // Frequency range (used by carrier detector)
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
-        const freqAtCursor = Math.round(startFreq + (x / this.width) * this.totalBandwidth);
+
+        // Current dial frequency — used by "Add DX Spot" so the spot lands exactly
+        // where the user is tuned, not where the cursor happens to be.
+        const dialFreq = window.getCurrentDialFrequency
+            ? window.getCurrentDialFrequency()
+            : (this.currentTunedFreq || Math.round(startFreq + (x / this.width) * this.totalBandwidth));
 
         // Build menu
         this.contextMenu.innerHTML = '';
@@ -5622,9 +5627,9 @@ class SpectrumDisplay {
         // ── "Add DX Spot" item — only when DX cluster extension is active ───
         if (window.dxClusterExtensionInstance &&
             typeof window.dxClusterExtensionInstance.addLocalSpot === 'function') {
-            const freqLabel = this.formatFrequency(freqAtCursor);
+            const freqLabel = this.formatFrequency(dialFreq);
             const dxItem = this._makeContextMenuItem(`📍 Add DX Spot at ${freqLabel}`, () => {
-                this._showAddLocalSpotModal(freqAtCursor, freqLabel);
+                this._showAddLocalSpotModal(dialFreq, freqLabel);
             });
             this.contextMenu.appendChild(dxItem);
         }
@@ -5796,6 +5801,13 @@ class SpectrumDisplay {
 
         cancelBtn.addEventListener('click', close);
         addBtn.addEventListener('click', confirm);
+
+        // Force uppercase as the user types
+        input.addEventListener('input', () => {
+            const sel = input.selectionStart;
+            input.value = input.value.toUpperCase();
+            input.setSelectionRange(sel, sel);
+        });
 
         // Keyboard: Enter = confirm, Escape = cancel
         input.addEventListener('keydown', (ev) => {

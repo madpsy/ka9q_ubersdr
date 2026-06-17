@@ -120,6 +120,17 @@
     width: 16px;
     height: 64px;
   }
+  /* FFT level canvas — sits behind the slider thumb, fills the slot exactly */
+  #eqw-widget .eqw-level-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 16px;
+    height: 64px;
+    z-index: 0;
+    border-radius: 2px;
+    pointer-events: none;
+  }
   #eqw-widget .eqw-slider {
     position: absolute;
     top: 50%;
@@ -134,6 +145,7 @@
     background: transparent;
     border-radius: 0;
     outline: none;
+    z-index: 1;
   }
   #eqw-widget .eqw-slider::-webkit-slider-runnable-track {
     height: 4px;
@@ -288,6 +300,13 @@
       var slot = document.createElement('div');
       slot.className = 'eqw-slot';
 
+      // FFT level canvas — sits behind the slider, z-index 0
+      var canvas = document.createElement('canvas');
+      canvas.className = 'eqw-level-canvas';
+      canvas.width = 16;
+      canvas.height = 64;
+      slot.appendChild(canvas);
+
       var slider = document.createElement('input');
       slider.type = 'range';
       slider.className = 'eqw-slider';
@@ -316,8 +335,118 @@
       col.appendChild(label);
       bandsWrap.appendChild(col);
 
-      sliders[b.hz] = { slider: slider, val: val };
+      sliders[b.hz] = { slider: slider, val: val, canvas: canvas, ctx: canvas.getContext('2d') };
     });
+  }
+
+  // ── FFT level bar helpers ───────────────────────────────────────────────────
+  // Half-bandwidth (Hz) used to average FFT bins around each band centre.
+  // Roughly ±½ octave — wide enough to catch the filter's influence without
+  // bleeding into adjacent bands.
+  var BAND_HALF_BW = [
+    30, 55, 100, 200, 300, 350, 400, 400, 500, 700, 1200, 1600
+  ];
+
+  // Smoothed level per band (0–255), decays toward 0 each frame.
+  var bandLevels = new Float32Array(BANDS.length);
+
+  // Colour ramp: green (low) → yellow (mid) → red (high).
+  // t is 0–1 (normalised level).
+  function levelColor(t) {
+    var r, g, b;
+    if (t < 0.5) {
+      // green → yellow
+      var u = t * 2;
+      r = Math.round(u * 255);
+      g = Math.round(180 + (1 - u) * 46); // 226 → 180
+      b = 0;
+    } else {
+      // yellow → red
+      var u2 = (t - 0.5) * 2;
+      r = 255;
+      g = Math.round((1 - u2) * 180);
+      b = 0;
+    }
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  // Draw one band's level bar onto its canvas.
+  // The bar is drawn as a 4px-wide strip centred in the 16px slot, matching
+  // the slider track width exactly. It grows from the bottom upward.
+  var TRACK_W = 4;   // must match .eqw-slider::-webkit-slider-runnable-track height
+  var TRACK_X = 6;   // (16 - 4) / 2 = 6 — centres the 4px bar in the 16px canvas
+
+  function drawBandLevel(b, idx) {
+    var entry = sliders[b.hz];
+    if (!entry || !entry.ctx) return;
+    var ctx = entry.ctx;
+    var W = 16, H = 64;
+
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+
+    var lvl = bandLevels[idx]; // 0–255
+    if (lvl < 2) return; // nothing visible
+
+    var t = lvl / 255;
+    var barH = Math.round(t * H);
+
+    // Gradient bar from bottom up, width matches the track
+    var grad = ctx.createLinearGradient(0, H, 0, H - barH);
+    grad.addColorStop(0,   levelColor(0));
+    grad.addColorStop(0.5, levelColor(0.5));
+    grad.addColorStop(1,   levelColor(t));
+    ctx.fillStyle = grad;
+    ctx.fillRect(TRACK_X, H - barH, TRACK_W, barH);
+  }
+
+  // ── FFT render loop ─────────────────────────────────────────────────────────
+  var FRAME_INTERVAL = 1000 / 30; // ~30 fps
+  var lastFrameTs = 0;
+  var fftRafId = null;
+  var fftData = null; // reused Uint8Array
+
+  function fftFrame(ts) {
+    fftRafId = requestAnimationFrame(fftFrame);
+    if (ts - lastFrameTs < FRAME_INTERVAL) return;
+    lastFrameTs = ts;
+
+    var analyser = window.vuAnalyser || window.analyser;
+    if (!analyser) {
+      // No audio yet — decay bars to zero
+      for (var i = 0; i < bandLevels.length; i++) {
+        bandLevels[i] *= 0.85;
+        drawBandLevel(BANDS[i], i);
+      }
+      return;
+    }
+
+    var bins = analyser.frequencyBinCount;
+    if (!fftData || fftData.length !== bins) fftData = new Uint8Array(bins);
+    analyser.getByteFrequencyData(fftData);
+
+    var sampleRate = (window.audioContext && window.audioContext.sampleRate) || 48000;
+    var nyquist = sampleRate / 2;
+    var hzPerBin = nyquist / bins;
+
+    for (var j = 0; j < BANDS.length; j++) {
+      var centreHz = BANDS[j].hz;
+      var halfBw   = BAND_HALF_BW[j];
+      var lo = Math.max(0,        Math.floor((centreHz - halfBw) / hzPerBin));
+      var hi = Math.min(bins - 1, Math.ceil( (centreHz + halfBw) / hzPerBin));
+      var sum = 0, count = 0;
+      for (var k = lo; k <= hi; k++) { sum += fftData[k]; count++; }
+      var raw = count > 0 ? sum / count : 0;
+
+      // Fast attack, slow decay
+      if (raw > bandLevels[j]) {
+        bandLevels[j] = raw;
+      } else {
+        bandLevels[j] += (raw - bandLevels[j]) * 0.12;
+      }
+
+      drawBandLevel(BANDS[j], j);
+    }
   }
 
   // ── Sync widget controls from the host UI ───────────────────────────────────
@@ -433,6 +562,7 @@
     e.stopPropagation();
     widget.style.display = 'none';
     if (pollId) { clearInterval(pollId); pollId = null; }
+    if (fftRafId) { cancelAnimationFrame(fftRafId); fftRafId = null; }
   });
 
   // ── Start ───────────────────────────────────────────────────────────────────
@@ -444,6 +574,8 @@
     // saved-settings load, the quick-toggle button, etc.) and waits for the EQ
     // controls/audio graph to come up.
     pollId = setInterval(applyReady, 400);
+    // Start the FFT level animation loop
+    fftRafId = requestAnimationFrame(fftFrame);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);

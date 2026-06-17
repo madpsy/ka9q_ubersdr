@@ -205,6 +205,15 @@
     background: rgba(255,255,255,0.12);
   }
 
+  .va-row--active {
+    background: rgba(46, 204, 113, 0.18);
+    border-left: 3px solid #2ecc71;
+    padding-left: 6px; /* compensate for border */
+  }
+  .va-row--active:hover {
+    background: rgba(46, 204, 113, 0.28);
+  }
+
   .va-freq {
     font-size: 12px;
     font-weight: bold;
@@ -843,6 +852,9 @@
         });
       }
     });
+
+    // Highlight whichever row matches the current dial frequency + mode
+    updateActiveRow();
   }
 
   // ── Tooltip helpers ──────────────────────────────────────────────────────
@@ -905,16 +917,18 @@
 
     // Check cache for already-fetched QRZ data
     var cache = window._callsignLookupCache;
+    var grid = '';
     if (cache) {
       var cached = cache.get(callsign);
       if (cached && cached.data) {
         var d = cached.data;
         fname = d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' ');
         imageUrl = cached.imageUrl || d.image || '';
+        grid = d.grid || '';
       }
     }
 
-    tooltipEl.innerHTML = buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl);
+    tooltipEl.innerHTML = buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid);
     tooltipEl.classList.add('va-tt-visible');
     positionTooltip(e);
 
@@ -931,8 +945,9 @@
             var d2 = result.data;
             var fn = d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' ');
             var iu = result.imageUrl || d2.image || '';
-            if (fn || iu) {
-              tooltipEl.innerHTML = buildTooltipHTML(fetchFor, country, continent, offset, snr, fn, iu);
+            var gr = d2.grid || '';
+            if (fn || iu || gr) {
+              tooltipEl.innerHTML = buildTooltipHTML(fetchFor, country, continent, offset, snr, fn, iu, gr);
               // Re-position in case size changed
               positionTooltip(window._lastTooltipEvent || e);
             }
@@ -998,6 +1013,41 @@
     if (typeof window.setMode === 'function') window.setMode(mode, false);
   }
 
+  // ── Dial frequency / mode tracking ────────────────────────────────────────
+  var FREQ_TOLERANCE_HZ = 500; // ±500 Hz match window
+
+  function getDialHz() {
+    var f = document.getElementById('frequency');
+    if (!f) return null;
+    var hz = parseInt(f.getAttribute('data-hz-value') || f.value, 10);
+    return isNaN(hz) ? null : hz;
+  }
+
+  function vaRowModeFamily(m) {
+    m = (m || '').toLowerCase();
+    if (m === 'cw' || m === 'cwu' || m === 'cwl') return 'cw';
+    if (m === 'am' || m === 'sam')                return 'am';
+    if (m === 'fm' || m === 'nfm')                return 'fm';
+    return m; // usb, lsb, etc.
+  }
+
+  function updateActiveRow() {
+    var dialHz  = getDialHz();
+    var dialFam = vaRowModeFamily(window.currentMode);
+    var rows    = bodyEl.querySelectorAll('.va-row');
+    rows.forEach(function (row) {
+      var rowHz  = parseFloat(row.getAttribute('data-freq'));
+      var rowFam = vaRowModeFamily(row.getAttribute('data-mode'));
+      var freqMatch = dialHz !== null && Math.abs(rowHz - dialHz) <= FREQ_TOLERANCE_HZ;
+      var modeMatch = !dialFam || !rowFam || dialFam === rowFam;
+      if (freqMatch && modeMatch) {
+        row.classList.add('va-row--active');
+      } else {
+        row.classList.remove('va-row--active');
+      }
+    });
+  }
+
   // ── Subscribe to the shared voice-activity service ─────────────────────────
   function start() {
     if (dismissed) return;
@@ -1007,6 +1057,17 @@
     }
     loadCountries();
     unsubscribe = window.VoiceActivityService.subscribe(onState);
+
+    // Instant highlight on frequency changes
+    var freqInput = document.getElementById('frequency');
+    if (freqInput && 'MutationObserver' in window) {
+      new MutationObserver(updateActiveRow).observe(freqInput, {
+        attributes: true,
+        attributeFilter: ['data-hz-value', 'value'],
+      });
+    }
+    // Backstop poll catches mode-only changes (window.currentMode is a plain var)
+    setInterval(updateActiveRow, 250);
   }
 
   if (document.readyState === 'loading') {

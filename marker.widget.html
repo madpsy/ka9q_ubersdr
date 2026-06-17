@@ -148,7 +148,46 @@
   max-width: 340px;
   text-align: center;
 }
+
+/* ── Callsign lookup info (name + country, shown below the callsign) ── */
+#sdr-marker-info {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: #9fb3c8;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+/* ── Callsign hover tooltip ── */
+#sdr-marker-tooltip {
+  position: fixed;
+  z-index: 10100;
+  pointer-events: none;
+  background: rgba(20, 30, 42, 0.97);
+  border: 1px solid rgba(127, 140, 141, 0.5);
+  border-radius: 5px;
+  padding: 6px 9px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.9);
+  white-space: normal;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.7);
+  display: none;
+  line-height: 1.6;
+  max-width: 200px;
+  width: max-content;
+}
+#sdr-marker-tooltip.sdr-tt-visible { display: block; }
+.sdr-tt-row   { display: flex; gap: 6px; align-items: flex-start; }
+.sdr-tt-label { color: rgba(255,255,255,0.45); min-width: 60px; flex-shrink: 0; white-space: nowrap; }
+.sdr-tt-value { color: #fff; font-weight: bold; white-space: normal; word-break: break-word; }
 </style>
+
+<div id="sdr-marker-tooltip"></div>
 
 <!-- Hidden until a current / prev / next marker exists for the dial freq + mode -->
 <div id="sdr-marker-widget" style="display:none">
@@ -169,6 +208,7 @@
     </button>
   </div>
   <div id="sdr-marker-name"></div>
+  <div id="sdr-marker-info" style="display:none"></div>
 </div>
 
 <script>
@@ -181,8 +221,10 @@
   // matcher is a sub-millisecond scan, so polling at 4 Hz is effectively free.
   const POLL_MS = 250;
 
-  const widget  = document.getElementById('sdr-marker-widget');
-  const nameEl  = document.getElementById('sdr-marker-name');
+  const widget    = document.getElementById('sdr-marker-widget');
+  const nameEl    = document.getElementById('sdr-marker-name');
+  const infoEl    = document.getElementById('sdr-marker-info');
+  const tooltipEl = document.getElementById('sdr-marker-tooltip');
   const navRow  = document.getElementById('sdr-marker-nav');
   const prevBtn = document.getElementById('sdr-marker-prev');
   const nextBtn = document.getElementById('sdr-marker-next');
@@ -190,6 +232,8 @@
   const nextText = document.getElementById('sdr-marker-next-text');
 
   let userClosed = false; // set once the user dismisses via ✕; stays hidden after
+  // Tracks which callsign the info panel is currently showing, to guard async updates.
+  let _infoCallsign = '';
 
   // The prev/next neighbour markers currently shown, kept so the click
   // handlers know where to tune. { freq, mode, name } | null.
@@ -230,16 +274,18 @@
     return voiceModeForFreq(spot.frequency);
   }
 
-  // Flatten every marker into { freq, mode, family, name, priority, type }. Spots
-  // get priority 1, bookmarks 0, so spots win when two markers share a frequency.
+  // Flatten every marker into { freq, mode, family, name, callsign, priority, type }.
+  // Spots get priority 1, bookmarks 0, so spots win when two markers share a frequency.
   // `type` (cw/dx/voice/bookmark) drives the prev/next navTypes filter.
+  // `callsign` is the actual callsign string when the name IS a callsign, null otherwise
+  // (e.g. voice activities without a dx_callsign get a placeholder name like 'Voice 60m').
   function collectMarkers() {
     const out = [];
-    const add = (list, freqOf, modeOf, famOf, nameOf, priority, type) => {
+    const add = (list, freqOf, modeOf, famOf, nameOf, callsignOf, priority, type) => {
       for (const item of list) {
         const f = freqOf(item);
         if (typeof f !== 'number' || isNaN(f)) continue;
-        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority, type });
+        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), callsign: callsignOf(item), priority, type });
       }
     };
     const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
@@ -249,10 +295,14 @@
       ? window.VoiceActivityService.getAllActivities() : [];
     const vaFreq = a => a.estimated_dial_freq || a.start_freq;
     const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
-    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',                s => s.dx_call, 1, 'cw');
-    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),          s => s.dx_call, 1, 'dx');
-    add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))), 1, 'voice');
-    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0, 'bookmark');
+    // CW and DX spots: name IS always the callsign.
+    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',               s => s.dx_call,   s => s.dx_call,               1, 'cw');
+    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),         s => s.dx_call,   s => s.dx_call,               1, 'dx');
+    // Voice: only set callsign when dx_callsign is present (not a placeholder like 'Voice 60m').
+    add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)),
+        a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))),
+        a => a.dx_callsign || null,                                                                                                            1, 'voice');
+    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, () => null, 0, 'bookmark');
     return out;
   }
 
@@ -283,7 +333,7 @@
         if (navAllowed(m) && (!next || m.freq < next.freq || (m.freq === next.freq && m.priority > next.priority))) next = m;
       }
     }
-    const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name } : null;
+    const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name, type: m.type, callsign: m.callsign } : null;
     result.current = strip(current);
     result.prev    = strip(prev);
     result.next    = strip(next);
@@ -321,6 +371,160 @@
     // 'callsign_lookup_complete', so we do it explicitly here.
     if (typeof window._notifyLookupWidgetIfCached === 'function') {
       window._notifyLookupWidgetIfCached(marker);
+    }
+  }
+
+  // ── Callsign hover tooltip ─────────────────────────────────────────
+  var _ttCallsign = '';
+  var _lastTTEvent = null;
+
+  function escMT(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl) {
+    var lines = [];
+    if (callsign) lines.push(['Callsign', escMT(callsign)]);
+    if (fname)    lines.push(['Name',     escMT(fname)]);
+    if (country)  lines.push(['Country',  escMT(country)]);
+    if (grid)     lines.push(['Grid',     escMT(grid)]);
+    var rowsHTML = lines.map(function (p) {
+      return '<div class="sdr-tt-row"><span class="sdr-tt-label">' + p[0] +
+             '</span><span class="sdr-tt-value">' + p[1] + '</span></div>';
+    }).join('');
+    var imgHTML = '';
+    if (imageUrl) {
+      imgHTML = '<img src="' + escMT(imageUrl) + '" alt="' + escMT(callsign) + '" ' +
+                'style="display:block;max-width:100%;max-height:80px;border-radius:3px;' +
+                'margin-top:5px;border:1px solid rgba(255,255,255,0.15);object-fit:cover;" ' +
+                'onerror="this.style.display=\'none\'" />';
+    }
+    return rowsHTML + imgHTML;
+  }
+
+  function positionMarkerTooltip(e) {
+    _lastTTEvent = e;
+    var ttW = tooltipEl.offsetWidth;
+    var ttH = tooltipEl.offsetHeight;
+    var x = e.clientX + 14;
+    var y = e.clientY - ttH / 2;
+    if (x + ttW > window.innerWidth  - 8) x = e.clientX - ttW - 10;
+    if (y < 4)                            y = 4;
+    if (y + ttH > window.innerHeight - 4) y = window.innerHeight - ttH - 4;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top  = y + 'px';
+  }
+
+  function showMarkerTooltip(callsign, e) {
+    if (!callsign) return;
+    _ttCallsign = callsign;
+
+    // Immediate render from cache
+    var fname = '', country = '', grid = '', imageUrl = '';
+    var cache = window._callsignLookupCache;
+    if (cache) {
+      var cached = cache.get(callsign);
+      if (cached && cached.data) {
+        var d = cached.data;
+        fname    = d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' ');
+        country  = d.country || d.land || '';
+        grid     = d.grid || '';
+        imageUrl = cached.imageUrl || d.image || '';
+      }
+    }
+    tooltipEl.innerHTML = buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl);
+    tooltipEl.classList.add('sdr-tt-visible');
+    positionMarkerTooltip(e);
+
+    // Background fetch if not yet cached
+    if (!fname && window.instanceDescription && window.instanceDescription.lookup_service === true) {
+      if (typeof window._fetchCallsignForMediaSession === 'function') {
+        var fetchFor = callsign;
+        window._fetchCallsignForMediaSession(callsign).then(function () {
+          if (_ttCallsign !== fetchFor) return;
+          if (!tooltipEl.classList.contains('sdr-tt-visible')) return;
+          var c2 = window._callsignLookupCache;
+          var result = c2 && c2.get(fetchFor);
+          if (result && result.data) {
+            var d2 = result.data;
+            var fn = d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' ');
+            var co = d2.country || d2.land || '';
+            var gr = d2.grid || '';
+            var iu = result.imageUrl || d2.image || '';
+            tooltipEl.innerHTML = buildMarkerTooltipHTML(fetchFor, fn, co, gr, iu);
+            positionMarkerTooltip(_lastTTEvent || e);
+          }
+        }).catch(function () {});
+      }
+    }
+  }
+
+  function hideMarkerTooltip() {
+    tooltipEl.classList.remove('sdr-tt-visible');
+    _ttCallsign = '';
+    _lastTTEvent = null;
+  }
+
+  // ── Callsign info panel ────────────────────────────────────────────
+  // Shows name + country below the large callsign when lookup service is available.
+  function setInfoPanel(lines) {
+    if (!lines || lines.length === 0) {
+      infoEl.style.display = 'none';
+      infoEl.innerHTML = '';
+    } else {
+      infoEl.innerHTML = lines.map(function (l) {
+        return '<div>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
+      }).join('');
+      infoEl.style.display = '';
+    }
+  }
+
+  // Tracks whether a background fetch is already in-flight for a callsign,
+  // so the 4 Hz poll doesn't fire duplicate requests.
+  let _infoFetchPending = '';
+
+  function updateInfoPanel(callsign) {
+    if (!callsign) { setInfoPanel(null); _infoCallsign = ''; _infoFetchPending = ''; return; }
+
+    // Check cache first — show immediately if available
+    const cache = window._callsignLookupCache;
+    if (cache) {
+      const cached = cache.get(callsign);
+      if (cached && cached.data) {
+        const d = cached.data;
+        const fname = d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' ');
+        const country = d.country || d.land || '';
+        const parts = [fname, country].filter(Boolean);
+        _infoCallsign = callsign;
+        _infoFetchPending = '';
+        setInfoPanel(parts);
+        return; // already have data
+      }
+    }
+
+    // No cached data yet — initiate a background fetch if not already pending
+    _infoCallsign = callsign;
+    if (_infoFetchPending === callsign) return; // fetch already in-flight
+    setInfoPanel(null);
+
+    if (window.instanceDescription && window.instanceDescription.lookup_service === true) {
+      if (typeof window._fetchCallsignForMediaSession === 'function') {
+        _infoFetchPending = callsign;
+        const fetchFor = callsign;
+        window._fetchCallsignForMediaSession(callsign).then(function () {
+          if (_infoCallsign !== fetchFor) return; // stale
+          _infoFetchPending = '';
+          const c2 = window._callsignLookupCache;
+          const result = c2 && c2.get(fetchFor);
+          if (result && result.data) {
+            const d2 = result.data;
+            const fn = d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' ');
+            const co = d2.country || d2.land || '';
+            setInfoPanel([fn, co].filter(Boolean));
+          }
+        }).catch(function () { _infoFetchPending = ''; });
+      }
     }
   }
 
@@ -369,17 +573,30 @@
       _lastName = null;
       nameEl.style.cursor = '';
       nameEl.title = '';
+      hideMarkerTooltip();
+      updateInfoPanel(null);
     } else {
       if (nameEl.style.display === 'none') nameEl.style.display = '';
-      // Show a pointer cursor and tooltip when the marker is a callsign type
-      // so the user knows it's clickable for a lookup.
-      const isCallsign = current && CALLSIGN_TYPES.has(current.type);
+      // CW/DX spots are always callsigns; voice only when dx_callsign is set.
+      // Use current.callsign when set, otherwise fall back to name for cw/dx types.
+      const lookupCallsign = current.callsign || (CALLSIGN_TYPES.has(current.type) && current.type !== 'voice' ? name : null);
+      const isCallsign = !!lookupCallsign;
+      // Store resolved callsign on _currentMarker so the click handler can use it.
+      _currentMarker.lookupCallsign = lookupCallsign;
       nameEl.style.cursor = isCallsign ? 'pointer' : '';
-      nameEl.title = isCallsign ? 'Click to look up ' + name : name;
+      // Tooltip replaces the title for callsigns; keep title for non-callsign names.
+      nameEl.title = isCallsign ? '' : name;
       if (name !== _lastName) {
         _lastName = name;
         nameEl.textContent = name;
+        // Clear info panel immediately when callsign changes
+        if (!isCallsign) updateInfoPanel(null);
+        // Hide stale tooltip when marker changes
+        hideMarkerTooltip();
       }
+      // Always re-check info panel for callsign markers so it populates
+      // as soon as the lookup cache is filled (handles initial load race).
+      if (isCallsign) updateInfoPanel(lookupCallsign);
     }
   }
 
@@ -393,13 +610,22 @@
   // lookup widget (e.g. qrz_lookup.widget.html) via window.lookupCallsign().
   nameEl.addEventListener('click', () => {
     if (!_currentMarker) return;
-    if (!CALLSIGN_TYPES.has(_currentMarker.type)) return;
-    const callsign = _currentMarker.name;
+    const callsign = _currentMarker.lookupCallsign || _currentMarker.callsign;
     if (!callsign) return;
     if (typeof window.lookupCallsign === 'function') {
       window.lookupCallsign(callsign);
     }
   });
+
+  // ── Callsign name hover → tooltip ─────────────────────────────────
+  nameEl.addEventListener('mouseenter', e => {
+    const callsign = _currentMarker && (_currentMarker.lookupCallsign || _currentMarker.callsign);
+    if (callsign) showMarkerTooltip(callsign, e);
+  });
+  nameEl.addEventListener('mousemove', e => {
+    if (tooltipEl.classList.contains('sdr-tt-visible')) positionMarkerTooltip(e);
+  });
+  nameEl.addEventListener('mouseleave', () => hideMarkerTooltip());
 
   // ── Close button ───────────────────────────────────────────────────
   document.getElementById('sdr-marker-close-btn').addEventListener('click', () => {
@@ -442,7 +668,7 @@
     }
 
     widget.addEventListener('pointerdown', e => {
-      if (e.target.closest('button, a')) return;
+      if (e.target.closest('button, a, #sdr-marker-name, #sdr-marker-info')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;

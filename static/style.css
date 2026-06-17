@@ -3170,6 +3170,18 @@ input[type="range"]::-moz-range-thumb {
     order: 2;
 }
 
+/* FFT level canvas — sits behind the slider, fills the slot exactly */
+.equalizer-bands .eq-level-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 30px;
+    height: 150px;
+    z-index: 0;
+    border-radius: 6px;
+    pointer-events: none;
+}
+
 .equalizer-bands .eq-slider {
     position: absolute;
     top: 50%;
@@ -3185,11 +3197,12 @@ input[type="range"]::-moz-range-thumb {
     writing-mode: horizontal-tb;   /* override the stale slider-vertical block above */
     -webkit-appearance: none;
     appearance: none;
-    /* "to right" maps to "to top" after the -90° rotation: green (boost) on top. */
-    background: linear-gradient(to right, #e74c3c 0%, #f39c12 50%, #2ecc71 100%);
+    /* Background replaced by the live FFT canvas behind this element */
+    background: transparent;
     border-radius: 6px;
     outline: none;
     cursor: pointer;
+    z-index: 1;
 }
 
 .equalizer-bands .eq-slider::-webkit-slider-runnable-track {

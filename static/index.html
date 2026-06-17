@@ -1101,62 +1101,62 @@
                         </div>
                         <div class="eq-band">
                     <label class="eq-label">60 Hz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-60" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-60" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-60" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-60-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">170 Hz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-170" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-170" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-170" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-170-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">310 Hz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-310" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-310" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-310" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-310-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">600 Hz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-600" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-600" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-600" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-600-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">1 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-1000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-1000" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-1000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-1000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">1.5 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-1500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-1500" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-1500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-1500-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">2 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-2000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-2000" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-2000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-2000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">2.5 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-2500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-2500" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-2500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-2500-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">3 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-3000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-3000" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-3000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-3000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">4 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-4000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-4000" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-4000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-4000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">6 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-6000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-6000" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-6000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-6000-value">0 dB</span>
                 </div>
                 <div class="eq-band">
                     <label class="eq-label">8 kHz</label>
-                    <div class="eq-slot"><input type="range" class="eq-slider" id="eq-8000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
+                    <div class="eq-slot"><canvas class="eq-level-canvas" id="eq-canvas-8000" width="30" height="150"></canvas><input type="range" class="eq-slider" id="eq-8000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()"></div>
                     <span class="eq-value" id="eq-8000-value">0 dB</span>
                         </div>
                     </div>
@@ -1799,5 +1799,129 @@
         </button>
         <p class="waterfall-pause-overlay-hint">Waterfall paused · saves bandwidth &amp; power</p>
     </div>
+<!-- ── EQ band FFT level bars ──────────────────────────────────────────────
+     Reads window.vuAnalyser (post-EQ, pre-volume tap set up by app.js) and
+     paints a live green→yellow→red level bar behind each .eq-level-canvas.
+     Capped at 30 fps to match audio.widget.html. -->
+<script>
+(function () {
+  'use strict';
+
+  var EQ_BANDS = [
+    { hz: 60,   halfBw: 30   },
+    { hz: 170,  halfBw: 55   },
+    { hz: 310,  halfBw: 100  },
+    { hz: 600,  halfBw: 200  },
+    { hz: 1000, halfBw: 300  },
+    { hz: 1500, halfBw: 350  },
+    { hz: 2000, halfBw: 400  },
+    { hz: 2500, halfBw: 400  },
+    { hz: 3000, halfBw: 500  },
+    { hz: 4000, halfBw: 700  },
+    { hz: 6000, halfBw: 1200 },
+    { hz: 8000, halfBw: 1600 }
+  ];
+
+  var bandLevels = new Float32Array(EQ_BANDS.length);
+  var fftData    = null;
+  var rafId      = null;
+  var lastTs     = 0;
+  var FRAME_MS   = 1000 / 30;
+
+  // Canvas contexts — resolved once on first frame (DOM guaranteed ready by then)
+  var ctxs = null;
+  function getCtxs() {
+    if (ctxs) return ctxs;
+    ctxs = EQ_BANDS.map(function (b) {
+      var el = document.getElementById('eq-canvas-' + b.hz);
+      return el ? el.getContext('2d') : null;
+    });
+    return ctxs;
+  }
+
+  // Colour ramp: green (low) → yellow (mid) → red (high). t = 0–1.
+  function levelColor(t) {
+    var r, g, b = 0;
+    if (t < 0.5) {
+      var u = t * 2;
+      r = Math.round(u * 255);
+      g = Math.round(180 + (1 - u) * 46);
+    } else {
+      var u2 = (t - 0.5) * 2;
+      r = 255;
+      g = Math.round((1 - u2) * 180);
+    }
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function drawBand(ctx, lvl) {
+    var W = 30, H = 150;
+    ctx.clearRect(0, 0, W, H);
+    if (lvl < 2) return;
+    var t    = lvl / 255;
+    var barH = Math.round(t * H);
+    var grad = ctx.createLinearGradient(0, H, 0, H - barH);
+    grad.addColorStop(0,   levelColor(0));
+    grad.addColorStop(0.5, levelColor(0.5));
+    grad.addColorStop(1,   levelColor(t));
+    ctx.fillStyle = grad;
+    // Slight inset (2px each side) so the bar sits inside the rounded track.
+    // Use fillRect — roundRect is not available in older Safari.
+    ctx.fillRect(2, H - barH, W - 4, barH);
+  }
+
+  function frame(ts) {
+    rafId = requestAnimationFrame(frame);
+    if (ts - lastTs < FRAME_MS) return;
+    lastTs = ts;
+
+    var contexts = getCtxs();
+    var analyser = window.vuAnalyser || window.analyser;
+
+    if (!analyser) {
+      // Decay bars to zero while waiting for audio
+      for (var i = 0; i < EQ_BANDS.length; i++) {
+        bandLevels[i] *= 0.85;
+        if (contexts[i]) drawBand(contexts[i], bandLevels[i]);
+      }
+      return;
+    }
+
+    var bins = analyser.frequencyBinCount;
+    if (!fftData || fftData.length !== bins) fftData = new Uint8Array(bins);
+    analyser.getByteFrequencyData(fftData);
+
+    var sampleRate = (window.audioContext && window.audioContext.sampleRate) || 48000;
+    var hzPerBin   = (sampleRate / 2) / bins;
+
+    for (var j = 0; j < EQ_BANDS.length; j++) {
+      var b    = EQ_BANDS[j];
+      var lo   = Math.max(0,        Math.floor((b.hz - b.halfBw) / hzPerBin));
+      var hi   = Math.min(bins - 1, Math.ceil( (b.hz + b.halfBw) / hzPerBin));
+      var sum  = 0, count = 0;
+      for (var k = lo; k <= hi; k++) { sum += fftData[k]; count++; }
+      var raw  = count > 0 ? sum / count : 0;
+
+      // Fast attack, slow decay
+      if (raw > bandLevels[j]) {
+        bandLevels[j] = raw;
+      } else {
+        bandLevels[j] += (raw - bandLevels[j]) * 0.12;
+      }
+
+      if (contexts[j]) drawBand(contexts[j], bandLevels[j]);
+    }
+  }
+
+  // Start after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      rafId = requestAnimationFrame(frame);
+    });
+  } else {
+    rafId = requestAnimationFrame(frame);
+  }
+})();
+</script>
 </body>
 </html>

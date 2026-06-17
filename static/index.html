@@ -1857,6 +1857,13 @@
   function drawBand(ctx, lvl) {
     var W = 30, H = 150;
     ctx.clearRect(0, 0, W, H);
+
+    // Draw the track background (replaces the old CSS gradient on the slider).
+    // Matches the original red→orange→green look at low signal, overdrawn by
+    // the live level bar as audio arrives.
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(2, 0, W - 4, H);
+
     if (lvl < 2) return;
     var t    = lvl / 255;
     var barH = Math.round(t * H);
@@ -1865,8 +1872,7 @@
     grad.addColorStop(0.5, levelColor(0.5));
     grad.addColorStop(1,   levelColor(t));
     ctx.fillStyle = grad;
-    // Slight inset (2px each side) so the bar sits inside the rounded track.
-    // Use fillRect — roundRect is not available in older Safari.
+    // Slight inset (2px each side) so the bar sits inside the track.
     ctx.fillRect(2, H - barH, W - 4, barH);
   }
 

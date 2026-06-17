@@ -7,6 +7,10 @@
   subscriber; other UI can subscribe to the same service.
   Drag to reposition; position saved in localStorage.
   Click a row to tune to that frequency.
+
+  Continent and country filters are searchable comboboxes populated from
+  /api/cty/countries. Selections are persisted in localStorage.
+  Filtering is client-side only — no extra API calls on filter change.
 -->
 
 <style>
@@ -29,8 +33,8 @@
     border-left: 3px solid rgba(255,255,255,0.4);
     cursor: grab;
     user-select: none;
-    min-width: 100px;
-    max-width: 160px;
+    min-width: 160px;
+    max-width: 220px;
   }
 
   #va-widget.va-dragging {
@@ -81,6 +85,109 @@
     background: rgba(0,0,0,0.3);
   }
 
+  /* ── Filter bar ─────────────────────────────────────────────────────────── */
+  #va-widget-filters {
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .va-filter-wrap {
+    position: relative;
+  }
+
+  .va-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    color: #fff;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px;
+    padding: 2px 18px 2px 5px; /* right padding leaves room for clear btn */
+    outline: none;
+    cursor: text;
+  }
+
+  .va-filter-input::placeholder {
+    color: rgba(255,255,255,0.4);
+  }
+
+  .va-filter-input:focus {
+    border-color: rgba(255,255,255,0.5);
+    background: rgba(0,0,0,0.5);
+  }
+
+  .va-filter-clear {
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 13px;
+    height: 13px;
+    display: none; /* shown via JS when input has value */
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    color: rgba(220, 60, 60, 0.85);
+    cursor: pointer;
+    border-radius: 2px;
+    transition: color 0.12s, background 0.12s;
+  }
+
+  .va-filter-clear:hover {
+    color: #ff4444;
+    background: rgba(255,255,255,0.1);
+  }
+
+  .va-filter-clear.va-clear-visible {
+    display: flex;
+  }
+
+  .va-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10000;
+    background: rgba(20, 60, 30, 0.97);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 140px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .va-filter-dropdown.va-dd-open {
+    display: block;
+  }
+
+  .va-filter-option {
+    padding: 3px 6px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.85);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .va-filter-option:hover,
+  .va-filter-option.va-opt-active {
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+  }
+
+  .va-filter-option.va-opt-selected {
+    color: #2ecc71;
+  }
+
+  /* ── Body ───────────────────────────────────────────────────────────────── */
   #va-widget-body {
     padding: 4px 0 2px;
   }
@@ -124,6 +231,48 @@
     color: rgba(255,255,255,0.55);
   }
 
+  /* ── Country badges ─────────────────────────────────────────────────────── */
+  #va-widget-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 4px 8px 5px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+
+  #va-widget-badges:empty {
+    display: none;
+  }
+
+  .va-badge {
+    font-size: 9px;
+    font-weight: bold;
+    font-family: 'Courier New', Courier, monospace;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.8);
+    cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.15);
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    white-space: nowrap;
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .va-badge:hover {
+    background: rgba(255,255,255,0.22);
+    color: #fff;
+    border-color: rgba(255,255,255,0.35);
+  }
+
+  .va-badge.va-badge-active {
+    background: rgba(46, 204, 113, 0.35);
+    color: #2ecc71;
+    border-color: rgba(46, 204, 113, 0.5);
+  }
+
   @media (max-width: 768px) {
     #va-widget { display: none !important; }
   }
@@ -137,37 +286,89 @@
     </span>
     <span id="va-widget-close" title="Dismiss">&#x2715;</span>
   </div>
+
+  <div id="va-widget-filters">
+    <!-- Continent searchable combobox -->
+    <div class="va-filter-wrap" id="va-cont-wrap">
+      <input class="va-filter-input" id="va-cont-input" type="text"
+             placeholder="Continent…" autocomplete="off" spellcheck="false" />
+      <span class="va-filter-clear" id="va-cont-clear" title="Clear">&#x2715;</span>
+      <div class="va-filter-dropdown" id="va-cont-dd"></div>
+    </div>
+    <!-- Country searchable combobox -->
+    <div class="va-filter-wrap" id="va-country-wrap">
+      <input class="va-filter-input" id="va-country-input" type="text"
+             placeholder="Country…" autocomplete="off" spellcheck="false" />
+      <span class="va-filter-clear" id="va-country-clear" title="Clear">&#x2715;</span>
+      <div class="va-filter-dropdown" id="va-country-dd"></div>
+    </div>
+  </div>
+
   <div id="va-widget-body">
     <div id="va-widget-empty">Waiting for band…</div>
   </div>
+  <div id="va-widget-badges"></div>
 </div>
 
 <script>
 (function () {
   'use strict';
 
-  var LS_POS_KEY     = 'va_widget_pos';
-  var DRAG_THRESHOLD = 5;
+  var LS_POS_KEY      = 'va_widget_pos';
+  var LS_CONT_KEY     = 'va_widget_continent';
+  var LS_COUNTRY_KEY  = 'va_widget_country';
+  var DRAG_THRESHOLD  = 5;
 
-  var widget    = document.getElementById('va-widget');
-  var titleEl   = document.getElementById('va-widget-title');
-  var bandEl    = document.getElementById('va-widget-band');
-  var bodyEl    = document.getElementById('va-widget-body');
-  var closeEl   = document.getElementById('va-widget-close');
+  var widget     = document.getElementById('va-widget');
+  var bandEl     = document.getElementById('va-widget-band');
+  var bodyEl     = document.getElementById('va-widget-body');
+  var badgesEl   = document.getElementById('va-widget-badges');
+  var closeEl    = document.getElementById('va-widget-close');
 
-  var dismissed   = false;
-  var currentBand = null;
-  var unsubscribe = null;
-  var dragState   = null;
-  var wasDragged  = false;
+  // Filter elements
+  var contInput    = document.getElementById('va-cont-input');
+  var contDd       = document.getElementById('va-cont-dd');
+  var contClear    = document.getElementById('va-cont-clear');
+  var countryInput = document.getElementById('va-country-input');
+  var countryDd    = document.getElementById('va-country-dd');
+  var countryClear = document.getElementById('va-country-clear');
 
-  // ── Position restore ────────────────────────────────────────────────────
+  var dismissed    = false;
+  var currentBand  = null;
+  var unsubscribe  = null;
+  var dragState    = null;
+  var wasDragged   = false;
+
+  // Filter state — the *value* (continent code or country name) that is active.
+  // Empty string means "no filter".
+  var activeContinent = '';
+  var activeCountry   = '';
+
+  // Full country list from /api/cty/countries
+  var allCountries = []; // [{name, continent, ...}, ...]
+
+  // Continent code → display name
+  var CONTINENT_NAMES = {
+    AF: 'Africa',
+    AN: 'Antarctica',
+    AS: 'Asia',
+    EU: 'Europe',
+    NA: 'North America',
+    OC: 'Oceania',
+    SA: 'South America'
+  };
+
+  // All continent options (static)
+  var CONTINENTS = Object.keys(CONTINENT_NAMES).map(function (code) {
+    return { code: code, name: CONTINENT_NAMES[code] };
+  }).sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+
+  // ── Restore saved position ───────────────────────────────────────────────
   (function restorePosition() {
     try {
       var saved = localStorage.getItem(LS_POS_KEY);
       if (saved) {
         var pos = JSON.parse(saved);
-        // Saved as {top, left} — convert back from left to right if needed
         if (typeof pos.top === 'number' && typeof pos.left === 'number') {
           widget.style.top   = pos.top  + 'px';
           widget.style.right = 'auto';
@@ -177,9 +378,22 @@
     } catch (e) { /* ignore */ }
   })();
 
-  // ── Drag ────────────────────────────────────────────────────────────────
+  // ── Restore saved filter selections ─────────────────────────────────────
+  (function restoreFilters() {
+    try {
+      var sc = localStorage.getItem(LS_CONT_KEY);
+      var sk = localStorage.getItem(LS_COUNTRY_KEY);
+      if (sc) { activeContinent = sc; contInput.value = CONTINENT_NAMES[sc] || sc; }
+      if (sk) { activeCountry   = sk; countryInput.value = sk; }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Drag ─────────────────────────────────────────────────────────────────
   widget.addEventListener('mousedown', function (e) {
     if (e.target === closeEl || closeEl.contains(e.target)) return;
+    // Don't start drag from filter inputs
+    if (e.target.classList.contains('va-filter-input') ||
+        e.target.classList.contains('va-filter-option')) return;
     if (e.button !== 0) return;
     var rect = widget.getBoundingClientRect();
     dragState = { startX: e.clientX, startY: e.clientY, origTop: rect.top, origLeft: rect.left };
@@ -194,7 +408,6 @@
     if (!wasDragged && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
       wasDragged = true;
       widget.classList.add('va-dragging');
-      // Switch from right-anchored to left-anchored for free movement
       widget.style.right = 'auto';
     }
     if (wasDragged) {
@@ -220,13 +433,200 @@
     setTimeout(function () { wasDragged = false; }, 0);
   });
 
-  // ── Close ───────────────────────────────────────────────────────────────
+  // ── Close ────────────────────────────────────────────────────────────────
   closeEl.addEventListener('click', function (e) {
     e.stopPropagation();
     dismissed = true;
     widget.style.display = 'none';
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   });
+
+  // ── Clear button visibility helper ──────────────────────────────────────
+  function updateClearBtn(input, clearBtn) {
+    if (!clearBtn) return;
+    if (input.value) {
+      clearBtn.classList.add('va-clear-visible');
+    } else {
+      clearBtn.classList.remove('va-clear-visible');
+    }
+  }
+
+  // ── Searchable combobox helper ───────────────────────────────────────────
+  // Creates a self-contained combobox from an input + dropdown div.
+  // options: [{label, value}, ...]
+  // onSelect(value, label) called when user picks an option.
+  // Returns { setOptions(opts), clear() }
+  function makeCombobox(input, dd, clearBtn, onSelect) {
+    var opts = [];
+    var activeIdx = -1;
+
+    function show() { dd.classList.add('va-dd-open'); }
+    function hide() { dd.classList.remove('va-dd-open'); activeIdx = -1; }
+
+    function render(filter) {
+      var q = (filter || '').toLowerCase();
+      var filtered = q
+        ? opts.filter(function (o) { return o.label.toLowerCase().indexOf(q) !== -1; })
+        : opts;
+
+      dd.innerHTML = '';
+      if (filtered.length === 0) { hide(); return; }
+
+      filtered.forEach(function (o, i) {
+        var el = document.createElement('div');
+        el.className = 'va-filter-option';
+        el.textContent = o.label;
+        el.setAttribute('data-value', o.value);
+        el.addEventListener('mousedown', function (e) {
+          e.preventDefault(); // keep focus on input
+          selectOption(o.value, o.label);
+        });
+        dd.appendChild(el);
+      });
+      show();
+    }
+
+    function selectOption(value, label) {
+      input.value = label;
+      updateClearBtn(input, clearBtn);
+      hide();
+      onSelect(value, label);
+    }
+
+    input.addEventListener('focus', function () {
+      render(input.value);
+    });
+
+    input.addEventListener('input', function () {
+      activeIdx = -1;
+      render(input.value);
+      updateClearBtn(input, clearBtn);
+      // If input is cleared, fire onSelect with empty to remove filter
+      if (input.value === '') onSelect('', '');
+    });
+
+    input.addEventListener('keydown', function (e) {
+      var items = dd.querySelectorAll('.va-filter-option');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, items.length - 1);
+        highlightActive(items);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+        highlightActive(items);
+      } else if (e.key === 'Enter') {
+        if (activeIdx >= 0 && items[activeIdx]) {
+          items[activeIdx].dispatchEvent(new MouseEvent('mousedown'));
+        }
+        hide();
+      } else if (e.key === 'Escape') {
+        hide();
+        input.blur();
+      }
+    });
+
+    input.addEventListener('blur', function () {
+      // Delay so mousedown on option fires first
+      setTimeout(hide, 150);
+    });
+
+    function highlightActive(items) {
+      items.forEach(function (el, i) {
+        el.classList.toggle('va-opt-active', i === activeIdx);
+      });
+      if (activeIdx >= 0 && items[activeIdx]) {
+        items[activeIdx].scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    return {
+      setOptions: function (newOpts) { opts = newOpts; },
+      clear: function () {
+        input.value = '';
+        updateClearBtn(input, clearBtn);
+        onSelect('', '');
+      }
+    };
+  }
+
+  // ── Continent combobox ───────────────────────────────────────────────────
+  var contCombo = makeCombobox(contInput, contDd, contClear, function (value) {
+    activeContinent = value;
+    // When continent changes, clear country filter if it doesn't belong
+    if (value && activeCountry) {
+      var match = allCountries.find(function (c) {
+        return c.name === activeCountry && c.continent === value;
+      });
+      if (!match) {
+        activeCountry = '';
+        countryInput.value = '';
+        try { localStorage.removeItem(LS_COUNTRY_KEY); } catch (e) {}
+      }
+    }
+    // Rebuild country options filtered to this continent
+    rebuildCountryOptions();
+    try { localStorage.setItem(LS_CONT_KEY, value); } catch (e) {}
+    // Re-render current data
+    if (currentBand) renderCurrent();
+  });
+
+  contCombo.setOptions(CONTINENTS.map(function (c) {
+    return { label: c.name, value: c.code };
+  }));
+
+  // ── Country combobox ─────────────────────────────────────────────────────
+  var countryCombo = makeCombobox(countryInput, countryDd, countryClear, function (value) {
+    activeCountry = value;
+    try {
+      if (value) localStorage.setItem(LS_COUNTRY_KEY, value);
+      else localStorage.removeItem(LS_COUNTRY_KEY);
+    } catch (e) {}
+    if (currentBand) renderCurrent();
+  });
+
+  // ── Wire clear buttons (after both combos are declared) ──────────────────
+  updateClearBtn(contInput, contClear);
+  updateClearBtn(countryInput, countryClear);
+
+  contClear.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    contCombo.clear();
+  });
+
+  countryClear.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    countryCombo.clear();
+  });
+
+  function rebuildCountryOptions() {
+    var list = activeContinent
+      ? allCountries.filter(function (c) { return c.continent === activeContinent; })
+      : allCountries;
+    countryCombo.setOptions(list.map(function (c) {
+      return { label: c.name, value: c.name };
+    }));
+  }
+
+  // ── Load countries from API ──────────────────────────────────────────────
+  function loadCountries() {
+    fetch('/api/cty/countries')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) {
+        if (!json || !json.success || !json.data || !json.data.countries) return;
+        allCountries = json.data.countries; // [{name, continent, ...}]
+        rebuildCountryOptions();
+      })
+      .catch(function () { /* CTY not available — filters just won't populate */ });
+  }
+
+  // ── Current activities cache (for re-render on filter change) ────────────
+  var lastActivities = [];
+  var lastBand = '';
+
+  function renderCurrent() {
+    renderData(lastActivities, lastBand);
+  }
 
   // ── Render from service state ─────────────────────────────────────────────
   function onState(state) {
@@ -252,33 +652,102 @@
 
     if (state.error) {
       console.warn('[VA Widget] service error:', state.error);
-      return; // keep existing display
+      return;
     }
 
-    renderData(state.activities || [], band);
+    lastActivities = state.activities || [];
+    lastBand = band;
+    renderData(lastActivities, band);
+  }
+
+  // ── Render country badges ────────────────────────────────────────────────
+  // Shows one badge per unique dx_country present in the full (unfiltered)
+  // activity list. Clicking a badge sets the country filter.
+  function renderBadges(activities) {
+    // Collect unique countries (preserving first-seen order)
+    var seen = {};
+    var countries = [];
+    activities.forEach(function (a) {
+      if (a.dx_country && !seen[a.dx_country]) {
+        seen[a.dx_country] = true;
+        countries.push(a.dx_country);
+      }
+    });
+
+    if (countries.length === 0) {
+      badgesEl.innerHTML = '';
+      return;
+    }
+
+    countries.sort();
+    badgesEl.innerHTML = countries.map(function (country) {
+      var isActive = country === activeCountry;
+      return '<span class="va-badge' + (isActive ? ' va-badge-active' : '') + '" ' +
+             'data-country="' + country.replace(/"/g, '&quot;') + '" ' +
+             'title="Filter: ' + country.replace(/"/g, '&quot;') + '">' +
+             country + '</span>';
+    }).join('');
+
+    badgesEl.querySelectorAll('.va-badge').forEach(function (badge) {
+      badge.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (wasDragged) return;
+        var country = badge.getAttribute('data-country');
+        if (activeCountry === country) {
+          // Toggle off — clear the filter
+          countryCombo.clear();
+        } else {
+          // Set country filter
+          activeCountry = country;
+          countryInput.value = country;
+          updateClearBtn(countryInput, countryClear);
+          try { localStorage.setItem(LS_COUNTRY_KEY, country); } catch (e2) {}
+          renderCurrent();
+        }
+      });
+    });
   }
 
   function renderData(activities, band) {
-    if (activities.length === 0) {
-      bodyEl.innerHTML = '<div id="va-widget-empty">No activity on ' + band + '</div>';
+    // Always update badges from the full unfiltered list
+    renderBadges(activities);
+
+    // Apply continent filter
+    var filtered = activities;
+    if (activeContinent) {
+      filtered = filtered.filter(function (a) {
+        return a.dx_continent === activeContinent;
+      });
+    }
+    // Apply country filter
+    if (activeCountry) {
+      filtered = filtered.filter(function (a) {
+        return a.dx_country === activeCountry;
+      });
+    }
+
+    if (filtered.length === 0) {
+      var msg = activities.length === 0
+        ? 'No activity on ' + band
+        : 'No matches for filter';
+      bodyEl.innerHTML = '<div id="va-widget-empty">' + msg + '</div>';
       return;
     }
 
     // Sort by signal_above_noise descending
-    activities = activities.slice().sort(function (a, b) {
+    filtered = filtered.slice().sort(function (a, b) {
       return (b.signal_above_noise || 0) - (a.signal_above_noise || 0);
     });
 
-    var rows = activities.map(function (act) {
+    var rows = filtered.map(function (act) {
       var hz   = act.estimated_dial_freq || act.start_freq;
-      var freq = (hz / 1e6).toFixed(3);    // MHz, 3 decimal places
+      var freq = (hz / 1e6).toFixed(3);
       var mode = (act.mode || 'LSB').toUpperCase();
       var snr  = act.signal_above_noise;
       var snrStr = snr != null ? Math.round(snr) + ' dB' : '';
       var snrClass = snr == null ? '' : snr >= 10 ? 'va-snr-strong' : snr >= 5 ? 'va-snr-good' : 'va-snr-weak';
 
       var callsign = act.dx_callsign || '';
-      // Show callsign in yellow instead of dB level when available
       var rightCol = callsign
         ? '<span class="va-snr" style="color:rgba(255,220,100,0.9);font-weight:bold;">' + callsign + '</span>'
         : (snrStr ? '<span class="va-snr ' + snrClass + '">' + snrStr + '</span>' : '');
@@ -292,7 +761,6 @@
 
     bodyEl.innerHTML = rows;
 
-    // Attach click handlers
     bodyEl.querySelectorAll('.va-row').forEach(function (row) {
       row.addEventListener('click', function () {
         if (wasDragged) return;
@@ -300,17 +768,14 @@
         var mode     = row.getAttribute('data-mode');
         var callsign = row.getAttribute('data-callsign');
         tuneToFrequency(hz, mode);
-        // Trigger QRZ lookup if the widget is available and a callsign is known
         if (callsign && typeof window.lookupCallsign === 'function') {
           window.lookupCallsign(callsign);
         }
       });
     });
-
   }
 
   function tuneToFrequency(hz, mode) {
-    // Edge-tune: only re-center if frequency is off-screen
     var centerSpectrum = true;
     var spectrum = window.spectrumDisplay;
     if (spectrum && spectrum.centerFreq && spectrum.totalBandwidth) {
@@ -348,10 +813,10 @@
   function start() {
     if (dismissed) return;
     if (!window.VoiceActivityService) {
-      // Service script not ready yet — retry shortly.
       setTimeout(start, 200);
       return;
     }
+    loadCountries();
     unsubscribe = window.VoiceActivityService.subscribe(onState);
   }
 

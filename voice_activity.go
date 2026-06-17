@@ -218,11 +218,15 @@ type VoiceActivity struct {
 	// DX cluster enrichment — populated when a callsign has been spotted on this
 	// frequency within the last 30 minutes and the DX cluster is enabled.
 	// Omitted from JSON when empty so existing clients are unaffected.
-	DXCallsign string `json:"dx_callsign,omitempty"`
+	DXCallsign   string  `json:"dx_callsign,omitempty"`
+	DXCountry    string  `json:"dx_country,omitempty"`
+	DXContinent  string  `json:"dx_continent,omitempty"`
+	DXTimeOffset float64 `json:"dx_time_offset,omitempty"`
 }
 
-// enrichWithDXCallsigns annotates each VoiceActivity with a spotted callsign from
-// the DX cluster frequency index, if one exists within the configured TTL.
+// enrichWithDXCallsigns annotates each VoiceActivity with a spotted callsign,
+// country, continent and time offset from the DX cluster frequency index,
+// if a spot exists within the configured TTL.
 // Safe to call with a nil or disabled DX cluster — returns the slice unchanged.
 // Never modifies the original slice header; always operates on the elements in place.
 func enrichWithDXCallsigns(activities []VoiceActivity) []VoiceActivity {
@@ -230,8 +234,11 @@ func enrichWithDXCallsigns(activities []VoiceActivity) []VoiceActivity {
 		return activities
 	}
 	for i := range activities {
-		if call := activeDXCluster.LookupCallsignByFreq(activities[i].EstimatedDialFreq); call != "" {
-			activities[i].DXCallsign = call
+		if entry := activeDXCluster.LookupByFreq(activities[i].EstimatedDialFreq); entry != nil {
+			activities[i].DXCallsign = entry.DXCall
+			activities[i].DXCountry = entry.Country
+			activities[i].DXContinent = entry.Continent
+			activities[i].DXTimeOffset = entry.TimeOffset
 		}
 	}
 	return activities

@@ -150,6 +150,16 @@
     margin-bottom: 2px;
   }
 
+  #qrz-name-line a {
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  #qrz-name-line a:hover {
+    color: #fff;
+  }
+
   #qrz-country-line {
     font-size: 10px;
     font-weight: normal;
@@ -525,7 +535,7 @@
 
     var html = '';
     if (fullName) {
-      html += '<div id="qrz-name-line">' + esc(fullName) + '</div>';
+      html += '<div id="qrz-name-line"><a href="https://www.qrz.com/db/' + esc(callsign) + '" target="_blank" rel="noopener noreferrer">' + esc(fullName) + '</a></div>';
     }
     if (country || d.grid) {
       var loc = [country, d.grid].filter(Boolean).join(' · ');

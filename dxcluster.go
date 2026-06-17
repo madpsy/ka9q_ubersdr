@@ -12,21 +12,25 @@ import (
 
 // DXSpot represents a DX spot from the cluster
 type DXSpot struct {
-	Frequency float64   `json:"frequency"` // Frequency in Hz
-	DXCall    string    `json:"dx_call"`   // Callsign being spotted
-	Spotter   string    `json:"spotter"`   // Callsign of spotter
-	Comment   string    `json:"comment"`   // Spot comment
-	Time      time.Time `json:"time"`      // Time of spot
-	Raw       string    `json:"raw"`       // Raw spot line
-	Band      string    `json:"band"`      // Amateur radio band (e.g., "20m", "40m")
-	Country   string    `json:"country"`   // Country name from CTY lookup
-	Continent string    `json:"continent"` // Continent code from CTY lookup
+	Frequency  float64   `json:"frequency"`   // Frequency in Hz
+	DXCall     string    `json:"dx_call"`     // Callsign being spotted
+	Spotter    string    `json:"spotter"`     // Callsign of spotter
+	Comment    string    `json:"comment"`     // Spot comment
+	Time       time.Time `json:"time"`        // Time of spot
+	Raw        string    `json:"raw"`         // Raw spot line
+	Band       string    `json:"band"`        // Amateur radio band (e.g., "20m", "40m")
+	Country    string    `json:"country"`     // Country name from CTY lookup
+	Continent  string    `json:"continent"`   // Continent code from CTY lookup
+	TimeOffset float64   `json:"time_offset"` // UTC offset in hours from CTY lookup
 }
 
 // dxFreqEntry holds the most recently spotted callsign for a frequency bucket
 type dxFreqEntry struct {
-	DXCall string
-	Time   time.Time
+	DXCall     string
+	Country    string
+	Continent  string
+	TimeOffset float64
+	Time       time.Time
 }
 
 // frequencyToBand converts a frequency in Hz to an amateur radio band name
@@ -567,10 +571,11 @@ func (c *DXClusterClient) parseDXSpot(line string) (DXSpot, bool) {
 		spot.Comment = strings.Join(fields[2:], " ")
 	}
 
-	// Perform CTY lookup for country and continent
+	// Perform CTY lookup for country, continent and time offset
 	if ctyInfo := GetCallsignInfo(spot.DXCall); ctyInfo != nil {
 		spot.Country = ctyInfo.Country
 		spot.Continent = ctyInfo.Continent
+		spot.TimeOffset = ctyInfo.TimeOffset
 	}
 
 	return spot, true
@@ -721,8 +726,11 @@ func (c *DXClusterClient) indexSpot(spot DXSpot) {
 
 	c.freqIndexMu.Lock()
 	c.freqIndex[key] = dxFreqEntry{
-		DXCall: spot.DXCall,
-		Time:   spot.Time,
+		DXCall:     spot.DXCall,
+		Country:    spot.Country,
+		Continent:  spot.Continent,
+		TimeOffset: spot.TimeOffset,
+		Time:       spot.Time,
 	}
 	c.freqIndexMu.Unlock()
 }
@@ -750,6 +758,33 @@ func (c *DXClusterClient) LookupCallsignByFreq(dialFreqHz uint64) string {
 		return ""
 	}
 	return entry.DXCall
+}
+
+// LookupByFreq returns the full dxFreqEntry for a given dial frequency (Hz),
+// or nil if no valid spot exists within the TTL.
+// Safe to call from any goroutine; never panics.
+func (c *DXClusterClient) LookupByFreq(dialFreqHz uint64) *dxFreqEntry {
+	if c == nil {
+		return nil
+	}
+	if !c.config.Enabled {
+		return nil
+	}
+	key := (dialFreqHz / 500) * 500
+
+	c.freqIndexMu.RLock()
+	entry, ok := c.freqIndex[key]
+	c.freqIndexMu.RUnlock()
+
+	if !ok {
+		return nil
+	}
+	if time.Since(entry.Time) > c.spotTTL {
+		return nil
+	}
+	// Return a copy to avoid exposing internal map entry
+	result := entry
+	return &result
 }
 
 // pruneFreqIndex removes entries from the frequency index that are older than spotTTL.

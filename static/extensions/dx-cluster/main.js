@@ -207,6 +207,60 @@ class DXClusterExtension extends DecoderExtension {
         // Subscription handled silently
     }
 
+    // ── Local (private) spot injection ────────────────────────────────────────
+    // Mirrors the DXSpot struct fields from dxcluster.go.
+    // Mode is inferred from comment + frequency by the existing tuneToSpot() /
+    // dxSpotMode() logic — no extra field needed.
+    addLocalSpot(freqHz, label) {
+        const ageFilterMinutes = (this.ageFilter !== null && this.ageFilter > 0)
+            ? this.ageFilter : 30;
+
+        const spot = {
+            frequency:   freqHz,
+            dx_call:     label,
+            spotter:     'Local Spot',
+            comment:     'Local temporary spot',
+            time:        new Date().toISOString(),
+            band:        this._frequencyToBand(freqHz),
+            country:     '',
+            continent:   '',
+            time_offset: 0,
+            _local:      true,   // flag for amber styling
+        };
+
+        this.addSpot(spot, true /* isNewSpot */);
+
+        // Auto-expire: remove from the array after ageFilter minutes, then
+        // force a re-render so the marker and table row disappear cleanly.
+        setTimeout(() => {
+            this.spots = this.spots.filter(s => s !== spot);
+            this.filterAndRenderSpots();
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.invalidateMarkerCache();
+                window.spectrumDisplay.draw();
+            }
+        }, ageFilterMinutes * 60 * 1000);
+    }
+
+    // Mirrors frequencyToBand() in dxcluster.go
+    _frequencyToBand(freqHz) {
+        const mhz = freqHz / 1e6;
+        if (mhz >= 0.1357 && mhz <= 0.1378) return '2200m';
+        if (mhz >= 0.470  && mhz <  0.480)  return '630m';
+        if (mhz >= 1.8    && mhz <= 2.0)    return '160m';
+        if (mhz >= 3.5    && mhz <= 4.0)    return '80m';
+        if (mhz >= 5.25   && mhz <= 5.45)   return '60m';
+        if (mhz >= 7.0    && mhz <= 7.3)    return '40m';
+        if (mhz >= 10.1   && mhz <= 10.15)  return '30m';
+        if (mhz >= 14.0   && mhz <= 14.35)  return '20m';
+        if (mhz >= 18.068 && mhz <= 18.168) return '17m';
+        if (mhz >= 21.0   && mhz <= 21.45)  return '15m';
+        if (mhz >= 24.89  && mhz <= 24.99)  return '12m';
+        if (mhz >= 28.0   && mhz <= 29.7)   return '10m';
+        if (mhz >= 50.0   && mhz <= 54.0)   return '6m';
+        return 'other';
+    }
+
     startConnectionMonitoring() {
         // Update immediately
         this.updateConnectionStatus();
@@ -420,6 +474,9 @@ class DXClusterExtension extends DecoderExtension {
 
             // Make row clickable to tune (always enabled)
             row.style.cursor = 'pointer';
+            if (spot._local) {
+                row.classList.add('spot-local');
+            }
             row.addEventListener('click', () => {
                 this.tuneToSpot(spot);
             });
@@ -1073,8 +1130,11 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Background for label
-        ctx.fillStyle = 'rgba(40, 167, 69, 0.95)'; // Green background
+        // Background for label — amber for local spots, green for real spots
+        const markerColor = spot._local
+            ? 'rgba(255, 160, 0, 0.95)'   // amber
+            : 'rgba(40, 167, 69, 0.95)';  // green
+        ctx.fillStyle = markerColor;
         ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 
         // Border for label
@@ -1083,13 +1143,13 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         ctx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 
         // Label text
-        ctx.fillStyle = '#FFFFFF'; // White text on green background
+        ctx.fillStyle = '#FFFFFF'; // White text
         ctx.fillText(spot.dx_call, x, labelY + labelHeight / 2);
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;
         const arrowTipY = 30 + labelHeight + arrowLength; // Always point to same baseline
-        ctx.fillStyle = 'rgba(40, 167, 69, 0.95)';
+        ctx.fillStyle = markerColor;
         ctx.beginPath();
         ctx.moveTo(x, arrowTipY); // Arrow tip at baseline
         ctx.lineTo(x - 4, arrowStartY); // Left point at label bottom

@@ -177,6 +177,15 @@
     cursor: default;
 }
 
+/* Local (privately-added) spots — amber tint to distinguish from real DX spots */
+.dx-cluster-table tbody tr.spot-local {
+    border-left: 3px solid rgba(255, 160, 0, 0.85);
+}
+
+.dx-cluster-table tbody tr.spot-local .spot-spotter {
+    color: rgba(255, 160, 0, 0.9);
+}
+
 .spot-time {
     color: #888;
     font-size: 11px;

@@ -5563,103 +5563,263 @@ class SpectrumDisplay {
         e.preventDefault();
         e.stopPropagation();
 
-        // Check for supported modes
-        const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
-        if (currentMode !== 'am' && currentMode !== 'sam' && currentMode !== 'usb' && currentMode !== 'lsb') {
+        if (!this.totalBandwidth || !this.centerFreq) {
             return;
-        }
-
-        if (!this.spectrumData || !this.currentTunedFreq || !this.totalBandwidth) {
-            return;
-        }
-
-        // Initialize carrier detector if not already done
-        if (!this.carrierDetector) {
-            this.carrierDetector = new CarrierDetector();
         }
 
         const rect = e.target.getBoundingClientRect();
         const x = e.clientX - rect.left;
 
-        // Calculate frequency range
+        // Frequency at the cursor position — always computed, used by "Add DX Spot"
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const freqAtCursor = Math.round(startFreq + (x / this.width) * this.totalBandwidth);
 
-        // Use CarrierDetector to find carrier/edge
-        const result = this.carrierDetector.detectCarrier(
-            currentMode,
-            this.spectrumData,
-            this.currentTunedFreq,
-            this.currentBandwidthLow,
-            this.currentBandwidthHigh,
-            startFreq,
-            this.totalBandwidth
-        );
+        // Build menu
+        this.contextMenu.innerHTML = '';
 
-        if (!result) {
+        // ── "Center Carrier / Edge" item — only for AM/SAM/USB/LSB ──────────
+        const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
+        const carrierModes = ['am', 'sam', 'usb', 'lsb'];
+        if (carrierModes.includes(currentMode) && this.spectrumData && this.currentTunedFreq) {
+            // Initialize carrier detector if not already done
+            if (!this.carrierDetector) {
+                this.carrierDetector = new CarrierDetector();
+            }
+
+            const result = this.carrierDetector.detectCarrier(
+                currentMode,
+                this.spectrumData,
+                this.currentTunedFreq,
+                this.currentBandwidthLow,
+                this.currentBandwidthHigh,
+                startFreq,
+                this.totalBandwidth
+            );
+
+            if (result) {
+                const offset = result.frequency - this.currentTunedFreq;
+                const currentDialFreq = window.getCurrentDialFrequency
+                    ? window.getCurrentDialFrequency() : this.currentTunedFreq;
+                let newDialFreq = Math.round(currentDialFreq + offset);
+
+                if (currentMode === 'lsb') {
+                    newDialFreq = Math.round((newDialFreq + 200) / 1000) * 1000;
+                } else if (currentMode === 'usb') {
+                    newDialFreq = Math.round((newDialFreq - 200) / 1000) * 1000;
+                }
+
+                const menuText = (currentMode === 'am' || currentMode === 'sam')
+                    ? `Center Carrier at ${this.formatFrequency(newDialFreq)}`
+                    : `Center ${currentMode.toUpperCase()} Edge at ${this.formatFrequency(newDialFreq)}`;
+
+                const carrierItem = this._makeContextMenuItem(menuText, () => {
+                    this.centerCarrier(newDialFreq);
+                });
+                this.contextMenu.appendChild(carrierItem);
+            }
+        }
+
+        // ── "Add DX Spot" item — only when DX cluster extension is active ───
+        if (window.dxClusterExtensionInstance &&
+            typeof window.dxClusterExtensionInstance.addLocalSpot === 'function') {
+            const freqLabel = this.formatFrequency(freqAtCursor);
+            const dxItem = this._makeContextMenuItem(`📍 Add DX Spot at ${freqLabel}`, () => {
+                this._showAddLocalSpotModal(freqAtCursor, freqLabel);
+            });
+            this.contextMenu.appendChild(dxItem);
+        }
+
+        // Don't show an empty menu
+        if (this.contextMenu.children.length === 0) {
             return;
         }
 
-        // Calculate new dial frequency
-        const offset = result.frequency - this.currentTunedFreq;
-        const currentDialFreq = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.currentTunedFreq;
-        let newDialFreq = Math.round(currentDialFreq + offset);
-
-        // Account for typical 200 Hz audio offset and round to nearest 1 kHz
-        if (currentMode === 'lsb') {
-            // LSB: audio is below dial frequency (dial - 3000 Hz to dial - 200 Hz)
-            // Detected edge is at dial - 200 Hz, so add 200 Hz to get dial frequency
-            // Then round to nearest 1 kHz
-            const adjustedFreq = newDialFreq + 200;
-            newDialFreq = Math.round(adjustedFreq / 1000) * 1000;
-        } else if (currentMode === 'usb') {
-            // USB: audio is above dial frequency (dial + 200 Hz to dial + 3000 Hz)
-            // Detected edge is at dial + 200 Hz, so subtract 200 Hz to get dial frequency
-            // Then round to nearest 1 kHz
-            const adjustedFreq = newDialFreq - 200;
-            newDialFreq = Math.round(adjustedFreq / 1000) * 1000;
-        }
-        // AM/SAM modes don't need special rounding - use exact carrier frequency
-
-        // Create menu text based on mode
-        let menuText;
-        if (currentMode === 'am' || currentMode === 'sam') {
-            menuText = `Center Carrier at ${this.formatFrequency(newDialFreq)}`;
-        } else {
-            menuText = `Center ${currentMode.toUpperCase()} Edge at ${this.formatFrequency(newDialFreq)}`;
-        }
-
-        // Create context menu content
-        this.contextMenu.innerHTML = '';
-        const menuItem = document.createElement('div');
-        menuItem.style.padding = '8px 16px';
-        menuItem.style.cursor = 'pointer';
-        menuItem.style.fontFamily = 'monospace';
-        menuItem.style.fontSize = '13px';
-        menuItem.textContent = menuText;
-
-        // Hover effect
-        menuItem.addEventListener('mouseenter', () => {
-            menuItem.style.backgroundColor = '#007bff';
-            menuItem.style.color = '#fff';
-        });
-        menuItem.addEventListener('mouseleave', () => {
-            menuItem.style.backgroundColor = '';
-            menuItem.style.color = '';
-        });
-
-        // Click handler
-        menuItem.addEventListener('click', (clickEvent) => {
-            clickEvent.stopPropagation();
-            this.centerCarrier(newDialFreq);
-            this.contextMenu.style.display = 'none';
-        });
-
-        this.contextMenu.appendChild(menuItem);
-
-        // Position context menu at cursor
+        // Position and show
         this.contextMenu.style.left = e.clientX + 'px';
         this.contextMenu.style.top = e.clientY + 'px';
         this.contextMenu.style.display = 'block';
+    }
+
+    // Helper: create a styled context menu item div
+    _makeContextMenuItem(text, onClick) {
+        const item = document.createElement('div');
+        item.style.padding = '8px 16px';
+        item.style.cursor = 'pointer';
+        item.style.fontFamily = 'monospace';
+        item.style.fontSize = '13px';
+        item.textContent = text;
+        item.addEventListener('mouseenter', () => {
+            item.style.backgroundColor = '#007bff';
+            item.style.color = '#fff';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.backgroundColor = '';
+            item.style.color = '';
+        });
+        item.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            this.contextMenu.style.display = 'none';
+            onClick();
+        });
+        return item;
+    }
+
+    // Show a simple modal asking the user for a callsign/label, then inject a
+    // local DX spot via window.dxClusterExtensionInstance.addLocalSpot().
+    _showAddLocalSpotModal(freqHz, freqLabel) {
+        // Remove any stale modal
+        const existing = document.getElementById('_local-spot-modal');
+        if (existing) existing.remove();
+
+        // ── Backdrop ──────────────────────────────────────────────────────
+        const backdrop = document.createElement('div');
+        backdrop.id = '_local-spot-modal';
+        Object.assign(backdrop.style, {
+            position:        'fixed',
+            inset:           '0',
+            zIndex:          '20000',
+            background:      'rgba(0,0,0,0.55)',
+            display:         'flex',
+            alignItems:      'center',
+            justifyContent:  'center',
+        });
+
+        // ── Dialog box ────────────────────────────────────────────────────
+        const dialog = document.createElement('div');
+        Object.assign(dialog.style, {
+            background:   '#1e2a38',
+            border:       '1px solid rgba(127,140,141,0.5)',
+            borderRadius: '8px',
+            padding:      '20px 24px',
+            boxShadow:    '0 8px 32px rgba(0,0,0,0.7)',
+            minWidth:     '300px',
+            maxWidth:     '380px',
+            fontFamily:   'inherit',
+            color:        '#ecf0f1',
+        });
+
+        // Title
+        const title = document.createElement('div');
+        title.textContent = '📍 Add Local DX Spot';
+        Object.assign(title.style, {
+            fontSize:     '14px',
+            fontWeight:   '600',
+            marginBottom: '4px',
+        });
+
+        // Frequency sub-label
+        const freqSub = document.createElement('div');
+        freqSub.textContent = freqLabel;
+        Object.assign(freqSub.style, {
+            fontSize:     '12px',
+            color:        '#95a5a6',
+            marginBottom: '14px',
+            fontFamily:   'monospace',
+        });
+
+        // Label
+        const label = document.createElement('label');
+        label.textContent = 'Callsign / Label';
+        Object.assign(label.style, {
+            display:      'block',
+            fontSize:     '11px',
+            color:        '#95a5a6',
+            marginBottom: '5px',
+            textTransform:'uppercase',
+            letterSpacing:'0.06em',
+        });
+
+        // Input
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'e.g. G0ABC';
+        input.maxLength = 20;
+        Object.assign(input.style, {
+            width:        '100%',
+            boxSizing:    'border-box',
+            background:   '#0d1b2a',
+            border:       '1px solid rgba(127,140,141,0.4)',
+            borderRadius: '4px',
+            color:        '#ecf0f1',
+            fontSize:     '14px',
+            fontFamily:   'monospace',
+            padding:      '7px 10px',
+            marginBottom: '16px',
+            outline:      'none',
+        });
+
+        // Button row
+        const btnRow = document.createElement('div');
+        Object.assign(btnRow.style, {
+            display:        'flex',
+            justifyContent: 'flex-end',
+            gap:            '8px',
+        });
+
+        const makeBtn = (text, primary) => {
+            const btn = document.createElement('button');
+            btn.textContent = text;
+            btn.type = 'button';
+            Object.assign(btn.style, {
+                padding:      '6px 16px',
+                borderRadius: '4px',
+                border:       primary ? 'none' : '1px solid rgba(127,140,141,0.4)',
+                background:   primary ? '#e67e00' : 'transparent',
+                color:        '#ecf0f1',
+                fontSize:     '13px',
+                cursor:       'pointer',
+                fontFamily:   'inherit',
+            });
+            return btn;
+        };
+
+        const cancelBtn = makeBtn('Cancel', false);
+        const addBtn    = makeBtn('Add Spot', true);
+
+        const close = () => backdrop.remove();
+
+        const confirm = () => {
+            const raw = input.value.trim().toUpperCase();
+            if (!raw) {
+                input.style.borderColor = '#e74c3c';
+                input.focus();
+                return;
+            }
+            close();
+            if (window.dxClusterExtensionInstance &&
+                typeof window.dxClusterExtensionInstance.addLocalSpot === 'function') {
+                window.dxClusterExtensionInstance.addLocalSpot(freqHz, raw);
+            } else {
+                console.warn('Add DX Spot: dxClusterExtensionInstance not available');
+            }
+        };
+
+        cancelBtn.addEventListener('click', close);
+        addBtn.addEventListener('click', confirm);
+
+        // Keyboard: Enter = confirm, Escape = cancel
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter')  { ev.preventDefault(); confirm(); }
+            if (ev.key === 'Escape') { ev.preventDefault(); close(); }
+        });
+
+        // Click outside dialog = cancel
+        backdrop.addEventListener('click', (ev) => {
+            if (ev.target === backdrop) close();
+        });
+
+        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(addBtn);
+        dialog.appendChild(title);
+        dialog.appendChild(freqSub);
+        dialog.appendChild(label);
+        dialog.appendChild(input);
+        dialog.appendChild(btnRow);
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
+
+        // Auto-focus the input after the modal is in the DOM
+        requestAnimationFrame(() => input.focus());
     }
 
     // Center carrier by adjusting dial frequency

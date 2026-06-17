@@ -5,6 +5,7 @@
      • Shows the latest decoded SSTV image
      • Polls /addon/sstv/api/images?limit=1 every 60 s
      • Only re-fetches the image when the record ID changes
+     • ← / → arrows browse history (offset-based)
      • Drag widget to reposition
      ═══════════════════════════════════════════════════════════ -->
 
@@ -52,22 +53,43 @@
   flex: 1;
 }
 
+/* ── Nav arrows + close button group ── */
+#sdr-sstv-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+#sdr-sstv-prev-btn,
+#sdr-sstv-next-btn,
 #sdr-sstv-close-btn {
   background: none !important;
   border: none !important;
   color: #7f8c8d !important;
   font-size: 13px;
   cursor: pointer !important;
-  padding: 0 0 0 6px;
+  padding: 0 3px;
   line-height: 1;
   font-weight: normal !important;
   transform: none !important;
   transition: color 0.15s !important;
 }
+#sdr-sstv-prev-btn:hover:not(:disabled),
+#sdr-sstv-next-btn:hover:not(:disabled),
 #sdr-sstv-close-btn:hover {
   color: #ecf0f1 !important;
   background: none !important;
   transform: none !important;
+}
+#sdr-sstv-prev-btn:disabled,
+#sdr-sstv-next-btn:disabled {
+  color: #3d5166 !important;
+  cursor: default !important;
+}
+
+/* Slight left margin to separate arrows from close */
+#sdr-sstv-close-btn {
+  padding-left: 6px;
 }
 
 /* ── Image area ── */
@@ -194,7 +216,11 @@
   <!-- Title bar -->
   <div id="sdr-sstv-titlebar">
     <span id="sdr-sstv-title">📡 Latest SSTV</span>
-    <button id="sdr-sstv-close-btn" title="Hide widget">✕</button>
+    <div id="sdr-sstv-nav">
+      <button id="sdr-sstv-prev-btn" title="Older image" disabled>&#8592;</button>
+      <button id="sdr-sstv-next-btn" title="Newer image" disabled>&#8594;</button>
+      <button id="sdr-sstv-close-btn" title="Hide widget">✕</button>
+    </div>
   </div>
 
   <!-- Image -->
@@ -219,7 +245,7 @@
 (function () {
   'use strict';
 
-  const API_URL   = '/addon/sstv/api/images?limit=1&snr_series=0&complete=1&min_snr=38';
+  const API_BASE  = '/addon/sstv/api/images?limit=1&snr_series=0&complete=1&min_snr=38';
   const IMG_BASE  = '/addon/sstv/images/';
   const POLL_MS   = 60_000; // 1 minute
 
@@ -228,13 +254,17 @@
   const placeholder = document.getElementById('sdr-sstv-placeholder');
   const infoEl      = document.getElementById('sdr-sstv-info');
   const ageEl       = document.getElementById('sdr-sstv-age');
+  const titleEl     = document.getElementById('sdr-sstv-title');
   const lightbox    = document.getElementById('sdr-sstv-lightbox');
   const lbImg       = document.getElementById('sdr-sstv-lightbox-img');
+  const prevBtn     = document.getElementById('sdr-sstv-prev-btn');
+  const nextBtn     = document.getElementById('sdr-sstv-next-btn');
 
-  let currentID   = null;  // ID of the record currently displayed
-  let currentRxEnd = null; // ISO string of rx_end for the age counter
-  let ageTimer    = null;
-  let pollTimer   = null;
+  let currentID    = null;  // ID of the record currently displayed
+  let currentRxEnd = null;  // ISO string of rx_end for the age counter
+  let currentOffset = 0;    // 0 = latest; positive = older
+  let ageTimer     = null;
+  let pollTimer    = null;
 
   // ── SSTV mode name table (matches app.js) ──────────────────────────
   const MODE_NAMES = {
@@ -283,13 +313,31 @@
     }, 15_000);
   }
 
+  // ── Update title to reflect browsing position ──────────────────────
+  function updateTitle() {
+    if (currentOffset === 0) {
+      titleEl.textContent = '📡 Latest SSTV';
+    } else {
+      titleEl.textContent = '📡 SSTV −' + currentOffset;
+    }
+  }
+
+  // ── Update nav button disabled states ─────────────────────────────
+  // nextBtn (→ newer) is disabled when we're already at the latest (offset 0).
+  // prevBtn (← older) is disabled when the last fetch returned no record at
+  // offset+1 (i.e. there is no older image).  We track this via noOlderImage.
+  let noOlderImage = false;
+
+  function updateNavButtons() {
+    nextBtn.disabled = (currentOffset === 0);
+    prevBtn.disabled = noOlderImage;
+  }
+
   // ── Render record ──────────────────────────────────────────────────
   function renderRecord(rec) {
     currentID    = rec.id;
     currentRxEnd = rec.rx_end || null;
 
-    // Image — only update src when the record changes (already guarded by
-    // the ID check in poll(), but also safe to call here directly).
     const src = IMG_BASE + rec.file;
     imgEl.src = src;
     imgEl.style.display = '';
@@ -320,30 +368,52 @@
     startAgeTicker();
   }
 
-  // ── Poll ───────────────────────────────────────────────────────────
-  function poll() {
-    fetch(API_URL)
+  // ── Fetch image at a specific offset ──────────────────────────────
+  // offset 0 = latest, 1 = second-latest, etc.
+  // Returns a Promise that resolves to the record or null.
+  function fetchAtOffset(offset) {
+    const url = API_BASE + '&offset=' + offset;
+    return fetch(url)
       .then(r => {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(records => {
-        if (!Array.isArray(records) || records.length === 0) {
-          placeholder.textContent = 'No images yet';
-          placeholder.style.display = '';
-          imgEl.style.display = 'none';
-          infoEl.innerHTML = '';
-          ageEl.textContent = '';
+        if (!Array.isArray(records) || records.length === 0) return null;
+        return records[0];
+      });
+  }
+
+  // ── Poll (always fetches latest, offset 0) ─────────────────────────
+  // Only auto-updates the display when the user is viewing the latest image.
+  function poll() {
+    fetchAtOffset(0)
+      .then(rec => {
+        if (!rec) {
+          // No images at all
+          if (currentOffset === 0) {
+            placeholder.textContent = 'No images yet';
+            placeholder.style.display = '';
+            imgEl.style.display = 'none';
+            infoEl.innerHTML = '';
+            ageEl.textContent = '';
+          }
           return;
         }
-        const rec = records[0];
-        // Only update the image if the record has changed.
-        if (rec.id !== currentID) {
-          renderRecord(rec);
-        } else {
-          // Same record — just refresh the age label.
-          if (currentRxEnd) ageEl.textContent = fmtAge(currentRxEnd);
+
+        if (currentOffset === 0) {
+          // User is viewing the latest — update if the record changed.
+          if (rec.id !== currentID) {
+            noOlderImage = false; // new latest arrived; reset older-image sentinel
+            renderRecord(rec);
+            // Probe whether there is an older image so ← can be enabled.
+            probeOlderImage();
+          } else {
+            // Same record — just refresh the age label.
+            if (currentRxEnd) ageEl.textContent = fmtAge(currentRxEnd);
+          }
         }
+        // If the user is browsing history, don't disturb the current view.
       })
       .catch(err => {
         console.warn('[sstv-widget] poll error:', err);
@@ -355,16 +425,75 @@
       });
   }
 
+  // Check whether there is an image at offset+1 so we can enable/disable ←.
+  function probeOlderImage() {
+    fetchAtOffset(currentOffset + 1)
+      .then(rec => {
+        noOlderImage = (rec === null);
+        updateNavButtons();
+      })
+      .catch(() => {
+        noOlderImage = true;
+        updateNavButtons();
+      });
+  }
+
   function schedulePoll() {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(poll, POLL_MS);
+  }
+
+  // ── Navigate to a specific offset ─────────────────────────────────
+  function navigateTo(offset) {
+    if (offset < 0) offset = 0;
+
+    placeholder.textContent = 'Loading…';
+    placeholder.style.display = '';
+    imgEl.style.display = 'none';
+
+    fetchAtOffset(offset)
+      .then(rec => {
+        if (!rec) {
+          // No image at this offset — clamp back.
+          if (offset > 0) {
+            // We went too far back; stay at the previous offset.
+            navigateTo(offset - 1);
+          } else {
+            placeholder.textContent = 'No images yet';
+            placeholder.style.display = '';
+            infoEl.innerHTML = '';
+            ageEl.textContent = '';
+          }
+          return;
+        }
+
+        currentOffset = offset;
+        renderRecord(rec);
+        updateTitle();
+
+        // Probe whether there is an image one step older to enable/disable ←.
+        fetchAtOffset(currentOffset + 1)
+          .then(older => {
+            noOlderImage = (older === null);
+            updateNavButtons();
+          })
+          .catch(() => {
+            noOlderImage = true;
+            updateNavButtons();
+          });
+      })
+      .catch(err => {
+        console.warn('[sstv-widget] navigate error:', err);
+        placeholder.textContent = 'Unavailable';
+        placeholder.style.display = '';
+        imgEl.style.display = 'none';
+      });
   }
 
   // ── Lightbox ───────────────────────────────────────────────────────
   imgEl.addEventListener('click', () => {
     if (!imgEl.src || imgEl.style.display === 'none') return;
     lbImg.src = imgEl.src;
-    // Set 2× natural size once the image is loaded (or immediately if already loaded)
     function applyScale() {
       if (imgEl.naturalWidth) {
         lbImg.style.width  = (imgEl.naturalWidth  * 2) + 'px';
@@ -391,12 +520,24 @@
     widget.style.display = 'none';
   });
 
+  // ── Nav arrow buttons ──────────────────────────────────────────────
+  prevBtn.addEventListener('click', () => {
+    if (!prevBtn.disabled) navigateTo(currentOffset + 1);
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (!nextBtn.disabled) navigateTo(currentOffset - 1);
+  });
+
   // ── Manual refresh ─────────────────────────────────────────────────
   document.getElementById('sdr-sstv-refresh-btn').addEventListener('click', () => {
-    // Force a re-fetch and re-render even if the ID hasn't changed.
+    // Jump back to latest and force a re-fetch.
+    currentOffset = 0;
     currentID = null;
+    noOlderImage = false;
+    updateTitle();
+    updateNavButtons();
     poll();
-    // Reset the poll interval so the next automatic poll is 60 s from now.
     schedulePoll();
   });
 
@@ -405,7 +546,6 @@
     const LS_KEY = 'sdr-sstv-widget-pos';
     let dragging = false, startX, startY, origLeft, origTop;
 
-    // Restore saved position from localStorage (if any)
     try {
       const saved = JSON.parse(localStorage.getItem(LS_KEY));
       if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
@@ -463,7 +603,6 @@
     });
     widget.addEventListener('pointercancel', () => { dragging = false; widget.classList.remove('dragging'); });
 
-    // Re-clamp position when the window is resized so the widget never goes off-screen
     window.addEventListener('resize', () => {
       if (widget.style.left && widget.style.top && widget.style.transform === 'none') {
         const maxL = window.innerWidth  - widget.offsetWidth;
@@ -475,9 +614,6 @@
   })();
 
   // ── Boot ───────────────────────────────────────────────────────────
-  // window.instanceDescription is populated asynchronously by the host
-  // app's fetchSiteDescription().  Poll for it (up to 10 s) then check
-  // data.addons before starting the widget.
   function boot() {
     const deadline = Date.now() + 10_000;
     const interval = setInterval(() => {
@@ -487,7 +623,7 @@
           console.warn('[sstv-widget] timed out waiting for instanceDescription — widget hidden');
           widget.style.display = 'none';
         }
-        return; // not ready yet — keep waiting
+        return;
       }
       clearInterval(interval);
       const addons = Array.isArray(window.instanceDescription.addons)
@@ -504,6 +640,8 @@
         return;
       }
       console.log('[sstv-widget] SSTV addon active — starting poll');
+      // Initial state: both nav buttons disabled until first poll completes.
+      updateNavButtons();
       poll();
       schedulePoll();
     }, 100);
@@ -513,4 +651,3 @@
 
 })();
 </script>
-

@@ -444,6 +444,7 @@ function toggleBandpassFilter() {
     const checkbox = document.getElementById('bandpass-enable');
     const badge = document.getElementById('bandpass-status-badge');
     bandpassEnabled = checkbox.checked;
+    window.bandpassEnabled = bandpassEnabled; // keep window property in sync
     if (bandpassEnabled) {
         updateBandpassSliderRanges();
         if (bandpassFilters.length === 0 && window.audioContext) {
@@ -634,7 +635,11 @@ function addNotchFilter(centerFreq) {
         const checkbox = document.getElementById('notch-enable');
         if (checkbox) {
             checkbox.checked = true;
-            toggleNotchFilter();
+            toggleNotchFilter(); // also sets window.notchEnabled = true
+        } else {
+            // Fallback if checkbox not in DOM yet
+            notchEnabled = true;
+            window.notchEnabled = true;
         }
     }
     updateNotchFilterUI();
@@ -685,6 +690,7 @@ function toggleNotchFilter() {
     const checkbox = document.getElementById('notch-enable');
     const badge = document.getElementById('notch-status-badge');
     notchEnabled = checkbox.checked;
+    window.notchEnabled = notchEnabled; // keep window property in sync
     if (notchEnabled) {
         updateNotchFilterUI();
         if (badge) {

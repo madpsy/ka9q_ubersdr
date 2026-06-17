@@ -52,7 +52,24 @@
     text-transform: uppercase;
   }
 
-  #aviz-tabs { display: flex; gap: 4px; margin-left: auto; margin-right: 6px; }
+  #aviz-tabs { display: flex; gap: 4px; margin-left: auto; margin-right: 6px; align-items: center; }
+
+  #aviz-fft-select {
+    font-size: 9px;
+    font-family: 'Courier New', Courier, monospace;
+    background: #1e2a38;
+    color: rgba(255,255,255,0.75);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 3px;
+    padding: 1px 3px;
+    cursor: pointer;
+    outline: none;
+  }
+  #aviz-fft-select:hover { background: #263545; }
+  #aviz-fft-select option {
+    background: #1e2a38;
+    color: #e0e8f0;
+  }
 
   .aviz-tab {
     font-size: 10px;
@@ -88,15 +105,96 @@
 
   #aviz-body { padding: 6px; }
 
-  .aviz-canvas-wrap { position: relative; margin-bottom: 6px; }
-  .aviz-canvas-wrap:last-child { margin-bottom: 0; }
+  .aviz-canvas-wrap { position: relative; margin-bottom: 4px; }
   .aviz-canvas-wrap.aviz-hidden { display: none; }
 
-  .aviz-canvas-wrap canvas {
+  /* Filter badge strip (notches + bandpass) */
+  #aviz-notch-badges {
+    display: none;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 3px 2px 2px;
+  }
+
+  .aviz-notch-badge {
+    font-size: 10px;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    background: rgba(255, 60, 60, 0.75);
+    color: #fff;
+    user-select: none;
+    border: 1px solid rgba(255, 100, 100, 0.5);
+    transition: background 0.12s, color 0.12s;
+  }
+  .aviz-notch-badge:hover {
+    background: rgba(255, 80, 80, 0.95);
+  }
+  .aviz-notch-badge.aviz-notch-disabled {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.35);
+    text-decoration: line-through;
+    border-color: rgba(255,255,255,0.15);
+  }
+
+  /* Bandpass badge — magenta (contrasts well against the blue/cyan/green waterfall) */
+  .aviz-bp-badge {
+    font-size: 10px;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    background: rgba(220, 0, 200, 0.75);
+    color: #fff;
+    user-select: none;
+    border: 1px solid rgba(240, 0, 220, 0.5);
+    transition: background 0.12s, color 0.12s;
+  }
+  .aviz-bp-badge:hover {
+    background: rgba(240, 0, 220, 0.95);
+  }
+  .aviz-bp-badge.aviz-bp-disabled {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.35);
+    text-decoration: line-through;
+    border-color: rgba(255,255,255,0.15);
+  }
+
+  .aviz-canvas-wrap canvas:not(#aviz-wf-overlay) {
     display: block;
     width: 100%;
     border-radius: 3px;
     background: #2c3e50;
+  }
+  #aviz-wf-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  /* Waterfall hover tooltip */
+  #aviz-wf-tooltip {
+    display: none;
+    position: absolute;
+    pointer-events: none;
+    background: rgba(10, 16, 24, 0.88);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-family: 'Courier New', Courier, monospace;
+    color: #e0e8f0;
+    white-space: nowrap;
+    z-index: 10;
+    line-height: 1.5;
   }
   #aviz-scope { height: 90px; }
   #aviz-wf    { height: 110px; }
@@ -118,6 +216,13 @@
   <div id="aviz-header">
     <span id="aviz-title">Audio</span>
     <span id="aviz-tabs">
+      <select id="aviz-fft-select" title="FFT Size (shared with main visualiser)">
+        <option value="2048">2048 (Fastest)</option>
+        <option value="4096">4096 (Fast)</option>
+        <option value="8192">8192 (Balanced)</option>
+        <option value="16384" selected>16384 (High Detail)</option>
+        <option value="32768">32768 (Max Detail)</option>
+      </select>
       <span class="aviz-tab" id="aviz-tab-scope" title="Toggle oscilloscope">Scope</span>
       <span class="aviz-tab aviz-on" id="aviz-tab-wf" title="Toggle waterfall">Waterfall</span>
     </span>
@@ -130,7 +235,10 @@
     </div>
     <div class="aviz-canvas-wrap" id="aviz-wf-wrap" style="display:none;">
       <canvas id="aviz-wf"></canvas>
+      <canvas id="aviz-wf-overlay"></canvas>
+      <div id="aviz-wf-tooltip"></div>
     </div>
+    <div id="aviz-notch-badges"></div>
   </div>
 </div>
 
@@ -142,19 +250,58 @@
   var LS_VIEW_KEY = 'aviz_widget_views';
   var DRAG_THRESHOLD = 5;
 
-  var widget   = document.getElementById('aviz-widget');
-  var header   = document.getElementById('aviz-header');
-  var closeEl  = document.getElementById('aviz-close');
-  var tabScope = document.getElementById('aviz-tab-scope');
-  var tabWf    = document.getElementById('aviz-tab-wf');
-  var waiting  = document.getElementById('aviz-waiting');
+  // ── Notch drag state ───────────────────────────────────────────────────────
+  var notchDrag = null; // { idx, side, range } — active notch drag
+  var NOTCH_HANDLE_HIT_PX = 7; // px tolerance for edge hit-test
+  var lastNotchCount   = -1;   // change-detection for badge re-render
+  var lastNotchEnabled = null; // change-detection for badge re-render
+
+  // ── Bandpass drag state ────────────────────────────────────────────────────
+  var bpDrag = null;           // { side, range } — active bandpass drag
+  var lastBpEnabled = null;    // change-detection for badge re-render
+  var lastBpCenter  = null;    // change-detection for badge re-render
+  var lastBpWidth   = null;    // change-detection for badge re-render
+
+  var widget    = document.getElementById('aviz-widget');
+  var header    = document.getElementById('aviz-header');
+  var closeEl   = document.getElementById('aviz-close');
+  var tabScope  = document.getElementById('aviz-tab-scope');
+  var tabWf     = document.getElementById('aviz-tab-wf');
+  var waiting   = document.getElementById('aviz-waiting');
+  var fftSelect = document.getElementById('aviz-fft-select');
+
+  // Sync widget FFT select from the main #fft-size dropdown (shared analyser).
+  // updateFFTSizeDropdown() in app.js sets #fft-size.value as a JS property
+  // (no 'change' event, no attribute mutation), so we poll in frame() instead.
+  (function syncFftSelect() {
+    var mainSel = document.getElementById('fft-size');
+    if (!mainSel || !fftSelect) return;
+    fftSelect.value = mainSel.value;
+    // Catch user-driven change events on the main select.
+    mainSel.addEventListener('change', function () {
+      fftSelect.value = mainSel.value;
+    });
+  })();
+
+  // When the widget FFT select changes, update the main dropdown and call updateFFTSize().
+  if (fftSelect) {
+    fftSelect.addEventListener('change', function (e) {
+      e.stopPropagation();
+      var mainSel = document.getElementById('fft-size');
+      if (mainSel) mainSel.value = fftSelect.value;
+      if (window.updateFFTSize) window.updateFFTSize();
+    });
+  }
 
   var scopeWrap = document.getElementById('aviz-scope-wrap');
   var wfWrap    = document.getElementById('aviz-wf-wrap');
-  var scopeCanvas = document.getElementById('aviz-scope');
-  var wfCanvas    = document.getElementById('aviz-wf');
-  var scopeCtx = scopeCanvas.getContext('2d');
-  var wfCtx    = wfCanvas.getContext('2d');
+  var scopeCanvas   = document.getElementById('aviz-scope');
+  var wfCanvas      = document.getElementById('aviz-wf');
+  var wfOverlay     = document.getElementById('aviz-wf-overlay');
+  var wfTooltip     = document.getElementById('aviz-wf-tooltip');
+  var scopeCtx  = scopeCanvas.getContext('2d');
+  var wfCtx     = wfCanvas.getContext('2d');
+  var wfOvCtx   = wfOverlay.getContext('2d');
 
   var dismissed = false;
   var rafId = null;
@@ -235,6 +382,7 @@
   header.addEventListener('mousedown', function (e) {
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target.classList.contains('aviz-tab')) return;
+    if (e.target === fftSelect || e.target.closest('#aviz-fft-select')) return;
     if (e.button !== 0) return;
     var rect = widget.getBoundingClientRect();
     dragState = { startX: e.clientX, startY: e.clientY, origTop: rect.top, origLeft: rect.left };
@@ -291,6 +439,9 @@
     wfWrap.style.display    = (ready && views.wf)    ? '' : 'none';
     waiting.style.display   = ready ? 'none' : '';
     if (ready) sizeCanvases();
+    // Always render the badge strip (shows hint text when no notches).
+    renderNotchBadges();
+    renderBandpassBadge();
   }
 
   tabScope.addEventListener('click', function (e) {
@@ -324,6 +475,13 @@
         // Clear on resize so the scroll buffer starts clean.
         wfCtx.fillStyle = '#2c3e50';
         wfCtx.fillRect(0, 0, wfCanvas.width, wfCanvas.height);
+      }
+      // Keep overlay canvas in sync with waterfall canvas dimensions.
+      var ow = Math.floor(wfCanvas.clientWidth);
+      var oh = Math.floor(wfCanvas.clientHeight);
+      if (ow > 0 && oh > 0 && (wfOverlay.width !== ow || wfOverlay.height !== oh)) {
+        wfOverlay.width  = ow;
+        wfOverlay.height = oh;
       }
     }
   }
@@ -402,6 +560,410 @@
       if (px === 0) scopeCtx.moveTo(px, y); else scopeCtx.lineTo(px, y);
     }
     scopeCtx.stroke();
+  }
+
+  // ── Frequency helpers ──────────────────────────────────────────────────────
+
+  // Get the current dial frequency in Hz from the host page's #frequency input.
+  function getDialHz() {
+    var f = document.getElementById('frequency');
+    if (!f) return null;
+    var hz = parseInt(f.getAttribute('data-hz-value') || f.value, 10);
+    return isNaN(hz) ? null : hz;
+  }
+
+  // Format a frequency in Hz with period-separated digit groups for 1 Hz accuracy.
+  // e.g. 7534105 → "7.534.105", 14205000 → "14.205.000", 800 → "800"
+  function fmtFreq(hz) {
+    if (hz === null || hz === undefined) return '—';
+    return Math.round(Math.abs(hz)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  }
+
+  // ── Notch helpers ──────────────────────────────────────────────────────────
+
+  // Format Hz value as a compact string (e.g. 1200 → "1.2kHz", 800 → "800Hz")
+  function fmtHz(hz) {
+    return Math.abs(hz) + ' Hz';
+  }
+
+  // Rebuild the notch badge strip from window.notchFilters.
+  // Always calls renderBandpassBadge() at the end so the bandpass badge
+  // is not lost when the strip is rebuilt (innerHTML = '' wipes everything).
+  function renderNotchBadges() {
+    var strip = document.getElementById('aviz-notch-badges');
+    if (!strip) return;
+    var filters = window.notchFilters;
+    strip.style.display = 'flex';
+    strip.innerHTML = '';
+    if (!filters || filters.length === 0) {
+      var hint = document.createElement('span');
+      hint.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.35);font-style:italic;padding:1px 2px;';
+      hint.textContent = 'Left-click Bandpass, right-click Notches';
+      strip.appendChild(hint);
+      renderBandpassBadge();
+      return;
+    }
+    var notchCb = document.getElementById('notch-enable');
+    var enabled = notchCb ? notchCb.checked : !!window.notchEnabled;
+    filters.forEach(function (notch, idx) {
+      var badge = document.createElement('span');
+      badge.className = 'aviz-notch-badge' + (enabled ? '' : ' aviz-notch-disabled');
+      badge.textContent = fmtHz(notch.center);
+      badge.title = 'Left-click: toggle notch on/off  ·  Right-click: remove this notch';
+
+      // Left-click: toggle global notch enable/disable
+      badge.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var cb = document.getElementById('notch-enable');
+        if (cb) {
+          cb.checked = !cb.checked;
+          if (window.toggleNotchFilter) window.toggleNotchFilter();
+        }
+        renderNotchBadges();
+      });
+
+      // Right-click: remove this specific notch
+      badge.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (window.removeNotchFilter) window.removeNotchFilter(idx);
+        renderNotchBadges();
+      });
+
+      strip.appendChild(badge);
+    });
+    // Restore the bandpass badge after rebuilding notch badges.
+    renderBandpassBadge();
+  }
+
+  // Convert a frequency (Hz) to a canvas X pixel within the given range.
+  function freqToX(freq, w, range) {
+    var span = range.end - range.start;
+    if (span <= 0) return 0;
+    return ((freq - range.start) / span) * w;
+  }
+
+  // Hit-test: return { idx, side } if canvasX is within NOTCH_HANDLE_HIT_PX of
+  // a notch centre or edge line, or null if no hit.
+  // side: 'center' → drag moves frequency; 'left'/'right' → drag resizes width.
+  function findNotchEdgeAt(canvasX, range) {
+    var filters = window.notchFilters;
+    var notchCb = document.getElementById('notch-enable');
+    var notchOn = notchCb ? notchCb.checked : !!window.notchEnabled;
+    if (!filters || !notchOn) return null;
+    for (var i = 0; i < filters.length; i++) {
+      var notch = filters[i];
+      var center   = Math.abs(notch.center);
+      var halfW    = (notch.width || 50) / 2;
+      var rolloffHz = halfW * 1.0; // must match drawNotchOverlays rolloff factor
+      var cx  = freqToX(center,                    wfCanvas.width, range);
+      // Edge lines are drawn at the rolloff boundary, not at ±halfW.
+      var lx  = freqToX(center - halfW - rolloffHz, wfCanvas.width, range);
+      var rx  = freqToX(center + halfW + rolloffHz, wfCanvas.width, range);
+      var dCx = Math.abs(canvasX - cx);
+      var dLx = Math.abs(canvasX - lx);
+      var dRx = Math.abs(canvasX - rx);
+      // Centre has priority when it is the closest handle within tolerance.
+      var minEdge = Math.min(dLx, dRx);
+      if (dCx <= NOTCH_HANDLE_HIT_PX && dCx <= minEdge) return { idx: i, side: 'center' };
+      if (dLx <= NOTCH_HANDLE_HIT_PX) return { idx: i, side: 'left' };
+      if (dRx <= NOTCH_HANDLE_HIT_PX) return { idx: i, side: 'right' };
+    }
+    return null;
+  }
+
+  // Draw notch overlays onto the dedicated overlay canvas (never touches the
+  // scrolling waterfall pixels, so there is no accumulation / darkening).
+  // Called each frame; clears the overlay first then redraws all notches.
+  function drawNotchOverlays(w, h, range) {
+    var ow = wfOverlay.width;
+    var oh = wfOverlay.height;
+    if (ow <= 0 || oh <= 0) return;
+
+    // Clear the overlay completely each frame.
+    wfOvCtx.clearRect(0, 0, ow, oh);
+
+    var filters = window.notchFilters;
+    if (!filters || filters.length === 0) return;
+    var span = range.end - range.start;
+    if (span <= 0) return;
+    var scrollH = Math.max(1, oh - WF_AXIS_H);
+
+    for (var i = 0; i < filters.length; i++) {
+      var notch  = filters[i];
+      var center = Math.abs(notch.center);
+      var halfW  = (notch.width || 50) / 2;
+      var lowHz  = center - halfW;
+      var highHz = center + halfW;
+
+      if (center < range.start || center > range.end) continue;
+
+      var cx = freqToX(center,  ow, range);
+      var lx = freqToX(lowHz,   ow, range);
+      var rx = freqToX(highHz,  ow, range);
+
+      // Rolloff zone: extend a full half-width beyond each edge.
+      var rolloffHz = halfW * 1.0;
+      var rlx = Math.max(0, freqToX(lowHz  - rolloffHz, ow, range));
+      var rrx = Math.min(ow, freqToX(highHz + rolloffHz, ow, range));
+
+      // Two half-gradients peaking at the centre line.
+      // Because this is on a separate overlay canvas that is cleared each frame,
+      // we can use a proper visible alpha without any accumulation.
+      var PEAK = 0.22;
+
+      if (cx > rlx) {
+        var gL = wfOvCtx.createLinearGradient(rlx, 0, cx, 0);
+        gL.addColorStop(0, 'rgba(255, 0, 0, 0)');
+        gL.addColorStop(1, 'rgba(255, 0, 0, ' + PEAK + ')');
+        wfOvCtx.fillStyle = gL;
+        wfOvCtx.fillRect(rlx, 0, cx - rlx, scrollH);
+      }
+      if (rrx > cx) {
+        var gR = wfOvCtx.createLinearGradient(cx, 0, rrx, 0);
+        gR.addColorStop(0, 'rgba(255, 0, 0, ' + PEAK + ')');
+        gR.addColorStop(1, 'rgba(255, 0, 0, 0)');
+        wfOvCtx.fillStyle = gR;
+        wfOvCtx.fillRect(cx, 0, rrx - cx, scrollH);
+      }
+
+      // Solid red centre line.
+      wfOvCtx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+      wfOvCtx.lineWidth   = 1.5;
+      wfOvCtx.setLineDash([]);
+      wfOvCtx.beginPath();
+      wfOvCtx.moveTo(cx, 0);
+      wfOvCtx.lineTo(cx, scrollH);
+      wfOvCtx.stroke();
+
+      // Dashed edges at the rolloff boundary (wider than the notch half-width
+      // to visually represent the filter's frequency rolloff skirts).
+      wfOvCtx.strokeStyle = 'rgba(255, 120, 120, 0.9)';
+      wfOvCtx.lineWidth   = 1.5;
+      wfOvCtx.setLineDash([4, 3]);
+      if (rlx >= 0 && rlx <= ow) {
+        wfOvCtx.beginPath();
+        wfOvCtx.moveTo(rlx, 0);
+        wfOvCtx.lineTo(rlx, scrollH);
+        wfOvCtx.stroke();
+      }
+
+      // Dashed right rolloff edge.
+      if (rrx >= 0 && rrx <= ow) {
+        wfOvCtx.beginPath();
+        wfOvCtx.moveTo(rrx, 0);
+        wfOvCtx.lineTo(rrx, scrollH);
+        wfOvCtx.stroke();
+      }
+
+      wfOvCtx.setLineDash([]);
+    }
+  }
+
+  // ── Bandpass helpers ───────────────────────────────────────────────────────
+
+  // Read bandpass center and width from the DOM sliders (source of truth).
+  function getBandpassParams() {
+    var cEl = document.getElementById('bandpass-center');
+    var wEl = document.getElementById('bandpass-width');
+    var center = cEl ? parseInt(cEl.value, 10) : 0;
+    var width  = wEl ? parseInt(wEl.value, 10) : 200;
+    return { center: center, width: width };
+  }
+
+  // Is the bandpass filter currently enabled?
+  function isBandpassOn() {
+    var cb = document.getElementById('bandpass-enable');
+    return cb ? cb.checked : !!window.bandpassEnabled;
+  }
+
+  // Set bandpass center freq via the DOM slider and call updateBandpassFilter().
+  function setBandpassCenter(freqHz) {
+    var cEl = document.getElementById('bandpass-center');
+    if (!cEl) return;
+    var min = parseInt(cEl.min, 10) || 50;
+    var max = parseInt(cEl.max, 10) || 5000;
+    cEl.value = Math.max(min, Math.min(max, Math.round(freqHz)));
+    if (window.updateBandpassFilter) window.updateBandpassFilter();
+  }
+
+  // Set bandpass width via the DOM slider and call updateBandpassFilter().
+  function setBandpassWidth(widthHz) {
+    var wEl = document.getElementById('bandpass-width');
+    if (!wEl) return;
+    var min = parseInt(wEl.min, 10) || 50;
+    var max = parseInt(wEl.max, 10) || 3000;
+    wEl.value = Math.max(min, Math.min(max, Math.round(widthHz)));
+    if (window.updateBandpassFilter) window.updateBandpassFilter();
+  }
+
+  // Enable the bandpass filter (check checkbox + call toggle if needed).
+  function enableBandpass() {
+    var cb = document.getElementById('bandpass-enable');
+    if (cb && !cb.checked) {
+      cb.checked = true;
+      if (window.toggleBandpassFilter) window.toggleBandpassFilter();
+    }
+  }
+
+  // Render the single bandpass badge in the strip.
+  function renderBandpassBadge() {
+    var strip = document.getElementById('aviz-notch-badges');
+    if (!strip) return;
+    // Remove any existing bandpass badge.
+    var existing = strip.querySelector('.aviz-bp-badge');
+    if (existing) existing.parentNode.removeChild(existing);
+
+    if (!isBandpassOn()) {
+      // If no notch badges remain either, restore the hint text.
+      var hasNotches = strip.querySelector('.aviz-notch-badge');
+      var hasHint    = strip.querySelector('span:not(.aviz-notch-badge):not(.aviz-bp-badge)');
+      if (!hasNotches && !hasHint) {
+        var hint = document.createElement('span');
+        hint.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.35);font-style:italic;padding:1px 2px;';
+        hint.textContent = 'Left-click Bandpass, right-click Notches';
+        strip.appendChild(hint);
+      }
+      return;
+    }
+
+    // Remove the hint text if present — it shouldn't show alongside a badge.
+    var hint = strip.querySelector('span:not(.aviz-notch-badge):not(.aviz-bp-badge)');
+    if (hint) hint.parentNode.removeChild(hint);
+
+    var p = getBandpassParams();
+    if (!p.center) return;
+
+    var badge = document.createElement('span');
+    badge.className = 'aviz-bp-badge';
+    badge.textContent = 'BP ' + fmtHz(p.center) + ' ±' + fmtHz(p.width / 2);
+    badge.title = 'Bandpass filter  ·  Left-click: disable  ·  Right-click: disable';
+
+    // Left-click: disable bandpass
+    badge.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var cb = document.getElementById('bandpass-enable');
+      if (cb && cb.checked) {
+        cb.checked = false;
+        if (window.toggleBandpassFilter) window.toggleBandpassFilter();
+      }
+      renderBandpassBadge();
+    });
+
+    // Right-click: also disable
+    badge.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var cb = document.getElementById('bandpass-enable');
+      if (cb && cb.checked) {
+        cb.checked = false;
+        if (window.toggleBandpassFilter) window.toggleBandpassFilter();
+      }
+      renderBandpassBadge();
+    });
+
+    // Insert before the first notch badge (or hint text) so it appears first.
+    strip.insertBefore(badge, strip.firstChild);
+  }
+
+  // Hit-test for bandpass handles: returns { side: 'center'|'left'|'right' } or null.
+  // Edge lines are drawn at ±halfW/2 (inward), so hit-test there.
+  function findBandpassHandleAt(canvasX, range) {
+    if (!isBandpassOn()) return null;
+    var p = getBandpassParams();
+    if (!p.center) return null;
+    var halfW    = p.width / 2;
+    var innerHz  = halfW * 0.5; // matches drawBandpassOverlay inner line position
+    var cx  = freqToX(p.center,           wfCanvas.width, range);
+    var ilx = freqToX(p.center - innerHz, wfCanvas.width, range);
+    var irx = freqToX(p.center + innerHz, wfCanvas.width, range);
+    var dCx  = Math.abs(canvasX - cx);
+    var dLx  = Math.abs(canvasX - ilx);
+    var dRx  = Math.abs(canvasX - irx);
+    var minEdge = Math.min(dLx, dRx);
+    if (dCx <= NOTCH_HANDLE_HIT_PX && dCx <= minEdge) return { side: 'center' };
+    if (dLx <= NOTCH_HANDLE_HIT_PX) return { side: 'left' };
+    if (dRx <= NOTCH_HANDLE_HIT_PX) return { side: 'right' };
+    return null;
+  }
+
+  // Draw the bandpass overlay onto the overlay canvas (cyan gradient).
+  function drawBandpassOverlay(range) {
+    if (!isBandpassOn()) return;
+    var p = getBandpassParams();
+    if (!p.center) return;
+    var ow = wfOverlay.width;
+    var oh = wfOverlay.height;
+    if (ow <= 0 || oh <= 0) return;
+    var scrollH = Math.max(1, oh - WF_AXIS_H);
+    var halfW = p.width / 2;
+
+    var cx  = freqToX(p.center,         ow, range);
+    // Outer fill edges at ±halfW (full bandwidth).
+    var lx  = freqToX(p.center - halfW, ow, range);
+    var rx  = freqToX(p.center + halfW, ow, range);
+    // Dashed lines drawn inward at ±halfW/2 — the reverse of notches where
+    // dashed lines are further apart than the centre. This shows the tighter
+    // -3dB region inside the nominal bandwidth.
+    var innerHz = halfW * 0.5;
+    var ilx = freqToX(p.center - innerHz, ow, range);
+    var irx = freqToX(p.center + innerHz, ow, range);
+    // Rolloff skirts extend one full halfW beyond each outer edge.
+    var rolloffHz = halfW * 1.0;
+    var rlx = Math.max(0,  freqToX(p.center - halfW - rolloffHz, ow, range));
+    var rrx = Math.min(ow, freqToX(p.center + halfW + rolloffHz, ow, range));
+
+    // Bandpass fill: solid inside passband, fading rolloff skirts outside.
+    var PEAK = 0.20;
+
+    // Solid fill inside passband (lx → rx).
+    wfOvCtx.fillStyle = 'rgba(220, 0, 200, ' + PEAK + ')';
+    wfOvCtx.fillRect(lx, 0, rx - lx, scrollH);
+
+    // Left rolloff skirt: peak at lx → transparent at rlx.
+    if (lx > rlx) {
+      var gL = wfOvCtx.createLinearGradient(rlx, 0, lx, 0);
+      gL.addColorStop(0, 'rgba(220, 0, 200, 0)');
+      gL.addColorStop(1, 'rgba(220, 0, 200, ' + PEAK + ')');
+      wfOvCtx.fillStyle = gL;
+      wfOvCtx.fillRect(rlx, 0, lx - rlx, scrollH);
+    }
+
+    // Right rolloff skirt: peak at rx → transparent at rrx.
+    if (rrx > rx) {
+      var gR = wfOvCtx.createLinearGradient(rx, 0, rrx, 0);
+      gR.addColorStop(0, 'rgba(220, 0, 200, ' + PEAK + ')');
+      gR.addColorStop(1, 'rgba(220, 0, 200, 0)');
+      wfOvCtx.fillStyle = gR;
+      wfOvCtx.fillRect(rx, 0, rrx - rx, scrollH);
+    }
+
+    // Solid magenta centre line.
+    wfOvCtx.strokeStyle = 'rgba(255, 0, 240, 1.0)';
+    wfOvCtx.lineWidth   = 2;
+    wfOvCtx.setLineDash([]);
+    wfOvCtx.beginPath();
+    wfOvCtx.moveTo(cx, 0);
+    wfOvCtx.lineTo(cx, scrollH);
+    wfOvCtx.stroke();
+
+    // Dashed magenta edge lines drawn inward at ±halfW/2.
+    wfOvCtx.strokeStyle = 'rgba(255, 0, 240, 1.0)';
+    wfOvCtx.lineWidth   = 2;
+    wfOvCtx.setLineDash([4, 3]);
+    if (ilx >= 0 && ilx <= ow) {
+      wfOvCtx.beginPath();
+      wfOvCtx.moveTo(ilx, 0);
+      wfOvCtx.lineTo(ilx, scrollH);
+      wfOvCtx.stroke();
+    }
+    if (irx >= 0 && irx <= ow) {
+      wfOvCtx.beginPath();
+      wfOvCtx.moveTo(irx, 0);
+      wfOvCtx.lineTo(irx, scrollH);
+      wfOvCtx.stroke();
+    }
+    wfOvCtx.setLineDash([]);
   }
 
   // ── Frequency axis helpers ─────────────────────────────────────────────────
@@ -523,6 +1085,13 @@
     // Redraw the static frequency scale every frame (it reflects the live,
     // possibly-just-changed passband).
     drawWfAxis(w, h, range);
+
+    // Draw overlays onto the separate overlay canvas (cleared first each frame).
+    wfOvCtx.clearRect(0, 0, wfOverlay.width, wfOverlay.height);
+    var notchCb = document.getElementById('notch-enable');
+    var notchOn = notchCb ? notchCb.checked : !!window.notchEnabled;
+    if (notchOn) drawNotchOverlays(w, h, range);
+    drawBandpassOverlay(range);
   }
 
   // ── Render loop ────────────────────────────────────────────────────────────
@@ -545,7 +1114,219 @@
     var sampleRate = (window.audioContext && window.audioContext.sampleRate) || 48000;
     if (views.scope && scopeWrap.style.display !== 'none') drawScope(analyser);
     if (views.wf && wfWrap.style.display !== 'none') drawWaterfall(analyser, sampleRate);
+
+    // Sync notch badges when the filter list or enabled state changes.
+    var curCount   = (window.notchFilters || []).length;
+    var notchCbF   = document.getElementById('notch-enable');
+    var curEnabled = notchCbF ? notchCbF.checked : !!window.notchEnabled;
+    if (curCount !== lastNotchCount || curEnabled !== lastNotchEnabled) {
+      lastNotchCount   = curCount;
+      lastNotchEnabled = curEnabled;
+      renderNotchBadges();
+    }
+
+    // Sync bandpass badge when enabled state or params change.
+    var bpOn  = isBandpassOn();
+    var bpP   = getBandpassParams();
+    if (bpOn !== lastBpEnabled || bpP.center !== lastBpCenter || bpP.width !== lastBpWidth) {
+      lastBpEnabled = bpOn;
+      lastBpCenter  = bpP.center;
+      lastBpWidth   = bpP.width;
+      renderBandpassBadge();
+    }
+
+    // Keep widget FFT select in sync with main #fft-size (catches auto-adjustments
+    // from updateFFTSizeDropdown() which sets .value without firing 'change').
+    // Also call updateFFTSize() so vuAnalyser.fftSize is updated to match.
+    if (fftSelect) {
+      var mainFftSel = document.getElementById('fft-size');
+      if (mainFftSel && fftSelect.value !== mainFftSel.value) {
+        fftSelect.value = mainFftSel.value;
+        if (window.updateFFTSize) window.updateFFTSize();
+      }
+    }
   }
+
+  // ── Waterfall interactions ─────────────────────────────────────────────────
+
+  // Left-click on waterfall → set bandpass centre to clicked frequency and enable.
+  wfCanvas.addEventListener('click', function (e) {
+    if (wasDragged) return; // ignore click at end of a widget drag
+    // If clicking on a notch or bandpass handle, don't create a bandpass.
+    var rect    = wfCanvas.getBoundingClientRect();
+    var canvasX = (e.clientX - rect.left) / rect.width * wfCanvas.width;
+    var range   = getBandFreqRange();
+    if (findNotchEdgeAt(canvasX, range)) return;
+    if (findBandpassHandleAt(canvasX, range)) return;
+
+    var xFrac = (e.clientX - rect.left) / rect.width;
+    var freq  = Math.round(range.start + xFrac * (range.end - range.start));
+    freq = Math.max(range.start + 50, Math.min(range.end - 50, freq));
+    // Update bandpass slider ranges first so the center value is valid.
+    if (window.updateBandpassSliderRanges) window.updateBandpassSliderRanges();
+    var alreadyOn = isBandpassOn();
+    setBandpassCenter(freq);
+    if (!alreadyOn) {
+      // Default to ±300 Hz (600 Hz total width) only when first creating the bandpass.
+      setBandpassWidth(600);
+      enableBandpass();
+    }
+    renderBandpassBadge();
+  });
+
+  // Right-click on waterfall → create a new notch at that frequency.
+  wfCanvas.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    if (!window.addNotchFilter) return;
+    var rect  = wfCanvas.getBoundingClientRect();
+    var xFrac = (e.clientX - rect.left) / rect.width;
+    var range = getBandFreqRange();
+    var freq  = Math.round(range.start + xFrac * (range.end - range.start));
+    freq = Math.max(range.start + 50, Math.min(range.end - 50, freq));
+    window.addNotchFilter(freq);
+    renderNotchBadges();
+  });
+
+  // Mousedown on waterfall — start a notch or bandpass drag.
+  wfCanvas.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    var rect    = wfCanvas.getBoundingClientRect();
+    var canvasX = (e.clientX - rect.left) / rect.width * wfCanvas.width;
+    var range   = getBandFreqRange();
+    // Check bandpass handles first (they're cyan, visually distinct).
+    var bpHit = findBandpassHandleAt(canvasX, range);
+    if (bpHit) {
+      e.preventDefault();
+      bpDrag = { side: bpHit.side, range: range };
+      return;
+    }
+    var hit = findNotchEdgeAt(canvasX, range);
+    if (hit) {
+      e.preventDefault();
+      notchDrag = { idx: hit.idx, side: hit.side, range: range };
+    }
+  });
+
+  // Mousemove on waterfall — update cursor and handle active drag.
+  wfCanvas.addEventListener('mousemove', function (e) {
+    var rect    = wfCanvas.getBoundingClientRect();
+    var canvasX = (e.clientX - rect.left) / rect.width * wfCanvas.width;
+
+    if (bpDrag) {
+      // Active bandpass drag.
+      var range = bpDrag.range;
+      var span  = range.end - range.start;
+      wfCanvas.style.cursor = 'ew-resize';
+      var p = getBandpassParams();
+
+      if (bpDrag.side === 'center') {
+        var newFreq = Math.round(range.start + (canvasX / wfCanvas.width) * span);
+        newFreq = Math.max(range.start + 50, Math.min(range.end - 50, newFreq));
+        setBandpassCenter(newFreq);
+        renderBandpassBadge();
+      } else {
+        // Edge drag → resize width symmetrically.
+        // The inner dashed line is at ±halfW/2 from centre, so distHz = halfW/2,
+        // therefore newWidth = 2*halfW = distHz*4.
+        var centerX = freqToX(p.center, wfCanvas.width, range);
+        var distHz  = Math.abs(canvasX - centerX) / wfCanvas.width * span;
+        setBandpassWidth(Math.round(distHz * 4));
+        renderBandpassBadge();
+      }
+      return;
+    }
+
+    if (notchDrag) {
+      var notch = window.notchFilters && window.notchFilters[notchDrag.idx];
+      if (!notch) { notchDrag = null; return; }
+      var range = notchDrag.range;
+      var span  = range.end - range.start;
+      wfCanvas.style.cursor = 'ew-resize';
+
+      if (notchDrag.side === 'center') {
+        // Drag centre line → move notch frequency.
+        var newFreq = Math.round(range.start + (canvasX / wfCanvas.width) * span);
+        newFreq = Math.max(range.start + 50, Math.min(range.end - 50, newFreq));
+        // Preserve sign (LSB notches are stored as negative).
+        notch.center = notch.center < 0 ? -newFreq : newFreq;
+        if (notch.filters) {
+          for (var fi = 0; fi < notch.filters.length; fi++) {
+            notch.filters[fi].frequency.value = newFreq;
+          }
+        }
+        // Sync the main card freq slider + label if visible.
+        var freqSlider = document.getElementById('notch-freq-' + notchDrag.idx);
+        if (freqSlider) freqSlider.value = newFreq;
+        var freqVal = document.getElementById('notch-freq-value-' + notchDrag.idx);
+        if (freqVal) freqVal.textContent = fmtHz(newFreq);
+        renderNotchBadges();
+      } else {
+        // Drag rolloff edge line → resize notch width symmetrically.
+        var center  = Math.abs(notch.center);
+        var centerX = freqToX(center, wfCanvas.width, range);
+        var distHz  = Math.abs(canvasX - centerX) / wfCanvas.width * span;
+        var newWidth = Math.max(10, Math.min(1000, Math.round(distHz)));
+        notch.width = newWidth;
+        var Q = Math.max(0.7, center / (newWidth * 3));
+        if (notch.filters) {
+          for (var fi2 = 0; fi2 < notch.filters.length; fi2++) {
+            notch.filters[fi2].Q.value = Q;
+          }
+        }
+        var widthSlider = document.getElementById('notch-width-' + notchDrag.idx);
+        if (widthSlider) widthSlider.value = newWidth;
+        var widthVal = document.getElementById('notch-width-value-' + notchDrag.idx);
+        if (widthVal) widthVal.textContent = newWidth + ' Hz';
+      }
+      return;
+    }
+
+    // No drag — update cursor based on proximity to any handle.
+    var range2  = getBandFreqRange();
+    var bpHit2  = findBandpassHandleAt(canvasX, range2);
+    var notchHit = findNotchEdgeAt(canvasX, range2);
+    wfCanvas.style.cursor = (bpHit2 || notchHit) ? 'ew-resize' : 'default';
+
+    // Update hover tooltip: audio freq + dial+audio freq.
+    var ttRange  = getBandFreqRange();
+    var ttSpan   = ttRange.end - ttRange.start;
+    var audioHz  = Math.round(ttRange.start + (canvasX / wfCanvas.width) * ttSpan);
+    var dialHz   = getDialHz();
+    var line1    = fmtHz(audioHz);
+    var line2    = dialHz !== null ? fmtFreq(dialHz + audioHz) : '';
+    wfTooltip.innerHTML = line1 + (line2 ? '<br>' + line2 : '');
+    // Position tooltip near cursor; flip left when near the right edge.
+    var wfRect  = wfCanvas.getBoundingClientRect();
+    var relX    = e.clientX - wfRect.left;
+    var relY    = e.clientY - wfRect.top;
+    var ttW     = wfTooltip.offsetWidth || 120;
+    var ttLeft  = (relX + 10 + ttW > wfRect.width) ? relX - ttW - 6 : relX + 10;
+    var ttTop   = relY - 36;
+    if (ttTop < 2) ttTop = relY + 14;
+    wfTooltip.style.left    = ttLeft + 'px';
+    wfTooltip.style.top     = ttTop  + 'px';
+    wfTooltip.style.display = 'block';
+  });
+
+  // Mouseleave — reset cursor and hide tooltip.
+  wfCanvas.addEventListener('mouseleave', function () {
+    if (!notchDrag && !bpDrag) wfCanvas.style.cursor = 'default';
+    wfTooltip.style.display = 'none';
+  });
+
+  // Mouseup anywhere — end any active drag and persist settings.
+  document.addEventListener('mouseup', function () {
+    if (bpDrag) {
+      if (window.saveFilterSettings) window.saveFilterSettings();
+      bpDrag = null;
+      wfCanvas.style.cursor = 'default';
+    }
+    if (notchDrag) {
+      if (window.saveFilterSettings) window.saveFilterSettings();
+      notchDrag = null;
+      wfCanvas.style.cursor = 'default';
+    }
+  });
 
   // ── Start ──────────────────────────────────────────────────────────────────
   function start() {

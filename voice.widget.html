@@ -264,25 +264,10 @@
     display: block;
   }
 
-  .va-tt-row {
-    display: flex;
-    gap: 6px;
-    align-items: flex-start; /* keep label top-aligned when value wraps */
-  }
-
-  .va-tt-label {
-    color: rgba(255,255,255,0.45);
-    min-width: 60px;
-    flex-shrink: 0;
-    white-space: nowrap;   /* label never wraps */
-  }
-
-  .va-tt-value {
-    color: #fff;
-    font-weight: bold;
-    white-space: normal;   /* value wraps, indented to label width via flex */
-    word-break: break-word;
-  }
+  .va-tt-body   { display: flex; gap: 7px; align-items: flex-start; }
+  .va-tt-photo  { flex: none; width: 56px; height: 56px; border-radius: 3px; object-fit: cover; border: 1px solid rgba(255,255,255,0.15); display: block; }
+  .va-tt-fields { display: flex; flex-direction: column; gap: 1px; }
+  .va-tt-value  { color: #fff; font-weight: bold; white-space: normal; word-break: break-word; }
 
   /* ── Country badges ─────────────────────────────────────────────────────── */
   #va-widget-badges {
@@ -862,35 +847,28 @@
 
   function buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid) {
     var contName = continent ? (CONTINENT_NAMES[continent] || continent) : '';
-    var lines = [];
-    if (callsign)  lines.push(['Callsign', escTT(callsign)]);
-    if (fname)     lines.push(['Name',     escTT(fname)]);
-    if (country)   lines.push(['Country',  escTT(country)]);
-    if (contName)  lines.push(['Continent', escTT(contName)]);
-    if (grid)      lines.push(['Grid',     escTT(grid)]);
+    var values = [];
+    if (callsign) values.push(escTT(callsign));
+    if (fname)    values.push(escTT(fname));
+    if (country)  values.push(escTT(country));
+    if (contName) values.push(escTT(contName));
+    if (grid)     values.push(escTT(grid));
     if (offset != null && offset !== '') {
       var off = parseFloat(offset);
-      var offStr = (off >= 0 ? 'UTC+' : 'UTC') + off;
-      lines.push(['Time zone', offStr]);
+      values.push((off >= 0 ? 'UTC+' : 'UTC') + off);
     }
-    if (snr)       lines.push(['SNR', escTT(snr)]);
+    if (snr)      values.push(escTT(snr));
 
-    var rowsHTML = lines.map(function (pair) {
-      return '<div class="va-tt-row">' +
-             '<span class="va-tt-label">' + pair[0] + '</span>' +
-             '<span class="va-tt-value">' + pair[1] + '</span>' +
-             '</div>';
+    var fieldsHTML = values.map(function (v) {
+      return '<div class="va-tt-value">' + v + '</div>';
     }).join('');
 
-    var imgHTML = '';
     if (imageUrl) {
-      imgHTML = '<img src="' + escTT(imageUrl) + '" alt="' + escTT(callsign) + '" ' +
-                'style="display:block;max-width:100%;max-height:80px;border-radius:3px;' +
-                'margin-top:5px;border:1px solid rgba(255,255,255,0.15);object-fit:cover;" ' +
-                'onerror="this.style.display=\'none\'" />';
+      var imgHTML = '<img class="va-tt-photo" src="' + escTT(imageUrl) + '" alt="' + escTT(callsign) + '" ' +
+                   'onerror="this.style.display=\'none\'" />';
+      return '<div class="va-tt-body">' + imgHTML + '<div class="va-tt-fields">' + fieldsHTML + '</div></div>';
     }
-
-    return rowsHTML + imgHTML;
+    return '<div class="va-tt-body"><div class="va-tt-fields">' + fieldsHTML + '</div></div>';
   }
 
   function escTT(str) {

@@ -13,9 +13,20 @@ SKIP_GEOIP=false
 NO_GIT=false
 PLATFORM="linux/amd64,linux/arm64"   # default: both arches
 PUSH_OR_LOAD="--push"                 # default: push to registry
+CUSTOM_TAG=""
 
 for arg in "$@"; do
     case $arg in
+        --tag=*)
+            CUSTOM_TAG="${arg#*=}"
+            if [ -z "$CUSTOM_TAG" ]; then
+                echo "ERROR: --tag requires a value, e.g. --tag=test-1"
+                exit 1
+            fi
+            TAG_LATEST=false
+            NO_GIT=true
+            echo "Using custom tag: $CUSTOM_TAG (will not tag as version or latest)"
+            ;;
         --no-latest)
             TAG_LATEST=false
             echo "Running in --no-latest mode (will not tag as latest)"
@@ -52,7 +63,7 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--amd64] [--arm64]"
+            echo "Usage: $0 [--tag=<value>] [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--amd64] [--arm64]"
             exit 1
             ;;
     esac
@@ -163,9 +174,13 @@ fi
 docker buildx inspect --bootstrap
 
 # Determine tags for UberSDR image
-UBERSDR_TAGS="-t $IMAGE:$VERSION"
-if [ "$TAG_LATEST" = true ]; then
-    UBERSDR_TAGS="$UBERSDR_TAGS -t $IMAGE:latest"
+if [ -n "$CUSTOM_TAG" ]; then
+    UBERSDR_TAGS="-t $IMAGE:$CUSTOM_TAG"
+else
+    UBERSDR_TAGS="-t $IMAGE:$VERSION"
+    if [ "$TAG_LATEST" = true ]; then
+        UBERSDR_TAGS="$UBERSDR_TAGS -t $IMAGE:latest"
+    fi
 fi
 
 # Build UberSDR image
@@ -183,9 +198,13 @@ echo "UberSDR build and push successful!"
 
 # Build Fluent Bit image with version tag (only if --fluent-bit flag is set)
 if [ "$BUILD_FLUENT_BIT" = true ]; then
-    FLUENT_TAGS="-t $FLUENT_BIT_IMAGE:$VERSION"
-    if [ "$TAG_LATEST" = true ]; then
-        FLUENT_TAGS="$FLUENT_TAGS -t $FLUENT_BIT_IMAGE:latest"
+    if [ -n "$CUSTOM_TAG" ]; then
+        FLUENT_TAGS="-t $FLUENT_BIT_IMAGE:$CUSTOM_TAG"
+    else
+        FLUENT_TAGS="-t $FLUENT_BIT_IMAGE:$VERSION"
+        if [ "$TAG_LATEST" = true ]; then
+            FLUENT_TAGS="$FLUENT_TAGS -t $FLUENT_BIT_IMAGE:latest"
+        fi
     fi
 
     echo "Building Fluent Bit Docker image (platform: $PLATFORM)..."

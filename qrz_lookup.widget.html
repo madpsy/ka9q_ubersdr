@@ -413,11 +413,12 @@
   });
 
   inputEl.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); doLookup(); }
+    if (e.key === 'Enter') { e.preventDefault(); doLookup(); inputEl.focus(); }
   });
 
   goBtn.addEventListener('click', function () {
     doLookup();
+    inputEl.focus();
   });
 
   // ── Lookup ───────────────────────────────────────────────────────────────

@@ -178,12 +178,13 @@
   box-shadow: 0 3px 12px rgba(0,0,0,0.7);
   display: none;
   line-height: 1.6;
-  max-width: 200px;
+  max-width: 240px;
   width: max-content;
 }
 #sdr-marker-tooltip.sdr-tt-visible { display: block; }
-.sdr-tt-row   { display: flex; gap: 6px; align-items: flex-start; }
-.sdr-tt-label { color: rgba(255,255,255,0.45); min-width: 60px; flex-shrink: 0; white-space: nowrap; }
+.sdr-tt-body  { display: flex; gap: 7px; align-items: flex-start; }
+.sdr-tt-photo { flex: none; width: 56px; height: 56px; border-radius: 3px; object-fit: cover; border: 1px solid rgba(255,255,255,0.15); display: block; }
+.sdr-tt-fields { display: flex; flex-direction: column; gap: 1px; }
 .sdr-tt-value { color: #fff; font-weight: bold; white-space: normal; word-break: break-word; }
 </style>
 
@@ -384,23 +385,20 @@
   }
 
   function buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl) {
-    var lines = [];
-    if (callsign) lines.push(['Callsign', escMT(callsign)]);
-    if (fname)    lines.push(['Name',     escMT(fname)]);
-    if (country)  lines.push(['Country',  escMT(country)]);
-    if (grid)     lines.push(['Grid',     escMT(grid)]);
-    var rowsHTML = lines.map(function (p) {
-      return '<div class="sdr-tt-row"><span class="sdr-tt-label">' + p[0] +
-             '</span><span class="sdr-tt-value">' + p[1] + '</span></div>';
+    var values = [];
+    if (callsign) values.push(escMT(callsign));
+    if (fname)    values.push(escMT(fname));
+    if (country)  values.push(escMT(country));
+    if (grid)     values.push(escMT(grid));
+    var fieldsHTML = values.map(function (v) {
+      return '<div class="sdr-tt-value">' + v + '</div>';
     }).join('');
-    var imgHTML = '';
     if (imageUrl) {
-      imgHTML = '<img src="' + escMT(imageUrl) + '" alt="' + escMT(callsign) + '" ' +
-                'style="display:block;max-width:100%;max-height:80px;border-radius:3px;' +
-                'margin-top:5px;border:1px solid rgba(255,255,255,0.15);object-fit:cover;" ' +
-                'onerror="this.style.display=\'none\'" />';
+      var imgHTML = '<img class="sdr-tt-photo" src="' + escMT(imageUrl) + '" alt="' + escMT(callsign) + '" ' +
+                   'onerror="this.style.display=\'none\'" />';
+      return '<div class="sdr-tt-body">' + imgHTML + '<div class="sdr-tt-fields">' + fieldsHTML + '</div></div>';
     }
-    return rowsHTML + imgHTML;
+    return '<div class="sdr-tt-body"><div class="sdr-tt-fields">' + fieldsHTML + '</div></div>';
   }
 
   function positionMarkerTooltip(e) {

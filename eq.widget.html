@@ -54,6 +54,84 @@
     margin-right: auto;
   }
 
+  #eqw-clip {
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #ff4444;
+    background: rgba(255, 60, 60, 0.18);
+    border: 1px solid rgba(255, 60, 60, 0.5);
+    letter-spacing: 0.3px;
+    visibility: hidden; /* space always reserved; JS sets visibility:visible */
+    white-space: nowrap;
+  }
+
+  /* ── Makeup-gain slider (header) ── */
+  #eqw-mg-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    max-width: 110px; /* cap to bands-row width minus fixed header items */
+  }
+
+  #eqw-widget #eqw-mg-slider {
+    flex: 1;
+    min-width: 0;
+    width: 0;          /* let flex distribute; overrides browser 100px default */
+    height: 14px;
+    margin: 0;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    outline: none;
+  }
+  #eqw-widget #eqw-mg-slider::-webkit-slider-runnable-track {
+    height: 3px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+  }
+  #eqw-widget #eqw-mg-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    margin-top: -5px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.75);
+    border: 1px solid rgba(0,0,0,0.3);
+  }
+  #eqw-widget #eqw-mg-slider::-moz-range-track {
+    height: 3px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+  }
+  #eqw-widget #eqw-mg-slider::-moz-range-thumb {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.75);
+    border: 1px solid rgba(0,0,0,0.3);
+  }
+
+  #eqw-mg-val {
+    font-size: 9px;
+    color: rgba(255,255,255,0.7);
+    white-space: nowrap;
+    min-width: 28px;
+    text-align: right;
+  }
+
+  /* Clip badge + ON/OFF button sit in a tight flex group so they're visually
+     closer to each other than to the title or close button. */
+  #eqw-power-group {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
   #eqw-power {
     font-size: 10px;
     font-weight: bold;
@@ -62,10 +140,11 @@
     cursor: pointer;
     color: rgba(255,255,255,0.55);
     background: rgba(255,255,255,0.06);
-    transition: color 0.15s, background 0.15s;
+    border: 1px solid rgba(220, 50, 50, 0.75);
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
   }
   #eqw-power:hover { color: #fff; background: rgba(255,255,255,0.14); }
-  #eqw-power.eqw-on { color: #051; background: rgba(0, 230, 118, 0.85); }
+  #eqw-power.eqw-on { color: #051; background: rgba(0, 230, 118, 0.85); border-color: transparent; }
 
   #eqw-close {
     width: 16px;
@@ -214,6 +293,8 @@
   #eqw-widget.eqw-off #eqw-bands,
   #eqw-widget.eqw-off #eqw-presets { opacity: 0.45; }
 
+  #eqw-widget.eqw-off #eqw-mg-wrap { opacity: 0.35; pointer-events: none; }
+
   @media (max-width: 768px) {
     #eqw-widget { display: none !important; }
   }
@@ -222,7 +303,14 @@
 <div id="eqw-widget" class="eqw-off">
   <div id="eqw-header">
     <span id="eqw-title">EQ</span>
-    <span id="eqw-power" title="Toggle equaliser on/off">OFF</span>
+    <div id="eqw-mg-wrap">
+      <input id="eqw-mg-slider" type="range" min="-12" max="12" step="0.5" value="0" title="Makeup gain (double-click to reset)" />
+      <span id="eqw-mg-val">+0.0</span>
+    </div>
+    <div id="eqw-power-group">
+      <span id="eqw-clip" title="EQ output is clipping">⚠ CLIP</span>
+      <span id="eqw-power" title="Toggle equaliser on/off">OFF</span>
+    </div>
     <span id="eqw-close" title="Dismiss">&#x2715;</span>
   </div>
   <div id="eqw-body">
@@ -260,13 +348,16 @@
     { hz: 8000, label: '8k'   }
   ];
 
-  var widget   = document.getElementById('eqw-widget');
-  var header   = document.getElementById('eqw-header');
-  var closeEl  = document.getElementById('eqw-close');
-  var powerEl  = document.getElementById('eqw-power');
-  var waiting  = document.getElementById('eqw-waiting');
+  var widget    = document.getElementById('eqw-widget');
+  var header    = document.getElementById('eqw-header');
+  var closeEl   = document.getElementById('eqw-close');
+  var powerEl   = document.getElementById('eqw-power');
+  var clipEl    = document.getElementById('eqw-clip');
+  var waiting   = document.getElementById('eqw-waiting');
   var bandsWrap = document.getElementById('eqw-bands');
-  var presets  = document.getElementById('eqw-presets');
+  var presets   = document.getElementById('eqw-presets');
+  var mgSlider  = document.getElementById('eqw-mg-slider');
+  var mgVal     = document.getElementById('eqw-mg-val');
 
   var dragState = null;
   var wasDragged = false;
@@ -460,11 +551,18 @@
         w.val.textContent = fmtDb(parseFloat(host.value));
       }
     });
+    // Sync makeup gain
+    var mgHost = document.getElementById('equalizer-makeup-gain');
+    if (mgHost && mgSlider.value !== mgHost.value) {
+      mgSlider.value = mgHost.value;
+      mgVal.textContent = fmtDb(parseFloat(mgHost.value));
+    }
     var box = hostEnableBox();
     var on = !!(box && box.checked);
     powerEl.textContent = on ? 'ON' : 'OFF';
     powerEl.classList.toggle('eqw-on', on);
     widget.classList.toggle('eqw-off', !on);
+    mgSlider.disabled = !on;
   }
 
   // ── Power toggle (mirrors the host enable checkbox) ─────────────────────────
@@ -567,16 +665,85 @@
 
   // ── Start ───────────────────────────────────────────────────────────────────
   var pollId = null;
+
+  // Match the CSS breakpoint exactly so JS and CSS agree on what counts as mobile.
+  var mobileQuery = window.matchMedia('(max-width: 768px)');
+
+  function stopLoops() {
+    if (pollId)   { clearInterval(pollId);           pollId   = null; }
+    if (fftRafId) { cancelAnimationFrame(fftRafId);  fftRafId = null; }
+  }
+
+  function startLoops() {
+    if (pollId   === null) pollId   = setInterval(applyReady, 400);
+    if (fftRafId === null) fftRafId = requestAnimationFrame(fftFrame);
+  }
+
+  // ── Makeup gain slider (header) ─────────────────────────────────────────────
+  mgSlider.addEventListener('input', function () {
+    var mgHost = document.getElementById('equalizer-makeup-gain');
+    if (mgHost) {
+      mgHost.value = mgSlider.value;
+      if (typeof window.updateEqualizer === 'function') window.updateEqualizer();
+    }
+    mgVal.textContent = fmtDb(parseFloat(mgSlider.value));
+  });
+
+  // Prevent header drag from starting on the slider
+  mgSlider.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+
+  // Double-click resets makeup gain to 0
+  mgSlider.addEventListener('dblclick', function () {
+    mgSlider.value = '0';
+    mgVal.textContent = '+0.0';
+    var mgHost = document.getElementById('equalizer-makeup-gain');
+    if (mgHost) {
+      mgHost.value = '0';
+      if (typeof window.updateEqualizer === 'function') window.updateEqualizer();
+    }
+  });
+
+  // ── Clip indicator mirror ────────────────────────────────────────────────────
+  // Watch the host's #equalizer-clip-indicator visibility and mirror it in the
+  // widget header. MutationObserver fires immediately — no polling lag.
+  function watchClipIndicator() {
+    var hostClip = document.getElementById('equalizer-clip-indicator');
+    if (!hostClip) return;
+    function syncClip() {
+      var visible = hostClip.style.display !== 'none' && hostClip.style.display !== '';
+      clipEl.style.visibility = visible ? 'visible' : 'hidden';
+    }
+    syncClip(); // initial state
+    new MutationObserver(syncClip).observe(hostClip, { attributes: true, attributeFilter: ['style'] });
+  }
+
   function start() {
+    // Do not run any loops when the widget is hidden by the mobile media query.
+    if (mobileQuery.matches) return;
     buildBands();
     applyReady();
+    watchClipIndicator();
     // Poll keeps the widget in step with the main panel (presets applied there,
     // saved-settings load, the quick-toggle button, etc.) and waits for the EQ
     // controls/audio graph to come up.
-    pollId = setInterval(applyReady, 400);
-    // Start the FFT level animation loop
-    fftRafId = requestAnimationFrame(fftFrame);
+    // Start the FFT level animation loop.
+    startLoops();
   }
+
+  // Respond to viewport width changes (e.g. device rotation, browser resize).
+  // Stop all loops when the screen becomes narrow; restart when it widens again.
+  mobileQuery.addEventListener('change', function (e) {
+    if (e.matches) {
+      // Entering mobile — stop all background work.
+      stopLoops();
+    } else {
+      // Leaving mobile — resume only if the widget hasn't been explicitly closed.
+      if (widget.style.display !== 'none') {
+        startLoops();
+      }
+    }
+  });
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
   } else {

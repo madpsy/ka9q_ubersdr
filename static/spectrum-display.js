@@ -4857,10 +4857,9 @@ class SpectrumDisplay {
             });
         }
 
-        // Right-click on Contrast label → reset to default (15)
-        const autoContrastLabel = document.getElementById('spectrum-auto-contrast-label');
-        if (autoContrastLabel && autoContrastSlider && autoContrastValue) {
-            autoContrastLabel.addEventListener('contextmenu', (e) => {
+        // Right-click on Contrast slider → reset to default (10)
+        if (autoContrastSlider && autoContrastValue) {
+            autoContrastSlider.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 const def = 10;
                 this.config.autoContrast = def;

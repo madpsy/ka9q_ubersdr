@@ -180,7 +180,8 @@ class DXClusterExtension extends DecoderExtension {
             }
         });
 
-        // Set initial values after handlers are attached
+        // Set initial values after handlers are attached, then render any spots
+        // that arrived before the panel was opened (buffered spots).
         requestAnimationFrame(() => {
             const ageFilter = document.getElementById('dx-cluster-age-filter');
             const bandFilter = document.getElementById('dx-cluster-band-filter');
@@ -193,6 +194,14 @@ class DXClusterExtension extends DecoderExtension {
             if (showMarkers) showMarkers.checked = this.showMarkers;
 
             console.log('DX Cluster: Initial filter values set');
+
+            // Populate the table with any spots already in memory — these are
+            // buffered spots that arrived before the panel was opened.
+            if (this.spots.length > 0) {
+                console.log('DX Cluster: Rendering', this.spots.length, 'pre-loaded spots on panel open');
+                this.filterAndRenderSpots();
+                this.updateLastUpdate();
+            }
         });
 
         console.log('DX Cluster: Event delegation handlers attached successfully');

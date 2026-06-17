@@ -413,7 +413,7 @@
   });
 
   inputEl.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); doLookup(); inputEl.focus(); }
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); doLookup(); inputEl.focus(); }
   });
 
   goBtn.addEventListener('click', function () {

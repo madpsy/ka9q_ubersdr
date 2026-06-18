@@ -697,16 +697,17 @@ function createNightPolygon(date) {
 function updateGreyline(forDate) {
     if (!map) return;
     if (greylineLayer) map.removeLayer(greylineLayer);
-    const nightPolygon = createNightPolygon(forDate || new Date());
-    if (nightPolygon.length > 0) {
-        greylineLayer = L.polygon(nightPolygon, {
-            color: 'transparent',
-            fillColor: '#000033',
-            fillOpacity: 0.3,
-            interactive: false,
-        }).addTo(map);
-        greylineLayer.bringToBack();
-    }
+    const base = createNightPolygon(forDate || new Date());
+    if (base.length === 0) return;
+    // Duplicate the polygon at -360 and +360 offsets so it covers
+    // repeated world copies when the map is zoomed out
+    const shift = (pts, dLon) => pts.map(([lat, lon]) => [lat, lon + dLon]);
+    greylineLayer = L.layerGroup([
+        L.polygon(shift(base, -360), { color: 'transparent', fillColor: '#000033', fillOpacity: 0.3, interactive: false }),
+        L.polygon(base,              { color: 'transparent', fillColor: '#000033', fillOpacity: 0.3, interactive: false }),
+        L.polygon(shift(base, +360), { color: 'transparent', fillColor: '#000033', fillOpacity: 0.3, interactive: false }),
+    ]).addTo(map);
+    greylineLayer.eachLayer(l => l.bringToBack());
 }
 
 function placeBeaconMarkers() {

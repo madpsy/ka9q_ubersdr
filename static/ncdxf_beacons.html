@@ -227,21 +227,18 @@
             font-size: 0.75em;
             padding: 2px 4px;
             display: flex;
-            flex-direction: column;
-            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
             overflow: hidden;
             opacity: 0.85;
         }
         .hm-beacon-label .hm-bl-call {
             font-weight: 700;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            flex-shrink: 0;
         }
         .hm-beacon-label .hm-bl-loc {
-            font-size: 0.85em;
-            opacity: 0.6;
-            white-space: nowrap;
+            opacity: 0.55;
             overflow: hidden;
             text-overflow: ellipsis;
         }

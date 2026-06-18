@@ -274,15 +274,22 @@
         }
 
 
-        /* ── Ant switch section below the distance/bearing block ─────────── */
+        /* ── Ant switch section — full-width row below the operator card ─── */
         #rx-ant-switch-section {
-            margin-top: 8px;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 8px;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
             display: none;          /* hidden until ant_switch_status arrives */
         }
         .rx-ant-sw-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
+            gap: 6px;
         }
         .rx-ant-sw-btn {
             -webkit-appearance: none;
@@ -1232,7 +1239,6 @@
                     <div class="operator-image-col">
                         ${imageHtml}
                         ${rxDistHtml}
-                        <div id="rx-ant-switch-section"></div>
                         <a class="qrz-link" href="${esc(qrzUrl)}" target="_blank" rel="noopener">View on QRZ.com ↗</a>
                     </div>
                     <div class="operator-info-col">
@@ -1244,6 +1250,7 @@
                         </div>
                     </div>
                 </div>
+                <div id="rx-ant-switch-section"></div>
                 ${mapHtml}
             `;
 

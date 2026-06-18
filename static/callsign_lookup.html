@@ -1387,9 +1387,10 @@
          * Safe to call even when the elements don't exist yet (no-ops in that case).
          */
         function updateRotatorUI() {
-            const antPart = document.getElementById('rx-ant-part');
-            const antDeg  = document.getElementById('rx-ant-deg');
-            const setPart = document.getElementById('rx-set-part');
+            const antPart   = document.getElementById('rx-ant-part');
+            const antDeg    = document.getElementById('rx-ant-deg');
+            const setPart   = document.getElementById('rx-set-part');
+            const bearingEl = document.getElementById('rx-bearing-deg');
             if (!antPart) return;
 
             // Condition 1: rotator enabled + azimuth known → show antenna bearing
@@ -1399,6 +1400,19 @@
                 antDeg.textContent = `${rotatorState.azimuth}° 🧭`;
                 // Pulse the bearing + emoji while the rotator is moving
                 antDeg.classList.toggle('rx-ant-moving', !!rotatorState.moving);
+            }
+
+            // Bold both bearings when they match within 1 degree
+            if (showAnt && bearingEl) {
+                const callsignBearing = parseFloat(bearingEl.textContent);
+                const match = !isNaN(callsignBearing) &&
+                              Math.abs(((rotatorState.azimuth - callsignBearing) + 360) % 360) <= 1;
+                const boldStyle = match ? 'bold' : '';
+                bearingEl.style.fontWeight = boldStyle;
+                if (antDeg) antDeg.style.fontWeight = boldStyle;
+            } else {
+                if (bearingEl) bearingEl.style.fontWeight = '';
+                if (antDeg)    antDeg.style.fontWeight    = '';
             }
 
             // Condition 2: rotator enabled + password present → show Set button

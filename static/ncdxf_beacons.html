@@ -865,18 +865,29 @@ function renderBeaconCards(spots, heardSet) {
     container.innerHTML = BEACONS.map(b => {
         const heard = heardSet.has(b.callsign);
         const bSpots = byCall[b.callsign] || [];
-        const bestSNR = bSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
         const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
-        const bandSet = [...new Set(bSpots.map(s => s.band))];
-        const bandPills = bandSet.map(bd =>
-            `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;">${bd}</span>`
-        ).join(' ');
+
+        // Best SNR per band — pills show "20m +12dB" style
+        const snrByBand = {};
+        bSpots.forEach(s => {
+            if (snrByBand[s.band] === undefined || s.snr > snrByBand[s.band]) {
+                snrByBand[s.band] = s.snr;
+            }
+        });
+        // Sort bands in BAND_NAMES order
+        const bandPills = BAND_NAMES
+            .filter(bd => snrByBand[bd] !== undefined)
+            .map(bd => {
+                const snr = snrByBand[bd];
+                const sign = snr >= 0 ? '+' : '';
+                return `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;color:#000;">${bd} <span style="opacity:0.75;">${sign}${snr}</span></span>`;
+            }).join(' ');
 
         return `<div class="beacon-card ${heard ? 'heard' : 'not-heard'}">
             <div class="bc-call">Slot ${b.slot} — ${b.callsign}</div>
             <div class="bc-entity">${b.entity} · ${b.location} · ${b.grid}</div>
             ${heard
-                ? `<div class="bc-spots">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Best SNR: ${bestSNR} dB ${bandPills}</div>
+                ? `<div class="bc-spots">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} ${bandPills}</div>
                    <div class="bc-last">Last: ${lastTime}</div>`
                 : `<div class="bc-spots" style="color:#888;">Not heard</div>`
             }

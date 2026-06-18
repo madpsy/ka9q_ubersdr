@@ -151,10 +151,25 @@ function cwAnalyticsIso2ToFlag(code) {
 
     function setupCountryAutocomplete() {
         const input = document.getElementById('country-search');
-        const list = document.getElementById('country-autocomplete-list');
-        if (!input || !list) return;
+        if (!input) return;
+
+        // Append list to body to escape stacking context created by backdrop-filter on .controls
+        let list = document.getElementById('cw-analytics-country-autocomplete-list');
+        if (!list) {
+            list = document.createElement('div');
+            list.id = 'cw-analytics-country-autocomplete-list';
+            list.style.cssText = 'display:none; position:fixed; z-index:99999; background:#1a1a2e; border:1px solid #444; border-radius:4px; max-height:220px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+            document.body.appendChild(list);
+        }
 
         let activeIndex = -1;
+
+        function positionList() {
+            const rect = input.getBoundingClientRect();
+            list.style.left = rect.left + 'px';
+            list.style.top = (rect.bottom + 2) + 'px';
+            list.style.width = rect.width + 'px';
+        }
 
         function showSuggestions(query) {
             list.innerHTML = '';
@@ -173,19 +188,16 @@ function cwAnalyticsIso2ToFlag(code) {
                     input.value = country.name;
                     list.style.display = 'none';
                 });
-                item.addEventListener('mouseover', () => {
-                    setActive(idx);
-                });
+                item.addEventListener('mouseover', () => { setActive(idx); });
                 list.appendChild(item);
             });
+            positionList();
             list.style.display = 'block';
         }
 
         function setActive(idx) {
             const items = list.querySelectorAll('div');
-            items.forEach((el, i) => {
-                el.style.background = i === idx ? '#2a2a4e' : '';
-            });
+            items.forEach((el, i) => { el.style.background = i === idx ? '#2a2a4e' : ''; });
             activeIndex = idx;
         }
 
@@ -194,22 +206,14 @@ function cwAnalyticsIso2ToFlag(code) {
         input.addEventListener('blur', () => { setTimeout(() => { list.style.display = 'none'; }, 150); });
         input.addEventListener('keydown', (e) => {
             const items = list.querySelectorAll('div');
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setActive(Math.min(activeIndex + 1, items.length - 1));
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setActive(Math.max(activeIndex - 1, 0));
-            } else if (e.key === 'Enter') {
-                if (activeIndex >= 0 && items[activeIndex]) {
-                    e.preventDefault();
-                    input.value = items[activeIndex].dataset.name;
-                    list.style.display = 'none';
-                }
-            } else if (e.key === 'Escape') {
-                list.style.display = 'none';
-            }
+            if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIndex + 1, items.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIndex - 1, 0)); }
+            else if (e.key === 'Enter') {
+                if (activeIndex >= 0 && items[activeIndex]) { e.preventDefault(); input.value = items[activeIndex].dataset.name; list.style.display = 'none'; }
+            } else if (e.key === 'Escape') { list.style.display = 'none'; }
         });
+        window.addEventListener('resize', () => { if (list.style.display !== 'none') positionList(); });
+        window.addEventListener('scroll', () => { if (list.style.display !== 'none') positionList(); }, true);
     }
 
     async function loadContinents() {

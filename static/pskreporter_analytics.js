@@ -26,10 +26,25 @@ function pskFlagForCountry(countryName) {
 
 function setupPskCountryAutocomplete() {
     const input = document.getElementById('country-search');
-    const list = document.getElementById('country-autocomplete-list');
-    if (!input || !list) return;
+    if (!input) return;
+
+    // Append list to body to escape any stacking context (e.g. backdrop-filter on .controls)
+    let list = document.getElementById('psk-country-autocomplete-list');
+    if (!list) {
+        list = document.createElement('div');
+        list.id = 'psk-country-autocomplete-list';
+        list.style.cssText = 'display:none; position:fixed; z-index:99999; background:#1a1a2e; border:1px solid #444; border-radius:4px; max-height:220px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+        document.body.appendChild(list);
+    }
 
     let activeIndex = -1;
+
+    function positionList() {
+        const rect = input.getBoundingClientRect();
+        list.style.left = rect.left + 'px';
+        list.style.top = (rect.bottom + 2) + 'px';
+        list.style.width = rect.width + 'px';
+    }
 
     function showSuggestions(query) {
         list.innerHTML = '';
@@ -51,6 +66,7 @@ function setupPskCountryAutocomplete() {
             item.addEventListener('mouseover', () => { setActive(idx); });
             list.appendChild(item);
         });
+        positionList();
         list.style.display = 'block';
     }
 
@@ -71,6 +87,8 @@ function setupPskCountryAutocomplete() {
             if (activeIndex >= 0 && items[activeIndex]) { e.preventDefault(); input.value = items[activeIndex].dataset.name; list.style.display = 'none'; }
         } else if (e.key === 'Escape') { list.style.display = 'none'; }
     });
+    window.addEventListener('resize', () => { if (list.style.display !== 'none') positionList(); });
+    window.addEventListener('scroll', () => { if (list.style.display !== 'none') positionList(); }, true);
 }
 
 // Band order for sorting
@@ -602,7 +620,7 @@ function displayCountries(data) {
             `;
 
             countries.forEach(country => {
-                html += `<span style="padding: 4px 12px; background: #4CAF50; color: white; border-radius: 4px; font-size: 0.9em;">${escapeHtml(country)}</span>`;
+                html += `<span style="padding: 4px 12px; background: #4CAF50; color: white; border-radius: 4px; font-size: 0.9em;">${pskFlagForCountry(country)}${escapeHtml(country)}</span>`;
             });
 
             html += `

@@ -201,6 +201,7 @@ type WSPRPredictionMeta struct {
 // WSPRPredictionEntry holds the prediction result for a single country+band combination
 type WSPRPredictionEntry struct {
 	Country         string   `json:"country"`
+	CountryCode     string   `json:"country_code,omitempty"` // ISO 3166-1 alpha-2 (empty for non-sovereign entities)
 	Continent       string   `json:"continent"`
 	Band            string   `json:"band"`
 	MeanWSPRSNR     float64  `json:"mean_wspr_snr"`    // mean channel SNR in 2500 Hz BW as reported by wsprd
@@ -799,6 +800,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 				lon := ctyInfo.Longitude
 				entry.Lat = &lat
 				entry.Lon = &lon
+				entry.CountryCode = ctyInfo.CountryCode
 			}
 		}
 		predictions = append(predictions, entry)

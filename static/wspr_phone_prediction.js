@@ -649,9 +649,13 @@ const app = (() => {
                 ? new Date(e.last_seen).toISOString().replace('T', ' ').substring(0, 16) + ' UTC'
                 : '—';
 
+            const flag = iso2ToFlag(e.country_code);
+            const countryDisplay = flag
+                ? `${flag}\u00A0${escHtml(e.country || '—')}`
+                : escHtml(e.country || '—');
             return `<tr>
                 <td>${badgeHTML(e.prediction)}</td>
-                <td>${escHtml(e.country || '—')}</td>
+                <td>${countryDisplay}</td>
                 <td>${escHtml(e.continent || '—')}</td>
                 <td>${escHtml(e.band)}</td>
                 <td class="${snrClass(ssnr)}">${ssnrStr} dB</td>
@@ -716,6 +720,7 @@ const app = (() => {
             if (!byCountry.has(p.country)) {
                 byCountry.set(p.country, {
                     continent: p.continent || '',
+                    countryCode: p.country_code || '',
                     bands: new Map(),
                     bestSNR: -Infinity, bestBand: '', bestPred: ''
                 });
@@ -754,7 +759,9 @@ const app = (() => {
             const bands = [...acc.bands.values()];
             const ringColor = PREDICTION_FILL[acc.bestPred] || '#888';
             const snrStr = (acc.bestSNR >= 0 ? '+' : '') + acc.bestSNR.toFixed(1);
+            const flag = iso2ToFlag(acc.countryCode);
             const countryEsc = escHtml(country || '—');
+            const countryDisplay = flag ? `${flag}\u00A0${countryEsc}` : countryEsc;
             const bandEsc = escHtml(acc.bestBand || '—');
             const gridCount = gridCountByCountry[country] || 0;
             const gridBadge = gridCount > 0
@@ -793,7 +800,7 @@ const app = (() => {
 
             return `<div class="top10-row" data-idx="${idx}" style="cursor:pointer">
                 ${dotSVG}
-                <div class="top10-country" title="${countryEsc}">${countryEsc}</div>
+                <div class="top10-country" title="${countryEsc}">${countryDisplay}</div>
                 <div class="top10-snr">${bandEsc}&nbsp;${snrStr} dB</div>
                 ${gridBadge}
             </div>`;
@@ -981,6 +988,20 @@ const app = (() => {
     }
 
     // ── Utility ──────────────────────────────────────────────────────────────
+
+    // Converts ISO 3166-1 alpha-2 code to a flag emoji using regional indicator symbols.
+    // e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸"
+    function iso2ToFlag(code) {
+        if (!code || code.length !== 2) return '';
+        const c = code.toUpperCase();
+        const base = 0x1F1E6 - 0x41;
+        try {
+            return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+        } catch (e) {
+            return '';
+        }
+    }
+
     function escHtml(str) {
         return String(str)
             .replace(/&/g, '&amp;')

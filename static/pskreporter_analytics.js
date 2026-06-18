@@ -397,17 +397,12 @@ function renderTablePage() {
     const tableContainer = document.getElementById('submissions-table');
     const stats = filteredStats;
 
-    if (!stats || stats.length === 0) {
-        tableContainer.innerHTML = '<p>No data available for the selected filters.</p>';
-        return;
-    }
-
-    const totalPages = Math.ceil(stats.length / itemsPerPage);
+    const totalPages = stats && stats.length > 0 ? Math.ceil(stats.length / itemsPerPage) : 1;
     const startIdx = (currentPage - 1) * itemsPerPage;
-    const endIdx = Math.min(startIdx + itemsPerPage, stats.length);
-    const pageStats = stats.slice(startIdx, endIdx);
+    const endIdx = stats && stats.length > 0 ? Math.min(startIdx + itemsPerPage, stats.length) : 0;
+    const pageStats = stats && stats.length > 0 ? stats.slice(startIdx, endIdx) : [];
 
-    // Real-time filter input and pagination info
+    // Real-time filter input and pagination info — always rendered so filter box stays visible
     let html = `
         <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px;">
             <div style="margin-bottom: 10px;">
@@ -415,11 +410,11 @@ function renderTablePage() {
                        id="table-filter"
                        placeholder="🔍 Filter by callsign, country, or locator..."
                        value="${escapeHtml(tableFilter)}"
-                       style="width: 100%; padding: 10px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255, 255, 255, 0.3); font-size: 1em;">
+                       style="width: 100%; padding: 10px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255, 255, 255, 0.3); font-size: 1em; box-sizing: border-box;">
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <div>
-                    Showing ${startIdx + 1}-${endIdx} of ${stats.length} combinations
+                    ${stats && stats.length > 0 ? `Showing ${startIdx + 1}-${endIdx} of ${stats.length} combinations` : 'No results match your filter'}
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <label style="display: flex; align-items: center; gap: 8px;">
@@ -487,6 +482,10 @@ function renderTablePage() {
             </tr>
         `;
     });
+
+    if (pageStats.length === 0) {
+        html += `<tr><td colspan="12" style="padding: 20px; text-align: center; opacity: 0.6;">No results match your filter</td></tr>`;
+    }
 
     html += `
             </tbody>

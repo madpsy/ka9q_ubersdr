@@ -65,6 +65,23 @@
   white-space: nowrap;
 }
 
+#sdr-marker-type-filter {
+  background: rgba(44, 62, 80, 0.85) !important;
+  border: 1px solid rgba(127, 140, 141, 0.4) !important;
+  border-radius: 4px;
+  color: #9fb3c8 !important;
+  font-size: 10px;
+  font-family: inherit;
+  padding: 1px 3px;
+  cursor: pointer;
+  outline: none;
+  flex: none;
+}
+#sdr-marker-type-filter:hover {
+  border-color: rgba(127, 140, 141, 0.7) !important;
+  color: #ecf0f1 !important;
+}
+
 #sdr-marker-close-btn {
   background: none !important;
   border: none !important;
@@ -194,6 +211,15 @@
 <div id="sdr-marker-widget" style="display:none">
   <div id="sdr-marker-titlebar">
     <span id="sdr-marker-title">📍 Marker</span>
+    <select id="sdr-marker-type-filter" title="Filter prev/next marker types">
+      <option value="all">All</option>
+      <option value="cw">CW</option>
+      <option value="dx">DX</option>
+      <option value="voice">Voice</option>
+      <option value="bookmark">Bookmarks</option>
+      <option value="bookmark-local">Local Book</option>
+      <option value="bookmark-server">Server Book</option>
+    </select>
     <button id="sdr-marker-close-btn" title="Hide widget">✕</button>
   </div>
   <!-- Prev/next neighbour jump — tapping tunes to that marker's freq + mode.
@@ -247,6 +273,24 @@
   const prevText = document.getElementById('sdr-marker-prev-text');
   const nextText = document.getElementById('sdr-marker-next-text');
 
+  // ── Widget-local marker type filter (prev/next only) ────────────────────────
+  const LS_FILTER_KEY = 'sdr-marker-widget-type-filter';
+  let _widgetTypeFilter = 'all';
+  try {
+    const saved = localStorage.getItem(LS_FILTER_KEY);
+    if (saved && ['all','cw','dx','voice','bookmark','bookmark-local','bookmark-server'].includes(saved)) _widgetTypeFilter = saved;
+  } catch (_) {}
+
+  const typeFilterEl = document.getElementById('sdr-marker-type-filter');
+  if (typeFilterEl) {
+    typeFilterEl.value = _widgetTypeFilter;
+    typeFilterEl.addEventListener('change', function () {
+      _widgetTypeFilter = this.value;
+      try { localStorage.setItem(LS_FILTER_KEY, _widgetTypeFilter); } catch (_) {}
+      update();
+    });
+  }
+
   let userClosed = false; // set once the user dismisses via ✕; stays hidden after
   // Tracks which callsign the info panel is currently showing, to guard async updates.
   let _infoCallsign = '';
@@ -292,7 +336,7 @@
 
   // Flatten every marker into { freq, mode, family, name, callsign, countryCode, priority, type }.
   // Spots get priority 1, bookmarks 0, so spots win when two markers share a frequency.
-  // `type` (cw/dx/voice/bookmark) drives the prev/next navTypes filter.
+  // `type` (cw/dx/voice/bookmark-local/bookmark-server) drives the prev/next navTypes filter.
   // `callsign` is the actual callsign string when the name IS a callsign, null otherwise
   // (e.g. voice activities without a dx_callsign get a placeholder name like 'Voice 60m').
   // `countryCode` is the ISO 3166-1 alpha-2 code for flag emoji display (may be null/empty).
@@ -320,7 +364,8 @@
         a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))),
         a => a.dx_callsign || null,
         a => a.dx_country_code || '',                                                                                                          1, 'voice');
-    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, () => null, () => '', 0, 'bookmark');
+    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, () => null, () => '', 0,
+        b => (b.source === 'local' ? 'bookmark-local' : 'bookmark-server'));
     return out;
   }
 
@@ -370,7 +415,19 @@
     const mode = window.currentMode;
     // Honour the host's prev/next marker-type preference (Audio Settings), so the
     // widget arrows step through the same markers as the dial wheel. null = all.
-    const navTypes = Array.isArray(window.markerNavTypes) ? window.markerNavTypes : null;
+    const hostNavTypes = Array.isArray(window.markerNavTypes) ? window.markerNavTypes : null;
+    // AND the widget-local type filter with the host preference.
+    // If both are set, use the intersection; if only one is set, use that one.
+    let navTypes;
+    if (_widgetTypeFilter !== 'all') {
+      // 'bookmark' expands to both sub-types so it matches regardless of source.
+      const widgetSet = _widgetTypeFilter === 'bookmark'
+        ? ['bookmark-local', 'bookmark-server']
+        : [_widgetTypeFilter];
+      navTypes = hostNavTypes ? widgetSet.filter(t => hostNavTypes.includes(t)) : widgetSet;
+    } else {
+      navTypes = hostNavTypes;
+    }
     if (typeof window.findMarkers === 'function') {
       return window.findMarkers(dialHz, mode, navTypes);
     }
@@ -596,7 +653,8 @@
     const name = current ? current.name : null;
 
     // Hide the widget only when there is NO current, prev AND next marker.
-    if (!name && !prev && !next) {
+    // Exception: keep visible when a type filter is active so the user can change it.
+    if (!name && !prev && !next && _widgetTypeFilter === 'all') {
       if (widget.style.display !== 'none') widget.style.display = 'none';
       _lastName = null;
       return;
@@ -714,7 +772,7 @@
     }
 
     widget.addEventListener('pointerdown', e => {
-      if (e.target.closest('button, a, #sdr-marker-name, #sdr-marker-info')) return;
+      if (e.target.closest('button, select, a, #sdr-marker-name, #sdr-marker-info')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;

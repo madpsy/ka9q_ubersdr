@@ -753,6 +753,9 @@
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
                         🔓 Enable Public Access
                     </button>
+                    <a id="groupsIoBtn" href="https://groups.io/g/ubersdr/" target="_blank" class="btn" style="display: none; background: #0077b5; text-decoration: none;">
+                        💬 groups.io
+                    </a>
                     <button id="supportSessionBtn" class="btn" onclick="openStartSupport()" style="display: none; background: #dc3545; color: white; font-weight: bold;" title="Start a remote support session">🆘 Support</button>
                     <div id="terminalButtonGroup" style="display: none; position: relative; align-items: stretch;">
                         <button class="btn" id="terminalButton" onclick="openTerminal()" style="border-radius: 5px 0 0 5px; border-right: none; margin: 0;">🖥️ Terminal</button>
@@ -4518,12 +4521,16 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         // Update public instance button visibility
         function updatePublicInstanceButton() {
             const btn = document.getElementById('publicInstanceBtn');
+            const groupsBtn = document.getElementById('groupsIoBtn');
             if (btn && currentConfig.instance_reporting) {
-                // Show button only if instance_reporting is disabled
+                // Show "Enable Public Access" only if instance_reporting is disabled
+                // Show groups.io button when already public (instance_reporting enabled)
                 if (currentConfig.instance_reporting.enabled === false) {
                     btn.style.display = 'inline-block';
+                    if (groupsBtn) groupsBtn.style.display = 'none';
                 } else {
                     btn.style.display = 'none';
+                    if (groupsBtn) groupsBtn.style.display = 'inline-block';
                 }
             }
         }

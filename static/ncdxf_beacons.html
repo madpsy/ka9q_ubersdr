@@ -662,6 +662,8 @@ function initMap() {
     // Draw day/night terminator and refresh every minute
     updateGreyline();
     setInterval(updateGreyline, 60000);
+    // Re-adjust label directions after zoom/pan
+    map.on('zoomend moveend', adjustBeaconLabelOffsets);
 }
 
 // ── Day/night terminator (greyline) ──────────────────────────────────────
@@ -721,7 +723,7 @@ function placeBeaconMarkers() {
             fillColor: '#555',
             fillOpacity: 0.7,
         });
-        // Permanent callsign label (always visible)
+        // Permanent callsign label — offset adjusted after render to avoid overlap
         m.bindTooltip(b.callsign, {
             permanent: true,
             direction: 'right',
@@ -741,6 +743,63 @@ function placeBeaconMarkers() {
         beaconMarkers[b.callsign] = m;
         clusterGroup.addLayer(m);
     });
+    adjustBeaconLabelOffsets();
+}
+
+// Adjust tooltip direction so labels don't overlap at current zoom level.
+// Beacons whose right-side labels would collide get direction:'bottom' instead.
+function adjustBeaconLabelOffsets() {
+    if (!map || !Object.keys(beaconMarkers).length) return;
+    setTimeout(() => {
+        const LABEL_W = 90;  // px — estimated max label width
+        const LABEL_H = 18;  // px — estimated label height
+
+        // Get pixel positions
+        const pts = BEACONS.map(b => {
+            const pt = map.latLngToContainerPoint([b.latitude, b.longitude]);
+            return { callsign: b.callsign, x: pt.x, y: pt.y, dir: 'right' };
+        });
+
+        // For each beacon, check if its right-side label box overlaps any other
+        // beacon's right-side label box. If so, switch it to 'bottom'.
+        // Iterate a few passes to settle cascading conflicts.
+        for (let pass = 0; pass < 3; pass++) {
+            for (let i = 0; i < pts.length; i++) {
+                for (let j = i + 1; j < pts.length; j++) {
+                    const a = pts[i], b = pts[j];
+                    // Bounding box of label for 'right' direction: [x+8, y-9, x+8+LABEL_W, y+9]
+                    const aBox = a.dir === 'right'
+                        ? { l: a.x + 8, r: a.x + 8 + LABEL_W, t: a.y - LABEL_H/2, b: a.y + LABEL_H/2 }
+                        : { l: a.x - LABEL_W/2, r: a.x + LABEL_W/2, t: a.y + 8, b: a.y + 8 + LABEL_H };
+                    const bBox = b.dir === 'right'
+                        ? { l: b.x + 8, r: b.x + 8 + LABEL_W, t: b.y - LABEL_H/2, b: b.y + LABEL_H/2 }
+                        : { l: b.x - LABEL_W/2, r: b.x + LABEL_W/2, t: b.y + 8, b: b.y + 8 + LABEL_H };
+                    const overlap = aBox.l < bBox.r && aBox.r > bBox.l && aBox.t < bBox.b && aBox.b > bBox.t;
+                    if (overlap) {
+                        // Switch the lower beacon (larger y = lower on screen) to 'bottom'
+                        if (a.y >= b.y) a.dir = 'bottom'; else b.dir = 'bottom';
+                    }
+                }
+            }
+        }
+
+        // Rebind tooltips with the computed direction
+        pts.forEach(item => {
+            const m = beaconMarkers[item.callsign];
+            if (!m) return;
+            const tt = m.getTooltip();
+            if (!tt) return;
+            const content = tt.getContent();
+            const cls = tt.options.className || 'beacon-label';
+            m.unbindTooltip();
+            m.bindTooltip(content, {
+                permanent: true,
+                direction: item.dir,
+                offset: item.dir === 'right' ? [8, 0] : [0, 8],
+                className: cls,
+            });
+        });
+    }, 100);
 }
 
 function placeReceiverMarker(lat, lon, callsign, name) {
@@ -838,6 +897,7 @@ function colourBeaconMarkers(heardSet, byCall) {
             <div class="bp-spots">${spotsHtml}</div>
         </div>`);
     });
+    adjustBeaconLabelOffsets();
 }
 
 // Draw lines from receiver to each heard beacon (one line per unique callsign)

@@ -376,6 +376,10 @@ class SpectrumDisplay {
                             const _img = (_c && _c.imageUrl)
                                 ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
+                            if (_c && _c.data) {
+                                const _n = _c.data.name_fmt || [_c.data.fname, _c.data.nickname ? `"${_c.data.nickname}"` : '', _c.data.name].filter(Boolean).join(' ');
+                                if (_n) tooltipText += `<br>Name: ${_n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n}`;
+                            }
                             this._tooltipCallsign = _b;
                             this._tooltipText = tooltipText;
                             if (_img) {
@@ -429,6 +433,10 @@ class SpectrumDisplay {
                             const _img = (_c && _c.imageUrl)
                                 ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
+                            if (_c && _c.data) {
+                                const _n = _c.data.name_fmt || [_c.data.fname, _c.data.nickname ? `"${_c.data.nickname}"` : '', _c.data.name].filter(Boolean).join(' ');
+                                if (_n) tooltipText += `<br>Name: ${_n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n}`;
+                            }
                             this._tooltipCallsign = _b;
                             this._tooltipText = tooltipText;
                             if (_img) {
@@ -481,6 +489,10 @@ class SpectrumDisplay {
                             const _img = (_c && _c.imageUrl)
                                 ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
+                            if (_c && _c.data) {
+                                const _n = _c.data.name_fmt || [_c.data.fname, _c.data.nickname ? `"${_c.data.nickname}"` : '', _c.data.name].filter(Boolean).join(' ');
+                                if (_n) tooltipText += `<br>Name: ${_n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n}`;
+                            }
                             this._tooltipCallsign = _b;
                             this._tooltipText = tooltipText;
                             if (_img) {

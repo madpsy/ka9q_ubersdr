@@ -274,6 +274,51 @@
         }
 
 
+        /* ── Ant switch section below the distance/bearing block ─────────── */
+        #rx-ant-switch-section {
+            margin-top: 8px;
+            display: none;          /* hidden until ant_switch_status arrives */
+        }
+        .rx-ant-sw-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .rx-ant-sw-btn {
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(55,55,55,0.9);
+            border: 1px solid rgba(100,100,100,0.5);
+            color: #bbb;
+            border-radius: 5px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            white-space: nowrap;
+        }
+        .rx-ant-sw-btn:hover:not(:disabled) {
+            background: rgba(70,70,70,0.9);
+            border-color: rgba(150,150,150,0.6);
+            color: #fff;
+        }
+        .rx-ant-sw-btn.selected {
+            background: #1b5e20;
+            border: 2px solid #66bb6a;
+            color: #a5d6a7;
+        }
+        .rx-ant-sw-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .rx-ant-sw-grounded {
+            font-size: 12px;
+            color: #ef9a9a;
+            padding: 4px 0;
+        }
+
         /* Slow pulse animation for the antenna bearing when rotator is moving */
         @keyframes rx-ant-pulse {
             0%, 100% { opacity: 1; }
@@ -1166,9 +1211,11 @@
                        <span class="rx-val" id="rx-bearing-row">
                            <span id="rx-bearing-deg">${rxDb.bearing}°</span><span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span><span id="rx-set-part" style="display:none"> <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${rxDb.bearing}°">Set</button></span>
                        </span>
-                   </div>`
+                   </div>
+                   <div id="rx-ant-switch-section"></div>`
                 : (d.lat && d.lon
-                    ? `<div class="rx-distance" id="rx-dist-display">—</div>`
+                    ? `<div class="rx-distance" id="rx-dist-display">—</div>
+                       <div id="rx-ant-switch-section"></div>`
                     : '');
 
             // Build aliases row — QRZ returns a comma-separated string
@@ -1217,9 +1264,10 @@
                 });
             });
 
-            // Wire rotator Set button and apply current rotator state (if any)
+            // Wire rotator Set button and apply current rotator/ant-switch state (if any)
             wireSetButton();
             updateRotatorUI();
+            updateAntSwitchUI();
 
             // Announce the callsign (voice or morse) if enabled
             announceCallsign(callsign);
@@ -1249,6 +1297,7 @@
                                 `</span>`;
                             wireSetButton();
                             updateRotatorUI();
+                            updateAntSwitchUI();
                         }
                     }
                 });
@@ -1317,7 +1366,8 @@
         // rotator-ui.js is loaded (i.e. rotator is enabled in config).
         // Default: all false/null so the page looks identical to today when
         // the rotator is not enabled.
-        let rotatorState = { enabled: false, connected: false, azimuth: null, hasPassword: false };
+        let rotatorState   = { enabled: false, connected: false, azimuth: null, moving: false, hasPassword: false };
+        let antSwitchState = { enabled: false, num_antennas: 0, antenna_labels: [], selected: [], grounded: false, thunderstorm: false, hasPassword: false };
 
         /**
          * Update the bearing row in #rx-dist-display based on current rotatorState.
@@ -1380,6 +1430,60 @@
             });
         }
 
+        /**
+         * Render the ant switch button row into #rx-ant-switch-section.
+         * Safe to call when the element doesn't exist yet (no-op).
+         */
+        function updateAntSwitchUI() {
+            const section = document.getElementById('rx-ant-switch-section');
+            if (!section) return;
+
+            if (!antSwitchState.enabled) {
+                section.style.display = 'none';
+                section.innerHTML = '';
+                return;
+            }
+
+            section.style.display = '';
+
+            const { num_antennas, antenna_labels, selected, grounded, thunderstorm, hasPassword } = antSwitchState;
+            const disabled = !hasPassword || thunderstorm;
+
+            let html = '<div class="rx-ant-sw-row">';
+
+            if (grounded) {
+                html += '<span class="rx-ant-sw-grounded">⏚ Grounded</span>';
+            }
+
+            for (let i = 1; i <= num_antennas; i++) {
+                const label = (antenna_labels[i - 1] && antenna_labels[i - 1] !== '')
+                    ? antenna_labels[i - 1]
+                    : `Antenna ${i}`;
+                const isSel = selected.includes(i);
+                const selClass = isSel ? ' selected' : '';
+                const dis = disabled ? ' disabled' : '';
+                html += `<button class="rx-ant-sw-btn${selClass}" data-ant="${i}"${dis}>${esc(label)}</button>`;
+            }
+
+            html += '</div>';
+            section.innerHTML = html;
+
+            // Wire click handlers
+            section.querySelectorAll('.rx-ant-sw-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const antenna = parseInt(btn.dataset.ant, 10);
+                    if (!window.opener || window.opener.closed) return;
+                    window.opener.postMessage(
+                        { type: 'ant_switch_select', antenna },
+                        window.location.origin
+                    );
+                    // Optimistic highlight
+                    section.querySelectorAll('.rx-ant-sw-btn').forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                });
+            });
+        }
+
         // ── Cross-window messaging ────────────────────────────────────────
         // The extension can post a message to update the UUID or trigger a lookup
         // without needing to close and reopen the window.
@@ -1388,6 +1492,11 @@
             if (event.data.type === 'rotator_status') {
                 rotatorState = event.data;
                 updateRotatorUI();
+                return;
+            }
+            if (event.data.type === 'ant_switch_status') {
+                antSwitchState = event.data;
+                updateAntSwitchUI();
                 return;
             }
             if (event.data.type === 'callsign_lookup') {

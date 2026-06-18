@@ -714,24 +714,34 @@ class RotatorUI {
         // leaves the main page.
         window.addEventListener('message', (event) => {
             if (event.origin !== window.location.origin) return;
-            if (!event.data || event.data.type !== 'rotator_set_bearing') return;
-            const bearing = parseFloat(event.data.bearing);
-            if (isNaN(bearing) || !this.savedPassword) return;
-            fetch('/api/rotctl/position', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: this.savedPassword, azimuth: bearing })
-            }).then(async r => {
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok || !d.success) {
-                    console.error('[RotatorUI] lookup set-bearing failed:', d.error || r.status);
-                    // If password rejected, clear it so the popup hides the Set button next cycle
-                    if (r.status === 401 || (d.error && d.error.toLowerCase().includes('password'))) {
-                        this.savedPassword = '';
-                        localStorage.removeItem('rotctl_password');
+            if (!event.data) return;
+
+            if (event.data.type === 'rotator_set_bearing') {
+                const bearing = parseFloat(event.data.bearing);
+                if (isNaN(bearing) || !this.savedPassword) return;
+                fetch('/api/rotctl/position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: this.savedPassword, azimuth: bearing })
+                }).then(async r => {
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok || !d.success) {
+                        console.error('[RotatorUI] lookup set-bearing failed:', d.error || r.status);
+                        if (r.status === 401 || (d.error && d.error.toLowerCase().includes('password'))) {
+                            this.savedPassword = '';
+                            localStorage.removeItem('rotctl_password');
+                        }
                     }
-                }
-            }).catch(err => console.error('[RotatorUI] lookup set-bearing network error:', err));
+                }).catch(err => console.error('[RotatorUI] lookup set-bearing network error:', err));
+                return;
+            }
+
+            if (event.data.type === 'ant_switch_select') {
+                const antenna = parseInt(event.data.antenna, 10);
+                if (isNaN(antenna) || !this.antSwitchPassword) return;
+                this._sendAntCommand({ command: 'select', antenna });
+                return;
+            }
         });
     }
     
@@ -1167,6 +1177,23 @@ class RotatorUI {
         const tabDot = document.getElementById('cp-tab-ant-status');
         if (tabDot) {
             tabDot.className = 'rotator-tab-status ' + (data.enabled ? 'connected' : 'disconnected');
+        }
+
+        // ── Push ant switch state to callsign lookup popup (if open) ──────
+        const lw = window._callsignLookupWindow;
+        if (lw && !lw.closed) {
+            try {
+                lw.postMessage({
+                    type:           'ant_switch_status',
+                    enabled:        !!data.enabled,
+                    num_antennas:   data.num_antennas || 0,
+                    antenna_labels: data.antenna_labels || [],
+                    selected:       data.selected || [],
+                    grounded:       !!data.grounded,
+                    thunderstorm:   !!data.thunderstorm,
+                    hasPassword:    !!this.antSwitchPassword
+                }, window.location.origin);
+            } catch (_) { /* popup closed between check and send — ignore */ }
         }
 
         // ── Render the ant switch pane (only if it exists in DOM) ─────────

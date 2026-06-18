@@ -407,7 +407,7 @@ class CWSpotsGraph {
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: {
-                    mode: 'nearest',
+                    mode: 'point',
                     intersect: true
                 },
                 plugins: {
@@ -628,7 +628,7 @@ class CWSpotsGraph {
             borderColor: group.color,
             pointRadius: 4,
             pointHoverRadius: 6,
-            pointHitRadius: 20
+            pointHitRadius: 8
         }));
     }
     

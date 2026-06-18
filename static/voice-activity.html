@@ -161,7 +161,7 @@
             font-size: 12px;
             font-weight: 600;
             color: #f1c40f;
-            text-align: center;
+            text-align: left;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -796,6 +796,19 @@
             activityList.innerHTML = data.activities.map(activity => renderActivityRow(activity)).join('');
         }
 
+        // Converts ISO 3166-1 alpha-2 code to a flag emoji using regional indicator symbols.
+        // e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸"
+        function iso2ToFlag(code) {
+            if (!code || code.length !== 2) return '';
+            const c = code.toUpperCase();
+            const base = 0x1F1E6 - 0x41;
+            try {
+                return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+            } catch (e) {
+                return '';
+            }
+        }
+
         function renderActivityRow(activity) {
             const freq = formatFrequency(activity.estimated_dial_freq || activity.start_freq);
             const modeUpper = activity.mode || 'LSB';
@@ -818,6 +831,11 @@
             const dialFreq = activity.estimated_dial_freq || activity.start_freq;
 
             const dxCallsign = activity.dx_callsign || '';
+            const countryCode = activity.dx_country_code || '';
+            const flagEmoji = countryCode ? iso2ToFlag(countryCode) : '';
+            const callsignDisplay = dxCallsign
+                ? (flagEmoji ? flagEmoji + '\u00A0' + dxCallsign : dxCallsign)
+                : '';
 
             const callsignAttr = dxCallsign ? ` data-callsign="${dxCallsign}"` : '';
             const onclickAttr = dxCallsign
@@ -831,7 +849,7 @@
                         <span class="mode">${modeUpper}</span>
                         <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz</span>
                     </div>
-                    <div class="dx-callsign">${dxCallsign}</div>
+                    <div class="dx-callsign">${callsignDisplay}</div>
                     <div class="${confidenceClass}">${confidence}</div>
                     <div class="snr">${signalAboveNoise}</div>
                 </div>

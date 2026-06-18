@@ -57,13 +57,6 @@
         .now-table td {
             padding: 4px 8px;
         }
-        .now-table tr.active-row td {
-            background: rgba(74,158,255,0.18);
-            font-weight: bold;
-        }
-        .now-table tr.active-row td:first-child {
-            border-left: 3px solid #4a9eff;
-        }
         .band-pill {
             display: inline-block;
             padding: 1px 7px;
@@ -363,6 +356,7 @@
                 <thead>
                     <tr>
                         <th>Time (UTC)</th>
+                        <th>Valid</th>
                         <th>Callsign</th>
                         <th>Entity</th>
                         <th>Band</th>
@@ -444,8 +438,7 @@ function updateScheduleTable(now) {
         const b = BEACONS[slotIdx];
         const bandName = BAND_NAMES[i];
         const color = BAND_COLORS[bandName] || '#aaa';
-        const isActive = (i === 0);
-        html += `<tr${isActive ? ' class="active-row"' : ''}>
+        html += `<tr>
             <td><span class="band-pill" style="background:${color};">${bandName} ${BANDS_MHZ[i]}</span></td>
             <td><strong>${b.callsign}</strong></td>
             <td>${b.location}</td>
@@ -557,21 +550,24 @@ function colourBeaconMarkers(heardSet, byCall) {
             className: 'beacon-label',
         });
 
-        // Update popup spot summary
-        const el = document.getElementById(`bpspot-${b.callsign}`);
-        if (el) {
-            if (heard) {
-                const bestSNR = bSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
-                const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
-                const bandPills = bandSet.map(bd =>
-                    `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;">${bd}</span>`
-                ).join(' ');
-                el.innerHTML = `${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Best SNR: ${bestSNR} dB<br>${bandPills}<br><span style="opacity:0.7;">Last: ${lastTime}</span>`;
-            } else {
-                el.textContent = 'Not heard';
-                el.style.color = '#888';
-            }
+        // Rebuild popup content via setPopupContent (works even before popup is opened)
+        let spotsHtml;
+        if (heard) {
+            const bestSNR = bSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
+            const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
+            const bandPills = bandSet.map(bd =>
+                `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;">${bd}</span>`
+            ).join(' ');
+            spotsHtml = `${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Best SNR: ${bestSNR} dB<br>${bandPills}<br><span style="opacity:0.7;">Last: ${lastTime}</span>`;
+        } else {
+            spotsHtml = '<span style="color:#888;">Not heard</span>';
         }
+        m.setPopupContent(`<div class="beacon-popup">
+            <div class="bp-call">${b.callsign}</div>
+            <div class="bp-entity">${b.entity}</div>
+            <div class="bp-detail">${b.location} · ${b.grid}</div>
+            <div class="bp-spots">${spotsHtml}</div>
+        </div>`);
     });
 }
 
@@ -748,10 +744,26 @@ function renderBeaconCards(spots, heardSet) {
     }).join('');
 }
 
+// ── Schedule validity check ───────────────────────────────────────────────
+// Given a spot's ISO timestamp and band name, return true if the callsign
+// matches the beacon that should be on that band at that moment.
+// Formula mirrors BeaconClock.js: beacon on band i = BEACONS[(18+n-i)%18]
+// where n = Math.floor(utcMs/10000) % 18
+function isValidBeaconSpot(spot) {
+    if (BEACONS.length === 0) return null; // data not loaded yet
+    const ts = new Date(spot.timestamp);
+    if (isNaN(ts)) return null;
+    const n = Math.floor(ts.getTime() / 10000) % 18;
+    const bandIdx = BAND_NAMES.indexOf(spot.band);
+    if (bandIdx === -1) return null; // unknown band
+    const expected = BEACONS[(18 + n - bandIdx) % 18];
+    return expected && expected.callsign === spot.callsign;
+}
+
 function renderSpotsTable(spots) {
     const tbody = document.getElementById('spots-tbody');
     if (spots.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;opacity:0.6;padding:20px;">No spots</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;opacity:0.6;padding:20px;">No spots</td></tr>';
         document.getElementById('spots-count').textContent = '';
         return;
     }
@@ -763,8 +775,15 @@ function renderSpotsTable(spots) {
         const bearing = s.bearing_deg != null ? Math.round(s.bearing_deg) + '\u00b0' : '\u2014';
         const timeStr = s.timestamp ? s.timestamp.slice(11, 19) : '';
         const entity = b ? b.entity : '';
+        const valid = isValidBeaconSpot(s);
+        const validCell = valid === null
+            ? '<td style="text-align:center;opacity:0.4;">?</td>'
+            : valid
+                ? '<td style="text-align:center;font-size:1.1em;" title="On schedule">✅</td>'
+                : '<td style="text-align:center;font-size:1.1em;" title="Not on schedule for this band/time">❌</td>';
         return `<tr class="beacon-row-highlight">
             <td style="font-family:monospace;">${timeStr}</td>
+            ${validCell}
             <td><strong>${s.callsign}</strong></td>
             <td>${entity}</td>
             <td><span class="band-pill" style="background:${color};">${s.band}</span></td>

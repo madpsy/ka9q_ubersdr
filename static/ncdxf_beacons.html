@@ -325,6 +325,12 @@
                     <option value="20">+20 dB</option>
                 </select>
             </div>
+            <div class="control-group" style="align-items:center;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9em;white-space:nowrap;">
+                    <input type="checkbox" id="auto-refresh-cb" checked style="width:15px;height:15px;cursor:pointer;">
+                    Auto-refresh (5 min)
+                </label>
+            </div>
             <div class="control-group">
                 <button id="load-btn" style="background:#4CAF50;">Load Spots</button>
             </div>
@@ -370,7 +376,10 @@
                 <tbody id="spots-tbody"></tbody>
             </table>
         </div>
-        <div id="spots-count" style="text-align:right; font-size:0.82em; opacity:0.65; margin-top:6px;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+            <div id="refresh-countdown" style="font-size:0.82em; opacity:0.55; font-style:italic;"></div>
+            <div id="spots-count" style="font-size:0.82em; opacity:0.65;"></div>
+        </div>
     </div>
 </div>
 
@@ -812,6 +821,45 @@ function todayUTC() {
         padZ(d.getUTCDate());
 }
 
+// ── Auto-refresh ──────────────────────────────────────────────────────────
+const AUTO_REFRESH_SECS = 300; // 5 minutes
+let autoRefreshSecsLeft = AUTO_REFRESH_SECS;
+let autoRefreshInterval = null;
+
+function isAutoRefreshEnabled() {
+    const cb = document.getElementById('auto-refresh-cb');
+    return cb ? cb.checked : false;
+}
+
+function startAutoRefresh() {
+    autoRefreshSecsLeft = AUTO_REFRESH_SECS;
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+    autoRefreshInterval = setInterval(() => {
+        if (!isAutoRefreshEnabled()) {
+            updateRefreshCountdown();
+            return;
+        }
+        autoRefreshSecsLeft--;
+        updateRefreshCountdown();
+        if (autoRefreshSecsLeft <= 0) {
+            autoRefreshSecsLeft = AUTO_REFRESH_SECS;
+            loadSpots();
+        }
+    }, 1000);
+}
+
+function updateRefreshCountdown() {
+    const el = document.getElementById('refresh-countdown');
+    if (!el) return;
+    if (!isAutoRefreshEnabled()) {
+        el.textContent = '';
+        return;
+    }
+    const m = Math.floor(autoRefreshSecsLeft / 60);
+    const s = autoRefreshSecsLeft % 60;
+    el.textContent = `Auto-refresh in ${m}:${padZ(s)}`;
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────
 async function init() {
     // Set default date to today
@@ -820,10 +868,21 @@ async function init() {
     dateInput.max   = todayUTC();
 
     // Wire buttons
-    document.getElementById('load-btn').addEventListener('click', loadSpots);
+    document.getElementById('load-btn').addEventListener('click', () => {
+        startAutoRefresh(); // reset countdown on manual load
+        loadSpots();
+    });
     document.getElementById('today-btn').addEventListener('click', () => {
         dateInput.value = todayUTC();
+        startAutoRefresh();
         loadSpots();
+    });
+    // Checkbox: toggling on resets the countdown; toggling off clears the display
+    document.getElementById('auto-refresh-cb').addEventListener('change', () => {
+        if (isAutoRefreshEnabled()) {
+            autoRefreshSecsLeft = AUTO_REFRESH_SECS;
+        }
+        updateRefreshCountdown();
     });
 
     // Init map
@@ -839,8 +898,9 @@ async function init() {
     updateClock();
     setInterval(updateClock, 1000);
 
-    // Auto-load today on startup
-    loadSpots();
+    // Auto-load today on startup, then start auto-refresh
+    await loadSpots();
+    startAutoRefresh();
 }
 
 document.addEventListener('DOMContentLoaded', init);

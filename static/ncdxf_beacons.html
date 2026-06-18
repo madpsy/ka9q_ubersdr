@@ -196,6 +196,19 @@
             font-weight: bold;
             font-size: 0.9em;
         }
+        /* ── Pagination buttons ─────────────────────────────────────── */
+        .page-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            padding: 3px 10px;
+            transition: background 0.15s;
+        }
+        .page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
+        .page-btn:disabled { opacity: 0.3; cursor: default; }
         /* ── Receiver diamond marker ────────────────────────────────── */
         .rx-marker-icon {
             font-size: 22px;
@@ -357,6 +370,21 @@
 
         <!-- ── Spots table ───────────────────────────────────────────── -->
         <div class="section-heading">📋 Spots Log</div>
+        <!-- Pagination top bar -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:0.88em;">
+                <label for="spots-per-page" style="opacity:0.75;">Rows per page:</label>
+                <select id="spots-per-page" style="padding:3px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:4px; color:white; font-size:0.9em;">
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="250">250</option>
+                    <option value="0">All</option>
+                </select>
+            </div>
+            <div id="spots-page-info" style="font-size:0.82em; opacity:0.65;"></div>
+        </div>
         <div class="spots-table-container">
             <table class="spots-table">
                 <thead>
@@ -376,9 +404,19 @@
                 <tbody id="spots-tbody"></tbody>
             </table>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
-            <div id="refresh-countdown" style="font-size:0.82em; opacity:0.55; font-style:italic;"></div>
-            <div id="spots-count" style="font-size:0.82em; opacity:0.65;"></div>
+        <!-- Pagination bottom bar -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:6px;">
+                <button id="spots-first-btn" class="page-btn" title="First page">«</button>
+                <button id="spots-prev-btn"  class="page-btn" title="Previous page">‹</button>
+                <span id="spots-page-label" style="font-size:0.85em; opacity:0.8; min-width:80px; text-align:center;"></span>
+                <button id="spots-next-btn"  class="page-btn" title="Next page">›</button>
+                <button id="spots-last-btn"  class="page-btn" title="Last page">»</button>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div id="refresh-countdown" style="font-size:0.82em; opacity:0.55; font-style:italic;"></div>
+                <div id="spots-count" style="font-size:0.82em; opacity:0.65;"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -769,41 +807,83 @@ function isValidBeaconSpot(spot) {
     return expected && expected.callsign === spot.callsign;
 }
 
-function renderSpotsTable(spots) {
-    const tbody = document.getElementById('spots-tbody');
-    if (spots.length === 0) {
+// ── Spots table pagination state ─────────────────────────────────────────
+let spotsTableData = [];   // full sorted spots array
+let spotsTablePage = 0;    // current 0-based page index
+
+function spotsRowHtml(s) {
+    const b = beaconByCall[s.callsign];
+    const color = BAND_COLORS[s.band] || '#aaa';
+    const dist = s.distance_km != null ? Math.round(s.distance_km).toLocaleString() + ' km' : '\u2014';
+    const bearing = s.bearing_deg != null ? Math.round(s.bearing_deg) + '\u00b0' : '\u2014';
+    const timeStr = s.timestamp ? s.timestamp.slice(11, 19) : '';
+    const entity = b ? b.entity : '';
+    const valid = isValidBeaconSpot(s);
+    const validCell = valid === null
+        ? '<td style="text-align:center;opacity:0.4;">?</td>'
+        : valid
+            ? '<td style="text-align:center;font-size:1.1em;" title="On schedule">✅</td>'
+            : '<td style="text-align:center;font-size:1.1em;" title="Not on schedule for this band/time">❌</td>';
+    return `<tr class="beacon-row-highlight">
+        <td style="font-family:monospace;">${timeStr}</td>
+        ${validCell}
+        <td><strong>${s.callsign}</strong></td>
+        <td>${entity}</td>
+        <td><span class="band-pill" style="background:${color};">${s.band}</span></td>
+        <td style="font-family:monospace;">${s.frequency ? s.frequency.toLocaleString() : ''}</td>
+        <td>${s.snr}</td>
+        <td>${s.wpm || '\u2014'}</td>
+        <td>${dist}</td>
+        <td>${bearing}</td>
+    </tr>`;
+}
+
+function renderSpotsPage() {
+    const tbody  = document.getElementById('spots-tbody');
+    const perPageVal = parseInt(document.getElementById('spots-per-page').value, 10);
+    const total  = spotsTableData.length;
+
+    if (total === 0) {
         tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;opacity:0.6;padding:20px;">No spots</td></tr>';
         document.getElementById('spots-count').textContent = '';
+        document.getElementById('spots-page-info').textContent = '';
+        document.getElementById('spots-page-label').textContent = '';
+        ['spots-first-btn','spots-prev-btn','spots-next-btn','spots-last-btn'].forEach(id => {
+            document.getElementById(id).disabled = true;
+        });
         return;
     }
 
-    tbody.innerHTML = spots.map(s => {
-        const b = beaconByCall[s.callsign];
-        const color = BAND_COLORS[s.band] || '#aaa';
-        const dist = s.distance_km != null ? Math.round(s.distance_km).toLocaleString() + ' km' : '\u2014';
-        const bearing = s.bearing_deg != null ? Math.round(s.bearing_deg) + '\u00b0' : '\u2014';
-        const timeStr = s.timestamp ? s.timestamp.slice(11, 19) : '';
-        const entity = b ? b.entity : '';
-        const valid = isValidBeaconSpot(s);
-        const validCell = valid === null
-            ? '<td style="text-align:center;opacity:0.4;">?</td>'
-            : valid
-                ? '<td style="text-align:center;font-size:1.1em;" title="On schedule">✅</td>'
-                : '<td style="text-align:center;font-size:1.1em;" title="Not on schedule for this band/time">❌</td>';
-        return `<tr class="beacon-row-highlight">
-            <td style="font-family:monospace;">${timeStr}</td>
-            ${validCell}
-            <td><strong>${s.callsign}</strong></td>
-            <td>${entity}</td>
-            <td><span class="band-pill" style="background:${color};">${s.band}</span></td>
-            <td style="font-family:monospace;">${s.frequency ? s.frequency.toLocaleString() : ''}</td>
-            <td>${s.snr}</td>
-            <td>${s.wpm || '\u2014'}</td>
-            <td>${dist}</td>
-            <td>${bearing}</td>
-        </tr>`;
-    }).join('');
-    document.getElementById('spots-count').textContent = spots.length + ' spot' + (spots.length !== 1 ? 's' : '');
+    const showAll  = perPageVal === 0;
+    const perPage  = showAll ? total : perPageVal;
+    const maxPage  = Math.max(0, Math.ceil(total / perPage) - 1);
+    spotsTablePage = Math.min(spotsTablePage, maxPage);
+
+    const start = showAll ? 0 : spotsTablePage * perPage;
+    const end   = showAll ? total : Math.min(start + perPage, total);
+    const page  = spotsTableData.slice(start, end);
+
+    tbody.innerHTML = page.map(spotsRowHtml).join('');
+
+    // Update info labels
+    document.getElementById('spots-count').textContent =
+        total + ' spot' + (total !== 1 ? 's' : '');
+    document.getElementById('spots-page-info').textContent =
+        showAll ? `Showing all ${total}` : `${start + 1}–${end} of ${total}`;
+    document.getElementById('spots-page-label').textContent =
+        showAll ? '' : `Page ${spotsTablePage + 1} / ${maxPage + 1}`;
+
+    // Enable/disable nav buttons
+    document.getElementById('spots-first-btn').disabled = showAll || spotsTablePage === 0;
+    document.getElementById('spots-prev-btn').disabled  = showAll || spotsTablePage === 0;
+    document.getElementById('spots-next-btn').disabled  = showAll || spotsTablePage >= maxPage;
+    document.getElementById('spots-last-btn').disabled  = showAll || spotsTablePage >= maxPage;
+}
+
+function renderSpotsTable(spots) {
+    spotsTableData = spots;
+    spotsTablePage = 0;
+    renderSpotsPage();
 }
 
 // ── Status helper ────────────────────────────────────────────────────────
@@ -883,6 +963,28 @@ async function init() {
             autoRefreshSecsLeft = AUTO_REFRESH_SECS;
         }
         updateRefreshCountdown();
+    });
+
+    // Pagination controls
+    document.getElementById('spots-per-page').addEventListener('change', () => {
+        spotsTablePage = 0;
+        renderSpotsPage();
+    });
+    document.getElementById('spots-first-btn').addEventListener('click', () => {
+        spotsTablePage = 0;
+        renderSpotsPage();
+    });
+    document.getElementById('spots-prev-btn').addEventListener('click', () => {
+        if (spotsTablePage > 0) { spotsTablePage--; renderSpotsPage(); }
+    });
+    document.getElementById('spots-next-btn').addEventListener('click', () => {
+        spotsTablePage++;
+        renderSpotsPage();
+    });
+    document.getElementById('spots-last-btn').addEventListener('click', () => {
+        const perPage = parseInt(document.getElementById('spots-per-page').value, 10) || spotsTableData.length;
+        spotsTablePage = Math.max(0, Math.ceil(spotsTableData.length / perPage) - 1);
+        renderSpotsPage();
     });
 
     // Init map

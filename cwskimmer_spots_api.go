@@ -13,6 +13,20 @@ import (
 	"time"
 )
 
+// sortedCallsignKey returns a stable, sorted, comma-joined string from a callsign
+// set, suitable for use as a rate-limit cache key.
+func sortedCallsignKey(callsigns map[string]bool) string {
+	if len(callsigns) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(callsigns))
+	for cs := range callsigns {
+		keys = append(keys, cs)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
+}
+
 // CWSpotRecord represents a CW spot from CSV
 type CWSpotRecord struct {
 	Timestamp  string   `json:"timestamp"`
@@ -33,8 +47,9 @@ type CWSpotRecord struct {
 	Name       string   `json:"name"` // Band name from file
 }
 
-// GetCWHistoricalSpots reads historical CW spots from CSV files
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
+// GetCWHistoricalSpots reads historical CW spots from CSV files.
+// callsigns is a set of uppercase callsigns to match; an empty map means no filter.
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("CW spots logging is not enabled")
 	}
@@ -109,8 +124,8 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name, callsign, conti
 				continue
 			}
 
-			// Filter by exact callsign match if specified
-			if callsign != "" && spot.Callsign != callsign {
+			// Filter by callsign set if specified
+			if len(callsigns) > 0 && !callsigns[spot.Callsign] {
 				continue
 			}
 
@@ -413,10 +428,11 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableNames() ([]string, error) {
 	return names, nil
 }
 
-// GetCWHistoricalCSV returns historical CW spots data as CSV string
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) (string, error) {
+// GetCWHistoricalCSV returns historical CW spots data as CSV string.
+// callsigns is a set of uppercase callsigns to match; an empty map means no filter.
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name string, callsigns map[string]bool, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetCWHistoricalSpots(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase)
+	spots, err := sl.GetCWHistoricalSpots(band, name, callsigns, continent, direction, fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase)
 	if err != nil {
 		return "", err
 	}
@@ -515,13 +531,30 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 
 	band := r.URL.Query().Get("band")
 	name := r.URL.Query().Get("name")
-	callsign := strings.ToUpper(r.URL.Query().Get("callsign"))
 	continent := r.URL.Query().Get("continent")
 	direction := r.URL.Query().Get("direction")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
 	minDistanceStr := r.URL.Query().Get("min_distance")
 	minSNRStr := r.URL.Query().Get("min_snr")
+
+	// Parse callsigns: supports comma-separated (?callsign=G3XYZ,W1AW) and
+	// repeated parameters (?callsign=G3XYZ&callsign=W1AW). Max 20 callsigns.
+	callsigns := make(map[string]bool)
+	for _, raw := range r.URL.Query()["callsign"] {
+		for _, part := range strings.Split(raw, ",") {
+			if p := strings.TrimSpace(strings.ToUpper(part)); p != "" {
+				callsigns[p] = true
+			}
+		}
+	}
+	if len(callsigns) > 20 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "too many callsigns: maximum 20 allowed",
+		})
+		return
+	}
 
 	minDistanceKm := 0.0
 	if minDistanceStr != "" {
@@ -537,9 +570,12 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 		}
 	}
 
+	// Build a stable rate-limit key from the sorted callsign set
+	callsignKey := sortedCallsignKey(callsigns)
+
 	// Check rate limit
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("cw-spots-%s-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsign, continent, direction, fromDate, toDate, startTime, minSNR)
+	rateLimitKey := fmt.Sprintf("cw-spots-%s-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsignKey, continent, direction, fromDate, toDate, startTime, minSNR)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -550,7 +586,7 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 
 	// Get spots
 	spots, err := cwSkimmer.spotsLogger.GetCWHistoricalSpots(
-		band, name, callsign, continent, direction,
+		band, name, callsigns, continent, direction,
 		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
 	)
 	if err != nil {
@@ -681,13 +717,31 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 
 	band := r.URL.Query().Get("band")
 	name := r.URL.Query().Get("name")
-	callsign := strings.ToUpper(r.URL.Query().Get("callsign"))
 	continent := r.URL.Query().Get("continent")
 	direction := r.URL.Query().Get("direction")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
 	minDistanceStr := r.URL.Query().Get("min_distance")
 	minSNRStr := r.URL.Query().Get("min_snr")
+
+	// Parse callsigns: supports comma-separated (?callsign=G3XYZ,W1AW) and
+	// repeated parameters (?callsign=G3XYZ&callsign=W1AW). Max 20 callsigns.
+	callsigns := make(map[string]bool)
+	for _, raw := range r.URL.Query()["callsign"] {
+		for _, part := range strings.Split(raw, ",") {
+			if p := strings.TrimSpace(strings.ToUpper(part)); p != "" {
+				callsigns[p] = true
+			}
+		}
+	}
+	if len(callsigns) > 20 {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "too many callsigns: maximum 20 allowed",
+		})
+		return
+	}
 
 	minDistanceKm := 0.0
 	if minDistanceStr != "" {
@@ -703,9 +757,12 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 		}
 	}
 
+	// Build a stable rate-limit key from the sorted callsign set
+	callsignKey := sortedCallsignKey(callsigns)
+
 	// Check rate limit
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("cw-spots-csv-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsign, continent, direction, fromDate, toDate, minSNR)
+	rateLimitKey := fmt.Sprintf("cw-spots-csv-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsignKey, continent, direction, fromDate, toDate, minSNR)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Header().Set("Content-Type", "application/json")
@@ -717,7 +774,7 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 
 	// Get CSV data
 	csvData, err := cwSkimmer.spotsLogger.GetCWHistoricalCSV(
-		band, name, callsign, continent, direction,
+		band, name, callsigns, continent, direction,
 		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
 	)
 	if err != nil {

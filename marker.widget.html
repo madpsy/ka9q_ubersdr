@@ -378,11 +378,23 @@
   }
 
   // Tune to a { freq, mode } neighbour (prev/next tap), mirroring the dial-wheel
-  // edge arrows: set frequency first, then the marker's own mode.
+  // edge arrows: set mode first, then frequency (so autoTune fires with the right
+  // mode), then pan the spectrum to follow — same sequence as the bookmark dropdown.
   function tuneToMarker(marker) {
     if (!marker || typeof marker.freq !== 'number') return;
-    if (typeof window.setFrequency === 'function') window.setFrequency(marker.freq);
     if (marker.mode && typeof window.setMode === 'function') window.setMode(marker.mode, false);
+    if (typeof window.setFrequency === 'function') window.setFrequency(marker.freq);
+
+    // Pan the spectrum to centre on the new frequency, same as the bookmark dropdown.
+    var spectrum = window.spectrumDisplay;
+    if (spectrum && spectrum.connected && spectrum.ws) {
+      spectrum.skipEdgeDetectionTemporary = true;
+      setTimeout(function () {
+        if (spectrum) spectrum.skipEdgeDetectionTemporary = false;
+      }, 2000);
+      spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: marker.freq }));
+    }
+
     update();
     // Notify lookup widgets if the callsign result is already cached.
     // _fetchCallsignForMediaSession returns early on a cache hit and won't fire

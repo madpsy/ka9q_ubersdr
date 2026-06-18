@@ -20,11 +20,11 @@ func (sl *CWSkimmerSpotsLogger) GetCWSpotsAnalytics(filterCountry string, filter
 
 	// Get spots using existing method
 	spots, err := sl.GetCWHistoricalSpots(
-		filterBand,      // band filter
-		"",              // name - all names
-		"",              // callsign - all callsigns
-		filterContinent, // continent filter
-		"",              // direction - all directions
+		filterBand,        // band filter
+		"",                // name - all names
+		map[string]bool{}, // callsigns - no filter (all callsigns)
+		filterContinent,   // continent filter
+		"",                // direction - all directions
 		fromDate,
 		toDate,
 		"", // startTime - no time filter
@@ -315,11 +315,11 @@ func (sl *CWSkimmerSpotsLogger) GetCWSpotsAnalyticsHourly(filterCountry string, 
 
 	// Get spots using existing method
 	spots, err := sl.GetCWHistoricalSpots(
-		filterBand,      // band filter
-		"",              // name - all names
-		"",              // callsign - all callsigns
-		filterContinent, // continent filter
-		"",              // direction - all directions
+		filterBand,        // band filter
+		"",                // name - all names
+		map[string]bool{}, // callsigns - no filter (all callsigns)
+		filterContinent,   // continent filter
+		"",                // direction - all directions
 		fromDate,
 		toDate,
 		"", // startTime - no time filter

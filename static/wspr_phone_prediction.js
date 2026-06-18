@@ -16,6 +16,9 @@ const app = (() => {
     let gridSquares = [];       // Current API response grid_squares array
     let meta = null;            // Current API response meta object
     let worldFeatures = null;   // TopoJSON country features
+    // Map of CTY country name → ISO 3166-1 alpha-2 code, loaded once at init.
+    // Used to show flags on country path hover for countries with no spot data.
+    let ctyNameToCode = new Map();
     let svg = null;
     let projection = null;
     let pathGen = null;
@@ -136,7 +139,10 @@ const app = (() => {
             .attr('d', pathGen)
             .on('mousemove', (event, d) => {
                 const name = (d.properties && d.properties.name) || 'Unknown';
-                tooltip.innerHTML = `<div class="tooltip-title">${escHtml(name)}</div>`;
+                const pathCode = ctyNameToCode.get(name) || '';
+                const pathFlag = iso2ToFlag(pathCode);
+                const pathTitle = pathFlag ? `${pathFlag}\u00A0${escHtml(name)}` : escHtml(name);
+                tooltip.innerHTML = `<div class="tooltip-title">${pathTitle}</div>`;
                 tooltip.style.display = 'block';
                 positionTooltip(event);
             })
@@ -1061,8 +1067,30 @@ const app = (() => {
         }
     }
 
+    // ── CTY country code lookup ───────────────────────────────────────────────
+    // Fetches /api/cty/countries once at page load and builds a Map of
+    // CTY entity name → ISO 3166-1 alpha-2 code.  Used to show flags on the
+    // TopoJSON country path hover for countries that have no WSPR spot data.
+    async function loadCtyCountryCodes() {
+        try {
+            const resp = await fetch('/api/cty/countries');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const countries = (data.data && data.data.countries) || [];
+            for (const c of countries) {
+                if (c.name && c.country_code) {
+                    ctyNameToCode.set(c.name, c.country_code);
+                }
+            }
+        } catch (_) {
+            // Non-critical — silently ignore if CTY API is unavailable
+        }
+    }
+
     // ── Init ─────────────────────────────────────────────────────────────────
     async function init() {
+        // Load CTY country codes in parallel with map init (non-blocking)
+        loadCtyCountryCodes();
         await initMap();
         initTableSort();
 

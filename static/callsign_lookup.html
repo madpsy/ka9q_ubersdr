@@ -273,10 +273,6 @@
             font-weight: 500;
         }
 
-        /* Rotator integration — antenna bearing part of the Bearing row */
-        #rx-ant-part {
-            color: #7ecfff;
-        }
 
         /* Rotator Set button — inline with the bearing value */
         .rx-set-btn {
@@ -691,16 +687,19 @@
 
         // ── State ────────────────────────────────────────────────────────
 
-        let currentUUID      = null;
-        let leafletMap       = null;   // Leaflet map instance (reused across lookups)
-        let leafletMarker    = null;   // callsign marker
-        let rxMarker         = null;   // receiver marker
-        let geodesicLine     = null;   // polyline between receiver and callsign
-        let currentSpotLat   = null;   // lat of the currently displayed callsign
-        let currentSpotLon   = null;
-        let receiverLat      = null;   // from /api/description receiver.gps.lat
-        let receiverLon      = null;
-        let receiverCallsign = null;   // from /api/description receiver.callsign
+        let currentUUID            = null;
+        let leafletMap             = null;   // Leaflet map instance (reused across lookups)
+        let leafletMarker          = null;   // callsign marker
+        let rxMarker               = null;   // receiver marker
+        let geodesicLine           = null;   // polyline between receiver and callsign
+        let rotatorConeLayer       = null;   // Leaflet polygon for the antenna cone
+        let currentSpotLat         = null;   // lat of the currently displayed callsign
+        let currentSpotLon         = null;
+        let currentSpotDistKm      = null;   // great-circle distance to current callsign (km)
+        let receiverOverlayVisible = false;  // true only when rxMarker is on the map
+        let receiverLat            = null;   // from /api/description receiver.gps.lat
+        let receiverLon            = null;
+        let receiverCallsign       = null;   // from /api/description receiver.callsign
         let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
 
         // In-memory cache of successful lookup results, keyed by normalised callsign.
@@ -814,6 +813,10 @@
         // ── Map helpers ──────────────────────────────────────────────────
 
         function destroyMap() {
+            if (rotatorConeLayer) {
+                if (leafletMap) leafletMap.removeLayer(rotatorConeLayer);
+                rotatorConeLayer = null;
+            }
             if (leafletMap) {
                 leafletMap.remove();
                 leafletMap    = null;
@@ -821,8 +824,10 @@
                 rxMarker      = null;
                 geodesicLine  = null;
             }
-            currentSpotLat = null;
-            currentSpotLon = null;
+            currentSpotLat         = null;
+            currentSpotLon         = null;
+            currentSpotDistKm      = null;
+            receiverOverlayVisible = false;
         }
 
         /**
@@ -871,6 +876,58 @@
             return pts;
         }
 
+        /**
+         * Compute a destination point given a start lat/lon, bearing (degrees) and
+         * distance (km).  Returns [lat, lon].  Uses the haversine formula.
+         */
+        function destPoint(lat, lon, bearingDeg, distKm) {
+            const R = 6371;
+            const δ = distKm / R;
+            const θ = bearingDeg * Math.PI / 180;
+            const φ1 = lat * Math.PI / 180;
+            const λ1 = lon * Math.PI / 180;
+            const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
+                                  Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+            const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+                                        Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+            return [φ2 * 180 / Math.PI, λ2 * 180 / Math.PI];
+        }
+
+        /**
+         * Draw (or redraw) the rotator cone on the Leaflet map.
+         * Only drawn when: map exists, rotator enabled, azimuth known,
+         * receiver overlay is visible, receiver coords known, distance known.
+         */
+        function drawRotatorCone(azimuth) {
+            // Always remove any existing cone first
+            if (rotatorConeLayer) {
+                if (leafletMap) leafletMap.removeLayer(rotatorConeLayer);
+                rotatorConeLayer = null;
+            }
+            if (!leafletMap || !rotatorState.enabled || azimuth === null) return;
+            if (!receiverOverlayVisible || receiverLat === null || currentSpotDistKm === null) return;
+
+            const HALF_BEAM = 22.5;   // ±22.5° = 45° total beam width
+            const ARC_STEPS = 20;     // points along the curved arc at the tip
+            const dist = currentSpotDistKm;
+
+            // Build polygon: apex → left edge → arc across tip → right edge → close
+            const pts = [[receiverLat, receiverLon]];
+            for (let i = 0; i <= ARC_STEPS; i++) {
+                const b = (azimuth - HALF_BEAM) + (i / ARC_STEPS) * (HALF_BEAM * 2);
+                pts.push(destPoint(receiverLat, receiverLon, b, dist));
+            }
+
+            rotatorConeLayer = L.polygon(pts, {
+                color:       '#DAA520',
+                weight:      1.5,
+                opacity:     0.85,
+                fillColor:   '#DAA520',
+                fillOpacity: 0.15,
+                interactive: false
+            }).addTo(leafletMap);
+        }
+
         function addReceiverOverlay(showReceiver) {
             if (!leafletMap || !currentSpotLat || !currentSpotLon) return;
 
@@ -879,6 +936,12 @@
             if (geodesicLine) { leafletMap.removeLayer(geodesicLine); geodesicLine = null; }
 
             if (!showReceiver || receiverLat === null || receiverLon === null) {
+                // Receiver overlay hidden — clear cone and flag
+                receiverOverlayVisible = false;
+                if (rotatorConeLayer) {
+                    leafletMap.removeLayer(rotatorConeLayer);
+                    rotatorConeLayer = null;
+                }
                 // Just zoom to the callsign marker
                 leafletMap.setView([currentSpotLat, currentSpotLon], 10);
                 return;
@@ -910,6 +973,12 @@
                 [receiverLat, receiverLon],
                 [currentSpotLat, currentSpotLon]
             ).pad(0.15), { paddingTopLeft: [0, 60] });
+
+            // Receiver overlay is now visible — draw cone if rotator is active
+            receiverOverlayVisible = true;
+            if (rotatorState.enabled && rotatorState.azimuth !== null) {
+                drawRotatorCone(rotatorState.azimuth);
+            }
         }
 
         function initMap(lat, lon, callsign, country, countryCode) {
@@ -939,6 +1008,7 @@
 
             // Build popup content — always include distance/bearing if receiver is known
             const db = calcDistanceBearing(lat, lon);
+            currentSpotDistKm = db ? db.distKm : null;
             const flag = iso2ToFlag(countryCode || '');
             const countryLine = country ? `<br>${esc(country)}` : '';
             const popupExtra = db
@@ -1085,7 +1155,7 @@
                        <span class="rx-val">${rxDb.distKm.toLocaleString()} km</span>
                        <span class="rx-lbl">Bearing</span>
                        <span class="rx-val" id="rx-bearing-row">
-                           <span id="rx-bearing-deg">${rxDb.bearing}°</span><span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span><span id="rx-set-part" style="display:none"> | <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${rxDb.bearing}°">Set</button></span>
+                           <span id="rx-bearing-deg">${rxDb.bearing}°</span><span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span><span id="rx-set-part" style="display:none"> <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${rxDb.bearing}°">Set</button></span>
                        </span>
                    </div>`
                 : (d.lat && d.lon
@@ -1166,7 +1236,7 @@
                                 `<span class="rx-val" id="rx-bearing-row">` +
                                     `<span id="rx-bearing-deg">${db2.bearing}°</span>` +
                                     `<span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span>` +
-                                    `<span id="rx-set-part" style="display:none"> | <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${db2.bearing}°">Set</button></span>` +
+                                    `<span id="rx-set-part" style="display:none"> <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${db2.bearing}°">Set</button></span>` +
                                 `</span>`;
                             wireSetButton();
                             updateRotatorUI();
@@ -1258,6 +1328,16 @@
             // Condition 2: rotator enabled + password present → show Set button
             if (setPart) {
                 setPart.style.display = (rotatorState.enabled && rotatorState.hasPassword) ? '' : 'none';
+            }
+
+            // Condition 3: update cone on map (only when receiver overlay is visible)
+            if (receiverOverlayVisible) {
+                if (rotatorState.enabled && rotatorState.azimuth !== null) {
+                    drawRotatorCone(rotatorState.azimuth);
+                } else if (rotatorConeLayer && leafletMap) {
+                    leafletMap.removeLayer(rotatorConeLayer);
+                    rotatorConeLayer = null;
+                }
             }
         }
 

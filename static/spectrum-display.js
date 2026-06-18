@@ -369,7 +369,21 @@ class SpectrumDisplay {
                         if (pos.spot.comment) {
                             tooltipText += `<br>Comment: ${pos.spot.comment}`;
                         }
-                        this.tooltip.innerHTML = tooltipText;
+                        {
+                            const _p = (pos.spot.dx_call || '').split('/');
+                            const _b = _p.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
+                            const _c = window._callsignLookupCache && window._callsignLookupCache.get(_b);
+                            const _img = (_c && _c.imageUrl)
+                                ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
+                                : '';
+                            if (_img) {
+                                this.tooltip.style.whiteSpace = 'normal';
+                                this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
+                            } else {
+                                this.tooltip.style.whiteSpace = 'nowrap';
+                                this.tooltip.innerHTML = tooltipText;
+                            }
+                        }
 
                         // Position tooltip near cursor
                         const tooltipX = e.clientX + 15;
@@ -406,7 +420,21 @@ class SpectrumDisplay {
                         if (pos.spot.comment) {
                             tooltipText += `<br>Comment: ${pos.spot.comment}`;
                         }
-                        this.tooltip.innerHTML = tooltipText;
+                        {
+                            const _p = (pos.spot.dx_call || '').split('/');
+                            const _b = _p.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
+                            const _c = window._callsignLookupCache && window._callsignLookupCache.get(_b);
+                            const _img = (_c && _c.imageUrl)
+                                ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
+                                : '';
+                            if (_img) {
+                                this.tooltip.style.whiteSpace = 'normal';
+                                this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
+                            } else {
+                                this.tooltip.style.whiteSpace = 'nowrap';
+                                this.tooltip.innerHTML = tooltipText;
+                            }
+                        }
 
                         // Position tooltip near cursor
                         const tooltipX = e.clientX + 15;
@@ -442,7 +470,21 @@ class SpectrumDisplay {
                         if (act.confidence != null) {
                             tooltipText += `<br>Confidence: ${Math.round(act.confidence * 100)}%`;
                         }
-                        this.tooltip.innerHTML = tooltipText;
+                        {
+                            const _p = (pos.label || '').split('/');
+                            const _b = _p.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
+                            const _c = window._callsignLookupCache && window._callsignLookupCache.get(_b);
+                            const _img = (_c && _c.imageUrl)
+                                ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
+                                : '';
+                            if (_img) {
+                                this.tooltip.style.whiteSpace = 'normal';
+                                this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
+                            } else {
+                                this.tooltip.style.whiteSpace = 'nowrap';
+                                this.tooltip.innerHTML = tooltipText;
+                            }
+                        }
 
                         this.tooltip.style.left = (e.clientX + 15) + 'px';
                         this.tooltip.style.top = (e.clientY - 10) + 'px';

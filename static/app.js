@@ -1611,11 +1611,18 @@ function updateMediaSession() {
         : null;
     const newAlbum = currentMarker ? (_enrichMarkerName(currentMarker) || 'Live SDR') : 'Live SDR';
 
-    // Artist: "freq mode" — append the raw callsign when tuned to a callsign-type
-    // marker (CW spot / DX spot / voice activity) so it's visible in the track line.
-    const markerCallsign = (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type))
-        ? currentMarker.name
-        : '';
+    // Artist: "freq mode" — append the raw callsign (with flag emoji if available)
+    // when tuned to a callsign-type marker (CW spot / DX spot / voice activity).
+    // Flag comes from the spot's country_code — no QRZ lookup needed.
+    // The flag is ONLY placed here (not in album/_enrichMarkerName) to avoid duplication.
+    let markerCallsign = '';
+    if (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type)) {
+        const cc = currentMarker.countryCode || '';
+        const flag = (cc.length === 2)
+            ? (() => { try { const b = 0x1F1E6 - 0x41; return String.fromCodePoint(b + cc.toUpperCase().charCodeAt(0), b + cc.toUpperCase().charCodeAt(1)); } catch (_) { return ''; } })()
+            : '';
+        markerCallsign = flag ? flag + '\u00A0' + currentMarker.name : currentMarker.name;
+    }
     const newArtist = [freqMHz, modeStr, markerCallsign].filter(Boolean).join(' • ');
 
     // ── Artwork strategy ─────────────────────────────────────────────────────

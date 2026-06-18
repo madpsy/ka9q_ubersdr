@@ -547,8 +547,10 @@
       if (btn.style.display !== 'none') btn.style.display = 'none';
       return false;
     }
-    if (textEl.textContent !== marker.name) {
-      textEl.textContent = marker.name;
+    const flag = (marker.countryCode && marker.countryCode.length === 2) ? iso2ToFlag(marker.countryCode) : '';
+    const displayName = flag ? flag + '\u00A0' + marker.name : marker.name;
+    if (textEl.textContent !== displayName) {
+      textEl.textContent = displayName;
       btn.title = 'Tune to ' + marker.name;
     }
     if (btn.style.display === 'none') btn.style.display = '';

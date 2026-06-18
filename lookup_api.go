@@ -9,6 +9,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// CTYAugmentation holds CTY database fields added to every lookup response.
+// All fields are omitempty so the object is absent when CTY is not loaded.
+type CTYAugmentation struct {
+	Country     string  `json:"country,omitempty"`
+	CountryCode string  `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
+	Continent   string  `json:"continent,omitempty"`
+	CQZone      int     `json:"cq_zone,omitempty"`
+	ITUZone     int     `json:"itu_zone,omitempty"`
+	Latitude    float64 `json:"latitude,omitempty"`
+	Longitude   float64 `json:"longitude,omitempty"`
+	TimeOffset  float64 `json:"time_offset,omitempty"`
+	PrimaryPfx  string  `json:"primary_prefix,omitempty"`
+}
+
+// lookupResponse wraps the QRZ result with an optional CTY augmentation block.
+type lookupResponse struct {
+	*QRZCallsign
+	CTY *CTYAugmentation `json:"cty,omitempty"`
+}
+
 // reValidCallsign matches a callsign that is 3–10 alphanumeric characters (after normalisation).
 var reValidCallsign = regexp.MustCompile(`^[A-Z0-9]{3,10}$`)
 
@@ -125,7 +145,35 @@ func handleLookup(
 			writeJSON(w, http.StatusNotFound, lookupErrorResponse{Error: "callsign not found"})
 			return
 		}
-		writeJSON(w, http.StatusOK, result)
+
+		// Augment with CTY database information (always attempt, even if QRZ
+		// already returned cqzone/ituzone — CTY provides continent, country_code
+		// and primary prefix which QRZ does not supply).
+		resp := &lookupResponse{QRZCallsign: result}
+		if globalCTY != nil {
+			if ctyInfo := globalCTY.LookupCallsignFull(normalised); ctyInfo != nil {
+				resp.CTY = &CTYAugmentation{
+					Country:     ctyInfo.Country,
+					CountryCode: ctyInfo.CountryCode,
+					Continent:   ctyInfo.Continent,
+					CQZone:      ctyInfo.CQZone,
+					ITUZone:     ctyInfo.ITUZone,
+					Latitude:    ctyInfo.Latitude,
+					Longitude:   ctyInfo.Longitude,
+					TimeOffset:  ctyInfo.TimeOffset,
+				}
+				// Look up primary prefix from the entity
+				globalCTY.mu.RLock()
+				for pfx, entity := range globalCTY.entities {
+					if entity.Name == ctyInfo.Country {
+						resp.CTY.PrimaryPfx = pfx
+						break
+					}
+				}
+				globalCTY.mu.RUnlock()
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 
 	default:
 		writeJSON(w, http.StatusServiceUnavailable, lookupErrorResponse{Error: "no supported lookup provider is configured"})

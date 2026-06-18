@@ -1,6 +1,20 @@
 // Digital Spots Extension for ka9q UberSDR
 // Displays real-time FT8, FT4, WSPR, and JS8 spots from the multi-decoder
 
+// ── Flag emoji helper ──────────────────────────────────────────────────────────
+// Converts ISO 3166-1 alpha-2 code to a flag emoji via Unicode regional indicators.
+// e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸". Returns '' for unknown/missing codes.
+function digIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41;
+    try {
+        return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+    } catch (e) {
+        return '';
+    }
+}
+
 class DigitalSpotsExtension extends DecoderExtension {
     constructor() {
         super('digital-spots', {
@@ -425,10 +439,11 @@ class DigitalSpotsExtension extends DecoderExtension {
         });
         row.appendChild(callCell);
 
-        // Country
+        // Country — flag emoji (if available) followed by country name
         const countryCell = document.createElement('td');
         countryCell.className = 'spot-country';
-        countryCell.textContent = spot.country || '';
+        const digFlag = digIso2ToFlag(spot.country_code || '');
+        countryCell.textContent = digFlag ? digFlag + '\u00A0' + (spot.country || '') : (spot.country || '');
         if (spot.country) {
             countryCell.style.cursor = 'pointer';
             countryCell.addEventListener('click', (e) => {
@@ -659,10 +674,11 @@ class DigitalSpotsExtension extends DecoderExtension {
                 });
                 row.appendChild(callCell);
 
-                // Country
+                // Country — flag emoji (if available) followed by country name
                 const countryCell = document.createElement('td');
                 countryCell.className = 'spot-country';
-                countryCell.textContent = spot.country || '';
+                const digFlag2 = digIso2ToFlag(spot.country_code || '');
+                countryCell.textContent = digFlag2 ? digFlag2 + '\u00A0' + (spot.country || '') : (spot.country || '');
                 if (spot.country) {
                     countryCell.style.cursor = 'pointer';
                     countryCell.addEventListener('click', (e) => {
@@ -1435,10 +1451,11 @@ class DigitalSpotsExtension extends DecoderExtension {
                 });
                 row.appendChild(callsignCell);
 
-                // Country
+                // Country — flag emoji (if available) followed by country name
                 const countryCell = document.createElement('td');
                 countryCell.className = 'modal-country';
-                countryCell.textContent = spot.country || '';
+                const modalDigFlag = digIso2ToFlag(spot.country_code || '');
+                countryCell.textContent = modalDigFlag ? modalDigFlag + '\u00A0' + (spot.country || '') : (spot.country || '');
                 row.appendChild(countryCell);
 
                 // Mode

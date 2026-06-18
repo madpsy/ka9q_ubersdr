@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"log"
 	"os"
 	"strconv"
@@ -11,15 +12,16 @@ import (
 
 // CTYEntity represents a DXCC entity from the CTY.DAT file
 type CTYEntity struct {
-	Name       string
-	CQZone     int
-	ITUZone    int
-	Continent  string
-	Latitude   float64
-	Longitude  float64
-	TimeOffset float64
-	PrimaryPfx string
-	IsWAEDC    bool // Marked with * in file
+	Name        string
+	CQZone      int
+	ITUZone     int
+	Continent   string
+	Latitude    float64
+	Longitude   float64
+	TimeOffset  float64
+	PrimaryPfx  string
+	IsWAEDC     bool   // Marked with * in file
+	CountryCode string // ISO 3166-1 alpha-2 code (may be empty for non-sovereign entities)
 }
 
 // CTYPrefix represents a callsign prefix with optional overrides
@@ -38,9 +40,10 @@ type CTYPrefix struct {
 
 // CTYDatabase holds the parsed CTY.DAT data
 type CTYDatabase struct {
-	entities map[string]*CTYEntity // Key is primary prefix
-	prefixes map[string]*CTYEntry  // Key is prefix (including exact matches)
-	mu       sync.RWMutex
+	entities    map[string]*CTYEntity // Key is primary prefix
+	prefixes    map[string]*CTYEntry  // Key is prefix (including exact matches)
+	iso2ByName  map[string]string     // CTY country name -> ISO 3166-1 alpha-2 code
+	mu          sync.RWMutex
 }
 
 // CTYEntry links a prefix to its entity with overrides
@@ -51,11 +54,42 @@ type CTYEntry struct {
 
 var globalCTY *CTYDatabase
 
+// loadISO2Map loads the CTY name -> ISO2 code mapping from a JSON file
+func loadISO2Map(filename string) (map[string]string, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if v == nil {
+			result[k] = ""
+		} else if s, ok := v.(string); ok {
+			result[k] = s
+		}
+	}
+	return result, nil
+}
+
 // InitCTYDatabase loads and parses the CTY.DAT file
 func InitCTYDatabase(filename string) error {
 	db := &CTYDatabase{
-		entities: make(map[string]*CTYEntity),
-		prefixes: make(map[string]*CTYEntry),
+		entities:   make(map[string]*CTYEntity),
+		prefixes:   make(map[string]*CTYEntry),
+		iso2ByName: make(map[string]string),
+	}
+
+	// Try to load ISO2 map from same directory as CTY.DAT
+	iso2File := strings.TrimSuffix(filename, "cty.dat") + "cty_iso2_map.json"
+	if iso2Map, err := loadISO2Map(iso2File); err != nil {
+		log.Printf("CTY: could not load ISO2 map from %s: %v (country codes will be unavailable)", iso2File, err)
+	} else {
+		db.iso2ByName = iso2Map
+		log.Printf("CTY: loaded %d ISO2 country code mappings", len(iso2Map))
 	}
 
 	file, err := os.Open(filename)
@@ -82,6 +116,10 @@ func InitCTYDatabase(filename string) error {
 			if err != nil {
 				log.Printf("Error parsing entity line: %v", err)
 				continue
+			}
+			// Attach ISO2 code if available
+			if code, ok := db.iso2ByName[entity.Name]; ok {
+				entity.CountryCode = code
 			}
 			currentEntity = entity
 			db.entities[entity.PrimaryPfx] = entity
@@ -318,13 +356,14 @@ func (db *CTYDatabase) LookupCallsign(callsign string) string {
 
 // CTYLookupResult contains all CTY information for a callsign
 type CTYLookupResult struct {
-	Country    string
-	CQZone     int
-	ITUZone    int
-	Continent  string
-	TimeOffset float64
-	Latitude   float64
-	Longitude  float64
+	Country     string
+	CountryCode string // ISO 3166-1 alpha-2 (empty for non-sovereign entities)
+	CQZone      int
+	ITUZone     int
+	Continent   string
+	TimeOffset  float64
+	Latitude    float64
+	Longitude   float64
 }
 
 // LookupCallsignFull finds all CTY information for a callsign, including overrides
@@ -358,13 +397,14 @@ func (db *CTYDatabase) LookupCallsignFull(callsign string) *CTYLookupResult {
 // buildLookupResult creates a CTYLookupResult from a CTYEntry, applying overrides
 func buildLookupResult(entry *CTYEntry) *CTYLookupResult {
 	result := &CTYLookupResult{
-		Country:    entry.Entity.Name,
-		CQZone:     entry.Entity.CQZone,
-		ITUZone:    entry.Entity.ITUZone,
-		Continent:  entry.Entity.Continent,
-		TimeOffset: entry.Entity.TimeOffset,
-		Latitude:   entry.Entity.Latitude,
-		Longitude:  entry.Entity.Longitude,
+		Country:     entry.Entity.Name,
+		CountryCode: entry.Entity.CountryCode,
+		CQZone:      entry.Entity.CQZone,
+		ITUZone:     entry.Entity.ITUZone,
+		Continent:   entry.Entity.Continent,
+		TimeOffset:  entry.Entity.TimeOffset,
+		Latitude:    entry.Entity.Latitude,
+		Longitude:   entry.Entity.Longitude,
 	}
 
 	// Apply prefix overrides if present

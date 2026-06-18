@@ -23,14 +23,15 @@ type CWSkimmerSpot struct {
 	Band      string    `json:"band"`      // Amateur radio band
 
 	// CTY enrichment (same as decoder spots)
-	Country    string   `json:"country"`
-	CQZone     int      `json:"cq_zone"`
-	ITUZone    int      `json:"itu_zone"`
-	Continent  string   `json:"continent"`
-	Latitude   float64  `json:"latitude"`
-	Longitude  float64  `json:"longitude"`
-	DistanceKm *float64 `json:"distance_km,omitempty"`
-	BearingDeg *float64 `json:"bearing_deg,omitempty"`
+	Country     string   `json:"country"`
+	CountryCode string   `json:"country_code"` // ISO 3166-1 alpha-2
+	CQZone      int      `json:"cq_zone"`
+	ITUZone     int      `json:"itu_zone"`
+	Continent   string   `json:"continent"`
+	Latitude    float64  `json:"latitude"`
+	Longitude   float64  `json:"longitude"`
+	DistanceKm  *float64 `json:"distance_km,omitempty"`
+	BearingDeg  *float64 `json:"bearing_deg,omitempty"`
 }
 
 // CWSkimmerClient manages connection to a CW Skimmer server
@@ -623,6 +624,7 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 	info := c.ctyDatabase.LookupCallsignFull(spot.DXCall)
 	if info != nil {
 		spot.Country = info.Country
+		spot.CountryCode = info.CountryCode
 		spot.CQZone = info.CQZone
 		spot.ITUZone = info.ITUZone
 		spot.Continent = info.Continent

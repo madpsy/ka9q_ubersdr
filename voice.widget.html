@@ -353,6 +353,21 @@
 (function () {
   'use strict';
 
+  // ── Flag emoji helper ────────────────────────────────────────────────────────
+  // Converts ISO 3166-1 alpha-2 code to a flag emoji using regional indicator symbols.
+  // e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸"
+  function iso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    // Regional indicator symbols start at U+1F1E6 (offset from 'A' = 0x41)
+    var base = 0x1F1E6 - 0x41;
+    try {
+      return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+    } catch (e) {
+      return '';
+    }
+  }
+
   var LS_POS_KEY      = 'va_widget_pos';
   var LS_CONT_KEY     = 'va_widget_continent';
   var LS_COUNTRY_KEY  = 'va_widget_country';
@@ -788,19 +803,25 @@
       var snrClass = snr == null ? '' : snr >= 10 ? 'va-snr-strong' : snr >= 5 ? 'va-snr-good' : 'va-snr-weak';
 
       var callsign = act.dx_callsign || '';
+      var countryCode = act.dx_country_code || '';
+      var flagEmoji = countryCode ? iso2ToFlag(countryCode) : '';
+      var callsignDisplay = callsign
+        ? callsign + (flagEmoji ? ' ' + flagEmoji : '')
+        : '';
       var rightCol = callsign
-        ? '<span class="va-snr" style="color:rgba(255,220,100,0.9);font-weight:bold;">' + callsign + '</span>'
+        ? '<span class="va-snr" style="color:rgba(255,220,100,0.9);font-weight:bold;">' + callsignDisplay + '</span>'
         : (snrStr ? '<span class="va-snr ' + snrClass + '">' + snrStr + '</span>' : '');
 
       // Encode DX tooltip data as data attributes (only when callsign present)
       var ttAttrs = '';
       if (callsign) {
         ttAttrs += ' data-tt-callsign="' + callsign.replace(/"/g, '&quot;') + '"';
-        if (act.dx_country)    ttAttrs += ' data-tt-country="'   + act.dx_country.replace(/"/g, '&quot;') + '"';
-        if (act.dx_continent)  ttAttrs += ' data-tt-continent="' + act.dx_continent + '"';
+        if (act.dx_country)      ttAttrs += ' data-tt-country="'      + act.dx_country.replace(/"/g, '&quot;') + '"';
+        if (act.dx_country_code) ttAttrs += ' data-tt-country-code="' + act.dx_country_code + '"';
+        if (act.dx_continent)    ttAttrs += ' data-tt-continent="'    + act.dx_continent + '"';
         if (act.dx_time_offset != null && act.dx_time_offset !== 0)
           ttAttrs += ' data-tt-offset="' + act.dx_time_offset + '"';
-        if (snrStr)            ttAttrs += ' data-tt-snr="'       + snrStr + '"';
+        if (snrStr)              ttAttrs += ' data-tt-snr="'          + snrStr + '"';
       }
 
       return '<div class="va-row" data-freq="' + hz + '" data-mode="' + mode.toLowerCase() + '"' +

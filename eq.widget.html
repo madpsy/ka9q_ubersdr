@@ -282,6 +282,29 @@
   .eqw-preset:hover { color: #fff; background: rgba(255,255,255,0.18); }
   .eqw-preset.eqw-flat:hover { background: rgba(255, 90, 90, 0.35); }
 
+  /* Stereo toggle — sits to the right of the preset buttons, same height */
+  #eqw-stereo {
+    flex-shrink: 0;
+    text-align: center;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 4px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: rgba(255,255,255,0.55);
+    background: rgba(255,255,255,0.06);
+    transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+    border-left: 1px solid rgba(255,255,255,0.1);
+    margin-left: 2px;
+  }
+  #eqw-stereo:hover { color: #fff; background: rgba(255,255,255,0.14); }
+  #eqw-stereo.eqw-stereo-on {
+    color: #051;
+    background: rgba(0, 180, 255, 0.75);
+    border-left-color: transparent;
+  }
+
   #eqw-waiting {
     padding: 14px 9px;
     font-size: 11px;
@@ -290,8 +313,12 @@
     color: rgba(255,255,255,0.55);
   }
 
-  #eqw-widget.eqw-off #eqw-bands,
-  #eqw-widget.eqw-off #eqw-presets { opacity: 0.45; }
+  #eqw-widget.eqw-off #eqw-bands { opacity: 0.45; }
+  /* Dim only the EQ preset buttons when EQ is off — not the Stereo toggle,
+     which is independent of the EQ on/off state. Opacity on the container
+     would compound into children and can't be overridden, so we target the
+     individual preset spans instead. */
+  #eqw-widget.eqw-off .eqw-preset { opacity: 0.45; pointer-events: none; }
 
   #eqw-widget.eqw-off #eqw-mg-wrap { opacity: 0.35; pointer-events: none; }
 
@@ -321,6 +348,7 @@
       <span class="eqw-preset" data-preset="cw" title="CW / Morse">CW</span>
       <span class="eqw-preset" data-preset="music" title="Music / wideband">Music</span>
       <span class="eqw-preset eqw-flat" data-preset="flat" title="Reset to flat">Flat</span>
+      <span id="eqw-stereo" title="Toggle stereo virtualiser">Stereo</span>
     </div>
   </div>
 </div>
@@ -356,6 +384,7 @@
   var waiting   = document.getElementById('eqw-waiting');
   var bandsWrap = document.getElementById('eqw-bands');
   var presets   = document.getElementById('eqw-presets');
+  var stereoEl  = document.getElementById('eqw-stereo');
   var mgSlider  = document.getElementById('eqw-mg-slider');
   var mgVal     = document.getElementById('eqw-mg-val');
 
@@ -563,6 +592,10 @@
     powerEl.classList.toggle('eqw-on', on);
     widget.classList.toggle('eqw-off', !on);
     mgSlider.disabled = !on;
+    // Sync stereo virtualiser toggle
+    var stereoBox = document.getElementById('stereo-virtualizer-enable');
+    var stereoOn = !!(stereoBox && stereoBox.checked);
+    stereoEl.classList.toggle('eqw-stereo-on', stereoOn);
   }
 
   // ── Power toggle (mirrors the host enable checkbox) ─────────────────────────
@@ -572,6 +605,16 @@
     if (!box) return;
     box.checked = !box.checked;
     if (typeof window.toggleEqualizer === 'function') window.toggleEqualizer();
+    syncFromHost();
+  });
+
+  // ── Stereo virtualiser toggle ───────────────────────────────────────────────
+  stereoEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var stereoBox = document.getElementById('stereo-virtualizer-enable');
+    if (!stereoBox) return;
+    stereoBox.checked = !stereoBox.checked;
+    if (typeof window.toggleStereoVirtualizer === 'function') window.toggleStereoVirtualizer();
     syncFromHost();
   });
 

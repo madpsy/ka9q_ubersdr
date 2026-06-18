@@ -932,6 +932,18 @@
 
         // ── Render ───────────────────────────────────────────────────────
 
+        // ── Flag emoji helper ────────────────────────────────────────────────
+        function iso2ToFlag(code) {
+            if (!code || code.length !== 2) return '';
+            const c = code.toUpperCase();
+            const base = 0x1F1E6 - 0x41;
+            try {
+                return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+            } catch (e) {
+                return '';
+            }
+        }
+
         function renderResult(d, callsign, generation) {
             // Build name string.
             // Prefer name_fmt (QRZ pre-formatted, e.g. 'Michael "Mike" Sauer').
@@ -956,6 +968,10 @@
 
             // Image URL — fetched directly by the browser from QRZ
             const imageUrl = d.image || '';
+
+            // CTY augmentation (may be absent if CTY database not loaded)
+            const cty = d.cty || null;
+            const flagEmoji = cty && cty.country_code ? iso2ToFlag(cty.country_code) : '';
 
             // ── Build info rows ──────────────────────────────────────────
             const rows = [];
@@ -1062,7 +1078,7 @@
                         <a class="qrz-link" href="${esc(qrzUrl)}" target="_blank" rel="noopener">View on QRZ.com ↗</a>
                     </div>
                     <div class="operator-info-col">
-                        <div class="callsign-heading">${esc(callsign)}</div>
+                        <div class="callsign-heading">${flagEmoji ? flagEmoji + '\u00A0' : ''}${esc(callsign)}</div>
                         ${aliasesHtml}
                         ${fullName ? `<div class="operator-name">${esc(fullName)}</div>` : ''}
                         <div class="info-grid">

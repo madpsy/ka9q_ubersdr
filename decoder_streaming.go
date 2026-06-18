@@ -636,6 +636,7 @@ func ParseStreamingDecoderLine(line string, dialFreq uint64, receiverLocator str
 		info := ctyDatabase.LookupCallsignFull(callsign)
 		if info != nil {
 			decode.Country = info.Country
+			decode.CountryCode = info.CountryCode
 			decode.CQZone = info.CQZone
 			decode.ITUZone = info.ITUZone
 			decode.Continent = info.Continent

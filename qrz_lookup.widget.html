@@ -516,6 +516,14 @@
     resultEl.style.display = 'none';
   }
 
+  function iso2ToFlagWidget(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41;
+    try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+    catch (e) { return ''; }
+  }
+
   function renderResult(callsign, d) {
     statusEl.style.display = 'none';
 
@@ -531,12 +539,15 @@
       fullName = parts.join(' ');
     }
 
-    var country = d.country || '';
+    var cty = d.cty || null;
+    var flagEmoji = cty && cty.country_code ? iso2ToFlagWidget(cty.country_code) : '';
+    var country = d.country || (cty && cty.country) || '';
     var imageUrl = d.image || '';
 
     var html = '';
     if (fullName) {
-      html += '<div id="qrz-name-line"><a href="https://www.qrz.com/db/' + esc(callsign) + '" target="_blank" rel="noopener noreferrer">' + esc(fullName) + '</a></div>';
+      var nameDisplay = flagEmoji ? flagEmoji + '\u00A0' + fullName : fullName;
+      html += '<div id="qrz-name-line"><a href="https://www.qrz.com/db/' + esc(callsign) + '" target="_blank" rel="noopener noreferrer">' + esc(nameDisplay) + '</a></div>';
     }
     if (country || d.grid) {
       var loc = [country, d.grid].filter(Boolean).join(' · ');

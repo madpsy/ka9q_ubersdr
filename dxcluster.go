@@ -12,25 +12,27 @@ import (
 
 // DXSpot represents a DX spot from the cluster
 type DXSpot struct {
-	Frequency  float64   `json:"frequency"`   // Frequency in Hz
-	DXCall     string    `json:"dx_call"`     // Callsign being spotted
-	Spotter    string    `json:"spotter"`     // Callsign of spotter
-	Comment    string    `json:"comment"`     // Spot comment
-	Time       time.Time `json:"time"`        // Time of spot
-	Raw        string    `json:"raw"`         // Raw spot line
-	Band       string    `json:"band"`        // Amateur radio band (e.g., "20m", "40m")
-	Country    string    `json:"country"`     // Country name from CTY lookup
-	Continent  string    `json:"continent"`   // Continent code from CTY lookup
-	TimeOffset float64   `json:"time_offset"` // UTC offset in hours from CTY lookup
+	Frequency   float64   `json:"frequency"`    // Frequency in Hz
+	DXCall      string    `json:"dx_call"`      // Callsign being spotted
+	Spotter     string    `json:"spotter"`      // Callsign of spotter
+	Comment     string    `json:"comment"`      // Spot comment
+	Time        time.Time `json:"time"`         // Time of spot
+	Raw         string    `json:"raw"`          // Raw spot line
+	Band        string    `json:"band"`         // Amateur radio band (e.g., "20m", "40m")
+	Country     string    `json:"country"`      // Country name from CTY lookup
+	CountryCode string    `json:"country_code"` // ISO 3166-1 alpha-2 from CTY lookup
+	Continent   string    `json:"continent"`    // Continent code from CTY lookup
+	TimeOffset  float64   `json:"time_offset"`  // UTC offset in hours from CTY lookup
 }
 
 // dxFreqEntry holds the most recently spotted callsign for a frequency bucket
 type dxFreqEntry struct {
-	DXCall     string
-	Country    string
-	Continent  string
-	TimeOffset float64
-	Time       time.Time
+	DXCall      string
+	Country     string
+	CountryCode string // ISO 3166-1 alpha-2
+	Continent   string
+	TimeOffset  float64
+	Time        time.Time
 }
 
 // frequencyToBand converts a frequency in Hz to an amateur radio band name
@@ -571,9 +573,10 @@ func (c *DXClusterClient) parseDXSpot(line string) (DXSpot, bool) {
 		spot.Comment = strings.Join(fields[2:], " ")
 	}
 
-	// Perform CTY lookup for country, continent and time offset
+	// Perform CTY lookup for country, continent, country code and time offset
 	if ctyInfo := GetCallsignInfo(spot.DXCall); ctyInfo != nil {
 		spot.Country = ctyInfo.Country
+		spot.CountryCode = ctyInfo.CountryCode
 		spot.Continent = ctyInfo.Continent
 		spot.TimeOffset = ctyInfo.TimeOffset
 	}
@@ -726,11 +729,12 @@ func (c *DXClusterClient) indexSpot(spot DXSpot) {
 
 	c.freqIndexMu.Lock()
 	c.freqIndex[key] = dxFreqEntry{
-		DXCall:     spot.DXCall,
-		Country:    spot.Country,
-		Continent:  spot.Continent,
-		TimeOffset: spot.TimeOffset,
-		Time:       spot.Time,
+		DXCall:      spot.DXCall,
+		Country:     spot.Country,
+		CountryCode: spot.CountryCode,
+		Continent:   spot.Continent,
+		TimeOffset:  spot.TimeOffset,
+		Time:        spot.Time,
 	}
 	c.freqIndexMu.Unlock()
 }

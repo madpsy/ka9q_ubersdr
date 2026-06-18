@@ -18,40 +18,43 @@ type CTYAPIResponse struct {
 
 // CTYCountryInfo represents detailed country information
 type CTYCountryInfo struct {
-	Name       string  `json:"name"`
-	PrimaryPfx string  `json:"primary_prefix"`
-	CQZone     int     `json:"cq_zone"`
-	ITUZone    int     `json:"itu_zone"`
-	Continent  string  `json:"continent"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-	TimeOffset float64 `json:"time_offset"`
-	IsWAEDC    bool    `json:"is_waedc"`
+	Name        string  `json:"name"`
+	CountryCode string  `json:"country_code,omitempty"`
+	PrimaryPfx  string  `json:"primary_prefix"`
+	CQZone      int     `json:"cq_zone"`
+	ITUZone     int     `json:"itu_zone"`
+	Continent   string  `json:"continent"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	TimeOffset  float64 `json:"time_offset"`
+	IsWAEDC     bool    `json:"is_waedc"`
 }
 
 // CTYPrefixInfo represents prefix information with overrides
 type CTYPrefixInfo struct {
-	Prefix     string  `json:"prefix"`
-	IsExact    bool    `json:"is_exact"`
-	Country    string  `json:"country"`
-	CQZone     int     `json:"cq_zone"`
-	ITUZone    int     `json:"itu_zone"`
-	Continent  string  `json:"continent"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-	TimeOffset float64 `json:"time_offset"`
+	Prefix      string  `json:"prefix"`
+	IsExact     bool    `json:"is_exact"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code,omitempty"`
+	CQZone      int     `json:"cq_zone"`
+	ITUZone     int     `json:"itu_zone"`
+	Continent   string  `json:"continent"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	TimeOffset  float64 `json:"time_offset"`
 }
 
 // CTYCallsignLookupResponse represents the response for callsign lookup
 type CTYCallsignLookupResponse struct {
-	Callsign   string  `json:"callsign"`
-	Country    string  `json:"country"`
-	CQZone     int     `json:"cq_zone"`
-	ITUZone    int     `json:"itu_zone"`
-	Continent  string  `json:"continent"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-	TimeOffset float64 `json:"time_offset"`
+	Callsign    string  `json:"callsign"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code,omitempty"`
+	CQZone      int     `json:"cq_zone"`
+	ITUZone     int     `json:"itu_zone"`
+	Continent   string  `json:"continent"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	TimeOffset  float64 `json:"time_offset"`
 }
 
 // handleCTYCountries returns a list of all countries in the database
@@ -86,15 +89,16 @@ func handleCTYCountries(w http.ResponseWriter, r *http.Request, ipBanManager *IP
 		}
 
 		countries = append(countries, CTYCountryInfo{
-			Name:       entity.Name,
-			PrimaryPfx: entity.PrimaryPfx,
-			CQZone:     entity.CQZone,
-			ITUZone:    entity.ITUZone,
-			Continent:  entity.Continent,
-			Latitude:   entity.Latitude,
-			Longitude:  entity.Longitude,
-			TimeOffset: entity.TimeOffset,
-			IsWAEDC:    entity.IsWAEDC,
+			Name:        entity.Name,
+			CountryCode: entity.CountryCode,
+			PrimaryPfx:  entity.PrimaryPfx,
+			CQZone:      entity.CQZone,
+			ITUZone:     entity.ITUZone,
+			Continent:   entity.Continent,
+			Latitude:    entity.Latitude,
+			Longitude:   entity.Longitude,
+			TimeOffset:  entity.TimeOffset,
+			IsWAEDC:     entity.IsWAEDC,
 		})
 	}
 
@@ -225,14 +229,15 @@ func handleCTYLookup(w http.ResponseWriter, r *http.Request, ipBanManager *IPBan
 	}
 
 	response := CTYCallsignLookupResponse{
-		Callsign:   callsign,
-		Country:    result.Country,
-		CQZone:     result.CQZone,
-		ITUZone:    result.ITUZone,
-		Continent:  result.Continent,
-		Latitude:   result.Latitude,
-		Longitude:  result.Longitude,
-		TimeOffset: result.TimeOffset,
+		Callsign:    callsign,
+		Country:     result.Country,
+		CountryCode: result.CountryCode,
+		CQZone:      result.CQZone,
+		ITUZone:     result.ITUZone,
+		Continent:   result.Continent,
+		Latitude:    result.Latitude,
+		Longitude:   result.Longitude,
+		TimeOffset:  result.TimeOffset,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -284,15 +289,16 @@ func handleCTYPrefixes(w http.ResponseWriter, r *http.Request, ipBanManager *IPB
 
 		// Build prefix info with overrides applied
 		info := CTYPrefixInfo{
-			Prefix:     prefix,
-			IsExact:    isExact,
-			Country:    entry.Entity.Name,
-			CQZone:     entry.Entity.CQZone,
-			ITUZone:    entry.Entity.ITUZone,
-			Continent:  entry.Entity.Continent,
-			Latitude:   entry.Entity.Latitude,
-			Longitude:  entry.Entity.Longitude,
-			TimeOffset: entry.Entity.TimeOffset,
+			Prefix:      prefix,
+			IsExact:     isExact,
+			Country:     entry.Entity.Name,
+			CountryCode: entry.Entity.CountryCode,
+			CQZone:      entry.Entity.CQZone,
+			ITUZone:     entry.Entity.ITUZone,
+			Continent:   entry.Entity.Continent,
+			Latitude:    entry.Entity.Latitude,
+			Longitude:   entry.Entity.Longitude,
+			TimeOffset:  entry.Entity.TimeOffset,
 		}
 
 		// Apply prefix overrides

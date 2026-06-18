@@ -11,6 +11,7 @@ type DecodeInfo struct {
 	Callsign      string
 	Locator       string
 	Country       string  // DXCC country name from CTY.DAT
+	CountryCode   string  // ISO 3166-1 alpha-2 from CTY.DAT
 	CQZone        int     // CQ Zone from CTY.DAT
 	ITUZone       int     // ITU Zone from CTY.DAT
 	Continent     string  // Continent code from CTY.DAT (e.g., "NA", "EU", "AS")

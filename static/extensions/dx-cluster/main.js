@@ -1,6 +1,20 @@
 // DX Cluster Extension for ka9q UberSDR
 // Displays real-time DX spots from amateur radio DX clusters
 
+// ── Flag emoji helper ──────────────────────────────────────────────────────────
+// Converts ISO 3166-1 alpha-2 code to a flag emoji via Unicode regional indicators.
+// e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸". Returns '' for unknown/missing codes.
+function iso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41; // regional indicator 'A' offset from char 'A'
+    try {
+        return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+    } catch (e) {
+        return '';
+    }
+}
+
 // Global array for DX spot positions (for spectrum display)
 let dxSpotPositions = [];
 window.dxSpotPositions = dxSpotPositions;
@@ -225,16 +239,17 @@ class DXClusterExtension extends DecoderExtension {
             ? this.ageFilter : 30;
 
         const spot = {
-            frequency:   freqHz,
-            dx_call:     label,
-            spotter:     'Local Spot',
-            comment:     'Local temporary spot',
-            time:        new Date().toISOString(),
-            band:        this._frequencyToBand(freqHz),
-            country:     '',
-            continent:   '',
-            time_offset: 0,
-            _local:      true,   // flag for amber styling
+            frequency:    freqHz,
+            dx_call:      label,
+            spotter:      'Local Spot',
+            comment:      'Local temporary spot',
+            time:         new Date().toISOString(),
+            band:         this._frequencyToBand(freqHz),
+            country:      '',
+            country_code: '',
+            continent:    '',
+            time_offset:  0,
+            _local:       true,   // flag for amber styling
         };
 
         this.addSpot(spot, true /* isNewSpot */);
@@ -529,10 +544,11 @@ class DXClusterExtension extends DecoderExtension {
                 this.openQRZ(spot.dx_call);
             });
 
-            // Country
+            // Country — flag emoji (if available) followed by country name
             const countryCell = row.insertCell();
             countryCell.className = 'spot-country';
-            countryCell.textContent = spot.country || '';
+            const flag = iso2ToFlag(spot.country_code || '');
+            countryCell.textContent = flag ? flag + '\u00A0' + (spot.country || '') : (spot.country || '');
 
             // Continent
             const continentCell = row.insertCell();

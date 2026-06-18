@@ -2,6 +2,20 @@
 // Displays real-time CW spots from CW Skimmer
 // Version: 2025-11-24-badge-fix-v1
 
+// ── Flag emoji helper ──────────────────────────────────────────────────────────
+// Converts ISO 3166-1 alpha-2 code to a flag emoji via Unicode regional indicators.
+// e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸". Returns '' for unknown/missing codes.
+function cwIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41;
+    try {
+        return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1));
+    } catch (e) {
+        return '';
+    }
+}
+
 class CWSpotsExtension extends DecoderExtension {
     constructor() {
         super('cw-spots', {
@@ -482,10 +496,11 @@ class CWSpotsExtension extends DecoderExtension {
         });
         row.appendChild(callCell);
 
-        // Country
+        // Country — flag emoji (if available) followed by country name
         const countryCell = document.createElement('td');
         countryCell.className = 'spot-country';
-        countryCell.textContent = spot.country || '';
+        const cwFlag = cwIso2ToFlag(spot.country_code || '');
+        countryCell.textContent = cwFlag ? cwFlag + '\u00A0' + (spot.country || '') : (spot.country || '');
         if (spot.country) {
             countryCell.style.cursor = 'pointer';
             countryCell.addEventListener('click', (e) => {
@@ -1407,10 +1422,11 @@ class CWSpotsExtension extends DecoderExtension {
                 callsignCell.appendChild(callsignSpan);
                 row.appendChild(callsignCell);
 
-                // Country
+                // Country — flag emoji (if available) followed by country name
                 const countryCell = document.createElement('td');
                 countryCell.className = 'modal-country';
-                countryCell.textContent = spot.country || '';
+                const modalFlag = cwIso2ToFlag(spot.country_code || '');
+                countryCell.textContent = modalFlag ? modalFlag + '\u00A0' + (spot.country || '') : (spot.country || '');
                 row.appendChild(countryCell);
 
                 // SNR

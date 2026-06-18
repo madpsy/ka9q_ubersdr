@@ -112,6 +112,7 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 	// Populate CTY information if available
 	if ctyInfo != nil {
 		info.Country = ctyInfo.Country
+		info.CountryCode = ctyInfo.CountryCode
 		info.CQZone = ctyInfo.CQZone
 		info.ITUZone = ctyInfo.ITUZone
 		info.Continent = ctyInfo.Continent
@@ -221,6 +222,7 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 	// Populate CTY information if available
 	if ctyInfo != nil {
 		info.Country = ctyInfo.Country
+		info.CountryCode = ctyInfo.CountryCode
 		info.CQZone = ctyInfo.CQZone
 		info.ITUZone = ctyInfo.ITUZone
 		info.Continent = ctyInfo.Continent

@@ -697,6 +697,7 @@ func (h *DXClusterWebSocketHandler) BroadcastDigitalSpot(decode DecodeInfo) {
 		"callsign":     decode.Callsign,
 		"locator":      decode.Locator,
 		"country":      decode.Country,
+		"country_code": decode.CountryCode,
 		"CQZone":       decode.CQZone,
 		"ITUZone":      decode.ITUZone,
 		"Continent":    decode.Continent,
@@ -848,19 +849,20 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 	}
 
 	data := map[string]interface{}{
-		"frequency": spot.Frequency,
-		"dx_call":   spot.DXCall,
-		"snr":       spot.SNR,
-		"wpm":       spot.WPM,
-		"comment":   spot.Comment,
-		"time":      spot.Time,
-		"band":      spot.Band,
-		"country":   spot.Country,
-		"cq_zone":   spot.CQZone,
-		"itu_zone":  spot.ITUZone,
-		"continent": spot.Continent,
-		"latitude":  spot.Latitude,
-		"longitude": spot.Longitude,
+		"frequency":    spot.Frequency,
+		"dx_call":      spot.DXCall,
+		"snr":          spot.SNR,
+		"wpm":          spot.WPM,
+		"comment":      spot.Comment,
+		"time":         spot.Time,
+		"band":         spot.Band,
+		"country":      spot.Country,
+		"country_code": spot.CountryCode,
+		"cq_zone":      spot.CQZone,
+		"itu_zone":     spot.ITUZone,
+		"continent":    spot.Continent,
+		"latitude":     spot.Latitude,
+		"longitude":    spot.Longitude,
 	}
 
 	// Add distance and bearing if available

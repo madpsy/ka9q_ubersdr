@@ -376,6 +376,8 @@ class SpectrumDisplay {
                             const _img = (_c && _c.imageUrl)
                                 ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
+                            this._tooltipCallsign = _b;
+                            this._tooltipText = tooltipText;
                             if (_img) {
                                 this.tooltip.style.whiteSpace = 'normal';
                                 this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
@@ -427,6 +429,8 @@ class SpectrumDisplay {
                             const _img = (_c && _c.imageUrl)
                                 ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
+                            this._tooltipCallsign = _b;
+                            this._tooltipText = tooltipText;
                             if (_img) {
                                 this.tooltip.style.whiteSpace = 'normal';
                                 this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
@@ -477,6 +481,8 @@ class SpectrumDisplay {
                             const _img = (_c && _c.imageUrl)
                                 ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
+                            this._tooltipCallsign = _b;
+                            this._tooltipText = tooltipText;
                             if (_img) {
                                 this.tooltip.style.whiteSpace = 'normal';
                                 this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
@@ -577,18 +583,20 @@ class SpectrumDisplay {
                         // The popup-window path is checked first so we don't open a second window.
                         const dxCallsign = (pos.spot && pos.spot.dx_call) || '';
                         if (dxCallsign) {
+                            const _dxParts = dxCallsign.split('/');
+                            const _dxBase = _dxParts.reduce((a, b) => (b.length > a.length ? b : a), '');
                             if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
-                                const parts = dxCallsign.split('/');
-                                const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
                                 const ext = window.dxClusterExtensionInstance;
                                 const uuid = ext && ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
                                 window._callsignLookupWindow.postMessage(
-                                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                                    { type: 'callsign_lookup', callsign: _dxBase, uuid },
                                     window.location.origin
                                 );
                                 window._callsignLookupWindow.focus();
-                            } else if (typeof window.lookupCallsign === 'function') {
-                                window.lookupCallsign(dxCallsign);
+                            }
+                            // Always fetch/broadcast so the inline widget and tooltip image update
+                            if (typeof window._fetchCallsignForMediaSession === 'function') {
+                                window._fetchCallsignForMediaSession(_dxBase);
                             }
                         }
                         return;
@@ -616,18 +624,20 @@ class SpectrumDisplay {
                         // The popup-window path is checked first so we don't open a second window.
                         const cwCallsign = (pos.spot && pos.spot.dx_call) || '';
                         if (cwCallsign) {
+                            const _cwParts = cwCallsign.split('/');
+                            const _cwBase = _cwParts.reduce((a, b) => (b.length > a.length ? b : a), '');
                             if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
-                                const parts = cwCallsign.split('/');
-                                const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
                                 const ext = window.cwSpotsExtensionInstance;
                                 const uuid = ext && ext.radio && ext.radio.getSessionId ? ext.radio.getSessionId() : '';
                                 window._callsignLookupWindow.postMessage(
-                                    { type: 'callsign_lookup', callsign: baseCallsign, uuid },
+                                    { type: 'callsign_lookup', callsign: _cwBase, uuid },
                                     window.location.origin
                                 );
                                 window._callsignLookupWindow.focus();
-                            } else if (typeof window.lookupCallsign === 'function') {
-                                window.lookupCallsign(cwCallsign);
+                            }
+                            // Always fetch/broadcast so the inline widget and tooltip image update
+                            if (typeof window._fetchCallsignForMediaSession === 'function') {
+                                window._fetchCallsignForMediaSession(_cwBase);
                             }
                         }
                         return;
@@ -649,19 +659,23 @@ class SpectrumDisplay {
                             window.tuneToChannel(pos.frequency, pos.mode);
                         }
 
-                        // If a callsign is known and the lookup popup is open, update it
+                        // If a callsign is known, fetch/broadcast so inline widget and tooltip image update
                         const callsign = pos.activity && pos.activity.dx_callsign;
-                        if (callsign && window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
-                            const parts = callsign.split('/');
-                            const baseCallsign = parts.reduce((a, b) => (b.length > a.length ? b : a), '');
-                            const uuid = window.userSessionID || '';
-                            window._callsignLookupWindow.postMessage(
-                                { type: 'callsign_lookup', callsign: baseCallsign, uuid },
-                                window.location.origin
-                            );
-                            window._callsignLookupWindow.focus();
-                        } else if (callsign && typeof window.lookupCallsign === 'function') {
-                            window.lookupCallsign(callsign);
+                        if (callsign) {
+                            const _vParts = callsign.split('/');
+                            const _vBase = _vParts.reduce((a, b) => (b.length > a.length ? b : a), '');
+                            if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
+                                const uuid = window.userSessionID || '';
+                                window._callsignLookupWindow.postMessage(
+                                    { type: 'callsign_lookup', callsign: _vBase, uuid },
+                                    window.location.origin
+                                );
+                                window._callsignLookupWindow.focus();
+                            }
+                            // Always fetch/broadcast so the inline widget and tooltip image update
+                            if (typeof window._fetchCallsignForMediaSession === 'function') {
+                                window._fetchCallsignForMediaSession(_vBase);
+                            }
                         }
                         return;
                     }
@@ -4489,6 +4503,23 @@ class SpectrumDisplay {
         this.tooltip.style.whiteSpace = 'nowrap';
         this.tooltip.style.border = '1px solid #fff';
         document.body.appendChild(this.tooltip);
+
+        // When a callsign lookup completes, update the tooltip image if it's still showing
+        // the same callsign (handles the case where the user clicked a marker and the async
+        // QRZ fetch finished while the tooltip was still visible).
+        this._tooltipCallsign = null;
+        this._tooltipText = null;
+        window.addEventListener('callsign_lookup_complete', (ev) => {
+            if (!this._tooltipCallsign || this.tooltip.style.display === 'none') return;
+            const detail = ev.detail || {};
+            const evCallsign = (detail.callsign || '').toUpperCase();
+            if (evCallsign !== this._tooltipCallsign) return;
+            const imageUrl = detail.imageUrl;
+            if (!imageUrl) return;
+            const _img = `<img src="${imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`;
+            this.tooltip.style.whiteSpace = 'normal';
+            this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${this._tooltipText}</div></div>`;
+        });
 
         // Add touch gesture support for mobile pinch-to-zoom
         this.setupTouchHandlers();

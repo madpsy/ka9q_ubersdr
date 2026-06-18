@@ -410,6 +410,7 @@ class CWSpotsGraph {
                         display: false
                     },
                     tooltip: {
+                        animation: false,
                         backgroundColor: 'rgba(0, 0, 0, 0.8)',
                         titleColor: '#fff',
                         bodyColor: '#fff',

@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCDXF/IARU Beacon Tracker</title>
+    <link rel="stylesheet" href="decoder_spots_history.css">
+    <link rel="stylesheet" href="leaflet.css" />
+    <link rel="stylesheet" href="MarkerCluster.css" />
+    <link rel="stylesheet" href="MarkerCluster.Default.css" />
+    <style>
+        /* ── Beacon clock panel ─────────────────────────────────────── */
+        .beacon-clock-panel {
+            background: rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        .clock-box {
+            text-align: center;
+            min-width: 120px;
+        }
+        .clock-box .utc-time {
+            font-size: 2em;
+            font-family: monospace;
+            font-weight: bold;
+            color: #4a9eff;
+            letter-spacing: 2px;
+        }
+        .clock-box .utc-label {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+        .now-table {
+            flex: 1;
+            min-width: 320px;
+        }
+        .now-table table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+        .now-table th {
+            text-align: left;
+            padding: 4px 8px;
+            opacity: 0.7;
+            font-weight: 600;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+        }
+        .now-table td {
+            padding: 4px 8px;
+        }
+        .now-table tr.active-row td {
+            background: rgba(74,158,255,0.18);
+            font-weight: bold;
+        }
+        .now-table tr.active-row td:first-child {
+            border-left: 3px solid #4a9eff;
+        }
+        .band-pill {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 0.82em;
+            font-weight: bold;
+            color: #fff;
+        }
+        /* ── Map ────────────────────────────────────────────────────── */
+        #beacon-map {
+            width: 100%;
+            height: 420px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        /* ── Spots table ────────────────────────────────────────────── */
+        .spots-table-container {
+            overflow-x: auto;
+        }
+        .spots-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88em;
+        }
+        .spots-table th {
+            background: rgba(255,255,255,0.12);
+            padding: 8px 10px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid rgba(255,255,255,0.2);
+            white-space: nowrap;
+        }
+        .spots-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            white-space: nowrap;
+        }
+        .spots-table tbody tr:hover {
+            background: rgba(255,255,255,0.06);
+        }
+        .spots-table tbody tr.beacon-row-highlight {
+            background: rgba(74,158,255,0.12);
+        }
+        /* ── Beacon status grid ─────────────────────────────────────── */
+        .beacon-status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .beacon-card {
+            background: rgba(255,255,255,0.07);
+            border-radius: 8px;
+            padding: 10px 14px;
+            border-left: 4px solid #444;
+            transition: border-color 0.3s;
+        }
+        .beacon-card.heard {
+            border-left-color: #4CAF50;
+        }
+        .beacon-card.not-heard {
+            border-left-color: #555;
+            opacity: 0.6;
+        }
+        .beacon-card .bc-call {
+            font-weight: bold;
+            font-size: 1.05em;
+            color: #fff;
+        }
+        .beacon-card .bc-entity {
+            font-size: 0.8em;
+            opacity: 0.75;
+            margin-top: 2px;
+        }
+        .beacon-card .bc-spots {
+            font-size: 0.82em;
+            margin-top: 6px;
+            color: #4a9eff;
+        }
+        .beacon-card .bc-last {
+            font-size: 0.78em;
+            opacity: 0.65;
+            margin-top: 2px;
+        }
+        /* ── Status / loading ───────────────────────────────────────── */
+        .status-bar {
+            text-align: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 0.95em;
+        }
+        .status-bar.loading { background: rgba(255,193,7,0.15); color: #ffc107; }
+        .status-bar.ok      { background: rgba(76,175,80,0.15);  color: #4CAF50; }
+        .status-bar.error   { background: rgba(244,67,54,0.15);  color: #f44336; }
+        .status-bar.info    { background: rgba(74,158,255,0.12); color: #4a9eff; }
+        /* ── Section headings ───────────────────────────────────────── */
+        .section-heading {
+            font-size: 1.15em;
+            font-weight: 700;
+            margin: 20px 0 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+        }
+        /* ── Summary stats ──────────────────────────────────────────── */
+        .summary-stats {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .stat-box {
+            background: rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 10px 18px;
+            text-align: center;
+            min-width: 100px;
+        }
+        .stat-box .sv { font-size: 1.6em; font-weight: bold; color: #4a9eff; }
+        .stat-box .sl { font-size: 0.78em; opacity: 0.7; margin-top: 2px; }
+        /* ── Nav buttons ────────────────────────────────────────────── */
+        .nav-buttons {
+            text-align: center;
+            margin: 12px 0 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 9px 18px;
+            border-radius: 4px;
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        /* ── Receiver diamond marker ────────────────────────────────── */
+        .rx-marker-icon {
+            font-size: 22px;
+            line-height: 22px;
+            text-align: center;
+            color: #ff4444;
+            text-shadow: 0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(255,68,68,0.6);
+            cursor: pointer;
+        }
+        .rx-label {
+            color: #ff9999 !important;
+            border-color: rgba(255,68,68,0.5) !important;
+        }
+        /* ── Leaflet beacon label (permanent tooltip) ───────────────── */
+        .beacon-label {
+            background: rgba(10, 20, 40, 0.82) !important;
+            border: 1px solid rgba(74,158,255,0.4) !important;
+            border-radius: 4px !important;
+            color: #e8f0ff !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            padding: 2px 6px !important;
+            white-space: nowrap !important;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.5) !important;
+            pointer-events: none !important;
+        }
+        .beacon-label::before { display: none !important; }
+        /* ── Leaflet beacon popup ───────────────────────────────────── */
+        .beacon-popup {
+            font-family: inherit;
+            min-width: 160px;
+        }
+        .beacon-popup .bp-call {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #1a3a6a;
+            margin-bottom: 2px;
+        }
+        .beacon-popup .bp-entity {
+            font-size: 0.88em;
+            color: #333;
+            margin-bottom: 2px;
+        }
+        .beacon-popup .bp-detail {
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        .beacon-popup .bp-spots {
+            font-size: 0.85em;
+            color: #1a5c2a;
+            border-top: 1px solid #ddd;
+            padding-top: 5px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📡 NCDXF/IARU Beacon Tracker</h1>
+    <div class="subtitle" id="subtitle">NCDXF International Beacon Network — Propagation Monitor</div>
+
+    <div class="nav-buttons">
+        <a href="cwskimmer_map.html"      style="background:#4CAF50;">🔴 Live Map</a>
+        <a href="cw_spots_history.html"   style="background:#2196F3;">📜 History</a>
+        <a href="cw_spots_analytics.html" style="background:#FF6B6B;">📊 Analytics</a>
+        <a href="cw_metrics.html"         style="background:#667eea;">📈 Metrics</a>
+    </div>
+
+    <!-- ── Beacon clock ──────────────────────────────────────────────── -->
+    <div class="beacon-clock-panel">
+        <div class="clock-box">
+            <div class="utc-time" id="utc-clock">--:--:--</div>
+            <div class="utc-label">UTC</div>
+            <div style="margin-top:10px; font-size:0.82em; opacity:0.65;" id="date-display">---</div>
+        </div>
+        <div class="now-table">
+            <div style="font-size:0.82em; opacity:0.7; margin-bottom:6px;">Current transmission schedule (10 s slots)</div>
+            <table id="schedule-table">
+                <thead>
+                    <tr>
+                        <th>Band</th>
+                        <th>Callsign</th>
+                        <th>Location</th>
+                        <th>Entity</th>
+                        <th>Grid</th>
+                    </tr>
+                </thead>
+                <tbody id="schedule-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── Controls ─────────────────────────────────────────────────── -->
+    <div class="controls">
+        <div class="control-row">
+            <div class="control-group">
+                <label>Date:</label>
+                <input type="date" id="date-input" />
+            </div>
+            <div class="control-group">
+                <label>Hours back (from end of day):</label>
+                <select id="hours-select">
+                    <option value="6">Last 6 h</option>
+                    <option value="12">Last 12 h</option>
+                    <option value="24" selected>Full day (24 h)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Band filter:</label>
+                <select id="band-filter">
+                    <option value="">All beacon bands</option>
+                    <option value="20m">20 m (14.100)</option>
+                    <option value="17m">17 m (18.110)</option>
+                    <option value="15m">15 m (21.150)</option>
+                    <option value="12m">12 m (24.930)</option>
+                    <option value="10m">10 m (28.200)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Min SNR (dB):</label>
+                <select id="snr-filter">
+                    <option value="-999">No minimum</option>
+                    <option value="0">0 dB</option>
+                    <option value="5">+5 dB</option>
+                    <option value="10">+10 dB</option>
+                    <option value="20">+20 dB</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <button id="load-btn" style="background:#4CAF50;">Load Spots</button>
+            </div>
+            <div class="control-group">
+                <button id="today-btn" style="background:#2196F3;">Today</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="status-bar" class="status-bar info">Select a date and click Load Spots</div>
+
+    <!-- ── Map ──────────────────────────────────────────────────────── -->
+    <div class="section-heading">🗺️ Beacon Map</div>
+    <div id="beacon-map"></div>
+
+    <!-- ── Summary stats ────────────────────────────────────────────── -->
+    <div id="summary-section" style="display:none;">
+        <div class="section-heading">📊 Summary</div>
+        <div class="summary-stats" id="summary-stats"></div>
+
+        <!-- ── Per-beacon status cards ──────────────────────────────── -->
+        <div class="section-heading">📻 Beacon Status</div>
+        <div class="beacon-status-grid" id="beacon-cards"></div>
+
+        <!-- ── Spots table ───────────────────────────────────────────── -->
+        <div class="section-heading">📋 Spots Log</div>
+        <div class="spots-table-container">
+            <table class="spots-table">
+                <thead>
+                    <tr>
+                        <th>Time (UTC)</th>
+                        <th>Callsign</th>
+                        <th>Entity</th>
+                        <th>Band</th>
+                        <th>Freq (Hz)</th>
+                        <th>SNR (dB)</th>
+                        <th>WPM</th>
+                        <th>Distance (km)</th>
+                        <th>Bearing (°)</th>
+                    </tr>
+                </thead>
+                <tbody id="spots-tbody"></tbody>
+            </table>
+        </div>
+        <div id="spots-count" style="text-align:right; font-size:0.82em; opacity:0.65; margin-top:6px;"></div>
+    </div>
+</div>
+
+<!-- Footer -->
+<footer class="site-footer">
+    <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> <span id="footer-version"></span></p>
+</footer>
+
+<script src="leaflet.js"></script>
+<script src="leaflet.markercluster.js"></script>
+<script>
+'use strict';
+
+// ── Band colours (matching cwskimmer_map.js palette) ──────────────────────
+const BAND_COLORS = {
+    '20m': '#FF6B6B',
+    '17m': '#4ECDC4',
+    '15m': '#45B7D1',
+    '12m': '#96CEB4',
+    '10m': '#FFEAA7',
+};
+
+// ── Beacon data (loaded from JSON) ───────────────────────────────────────
+let BEACONS = [];          // array ordered by slot
+let beaconByCall = {};     // callsign → beacon object
+
+// ── Leaflet map ──────────────────────────────────────────────────────────
+let map = null;
+let receiverMarker = null;
+let beaconMarkers = {};    // callsign → L.circleMarker
+let spotLines = [];        // L.polyline array (cleared on reload)
+let clusterGroup = null;
+
+// ── State ────────────────────────────────────────────────────────────────
+let allSpots = [];         // raw spots from API
+let receiverLat = null;
+let receiverLon = null;
+
+// ── Clock ────────────────────────────────────────────────────────────────
+function padZ(n) { return n < 10 ? '0' + n : '' + n; }
+
+function updateClock() {
+    const now = new Date();
+    document.getElementById('utc-clock').textContent =
+        padZ(now.getUTCHours()) + ':' + padZ(now.getUTCMinutes()) + ':' + padZ(now.getUTCSeconds());
+    document.getElementById('date-display').textContent =
+        now.toUTCString().slice(0, 16);
+    updateScheduleTable(now);
+}
+
+// ── Schedule table ───────────────────────────────────────────────────────
+// n = Math.floor(utcMs / 10000) % 18  → index of beacon currently on 20m (14.100)
+// For band i (0=20m … 4=10m) the transmitting beacon is BEACONS[(18+n-i)%18]
+// This matches BeaconClock.js by VE3SUN: beacons[(18+n-i)%18]
+const BANDS_MHZ = ['14.100', '18.110', '21.150', '24.930', '28.200'];
+const BAND_NAMES = ['20m', '17m', '15m', '12m', '10m'];
+
+function updateScheduleTable(now) {
+    if (BEACONS.length === 0) return;
+    const n = Math.floor(now.getTime() / 10000) % 18; // beacon index currently on 20m
+    const tbody = document.getElementById('schedule-tbody');
+    let html = '';
+    for (let i = 0; i < 5; i++) {
+        const slotIdx = (18 + n - i) % 18;
+        const b = BEACONS[slotIdx];
+        const bandName = BAND_NAMES[i];
+        const color = BAND_COLORS[bandName] || '#aaa';
+        const isActive = (i === 0);
+        html += `<tr${isActive ? ' class="active-row"' : ''}>
+            <td><span class="band-pill" style="background:${color};">${bandName} ${BANDS_MHZ[i]}</span></td>
+            <td><strong>${b.callsign}</strong></td>
+            <td>${b.location}</td>
+            <td>${b.entity}</td>
+            <td style="font-family:monospace;">${b.grid}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+// ── Map initialisation ───────────────────────────────────────────────────
+function initMap() {
+    map = L.map('beacon-map', { center: [20, 0], zoom: 2 });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 18,
+    }).addTo(map);
+    clusterGroup = L.markerClusterGroup({ maxClusterRadius: 30 });
+    map.addLayer(clusterGroup);
+}
+
+function placeBeaconMarkers() {
+    clusterGroup.clearLayers();
+    beaconMarkers = {};
+    BEACONS.forEach(b => {
+        const m = L.circleMarker([b.latitude, b.longitude], {
+            radius: 7,
+            color: '#fff',
+            weight: 1.5,
+            fillColor: '#555',
+            fillOpacity: 0.7,
+        });
+        // Permanent callsign label (always visible)
+        m.bindTooltip(b.callsign, {
+            permanent: true,
+            direction: 'right',
+            offset: [8, 0],
+            className: 'beacon-label',
+        });
+        // Rich click popup (updated with spot data after load)
+        m.bindPopup(`<div class="beacon-popup">
+            <div class="bp-call">${b.callsign}</div>
+            <div class="bp-entity">${b.entity}</div>
+            <div class="bp-detail">${b.location} · ${b.grid}</div>
+            <div class="bp-spots" id="bpspot-${b.callsign}">No spots loaded yet</div>
+        </div>`);
+        beaconMarkers[b.callsign] = m;
+        clusterGroup.addLayer(m);
+    });
+}
+
+function placeReceiverMarker(lat, lon, callsign, name) {
+    if (receiverMarker) receiverMarker.remove();
+    // Use a distinct diamond/star DivIcon so it stands apart from beacon circles
+    const icon = L.divIcon({
+        className: '',
+        html: `<div class="rx-marker-icon">&#9670;</div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+    });
+    receiverMarker = L.marker([lat, lon], { icon })
+        .bindTooltip('Receiver', {
+            permanent: true,
+            direction: 'right',
+            offset: [10, 0],
+            className: 'beacon-label rx-label',
+        })
+        .bindPopup(`<div class="beacon-popup">
+            <div class="bp-call">${callsign || 'Receiver'}</div>
+            <div class="bp-entity">${name || ''}</div>
+            <div class="bp-detail">${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
+        </div>`)
+        .addTo(map);
+}
+
+function clearSpotLines() {
+    spotLines.forEach(l => l.remove());
+    spotLines = [];
+}
+
+// ── Colour beacons by heard/not-heard ────────────────────────────────────
+function colourBeaconMarkers(heardSet, byCall) {
+    byCall = byCall || {};
+    BEACONS.forEach(b => {
+        const m = beaconMarkers[b.callsign];
+        if (!m) return;
+        const heard = heardSet.has(b.callsign);
+        if (heard) {
+            m.setStyle({ fillColor: '#4CAF50', fillOpacity: 0.9, radius: 9 });
+        } else {
+            m.setStyle({ fillColor: '#555', fillOpacity: 0.5, radius: 7 });
+        }
+
+        // Update permanent tooltip to include bands heard
+        const bSpots = byCall[b.callsign] || [];
+        const bandSet = [...new Set(bSpots.map(s => s.band))].sort();
+        let labelHtml = `<b>${b.callsign}</b>`;
+        if (bandSet.length > 0) {
+            const pills = bandSet.map(bd =>
+                `<span style="display:inline-block;padding:1px 4px;border-radius:3px;font-size:10px;background:${BAND_COLORS[bd]||'#888'};color:#000;margin-left:3px;">${bd}</span>`
+            ).join('');
+            labelHtml += pills;
+        }
+        m.unbindTooltip();
+        m.bindTooltip(labelHtml, {
+            permanent: true,
+            direction: 'right',
+            offset: [8, 0],
+            className: 'beacon-label',
+        });
+
+        // Update popup spot summary
+        const el = document.getElementById(`bpspot-${b.callsign}`);
+        if (el) {
+            if (heard) {
+                const bestSNR = bSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
+                const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
+                const bandPills = bandSet.map(bd =>
+                    `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;">${bd}</span>`
+                ).join(' ');
+                el.innerHTML = `${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Best SNR: ${bestSNR} dB<br>${bandPills}<br><span style="opacity:0.7;">Last: ${lastTime}</span>`;
+            } else {
+                el.textContent = 'Not heard';
+                el.style.color = '#888';
+            }
+        }
+    });
+}
+
+// Draw lines from receiver to each heard beacon (one line per unique callsign)
+function drawSpotLines(spots) {
+    clearSpotLines();
+    if (receiverLat === null) return;
+    const drawn = new Set();
+    spots.forEach(s => {
+        if (drawn.has(s.callsign)) return;
+        const b = beaconByCall[s.callsign];
+        if (!b) return;
+        const color = BAND_COLORS[s.band] || '#aaa';
+        const line = L.polyline(
+            [[receiverLat, receiverLon], [b.latitude, b.longitude]],
+            { color, weight: 1.5, opacity: 0.55, dashArray: '4 4' }
+        ).addTo(map);
+        spotLines.push(line);
+        drawn.add(s.callsign);
+    });
+}
+
+// ── Fetch receiver location from /api/description ────────────────────────
+async function fetchReceiverLocation() {
+    try {
+        const r = await fetch('/api/description');
+        if (!r.ok) return;
+        const d = await r.json();
+        const gps = d.receiver && d.receiver.gps;
+        if (gps && gps.lat && gps.lon) {
+            receiverLat = gps.lat;
+            receiverLon = gps.lon;
+            const callsign = (d.receiver && d.receiver.callsign) || '';
+            const name     = (d.receiver && d.receiver.name)     || '';
+            placeReceiverMarker(receiverLat, receiverLon, callsign, name);
+        }
+    } catch (_) { /* no receiver location available */ }
+}
+
+// ── Load beacon JSON ─────────────────────────────────────────────────────
+async function loadBeaconData() {
+    const r = await fetch('ncdxf_beacons.json');
+    const d = await r.json();
+    BEACONS = d.ncdxf_iaru_beacons.beacons.slice().sort((a, b) => a.slot - b.slot);
+    beaconByCall = {};
+    BEACONS.forEach(b => { beaconByCall[b.callsign] = b; });
+    placeBeaconMarkers();
+}
+
+// ── Build callsign query string (comma-separated, max 20) ────────────────
+function buildCallsignParam() {
+    return BEACONS.map(b => b.callsign).slice(0, 20).join(',');
+}
+
+// ── Fetch spots from API ─────────────────────────────────────────────────
+async function loadSpots() {
+    const dateVal = document.getElementById('date-input').value;
+    if (!dateVal) {
+        setStatus('Please select a date.', 'error');
+        return;
+    }
+
+    const hours = parseInt(document.getElementById('hours-select').value, 10);
+    const band  = document.getElementById('band-filter').value;
+    const minSNR = document.getElementById('snr-filter').value;
+
+    // Compute start_time for the hours-back filter
+    let startTimeParam = '';
+    if (hours < 24) {
+        // e.g. last 6 h of the day = start at 18:00
+        const startH = 24 - hours;
+        startTimeParam = `&start_time=${padZ(startH)}:00`;
+    }
+
+    const callsigns = buildCallsignParam();
+    let url = `/api/cwskimmer/spots?date=${dateVal}&callsign=${encodeURIComponent(callsigns)}${startTimeParam}`;
+    if (band)   url += `&band=${encodeURIComponent(band)}`;
+    if (minSNR !== '-999') url += `&min_snr=${minSNR}`;
+
+    setStatus('Loading spots…', 'loading');
+    document.getElementById('summary-section').style.display = 'none';
+
+    try {
+        const r = await fetch(url);
+        if (r.status === 204) {
+            allSpots = [];
+            setStatus('No beacon spots found for the selected parameters.', 'info');
+            renderResults([]);
+            return;
+        }
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({ error: r.statusText }));
+            setStatus('Error: ' + (e.error || r.statusText), 'error');
+            return;
+        }
+        const data = await r.json();
+        allSpots = data.spots || [];
+        // Keep only spots whose callsign is a known beacon
+        allSpots = allSpots.filter(s => beaconByCall[s.callsign]);
+        setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} for ${dateVal}.`, 'ok');
+        renderResults(allSpots);
+    } catch (err) {
+        setStatus('Fetch error: ' + err.message, 'error');
+    }
+}
+
+// ── Render everything ────────────────────────────────────────────────────
+function renderResults(spots) {
+    const heardSet = new Set(spots.map(s => s.callsign));
+    const byCall = {};
+    spots.forEach(s => {
+        if (!byCall[s.callsign]) byCall[s.callsign] = [];
+        byCall[s.callsign].push(s);
+    });
+    colourBeaconMarkers(heardSet, byCall);
+    drawSpotLines(spots);
+    renderSummary(spots, heardSet);
+    renderBeaconCards(spots, heardSet);
+    renderSpotsTable(spots);
+    if (spots.length > 0) {
+        document.getElementById('summary-section').style.display = '';
+    }
+}
+
+function renderSummary(spots, heardSet) {
+    const bandCounts = {};
+    spots.forEach(s => { bandCounts[s.band] = (bandCounts[s.band] || 0) + 1; });
+    const bestSNR = spots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
+    const bestDist = spots.reduce((best, s) => (s.distance_km && s.distance_km > best) ? s.distance_km : best, 0);
+
+    const bandSummary = Object.entries(bandCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([b, c]) => `<span class="band-pill" style="background:${BAND_COLORS[b]||'#888'}">${b}: ${c}</span>`)
+        .join(' ');
+
+    document.getElementById('summary-stats').innerHTML = `
+        <div class="stat-box"><div class="sv">${spots.length}</div><div class="sl">Total Spots</div></div>
+        <div class="stat-box"><div class="sv">${heardSet.size}</div><div class="sl">Beacons Heard</div></div>
+        <div class="stat-box"><div class="sv">${BEACONS.length - heardSet.size}</div><div class="sl">Not Heard</div></div>
+        <div class="stat-box"><div class="sv">${bestSNR > -999 ? bestSNR + ' dB' : '—'}</div><div class="sl">Best SNR</div></div>
+        <div class="stat-box"><div class="sv">${bestDist > 0 ? Math.round(bestDist).toLocaleString() + ' km' : '—'}</div><div class="sl">Max Distance</div></div>
+        <div class="stat-box" style="min-width:200px;"><div style="font-size:0.9em; margin-top:4px;">${bandSummary || '—'}</div><div class="sl">By Band</div></div>
+    `;
+}
+
+function renderBeaconCards(spots, heardSet) {
+    // Group spots by callsign
+    const byCall = {};
+    spots.forEach(s => {
+        if (!byCall[s.callsign]) byCall[s.callsign] = [];
+        byCall[s.callsign].push(s);
+    });
+
+    const container = document.getElementById('beacon-cards');
+    container.innerHTML = BEACONS.map(b => {
+        const heard = heardSet.has(b.callsign);
+        const bSpots = byCall[b.callsign] || [];
+        const bestSNR = bSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
+        const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
+        const bandSet = [...new Set(bSpots.map(s => s.band))];
+        const bandPills = bandSet.map(bd =>
+            `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;">${bd}</span>`
+        ).join(' ');
+
+        return `<div class="beacon-card ${heard ? 'heard' : 'not-heard'}">
+            <div class="bc-call">Slot ${b.slot} — ${b.callsign}</div>
+            <div class="bc-entity">${b.entity} · ${b.location} · ${b.grid}</div>
+            ${heard
+                ? `<div class="bc-spots">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Best SNR: ${bestSNR} dB ${bandPills}</div>
+                   <div class="bc-last">Last: ${lastTime}</div>`
+                : `<div class="bc-spots" style="color:#888;">Not heard</div>`
+            }
+        </div>`;
+    }).join('');
+}
+
+function renderSpotsTable(spots) {
+    const tbody = document.getElementById('spots-tbody');
+    if (spots.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;opacity:0.6;padding:20px;">No spots</td></tr>';
+        document.getElementById('spots-count').textContent = '';
+        return;
+    }
+
+    tbody.innerHTML = spots.map(s => {
+        const b = beaconByCall[s.callsign];
+        const color = BAND_COLORS[s.band] || '#aaa';
+        const dist = s.distance_km != null ? Math.round(s.distance_km).toLocaleString() + ' km' : '\u2014';
+        const bearing = s.bearing_deg != null ? Math.round(s.bearing_deg) + '\u00b0' : '\u2014';
+        const timeStr = s.timestamp ? s.timestamp.slice(11, 19) : '';
+        const entity = b ? b.entity : '';
+        return `<tr class="beacon-row-highlight">
+            <td style="font-family:monospace;">${timeStr}</td>
+            <td><strong>${s.callsign}</strong></td>
+            <td>${entity}</td>
+            <td><span class="band-pill" style="background:${color};">${s.band}</span></td>
+            <td style="font-family:monospace;">${s.frequency ? s.frequency.toLocaleString() : ''}</td>
+            <td>${s.snr}</td>
+            <td>${s.wpm || '\u2014'}</td>
+            <td>${dist}</td>
+            <td>${bearing}</td>
+        </tr>`;
+    }).join('');
+    document.getElementById('spots-count').textContent = spots.length + ' spot' + (spots.length !== 1 ? 's' : '');
+}
+
+// ── Status helper ────────────────────────────────────────────────────────
+function setStatus(msg, type) {
+    const el = document.getElementById('status-bar');
+    el.textContent = msg;
+    el.className = 'status-bar ' + (type || 'info');
+}
+
+// ── Date helpers ─────────────────────────────────────────────────────────
+function todayUTC() {
+    const d = new Date();
+    return d.getUTCFullYear() + '-' +
+        padZ(d.getUTCMonth() + 1) + '-' +
+        padZ(d.getUTCDate());
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+async function init() {
+    // Set default date to today
+    const dateInput = document.getElementById('date-input');
+    dateInput.value = todayUTC();
+    dateInput.max   = todayUTC();
+
+    // Wire buttons
+    document.getElementById('load-btn').addEventListener('click', loadSpots);
+    document.getElementById('today-btn').addEventListener('click', () => {
+        dateInput.value = todayUTC();
+        loadSpots();
+    });
+
+    // Init map
+    initMap();
+
+    // Load beacon reference data
+    await loadBeaconData();
+
+    // Try to get receiver location
+    await fetchReceiverLocation();
+
+    // Start clock
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // Auto-load today on startup
+    loadSpots();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

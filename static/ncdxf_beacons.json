@@ -1,0 +1,208 @@
+{
+  "ncdxf_iaru_beacons": {
+    "bands_mhz": ["14.100", "18.110", "21.150", "24.930", "28.200"],
+    "cycle_seconds": 10,
+    "beacons_per_cycle": 18,
+    "full_cycle_seconds": 180,
+    "beacons": [
+      {
+        "slot": 1,
+        "callsign": "4U1UN",
+        "entity": "United Nations",
+        "location": "New York City",
+        "country": "United States",
+        "grid": "FN30as",
+        "latitude": 40.75,
+        "longitude": -73.97,
+        "operator": "UNRC"
+      },
+      {
+        "slot": 2,
+        "callsign": "VE8AT",
+        "entity": "Canada",
+        "location": "Inuvik, NT",
+        "country": "Canada",
+        "grid": "CP38gh",
+        "latitude": 68.35,
+        "longitude": -133.72,
+        "operator": "RAC/NARC"
+      },
+      {
+        "slot": 3,
+        "callsign": "W6WX",
+        "entity": "United States",
+        "location": "Mt. Umunhum, CA",
+        "country": "United States",
+        "grid": "CM97bd",
+        "latitude": 37.16,
+        "longitude": -121.90,
+        "operator": "NCDXF"
+      },
+      {
+        "slot": 4,
+        "callsign": "KH6RS",
+        "entity": "Hawaii",
+        "location": "Maui, HI",
+        "country": "United States",
+        "grid": "BL10ts",
+        "latitude": 20.81,
+        "longitude": -156.14,
+        "operator": "Maui ARC"
+      },
+      {
+        "slot": 5,
+        "callsign": "ZL6B",
+        "entity": "New Zealand",
+        "location": "Masterton",
+        "country": "New Zealand",
+        "grid": "RE78tw",
+        "latitude": -40.94,
+        "longitude": 175.66,
+        "operator": "NZART"
+      },
+      {
+        "slot": 6,
+        "callsign": "VK6RBP",
+        "entity": "Australia",
+        "location": "Roleystone, WA",
+        "country": "Australia",
+        "grid": "OF87av",
+        "latitude": -32.12,
+        "longitude": 116.03,
+        "operator": "WIA"
+      },
+      {
+        "slot": 7,
+        "callsign": "JA2IGY",
+        "entity": "Japan",
+        "location": "Mt. Asama, Nagano",
+        "country": "Japan",
+        "grid": "PM84jk",
+        "latitude": 34.45,
+        "longitude": 136.39,
+        "operator": "JARL"
+      },
+      {
+        "slot": 8,
+        "callsign": "RR9O",
+        "entity": "Russia",
+        "location": "Novosibirsk",
+        "country": "Russia",
+        "grid": "NO14kx",
+        "latitude": 54.85,
+        "longitude": 82.97,
+        "operator": "SRR"
+      },
+      {
+        "slot": 9,
+        "callsign": "VR2B",
+        "entity": "Hong Kong",
+        "location": "Hong Kong",
+        "country": "Hong Kong",
+        "grid": "OL72bg",
+        "latitude": 22.28,
+        "longitude": 114.16,
+        "operator": "HARTS"
+      },
+      {
+        "slot": 10,
+        "callsign": "4S7B",
+        "entity": "Sri Lanka",
+        "location": "Colombo",
+        "country": "Sri Lanka",
+        "grid": "MJ96wv",
+        "latitude": 6.91,
+        "longitude": 79.86,
+        "operator": "RSSL"
+      },
+      {
+        "slot": 11,
+        "callsign": "ZS6DN",
+        "entity": "South Africa",
+        "location": "Pretoria",
+        "country": "South Africa",
+        "grid": "KG33xi",
+        "latitude": -25.73,
+        "longitude": 28.19,
+        "operator": "SARL"
+      },
+      {
+        "slot": 12,
+        "callsign": "5Z4B",
+        "entity": "Kenya",
+        "location": "Kikuyu",
+        "country": "Kenya",
+        "grid": "KI88hr",
+        "latitude": -1.25,
+        "longitude": 36.66,
+        "operator": "ARSK"
+      },
+      {
+        "slot": 13,
+        "callsign": "4X6TU",
+        "entity": "Israel",
+        "location": "Tel Aviv",
+        "country": "Israel",
+        "grid": "KM72jb",
+        "latitude": 32.06,
+        "longitude": 34.78,
+        "operator": "IARC"
+      },
+      {
+        "slot": 14,
+        "callsign": "OH2B",
+        "entity": "Finland",
+        "location": "Lohja",
+        "country": "Finland",
+        "grid": "KP20eh",
+        "latitude": 60.22,
+        "longitude": 23.97,
+        "operator": "SRAL"
+      },
+      {
+        "slot": 15,
+        "callsign": "CS3B",
+        "entity": "Madeira",
+        "location": "São Jorge, Madeira",
+        "country": "Portugal",
+        "grid": "IM12jt",
+        "latitude": 32.76,
+        "longitude": -16.77,
+        "operator": "Delegação Madeira"
+      },
+      {
+        "slot": 16,
+        "callsign": "LU4AA",
+        "entity": "Argentina",
+        "location": "Buenos Aires",
+        "country": "Argentina",
+        "grid": "GF05tj",
+        "latitude": -34.61,
+        "longitude": -58.37,
+        "operator": "RCA"
+      },
+      {
+        "slot": 17,
+        "callsign": "OA4B",
+        "entity": "Peru",
+        "location": "Lima",
+        "country": "Peru",
+        "grid": "FH17mw",
+        "latitude": -12.05,
+        "longitude": -77.03,
+        "operator": "RCP"
+      },
+      {
+        "slot": 18,
+        "callsign": "YV5B",
+        "entity": "Venezuela",
+        "location": "Caracas",
+        "country": "Venezuela",
+        "grid": "FK60nd",
+        "latitude": 10.48,
+        "longitude": -66.86,
+        "operator": "RCV"
+      }
+    ]
+  }
+}

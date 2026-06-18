@@ -1,4 +1,13 @@
 // Decoder Spots Analytics JavaScript
+
+function digAnalyticsIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(1)
+    ) + ' ';
+}
+
 (function() {
     'use strict';
 
@@ -128,19 +137,81 @@
             if (data.success && data.data && data.data.countries) {
                 allCountries = data.data.countries;
                 
-                // Populate datalist
-                const datalist = document.getElementById('countries-datalist');
-                datalist.innerHTML = '';
-                
-                allCountries.forEach(country => {
-                    const option = document.createElement('option');
-                    option.value = country.name;
-                    datalist.appendChild(option);
-                });
+                // Set up custom autocomplete
+                setupCountryAutocomplete();
             }
         } catch (error) {
             console.error('Error loading countries:', error);
         }
+    }
+
+    function flagForAnalyticsCountry(countryName) {
+        if (!countryName) return '';
+        const entry = allCountries.find(c => c.name === countryName);
+        return entry ? digAnalyticsIso2ToFlag(entry.country_code) : '';
+    }
+
+    function setupCountryAutocomplete() {
+        const input = document.getElementById('country-search');
+        const list = document.getElementById('country-autocomplete-list');
+        if (!input || !list) return;
+
+        let activeIndex = -1;
+
+        function showSuggestions(query) {
+            list.innerHTML = '';
+            activeIndex = -1;
+            if (!query) { list.style.display = 'none'; return; }
+            const q = query.toLowerCase();
+            const matches = allCountries.filter(c => c.name.toLowerCase().includes(q)).slice(0, 50);
+            if (matches.length === 0) { list.style.display = 'none'; return; }
+            matches.forEach((country, idx) => {
+                const item = document.createElement('div');
+                item.style.cssText = 'padding:6px 10px; cursor:pointer; color:#fff; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+                item.textContent = digAnalyticsIso2ToFlag(country.country_code) + country.name;
+                item.dataset.name = country.name;
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    input.value = country.name;
+                    list.style.display = 'none';
+                });
+                item.addEventListener('mouseover', () => {
+                    setActive(idx);
+                });
+                list.appendChild(item);
+            });
+            list.style.display = 'block';
+        }
+
+        function setActive(idx) {
+            const items = list.querySelectorAll('div');
+            items.forEach((el, i) => {
+                el.style.background = i === idx ? '#2a2a4e' : '';
+            });
+            activeIndex = idx;
+        }
+
+        input.addEventListener('input', () => showSuggestions(input.value.trim()));
+        input.addEventListener('focus', () => { if (input.value.trim()) showSuggestions(input.value.trim()); });
+        input.addEventListener('blur', () => { setTimeout(() => { list.style.display = 'none'; }, 150); });
+        input.addEventListener('keydown', (e) => {
+            const items = list.querySelectorAll('div');
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActive(Math.min(activeIndex + 1, items.length - 1));
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActive(Math.max(activeIndex - 1, 0));
+            } else if (e.key === 'Enter') {
+                if (activeIndex >= 0 && items[activeIndex]) {
+                    e.preventDefault();
+                    input.value = items[activeIndex].dataset.name;
+                    list.style.display = 'none';
+                }
+            } else if (e.key === 'Escape') {
+                list.style.display = 'none';
+            }
+        });
     }
 
     async function loadContinents() {
@@ -820,8 +891,9 @@
         const card = document.createElement('div');
         card.className = 'entity-card';
 
-        const name = type === 'country' ? entity.country :
-                     (continentNames[entity.continent] || entity.continent);
+        const name = type === 'country'
+            ? flagForAnalyticsCountry(entity.country) + entity.country
+            : (continentNames[entity.continent] || entity.continent);
         const subtitle = type === 'country' ?
                         (continentNames[entity.continent] || entity.continent) :
                         `${entity.countries_count} countries`;

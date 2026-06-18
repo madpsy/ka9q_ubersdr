@@ -1003,3 +1003,57 @@ func (lrl *LookupRateLimiter) GetStats() int {
 	defer lrl.mu.RUnlock()
 	return len(lrl.limiters)
 }
+
+// ImageProxyRateLimiter manages per-IP rate limiters for the /api/lookup/image
+// endpoint.  Fixed at 3 requests per second per IP with a burst of 3.
+// Images are cached by the browser for 24 h so legitimate clients only hit
+// this endpoint once per callsign per session; 3 req/s is generous.
+type ImageProxyRateLimiter struct {
+	limiters map[string]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewImageProxyRateLimiter creates a new image proxy rate limiter.
+func NewImageProxyRateLimiter() *ImageProxyRateLimiter {
+	return &ImageProxyRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+	}
+}
+
+// Allow returns true if the given IP is within the rate limit.
+func (rl *ImageProxyRateLimiter) Allow(ip string) bool {
+	rl.mu.Lock()
+	limiter, exists := rl.limiters[ip]
+	if !exists {
+		limiter = &RateLimiter{
+			tokens:     3.0,
+			maxTokens:  3.0,
+			refillRate: 3.0, // 3 requests per second
+			lastRefill: time.Now(),
+		}
+		rl.limiters[ip] = limiter
+	}
+	rl.mu.Unlock()
+	return limiter.Allow()
+}
+
+// Cleanup removes per-IP limiters that have not been used in the last 5 minutes.
+func (rl *ImageProxyRateLimiter) Cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	for ip, limiter := range rl.limiters {
+		limiter.mu.Lock()
+		if now.Sub(limiter.lastRefill) > 5*time.Minute {
+			delete(rl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the number of currently tracked IPs.
+func (rl *ImageProxyRateLimiter) GetStats() int {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+	return len(rl.limiters)
+}

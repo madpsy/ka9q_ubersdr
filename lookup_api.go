@@ -146,6 +146,15 @@ func handleLookup(
 			return
 		}
 
+		// Rewrite the QRZ image URL to a same-origin proxy path so the browser
+		// can cache it normally.  Cross-origin QRZ CDN URLs are always fetched
+		// with Cache-Control: no-cache by Chrome, causing a network round-trip
+		// on every hover.  The proxy serves the image from /dev/shm with
+		// Cache-Control: public, max-age=86400, immutable.
+		if result.Image != "" && globalImageProxy != nil {
+			result.Image = globalImageProxy.Register(result.Image)
+		}
+
 		// Augment with CTY database information (always attempt, even if QRZ
 		// already returned cqzone/ituzone — CTY provides continent, country_code
 		// and primary prefix which QRZ does not supply).

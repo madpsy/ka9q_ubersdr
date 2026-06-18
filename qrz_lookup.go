@@ -162,6 +162,12 @@ type QRZService struct {
 	cacheMu sync.RWMutex
 	cache   map[string]*qrzCacheEntry // key: normalised uppercase callsign
 
+	// onEvict is called (if non-nil) whenever a cache entry is removed due to
+	// expiry or the size cap being exceeded.  It receives the original
+	// QRZCallsign so callers can clean up associated resources (e.g. proxied
+	// images).  Called with cacheMu held — must not re-acquire it.
+	onEvict func(cs *QRZCallsign)
+
 	// sf deduplicates concurrent in-flight lookups for the same callsign.
 	// When N goroutines all miss the cache for the same key simultaneously,
 	// only one HTTP request is made to QRZ; the rest wait and share the result.
@@ -412,6 +418,7 @@ func (s *QRZService) cachePut(call string, cs *QRZCallsign) {
 	now := time.Now()
 	for k, e := range s.cache {
 		if now.After(e.expiresAt) {
+			s.evictLocked(k, e)
 			delete(s.cache, k)
 		}
 	}
@@ -436,8 +443,28 @@ func (s *QRZService) cachePut(call string, cs *QRZCallsign) {
 		if len(s.cache) <= s.cacheMaxSize {
 			break
 		}
-		delete(s.cache, e.key)
+		if entry, ok := s.cache[e.key]; ok {
+			s.evictLocked(e.key, entry)
+			delete(s.cache, e.key)
+		}
 	}
+}
+
+// evictLocked fires the onEvict callback for a cache entry being removed.
+// Must be called with cacheMu held.
+func (s *QRZService) evictLocked(key string, e *qrzCacheEntry) {
+	if s.onEvict != nil && e.callsign != nil {
+		s.onEvict(e.callsign)
+	}
+}
+
+// SetEvictCallback registers a function to be called whenever a cache entry
+// is removed (due to expiry or size-cap eviction).  Safe to call at any time;
+// replaces any previously registered callback.
+func (s *QRZService) SetEvictCallback(fn func(cs *QRZCallsign)) {
+	s.cacheMu.Lock()
+	s.onEvict = fn
+	s.cacheMu.Unlock()
 }
 
 // CacheSize returns the number of entries currently in the cache.

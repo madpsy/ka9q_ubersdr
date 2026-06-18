@@ -1405,11 +1405,11 @@ function _fetchCallsignForMediaSession(callsign) {
 
             // Store the full API response so the QRZ lookup widget can render all
             // fields (name, nickname, grid, etc.) from cache without a second fetch.
-            // We do NOT attempt to blob-fetch the QRZ photo: QRZ's CDN does not
-            // send CORS headers, so fetch() would fail silently with a CORS error.
-            // Using imageUrl directly works fine — <img src> and MediaSession both
-            // accept cross-origin URLs without CORS.  The re-fetch storm concern
-            // only applies to our own server's logo artwork (already blobbed).
+            // data.image is now a same-origin path (/api/lookup/image/<uuid>) served
+            // by our image proxy, which fetches the QRZ photo server-side and caches
+            // it in /dev/shm.  Same-origin responses are cached normally by the
+            // browser (no forced Cache-Control: no-cache override for cross-origin
+            // images), so the photo is only fetched once per 24 h session.
             _callsignLookupCache.set(callsign, { data, imageUrl });
             // Notify all lookup surfaces (inline widget + popup window).
             _broadcastCallsignLookup(callsign, data, imageUrl);

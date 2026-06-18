@@ -595,6 +595,15 @@ func main() {
 			} else {
 				globalQRZService = NewQRZService(config.LookupServices.QRZ, config.LookupServices.CacheMaxSize)
 				log.Printf("QRZ lookup service initialised (provider: qrz, user: %s)", config.LookupServices.QRZ.Username)
+				globalImageProxy = NewImageProxyService()
+				log.Printf("Image proxy service initialised (storage: %s)", imageProxyDir)
+				// When the QRZ cache evicts a callsign entry (expiry or size cap),
+				// also evict the associated proxied image from /dev/shm.
+				globalQRZService.SetEvictCallback(func(cs *QRZCallsign) {
+					if cs.Image != "" {
+						globalImageProxy.EvictBySourceURL(cs.Image)
+					}
+				})
 			}
 		default:
 			log.Printf("Warning: unknown lookup_services.provider %q — lookup disabled", config.LookupServices.Provider)
@@ -2202,6 +2211,13 @@ func main() {
 	})
 	http.HandleFunc("/api/lookup", func(w http.ResponseWriter, r *http.Request) {
 		handleLookup(w, r, config, sessions, lookupRateLimiter)
+	})
+	http.HandleFunc("/api/lookup/image/", func(w http.ResponseWriter, r *http.Request) {
+		if globalImageProxy == nil {
+			http.NotFound(w, r)
+			return
+		}
+		globalImageProxy.HandleImageRequest(w, r)
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)

@@ -539,6 +539,7 @@
 
   // ── Render ─────────────────────────────────────────────────────────
   let _lastName = undefined;
+  let _lastCountryCode = undefined;
 
   // Show/hide one neighbour button and label it. Returns true if shown.
   function updateNavButton(btn, textEl, marker) {
@@ -595,10 +596,12 @@
       nameEl.style.cursor = isCallsign ? 'pointer' : '';
       // Tooltip replaces the title for callsigns; keep title for non-callsign names.
       nameEl.title = isCallsign ? '' : name;
-      if (name !== _lastName) {
+      const currentCountryCode = (isCallsign && current.countryCode) ? current.countryCode : '';
+      if (name !== _lastName || currentCountryCode !== _lastCountryCode) {
         _lastName = name;
+        _lastCountryCode = currentCountryCode;
         // Append flag emoji after callsign when country code is available
-        const flag = (isCallsign && current.countryCode) ? iso2ToFlag(current.countryCode) : '';
+        const flag = currentCountryCode ? iso2ToFlag(currentCountryCode) : '';
         nameEl.textContent = flag ? name + '\u00A0' + flag : name;
         // Clear info panel immediately when callsign changes
         if (!isCallsign) updateInfoPanel(null);

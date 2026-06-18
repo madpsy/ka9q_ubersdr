@@ -379,14 +379,22 @@ class SpectrumDisplay {
                             const _img = (_dxC && _dxC.imageUrl)
                                 ? `<img src="${_dxC.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
-                            this._tooltipCallsign = _dxB;
-                            this._tooltipText = tooltipText;
-                            if (_img) {
-                                this.tooltip.style.whiteSpace = 'normal';
-                                this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
-                            } else {
-                                this.tooltip.style.whiteSpace = 'nowrap';
-                                this.tooltip.innerHTML = tooltipText;
+                            // Only rebuild innerHTML when the spot changes or the cache entry
+                            // is still pending (undefined = lookup not yet complete).
+                            // Once the cache is settled (null or object) and we're on the
+                            // same spot, skip the DOM write so the browser never re-fetches
+                            // the callsign image on every pixel of mouse movement.
+                            const _dxCacheComplete = _dxC !== undefined;
+                            if (this._tooltipCallsign !== _dxB || !_dxCacheComplete) {
+                                this._tooltipCallsign = _dxB;
+                                this._tooltipText = tooltipText;
+                                if (_img) {
+                                    this.tooltip.style.whiteSpace = 'normal';
+                                    this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
+                                } else {
+                                    this.tooltip.style.whiteSpace = 'nowrap';
+                                    this.tooltip.innerHTML = tooltipText;
+                                }
                             }
                         }
 
@@ -435,14 +443,17 @@ class SpectrumDisplay {
                             const _img = (_cwC && _cwC.imageUrl)
                                 ? `<img src="${_cwC.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
-                            this._tooltipCallsign = _cwB;
-                            this._tooltipText = tooltipText;
-                            if (_img) {
-                                this.tooltip.style.whiteSpace = 'normal';
-                                this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
-                            } else {
-                                this.tooltip.style.whiteSpace = 'nowrap';
-                                this.tooltip.innerHTML = tooltipText;
+                            const _cwCacheComplete = _cwC !== undefined;
+                            if (this._tooltipCallsign !== _cwB || !_cwCacheComplete) {
+                                this._tooltipCallsign = _cwB;
+                                this._tooltipText = tooltipText;
+                                if (_img) {
+                                    this.tooltip.style.whiteSpace = 'normal';
+                                    this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
+                                } else {
+                                    this.tooltip.style.whiteSpace = 'nowrap';
+                                    this.tooltip.innerHTML = tooltipText;
+                                }
                             }
                         }
 
@@ -489,14 +500,17 @@ class SpectrumDisplay {
                             const _img = (_vaC && _vaC.imageUrl)
                                 ? `<img src="${_vaC.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
-                            this._tooltipCallsign = _vaB;
-                            this._tooltipText = tooltipText;
-                            if (_img) {
-                                this.tooltip.style.whiteSpace = 'normal';
-                                this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
-                            } else {
-                                this.tooltip.style.whiteSpace = 'nowrap';
-                                this.tooltip.innerHTML = tooltipText;
+                            const _vaCacheComplete = _vaC !== undefined;
+                            if (this._tooltipCallsign !== _vaB || !_vaCacheComplete) {
+                                this._tooltipCallsign = _vaB;
+                                this._tooltipText = tooltipText;
+                                if (_img) {
+                                    this.tooltip.style.whiteSpace = 'normal';
+                                    this.tooltip.innerHTML = `<div style="display:flex;align-items:flex-start;gap:8px;">${_img}<div style="white-space:nowrap;">${tooltipText}</div></div>`;
+                                } else {
+                                    this.tooltip.style.whiteSpace = 'nowrap';
+                                    this.tooltip.innerHTML = tooltipText;
+                                }
                             }
                         }
 
@@ -5234,6 +5248,9 @@ class SpectrumDisplay {
         if (this.tooltip) {
             this.tooltip.style.display = 'none';
         }
+        // Reset cached callsign so the next hover over the same spot re-renders
+        // correctly (the tooltip was hidden, so it needs a fresh innerHTML write).
+        this._tooltipCallsign = null;
     }
 
     // Update configuration

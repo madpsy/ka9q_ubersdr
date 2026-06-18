@@ -310,11 +310,12 @@
                 <input type="date" id="date-input" />
             </div>
             <div class="control-group">
-                <label>Hours back (from end of day):</label>
+                <label>Time range:</label>
                 <select id="hours-select">
-                    <option value="6">Last 6 h</option>
-                    <option value="12">Last 12 h</option>
-                    <option value="24" selected>Full day (24 h)</option>
+                    <option value="rolling24" selected>Rolling 24 h</option>
+                    <option value="6">Last 6 h (today)</option>
+                    <option value="12">Last 12 h (today)</option>
+                    <option value="24">Full Day</option>
                 </select>
             </div>
             <div class="control-group">
@@ -669,52 +670,66 @@ function buildCallsignParam() {
     return BEACONS.map(b => b.callsign).slice(0, 20).join(',');
 }
 
+// ── Helper: fetch one date's spots (returns [] on 204/error) ─────────────
+async function fetchSpotsForDate(dateStr, band, minSNR, startTimeParam) {
+    const callsigns = buildCallsignParam();
+    let url = `/api/cwskimmer/spots?date=${dateStr}&callsign=${encodeURIComponent(callsigns)}${startTimeParam}`;
+    if (band)              url += `&band=${encodeURIComponent(band)}`;
+    if (minSNR !== '-999') url += `&min_snr=${minSNR}`;
+    const r = await fetch(url);
+    if (r.status === 204 || !r.ok) return [];
+    const data = await r.json();
+    return (data.spots || []).filter(s => beaconByCall[s.callsign]);
+}
+
 // ── Fetch spots from API ─────────────────────────────────────────────────
 async function loadSpots() {
-    const dateVal = document.getElementById('date-input').value;
-    if (!dateVal) {
-        setStatus('Please select a date.', 'error');
-        return;
-    }
-
-    const hours = parseInt(document.getElementById('hours-select').value, 10);
-    const band  = document.getElementById('band-filter').value;
-    const minSNR = document.getElementById('snr-filter').value;
-
-    // Compute start_time for the hours-back filter
-    let startTimeParam = '';
-    if (hours < 24) {
-        // e.g. last 6 h of the day = start at 18:00
-        const startH = 24 - hours;
-        startTimeParam = `&start_time=${padZ(startH)}:00`;
-    }
-
-    const callsigns = buildCallsignParam();
-    let url = `/api/cwskimmer/spots?date=${dateVal}&callsign=${encodeURIComponent(callsigns)}${startTimeParam}`;
-    if (band)   url += `&band=${encodeURIComponent(band)}`;
-    if (minSNR !== '-999') url += `&min_snr=${minSNR}`;
+    const hoursVal = document.getElementById('hours-select').value;
+    const band     = document.getElementById('band-filter').value;
+    const minSNR   = document.getElementById('snr-filter').value;
+    const rolling  = hoursVal === 'rolling24';
 
     setStatus('Loading spots…', 'loading');
     document.getElementById('summary-section').style.display = 'none';
 
     try {
-        const r = await fetch(url);
-        if (r.status === 204) {
-            allSpots = [];
-            setStatus('No beacon spots found for the selected parameters.', 'info');
-            renderResults([]);
-            return;
+        if (rolling) {
+            // Fetch today + yesterday in parallel, merge, then filter to last 24 h
+            const now = new Date();
+            const cutoff = new Date(now.getTime() - 24 * 3600 * 1000);
+            const todayStr     = todayUTC();
+            const yd = new Date(now);
+            yd.setUTCDate(yd.getUTCDate() - 1);
+            const yesterdayStr = yd.getUTCFullYear() + '-' + padZ(yd.getUTCMonth() + 1) + '-' + padZ(yd.getUTCDate());
+
+            const [todaySpots, ydSpots] = await Promise.all([
+                fetchSpotsForDate(todayStr,     band, minSNR, ''),
+                fetchSpotsForDate(yesterdayStr, band, minSNR, ''),
+            ]);
+
+            // Merge and filter to last 24 h
+            allSpots = [...todaySpots, ...ydSpots].filter(s => {
+                const ts = new Date(s.timestamp);
+                return !isNaN(ts) && ts >= cutoff && ts <= now;
+            });
+            // Sort newest first
+            allSpots.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} (rolling 24 h).`, 'ok');
+        } else {
+            const dateVal = document.getElementById('date-input').value;
+            if (!dateVal) {
+                setStatus('Please select a date.', 'error');
+                return;
+            }
+            const hours = parseInt(hoursVal, 10);
+            let startTimeParam = '';
+            if (hours < 24) {
+                const startH = 24 - hours;
+                startTimeParam = `&start_time=${padZ(startH)}:00`;
+            }
+            allSpots = await fetchSpotsForDate(dateVal, band, minSNR, startTimeParam);
+            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} for ${dateVal}.`, 'ok');
         }
-        if (!r.ok) {
-            const e = await r.json().catch(() => ({ error: r.statusText }));
-            setStatus('Error: ' + (e.error || r.statusText), 'error');
-            return;
-        }
-        const data = await r.json();
-        allSpots = data.spots || [];
-        // Keep only spots whose callsign is a known beacon
-        allSpots = allSpots.filter(s => beaconByCall[s.callsign]);
-        setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} for ${dateVal}.`, 'ok');
         renderResults(allSpots);
     } catch (err) {
         setStatus('Fetch error: ' + err.message, 'error');
@@ -947,13 +962,24 @@ async function init() {
     dateInput.value = todayUTC();
     dateInput.max   = todayUTC();
 
+    // Disable date input when Rolling 24h is selected
+    function updateDateInputState() {
+        const rolling = document.getElementById('hours-select').value === 'rolling24';
+        dateInput.disabled = rolling;
+        dateInput.style.opacity = rolling ? '0.4' : '1';
+    }
+    document.getElementById('hours-select').addEventListener('change', updateDateInputState);
+    updateDateInputState(); // apply on load (rolling24 is default)
+
     // Wire buttons
     document.getElementById('load-btn').addEventListener('click', () => {
         startAutoRefresh(); // reset countdown on manual load
         loadSpots();
     });
     document.getElementById('today-btn').addEventListener('click', () => {
-        dateInput.value = todayUTC();
+        if (document.getElementById('hours-select').value !== 'rolling24') {
+            dateInput.value = todayUTC();
+        }
         startAutoRefresh();
         loadSpots();
     });

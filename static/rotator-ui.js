@@ -992,6 +992,24 @@ class RotatorUI {
                     hasPassword: !!this.savedPassword
                 }, window.location.origin);
             } catch (_) { /* popup closed between check and send — ignore */ }
+
+            // Piggyback the current ant switch status on every rotator poll (1 s).
+            // This ensures the popup sees the ant switch state immediately on open
+            // without waiting up to 30 s for the dedicated ant switch poll cycle.
+            if (this.antSwitchEnabled && this.antSwitchStatus) {
+                try {
+                    lw.postMessage({
+                        type:           'ant_switch_status',
+                        enabled:        !!this.antSwitchStatus.enabled,
+                        num_antennas:   this.antSwitchStatus.num_antennas   || 0,
+                        antenna_labels: this.antSwitchStatus.antenna_labels || [],
+                        selected:       this.antSwitchStatus.selected       || [],
+                        grounded:       !!this.antSwitchStatus.grounded,
+                        thunderstorm:   !!this.antSwitchStatus.thunderstorm,
+                        hasPassword:    !!this.antSwitchPassword
+                    }, window.location.origin);
+                } catch (_) {}
+            }
         }
     }
     

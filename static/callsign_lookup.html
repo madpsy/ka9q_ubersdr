@@ -910,7 +910,7 @@
             // Build popup content — always include distance/bearing if receiver is known
             const db = calcDistanceBearing(lat, lon);
             const flag = iso2ToFlag(countryCode || '');
-            const countryLine = country ? `<br>${flag}${esc(country)}` : '';
+            const countryLine = country ? `<br>${esc(country)}` : '';
             const popupExtra = db
                 ? `<br>${db.distKm.toLocaleString()} km &nbsp;|&nbsp; ${db.bearing}°`
                 : '';

@@ -244,6 +244,7 @@ type WSPRGridSquareBandEntry struct {
 type WSPRGridSquareEntry struct {
 	Grid           string                    `json:"grid"` // 4-char Maidenhead (e.g. "IO91")
 	Country        string                    `json:"country"`
+	CountryCode    string                    `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
 	Continent      string                    `json:"continent"`
 	BestPrediction string                    `json:"best_prediction"` // best quality across all bands
 	BestSSBSNR     float64                   `json:"best_ssb_snr"`    // highest predicted SSB SNR across all bands
@@ -1066,6 +1067,7 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 	// Aggregate by grid square across bands.
 	type gridAcc struct {
 		country        string
+		countryCode    string
 		continent      string
 		bestPrediction string
 		bestSSBSNR     float64
@@ -1091,8 +1093,16 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 
 		acc, ok := byGrid[gk.Grid]
 		if !ok {
+			// Resolve ISO 3166-1 alpha-2 country code via the best-SNR callsign for this grid.
+			var countryCode string
+			if gg.BestCallsign != "" {
+				if ctyInfo := GetCallsignInfo(gg.BestCallsign); ctyInfo != nil {
+					countryCode = ctyInfo.CountryCode
+				}
+			}
 			acc = &gridAcc{
 				country:        gk.Country,
+				countryCode:    countryCode,
 				continent:      gg.Continent,
 				bestPrediction: pred,
 				bestSSBSNR:     snr,
@@ -1136,6 +1146,7 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 		result = append(result, WSPRGridSquareEntry{
 			Grid:           grid,
 			Country:        acc.country,
+			CountryCode:    acc.countryCode,
 			Continent:      acc.continent,
 			BestPrediction: acc.bestPrediction,
 			BestSSBSNR:     acc.bestSSBSNR,

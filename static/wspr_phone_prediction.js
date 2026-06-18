@@ -333,8 +333,10 @@ const app = (() => {
             return `<div class="${cls}" style="margin-top:2px;">${escHtml(b.band)}: <strong>${blabel}</strong> (${bsnr} dB)</div>`;
         }).join('');
 
+        const gsFlag = iso2ToFlag(gs.country_code);
+        const gsCountry = gsFlag ? `${gsFlag}\u00A0${escHtml(gs.country)}` : escHtml(gs.country);
         tooltip.innerHTML = `
-            <div class="tooltip-title">⊞ ${escHtml(gs.grid)} — ${escHtml(gs.country)}</div>
+            <div class="tooltip-title">⊞ ${escHtml(gs.grid)} — ${gsCountry}</div>
             <div class="${tooltipPredClass(gs.best_prediction)}">Best: <strong>${predLabel}</strong> (${bestSnrStr} dB)</div>
             ${bandLines}
         `;
@@ -456,7 +458,7 @@ const app = (() => {
             if (entry.lat == null || entry.lon == null) continue;
             if (!byCountry.has(entry.country)) {
                 byCountry.set(entry.country, { lat: entry.lat, lon: entry.lon,
-                    continent: entry.continent, bands: [] });
+                    continent: entry.continent, countryCode: entry.country_code || '', bands: [] });
             }
             byCountry.get(entry.country).bands.push(entry);
         }
@@ -572,8 +574,10 @@ const app = (() => {
             </div>`;
         }).join('');
 
+        const spotFlag = iso2ToFlag(cdata.countryCode);
+        const spotTitle = spotFlag ? `${spotFlag}\u00A0${escHtml(cdata.country)}` : escHtml(cdata.country);
         tooltip.innerHTML = `
-            <div class="tooltip-title">${escHtml(cdata.country)}</div>
+            <div class="tooltip-title">${spotTitle}</div>
             <div style="color:#888;font-size:11px;margin-bottom:5px;">${escHtml(cdata.continent || '')}</div>
             ${bandRows}
         `;

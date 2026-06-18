@@ -667,7 +667,9 @@
 
             badgesEl.innerHTML = countries.map(c => {
                 const cls = c.prediction || 'poor';
-                return `<span class="wspr-badge ${cls}" title="${c.prediction} (${c.predicted_ssb_snr.toFixed(1)} dB SSB SNR)">${c.country}</span>`;
+                const flag = iso2ToFlag(c.country_code);
+                const label = flag ? `${flag}\u00A0${c.country}` : c.country;
+                return `<span class="wspr-badge ${cls}" title="${c.prediction} (${c.predicted_ssb_snr.toFixed(1)} dB SSB SNR)">${label}</span>`;
             }).join('');
 
             container.style.display = 'block';

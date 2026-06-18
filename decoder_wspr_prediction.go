@@ -279,6 +279,7 @@ type WSPRSummaryByCountryResponse struct {
 // WSPRSummaryCountryEntry is one country within a by=band summary row.
 type WSPRSummaryCountryEntry struct {
 	Country         string   `json:"country"`
+	CountryCode     string   `json:"country_code,omitempty"` // ISO 3166-1 alpha-2 (empty for non-sovereign entities)
 	Continent       string   `json:"continent"`
 	Prediction      string   `json:"prediction"`
 	PredictedSSBSNR float64  `json:"predicted_ssb_snr"`
@@ -439,6 +440,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 				lon := ctyInfo.Longitude
 				entry.Lat = &lat
 				entry.Lon = &lon
+				entry.CountryCode = ctyInfo.CountryCode
 			}
 		}
 		acc.countries = append(acc.countries, entry)
@@ -965,6 +967,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 					lon := ctyInfo.Longitude
 					countryEntry.Lat = &lat
 					countryEntry.Lon = &lon
+					countryEntry.CountryCode = ctyInfo.CountryCode
 				}
 			}
 			acc.countries = append(acc.countries, countryEntry)

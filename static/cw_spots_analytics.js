@@ -1,4 +1,13 @@
 // CW Spots Analytics JavaScript
+
+function cwAnalyticsIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(1)
+    ) + ' ';
+}
+
 (function() {
     'use strict';
 
@@ -133,12 +142,21 @@
                 allCountries.forEach(country => {
                     const option = document.createElement('option');
                     option.value = country.name;
+                    option.textContent = cwAnalyticsIso2ToFlag(country.country_code) + country.name;
+                    option.style.background = '#1a1a2e';
+                    option.style.color = '#ffffff';
                     datalist.appendChild(option);
                 });
             }
         } catch (error) {
             console.error('Error loading countries:', error);
         }
+    }
+
+    function flagForAnalyticsCountry(countryName) {
+        if (!countryName) return '';
+        const entry = allCountries.find(c => c.name === countryName);
+        return entry ? cwAnalyticsIso2ToFlag(entry.country_code) : '';
     }
 
     async function loadContinents() {
@@ -483,7 +501,7 @@
 
             // Create popup content
             let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
-            popupContent += `<b>${country.country}</b><br>`;
+            popupContent += `<b>${flagForAnalyticsCountry(country.country)}${country.country}</b><br>`;
             popupContent += `<b>Continent:</b> ${country.continent}<br>`;
             popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
             popupContent += `<b>Bands:</b> ${country.bands.map(b => b.band).join(', ')}<br>`;
@@ -548,7 +566,7 @@
 
             // Create popup content
             let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
-            popupContent += `<b>${country.country}</b><br>`;
+            popupContent += `<b>${flagForAnalyticsCountry(country.country)}${country.country}</b><br>`;
             popupContent += `<b>Continent:</b> ${country.continent}<br>`;
             popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
             popupContent += `<b>Bands:</b> ${country.bands.map(b => b.band).join(', ')}<br>`;
@@ -723,8 +741,9 @@
         const card = document.createElement('div');
         card.className = 'entity-card';
 
-        const name = type === 'country' ? entity.country :
-                     (continentNames[entity.continent] || entity.continent);
+        const name = type === 'country'
+            ? flagForAnalyticsCountry(entity.country) + entity.country
+            : (continentNames[entity.continent] || entity.continent);
         const subtitle = type === 'country' ?
                         (continentNames[entity.continent] || entity.continent) :
                         `${entity.countries_count} countries`;
@@ -1595,7 +1614,7 @@
 
             // Create popup content
             let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
-            popupContent += `<b>${countryName}</b><br>`;
+            popupContent += `<b>${flagForAnalyticsCountry(countryName)}${countryName}</b><br>`;
             popupContent += `<b>Hour:</b> ${hourStr} UTC<br>`;
             popupContent += `<b>Spots:</b> ${spots.toLocaleString()}<br>`;
             popupContent += `<b>Unique Callsigns:</b> ${uniqueCallsigns}<br>`;

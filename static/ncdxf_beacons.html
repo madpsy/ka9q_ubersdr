@@ -400,6 +400,12 @@
                 </select>
             </div>
             <div class="control-group">
+                <label>Beacon:</label>
+                <select id="beacon-filter">
+                    <option value="">All beacons</option>
+                </select>
+            </div>
+            <div class="control-group">
                 <label>Band filter:</label>
                 <select id="band-filter">
                     <option value="">All beacon bands</option>
@@ -694,12 +700,20 @@ function colourBeaconMarkers(heardSet, byCall) {
         // Rebuild popup content via setPopupContent (works even before popup is opened)
         let spotsHtml;
         if (heard) {
-            const bestSNR = bSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
-            const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
-            const bandPills = bandSet.map(bd =>
-                `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;">${bd}</span>`
-            ).join(' ');
-            spotsHtml = `${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Best SNR: ${bestSNR} dB<br>${bandPills}<br><span style="opacity:0.7;">Last: ${lastTime}</span>`;
+            const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 16) + ' UTC' : '';
+
+            // Per-band: best SNR and last-heard hour
+            const bandDetails = BAND_NAMES
+                .filter(bd => bandSet.includes(bd))
+                .map(bd => {
+                    const bandSpots = bSpots.filter(s => s.band === bd);
+                    const bestSNR = bandSpots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
+                    const lastBandTime = bandSpots.length > 0 ? bandSpots[0].timestamp.slice(11, 16) + ' UTC' : '';
+                    const sign = bestSNR >= 0 ? '+' : '';
+                    return `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;color:#000;">${bd} <span style="opacity:0.75;">${sign}${bestSNR} dB</span></span> <span style="opacity:0.55;font-size:0.8em;">${lastBandTime}</span>`;
+                }).join('<br>');
+
+            spotsHtml = `<span style="opacity:0.7;">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} · Last: ${lastTime}</span><br>${bandDetails}`;
         } else {
             spotsHtml = '<span style="color:#888;">Not heard</span>';
         }
@@ -756,10 +770,25 @@ async function loadBeaconData() {
     beaconByCall = {};
     BEACONS.forEach(b => { beaconByCall[b.callsign] = b; });
     placeBeaconMarkers();
+
+    // Populate beacon filter dropdown
+    const sel = document.getElementById('beacon-filter');
+    if (sel) {
+        // Keep the "All beacons" option, then add one per beacon
+        sel.innerHTML = '<option value="">All beacons</option>' +
+            BEACONS.map(b =>
+                `<option value="${b.callsign}">${b.callsign} — ${b.location}</option>`
+            ).join('');
+    }
 }
 
-// ── Build callsign query string (comma-separated, max 20) ────────────────
+// ── Build callsign query string ───────────────────────────────────────────
+// If a specific beacon is selected, use only that callsign.
+// Otherwise send all 18 (API supports up to 20).
 function buildCallsignParam() {
+    const sel = document.getElementById('beacon-filter');
+    const chosen = sel ? sel.value : '';
+    if (chosen) return chosen;
     return BEACONS.map(b => b.callsign).slice(0, 20).join(',');
 }
 
@@ -845,11 +874,18 @@ function renderResults(spots) {
         if (!byCall[s.callsign]) byCall[s.callsign] = [];
         byCall[s.callsign].push(s);
     });
+
+    // If a specific beacon is selected, restrict cards + heatmap to that beacon only
+    const selBeacon = (document.getElementById('beacon-filter') || {}).value || '';
+    const visibleBeacons = selBeacon
+        ? BEACONS.filter(b => b.callsign === selBeacon)
+        : BEACONS;
+
     colourBeaconMarkers(heardSet, byCall);
     drawSpotLines(spots);
     renderSummary(spots, heardSet);
-    renderBeaconCards(spots, heardSet);
-    renderHeatmap(spots);
+    renderBeaconCards(spots, heardSet, visibleBeacons);
+    renderHeatmap(spots, visibleBeacons);
     renderSpotsTable(spots);
     if (spots.length > 0) {
         document.getElementById('summary-section').style.display = '';
@@ -877,7 +913,8 @@ function renderSummary(spots, heardSet) {
     `;
 }
 
-function renderBeaconCards(spots, heardSet) {
+function renderBeaconCards(spots, heardSet, beaconList) {
+    beaconList = beaconList || BEACONS;
     // Group spots by callsign
     const byCall = {};
     spots.forEach(s => {
@@ -886,7 +923,7 @@ function renderBeaconCards(spots, heardSet) {
     });
 
     const container = document.getElementById('beacon-cards');
-    container.innerHTML = BEACONS.map(b => {
+    container.innerHTML = beaconList.map(b => {
         const heard = heardSet.has(b.callsign);
         const bSpots = byCall[b.callsign] || [];
         const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
@@ -1044,7 +1081,8 @@ function snrToColor(snr) {
     return `rgb(${r},${g},${b})`;
 }
 
-function renderHeatmap(spots) {
+function renderHeatmap(spots, beaconList) {
+    beaconList = beaconList || BEACONS;
     const section = document.getElementById('heatmap-section');
     if (!section) return;
 
@@ -1058,7 +1096,7 @@ function renderHeatmap(spots) {
     const heatData = {};
     BAND_NAMES.forEach(bd => {
         heatData[bd] = {};
-        BEACONS.forEach(b => { heatData[bd][b.callsign] = {}; });
+        beaconList.forEach(b => { heatData[bd][b.callsign] = {}; });
     });
 
     spots.forEach(s => {
@@ -1086,7 +1124,7 @@ function renderHeatmap(spots) {
 
         // Count total spots for this band
         let bandTotalSpots = 0;
-        BEACONS.forEach(b => {
+        beaconList.forEach(b => {
             Object.values(heatData[band][b.callsign]).forEach(cell => { bandTotalSpots += cell.count; });
         });
         const bandHasData = bandTotalSpots > 0;
@@ -1107,7 +1145,7 @@ function renderHeatmap(spots) {
         });
 
         // One row per beacon
-        BEACONS.forEach(b => {
+        beaconList.forEach(b => {
             html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
             hours.forEach(h => {
                 const cell = heatData[band][b.callsign][h];

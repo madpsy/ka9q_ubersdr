@@ -141,10 +141,8 @@ function cwAnalyticsIso2ToFlag(code) {
                 
                 allCountries.forEach(country => {
                     const option = document.createElement('option');
-                    option.value = country.name;
-                    option.textContent = cwAnalyticsIso2ToFlag(country.country_code) + country.name;
-                    option.style.background = '#1a1a2e';
-                    option.style.color = '#ffffff';
+                    const flag = cwAnalyticsIso2ToFlag(country.country_code);
+                    option.value = flag + country.name;
                     datalist.appendChild(option);
                 });
             }
@@ -1267,9 +1265,19 @@ function cwAnalyticsIso2ToFlag(code) {
     }
 
     function getNormalizedCountryName(countryName) {
+        // Strip a leading flag emoji + space if present (2 regional indicator chars + space = 3 chars)
+        // Regional indicator symbols are in the range U+1F1E6–U+1F1FF (each is a surrogate pair = 2 JS chars)
+        let stripped = countryName;
+        if (countryName.length >= 5) {
+            const cp0 = countryName.codePointAt(0);
+            if (cp0 >= 0x1F1E6 && cp0 <= 0x1F1FF) {
+                // First char is a regional indicator (2 JS chars), second too, then a space
+                stripped = countryName.slice(5); // 2+2+1 = 5 JS chars
+            }
+        }
         // Find the country in our list (case-insensitive) and return the exact name
         const found = allCountries.find(country =>
-            country.name.toLowerCase() === countryName.toLowerCase()
+            country.name.toLowerCase() === stripped.toLowerCase()
         );
         return found ? found.name : null;
     }

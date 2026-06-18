@@ -96,7 +96,6 @@ func (s *ImageProxyService) Register(srcURL string) string {
 		return ""
 	}
 	if !s.isAllowedURL(srcURL) {
-		log.Printf("[image-proxy] rejected disallowed image URL: %s", srcURL)
 		return ""
 	}
 

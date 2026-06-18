@@ -151,14 +151,21 @@ func handleLookup(
 		// with Cache-Control: no-cache by Chrome, causing a network round-trip
 		// on every hover.  The proxy serves the image from /dev/shm with
 		// Cache-Control: public, max-age=86400, immutable.
-		if result.Image != "" && globalImageProxy != nil {
-			result.Image = globalImageProxy.Register(result.Image)
+		//
+		// IMPORTANT: do NOT mutate result.Image — result points into the QRZ
+		// cache and mutating it would store the proxy path in the cache, causing
+		// subsequent lookups to pass the proxy path back to Register() instead
+		// of the original QRZ CDN URL.  Instead, copy the struct and rewrite
+		// only the copy's Image field.
+		respCallsign := *result // shallow copy — safe; all fields are value types or immutable strings
+		if respCallsign.Image != "" && globalImageProxy != nil {
+			respCallsign.Image = globalImageProxy.Register(respCallsign.Image)
 		}
 
 		// Augment with CTY database information (always attempt, even if QRZ
 		// already returned cqzone/ituzone — CTY provides continent, country_code
 		// and primary prefix which QRZ does not supply).
-		resp := &lookupResponse{QRZCallsign: result}
+		resp := &lookupResponse{QRZCallsign: &respCallsign}
 		if globalCTY != nil {
 			if ctyInfo := globalCTY.LookupCallsignFull(normalised); ctyInfo != nil {
 				resp.CTY = &CTYAugmentation{

@@ -710,10 +710,15 @@
             }
         }
 
+        let lastAnnouncedCallsign = null;
+
         function announceCallsign(callsign) {
+            const normalised = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            if (normalised === lastAnnouncedCallsign) return;
+            lastAnnouncedCallsign = normalised;
+
             if (announceMode === 'voice' && ttsVoice) {
-                const words = callsign.toUpperCase().replace(/[^A-Z0-9]/g, '')
-                    .split('').map(ch => NATO[ch] || ch).join(' ');
+                const words = normalised.split('').map(ch => NATO[ch] || ch).join(' ');
                 ttsSpeak(words);
             } else if (announceMode === 'morse') {
                 playMorse(callsign);

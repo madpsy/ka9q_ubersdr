@@ -1,6 +1,14 @@
 // Digital Spots Map JavaScript
 // Displays real-time digital mode spots on a Leaflet map
 
+function digMapIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(1)
+    ) + ' ';
+}
+
 class DigitalSpotsMap {
     constructor() {
         this.map = null;
@@ -1740,7 +1748,7 @@ class DigitalSpotsMap {
 
         let content = `
             <div style="font-family: monospace; font-size: 12px;">
-                <b>${spot.callsign}</b><br>
+                <b>${digMapIso2ToFlag(spot.country_code)}${spot.callsign}</b><br>
         `;
 
         if (spot.country) {
@@ -1888,12 +1896,14 @@ class DigitalSpotsMap {
 
     updateFilterDropdowns() {
         // Collect unique countries and continents from all spots
-        const countries = new Set();
+        const countries = new Map(); // country name -> country_code
         const continents = new Set();
         
         this.spots.forEach(spot => {
             if (spot.country && spot.country !== 'Unknown' && spot.country !== '') {
-                countries.add(spot.country);
+                if (!countries.has(spot.country)) {
+                    countries.set(spot.country, spot.country_code || '');
+                }
             }
             if (spot.Continent && spot.Continent !== '') {
                 continents.add(spot.Continent);
@@ -1904,14 +1914,15 @@ class DigitalSpotsMap {
         const countryFilter = document.getElementById('country-filter');
         if (countryFilter) {
             const currentValue = countryFilter.value;
-            const sortedCountries = Array.from(countries).sort();
+            const sortedCountries = Array.from(countries.keys()).sort();
             
             // Rebuild options
             countryFilter.innerHTML = '<option value="all">All</option>';
             sortedCountries.forEach(country => {
                 const option = document.createElement('option');
                 option.value = country;
-                option.textContent = country;
+                const flag = digMapIso2ToFlag(countries.get(country));
+                option.textContent = flag + country;
                 countryFilter.appendChild(option);
             });
             
@@ -1962,9 +1973,13 @@ class DigitalSpotsMap {
         const cqZones = new Set();
         const continents = new Set();
         
+        const countrySampleSpot = {}; // Store a sample spot per country for country_code lookup
         spots.forEach(spot => {
             if (spot.country && spot.country !== 'Unknown') {
                 countryCounts[spot.country] = (countryCounts[spot.country] || 0) + 1;
+                if (!countrySampleSpot[spot.country]) {
+                    countrySampleSpot[spot.country] = spot;
+                }
             }
             if (spot.CQZone && spot.CQZone > 0) {
                 cqZones.add(spot.CQZone);
@@ -1988,11 +2003,13 @@ class DigitalSpotsMap {
         let html = '';
         sortedCountries.forEach(([country, count], index) => {
             const isActive = this.countryFilter === country;
+            const sampleSpot = countrySampleSpot[country];
+            const flag = sampleSpot ? digMapIso2ToFlag(sampleSpot.country_code) : '';
             html += `
                 <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #ccc;">
                     <span style="cursor: pointer; ${isActive ? 'color: #4a9eff; font-weight: bold;' : ''}"
                           title="Filter by ${country}"
-                          onclick="window.digitalSpotsMap.setFilter('country', '${country.replace(/'/g, "\\'")}')">${index + 1}. ${country}</span>
+                          onclick="window.digitalSpotsMap.setFilter('country', '${country.replace(/'/g, "\\'")}')">${index + 1}. ${flag}${country}</span>
                     <span style="color: #4a9eff;">${count}</span>
                 </div>
             `;
@@ -2321,7 +2338,7 @@ class DigitalSpotsMap {
         
         rangesEl.innerHTML = html;
         // Format closest spot with details on separate lines
-        let closestHtml = `${Math.round(closestSpot.distance_km)} km - ${closestSpot.callsign}`;
+        let closestHtml = `${Math.round(closestSpot.distance_km)} km - ${digMapIso2ToFlag(closestSpot.country_code)}${closestSpot.callsign}`;
         if (closestSpot.locator) {
             closestHtml += ` (${closestSpot.locator})`;
         }
@@ -2344,7 +2361,7 @@ class DigitalSpotsMap {
         closestEl.innerHTML = closestHtml;
 
         // Format farthest spot with details on separate lines
-        let farthestHtml = `${Math.round(farthestSpot.distance_km)} km - ${farthestSpot.callsign}`;
+        let farthestHtml = `${Math.round(farthestSpot.distance_km)} km - ${digMapIso2ToFlag(farthestSpot.country_code)}${farthestSpot.callsign}`;
         if (farthestSpot.locator) {
             farthestHtml += ` (${farthestSpot.locator})`;
         }
@@ -2697,7 +2714,7 @@ class DigitalSpotsMap {
                     <div class="live-message-time">${time} UTC${localTimeStr}</div>
                     <div>
                         <span class="live-message-callsign" style="cursor: pointer; text-decoration: underline;"
-                              onclick="window.digitalSpotsMap.showSpotOnMap('${spotKey}')">${spot.callsign}</span>
+                              onclick="window.digitalSpotsMap.showSpotOnMap('${spotKey}')">${digMapIso2ToFlag(spot.country_code)}${spot.callsign}</span>
                         ${spot.country ? `<span style="color: #888; font-size: 10px;"> • ${spot.country}</span>` : ''}
                         ${spot.Continent ? `<span style="color: #888; font-size: 10px;"> • ${spot.Continent}</span>` : ''}
                         ${spot.distance_km !== undefined && spot.distance_km !== null ? `<span style="color: #888; font-size: 10px;"> • ${Math.round(spot.distance_km)} km</span>` : ''}
@@ -2807,6 +2824,7 @@ class DigitalSpotsMap {
                 this.seenCountryBands.add(countryBandKey);
                 this.latestNewCountry = {
                     country: spot.country,
+                    country_code: spot.country_code,
                     mode: spot.mode,
                     band: spot.band,
                     callsign: spot.callsign,
@@ -2837,7 +2855,7 @@ class DigitalSpotsMap {
             const snrStr = this.latestNewCountry.snr !== undefined ?
                 `${this.latestNewCountry.snr >= 0 ? '+' : ''}${this.latestNewCountry.snr}dB` : 'N/A';
             countryInfo.innerHTML = `
-                <div style="font-weight: bold;">${this.latestNewCountry.country} • ${this.latestNewCountry.band}</div>
+                <div style="font-weight: bold;">${digMapIso2ToFlag(this.latestNewCountry.country_code)}${this.latestNewCountry.country} • ${this.latestNewCountry.band}</div>
                 <div style="font-size: 10px; color: #888; margin-top: 2px;">
                     ${this.latestNewCountry.callsign} • ${this.latestNewCountry.mode} • ${snrStr}
                 </div>
@@ -2938,7 +2956,7 @@ class DigitalSpotsMap {
             const snrStr = spot.snr !== undefined ?
                 `${spot.snr >= 0 ? '+' : ''}${spot.snr}dB` : 'N/A';
             rarestCountryEl.innerHTML = `
-                <div style="font-weight: bold;">${rarestCountry} (${minCountryCount} spot${minCountryCount !== 1 ? 's' : ''})</div>
+                <div style="font-weight: bold;">${digMapIso2ToFlag(spot.country_code)}${rarestCountry} (${minCountryCount} spot${minCountryCount !== 1 ? 's' : ''})</div>
                 <div style="font-size: 10px; color: #888; margin-top: 2px;">
                     ${spot.callsign} • ${spot.mode} • ${spot.band} • ${snrStr}
                 </div>

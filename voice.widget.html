@@ -866,10 +866,11 @@
   // ── Tooltip helpers ──────────────────────────────────────────────────────
   var tooltipCallsign = ''; // tracks which callsign the tooltip is currently showing
 
-  function buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid) {
+  function buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid, countryCode) {
     var contName = continent ? (CONTINENT_NAMES[continent] || continent) : '';
+    var flag = (countryCode && countryCode.length === 2) ? iso2ToFlag(countryCode) : '';
     var values = [];
-    if (callsign) values.push(escTT(callsign));
+    if (callsign) values.push(escTT(flag ? flag + '\u00A0' + callsign : callsign));
     if (fname)    values.push(escTT(fname));
     if (country)  values.push(escTT(country));
     if (contName) values.push(escTT(contName));
@@ -901,11 +902,12 @@
   }
 
   function showRowTooltip(row, e) {
-    var callsign  = row.getAttribute('data-tt-callsign') || '';
-    var country   = row.getAttribute('data-tt-country')   || '';
-    var continent = row.getAttribute('data-tt-continent') || '';
-    var offset    = row.getAttribute('data-tt-offset');
-    var snr       = row.getAttribute('data-tt-snr')       || '';
+    var callsign    = row.getAttribute('data-tt-callsign')     || '';
+    var country     = row.getAttribute('data-tt-country')      || '';
+    var countryCode = row.getAttribute('data-tt-country-code') || '';
+    var continent   = row.getAttribute('data-tt-continent')    || '';
+    var offset      = row.getAttribute('data-tt-offset');
+    var snr         = row.getAttribute('data-tt-snr')          || '';
 
     if (!callsign) return;
     tooltipCallsign = callsign;
@@ -927,7 +929,7 @@
       }
     }
 
-    tooltipEl.innerHTML = buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid);
+    tooltipEl.innerHTML = buildTooltipHTML(callsign, country, continent, offset, snr, fname, imageUrl, grid, countryCode);
     tooltipEl.classList.add('va-tt-visible');
     positionTooltip(e);
 
@@ -946,7 +948,7 @@
             var iu = result.imageUrl || d2.image || '';
             var gr = d2.grid || '';
             if (fn || iu || gr) {
-              tooltipEl.innerHTML = buildTooltipHTML(fetchFor, country, continent, offset, snr, fn, iu, gr);
+              tooltipEl.innerHTML = buildTooltipHTML(fetchFor, country, continent, offset, snr, fn, iu, gr, countryCode);
               // Re-position in case size changed
               positionTooltip(window._lastTooltipEvent || e);
             }

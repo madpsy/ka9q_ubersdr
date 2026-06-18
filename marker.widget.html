@@ -395,9 +395,10 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl) {
+  function buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl, countryCode) {
+    var flag = (countryCode && countryCode.length === 2) ? iso2ToFlag(countryCode) : '';
     var values = [];
-    if (callsign) values.push(escMT(callsign));
+    if (callsign) values.push(escMT(flag ? flag + '\u00A0' + callsign : callsign));
     if (fname)    values.push(escMT(fname));
     if (country)  values.push(escMT(country));
     if (grid)     values.push(escMT(grid));
@@ -429,6 +430,9 @@
     if (!callsign) return;
     _ttCallsign = callsign;
 
+    // Get country code from current marker for flag emoji
+    var countryCode = (_currentMarker && _currentMarker.countryCode) ? _currentMarker.countryCode : '';
+
     // Immediate render from cache
     var fname = '', country = '', grid = '', imageUrl = '';
     var cache = window._callsignLookupCache;
@@ -442,7 +446,7 @@
         imageUrl = cached.imageUrl || d.image || '';
       }
     }
-    tooltipEl.innerHTML = buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl);
+    tooltipEl.innerHTML = buildMarkerTooltipHTML(callsign, fname, country, grid, imageUrl, countryCode);
     tooltipEl.classList.add('sdr-tt-visible');
     positionMarkerTooltip(e);
 
@@ -461,7 +465,7 @@
             var co = d2.country || d2.land || '';
             var gr = d2.grid || '';
             var iu = result.imageUrl || d2.image || '';
-            tooltipEl.innerHTML = buildMarkerTooltipHTML(fetchFor, fn, co, gr, iu);
+            tooltipEl.innerHTML = buildMarkerTooltipHTML(fetchFor, fn, co, gr, iu, countryCode);
             positionMarkerTooltip(_lastTTEvent || e);
           }
         }).catch(function () {});

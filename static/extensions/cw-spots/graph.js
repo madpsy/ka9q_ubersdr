@@ -31,6 +31,7 @@ class CWSpotsGraph {
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
         this.currentFrequency = null; // Tuned frequency relayed from parent (Hz)
+        this._lastHoverFrequency = null; // Debounce hover-tune: only send when spot changes
 
         // CW decoder state
         this.morseRunning = false;
@@ -541,9 +542,14 @@ class CWSpotsGraph {
                         const datasetIndex = element.datasetIndex;
                         const index = element.index;
                         const spot = this.chart.data.datasets[datasetIndex].data[index].spot;
-                        if (spot) {
+                        // Only tune if the hovered spot has changed — prevents flooding
+                        // the parent with tune requests on every mousemove pixel
+                        if (spot && spot.frequency !== this._lastHoverFrequency) {
+                            this._lastHoverFrequency = spot.frequency;
                             this.tuneToSpot(spot);
                         }
+                    } else if (elements.length === 0) {
+                        this._lastHoverFrequency = null;
                     }
                 }
             }

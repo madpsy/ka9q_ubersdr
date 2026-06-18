@@ -1,6 +1,14 @@
 // Decoder Spots History Map Module
 // Displays historical spots on a Leaflet map with grid locator conversion
 
+function _histMapIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(1)
+    ) + ' ';
+}
+
 class DecoderSpotsHistoryMap {
     constructor() {
         this.map = null;
@@ -8,6 +16,7 @@ class DecoderSpotsHistoryMap {
         this.markerClusterGroup = null; // Leaflet marker cluster group
         this.receiverMarker = null;
         this.receiverLocation = null;
+        this.ctyCountryMap = new Map(); // country name -> ISO2 code
         
         // Band colors matching digitalspots_map.js
         this.bandColors = {
@@ -128,7 +137,33 @@ class DecoderSpotsHistoryMap {
     /**
      * Initialize the map
      */
+    async loadCTYCountries() {
+        try {
+            const resp = await fetch('/api/cty/countries');
+            if (!resp.ok) return;
+            const json = await resp.json();
+            const countries = json && json.data && json.data.countries;
+            if (Array.isArray(countries)) {
+                countries.forEach(entry => {
+                    if (entry.name && entry.country_code) {
+                        this.ctyCountryMap.set(entry.name, entry.country_code);
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('[DecoderSpotsHistoryMap] Failed to load CTY countries:', e);
+        }
+    }
+
+    flagForCountry(countryName) {
+        if (!countryName) return '';
+        return _histMapIso2ToFlag(this.ctyCountryMap.get(countryName));
+    }
+
     async initMap() {
+        // Load CTY country->ISO2 mapping for flag display (non-blocking)
+        this.loadCTYCountries();
+
         const mapContainer = document.getElementById('spots-map');
         if (!mapContainer) {
             console.error('Map container not found');
@@ -373,7 +408,7 @@ class DecoderSpotsHistoryMap {
 
         let content = `
             <div style="font-family: monospace; font-size: 12px;">
-                <b><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" style="color: #000; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${spot.callsign}</a></b><br>
+                <b><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" style="color: #000; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${this.flagForCountry(spot.country)}${spot.callsign}</a></b><br>
         `;
 
         if (spot.country) {

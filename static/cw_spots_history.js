@@ -15,6 +15,38 @@
     let sortColumn = 'timestamp';
     let sortDirection = 'desc'; // Start with newest first
     let spotsMap = null; // Map instance
+    let ctyCountryMap = new Map(); // country name -> ISO2 code
+
+    function cwHistIso2ToFlag(code) {
+        if (!code || code.length !== 2) return '';
+        return String.fromCodePoint(
+            0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(0),
+            0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(1)
+        ) + ' ';
+    }
+
+    function flagForCountry(countryName) {
+        if (!countryName) return '';
+        return cwHistIso2ToFlag(ctyCountryMap.get(countryName));
+    }
+
+    async function loadCTYCountries() {
+        try {
+            const resp = await fetch('/api/cty/countries');
+            if (!resp.ok) return;
+            const json = await resp.json();
+            const countries = json && json.data && json.data.countries;
+            if (Array.isArray(countries)) {
+                countries.forEach(entry => {
+                    if (entry.name && entry.country_code) {
+                        ctyCountryMap.set(entry.name, entry.country_code);
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('[CW Spots History] Failed to load CTY countries:', e);
+        }
+    }
 
     // Common HF band names (excluding VHF/UHF)
     const commonBands = [
@@ -37,6 +69,7 @@
         initializeDatePicker();
         initializeControls();
         initializeMap();
+        loadCTYCountries();
         loadAvailableDates().then(() => {
             // Auto-select today's date if available
             autoSelectTodayAndLoad();
@@ -160,7 +193,9 @@
         sortedCountries.forEach(country => {
             const option = document.createElement('option');
             option.value = country;
-            option.textContent = country;
+            option.textContent = flagForCountry(country) + country;
+            option.style.background = '#1a1a2e';
+            option.style.color = '#ffffff';
             countrySelect.appendChild(option);
         });
 
@@ -771,7 +806,7 @@
         if (stats.mostCommonCountry) {
             statsHTML += `
                 <div class="stat-card">
-                    <div class="stat-value">${stats.mostCommonCountry.value}</div>
+                    <div class="stat-value">${flagForCountry(stats.mostCommonCountry.value)}${stats.mostCommonCountry.value}</div>
                     <div class="stat-label">Most Common Country (${stats.mostCommonCountry.count})</div>
                 </div>
             `;
@@ -808,7 +843,7 @@
         if (stats.leastCommonCountry && stats.uniqueCountries > 1) {
             statsHTML += `
                 <div class="stat-card">
-                    <div class="stat-value">${stats.leastCommonCountry.value}</div>
+                    <div class="stat-value">${flagForCountry(stats.leastCommonCountry.value)}${stats.leastCommonCountry.value}</div>
                     <div class="stat-label">Least Common Country (${stats.leastCommonCountry.count})</div>
                 </div>
             `;
@@ -849,7 +884,7 @@
             row.innerHTML = `
                 <td>${time}</td>
                 <td>${spot.band}</td>
-                <td><strong><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" class="callsign-link" style="color: inherit; text-decoration: none; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${spot.callsign}</a></strong></td>
+                <td><strong><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" class="callsign-link" style="color: inherit; text-decoration: none; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${flagForCountry(spot.country)}${spot.callsign}</a></strong></td>
                 <td class="${snrClass}">${snrText} dB</td>
                 <td>${freqMHz} MHz</td>
                 <td>${spot.wpm || '-'}</td>

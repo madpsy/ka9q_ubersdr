@@ -1364,8 +1364,9 @@ function colourBeaconMarkersForHour(h) {
 function replayStep() {
     colourBeaconMarkersForHour(replayState.currentHour);
     if (replayState.currentHour >= 23) {
-        // Reached the end — stop and leave markers at hour 23
+        // Reached the end — pause and restore live greyline
         pauseReplay();
+        updateGreyline(); // snap terminator back to current real time
         return;
     }
     replayState.currentHour++;

@@ -707,6 +707,32 @@ class RotatorUI {
      */
     setupEventHandlers() {
         // Panel toggle is handled via onclick in HTML
+
+        // Listen for bearing commands from the callsign lookup popup.
+        // The popup sends {type:'rotator_set_bearing', bearing:<number>} when the
+        // user clicks "Set" — we execute the API call here so the password never
+        // leaves the main page.
+        window.addEventListener('message', (event) => {
+            if (event.origin !== window.location.origin) return;
+            if (!event.data || event.data.type !== 'rotator_set_bearing') return;
+            const bearing = parseFloat(event.data.bearing);
+            if (isNaN(bearing) || !this.savedPassword) return;
+            fetch('/api/rotctl/position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: this.savedPassword, azimuth: bearing })
+            }).then(async r => {
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || !d.success) {
+                    console.error('[RotatorUI] lookup set-bearing failed:', d.error || r.status);
+                    // If password rejected, clear it so the popup hides the Set button next cycle
+                    if (r.status === 401 || (d.error && d.error.toLowerCase().includes('password'))) {
+                        this.savedPassword = '';
+                        localStorage.removeItem('rotctl_password');
+                    }
+                }
+            }).catch(err => console.error('[RotatorUI] lookup set-bearing network error:', err));
+        });
     }
     
     /**
@@ -914,6 +940,23 @@ class RotatorUI {
                 className += ' moving';
             }
             tabStatus.className = className;
+        }
+
+        // Push rotator state to callsign lookup popup (if open)
+        // The popup uses this to show current antenna bearing and the Set button.
+        const lw = window._callsignLookupWindow;
+        if (lw && !lw.closed) {
+            try {
+                lw.postMessage({
+                    type:        'rotator_status',
+                    enabled:     true,
+                    connected:   !!data.connected,
+                    azimuth:     (data.position && data.position.azimuth !== undefined)
+                                     ? Math.round(data.position.azimuth)
+                                     : null,
+                    hasPassword: !!this.savedPassword
+                }, window.location.origin);
+            } catch (_) { /* popup closed between check and send — ignore */ }
         }
     }
     

@@ -273,6 +273,36 @@
             font-weight: 500;
         }
 
+        /* Rotator integration — antenna bearing part of the Bearing row */
+        #rx-ant-part {
+            color: #7ecfff;
+        }
+
+        /* Rotator Set button — inline with the bearing value */
+        .rx-set-btn {
+            -webkit-appearance: none;
+            appearance: none;
+            background: none;
+            border: 1px solid #555;
+            color: #e0e0e0;
+            border-radius: 3px;
+            padding: 0 6px;
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+            vertical-align: baseline;
+            line-height: 1.5;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .rx-set-btn:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: #888;
+        }
+        .rx-set-btn.sent {
+            color: #4CAF50;
+            border-color: #4CAF50;
+        }
+
         .info-grid {
             display: grid;
             grid-template-columns: auto 1fr;
@@ -1054,7 +1084,9 @@
                        <span class="rx-lbl">Distance</span>
                        <span class="rx-val">${rxDb.distKm.toLocaleString()} km</span>
                        <span class="rx-lbl">Bearing</span>
-                       <span class="rx-val">${rxDb.bearing}°</span>
+                       <span class="rx-val" id="rx-bearing-row">
+                           <span id="rx-bearing-deg">${rxDb.bearing}°</span><span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span><span id="rx-set-part" style="display:none"> | <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${rxDb.bearing}°">Set</button></span>
+                       </span>
                    </div>`
                 : (d.lat && d.lon
                     ? `<div class="rx-distance" id="rx-dist-display">—</div>`
@@ -1106,6 +1138,10 @@
                 });
             });
 
+            // Wire rotator Set button and apply current rotator state (if any)
+            wireSetButton();
+            updateRotatorUI();
+
             // Announce the callsign (voice or morse) if enabled
             announceCallsign(callsign);
 
@@ -1122,11 +1158,19 @@
                     const distEl = document.getElementById('rx-dist-display');
                     if (distEl && distEl.textContent.trim() === '—') {
                         const db2 = calcDistanceBearing(d.lat, d.lon);
-                        if (db2) distEl.innerHTML =
-                            `<span class="rx-lbl">Distance</span>` +
-                            `<span class="rx-val">${db2.distKm.toLocaleString()} km</span>` +
-                            `<span class="rx-lbl">Bearing</span>` +
-                            `<span class="rx-val">${db2.bearing}°</span>`;
+                        if (db2) {
+                            distEl.innerHTML =
+                                `<span class="rx-lbl">Distance</span>` +
+                                `<span class="rx-val">${db2.distKm.toLocaleString()} km</span>` +
+                                `<span class="rx-lbl">Bearing</span>` +
+                                `<span class="rx-val" id="rx-bearing-row">` +
+                                    `<span id="rx-bearing-deg">${db2.bearing}°</span>` +
+                                    `<span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span>` +
+                                    `<span id="rx-set-part" style="display:none"> | <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${db2.bearing}°">Set</button></span>` +
+                                `</span>`;
+                            wireSetButton();
+                            updateRotatorUI();
+                        }
                     }
                 });
             }
@@ -1189,11 +1233,70 @@
             input.focus();
         }
 
+        // ── Rotator integration ───────────────────────────────────────────
+        // State pushed from the main page via postMessage every ~1 s when
+        // rotator-ui.js is loaded (i.e. rotator is enabled in config).
+        // Default: all false/null so the page looks identical to today when
+        // the rotator is not enabled.
+        let rotatorState = { enabled: false, connected: false, azimuth: null, hasPassword: false };
+
+        /**
+         * Update the bearing row in #rx-dist-display based on current rotatorState.
+         * Safe to call even when the elements don't exist yet (no-ops in that case).
+         */
+        function updateRotatorUI() {
+            const antPart = document.getElementById('rx-ant-part');
+            const antDeg  = document.getElementById('rx-ant-deg');
+            const setPart = document.getElementById('rx-set-part');
+            if (!antPart) return;
+
+            // Condition 1: rotator enabled + azimuth known → show antenna bearing
+            const showAnt = rotatorState.enabled && rotatorState.azimuth !== null;
+            antPart.style.display = showAnt ? '' : 'none';
+            if (showAnt && antDeg) antDeg.textContent = `${rotatorState.azimuth}° 🧭`;
+
+            // Condition 2: rotator enabled + password present → show Set button
+            if (setPart) {
+                setPart.style.display = (rotatorState.enabled && rotatorState.hasPassword) ? '' : 'none';
+            }
+        }
+
+        /**
+         * Wire the Set button click handler.
+         * Called once after each renderResult() / deferred RAF DOM build.
+         * Idempotent — uses a data attribute to avoid double-wiring.
+         */
+        function wireSetButton() {
+            const btn = document.getElementById('rx-set-btn');
+            if (!btn || btn.dataset.wired) return;
+            btn.dataset.wired = '1';
+            btn.addEventListener('click', () => {
+                const degEl = document.getElementById('rx-bearing-deg');
+                const bearing = degEl ? parseFloat(degEl.textContent) : NaN;
+                if (isNaN(bearing)) return;
+                if (!window.opener || window.opener.closed) return;
+                window.opener.postMessage(
+                    { type: 'rotator_set_bearing', bearing },
+                    window.location.origin
+                );
+                // Brief visual feedback — revert after 1.5 s
+                const orig = btn.textContent;
+                btn.classList.add('sent');
+                btn.textContent = '✓';
+                setTimeout(() => { btn.classList.remove('sent'); btn.textContent = orig; }, 1500);
+            });
+        }
+
         // ── Cross-window messaging ────────────────────────────────────────
         // The extension can post a message to update the UUID or trigger a lookup
         // without needing to close and reopen the window.
         window.addEventListener('message', (event) => {
             if (!event.data) return;
+            if (event.data.type === 'rotator_status') {
+                rotatorState = event.data;
+                updateRotatorUI();
+                return;
+            }
             if (event.data.type === 'callsign_lookup') {
                 if (event.data.uuid) currentUUID = event.data.uuid;
                 if (event.data.callsign) {

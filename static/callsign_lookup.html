@@ -882,7 +882,7 @@
             ).pad(0.15), { paddingTopLeft: [0, 60] });
         }
 
-        function initMap(lat, lon, callsign, country) {
+        function initMap(lat, lon, callsign, country, countryCode) {
             currentSpotLat = lat;
             currentSpotLon = lon;
 
@@ -909,14 +909,15 @@
 
             // Build popup content — always include distance/bearing if receiver is known
             const db = calcDistanceBearing(lat, lon);
-            const countryLine = country ? `<br>${esc(country)}` : '';
+            const flag = iso2ToFlag(countryCode || '');
+            const countryLine = country ? `<br>${flag}${esc(country)}` : '';
             const popupExtra = db
                 ? `<br>${db.distKm.toLocaleString()} km &nbsp;|&nbsp; ${db.bearing}°`
                 : '';
 
             leafletMarker = L.marker([lat, lon], { icon })
                 .addTo(leafletMap)
-                .bindPopup(`<b>${esc(callsign)}</b>${countryLine}${popupExtra}`, {
+                .bindPopup(`<b>${flag}${esc(callsign)}</b>${countryLine}${popupExtra}`, {
                     autoPanPaddingTopLeft: L.point(10, 60)
                 })
                 .openPopup();
@@ -1116,7 +1117,7 @@
                 // container that a newer lookup has already claimed.
                 requestAnimationFrame(() => {
                     if (generation !== lookupGeneration) return;
-                    initMap(d.lat, d.lon, callsign, d.country);
+                    initMap(d.lat, d.lon, callsign, d.country, d.cty && d.cty.country_code ? d.cty.country_code : '');
                     // If description hadn't loaded yet when renderResult ran, fill in now
                     const distEl = document.getElementById('rx-dist-display');
                     if (distEl && distEl.textContent.trim() === '—') {

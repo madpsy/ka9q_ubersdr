@@ -1505,6 +1505,16 @@
                     input.value = event.data.callsign.toUpperCase();
                     doLookup(event.data.callsign);
                 }
+                // Ask the main page to push the current ant switch status immediately
+                // (avoids waiting up to 30 s for the next poll cycle)
+                if (window.opener && !window.opener.closed) {
+                    try {
+                        window.opener.postMessage(
+                            { type: 'request_ant_switch_status' },
+                            window.location.origin
+                        );
+                    } catch (_) {}
+                }
             }
         });
 

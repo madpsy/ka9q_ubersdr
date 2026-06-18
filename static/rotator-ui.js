@@ -742,6 +742,30 @@ class RotatorUI {
                 this._sendAntCommand({ command: 'select', antenna });
                 return;
             }
+
+            // Popup requests an immediate push of the current ant switch status
+            // (sent when the popup first receives a callsign_lookup message, to
+            // avoid waiting up to 30 s for the next poll cycle).
+            if (event.data.type === 'request_ant_switch_status') {
+                if (this.antSwitchEnabled && this.antSwitchStatus) {
+                    const lw = window._callsignLookupWindow;
+                    if (lw && !lw.closed) {
+                        try {
+                            lw.postMessage({
+                                type:           'ant_switch_status',
+                                enabled:        !!this.antSwitchStatus.enabled,
+                                num_antennas:   this.antSwitchStatus.num_antennas || 0,
+                                antenna_labels: this.antSwitchStatus.antenna_labels || [],
+                                selected:       this.antSwitchStatus.selected || [],
+                                grounded:       !!this.antSwitchStatus.grounded,
+                                thunderstorm:   !!this.antSwitchStatus.thunderstorm,
+                                hasPassword:    !!this.antSwitchPassword
+                            }, window.location.origin);
+                        } catch (_) {}
+                    }
+                }
+                return;
+            }
         });
     }
     

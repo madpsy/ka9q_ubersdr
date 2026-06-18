@@ -355,7 +355,8 @@
             font-size: 11px !important;
             font-weight: 600 !important;
             padding: 2px 6px !important;
-            white-space: nowrap !important;
+            white-space: normal !important;
+            max-width: 120px !important;
             box-shadow: 0 1px 4px rgba(0,0,0,0.5) !important;
             pointer-events: none !important;
         }
@@ -790,13 +791,14 @@ function colourBeaconMarkers(heardSet, byCall) {
         // Update permanent tooltip to include bands heard
         const bSpots = byCall[b.callsign] || [];
         const bandSet = [...new Set(bSpots.map(s => s.band))].sort();
-        let labelHtml = `<b>${b.callsign}</b>`;
+        let labelHtml = `<span style="display:flex;flex-wrap:wrap;align-items:center;gap:2px;"><b>${b.callsign}</b>`;
         if (bandSet.length > 0) {
             const pills = bandSet.map(bd =>
-                `<span style="display:inline-block;padding:1px 4px;border-radius:3px;font-size:10px;background:${BAND_COLORS[bd]||'#888'};color:#000;margin-left:3px;">${bd}</span>`
+                `<span style="padding:1px 4px;border-radius:3px;font-size:10px;background:${BAND_COLORS[bd]||'#888'};color:#000;">${bd}</span>`
             ).join('');
             labelHtml += pills;
         }
+        labelHtml += '</span>';
         m.unbindTooltip();
         m.bindTooltip(labelHtml, {
             permanent: true,

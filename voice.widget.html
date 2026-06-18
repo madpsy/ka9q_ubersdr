@@ -981,14 +981,6 @@
   }
 
   function tuneToFrequency(hz, mode) {
-    var centerSpectrum = true;
-    var spectrum = window.spectrumDisplay;
-    if (spectrum && spectrum.centerFreq && spectrum.totalBandwidth) {
-      var minV = spectrum.centerFreq - spectrum.totalBandwidth / 2;
-      var maxV = spectrum.centerFreq + spectrum.totalBandwidth / 2;
-      centerSpectrum = !(hz >= minV && hz <= maxV);
-    }
-
     if (typeof window.setFrequencyInputValue === 'function') {
       window.setFrequencyInputValue(Math.round(hz));
     } else {
@@ -996,22 +988,21 @@
       if (fi) fi.value = Math.round(hz);
     }
     if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
-    if (typeof window.updateURL === 'function') window.updateURL();
-
-    if (centerSpectrum) {
-      var etCb = document.getElementById('spectrum-edge-tune-enable');
-      var etOrig = etCb ? etCb.checked : false;
-      if (etCb && !etOrig) {
-        etCb.checked = true;
-        etCb.dispatchEvent(new Event('change'));
-        setTimeout(function () {
-          if (etCb) { etCb.checked = etOrig; etCb.dispatchEvent(new Event('change')); }
-        }, 2000);
-      }
-    }
-
-    if (typeof window.autoTune === 'function') window.autoTune();
     if (typeof window.setMode === 'function') window.setMode(mode, false);
+    if (typeof window.updateURL === 'function') window.updateURL();
+    if (typeof window.autoTune === 'function') window.autoTune();
+
+    // Re-centre the spectrum the same way the bookmark dropdown does:
+    // send an explicit 'pan' WebSocket message and suppress edge-detection
+    // for 2 s so it doesn't fight the pan.
+    var spectrum = window.spectrumDisplay;
+    if (spectrum && spectrum.connected && spectrum.ws) {
+      spectrum.skipEdgeDetectionTemporary = true;
+      setTimeout(function () {
+        if (spectrum) spectrum.skipEdgeDetectionTemporary = false;
+      }, 2000);
+      spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: hz }));
+    }
   }
 
   // ── Dial frequency / mode tracking ────────────────────────────────────────

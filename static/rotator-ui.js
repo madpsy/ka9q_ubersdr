@@ -1253,6 +1253,23 @@ class RotatorUI {
         this.lastAntSelected = newSelected;
         this.lastAntGrounded = newGrounded;
 
+        // Keep window.activeAntennaLabel in sync so the spectrum overlay
+        // (drawStationIdOverlay) reflects the current antenna immediately,
+        // rather than waiting up to 30 s for the separate app.js poll.
+        if (data.grounded) {
+            window.activeAntennaLabel = 'Grounded';
+        } else if (data.selected && data.selected.length > 0) {
+            const labels = data.selected.map(n => {
+                const idx = n - 1;
+                return (data.antenna_labels && data.antenna_labels[idx])
+                    ? data.antenna_labels[idx]
+                    : `Antenna ${n}`;
+            });
+            window.activeAntennaLabel = labels.join(', ');
+        } else {
+            window.activeAntennaLabel = null;
+        }
+
         this.antSwitchStatus = data;
 
         // ── Update collapsed tab label ─────────────────────────────────────

@@ -75,7 +75,7 @@ func NewImageProxyService() *ImageProxyService {
 		byURL:       make(map[string]*imageCacheEntry),
 		rateLimiter: NewImageProxyRateLimiter(),
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: 7 * time.Second,
 		},
 	}
 	// Clean up any stale files left from a previous run.
@@ -152,7 +152,14 @@ func (s *ImageProxyService) fetchAndStore(entry *imageCacheEntry) {
 		return
 	}
 
-	resp, err := s.httpClient.Get(entry.srcURL) //nolint:gosec // URL validated by isAllowedURL
+	req, err := http.NewRequest(http.MethodGet, entry.srcURL, nil) //nolint:gosec // URL validated by isAllowedURL
+	if err != nil {
+		entry.err = fmt.Errorf("image-proxy: build request: %w", err)
+		log.Printf("[image-proxy] request build error for %s: %v", entry.srcURL, err)
+		return
+	}
+	req.Header.Set("User-Agent", "UberSDR/"+Version)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		entry.err = fmt.Errorf("image-proxy: fetch failed: %w", err)
 		log.Printf("[image-proxy] fetch error for %s: %v", entry.srcURL, err)
@@ -234,10 +241,10 @@ func (s *ImageProxyService) HandleImageRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Wait for the background fetch to complete (up to 10 s).
+	// Wait for the background fetch to complete (up to 5 s).
 	select {
 	case <-entry.ready:
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		http.Error(w, "image fetch timed out", http.StatusGatewayTimeout)
 		return
 	}

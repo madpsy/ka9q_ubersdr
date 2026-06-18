@@ -357,7 +357,13 @@ class SpectrumDisplay {
                         const timeStr = pos.spot.time ? new Date(pos.spot.time).toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) : 'N/A';
                         const dxFlag = _spectrumIso2ToFlag(pos.spot.country_code || '');
                         const dxCallDisplay = dxFlag ? dxFlag + '\u00A0' + pos.spot.dx_call : pos.spot.dx_call;
-                        let tooltipText = `${dxCallDisplay}: ${freqStr}<br>Time: ${timeStr} UTC`;
+                        const _dxP = (pos.spot.dx_call || '').split('/');
+                        const _dxB = _dxP.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
+                        const _dxC = window._callsignLookupCache && window._callsignLookupCache.get(_dxB);
+                        const _dxName = (_dxC && _dxC.data) ? (() => { const _n = _dxC.data.name_fmt || [_dxC.data.fname, _dxC.data.nickname ? `"${_dxC.data.nickname}"` : '', _dxC.data.name].filter(Boolean).join(' '); return _n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n; })() : '';
+                        let tooltipText = `${dxCallDisplay}: ${freqStr}`;
+                        if (_dxName) tooltipText += `<br>Name: ${_dxName}`;
+                        tooltipText += `<br>Time: ${timeStr} UTC`;
                         if (pos.spot.country) {
                             tooltipText += `<br>Country: ${pos.spot.country}`;
                         }
@@ -370,17 +376,10 @@ class SpectrumDisplay {
                             tooltipText += `<br>Comment: ${pos.spot.comment}`;
                         }
                         {
-                            const _p = (pos.spot.dx_call || '').split('/');
-                            const _b = _p.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
-                            const _c = window._callsignLookupCache && window._callsignLookupCache.get(_b);
-                            const _img = (_c && _c.imageUrl)
-                                ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
+                            const _img = (_dxC && _dxC.imageUrl)
+                                ? `<img src="${_dxC.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
-                            if (_c && _c.data) {
-                                const _n = _c.data.name_fmt || [_c.data.fname, _c.data.nickname ? `"${_c.data.nickname}"` : '', _c.data.name].filter(Boolean).join(' ');
-                                if (_n) tooltipText += `<br>Name: ${_n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n}`;
-                            }
-                            this._tooltipCallsign = _b;
+                            this._tooltipCallsign = _dxB;
                             this._tooltipText = tooltipText;
                             if (_img) {
                                 this.tooltip.style.whiteSpace = 'normal';
@@ -419,7 +418,13 @@ class SpectrumDisplay {
                         const snrStr = pos.spot.snr >= 0 ? `+${pos.spot.snr}` : pos.spot.snr;
                         const cwFlag = _spectrumIso2ToFlag(pos.spot.country_code || '');
                         const cwCallDisplay = cwFlag ? cwFlag + '\u00A0' + pos.spot.dx_call : pos.spot.dx_call;
-                        let tooltipText = `${cwCallDisplay}: ${freqStr}<br>Time: ${timeStr} UTC<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
+                        const _cwP = (pos.spot.dx_call || '').split('/');
+                        const _cwB = _cwP.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
+                        const _cwC = window._callsignLookupCache && window._callsignLookupCache.get(_cwB);
+                        const _cwName = (_cwC && _cwC.data) ? (() => { const _n = _cwC.data.name_fmt || [_cwC.data.fname, _cwC.data.nickname ? `"${_cwC.data.nickname}"` : '', _cwC.data.name].filter(Boolean).join(' '); return _n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n; })() : '';
+                        let tooltipText = `${cwCallDisplay}: ${freqStr}`;
+                        if (_cwName) tooltipText += `<br>Name: ${_cwName}`;
+                        tooltipText += `<br>Time: ${timeStr} UTC<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
                         if (pos.spot.country) {
                             tooltipText += `<br>Country: ${pos.spot.country}`;
                         }
@@ -427,17 +432,10 @@ class SpectrumDisplay {
                             tooltipText += `<br>Comment: ${pos.spot.comment}`;
                         }
                         {
-                            const _p = (pos.spot.dx_call || '').split('/');
-                            const _b = _p.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
-                            const _c = window._callsignLookupCache && window._callsignLookupCache.get(_b);
-                            const _img = (_c && _c.imageUrl)
-                                ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
+                            const _img = (_cwC && _cwC.imageUrl)
+                                ? `<img src="${_cwC.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
-                            if (_c && _c.data) {
-                                const _n = _c.data.name_fmt || [_c.data.fname, _c.data.nickname ? `"${_c.data.nickname}"` : '', _c.data.name].filter(Boolean).join(' ');
-                                if (_n) tooltipText += `<br>Name: ${_n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n}`;
-                            }
-                            this._tooltipCallsign = _b;
+                            this._tooltipCallsign = _cwB;
                             this._tooltipText = tooltipText;
                             if (_img) {
                                 this.tooltip.style.whiteSpace = 'normal';
@@ -474,7 +472,12 @@ class SpectrumDisplay {
                         const modeStr = (pos.mode || '').toUpperCase();
                         const voiceFlag = _spectrumIso2ToFlag(act.dx_country_code || '');
                         const voiceLabel = voiceFlag ? voiceFlag + '\u00A0' + pos.label : pos.label;
+                        const _vaP = (pos.label || '').split('/');
+                        const _vaB = _vaP.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
+                        const _vaC = window._callsignLookupCache && window._callsignLookupCache.get(_vaB);
+                        const _vaName = (_vaC && _vaC.data) ? (() => { const _n = _vaC.data.name_fmt || [_vaC.data.fname, _vaC.data.nickname ? `"${_vaC.data.nickname}"` : '', _vaC.data.name].filter(Boolean).join(' '); return _n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n; })() : '';
                         let tooltipText = `${voiceLabel}: ${freqStr}`;
+                        if (_vaName) tooltipText += `<br>Name: ${_vaName}`;
                         if (modeStr) tooltipText += `<br>Mode: ${modeStr}`;
                         if (act.signal_above_noise != null) {
                             tooltipText += `<br>SNR: ${Math.round(act.signal_above_noise)} dB`;
@@ -483,17 +486,10 @@ class SpectrumDisplay {
                             tooltipText += `<br>Confidence: ${Math.round(act.confidence * 100)}%`;
                         }
                         {
-                            const _p = (pos.label || '').split('/');
-                            const _b = _p.reduce((a, b) => b.length > a.length ? b : a, '').toUpperCase();
-                            const _c = window._callsignLookupCache && window._callsignLookupCache.get(_b);
-                            const _img = (_c && _c.imageUrl)
-                                ? `<img src="${_c.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
+                            const _img = (_vaC && _vaC.imageUrl)
+                                ? `<img src="${_vaC.imageUrl}" style="width:56px;height:auto;border-radius:3px;flex-shrink:0;display:block;">`
                                 : '';
-                            if (_c && _c.data) {
-                                const _n = _c.data.name_fmt || [_c.data.fname, _c.data.nickname ? `"${_c.data.nickname}"` : '', _c.data.name].filter(Boolean).join(' ');
-                                if (_n) tooltipText += `<br>Name: ${_n.length > 30 ? _n.slice(0, 30) + '\u2026' : _n}`;
-                            }
-                            this._tooltipCallsign = _b;
+                            this._tooltipCallsign = _vaB;
                             this._tooltipText = tooltipText;
                             if (_img) {
                                 this.tooltip.style.whiteSpace = 'normal';

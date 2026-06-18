@@ -322,6 +322,12 @@
 
   #eqw-widget.eqw-off #eqw-mg-wrap { opacity: 0.35; pointer-events: none; }
 
+  /* Out-of-band band column: slider disabled, everything dimmed */
+  #eqw-widget .eqw-band.eqw-out-of-band .eqw-slot { opacity: 0.28; }
+  #eqw-widget .eqw-band.eqw-out-of-band .eqw-val   { opacity: 0.28; }
+  #eqw-widget .eqw-band.eqw-out-of-band .eqw-label { opacity: 0.28; }
+  #eqw-widget .eqw-band.eqw-out-of-band .eqw-slider { cursor: not-allowed; }
+
   @media (max-width: 768px) {
     #eqw-widget { display: none !important; }
   }
@@ -400,6 +406,67 @@
   function hostReady() {
     return !!(hostEnableBox() && hostBandSlider(60) &&
               typeof window.updateEqualizer === 'function');
+  }
+
+  // ── Bandwidth range helper (mirrors audio.widget.html getBandFreqRange) ──────
+  // Returns { start, end } in Hz representing the absolute audio passband.
+  // Falls back to 0–8000 Hz (covers all EQ bands) when bandwidth is unknown.
+  function getBandFreqRange() {
+    var lo = window.currentBandwidthLow;
+    var hi = window.currentBandwidthHigh;
+    if (typeof lo !== 'number' || typeof hi !== 'number') return { start: 0, end: 8000 };
+
+    if (Math.abs(lo) < 500 && Math.abs(hi) < 500) {
+      // CW: 500 Hz audio offset — centre on it
+      var half = Math.max(Math.abs(lo), Math.abs(hi));
+      return { start: Math.max(0, 500 - half), end: 500 + half };
+    }
+    if (lo < 0 && hi > 0) {
+      // Spans zero (AM/SAM): 0 → max extent
+      return { start: 0, end: Math.max(Math.abs(lo), Math.abs(hi)) };
+    }
+    if (lo < 0 && hi <= 0) {
+      // Both negative (LSB): convert to positive, reversed order
+      return { start: Math.abs(hi), end: Math.abs(lo) };
+    }
+    // Both positive (USB etc.)
+    return { start: Math.max(0, lo), end: hi };
+  }
+
+  // ── Out-of-band disable ──────────────────────────────────────────────────────
+  // Disable (and dim) EQ band sliders that are above the audio passband's upper
+  // cutoff.  Only the upper cutoff is enforced — the lower cutoff (e.g. the 50 Hz
+  // USB high-pass) is ignored because low-frequency EQ bands still shape the
+  // audio even when the passband starts above them.
+  //
+  // "+1 slider" leeway: the first band whose centre exceeds the upper cutoff is
+  // still kept enabled (it straddles the edge).  All bands beyond that are
+  // disabled.
+  //
+  // Example: cutoff 2.6 kHz, bands …2.5k, 3k, 4k, 6k, 8k
+  //   2.5k ≤ 2600 → enabled (in-band)
+  //   3k   > 2600 → first band above cutoff → enabled (+1 leeway)
+  //   4k, 6k, 8k  → disabled
+  function updateBandDisabledState() {
+    var range = getBandFreqRange();
+
+    // Find the index of the first band strictly above the upper cutoff.
+    var firstAboveHi = -1;
+    for (var i = 0; i < BANDS.length; i++) {
+      if (BANDS[i].hz > range.end) { firstAboveHi = i; break; }
+    }
+
+    BANDS.forEach(function (b, idx) {
+      var entry = sliders[b.hz];
+      if (!entry) return;
+
+      // Disable only if more than one step above the upper cutoff.
+      var inBand = (firstAboveHi === -1) || (idx <= firstAboveHi);
+
+      var col = entry.slider.closest('.eqw-band');
+      if (col) col.classList.toggle('eqw-out-of-band', !inBand);
+      entry.slider.disabled = !inBand;
+    });
   }
 
   function fmtDb(v) {
@@ -531,6 +598,10 @@
     if (ts - lastFrameTs < FRAME_INTERVAL) return;
     lastFrameTs = ts;
 
+    // Update out-of-band disabled state every frame so it reacts immediately
+    // when the user changes mode/bandwidth on the main UI.
+    updateBandDisabledState();
+
     var analyser = window.vuAnalyser || window.analyser;
     if (!analyser) {
       // No audio yet — decay bars to zero
@@ -580,6 +651,7 @@
         w.val.textContent = fmtDb(parseFloat(host.value));
       }
     });
+    updateBandDisabledState();
     // Sync makeup gain
     var mgHost = document.getElementById('equalizer-makeup-gain');
     if (mgHost && mgSlider.value !== mgHost.value) {

@@ -65,6 +65,49 @@
             font-weight: bold;
             color: #fff;
         }
+        /* ── Replay bar ─────────────────────────────────────────────── */
+        .replay-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+        .replay-bar button {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 5px;
+            color: #e8f0ff;
+            font-size: 1em;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .replay-bar button:hover { background: rgba(255,255,255,0.2); }
+        .replay-bar button:disabled { opacity: 0.35; cursor: default; }
+        #replay-slider {
+            flex: 1;
+            min-width: 120px;
+            accent-color: #4a9eff;
+        }
+        #replay-hour-label {
+            font-size: 0.88em;
+            font-family: monospace;
+            opacity: 0.8;
+            min-width: 70px;
+        }
+        #replay-speed-select {
+            padding: 3px 6px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            color: white;
+            font-size: 0.85em;
+        }
         /* ── Map ────────────────────────────────────────────────────── */
         #beacon-map {
             width: 100%;
@@ -442,6 +485,20 @@
 
     <!-- ── Map ──────────────────────────────────────────────────────── -->
     <div class="section-heading">🗺️ Beacon Map</div>
+    <div id="replay-bar" class="replay-bar" style="display:none;">
+        <button id="replay-play-btn"  title="Play">▶</button>
+        <button id="replay-pause-btn" title="Pause" style="display:none;">⏸</button>
+        <button id="replay-stop-btn"  title="Stop / reset to live view">⏹</button>
+        <input  type="range" id="replay-slider" min="0" max="23" value="0" step="1">
+        <span   id="replay-hour-label">00:00 UTC</span>
+        <label style="font-size:0.82em;opacity:0.65;">Speed:</label>
+        <select id="replay-speed-select">
+            <option value="2000">0.5×</option>
+            <option value="1000" selected>1×</option>
+            <option value="500">2×</option>
+            <option value="250">4×</option>
+        </select>
+    </div>
     <div id="beacon-map"></div>
 
     <!-- ── Summary stats ────────────────────────────────────────────── -->
@@ -648,6 +705,7 @@ function updateGreyline() {
             fillOpacity: 0.3,
             interactive: false,
         }).addTo(map);
+        greylineLayer.bringToBack();
     }
 }
 
@@ -944,7 +1002,12 @@ function renderResults(spots) {
     renderSpotsTable(spots);
     if (spots.length > 0) {
         document.getElementById('summary-section').style.display = '';
+        document.getElementById('replay-bar').style.display = '';
+    } else {
+        document.getElementById('replay-bar').style.display = 'none';
     }
+    // Stop any running replay when new data arrives
+    stopReplay();
 }
 
 function renderSummary(spots, heardSet) {
@@ -1246,6 +1309,102 @@ function downloadCSV() {
     URL.revokeObjectURL(a.href);
 }
 
+// ── Map replay ───────────────────────────────────────────────────────────
+// Steps through UTC hours 0-23, filtering allSpots cumulatively up to each
+// hour and updating beacon marker colours + band badges.
+const replayState = {
+    isPlaying: false,
+    currentHour: 0,
+    intervalId: null,
+};
+
+function replayGetSpeed() {
+    return parseInt(document.getElementById('replay-speed-select').value, 10) || 1000;
+}
+
+// Colour markers using only spots whose UTC hour <= h (cumulative view)
+function colourBeaconMarkersForHour(h) {
+    const filtered = allSpots.filter(s => {
+        const ts = new Date(s.timestamp);
+        return !isNaN(ts) && ts.getUTCHours() <= h;
+    });
+    const heardSet = new Set(filtered.map(s => s.callsign));
+    const byCall = {};
+    filtered.forEach(s => {
+        if (!byCall[s.callsign]) byCall[s.callsign] = [];
+        byCall[s.callsign].push(s);
+    });
+    colourBeaconMarkers(heardSet, byCall);
+    // Also update spot lines for this filtered view
+    clearSpotLines();
+    if (receiverLat !== null) {
+        const drawn = new Set();
+        filtered.forEach(s => {
+            if (drawn.has(s.callsign)) return;
+            const b = beaconByCall[s.callsign];
+            if (!b) return;
+            const color = BAND_COLORS[s.band] || '#aaa';
+            const line = L.polyline(
+                [[receiverLat, receiverLon], [b.latitude, b.longitude]],
+                { color, weight: 2.5, opacity: 0.65, dashArray: '6 5' }
+            ).addTo(map);
+            spotLines.push(line);
+            drawn.add(s.callsign);
+        });
+    }
+    // Update hour label and slider
+    document.getElementById('replay-hour-label').textContent = padZ(h) + ':00 UTC';
+    document.getElementById('replay-slider').value = h;
+}
+
+function replayStep() {
+    colourBeaconMarkersForHour(replayState.currentHour);
+    replayState.currentHour++;
+    if (replayState.currentHour > 23) {
+        replayState.currentHour = 0;
+    }
+}
+
+function startReplay() {
+    if (replayState.isPlaying) return;
+    replayState.isPlaying = true;
+    document.getElementById('replay-play-btn').style.display  = 'none';
+    document.getElementById('replay-pause-btn').style.display = '';
+    replayStep(); // immediate first step
+    replayState.intervalId = setInterval(replayStep, replayGetSpeed());
+}
+
+function pauseReplay() {
+    if (!replayState.isPlaying) return;
+    replayState.isPlaying = false;
+    clearInterval(replayState.intervalId);
+    replayState.intervalId = null;
+    document.getElementById('replay-play-btn').style.display  = '';
+    document.getElementById('replay-pause-btn').style.display = 'none';
+}
+
+function stopReplay() {
+    pauseReplay();
+    replayState.currentHour = 0;
+    document.getElementById('replay-slider').value = 0;
+    document.getElementById('replay-hour-label').textContent = '00:00 UTC';
+    // Restore full live view
+    const heardSet = new Set(allSpots.map(s => s.callsign));
+    const byCall = {};
+    allSpots.forEach(s => {
+        if (!byCall[s.callsign]) byCall[s.callsign] = [];
+        byCall[s.callsign].push(s);
+    });
+    colourBeaconMarkers(heardSet, byCall);
+    drawSpotLines(allSpots);
+}
+
+function scrubReplay(h) {
+    pauseReplay();
+    replayState.currentHour = h;
+    colourBeaconMarkersForHour(h);
+}
+
 // ── Heat-map CSV download ─────────────────────────────────────────────────
 // Exports: Band, Callsign, Location, Hour (UTC), Spots, Best SNR (dB)
 function downloadHeatmapCSV() {
@@ -1381,6 +1540,18 @@ async function init() {
     // CSV download buttons
     document.getElementById('csv-download-btn').addEventListener('click', downloadCSV);
     document.getElementById('heatmap-csv-btn').addEventListener('click', downloadHeatmapCSV);
+
+    // Replay controls
+    document.getElementById('replay-play-btn').addEventListener('click', startReplay);
+    document.getElementById('replay-pause-btn').addEventListener('click', pauseReplay);
+    document.getElementById('replay-stop-btn').addEventListener('click', stopReplay);
+    document.getElementById('replay-slider').addEventListener('input', e => scrubReplay(parseInt(e.target.value, 10)));
+    document.getElementById('replay-speed-select').addEventListener('change', () => {
+        if (replayState.isPlaying) {
+            clearInterval(replayState.intervalId);
+            replayState.intervalId = setInterval(replayStep, replayGetSpeed());
+        }
+    });
 
     // Pagination controls
     document.getElementById('spots-per-page').addEventListener('change', () => {

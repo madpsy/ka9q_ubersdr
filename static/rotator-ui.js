@@ -954,6 +954,7 @@ class RotatorUI {
                     azimuth:     (data.position && data.position.azimuth !== undefined)
                                      ? Math.round(data.position.azimuth)
                                      : null,
+                    moving:      !!data.moving,
                     hasPassword: !!this.savedPassword
                 }, window.location.origin);
             } catch (_) { /* popup closed between check and send — ignore */ }

@@ -274,6 +274,15 @@
         }
 
 
+        /* Slow pulse animation for the antenna bearing when rotator is moving */
+        @keyframes rx-ant-pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.35; }
+        }
+        .rx-ant-moving {
+            animation: rx-ant-pulse 1.5s ease-in-out infinite;
+        }
+
         /* Rotator Set button — inline with the bearing value */
         .rx-set-btn {
             -webkit-appearance: none;
@@ -1323,7 +1332,11 @@
             // Condition 1: rotator enabled + azimuth known → show antenna bearing
             const showAnt = rotatorState.enabled && rotatorState.azimuth !== null;
             antPart.style.display = showAnt ? '' : 'none';
-            if (showAnt && antDeg) antDeg.textContent = `${rotatorState.azimuth}° 🧭`;
+            if (showAnt && antDeg) {
+                antDeg.textContent = `${rotatorState.azimuth}° 🧭`;
+                // Pulse the bearing + emoji while the rotator is moving
+                antDeg.classList.toggle('rx-ant-moving', !!rotatorState.moving);
+            }
 
             // Condition 2: rotator enabled + password present → show Set button
             if (setPart) {

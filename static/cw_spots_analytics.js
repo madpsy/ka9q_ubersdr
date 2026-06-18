@@ -135,16 +135,8 @@ function cwAnalyticsIso2ToFlag(code) {
             if (data.success && data.data && data.data.countries) {
                 allCountries = data.data.countries;
                 
-                // Populate datalist
-                const datalist = document.getElementById('countries-datalist');
-                datalist.innerHTML = '';
-                
-                allCountries.forEach(country => {
-                    const option = document.createElement('option');
-                    const flag = cwAnalyticsIso2ToFlag(country.country_code);
-                    option.value = flag + country.name;
-                    datalist.appendChild(option);
-                });
+                // Set up custom autocomplete
+                setupCountryAutocomplete();
             }
         } catch (error) {
             console.error('Error loading countries:', error);
@@ -155,6 +147,69 @@ function cwAnalyticsIso2ToFlag(code) {
         if (!countryName) return '';
         const entry = allCountries.find(c => c.name === countryName);
         return entry ? cwAnalyticsIso2ToFlag(entry.country_code) : '';
+    }
+
+    function setupCountryAutocomplete() {
+        const input = document.getElementById('country-search');
+        const list = document.getElementById('country-autocomplete-list');
+        if (!input || !list) return;
+
+        let activeIndex = -1;
+
+        function showSuggestions(query) {
+            list.innerHTML = '';
+            activeIndex = -1;
+            if (!query) { list.style.display = 'none'; return; }
+            const q = query.toLowerCase();
+            const matches = allCountries.filter(c => c.name.toLowerCase().includes(q)).slice(0, 50);
+            if (matches.length === 0) { list.style.display = 'none'; return; }
+            matches.forEach((country, idx) => {
+                const item = document.createElement('div');
+                item.style.cssText = 'padding:6px 10px; cursor:pointer; color:#fff; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+                item.textContent = cwAnalyticsIso2ToFlag(country.country_code) + country.name;
+                item.dataset.name = country.name;
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    input.value = country.name;
+                    list.style.display = 'none';
+                });
+                item.addEventListener('mouseover', () => {
+                    setActive(idx);
+                });
+                list.appendChild(item);
+            });
+            list.style.display = 'block';
+        }
+
+        function setActive(idx) {
+            const items = list.querySelectorAll('div');
+            items.forEach((el, i) => {
+                el.style.background = i === idx ? '#2a2a4e' : '';
+            });
+            activeIndex = idx;
+        }
+
+        input.addEventListener('input', () => showSuggestions(input.value.trim()));
+        input.addEventListener('focus', () => { if (input.value.trim()) showSuggestions(input.value.trim()); });
+        input.addEventListener('blur', () => { setTimeout(() => { list.style.display = 'none'; }, 150); });
+        input.addEventListener('keydown', (e) => {
+            const items = list.querySelectorAll('div');
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActive(Math.min(activeIndex + 1, items.length - 1));
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActive(Math.max(activeIndex - 1, 0));
+            } else if (e.key === 'Enter') {
+                if (activeIndex >= 0 && items[activeIndex]) {
+                    e.preventDefault();
+                    input.value = items[activeIndex].dataset.name;
+                    list.style.display = 'none';
+                }
+            } else if (e.key === 'Escape') {
+                list.style.display = 'none';
+            }
+        });
     }
 
     async function loadContinents() {
@@ -1265,19 +1320,9 @@ function cwAnalyticsIso2ToFlag(code) {
     }
 
     function getNormalizedCountryName(countryName) {
-        // Strip a leading flag emoji + space if present (2 regional indicator chars + space = 3 chars)
-        // Regional indicator symbols are in the range U+1F1E6–U+1F1FF (each is a surrogate pair = 2 JS chars)
-        let stripped = countryName;
-        if (countryName.length >= 5) {
-            const cp0 = countryName.codePointAt(0);
-            if (cp0 >= 0x1F1E6 && cp0 <= 0x1F1FF) {
-                // First char is a regional indicator (2 JS chars), second too, then a space
-                stripped = countryName.slice(5); // 2+2+1 = 5 JS chars
-            }
-        }
         // Find the country in our list (case-insensitive) and return the exact name
         const found = allCountries.find(country =>
-            country.name.toLowerCase() === stripped.toLowerCase()
+            country.name.toLowerCase() === countryName.toLowerCase()
         );
         return found ? found.name : null;
     }

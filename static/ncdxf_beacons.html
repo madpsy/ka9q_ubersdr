@@ -211,10 +211,10 @@
         }
         .heatmap-grid {
             display: grid;
-            /* col 0 = beacon label, cols 1-24 = hours */
-            grid-template-columns: 110px repeat(24, minmax(22px, 1fr));
+            /* col 0 = beacon label (callsign + location), cols 1-24 = hours */
+            grid-template-columns: 180px repeat(24, minmax(22px, 1fr));
             gap: 2px;
-            min-width: 650px;
+            min-width: 720px;
         }
         .hm-corner { /* top-left empty cell */ }
         .hm-hour {
@@ -225,13 +225,25 @@
         }
         .hm-beacon-label {
             font-size: 0.75em;
+            padding: 2px 4px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            overflow: hidden;
+            opacity: 0.85;
+        }
+        .hm-beacon-label .hm-bl-call {
+            font-weight: 700;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            padding: 2px 4px;
-            display: flex;
-            align-items: center;
-            opacity: 0.85;
+        }
+        .hm-beacon-label .hm-bl-loc {
+            font-size: 0.85em;
+            opacity: 0.6;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .hm-cell {
             height: 18px;
@@ -1078,7 +1090,7 @@ function renderHeatmap(spots) {
 
         // One row per beacon
         BEACONS.forEach(b => {
-            html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}">${b.callsign}</div>`;
+            html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
             hours.forEach(h => {
                 const cell = heatData[band][b.callsign][h];
                 if (cell) {

@@ -1,6 +1,15 @@
 // Spectrum Display - Full-band FFT visualization for ka9q UberSDR
 // Connects to radiod's spectrum mode via WebSocket
 
+// ── Flag emoji helper ──────────────────────────────────────────────────────────
+function _spectrumIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    const c = code.toUpperCase();
+    const base = 0x1F1E6 - 0x41;
+    try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+    catch (e) { return ''; }
+}
+
 class SpectrumDisplay {
     constructor(canvasId, config = {}) {
         this.canvas = document.getElementById(canvasId);
@@ -346,7 +355,9 @@ class SpectrumDisplay {
                         // Show DX spot info
                         const freqStr = this.formatFrequency(pos.spot.frequency);
                         const timeStr = pos.spot.time ? new Date(pos.spot.time).toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) : 'N/A';
-                        let tooltipText = `${pos.spot.dx_call}: ${freqStr}<br>Time: ${timeStr} UTC`;
+                        const dxFlag = _spectrumIso2ToFlag(pos.spot.country_code || '');
+                        const dxCallDisplay = dxFlag ? dxFlag + '\u00A0' + pos.spot.dx_call : pos.spot.dx_call;
+                        let tooltipText = `${dxCallDisplay}: ${freqStr}<br>Time: ${timeStr} UTC`;
                         if (pos.spot.country) {
                             tooltipText += `<br>Country: ${pos.spot.country}`;
                         }
@@ -386,7 +397,9 @@ class SpectrumDisplay {
                         const freqStr = this.formatFrequency(pos.spot.frequency);
                         const timeStr = pos.spot.time ? new Date(pos.spot.time).toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) : 'N/A';
                         const snrStr = pos.spot.snr >= 0 ? `+${pos.spot.snr}` : pos.spot.snr;
-                        let tooltipText = `${pos.spot.dx_call}: ${freqStr}<br>Time: ${timeStr} UTC<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
+                        const cwFlag = _spectrumIso2ToFlag(pos.spot.country_code || '');
+                        const cwCallDisplay = cwFlag ? cwFlag + '\u00A0' + pos.spot.dx_call : pos.spot.dx_call;
+                        let tooltipText = `${cwCallDisplay}: ${freqStr}<br>Time: ${timeStr} UTC<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
                         if (pos.spot.country) {
                             tooltipText += `<br>Country: ${pos.spot.country}`;
                         }
@@ -419,7 +432,9 @@ class SpectrumDisplay {
                         const act = pos.activity || {};
                         const freqStr = this.formatFrequency(pos.frequency);
                         const modeStr = (pos.mode || '').toUpperCase();
-                        let tooltipText = `${pos.label}: ${freqStr}`;
+                        const voiceFlag = _spectrumIso2ToFlag(act.dx_country_code || '');
+                        const voiceLabel = voiceFlag ? voiceFlag + '\u00A0' + pos.label : pos.label;
+                        let tooltipText = `${voiceLabel}: ${freqStr}`;
                         if (modeStr) tooltipText += `<br>Mode: ${modeStr}`;
                         if (act.signal_above_noise != null) {
                             tooltipText += `<br>SNR: ${Math.round(act.signal_above_noise)} dB`;

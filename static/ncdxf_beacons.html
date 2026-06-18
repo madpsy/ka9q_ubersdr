@@ -196,6 +196,66 @@
             font-weight: bold;
             font-size: 0.9em;
         }
+        /* ── Band propagation heat-map ──────────────────────────────── */
+        .heatmap-band-block {
+            margin-bottom: 18px;
+            overflow-x: auto;
+        }
+        .heatmap-band-title {
+            font-size: 0.92em;
+            font-weight: 700;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .heatmap-grid {
+            display: grid;
+            /* col 0 = beacon label, cols 1-24 = hours */
+            grid-template-columns: 110px repeat(24, minmax(22px, 1fr));
+            gap: 2px;
+            min-width: 650px;
+        }
+        .hm-corner { /* top-left empty cell */ }
+        .hm-hour {
+            text-align: center;
+            font-size: 0.68em;
+            opacity: 0.6;
+            padding: 1px 0;
+        }
+        .hm-beacon-label {
+            font-size: 0.75em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 2px 4px;
+            display: flex;
+            align-items: center;
+            opacity: 0.85;
+        }
+        .hm-cell {
+            height: 18px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.06);
+            cursor: default;
+            position: relative;
+        }
+        .hm-cell:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 4px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10,20,40,0.95);
+            color: #e8f0ff;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            z-index: 999;
+            pointer-events: none;
+            border: 1px solid rgba(74,158,255,0.4);
+        }
         /* ── Pagination buttons ─────────────────────────────────────── */
         .page-btn {
             background: rgba(255,255,255,0.1);
@@ -348,13 +408,10 @@
             <div class="control-group">
                 <button id="load-btn" style="background:#4CAF50;">Load Spots</button>
             </div>
-            <div class="control-group">
-                <button id="today-btn" style="background:#2196F3;">Today</button>
-            </div>
         </div>
     </div>
 
-    <div id="status-bar" class="status-bar info">Select a date and click Load Spots</div>
+    <div id="status-bar" class="status-bar info">Click Load Spots or wait for auto-refresh</div>
 
     <!-- ── Map ──────────────────────────────────────────────────────── -->
     <div class="section-heading">🗺️ Beacon Map</div>
@@ -368,6 +425,10 @@
         <!-- ── Per-beacon status cards ──────────────────────────────── -->
         <div class="section-heading">📻 Beacon Status</div>
         <div class="beacon-status-grid" id="beacon-cards"></div>
+
+        <!-- ── Band propagation heat-map ────────────────────────────── -->
+        <div class="section-heading">🌡️ Band Propagation Heat-map</div>
+        <div id="heatmap-section"></div>
 
         <!-- ── Spots table ───────────────────────────────────────────── -->
         <div class="section-heading">📋 Spots Log</div>
@@ -384,7 +445,10 @@
                     <option value="0">All</option>
                 </select>
             </div>
-            <div id="spots-page-info" style="font-size:0.82em; opacity:0.65;"></div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <button id="csv-download-btn" class="page-btn" title="Download all spots as CSV" style="background:rgba(76,175,80,0.2); border-color:rgba(76,175,80,0.5); color:#81c784;" disabled>⬇ CSV</button>
+                <div id="spots-page-info" style="font-size:0.82em; opacity:0.65;"></div>
+            </div>
         </div>
         <div class="spots-table-container">
             <table class="spots-table">
@@ -526,13 +590,16 @@ function placeBeaconMarkers() {
             offset: [8, 0],
             className: 'beacon-label',
         });
-        // Rich click popup (updated with spot data after load)
+        // Rich popup (opens on hover AND click; updated with spot data after load)
         m.bindPopup(`<div class="beacon-popup">
             <div class="bp-call">${b.callsign}</div>
             <div class="bp-entity">${b.entity}</div>
             <div class="bp-detail">${b.location} · ${b.grid}</div>
             <div class="bp-spots" id="bpspot-${b.callsign}">No spots loaded yet</div>
-        </div>`);
+        </div>`, { autoPan: false });
+        // Open popup on hover; close on mouse-out unless user clicked to pin it
+        m.on('mouseover', function() { this.openPopup(); });
+        m.on('mouseout',  function() { this.closePopup(); });
         beaconMarkers[b.callsign] = m;
         clusterGroup.addLayer(m);
     });
@@ -558,8 +625,10 @@ function placeReceiverMarker(lat, lon, callsign, name) {
             <div class="bp-call">${callsign || 'Receiver'}</div>
             <div class="bp-entity">${name || ''}</div>
             <div class="bp-detail">${lat.toFixed(4)}, ${lon.toFixed(4)}</div>
-        </div>`)
+        </div>`, { autoPan: false })
         .addTo(map);
+    receiverMarker.on('mouseover', function() { this.openPopup(); });
+    receiverMarker.on('mouseout',  function() { this.closePopup(); });
 }
 
 function clearSpotLines() {
@@ -670,18 +739,6 @@ function buildCallsignParam() {
     return BEACONS.map(b => b.callsign).slice(0, 20).join(',');
 }
 
-// ── Helper: fetch one date's spots (returns [] on 204/error) ─────────────
-async function fetchSpotsForDate(dateStr, band, minSNR, startTimeParam) {
-    const callsigns = buildCallsignParam();
-    let url = `/api/cwskimmer/spots?date=${dateStr}&callsign=${encodeURIComponent(callsigns)}${startTimeParam}`;
-    if (band)              url += `&band=${encodeURIComponent(band)}`;
-    if (minSNR !== '-999') url += `&min_snr=${minSNR}`;
-    const r = await fetch(url);
-    if (r.status === 204 || !r.ok) return [];
-    const data = await r.json();
-    return (data.spots || []).filter(s => beaconByCall[s.callsign]);
-}
-
 // ── Fetch spots from API ─────────────────────────────────────────────────
 async function loadSpots() {
     const hoursVal = document.getElementById('hours-select').value;
@@ -693,28 +750,19 @@ async function loadSpots() {
     document.getElementById('summary-section').style.display = 'none';
 
     try {
+        const callsigns = buildCallsignParam();
+        let url, cutoff = null;
+
         if (rolling) {
-            // Fetch today + yesterday in parallel, merge, then filter to last 24 h
+            // Single API call: from_date=yesterday&to_date=today
+            // Then filter client-side to the last 24 h
             const now = new Date();
-            const cutoff = new Date(now.getTime() - 24 * 3600 * 1000);
-            const todayStr     = todayUTC();
+            cutoff = new Date(now.getTime() - 24 * 3600 * 1000);
+            const todayStr = todayUTC();
             const yd = new Date(now);
             yd.setUTCDate(yd.getUTCDate() - 1);
             const yesterdayStr = yd.getUTCFullYear() + '-' + padZ(yd.getUTCMonth() + 1) + '-' + padZ(yd.getUTCDate());
-
-            const [todaySpots, ydSpots] = await Promise.all([
-                fetchSpotsForDate(todayStr,     band, minSNR, ''),
-                fetchSpotsForDate(yesterdayStr, band, minSNR, ''),
-            ]);
-
-            // Merge and filter to last 24 h
-            allSpots = [...todaySpots, ...ydSpots].filter(s => {
-                const ts = new Date(s.timestamp);
-                return !isNaN(ts) && ts >= cutoff && ts <= now;
-            });
-            // Sort newest first
-            allSpots.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} (rolling 24 h).`, 'ok');
+            url = `/api/cwskimmer/spots?from_date=${yesterdayStr}&to_date=${todayStr}&callsign=${encodeURIComponent(callsigns)}`;
         } else {
             const dateVal = document.getElementById('date-input').value;
             if (!dateVal) {
@@ -727,8 +775,37 @@ async function loadSpots() {
                 const startH = 24 - hours;
                 startTimeParam = `&start_time=${padZ(startH)}:00`;
             }
-            allSpots = await fetchSpotsForDate(dateVal, band, minSNR, startTimeParam);
-            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} for ${dateVal}.`, 'ok');
+            url = `/api/cwskimmer/spots?date=${dateVal}&callsign=${encodeURIComponent(callsigns)}${startTimeParam}`;
+        }
+
+        if (band)              url += `&band=${encodeURIComponent(band)}`;
+        if (minSNR !== '-999') url += `&min_snr=${minSNR}`;
+
+        const r = await fetch(url);
+        if (r.status === 204) {
+            allSpots = [];
+            setStatus('No beacon spots found for the selected parameters.', 'info');
+            renderResults([]);
+            return;
+        }
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({ error: r.statusText }));
+            setStatus('Error: ' + (e.error || r.statusText), 'error');
+            return;
+        }
+        const data = await r.json();
+        allSpots = (data.spots || []).filter(s => beaconByCall[s.callsign]);
+
+        if (rolling && cutoff) {
+            const now = new Date();
+            allSpots = allSpots.filter(s => {
+                const ts = new Date(s.timestamp);
+                return !isNaN(ts) && ts >= cutoff && ts <= now;
+            });
+            allSpots.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} (rolling 24 h).`, 'ok');
+        } else {
+            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''}.`, 'ok');
         }
         renderResults(allSpots);
     } catch (err) {
@@ -748,6 +825,7 @@ function renderResults(spots) {
     drawSpotLines(spots);
     renderSummary(spots, heardSet);
     renderBeaconCards(spots, heardSet);
+    renderHeatmap(spots);
     renderSpotsTable(spots);
     if (spots.length > 0) {
         document.getElementById('summary-section').style.display = '';
@@ -899,6 +977,139 @@ function renderSpotsTable(spots) {
     spotsTableData = spots;
     spotsTablePage = 0;
     renderSpotsPage();
+    // Enable CSV button only when there's data
+    const csvBtn = document.getElementById('csv-download-btn');
+    if (csvBtn) csvBtn.disabled = spots.length === 0;
+}
+
+// ── Band propagation heat-map ────────────────────────────────────────────
+// Renders one grid per band: rows = 18 beacons, cols = 24 UTC hours.
+// Each cell is coloured by best SNR heard in that hour (empty = grey).
+// SNR colour scale: ≥20 dB → bright green, 0 dB → yellow, ≤-20 dB → red.
+function snrToColor(snr) {
+    // Map SNR to a 0-1 value: -20 dB → 0, +20 dB → 1
+    const t = Math.max(0, Math.min(1, (snr + 20) / 40));
+    // Interpolate: red(255,60,60) → yellow(255,220,0) → green(60,200,80)
+    let r, g, b;
+    if (t < 0.5) {
+        // red → yellow
+        const u = t * 2;
+        r = 255;
+        g = Math.round(60 + u * 160);
+        b = Math.round(60 * (1 - u));
+    } else {
+        // yellow → green
+        const u = (t - 0.5) * 2;
+        r = Math.round(255 * (1 - u) + 60 * u);
+        g = Math.round(220 + u * (200 - 220));
+        b = Math.round(u * 80);
+    }
+    return `rgb(${r},${g},${b})`;
+}
+
+function renderHeatmap(spots) {
+    const section = document.getElementById('heatmap-section');
+    if (!section) return;
+
+    if (spots.length === 0) {
+        section.innerHTML = '<p style="opacity:0.5;font-size:0.88em;padding:8px 0;">No spots to display.</p>';
+        return;
+    }
+
+    // Build heatData[band][callsign][hour] = { bestSNR, count }
+    // hour = UTC hour extracted from timestamp
+    const heatData = {};
+    BAND_NAMES.forEach(bd => {
+        heatData[bd] = {};
+        BEACONS.forEach(b => { heatData[bd][b.callsign] = {}; });
+    });
+
+    spots.forEach(s => {
+        if (!heatData[s.band]) return;
+        if (!heatData[s.band][s.callsign]) return;
+        const ts = new Date(s.timestamp);
+        if (isNaN(ts)) return;
+        const hour = ts.getUTCHours();
+        const cell = heatData[s.band][s.callsign][hour];
+        if (!cell) {
+            heatData[s.band][s.callsign][hour] = { bestSNR: s.snr, count: 1 };
+        } else {
+            cell.count++;
+            if (s.snr > cell.bestSNR) cell.bestSNR = s.snr;
+        }
+    });
+
+    // Render one block per band
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    let html = '';
+
+    BAND_NAMES.forEach((band, bi) => {
+        const color = BAND_COLORS[band] || '#aaa';
+        const freq  = BANDS_MHZ[bi];
+
+        // Check if this band has any data at all
+        const bandHasData = BEACONS.some(b =>
+            Object.keys(heatData[band][b.callsign]).length > 0
+        );
+
+        html += `<div class="heatmap-band-block">`;
+        html += `<div class="heatmap-band-title">
+            <span class="band-pill" style="background:${color};color:#000;">${band} ${freq}</span>
+            ${!bandHasData ? '<span style="opacity:0.45;font-size:0.85em;font-weight:400;">no spots</span>' : ''}
+        </div>`;
+        html += `<div class="heatmap-grid">`;
+
+        // Header row: corner + 24 hour labels
+        html += `<div class="hm-corner"></div>`;
+        hours.forEach(h => {
+            html += `<div class="hm-hour">${padZ(h)}</div>`;
+        });
+
+        // One row per beacon
+        BEACONS.forEach(b => {
+            html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}">${b.callsign}</div>`;
+            hours.forEach(h => {
+                const cell = heatData[band][b.callsign][h];
+                if (cell) {
+                    const bg = snrToColor(cell.bestSNR);
+                    const tip = `${b.callsign} ${padZ(h)}:00 UTC — ${cell.count} spot${cell.count !== 1 ? 's' : ''}, best SNR: ${cell.bestSNR} dB`;
+                    html += `<div class="hm-cell" style="background:${bg};opacity:0.85;" data-tip="${tip}"></div>`;
+                } else {
+                    html += `<div class="hm-cell"></div>`;
+                }
+            });
+        });
+
+        html += `</div>`; // .heatmap-grid
+        html += `</div>`; // .heatmap-band-block
+    });
+
+    section.innerHTML = html;
+}
+
+// ── CSV download ──────────────────────────────────────────────────────────
+function downloadCSV() {
+    if (!spotsTableData.length) return;
+    const headers = ['Time (UTC)', 'Valid', 'Callsign', 'Entity', 'Band', 'Freq (Hz)', 'SNR (dB)', 'WPM', 'Distance (km)', 'Bearing (deg)'];
+    const rows = spotsTableData.map(s => {
+        const b = beaconByCall[s.callsign];
+        const valid = isValidBeaconSpot(s);
+        const validStr = valid === null ? '?' : valid ? 'Yes' : 'No';
+        const timeStr = s.timestamp ? s.timestamp.slice(0, 19).replace('T', ' ') : '';
+        const entity = b ? b.entity : '';
+        const dist = s.distance_km != null ? Math.round(s.distance_km) : '';
+        const bearing = s.bearing_deg != null ? Math.round(s.bearing_deg) : '';
+        return [timeStr, validStr, s.callsign, entity, s.band, s.frequency || '', s.snr, s.wpm || '', dist, bearing]
+            .map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const now = new Date();
+    a.download = `ncdxf_beacons_${now.getUTCFullYear()}${padZ(now.getUTCMonth()+1)}${padZ(now.getUTCDate())}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
 }
 
 // ── Status helper ────────────────────────────────────────────────────────
@@ -976,13 +1187,6 @@ async function init() {
         startAutoRefresh(); // reset countdown on manual load
         loadSpots();
     });
-    document.getElementById('today-btn').addEventListener('click', () => {
-        if (document.getElementById('hours-select').value !== 'rolling24') {
-            dateInput.value = todayUTC();
-        }
-        startAutoRefresh();
-        loadSpots();
-    });
     // Checkbox: toggling on resets the countdown; toggling off clears the display
     document.getElementById('auto-refresh-cb').addEventListener('change', () => {
         if (isAutoRefreshEnabled()) {
@@ -990,6 +1194,9 @@ async function init() {
         }
         updateRefreshCountdown();
     });
+
+    // CSV download button
+    document.getElementById('csv-download-btn').addEventListener('click', downloadCSV);
 
     // Pagination controls
     document.getElementById('spots-per-page').addEventListener('change', () => {

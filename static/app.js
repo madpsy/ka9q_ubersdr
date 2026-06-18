@@ -1495,6 +1495,7 @@ function _notifyLookupWidgetIfCached(marker) {
     // will broadcast once the fetch completes — nothing extra needed.
 }
 window._notifyLookupWidgetIfCached = _notifyLookupWidgetIfCached;
+window._broadcastCallsignLookup = _broadcastCallsignLookup;
 
 /**
  * Given a marker {name, type}, return the enriched display string.

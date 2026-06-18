@@ -2231,9 +2231,23 @@ class CWSpotsExtension extends DecoderExtension {
                     this.tuneToSpot(event.data.spot);
                 }
             } else if (event.data.type === 'tune_to_spot_click') {
-                // Tune to spot AND update lookup popup if already open (click only)
+                // Tune to spot AND update all lookup surfaces (click only):
+                //   - inline qrz_lookup.widget.html via _fetchCallsignForMediaSession / cache broadcast
+                //   - callsign_lookup.html popup via openQRZ (if already open)
                 if (event.data.spot) {
                     this.tuneToSpot(event.data.spot);
+                    // Normalise callsign (strip /P, /M etc — pick longest segment)
+                    const _parts = event.data.spot.dx_call.split('/');
+                    const _base = _parts.reduce((a, b) => (b.length > a.length ? b : a), '');
+                    // Broadcast from cache immediately if available, otherwise fetch
+                    const _cached = window._callsignLookupCache && window._callsignLookupCache.get(_base);
+                    if (_cached && _cached.data) {
+                        if (typeof window._broadcastCallsignLookup === 'function') {
+                            window._broadcastCallsignLookup(_base, _cached.data, _cached.imageUrl);
+                        }
+                    } else if (typeof window._fetchCallsignForMediaSession === 'function') {
+                        window._fetchCallsignForMediaSession(_base);
+                    }
                     if (window._callsignLookupWindow && !window._callsignLookupWindow.closed) {
                         this.openQRZ(event.data.spot.dx_call);
                     }

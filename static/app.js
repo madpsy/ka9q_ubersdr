@@ -14855,12 +14855,12 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         // `type` may be a fixed string or a per-item function (item => type),
         // letting one list yield more than one marker type (e.g. bookmarks split
         // into server vs local for prev/next navigation filtering).
-        const add = (list, freqOf, modeOf, famOf, nameOf, priority, type) => {
+        const add = (list, freqOf, modeOf, famOf, nameOf, countryCodeOf, priority, type) => {
             for (const item of list) {
                 const f = freqOf(item);
                 if (typeof f !== 'number' || isNaN(f)) continue;
                 const t = typeof type === 'function' ? type(item) : type;
-                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), priority, type: t });
+                out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), countryCode: countryCodeOf(item) || '', priority, type: t });
             }
         };
 
@@ -14877,10 +14877,10 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         const vaFreq = a => a.estimated_dial_freq || a.start_freq;
         const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
 
-        add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, 1, 'cw');
-        add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, 1, 'dx');
-        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))), 1, 'voice');
-        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, 0,
+        add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',          s => s.dx_call, s => s.country_code || '', 1, 'cw');
+        add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),    s => s.dx_call, s => s.country_code || '', 1, 'dx');
+        add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)), a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))), a => a.dx_country_code || '', 1, 'voice');
+        add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, () => '', 0,
             b => (b.source === 'local' ? 'bookmark-local' : 'bookmark-server'));
         return out;
     }
@@ -14941,7 +14941,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             }
         }
 
-        const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name, type: m.type } : null;
+        const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name, type: m.type, countryCode: m.countryCode || '' } : null;
         result.current = strip(current);
         result.prev    = strip(prev);
         result.next    = strip(next);

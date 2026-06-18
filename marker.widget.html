@@ -216,6 +216,15 @@
 (function () {
   'use strict';
 
+  // ── Flag emoji helper ────────────────────────────────────────────────────
+  function iso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41;
+    try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+    catch (e) { return ''; }
+  }
+
   // Backstop poll — catches changes with no DOM hook to observe: mode switches
   // (window.currentMode is a plain variable) and newly-arrived spots/bookmarks.
   // Frequency changes are handled instantly by a MutationObserver below. The
@@ -275,18 +284,19 @@
     return voiceModeForFreq(spot.frequency);
   }
 
-  // Flatten every marker into { freq, mode, family, name, callsign, priority, type }.
+  // Flatten every marker into { freq, mode, family, name, callsign, countryCode, priority, type }.
   // Spots get priority 1, bookmarks 0, so spots win when two markers share a frequency.
   // `type` (cw/dx/voice/bookmark) drives the prev/next navTypes filter.
   // `callsign` is the actual callsign string when the name IS a callsign, null otherwise
   // (e.g. voice activities without a dx_callsign get a placeholder name like 'Voice 60m').
+  // `countryCode` is the ISO 3166-1 alpha-2 code for flag emoji display (may be null/empty).
   function collectMarkers() {
     const out = [];
-    const add = (list, freqOf, modeOf, famOf, nameOf, callsignOf, priority, type) => {
+    const add = (list, freqOf, modeOf, famOf, nameOf, callsignOf, countryCodeOf, priority, type) => {
       for (const item of list) {
         const f = freqOf(item);
         if (typeof f !== 'number' || isNaN(f)) continue;
-        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), callsign: callsignOf(item), priority, type });
+        out.push({ freq: f, mode: modeOf(item), family: famOf(item), name: nameOf(item), callsign: callsignOf(item), countryCode: countryCodeOf(item) || '', priority, type });
       }
     };
     const cwSpots = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
@@ -297,13 +307,14 @@
     const vaFreq = a => a.estimated_dial_freq || a.start_freq;
     const vaMode = a => (a.mode ? a.mode.toLowerCase() : voiceModeForFreq(vaFreq(a)));
     // CW and DX spots: name IS always the callsign.
-    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',               s => s.dx_call,   s => s.dx_call,               1, 'cw');
-    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),         s => s.dx_call,   s => s.dx_call,               1, 'dx');
+    add(cwSpots, s => s.frequency, s => cwModeForFreq(s.frequency), () => 'cw',               s => s.dx_call,   s => s.dx_call,   s => s.country_code || '',               1, 'cw');
+    add(dxSpots, s => s.frequency, s => dxSpotMode(s), s => modeFamily(dxSpotMode(s)),         s => s.dx_call,   s => s.dx_call,   s => s.country_code || '',               1, 'dx');
     // Voice: only set callsign when dx_callsign is present (not a placeholder like 'Voice 60m').
     add(voiceActs, vaFreq, vaMode, a => modeFamily(vaMode(a)),
         a => (a.dx_callsign || ('Voice' + (a.band ? ' ' + a.band : ''))),
-        a => a.dx_callsign || null,                                                                                                            1, 'voice');
-    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, () => null, 0, 'bookmark');
+        a => a.dx_callsign || null,
+        a => a.dx_country_code || '',                                                                                                          1, 'voice');
+    add(window.bookmarks || [], b => b.frequency, b => (b.mode || null), b => (b.mode ? modeFamily(b.mode) : null), b => b.name, () => null, () => '', 0, 'bookmark');
     return out;
   }
 
@@ -334,7 +345,7 @@
         if (navAllowed(m) && (!next || m.freq < next.freq || (m.freq === next.freq && m.priority > next.priority))) next = m;
       }
     }
-    const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name, type: m.type, callsign: m.callsign } : null;
+    const strip = m => m ? { freq: m.freq, mode: m.mode, name: m.name, type: m.type, callsign: m.callsign, countryCode: m.countryCode || '' } : null;
     result.current = strip(current);
     result.prev    = strip(prev);
     result.next    = strip(next);
@@ -586,7 +597,9 @@
       nameEl.title = isCallsign ? '' : name;
       if (name !== _lastName) {
         _lastName = name;
-        nameEl.textContent = name;
+        // Append flag emoji after callsign when country code is available
+        const flag = (isCallsign && current.countryCode) ? iso2ToFlag(current.countryCode) : '';
+        nameEl.textContent = flag ? name + '\u00A0' + flag : name;
         // Clear info panel immediately when callsign changes
         if (!isCallsign) updateInfoPanel(null);
         // Hide stale tooltip when marker changes

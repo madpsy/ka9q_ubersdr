@@ -542,13 +542,21 @@
   let _lastCountryCode = undefined;
 
   // Show/hide one neighbour button and label it. Returns true if shown.
-  function updateNavButton(btn, textEl, marker) {
+  // flagSide: 'left' = flag before name (prev), 'right' = flag after name (next).
+  function updateNavButton(btn, textEl, marker, flagSide) {
     if (!marker) {
       if (btn.style.display !== 'none') btn.style.display = 'none';
       return false;
     }
     const flag = (marker.countryCode && marker.countryCode.length === 2) ? iso2ToFlag(marker.countryCode) : '';
-    const displayName = flag ? flag + '\u00A0' + marker.name : marker.name;
+    let displayName;
+    if (!flag) {
+      displayName = marker.name;
+    } else if (flagSide === 'right') {
+      displayName = marker.name + '\u00A0' + flag;
+    } else {
+      displayName = flag + '\u00A0' + marker.name;
+    }
     if (textEl.textContent !== displayName) {
       textEl.textContent = displayName;
       btn.title = 'Tune to ' + marker.name;
@@ -575,8 +583,8 @@
     if (widget.style.display === 'none') widget.style.display = '';
 
     // ── Prev/next neighbours (row above the current name) ──
-    const hasPrev = updateNavButton(prevBtn, prevText, prev);
-    const hasNext = updateNavButton(nextBtn, nextText, next);
+    const hasPrev = updateNavButton(prevBtn, prevText, prev, 'left');
+    const hasNext = updateNavButton(nextBtn, nextText, next, 'right');
     navRow.style.display = (hasPrev || hasNext) ? '' : 'none';
 
     // ── Current marker name ──

@@ -1538,9 +1538,19 @@ function _enrichMarkerName(marker) {
     // Read fname/country from the full data object stored by the cache.
     const fname   = (cached.data && cached.data.fname)   ? cached.data.fname.trim()   : '';
     const country = (cached.data && cached.data.country) ? cached.data.country.trim() : '';
+    // Prepend flag emoji to country name using the spot's country_code (no extra lookup needed).
+    const cc = marker.countryCode || '';
+    let flaggedCountry = country;
+    if (country && cc.length === 2) {
+        try {
+            const base = 0x1F1E6 - 0x41;
+            const flag = String.fromCodePoint(base + cc.toUpperCase().charCodeAt(0), base + cc.toUpperCase().charCodeAt(1));
+            flaggedCountry = flag + '\u00A0' + country;
+        } catch (_) {}
+    }
     const parts = [rawCallsign];
-    if (fname)   parts.push(fname);
-    if (country) parts.push(country);
+    if (fname)         parts.push(fname);
+    if (flaggedCountry) parts.push(flaggedCountry);
     return parts.join(' • ');
 }
 

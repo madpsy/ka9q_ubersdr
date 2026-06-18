@@ -216,6 +216,12 @@
 (function () {
   'use strict';
 
+  // ── Text truncation helper ───────────────────────────────────────────────
+  function truncate(str, max) {
+    if (!str || str.length <= max) return str;
+    return str.slice(0, max) + '…';
+  }
+
   // ── Flag emoji helper ────────────────────────────────────────────────────
   function iso2ToFlag(code) {
     if (!code || code.length !== 2) return '';
@@ -440,7 +446,7 @@
       var cached = cache.get(callsign);
       if (cached && cached.data) {
         var d = cached.data;
-        fname    = d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' ');
+        fname    = truncate(d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' '), 30);
         country  = d.country || d.land || '';
         grid     = d.grid || '';
         imageUrl = cached.imageUrl || d.image || '';
@@ -461,7 +467,7 @@
           var result = c2 && c2.get(fetchFor);
           if (result && result.data) {
             var d2 = result.data;
-            var fn = d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' ');
+            var fn = truncate(d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' '), 30);
             var co = d2.country || d2.land || '';
             var gr = d2.grid || '';
             var iu = result.imageUrl || d2.image || '';
@@ -506,7 +512,7 @@
       const cached = cache.get(callsign);
       if (cached && cached.data) {
         const d = cached.data;
-        const fname = d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' ');
+        const fname = truncate(d.name_fmt || [d.fname, d.nickname ? '"' + d.nickname + '"' : '', d.name].filter(Boolean).join(' '), 30);
         const country = d.country || d.land || '';
         const parts = [fname, country].filter(Boolean);
         _infoCallsign = callsign;
@@ -532,7 +538,7 @@
           const result = c2 && c2.get(fetchFor);
           if (result && result.data) {
             const d2 = result.data;
-            const fn = d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' ');
+            const fn = truncate(d2.name_fmt || [d2.fname, d2.nickname ? '"' + d2.nickname + '"' : '', d2.name].filter(Boolean).join(' '), 30);
             const co = d2.country || d2.land || '';
             setInfoPanel([fn, co].filter(Boolean));
           }

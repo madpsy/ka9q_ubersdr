@@ -411,11 +411,22 @@ class CWSpotsGraph {
                     },
                     tooltip: {
                         animation: false,
+                        displayColors: false,
                         backgroundColor: 'rgba(0, 0, 0, 0.8)',
                         titleColor: '#fff',
                         bodyColor: '#fff',
-                        borderColor: '#4CAF50',
-                        borderWidth: 1,
+                        borderWidth: 2,
+                        borderColor: (context) => {
+                            const items = context.tooltipItems;
+                            if (items && items.length > 0) {
+                                const spot = items[0].raw.spot;
+                                if (spot.snr > 26)  return '#28a745';
+                                if (spot.snr >= 13) return '#ffc107';
+                                if (spot.snr >= 6)  return '#ff8c00';
+                                return '#dc3545';
+                            }
+                            return '#4CAF50';
+                        },
                         callbacks: {
                             title: (items) => {
                                 if (items.length > 0) {

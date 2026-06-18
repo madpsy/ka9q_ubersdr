@@ -459,7 +459,9 @@ class CWSpotsGraph {
                             return self.showLabels;
                         },
                         formatter: (value, context) => {
-                            return value.spot.dx_call || 'Unknown';
+                            const spot = value.spot;
+                            const flag = cwGraphIso2ToFlag(spot.country_code);
+                            return flag + (spot.dx_call || 'Unknown');
                         },
                         color: (context) => {
                             const spot = context.dataset.data[context.dataIndex]?.spot;

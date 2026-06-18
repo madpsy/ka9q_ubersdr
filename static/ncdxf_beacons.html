@@ -448,7 +448,10 @@
         <div class="beacon-status-grid" id="beacon-cards"></div>
 
         <!-- ── Band propagation heat-map ────────────────────────────── -->
-        <div class="section-heading">🌡️ Band Propagation Heat-map</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+            <div class="section-heading" style="margin-bottom:0;">🌡️ Band Propagation Heat-map</div>
+            <button id="heatmap-csv-btn" class="page-btn" title="Download heat-map data as CSV" style="background:rgba(76,175,80,0.2);border-color:rgba(76,175,80,0.5);color:#81c784;" disabled>⬇ CSV</button>
+        </div>
         <div id="heatmap-section"></div>
 
         <!-- ── Spots table ───────────────────────────────────────────── -->
@@ -1012,6 +1015,8 @@ function renderSpotsTable(spots) {
     // Enable CSV button only when there's data
     const csvBtn = document.getElementById('csv-download-btn');
     if (csvBtn) csvBtn.disabled = spots.length === 0;
+    const hmCsvBtn = document.getElementById('heatmap-csv-btn');
+    if (hmCsvBtn) hmCsvBtn.disabled = spots.length === 0;
 }
 
 // ── Band propagation heat-map ────────────────────────────────────────────
@@ -1148,6 +1153,55 @@ function downloadCSV() {
     URL.revokeObjectURL(a.href);
 }
 
+// ── Heat-map CSV download ─────────────────────────────────────────────────
+// Exports: Band, Callsign, Location, Hour (UTC), Spots, Best SNR (dB)
+function downloadHeatmapCSV() {
+    if (!allSpots.length) return;
+
+    // Rebuild heatData from allSpots (same logic as renderHeatmap)
+    const heatData = {};
+    BAND_NAMES.forEach(bd => {
+        heatData[bd] = {};
+        BEACONS.forEach(b => { heatData[bd][b.callsign] = {}; });
+    });
+    allSpots.forEach(s => {
+        if (!heatData[s.band] || !heatData[s.band][s.callsign]) return;
+        const ts = new Date(s.timestamp);
+        if (isNaN(ts)) return;
+        const hour = ts.getUTCHours();
+        const cell = heatData[s.band][s.callsign][hour];
+        if (!cell) {
+            heatData[s.band][s.callsign][hour] = { bestSNR: s.snr, count: 1 };
+        } else {
+            cell.count++;
+            if (s.snr > cell.bestSNR) cell.bestSNR = s.snr;
+        }
+    });
+
+    const headers = ['Band', 'Freq (MHz)', 'Callsign', 'Location', 'Hour (UTC)', 'Spots', 'Best SNR (dB)'];
+    const rows = [];
+    BAND_NAMES.forEach((band, bi) => {
+        BEACONS.forEach(b => {
+            for (let h = 0; h < 24; h++) {
+                const cell = heatData[band][b.callsign][h];
+                if (cell) {
+                    rows.push([band, BANDS_MHZ[bi], b.callsign, b.location, padZ(h) + ':00', cell.count, cell.bestSNR]
+                        .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+                }
+            }
+        });
+    });
+
+    const csv = [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const now = new Date();
+    a.download = `ncdxf_heatmap_${now.getUTCFullYear()}${padZ(now.getUTCMonth()+1)}${padZ(now.getUTCDate())}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
 // ── Status helper ────────────────────────────────────────────────────────
 function setStatus(msg, type) {
     const el = document.getElementById('status-bar');
@@ -1231,8 +1285,9 @@ async function init() {
         updateRefreshCountdown();
     });
 
-    // CSV download button
+    // CSV download buttons
     document.getElementById('csv-download-btn').addEventListener('click', downloadCSV);
+    document.getElementById('heatmap-csv-btn').addEventListener('click', downloadHeatmapCSV);
 
     // Pagination controls
     document.getElementById('spots-per-page').addEventListener('change', () => {

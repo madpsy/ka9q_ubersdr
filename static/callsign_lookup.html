@@ -1439,6 +1439,10 @@
         /**
          * Render the ant switch button row into #rx-ant-switch-section.
          * Safe to call when the element doesn't exist yet (no-op).
+         *
+         * On repeated calls (e.g. every 1 s from the rotator poll piggyback) we
+         * patch the existing buttons in-place rather than rebuilding innerHTML so
+         * that hover/focus state is preserved and there is no flicker.
          */
         function updateAntSwitchUI() {
             const section = document.getElementById('rx-ant-switch-section');
@@ -1455,39 +1459,69 @@
             const { num_antennas, antenna_labels, selected, grounded, thunderstorm, hasPassword } = antSwitchState;
             const disabled = !hasPassword || thunderstorm;
 
-            let html = '<div class="rx-ant-sw-row">';
+            // Check whether the DOM already has the right number of buttons.
+            // If not (first render, or antenna count changed) do a full rebuild.
+            const existingBtns = section.querySelectorAll('.rx-ant-sw-btn');
+            const needsRebuild = existingBtns.length !== num_antennas;
 
-            if (grounded) {
-                html += '<span class="rx-ant-sw-grounded">⏚ Grounded</span>';
-            }
+            if (needsRebuild) {
+                // ── Full rebuild ──────────────────────────────────────────────
+                let html = '<div class="rx-ant-sw-row">';
 
-            for (let i = 1; i <= num_antennas; i++) {
-                const label = (antenna_labels[i - 1] && antenna_labels[i - 1] !== '')
-                    ? antenna_labels[i - 1]
-                    : `Antenna ${i}`;
-                const isSel = selected.includes(i);
-                const selClass = isSel ? ' selected' : '';
-                const dis = disabled ? ' disabled' : '';
-                html += `<button class="rx-ant-sw-btn${selClass}" data-ant="${i}"${dis}>${esc(label)}</button>`;
-            }
+                if (grounded) {
+                    html += '<span class="rx-ant-sw-grounded">⏚ Grounded</span>';
+                }
 
-            html += '</div>';
-            section.innerHTML = html;
+                for (let i = 1; i <= num_antennas; i++) {
+                    const label = (antenna_labels[i - 1] && antenna_labels[i - 1] !== '')
+                        ? antenna_labels[i - 1]
+                        : `Antenna ${i}`;
+                    const isSel = selected.includes(i);
+                    const selClass = isSel ? ' selected' : '';
+                    const dis = disabled ? ' disabled' : '';
+                    html += `<button class="rx-ant-sw-btn${selClass}" data-ant="${i}"${dis}>${esc(label)}</button>`;
+                }
 
-            // Wire click handlers
-            section.querySelectorAll('.rx-ant-sw-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const antenna = parseInt(btn.dataset.ant, 10);
-                    if (!window.opener || window.opener.closed) return;
-                    window.opener.postMessage(
-                        { type: 'ant_switch_select', antenna },
-                        window.location.origin
-                    );
-                    // Optimistic highlight
-                    section.querySelectorAll('.rx-ant-sw-btn').forEach(b => b.classList.remove('selected'));
-                    btn.classList.add('selected');
+                html += '</div>';
+                section.innerHTML = html;
+
+                // Wire click handlers on freshly-created buttons
+                section.querySelectorAll('.rx-ant-sw-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const antenna = parseInt(btn.dataset.ant, 10);
+                        if (!window.opener || window.opener.closed) return;
+                        window.opener.postMessage(
+                            { type: 'ant_switch_select', antenna },
+                            window.location.origin
+                        );
+                        // Optimistic highlight — patch in-place, no rebuild
+                        section.querySelectorAll('.rx-ant-sw-btn').forEach(b => b.classList.remove('selected'));
+                        btn.classList.add('selected');
+                    });
                 });
-            });
+            } else {
+                // ── Patch update — no DOM rebuild, no flicker ─────────────────
+                existingBtns.forEach(btn => {
+                    const i = parseInt(btn.dataset.ant, 10);
+                    const isSel = selected.includes(i);
+                    btn.classList.toggle('selected', isSel);
+                    btn.disabled = disabled;
+                });
+
+                // Update grounded indicator
+                const groundedEl = section.querySelector('.rx-ant-sw-grounded');
+                if (grounded && !groundedEl) {
+                    const row = section.querySelector('.rx-ant-sw-row');
+                    if (row) {
+                        const span = document.createElement('span');
+                        span.className = 'rx-ant-sw-grounded';
+                        span.textContent = '⏚ Grounded';
+                        row.insertBefore(span, row.firstChild);
+                    }
+                } else if (!grounded && groundedEl) {
+                    groundedEl.remove();
+                }
+            }
         }
 
         // ── Cross-window messaging ────────────────────────────────────────

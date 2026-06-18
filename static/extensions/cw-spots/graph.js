@@ -4,6 +4,15 @@
 // Register the datalabels plugin with Chart.js
 Chart.register(ChartDataLabels);
 
+function cwGraphIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    const c = code.toUpperCase();
+    return String.fromCodePoint(
+        0x1F1E6 - 0x41 + c.charCodeAt(0),
+        0x1F1E6 - 0x41 + c.charCodeAt(1)
+    ) + ' ';
+}
+
 class CWSpotsGraph {
     constructor() {
         this.spots = [];
@@ -410,7 +419,8 @@ class CWSpotsGraph {
                             title: (items) => {
                                 if (items.length > 0) {
                                     const spot = items[0].raw.spot;
-                                    return spot.dx_call || 'Unknown';
+                                    const flag = cwGraphIso2ToFlag(spot.country_code);
+                                    return flag + (spot.dx_call || 'Unknown');
                                 }
                                 return '';
                             },
@@ -666,13 +676,14 @@ class CWSpotsGraph {
         }
 
         // Format display text
+        const flag = cwGraphIso2ToFlag(spot.country_code);
         const callsign = spot.dx_call || 'Unknown';
         const frequency = (spot.frequency / 1e6).toFixed(4);
         const wpm = spot.wpm || 'N/A';
         const country = spot.country || '';
         const countryText = country ? ` • ${country}` : '';
 
-        latestSpotEl.textContent = `${callsign} • ${frequency} MHz • ${wpm} WPM${countryText}`;
+        latestSpotEl.textContent = `${flag}${callsign} • ${frequency} MHz • ${wpm} WPM${countryText}`;
         latestSpotEl.className = `latest-spot ${snrClass}`;
         latestSpotEl.style.cursor = 'pointer';
 

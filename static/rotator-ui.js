@@ -33,6 +33,11 @@ class RotatorUI {
         this.antHistoryPage     = 0;      // current history page (0-based)
         this.antHistoryEntries  = [];     // cached history entries
 
+        // ── Notification tracking ──────────────────────────────────────────
+        this.lastMoving         = false;  // previous rotator moving state
+        this.lastAntSelected    = null;   // JSON-serialised last selected array
+        this.lastAntGrounded    = null;   // last grounded boolean (null = uninitialised)
+
         // ── Active inner tab: 'rotator' | 'antswitch' ─────────────────────
         this.activeTab = localStorage.getItem('control_panel_tab') ||
             (this.rotatorEnabled ? 'rotator' : 'antswitch');
@@ -976,6 +981,22 @@ class RotatorUI {
             tabStatus.className = className;
         }
 
+        // ── Rotator stopped-moving notification ───────────────────────────
+        // Fire once when the rotator transitions from moving → stopped.
+        // We only notify after the first real status update (lastMoving starts
+        // false, so we guard against a spurious fire on page load by requiring
+        // that we have seen at least one moving=true cycle first).
+        if (this.lastMoving && !data.moving && data.connected) {
+            const az = (data.position && data.position.azimuth !== undefined)
+                ? Math.round(data.position.azimuth) + '°'
+                : '';
+            const msg = az ? `🧭 Rotator stopped at ${az}` : '🧭 Rotator stopped';
+            if (typeof window.showNotification === 'function') {
+                window.showNotification(msg, 'success', 4000);
+            }
+        }
+        this.lastMoving = !!data.moving;
+
         // Push rotator state to callsign lookup popup (if open)
         // The popup uses this to show current antenna bearing and the Set button.
         const lw = window._callsignLookupWindow;
@@ -1197,6 +1218,41 @@ class RotatorUI {
     // ═══════════════════════════════════════════════════════════════════════
 
     handleAntSwitchStatus(data) {
+        // ── Ant switch change notification ────────────────────────────────
+        // Fire when selected antennas or grounded state changes.
+        // lastAntSelected/lastAntGrounded start as null so the very first
+        // status fetch (page load) is treated as initialisation only — no toast.
+        const newSelected  = JSON.stringify((data.selected  || []).slice().sort((a,b)=>a-b));
+        const newGrounded  = !!data.grounded;
+
+        if (this.lastAntSelected !== null) {
+            // We have a baseline — check for changes
+            const selectedChanged = newSelected  !== this.lastAntSelected;
+            const groundedChanged = newGrounded  !== this.lastAntGrounded;
+
+            if ((selectedChanged || groundedChanged) && typeof window.showNotification === 'function') {
+                let msg;
+                if (newGrounded) {
+                    msg = '⏚ Antenna grounded';
+                } else if (data.selected && data.selected.length > 0) {
+                    const labels = data.selected.map(n => {
+                        const idx = n - 1;
+                        return (data.antenna_labels && data.antenna_labels[idx])
+                            ? data.antenna_labels[idx]
+                            : `Antenna ${n}`;
+                    });
+                    msg = '📡 Antenna: ' + labels.join(', ');
+                } else {
+                    msg = '📡 Antenna: none selected';
+                }
+                window.showNotification(msg, 'info', 4000);
+            }
+        }
+
+        // Update baseline for next comparison
+        this.lastAntSelected = newSelected;
+        this.lastAntGrounded = newGrounded;
+
         this.antSwitchStatus = data;
 
         // ── Update collapsed tab label ─────────────────────────────────────

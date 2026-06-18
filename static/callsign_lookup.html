@@ -1211,11 +1211,9 @@
                        <span class="rx-val" id="rx-bearing-row">
                            <span id="rx-bearing-deg">${rxDb.bearing}°</span><span id="rx-ant-part" style="display:none"> | <span id="rx-ant-deg" title="Current antenna bearing">—° 🧭</span></span><span id="rx-set-part" style="display:none"> <button class="rx-set-btn" id="rx-set-btn" title="Rotate antenna to ${rxDb.bearing}°">Set</button></span>
                        </span>
-                   </div>
-                   <div id="rx-ant-switch-section"></div>`
+                   </div>`
                 : (d.lat && d.lon
-                    ? `<div class="rx-distance" id="rx-dist-display">—</div>
-                       <div id="rx-ant-switch-section"></div>`
+                    ? `<div class="rx-distance" id="rx-dist-display">—</div>`
                     : '');
 
             // Build aliases row — QRZ returns a comma-separated string
@@ -1234,6 +1232,7 @@
                     <div class="operator-image-col">
                         ${imageHtml}
                         ${rxDistHtml}
+                        <div id="rx-ant-switch-section"></div>
                         <a class="qrz-link" href="${esc(qrzUrl)}" target="_blank" rel="noopener">View on QRZ.com ↗</a>
                     </div>
                     <div class="operator-info-col">
@@ -1517,6 +1516,17 @@
                 }
             }
         });
+
+        // On first load (popup opened via URL), immediately ask the main page for
+        // the current ant switch status — don't wait for the next 30 s poll cycle.
+        if (window.opener && !window.opener.closed) {
+            try {
+                window.opener.postMessage(
+                    { type: 'request_ant_switch_status' },
+                    window.location.origin
+                );
+            } catch (_) {}
+        }
 
     })();
     </script>

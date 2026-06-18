@@ -1067,15 +1067,19 @@ function renderHeatmap(spots) {
         const color = BAND_COLORS[band] || '#aaa';
         const freq  = BANDS_MHZ[bi];
 
-        // Check if this band has any data at all
-        const bandHasData = BEACONS.some(b =>
-            Object.keys(heatData[band][b.callsign]).length > 0
-        );
+        // Count total spots for this band
+        let bandTotalSpots = 0;
+        BEACONS.forEach(b => {
+            Object.values(heatData[band][b.callsign]).forEach(cell => { bandTotalSpots += cell.count; });
+        });
+        const bandHasData = bandTotalSpots > 0;
 
         html += `<div class="heatmap-band-block">`;
         html += `<div class="heatmap-band-title">
             <span class="band-pill" style="background:${color};color:#000;">${band} ${freq}</span>
-            ${!bandHasData ? '<span style="opacity:0.45;font-size:0.85em;font-weight:400;">no spots</span>' : ''}
+            ${bandHasData
+                ? `<span style="opacity:0.55;font-size:0.85em;font-weight:400;">${bandTotalSpots} spot${bandTotalSpots !== 1 ? 's' : ''}</span>`
+                : '<span style="opacity:0.45;font-size:0.85em;font-weight:400;">no spots</span>'}
         </div>`;
         html += `<div class="heatmap-grid">`;
 

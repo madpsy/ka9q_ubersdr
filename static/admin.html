@@ -3890,43 +3890,49 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 stopSystemAutoRefresh();
             }
 
+            // Helper: find the tab button by its onclick attribute value
+            function activateTabBtn(tabName) {
+                const btn = document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`);
+                if (btn) btn.classList.add('active');
+            }
+
             if (tab === 'sessions') {
-                document.querySelector('.tab:nth-child(1)').classList.add('active');
+                activateTabBtn('sessions');
                 document.getElementById('sessionsTab').classList.add('active');
                 document.getElementById('sessionButtons').style.display = 'flex';
                 loadSessions();
                 startSessionsAutoRefresh();
             } else if (tab === 'banned') {
-                document.querySelector('.tab:nth-child(2)').classList.add('active');
+                activateTabBtn('banned');
                 document.getElementById('bannedTab').classList.add('active');
                 loadBannedIPs();
             } else if (tab === 'logs') {
-                document.querySelector('.tab:nth-child(3)').classList.add('active');
+                activateTabBtn('logs');
                 document.getElementById('logsTab').classList.add('active');
                 updateRemoteLoggingCheckbox();
                 initLogsTab();
             } else if (tab === 'visual') {
-                document.querySelector('.tab:nth-child(4)').classList.add('active');
+                activateTabBtn('visual');
                 document.getElementById('visualTab').classList.add('active');
                 document.getElementById('configButtons').style.display = 'flex';
             } else if (tab === 'ui') {
-                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                activateTabBtn('ui');
                 document.getElementById('uiTab').classList.add('active');
                 document.getElementById('uiButtons').style.display = 'flex';
                 loadAdminUIConfig();
                 switchWidgetSubTab('browse');
             } else if (tab === 'proxy') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                activateTabBtn('proxy');
                 document.getElementById('proxyTab').classList.add('active');
                 document.getElementById('proxyButtons').style.display = 'flex';
                 loadAddonProxies();
             } else if (tab === 'radiod') {
-                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                activateTabBtn('radiod');
                 document.getElementById('radiodTab').classList.add('active');
                 document.getElementById('radiodButtons').style.display = 'flex';
                 loadRadiodConfig();
             } else if (tab === 'radiod-channels') {
-                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                activateTabBtn('radiod-channels');
                 document.getElementById('radiodChannelsTab').classList.add('active');
                 document.getElementById('radiodChannelsButtons').style.display = 'flex';
                 // Always reset to unchecked so browser-restored state doesn't silently
@@ -3936,7 +3942,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 loadRadiodChannels();
                 startRadiodChannelsAutoRefresh();
             } else if (tab === 'gpsdo') {
-                document.getElementById('gpsdoTab').classList.add('active');
+                activateTabBtn('gpsdo');
                 document.getElementById('gpsdoTabContent').classList.add('active');
                 document.getElementById('gpsdoButtons').style.display = 'flex';
                 // Load the iframe src on first activation; subsequent activations keep it loaded
@@ -3968,39 +3974,39 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     iframe.src = '/gpsdo/';
                 }
             } else if (tab === 'bookmarks') {
-                document.querySelector('.tab:nth-child(10)').classList.add('active');
+                activateTabBtn('bookmarks');
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
             } else if (tab === 'bands') {
-                document.querySelector('.tab:nth-child(11)').classList.add('active');
+                activateTabBtn('bands');
                 document.getElementById('bandsTab').classList.add('active');
                 document.getElementById('bandButtons').style.display = 'flex';
                 loadBands();
             } else if (tab === 'extensions') {
-                document.querySelector('.tab:nth-child(12)').classList.add('active');
+                activateTabBtn('extensions');
                 document.getElementById('extensionsTab').classList.add('active');
                 document.getElementById('extensionButtons').style.display = 'flex';
                 loadAvailableExtensions();
             } else if (tab === 'decoder') {
-                document.querySelector('.tab:nth-child(13)').classList.add('active');
+                activateTabBtn('decoder');
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
             } else if (tab === 'cwskimmer') {
-                document.querySelector('.tab:nth-child(14)').classList.add('active');
+                activateTabBtn('cwskimmer');
                 document.getElementById('cwskimmerTab').classList.add('active');
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
             } else if (tab === 'rotator') {
-                document.querySelector('.tab:nth-child(15)').classList.add('active');
+                activateTabBtn('rotator');
                 document.getElementById('rotatorSchedulerTab').classList.add('active');
                 const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
                 if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'flex';
                 loadRotatorSchedulerConfig();
                 startRotatorLogsAutoRefresh();
             } else if (tab === 'ant-switch') {
-                document.getElementById('antSwitchTab').classList.add('active');
+                activateTabBtn('ant-switch');
                 document.getElementById('antSwitchTabContent').classList.add('active');
                 const antSwitchBtns = document.getElementById('antSwitchButtons');
                 if (antSwitchBtns) antSwitchBtns.style.display = 'flex';
@@ -4011,18 +4017,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 loadAntSwitchSchedulerConfig();
                 startAntSwitchAutoRefresh();
             } else if (tab === 'chat') {
-                document.querySelector('.tab:nth-child(16)').classList.add('active');
+                activateTabBtn('chat');
                 document.getElementById('chatTab').classList.add('active');
                 document.getElementById('chatButtons').style.display = 'flex';
                 loadChatLogs();
             } else if (tab === 'monitor') {
-                document.querySelector('.tab:nth-child(17)').classList.add('active');
+                activateTabBtn('monitor');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(18)').classList.add('active');
+                activateTabBtn('system');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();

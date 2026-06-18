@@ -136,13 +136,17 @@ initialize_configs() {
         merge_config_keys "/app/config/ui.yaml" "/etc/ka9q_ubersdr/ui.yaml.example" "ui.yaml"
     fi
 
-    # Initialize CTY.DAT directory if it doesn't exist
+    # Initialize CTY directory if it doesn't exist
     if [ ! -d "/app/config/cty" ]; then
         echo "Initializing cty directory..."
         mkdir -p /app/config/cty
         if [ -f "/etc/ka9q_ubersdr/cty/cty.dat" ]; then
             cp /etc/ka9q_ubersdr/cty/cty.dat /app/config/cty/cty.dat
             echo "✓ cty.dat copied from image"
+        fi
+        if [ -f "/etc/ka9q_ubersdr/cty/cty_iso2_map.json" ]; then
+            cp /etc/ka9q_ubersdr/cty/cty_iso2_map.json /app/config/cty/cty_iso2_map.json
+            echo "✓ cty_iso2_map.json copied from image"
         fi
     else
         # Check if cty.dat exists, if not copy from image
@@ -152,6 +156,11 @@ initialize_configs() {
             echo "✓ cty.dat copied"
         else
             echo "✓ cty.dat exists"
+        fi
+        # Always sync cty_iso2_map.json from image (it's generated, not user-edited)
+        if [ -f "/etc/ka9q_ubersdr/cty/cty_iso2_map.json" ]; then
+            cp /etc/ka9q_ubersdr/cty/cty_iso2_map.json /app/config/cty/cty_iso2_map.json
+            echo "✓ cty_iso2_map.json synced from image"
         fi
     fi
 }

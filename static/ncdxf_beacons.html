@@ -355,8 +355,7 @@
             font-size: 11px !important;
             font-weight: 600 !important;
             padding: 2px 6px !important;
-            white-space: normal !important;
-            max-width: 120px !important;
+            white-space: nowrap !important;
             box-shadow: 0 1px 4px rgba(0,0,0,0.5) !important;
             pointer-events: none !important;
         }
@@ -663,6 +662,8 @@ function initMap() {
     // Draw day/night terminator and refresh every minute
     updateGreyline();
     setInterval(updateGreyline, 60000);
+    // Re-run label collision nudge after zoom/pan
+    map.on('zoomend moveend', nudgeBeaconLabels);
 }
 
 // ── Day/night terminator (greyline) ──────────────────────────────────────
@@ -711,6 +712,40 @@ function updateGreyline(forDate) {
     greylineLayer.eachLayer(l => l.bringToBack());
 }
 
+// ── Beacon label collision nudge ─────────────────────────────────────────
+// After Leaflet positions permanent tooltips, nudge any that overlap
+// vertically so they don't sit on top of each other.
+function nudgeBeaconLabels() {
+    // Wait a tick for Leaflet to finish positioning tooltips
+    setTimeout(() => {
+        const labels = Array.from(
+            document.querySelectorAll('#beacon-map .beacon-label')
+        );
+        if (labels.length === 0) return;
+
+        // Reset any previous nudges
+        labels.forEach(el => { el.style.marginTop = ''; });
+
+        // Collect rects sorted by top position
+        const items = labels.map(el => ({ el, rect: el.getBoundingClientRect() }));
+        items.sort((a, b) => a.rect.top - b.rect.top);
+
+        // Simple greedy sweep: if item[i] overlaps item[i-1], push it down
+        for (let i = 1; i < items.length; i++) {
+            const prev = items[i - 1];
+            const cur  = items[i];
+            const overlap = (prev.rect.top + prev.rect.height + 2) - cur.rect.top;
+            if (overlap > 0) {
+                const curMt = parseFloat(cur.el.style.marginTop) || 0;
+                cur.el.style.marginTop = (curMt + overlap) + 'px';
+                // Update rect for next iteration
+                const r = cur.el.getBoundingClientRect();
+                items[i].rect = r;
+            }
+        }
+    }, 50);
+}
+
 function placeBeaconMarkers() {
     clusterGroup.clearLayers();
     beaconMarkers = {};
@@ -742,6 +777,7 @@ function placeBeaconMarkers() {
         beaconMarkers[b.callsign] = m;
         clusterGroup.addLayer(m);
     });
+    nudgeBeaconLabels();
 }
 
 function placeReceiverMarker(lat, lon, callsign, name) {
@@ -791,14 +827,13 @@ function colourBeaconMarkers(heardSet, byCall) {
         // Update permanent tooltip to include bands heard
         const bSpots = byCall[b.callsign] || [];
         const bandSet = [...new Set(bSpots.map(s => s.band))].sort();
-        let labelHtml = `<span style="display:flex;flex-wrap:wrap;align-items:center;gap:2px;"><b>${b.callsign}</b>`;
+        let labelHtml = `<b>${b.callsign}</b>`;
         if (bandSet.length > 0) {
             const pills = bandSet.map(bd =>
-                `<span style="padding:1px 4px;border-radius:3px;font-size:10px;background:${BAND_COLORS[bd]||'#888'};color:#000;">${bd}</span>`
+                `<span class="bl-pill" style="display:inline-block;padding:1px 4px;border-radius:3px;font-size:10px;background:${BAND_COLORS[bd]||'#888'};color:#000;margin-left:3px;">${bd}</span>`
             ).join('');
             labelHtml += pills;
         }
-        labelHtml += '</span>';
         m.unbindTooltip();
         m.bindTooltip(labelHtml, {
             permanent: true,
@@ -840,6 +875,7 @@ function colourBeaconMarkers(heardSet, byCall) {
             <div class="bp-spots">${spotsHtml}</div>
         </div>`);
     });
+    nudgeBeaconLabels();
 }
 
 // Draw lines from receiver to each heard beacon (one line per unique callsign)

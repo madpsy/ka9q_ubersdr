@@ -8,6 +8,70 @@ let itemsPerPage = 100;
 let filteredStats = [];
 let allStats = []; // Store all stats before filtering
 let tableFilter = ''; // Real-time table filter
+let pskCountryList = []; // [{name, country_code}] for flag lookup
+
+function pskIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 0x41 + code.toUpperCase().charCodeAt(1)
+    ) + ' ';
+}
+
+function pskFlagForCountry(countryName) {
+    if (!countryName) return '';
+    const entry = pskCountryList.find(c => c.name === countryName);
+    return entry ? pskIso2ToFlag(entry.country_code) : '';
+}
+
+function setupPskCountryAutocomplete() {
+    const input = document.getElementById('country-search');
+    const list = document.getElementById('country-autocomplete-list');
+    if (!input || !list) return;
+
+    let activeIndex = -1;
+
+    function showSuggestions(query) {
+        list.innerHTML = '';
+        activeIndex = -1;
+        if (!query) { list.style.display = 'none'; return; }
+        const q = query.toLowerCase();
+        const matches = pskCountryList.filter(c => c.name.toLowerCase().includes(q)).slice(0, 50);
+        if (matches.length === 0) { list.style.display = 'none'; return; }
+        matches.forEach((country, idx) => {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding:6px 10px; cursor:pointer; color:#fff; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+            item.textContent = pskIso2ToFlag(country.country_code) + country.name;
+            item.dataset.name = country.name;
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                input.value = country.name;
+                list.style.display = 'none';
+            });
+            item.addEventListener('mouseover', () => { setActive(idx); });
+            list.appendChild(item);
+        });
+        list.style.display = 'block';
+    }
+
+    function setActive(idx) {
+        const items = list.querySelectorAll('div');
+        items.forEach((el, i) => { el.style.background = i === idx ? '#2a2a4e' : ''; });
+        activeIndex = idx;
+    }
+
+    input.addEventListener('input', () => showSuggestions(input.value.trim()));
+    input.addEventListener('focus', () => { if (input.value.trim()) showSuggestions(input.value.trim()); });
+    input.addEventListener('blur', () => { setTimeout(() => { list.style.display = 'none'; }, 150); });
+    input.addEventListener('keydown', (e) => {
+        const items = list.querySelectorAll('div');
+        if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIndex + 1, items.length - 1)); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIndex - 1, 0)); }
+        else if (e.key === 'Enter') {
+            if (activeIndex >= 0 && items[activeIndex]) { e.preventDefault(); input.value = items[activeIndex].dataset.name; list.style.display = 'none'; }
+        } else if (e.key === 'Escape') { list.style.display = 'none'; }
+    });
+}
 
 // Band order for sorting
 const BAND_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m', '2m', '1.25m', '70cm'];
@@ -90,21 +154,17 @@ async function loadVersion() {
     }
 }
 
-// Load countries list for datalist
+// Load countries list for autocomplete
 async function loadCountriesList() {
     try {
         const response = await fetch('/api/cty/countries');
         const data = await response.json();
-        const datalist = document.getElementById('countries-datalist');
-        datalist.innerHTML = '';
 
-        if (data.countries) {
-            data.countries.forEach(country => {
-                const option = document.createElement('option');
-                option.value = country;
-                datalist.appendChild(option);
-            });
+        const countries = data && data.data && data.data.countries;
+        if (Array.isArray(countries)) {
+            pskCountryList = countries.filter(c => c.name && c.country_code);
         }
+        setupPskCountryAutocomplete();
     } catch (error) {
         console.error('Error loading countries:', error);
     }
@@ -395,7 +455,7 @@ function renderTablePage() {
         html += `
             <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); transition: background 0.3s ease;" onmouseover="this.style.background='rgba(255, 255, 255, 0.08)'" onmouseout="this.style.background='transparent'">
                 <td style="padding: 10px;"><strong>${escapeHtml(stat.callsign)}</strong></td>
-                <td style="padding: 10px;">${escapeHtml(stat.country || '-')}</td>
+                <td style="padding: 10px;">${pskFlagForCountry(stat.country)}${escapeHtml(stat.country || '-')}</td>
                 <td style="padding: 10px;">${escapeHtml(stat.band)}</td>
                 <td style="padding: 10px;">${escapeHtml(stat.mode)}</td>
                 <td style="padding: 10px; text-align: center;">${stat.submission_count}</td>

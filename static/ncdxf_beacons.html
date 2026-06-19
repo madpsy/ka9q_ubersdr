@@ -465,6 +465,12 @@
             outline: 2px solid rgba(255,220,50,0.9);
             outline-offset: 1px;
         }
+        /* Persistent amber outline on the band pill for the slot duration */
+        .band-pill-live-hold {
+            outline: 2px solid rgba(255,220,50,0.9);
+            outline-offset: 1px;
+            box-shadow: 0 0 4px rgba(255,220,50,0.5);
+        }
 
         /* ── Live SSE spot — beacon card / schedule row flash ───────────── */
         @keyframes live-card-flash {
@@ -616,12 +622,6 @@
                     <option value="20">+20 dB</option>
                 </select>
             </div>
-            <div class="control-group" style="align-items:center;">
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9em;white-space:nowrap;">
-                    <input type="checkbox" id="auto-refresh-cb" checked style="width:15px;height:15px;cursor:pointer;">
-                    Auto-refresh (5 min)
-                </label>
-            </div>
             <div class="control-group">
                 <button id="load-btn" style="background:#4CAF50;">Load Spots</button>
             </div>
@@ -760,7 +760,6 @@
                 <button id="spots-last-btn"  class="page-btn" title="Last page">»</button>
             </div>
             <div style="display:flex; align-items:center; gap:12px;">
-                <div id="refresh-countdown" style="font-size:0.82em; opacity:0.55; font-style:italic;"></div>
                 <div id="spots-count" style="font-size:0.82em; opacity:0.65;"></div>
             </div>
         </div>
@@ -926,10 +925,9 @@ function updateClock() {
 const BANDS_MHZ = ['14.100', '18.110', '21.150', '24.930', '28.200'];
 const BAND_NAMES = ['20m', '17m', '15m', '12m', '10m'];
 
-// Callsign whose schedule row should remain highlighted until the slot rotates.
-// Set by the SSE handler; cleared automatically when updateScheduleTable rebuilds
-// the tbody and the callsign is no longer in the current 5-slot window.
-let liveScheduleCallsign = null;
+// The {callsign, band} of the last live spot, used to keep exactly one schedule
+// row highlighted until the 10 s slot rotates that beacon off that band.
+let liveScheduleSpot = null;
 
 function updateScheduleTable(now) {
     if (BEACONS.length === 0) return;
@@ -951,13 +949,33 @@ function updateScheduleTable(now) {
         </tr>`;
     }
     tbody.innerHTML = html;
-    // Re-apply persistent live highlight if the callsign is still in the window
-    if (liveScheduleCallsign) {
-        tbody.querySelectorAll('tr').forEach(row => {
-            if (row.textContent.includes(liveScheduleCallsign)) {
+    // Re-apply highlight only to the exact row (callsign + band) that was heard.
+    // When the slot rotates the beacon moves to a different band row, so it won't
+    // match and the highlight disappears naturally.
+    if (liveScheduleSpot) {
+        let matched = false;
+        const rows = tbody.querySelectorAll('tr');
+        rows.forEach((row, i) => {
+            if (BAND_NAMES[i] === liveScheduleSpot.band &&
+                row.textContent.includes(liveScheduleSpot.callsign)) {
                 row.classList.add('schedule-row-live');
+                matched = true;
             }
         });
+        if (!matched) {
+            // Slot has rotated — clear the live state and restore the map marker
+            const prevCall = liveScheduleSpot.callsign;
+            liveScheduleSpot = null;
+            const m = beaconMarkers[prevCall];
+            if (m) {
+                const wasHeard = allSpots.some(s => s.callsign === prevCall);
+                if (wasHeard) {
+                    m.setStyle({ fillColor: '#4CAF50', fillOpacity: 0.9, radius: 9, color: '#fff', weight: 1 });
+                } else {
+                    m.setStyle({ fillColor: '#555', fillOpacity: 0.5, radius: 7, color: '#fff', weight: 1 });
+                }
+            }
+        }
     }
 }
 
@@ -1157,6 +1175,10 @@ function colourBeaconMarkers(heardSet, byCall) {
         } else {
             m.setStyle({ fillColor: '#555', fillOpacity: 0.5, radius: 7, color: '#fff', weight: 1 });
         }
+        // Override with gold if this is the currently live beacon (slot duration)
+        if (liveScheduleSpot && liveScheduleSpot.callsign === b.callsign) {
+            m.setStyle({ fillColor: '#FFE033', fillOpacity: 1, radius: 11, color: '#fff', weight: 2 });
+        }
 
         // Update permanent tooltip to include bands heard
         const bSpots = byCall[b.callsign] || [];
@@ -1344,6 +1366,16 @@ function buildCallsignParam() {
     return BEACONS.map(b => b.callsign).slice(0, 20).join(',');
 }
 
+// ── Live mode detection ───────────────────────────────────────────────────
+// "Live mode" = any time range that doesn't require a specific date picker
+// (rolling 24 h, last 6 h, last 12 h). Only in these modes should SSE spots
+// be injected into allSpots and re-rendered in real time.
+// "Full Day" with a specific date is excluded — it's a historical view.
+function isLiveMode() {
+    const val = document.getElementById('hours-select').value;
+    return val === 'rolling24' || val === '6' || val === '12';
+}
+
 // ── Fetch spots from API ─────────────────────────────────────────────────
 async function loadSpots() {
     const hoursVal = document.getElementById('hours-select').value;
@@ -1369,12 +1401,20 @@ async function loadSpots() {
             const yesterdayStr = yd.getUTCFullYear() + '-' + padZ(yd.getUTCMonth() + 1) + '-' + padZ(yd.getUTCDate());
             url = `/api/cwskimmer/spots?from_date=${yesterdayStr}&to_date=${todayStr}&callsign=${encodeURIComponent(callsigns)}`;
         } else {
-            const dateVal = document.getElementById('date-input').value;
-            if (!dateVal) {
-                setStatus('Please select a date.', 'error');
-                return;
-            }
+            // "Full Day" uses the date picker; "Last 6 h" / "Last 12 h" always use today
             const hours = parseInt(hoursVal, 10);
+            let dateVal;
+            if (hours === 24) {
+                // Full Day — date picker required
+                dateVal = document.getElementById('date-input').value;
+                if (!dateVal) {
+                    setStatus('Please select a date.', 'error');
+                    return;
+                }
+            } else {
+                // Last 6 h / Last 12 h — always today UTC
+                dateVal = todayUTC();
+            }
             let startTimeParam = '';
             if (hours < 24) {
                 const startH = 24 - hours;
@@ -1521,11 +1561,23 @@ function renderBeaconCards(spots, heardSet, beaconList) {
             }).join(' ');
 
         const _flagC = beaconFlag(b);
+        // Re-apply persistent live band pill highlight if this beacon/band is the live spot
+        const liveBandPills = BAND_NAMES
+            .filter(bd => snrByBand[bd] !== undefined)
+            .map(bd => {
+                const snr = snrByBand[bd];
+                const sign = snr >= 0 ? '+' : '';
+                const isLive = liveScheduleSpot &&
+                    liveScheduleSpot.callsign === b.callsign &&
+                    liveScheduleSpot.band === bd;
+                const extraClass = isLive ? ' band-pill-live-hold' : '';
+                return `<span class="band-pill${extraClass}" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;color:#000;">${bd} <span style="opacity:0.75;">${sign}${snr}</span></span>`;
+            }).join(' ');
         return `<div class="beacon-card ${heard ? 'heard' : 'not-heard'}">
             <div class="bc-call">Slot ${b.slot} — ${_flagC ? _flagC + '\u202F' : ''}${b.callsign}</div>
             <div class="bc-entity">${b.entity} · ${b.location} · ${b.grid}</div>
             ${heard
-                ? `<div class="bc-spots">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} ${bandPills}</div>
+                ? `<div class="bc-spots">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} ${liveBandPills}</div>
                    <div class="bc-last">Last: ${lastTime}</div>`
                 : `<div class="bc-spots" style="color:#888;">Not heard</div>`
             }
@@ -1942,45 +1994,6 @@ function todayUTC() {
         padZ(d.getUTCDate());
 }
 
-// ── Auto-refresh ──────────────────────────────────────────────────────────
-const AUTO_REFRESH_SECS = 300; // 5 minutes
-let autoRefreshSecsLeft = AUTO_REFRESH_SECS;
-let autoRefreshInterval = null;
-
-function isAutoRefreshEnabled() {
-    const cb = document.getElementById('auto-refresh-cb');
-    return cb ? cb.checked : false;
-}
-
-function startAutoRefresh() {
-    autoRefreshSecsLeft = AUTO_REFRESH_SECS;
-    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-    autoRefreshInterval = setInterval(() => {
-        if (!isAutoRefreshEnabled()) {
-            updateRefreshCountdown();
-            return;
-        }
-        autoRefreshSecsLeft--;
-        updateRefreshCountdown();
-        if (autoRefreshSecsLeft <= 0) {
-            autoRefreshSecsLeft = AUTO_REFRESH_SECS;
-            loadSpots();
-        }
-    }, 1000);
-}
-
-function updateRefreshCountdown() {
-    const el = document.getElementById('refresh-countdown');
-    if (!el) return;
-    if (!isAutoRefreshEnabled()) {
-        el.textContent = '';
-        return;
-    }
-    const m = Math.floor(autoRefreshSecsLeft / 60);
-    const s = autoRefreshSecsLeft % 60;
-    el.textContent = `Auto-refresh in ${m}:${padZ(s)}`;
-}
-
 // ── Live CW Skimmer SSE feed ─────────────────────────────────────────────
 // Connects to /api/cwskimmer/stream, watches for NCDXF beacon callsigns,
 // and flashes them on the map, schedule table, and Beacon Status cards.
@@ -2011,32 +2024,58 @@ function connectCWSkimmerSSE() {
         });
     }
 
-    // Highlight the matching schedule row and keep it lit until the slot rotates.
-    // liveScheduleCallsign is read by updateScheduleTable() to re-apply the class
-    // after each 10 s rebuild; it clears naturally when the callsign leaves the window.
-    function markScheduleRow(callsign) {
-        liveScheduleCallsign = callsign;
-        // Remove any previous highlight
+    // Highlight the exact schedule row (callsign + band) and keep it lit until
+    // the 10 s slot rotates that beacon off that band.  liveScheduleSpot is read
+    // by updateScheduleTable(), renderBeaconCards(), and colourBeaconMarkers() to
+    // re-apply highlights after each rebuild; they clear naturally when the band
+    // no longer matches the row/pill/marker position.
+    function markScheduleRow(callsign, band) {
+        liveScheduleSpot = { callsign, band };
+
+        // ── Schedule row ──────────────────────────────────────────────────────
         document.querySelectorAll('#schedule-tbody tr.schedule-row-live').forEach(r => {
             r.classList.remove('schedule-row-live');
         });
-        // Apply to the matching row immediately
-        document.querySelectorAll('#schedule-tbody tr').forEach(row => {
-            if (row.textContent.includes(callsign)) {
+        document.querySelectorAll('#schedule-tbody tr').forEach((row, i) => {
+            if (BAND_NAMES[i] === band && row.textContent.includes(callsign)) {
                 row.classList.add('schedule-row-live');
             }
         });
+
+        // ── Beacon card band pill ─────────────────────────────────────────────
+        // Remove any previous persistent pill highlight
+        document.querySelectorAll('#beacon-cards .band-pill-live-hold').forEach(p => {
+            p.classList.remove('band-pill-live-hold');
+        });
+        // Apply to the matching pill on the matching card
+        document.querySelectorAll('#beacon-cards .beacon-card').forEach(card => {
+            const callEl = card.querySelector('.bc-call');
+            if (!callEl || !callEl.textContent.includes(callsign)) return;
+            card.querySelectorAll('.band-pill').forEach(pill => {
+                if (pill.textContent.trim().startsWith(band)) {
+                    pill.classList.add('band-pill-live-hold');
+                }
+            });
+        });
+
+        // ── Map marker ────────────────────────────────────────────────────────
+        // Set the live beacon gold immediately. Any previously-gold marker will
+        // be restored to its correct heard/not-heard colour on the next
+        // colourBeaconMarkers() call (which runs on every render cycle).
+        const liveM = beaconMarkers[callsign];
+        if (liveM) {
+            liveM.setStyle({ fillColor: '#FFE033', fillOpacity: 1, radius: 11, color: '#fff', weight: 2 });
+        }
     }
 
-    // Briefly pulse the Leaflet map marker then restore its normal style
+    // Briefly pulse the Leaflet map marker (initial attention-grab on spot arrival)
     function pulseMarker(callsign) {
         const m = beaconMarkers[callsign];
         if (!m) return;
-        const prevFill  = m.options.fillColor;
-        const prevOpac  = m.options.fillOpacity;
-        const prevR     = m.options.radius;
-        m.setStyle({ radius: prevR + 5, fillColor: '#FFE033', fillOpacity: 1 });
-        setTimeout(() => m.setStyle({ radius: prevR, fillColor: prevFill, fillOpacity: prevOpac }), 800);
+        // The marker is already set gold by markScheduleRow; just do a radius pop
+        const curR = m.options.radius;
+        m.setStyle({ radius: curR + 4 });
+        setTimeout(() => m.setStyle({ radius: curR }), 600);
     }
 
     async function connect() {
@@ -2097,15 +2136,53 @@ function connectCWSkimmerSSE() {
             // Only care about NCDXF beacon callsigns
             if (!beaconByCall[call]) return;
 
-            // Flash beacon card and map marker; keep schedule row lit for the slot
-            flashBeaconCard(call, band);
-            markScheduleRow(call);
-            pulseMarker(call);
-
             // Update SSE status with last-heard info
             const now = serverNow();
             const hhmm = padZ(now.getUTCHours()) + ':' + padZ(now.getUTCMinutes()) + ':' + padZ(now.getUTCSeconds());
             setSSEStatus('sse-connected', `⬤ Live: ${call} ${band} @ ${hhmm} UTC`);
+
+            // ── First-class SSE: inject into allSpots and re-render ───────────
+            // Only when viewing a live time range (rolling 24 h, no specific date).
+            // Only NCDXF beacon callsigns reach this point (checked above).
+            if (isLiveMode()) {
+                // Respect the active band and SNR filters
+                const uiBand   = document.getElementById('band-filter').value;
+                const uiMinSNR = parseInt(document.getElementById('snr-filter').value, 10);
+                const bandOk   = !uiBand || band === uiBand;
+                const snrOk    = isNaN(uiMinSNR) || uiMinSNR <= -999 || spot.snr >= uiMinSNR;
+
+                if (bandOk && snrOk) {
+                    // Deduplicate: skip if we already have this exact spot
+                    const alreadyHave = allSpots.some(s =>
+                        s.callsign === call && s.band === band && s.timestamp === spot.timestamp
+                    );
+                    if (!alreadyHave) {
+                        // Prepend the new spot (newest-first order)
+                        allSpots.unshift(spot);
+
+                        // Trim spots older than 24 h from the rolling window
+                        const cutoff = new Date(Date.now() - 24 * 3600 * 1000);
+                        allSpots = allSpots.filter(s => {
+                            const ts = new Date(s.timestamp);
+                            return !isNaN(ts) && ts >= cutoff;
+                        });
+
+                        // Re-render everything, preserving the user's current spots table page
+                        const savedPage = spotsTablePage;
+                        renderResults(allSpots);
+                        spotsTablePage = savedPage;
+                        renderSpotsPage();
+
+                        // Update status bar spot count
+                        setStatus(`${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} (rolling 24 h, live). Last: ${call} ${band} @ ${hhmm} UTC`, 'ok');
+                    }
+                }
+            }
+
+            // Visual highlights (always, regardless of mode)
+            flashBeaconCard(call, band);
+            markScheduleRow(call, band);
+            pulseMarker(call);
         };
 
         es.onerror = () => {
@@ -2125,27 +2202,18 @@ async function init() {
     dateInput.value = todayUTC();
     dateInput.max   = todayUTC();
 
-    // Disable date input when Rolling 24h is selected
+    // Date input is only relevant for "Full Day" (value "24").
+    // Rolling 24 h, Last 6 h, and Last 12 h all use today's date automatically.
     function updateDateInputState() {
-        const rolling = document.getElementById('hours-select').value === 'rolling24';
-        dateInput.disabled = rolling;
-        dateInput.style.opacity = rolling ? '0.4' : '1';
+        const fullDay = document.getElementById('hours-select').value === '24';
+        dateInput.disabled = !fullDay;
+        dateInput.style.opacity = fullDay ? '1' : '0.4';
     }
     document.getElementById('hours-select').addEventListener('change', updateDateInputState);
     updateDateInputState(); // apply on load (rolling24 is default)
 
     // Wire buttons
-    document.getElementById('load-btn').addEventListener('click', () => {
-        startAutoRefresh(); // reset countdown on manual load
-        loadSpots();
-    });
-    // Checkbox: toggling on resets the countdown; toggling off clears the display
-    document.getElementById('auto-refresh-cb').addEventListener('change', () => {
-        if (isAutoRefreshEnabled()) {
-            autoRefreshSecsLeft = AUTO_REFRESH_SECS;
-        }
-        updateRefreshCountdown();
-    });
+    document.getElementById('load-btn').addEventListener('click', loadSpots);
 
     // CSV download buttons
     document.getElementById('csv-download-btn').addEventListener('click', downloadCSV);
@@ -2233,9 +2301,8 @@ async function init() {
     updateClock();
     setInterval(updateClock, 1000);
 
-    // Auto-load today on startup, then start auto-refresh
+    // Auto-load on startup
     await loadSpots();
-    startAutoRefresh();
 
     // Connect to live CW Skimmer SSE feed
     connectCWSkimmerSSE();

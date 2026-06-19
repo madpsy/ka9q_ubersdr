@@ -471,9 +471,13 @@
             0%   { background: rgba(255,220,50,0.35); }
             100% { background: transparent; }
         }
-        .beacon-card.live-flash,
-        #schedule-tbody tr.live-flash td {
+        .beacon-card.live-flash {
             animation: live-card-flash 2s ease-out forwards;
+        }
+        /* Schedule row stays highlighted for the full 10 s slot duration */
+        #schedule-tbody tr.schedule-row-live td {
+            background: rgba(255,220,50,0.22);
+            transition: background 0.4s ease;
         }
 
         /* ── Live SSE spot — map marker pulse ───────────────────────────── */
@@ -922,6 +926,11 @@ function updateClock() {
 const BANDS_MHZ = ['14.100', '18.110', '21.150', '24.930', '28.200'];
 const BAND_NAMES = ['20m', '17m', '15m', '12m', '10m'];
 
+// Callsign whose schedule row should remain highlighted until the slot rotates.
+// Set by the SSE handler; cleared automatically when updateScheduleTable rebuilds
+// the tbody and the callsign is no longer in the current 5-slot window.
+let liveScheduleCallsign = null;
+
 function updateScheduleTable(now) {
     if (BEACONS.length === 0) return;
     const n = Math.floor(now.getTime() / 10000) % 18; // beacon index currently on 20m
@@ -942,6 +951,14 @@ function updateScheduleTable(now) {
         </tr>`;
     }
     tbody.innerHTML = html;
+    // Re-apply persistent live highlight if the callsign is still in the window
+    if (liveScheduleCallsign) {
+        tbody.querySelectorAll('tr').forEach(row => {
+            if (row.textContent.includes(liveScheduleCallsign)) {
+                row.classList.add('schedule-row-live');
+            }
+        });
+    }
 }
 
 // ── Map initialisation ───────────────────────────────────────────────────
@@ -1994,13 +2011,19 @@ function connectCWSkimmerSSE() {
         });
     }
 
-    // Flash the matching row in the Current Transmission Schedule table
-    function flashScheduleRow(callsign) {
+    // Highlight the matching schedule row and keep it lit until the slot rotates.
+    // liveScheduleCallsign is read by updateScheduleTable() to re-apply the class
+    // after each 10 s rebuild; it clears naturally when the callsign leaves the window.
+    function markScheduleRow(callsign) {
+        liveScheduleCallsign = callsign;
+        // Remove any previous highlight
+        document.querySelectorAll('#schedule-tbody tr.schedule-row-live').forEach(r => {
+            r.classList.remove('schedule-row-live');
+        });
+        // Apply to the matching row immediately
         document.querySelectorAll('#schedule-tbody tr').forEach(row => {
             if (row.textContent.includes(callsign)) {
-                row.classList.remove('live-flash');
-                void row.offsetWidth;
-                row.classList.add('live-flash');
+                row.classList.add('schedule-row-live');
             }
         });
     }
@@ -2035,9 +2058,9 @@ function connectCWSkimmerSSE() {
             // Only care about NCDXF beacon callsigns
             if (!beaconByCall[call]) return;
 
-            // Temporary visual flashes — nothing persists
+            // Flash beacon card and map marker; keep schedule row lit for the slot
             flashBeaconCard(call, band);
-            flashScheduleRow(call);
+            markScheduleRow(call);
             pulseMarker(call);
 
             // Update SSE status with last-heard info

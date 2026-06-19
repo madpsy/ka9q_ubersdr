@@ -143,21 +143,22 @@
             background: rgba(255,255,255,0.06);
         }
         /* ── Crosshair hover: row + column highlight for <table> elements ── */
-        /* Row highlight is handled by tr.xhair-row, column by td.xhair-col  */
+        /* Use inset box-shadow so the tint overlays without replacing the     */
+        /* cell's existing background colour.                                  */
         .now-table tr.xhair-row td,
         .spots-table tr.xhair-row td {
-            background: rgba(255,255,255,0.08);
+            box-shadow: inset 0 0 0 9999px rgba(255,255,255,0.05);
         }
         .now-table td.xhair-col,
         .spots-table td.xhair-col,
         .now-table th.xhair-col,
         .spots-table th.xhair-col {
-            background: rgba(255,255,255,0.06);
+            box-shadow: inset 0 0 0 9999px rgba(255,255,255,0.04);
         }
-        /* Intersection cell gets both — slightly brighter */
+        /* Intersection cell (hovered cell) — slightly more visible */
         .now-table tr.xhair-row td.xhair-col,
         .spots-table tr.xhair-row td.xhair-col {
-            background: rgba(255,255,255,0.14);
+            box-shadow: inset 0 0 0 9999px rgba(255,255,255,0.09);
         }
         .spots-table tbody tr.beacon-row-highlight {
             background: rgba(74,158,255,0.12);
@@ -305,16 +306,34 @@
             background: rgba(74,158,255,0.13);
         }
         /* ── Heatmap crosshair hover ─────────────────────────────────────── */
-        .hm-cell.hm-row-hover,
+        /* Use ::before overlay so SNR background colours show through        */
+        .hm-cell.hm-row-hover::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.12);
+            border-radius: inherit;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .hm-cell.hm-col-hover::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.08);
+            border-radius: inherit;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .hm-cell.hm-row-hover.hm-col-hover::before {
+            background: rgba(255,255,255,0.20);
+        }
+        /* Beacon label and hour header have no inline bg — direct tint is fine */
         .hm-beacon-label.hm-row-hover {
-            background: rgba(255,255,255,0.10) !important;
+            background: rgba(255,255,255,0.08);
         }
-        .hm-cell.hm-col-hover,
         .hm-hour.hm-col-hover {
-            background: rgba(255,255,255,0.07);
-        }
-        .hm-cell.hm-row-hover.hm-col-hover {
-            background: rgba(255,255,255,0.18) !important;
+            background: rgba(255,255,255,0.08);
         }
         .hm-beacon-label {
             font-size: 0.75em;
@@ -353,6 +372,7 @@
             color: rgba(0,0,0,0.65);
             pointer-events: none;
             line-height: 1;
+            z-index: 2; /* above ::before overlays (current-col z:0, crosshair z:1) */
         }
         .hm-cell[data-tip]:hover::after {
             content: attr(data-tip);

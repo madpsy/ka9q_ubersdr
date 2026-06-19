@@ -382,6 +382,55 @@ const _artworkPaths = [
 let _artworkBlobUrls = null; // Array of { src, sizes, type } with blob: URLs once resolved
 let _artworkBlobPromise = null; // Singleton promise so concurrent callers share one fetch
 
+// ── Per-callsign operator photo blob URL cache ───────────────────────────────
+// QRZ operator photos are served via the same-origin image proxy at
+// /api/lookup/image/<uuid>, so they can be fetch()-ed and converted to blob:
+// URLs just like the standard logo artwork.  This eliminates Chrome's
+// re-fetch storm for the photo on every waiting→playing transition.
+//
+// _callsignPhotoBlobCache: proxy path → blob: URL (string)
+// _callsignPhotoBlobPromises: proxy path → in-flight Promise<string>
+// _callsignPhotoBlobCurrent: the proxy path whose blob is in the current metadata
+//   (used to revoke the old blob URL when the callsign changes)
+const _callsignPhotoBlobCache    = new Map(); // proxyPath → blobUrl
+const _callsignPhotoBlobPromises = new Map(); // proxyPath → Promise<blobUrl>
+let   _callsignPhotoBlobCurrent  = null;      // proxyPath currently in MediaMetadata
+
+/**
+ * Fetch the operator photo at proxyPath (a same-origin /api/lookup/image/<uuid>
+ * URL) and return a promise that resolves to a blob: URL.
+ * Results are cached; concurrent callers for the same path share one fetch.
+ * Falls back to the raw proxyPath string on any error.
+ */
+function _ensureCallsignPhotoBlobUrl(proxyPath) {
+    if (_callsignPhotoBlobCache.has(proxyPath)) {
+        return Promise.resolve(_callsignPhotoBlobCache.get(proxyPath));
+    }
+    if (_callsignPhotoBlobPromises.has(proxyPath)) {
+        return _callsignPhotoBlobPromises.get(proxyPath);
+    }
+    const p = fetch(proxyPath)
+        .then(resp => {
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.blob();
+        })
+        .then(blob => {
+            const blobUrl = URL.createObjectURL(blob);
+            _callsignPhotoBlobCache.set(proxyPath, blobUrl);
+            _callsignPhotoBlobPromises.delete(proxyPath);
+            return blobUrl;
+        })
+        .catch(e => {
+            console.warn('[MediaSession] Could not create blob URL for operator photo:', e.message);
+            _callsignPhotoBlobPromises.delete(proxyPath);
+            // Cache the raw path as fallback so we don't retry on every call.
+            _callsignPhotoBlobCache.set(proxyPath, proxyPath);
+            return proxyPath;
+        });
+    _callsignPhotoBlobPromises.set(proxyPath, p);
+    return p;
+}
+
 /**
  * Pre-fetch artwork images and convert them to blob: URLs.
  * Returns a promise that resolves to an array of MediaImage-compatible objects.
@@ -1345,11 +1394,12 @@ let _lastMediaSessionImageUrl = null; // tracks QRZ photo URL so artwork updates
 //   { data, imageUrl } — successful lookup
 //
 // data     — full raw API response object (all QRZ fields).
-// imageUrl — raw QRZ photo URL ('' if no photo).  Used directly in MediaSession
-//            artwork on both desktop and mobile.  We do NOT blob-fetch the photo:
-//            QRZ's CDN does not send CORS headers so fetch()-to-blob fails
-//            silently.  Using the URL directly works fine — MediaSession and
-//            Bluetooth AVRCP both accept cross-origin image URLs.
+// imageUrl — same-origin proxy path (/api/lookup/image/<uuid>) for the QRZ
+//            operator photo, or '' if no photo.  The server-side image proxy
+//            (lookup_image_proxy.go) rewrites the QRZ CDN URL to a same-origin
+//            path, so fetch()-to-blob works without any CORS issues.
+//            updateMediaSession() converts this to a blob: URL before placing
+//            it in MediaMetadata artwork to eliminate Chrome's re-fetch storm.
 //
 // The cache lives for the page session; the server-side QRZ cache handles the
 // 24-hour deduplication against the QRZ API.
@@ -1630,7 +1680,7 @@ function updateMediaSession() {
     const newArtist = [freqMHz, modeStr, markerCallsign].filter(Boolean).join(' • ');
 
     // ── Artwork strategy ─────────────────────────────────────────────────────
-    // Standard UberSDR logo artwork: always use blob: URLs on all platforms.
+    // All artwork is served as blob: URLs on all platforms.
     //
     // The browser fetches the artwork URL and passes the image data to the OS
     // media session / Bluetooth stack — the car/OS never makes an independent
@@ -1645,10 +1695,10 @@ function updateMediaSession() {
     // blob: URLs also stop Chrome's re-fetch storm (hundreds of fetches during
     // the audio buffering phase) on all platforms.
     //
-    // QRZ operator photo: always use the raw imageUrl directly.  QRZ's CDN
-    // does not send CORS headers so fetch()-to-blob fails silently.  The
-    // browser can still pass the URL to the OS media session as a cross-origin
-    // URL — the OS fetches it via the phone's internet connection.
+    // QRZ operator photo: the server-side image proxy (lookup_image_proxy.go)
+    // rewrites the QRZ CDN URL to a same-origin /api/lookup/image/<uuid> path,
+    // so fetch()-to-blob works without any CORS issues.  We convert it to a
+    // blob: URL via _ensureCallsignPhotoBlobUrl() and cache the result.
 
     // Standard UberSDR logo artwork — blob: URLs for all platforms.
     const standardArtwork = _artworkBlobUrls
@@ -1657,10 +1707,7 @@ function updateMediaSession() {
             src: `${window.location.origin}${path}`, sizes, type
           }));
 
-    // QRZ operator photo for the artwork array.
-    // We use the raw imageUrl directly — QRZ's CDN does not send CORS headers
-    // so fetch()-to-blob fails silently.  The re-fetch storm concern only
-    // applies to our own server's logo artwork (already handled by blobs above).
+    // QRZ operator photo proxy path (same-origin /api/lookup/image/<uuid>).
     const cachedCallsign = (currentMarker && _CALLSIGN_MARKER_TYPES.has(currentMarker.type))
         ? (_callsignLookupCache.get(_normaliseCallsign(currentMarker.name)) || null)
         : null;
@@ -1680,40 +1727,76 @@ function updateMediaSession() {
         _lastMediaSessionAlbum    = newAlbum;
         _lastMediaSessionImageUrl = callsignImageUrl;
 
-        // When a QRZ operator photo is available, use it as the sole artwork
-        // entry.  Including the standard UberSDR logo blobs alongside it causes
-        // Chrome to pick the 512x512 blob over the QRZ photo (Chrome's artwork
-        // selection algorithm prefers the largest declared size that fits the
-        // display context, and the blob is declared at 512x512).
-        // When no photo is available, fall back to the standard artwork array.
-        const artwork = callsignImageUrl
-            ? [{ src: callsignImageUrl, sizes: '800x800', type: 'image/jpeg' }]
-            : standardArtwork;
+        // Revoke the blob URL for the previous callsign photo (if any) when
+        // the photo changes, to avoid leaking object URLs.
+        if (_callsignPhotoBlobCurrent && _callsignPhotoBlobCurrent !== callsignImageUrl) {
+            const oldBlob = _callsignPhotoBlobCache.get(_callsignPhotoBlobCurrent);
+            if (oldBlob && oldBlob.startsWith('blob:')) {
+                URL.revokeObjectURL(oldBlob);
+                _callsignPhotoBlobCache.delete(_callsignPhotoBlobCurrent);
+            }
+            _callsignPhotoBlobCurrent = null;
+        }
 
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title:  newTitle,
-            artist: newArtist,
-            album:  newAlbum,
-            artwork
-        });
+        if (callsignImageUrl) {
+            // When a QRZ operator photo is available, use it as the sole artwork
+            // entry.  Including the standard UberSDR logo blobs alongside it causes
+            // Chrome to pick the 512x512 blob over the QRZ photo (Chrome's artwork
+            // selection algorithm prefers the largest declared size that fits the
+            // display context, and the blob is declared at 512x512).
+            //
+            // Set metadata immediately with the proxy URL as a placeholder so the
+            // OS shows *something* while the blob fetch is in flight, then upgrade
+            // to the blob: URL once it resolves.
+            _callsignPhotoBlobCurrent = callsignImageUrl;
+            const placeholderArtwork = [{ src: callsignImageUrl, sizes: '800x800', type: 'image/jpeg' }];
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title:  newTitle,
+                artist: newArtist,
+                album:  newAlbum,
+                artwork: placeholderArtwork
+            });
 
-        // If blob URLs aren't cached yet, pre-fetch them now and re-apply
-        // metadata once ready (no-op if content changed again meanwhile).
-        // Applies to all platforms — blob: URLs are the correct approach
-        // everywhere (the browser fetches and passes image data to the OS).
-        if (!_artworkBlobUrls && !callsignImageUrl) {
-            _ensureArtworkBlobUrls().then(blobArtwork => {
-                if (_lastMediaSessionTitle === newTitle &&
-                    _lastMediaSessionArtist === newArtist &&
-                    _lastMediaSessionAlbum === newAlbum) {
+            _ensureCallsignPhotoBlobUrl(callsignImageUrl).then(blobUrl => {
+                // Only upgrade if the callsign hasn't changed while we were fetching.
+                if (_lastMediaSessionImageUrl === callsignImageUrl &&
+                    _lastMediaSessionTitle    === newTitle &&
+                    _lastMediaSessionArtist   === newArtist &&
+                    _lastMediaSessionAlbum    === newAlbum) {
                     navigator.mediaSession.metadata = new MediaMetadata({
-                        title:   newTitle,
-                        artist:  newArtist,
-                        album:   newAlbum,
-                        artwork: blobArtwork
+                        title:  newTitle,
+                        artist: newArtist,
+                        album:  newAlbum,
+                        artwork: [{ src: blobUrl, sizes: '800x800', type: 'image/jpeg' }]
                     });
                 }
             });
+        } else {
+            // No operator photo — use the standard logo artwork array.
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title:  newTitle,
+                artist: newArtist,
+                album:  newAlbum,
+                artwork: standardArtwork
+            });
+
+            // If blob URLs aren't cached yet, pre-fetch them now and re-apply
+            // metadata once ready (no-op if content changed again meanwhile).
+            if (!_artworkBlobUrls) {
+                _ensureArtworkBlobUrls().then(blobArtwork => {
+                    if (_lastMediaSessionTitle  === newTitle &&
+                        _lastMediaSessionArtist === newArtist &&
+                        _lastMediaSessionAlbum  === newAlbum &&
+                        !_lastMediaSessionImageUrl) {
+                        navigator.mediaSession.metadata = new MediaMetadata({
+                            title:   newTitle,
+                            artist:  newArtist,
+                            album:   newAlbum,
+                            artwork: blobArtwork
+                        });
+                    }
+                });
+            }
         }
     }
 

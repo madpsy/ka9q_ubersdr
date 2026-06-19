@@ -29,7 +29,7 @@ html, body {
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: 'Twemoji Flags', 'Segoe UI', system-ui, -apple-system, sans-serif;
     font-size: 13px;
     line-height: 1.4;
     overflow-x: hidden;

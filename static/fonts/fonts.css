@@ -1,5 +1,27 @@
 /* Self-hosted fonts — fetched from Google Fonts (latin subset) */
 
+/* Twemoji flag emoji — flags-only subset (Regional Indicator pairs U+1F1E6–U+1F1FF).
+   Fixes Chrome on Windows which lacks flag glyphs in Segoe UI Emoji.
+   Only activates for the Regional Indicator unicode block; all other text is unaffected.
+   Font: Twemoji 16.0.1 SVG-COLR1, subset by fontTools. ~500 KB WOFF2. */
+@font-face {
+    font-family: 'Twemoji Flags';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+}
+
+/* Baseline body font stack — ensures 'Twemoji Flags' is consulted for flag emoji
+   on pages that don't declare their own body font-family. Pages with their own
+   body { font-family } rule will override this naturally via the CSS cascade,
+   and those CSS files have 'Twemoji Flags' prepended directly. */
+body {
+    font-family: 'Twemoji Flags', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+
 /* Nixie One — display/nixie tube style, regular 400 only */
 @font-face {
     font-family: 'Nixie One';

@@ -353,8 +353,9 @@
             transition: border-color 0.2s, background 0.2s;
         }
         #recent-spots-overlay.active {
-            background: rgba(74,158,255,0.18);
+            background: rgba(10, 28, 60, 0.92);
             border-color: #4a9eff;
+            box-shadow: 0 2px 12px rgba(74,158,255,0.35);
         }
         #recent-spots-overlay input[type="checkbox"] {
             width: 15px;
@@ -386,13 +387,14 @@
         }
         #recent-spots-badge {
             background: #4a9eff;
-            color: #000;
+            color: #000d1a;
             font-size: 0.72em;
             font-weight: 700;
             border-radius: 8px;
-            padding: 1px 6px;
+            padding: 2px 7px;
             display: none;
             white-space: nowrap;
+            flex-shrink: 0;
         }
         /* ── Receiver diamond marker ────────────────────────────────── */
         .rx-marker-icon {

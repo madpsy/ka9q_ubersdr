@@ -60,6 +60,7 @@ type DecoderSSEHub struct {
 	mu           sync.RWMutex
 	clients      map[*decoderSSEClient]struct{}
 	lastSpotTime atomic.Int64 // Unix nanoseconds; 0 = no spot yet
+	enabled      atomic.Bool  // true when the decoder subsystem is active
 }
 
 // NewDecoderSSEHub creates a new hub
@@ -67,6 +68,12 @@ func NewDecoderSSEHub() *DecoderSSEHub {
 	return &DecoderSSEHub{
 		clients: make(map[*decoderSSEClient]struct{}),
 	}
+}
+
+// SetEnabled marks the hub as active (decoder subsystem is running).
+// When not enabled, SSE handlers return 503 Service Unavailable.
+func (h *DecoderSSEHub) SetEnabled(v bool) {
+	h.enabled.Store(v)
 }
 
 // register adds a client to the hub
@@ -145,6 +152,12 @@ func (h *DecoderSSEHub) heartbeatJSON() string {
 // HandleDecoderStream is the HTTP handler for /admin/decoder/stream
 func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Return 503 if the decoder subsystem is not active
+		if !hub.enabled.Load() {
+			http.Error(w, "decoder is not enabled", http.StatusServiceUnavailable)
+			return
+		}
+
 		// Verify the client supports SSE flushing
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -205,6 +218,12 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 // connection limit via limiter (typically 2 connections per IP).
 func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Return 503 if the decoder subsystem is not active
+		if !hub.enabled.Load() {
+			http.Error(w, "decoder is not enabled", http.StatusServiceUnavailable)
+			return
+		}
+
 		// Resolve the client IP (honour X-Forwarded-For set by a trusted reverse proxy)
 		ip := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(ip); err == nil {

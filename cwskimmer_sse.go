@@ -59,6 +59,7 @@ type CWSkimmerSSEHub struct {
 	mu           sync.RWMutex
 	clients      map[*cwSkimmerSSEClient]struct{}
 	lastSpotTime atomic.Int64 // Unix nanoseconds; 0 = no spot yet
+	enabled      atomic.Bool  // true when the CW skimmer subsystem is active
 }
 
 // NewCWSkimmerSSEHub creates a new hub
@@ -66,6 +67,12 @@ func NewCWSkimmerSSEHub() *CWSkimmerSSEHub {
 	return &CWSkimmerSSEHub{
 		clients: make(map[*cwSkimmerSSEClient]struct{}),
 	}
+}
+
+// SetEnabled marks the hub as active (CW skimmer subsystem is running).
+// When not enabled, SSE handlers return 503 Service Unavailable.
+func (h *CWSkimmerSSEHub) SetEnabled(v bool) {
+	h.enabled.Store(v)
 }
 
 // register adds a client to the hub
@@ -142,6 +149,12 @@ func (h *CWSkimmerSSEHub) heartbeatJSON() string {
 // HandleCWSkimmerStream is the HTTP handler for /admin/cwskimmer/stream
 func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Return 503 if the CW skimmer subsystem is not active
+		if !hub.enabled.Load() {
+			http.Error(w, "CW skimmer is not enabled", http.StatusServiceUnavailable)
+			return
+		}
+
 		// Verify the client supports SSE flushing
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -200,6 +213,12 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 // connection limit via limiter (typically 2 connections per IP).
 func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Return 503 if the CW skimmer subsystem is not active
+		if !hub.enabled.Load() {
+			http.Error(w, "CW skimmer is not enabled", http.StatusServiceUnavailable)
+			return
+		}
+
 		// Resolve the client IP (honour X-Forwarded-For set by a trusted reverse proxy)
 		ip := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(ip); err == nil {

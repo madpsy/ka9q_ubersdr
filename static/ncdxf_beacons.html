@@ -2039,8 +2039,47 @@ function connectCWSkimmerSSE() {
         setTimeout(() => m.setStyle({ radius: prevR, fillColor: prevFill, fillOpacity: prevOpac }), 800);
     }
 
-    function connect() {
+    async function connect() {
         setSSEStatus('sse-connecting', '⬤ SSE connecting…');
+
+        // Pre-flight fetch to detect 503 (disabled) and 429 (rate-limited)
+        // before opening an EventSource (which hides HTTP status codes).
+        try {
+            const probe = await fetch('/api/cwskimmer/stream', {
+                method: 'GET',
+                headers: { 'Accept': 'text/event-stream' },
+            });
+            // We got a response — close the body immediately; we'll open
+            // a proper EventSource below if the status was OK.
+            if (probe.body) {
+                try { probe.body.cancel(); } catch (_) { /* ignore */ }
+            }
+
+            if (probe.status === 503) {
+                // CW skimmer is not enabled on this server — stop retrying
+                setSSEStatus('sse-error', '⬤ CW skimmer not enabled');
+                return;
+            }
+            if (probe.status === 429) {
+                // Too many connections — retry after 60 s
+                setSSEStatus('sse-error', '⬤ Rate limited — retrying in 60 s…');
+                setTimeout(connect, 60000);
+                return;
+            }
+            if (!probe.ok) {
+                // Other server error — retry after 5 s
+                setSSEStatus('sse-error', `⬤ Server error (${probe.status}) — retrying…`);
+                setTimeout(connect, 5000);
+                return;
+            }
+        } catch (fetchErr) {
+            // Network error on probe — retry after 5 s
+            setSSEStatus('sse-error', '⬤ SSE connection failed — retrying…');
+            setTimeout(connect, 5000);
+            return;
+        }
+
+        // Probe succeeded — open the real EventSource connection
         const es = new EventSource('/api/cwskimmer/stream');
 
         es.onopen = () => {
@@ -2072,7 +2111,7 @@ function connectCWSkimmerSSE() {
         es.onerror = () => {
             setSSEStatus('sse-error', '⬤ SSE disconnected — retrying…');
             es.close();
-            setTimeout(connect, 2000);
+            setTimeout(connect, 3000);
         };
     }
 

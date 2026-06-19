@@ -1668,6 +1668,7 @@ func main() {
 
 	// Register CW Skimmer spot handler to broadcast via websocket, MQTT, and SSE
 	if cwSkimmer != nil {
+		cwSkimmerSSEHub.SetEnabled(true)
 		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {
 			// Broadcast to websocket clients
 			dxClusterWsHandler.BroadcastCWSpot(spot)
@@ -1714,6 +1715,7 @@ func main() {
 			log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
 			multiDecoder = nil
 		} else {
+			decoderSSEHub.SetEnabled(true)
 			// Register callback to broadcast digital spots via websocket, MQTT, and SSE
 			multiDecoder.OnDecode(func(decode DecodeInfo) {
 				// Broadcast to websocket clients

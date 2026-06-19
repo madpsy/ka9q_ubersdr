@@ -506,6 +506,7 @@
             <div class="utc-label">UTC</div>
             <div style="margin-top:10px; font-size:0.82em; opacity:0.65;" id="date-display">---</div>
             <div id="time-offset" style="margin-top:6px; font-size:0.75em; opacity:0.7; font-family:monospace;"></div>
+            <div id="server-latency" style="margin-top:2px; font-size:0.75em; opacity:0.55; font-family:monospace;"></div>
         </div>
         <div class="now-table">
             <div style="font-size:0.82em; opacity:0.7; margin-bottom:6px;">Current transmission schedule (10 s slots)</div>
@@ -852,8 +853,16 @@ function applyRecentSpotsFilter() {
 // ── Clock ────────────────────────────────────────────────────────────────
 function padZ(n) { return n < 10 ? '0' + n : '' + n; }
 
+// Offset (ms) to add to Date.now() to get server-corrected time.
+// Set once fetchReceiverLocation() resolves the server_time.
+let serverClockOffsetMs = 0;
+
+function serverNow() {
+    return new Date(Date.now() + serverClockOffsetMs);
+}
+
 function updateClock() {
-    const now = new Date();
+    const now = serverNow();
     document.getElementById('utc-clock').textContent =
         padZ(now.getUTCHours()) + ':' + padZ(now.getUTCMinutes()) + ':' + padZ(now.getUTCSeconds());
     document.getElementById('date-display').textContent =
@@ -1188,7 +1197,14 @@ async function fetchReceiverLocation() {
             // Estimate server time at the moment the response was received
             const corrected  = serverMs + rtt / 2;
             const offsetMs   = t1 - corrected;                 // +ve = browser ahead
-            const offsetSec  = offsetMs / 1000;
+            // Store offset so the clock uses server time going forward
+            serverClockOffsetMs = -offsetMs;                   // subtract browser lead
+            // Show latency (RTT)
+            const latEl = document.getElementById('server-latency');
+            if (latEl) {
+                latEl.textContent = `Latency: ${rtt} ms`;
+            }
+
             const el = document.getElementById('time-offset');
             if (el) {
                 const absMs  = Math.abs(offsetMs);

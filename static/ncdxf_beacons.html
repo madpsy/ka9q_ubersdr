@@ -505,6 +505,7 @@
             <div class="utc-time" id="utc-clock">--:--:--</div>
             <div class="utc-label">UTC</div>
             <div style="margin-top:10px; font-size:0.82em; opacity:0.65;" id="date-display">---</div>
+            <div id="time-offset" style="margin-top:6px; font-size:0.75em; opacity:0.7; font-family:monospace;"></div>
         </div>
         <div class="now-table">
             <div style="font-size:0.82em; opacity:0.7; margin-bottom:6px;">Current transmission schedule (10 s slots)</div>
@@ -1174,9 +1175,42 @@ function drawSpotLines(spots) {
 // ── Fetch receiver location from /api/description ────────────────────────
 async function fetchReceiverLocation() {
     try {
+        const t0 = Date.now();
         const r = await fetch('/api/description');
         if (!r.ok) return;
+        const t1 = Date.now();
         const d = await r.json();
+
+        // ── Server time offset display ────────────────────────────────
+        if (d.server_time) {
+            const serverMs   = new Date(d.server_time).getTime();
+            const rtt        = t1 - t0;                        // round-trip ms
+            // Estimate server time at the moment the response was received
+            const corrected  = serverMs + rtt / 2;
+            const offsetMs   = t1 - corrected;                 // +ve = browser ahead
+            const offsetSec  = offsetMs / 1000;
+            const el = document.getElementById('time-offset');
+            if (el) {
+                const absMs  = Math.abs(offsetMs);
+                // Round to nearest 100 ms — that's the practical precision here
+                const roundedMs = Math.round(offsetMs / 100) * 100;
+                const sign   = roundedMs >= 0 ? '+' : '';
+                let label, color;
+                if (absMs < 100) {
+                    label = '✓ clock in sync';
+                    color = '#4CAF50';
+                } else if (absMs < 5000) {
+                    label = `${sign}${roundedMs} ms vs server`;
+                    color = '#ffc107';
+                } else {
+                    label = `${sign}${(roundedMs / 1000).toFixed(1)} s vs server`;
+                    color = '#ff6b6b';
+                }
+                el.textContent = label;
+                el.style.color = color;
+            }
+        }
+
         const gps = d.receiver && d.receiver.gps;
         if (gps && gps.lat && gps.lon) {
             receiverLat = gps.lat;

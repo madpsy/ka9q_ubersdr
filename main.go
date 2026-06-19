@@ -3858,7 +3858,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"lookup_service":       config.LookupServices.Enabled,
 		"dsp":                  buildDSPInfo(&config.DSP),
 		"addons":               enabledAddons,
-		"server_time":          time.Now().UTC().Format(time.RFC3339),
+		"server_time":          time.Now().UTC().Format(time.RFC3339Nano),
 		"server_time_sync":     GetNTPSynced(),
 		"frontend":             buildStartupFrontendInfo(frontendHistory),
 	}

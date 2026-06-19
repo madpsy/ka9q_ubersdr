@@ -9,7 +9,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: 'Twemoji Flags', 'Segoe UI', system-ui, sans-serif;
             background: #0f1117;
             color: #e0e0e0;
             height: 100vh;
@@ -421,7 +421,7 @@
             <td class="col-time">${fmtTime(d.timestamp)}</td>
             <td class="col-band">${escHtml(d.band || '—')}</td>
             <td class="col-freq">${fmtFreqKHz(d.frequency)}</td>
-            <td class="col-callsign">${escHtml(d.callsign || '—')}</td>
+            <td class="col-callsign">${iso2ToFlag(d.country_code)}${escHtml(d.callsign || '—')}</td>
             <td class="col-spotter">${escHtml(d.spotter || '')}</td>
             <td class="col-snr ${snrClass(d.snr)}">${snrStr} dB</td>
             <td class="col-wpm">${d.wpm} WPM</td>
@@ -465,6 +465,15 @@
         for (const tr of rows) {
             tr.style.display = (!needle || tr.dataset.search.includes(needle)) ? '' : 'none';
         }
+    }
+
+    // ── Flag helper ──────────────────────────────────────────────────────────
+    function iso2ToFlag(code) {
+        if (!code || code.length !== 2) return '';
+        return String.fromCodePoint(
+            0x1F1E6 - 65 + code.toUpperCase().charCodeAt(0),
+            0x1F1E6 - 65 + code.toUpperCase().charCodeAt(1)
+        ) + '\u202F';
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

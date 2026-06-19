@@ -822,6 +822,11 @@
                         </div>
                         <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
                     </div>
+                    <!-- Connected Countries Badges -->
+                    <div id="connectedCountriesBadges" style="display:none; margin-bottom: 15px; padding: 10px 14px; background: #f0f4ff; border-radius: 6px; border: 1px solid #c5cae9;">
+                        <span style="font-size: 12px; font-weight: 600; color: #5c6bc0; margin-right: 8px; white-space: nowrap;">🌍 Connected from:</span>
+                        <span id="connectedCountriesPills" style="display: inline-flex; flex-wrap: wrap; gap: 6px;"></span>
+                    </div>
                     <div id="sessionsList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading sessions...</p>
@@ -6782,9 +6787,43 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             sessionsLastSystemLoad = null;
         }
 
+        function renderConnectedCountries() {
+            const wrap  = document.getElementById('connectedCountriesBadges');
+            const pills = document.getElementById('connectedCountriesPills');
+            if (!wrap || !pills) return;
+
+            // Collect unique country_code → country name from non-internal sessions
+            const countryMap = new Map(); // code → name
+            (currentSessions || []).forEach(s => {
+                if (s.is_internal) return;
+                const code = s.country_code || '';
+                const name = s.country || '';
+                if (code && !countryMap.has(code)) countryMap.set(code, name || code);
+            });
+
+            if (countryMap.size === 0) {
+                wrap.style.display = 'none';
+                return;
+            }
+
+            // Sort alphabetically by country name
+            const sorted = [...countryMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+
+            pills.innerHTML = sorted.map(([code, name]) => {
+                const flag = String.fromCodePoint(
+                    0x1F1E6 - 65 + code.toUpperCase().charCodeAt(0),
+                    0x1F1E6 - 65 + code.toUpperCase().charCodeAt(1)
+                );
+                return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#e8eaf6;border:1px solid #9fa8da;border-radius:12px;font-size:12px;color:#3949ab;white-space:nowrap;">${flag}\u202F${name}</span>`;
+            }).join('');
+
+            wrap.style.display = '';
+        }
+
         function renderSessions(filterType = currentSessionFilter, systemLoad = null) {
             currentSessionFilter = filterType;
             if (systemLoad !== null) sessionsLastSystemLoad = systemLoad;
+            renderConnectedCountries();
             const effectiveLoad = sessionsLastSystemLoad;
 
             const container = document.getElementById('sessionsList');

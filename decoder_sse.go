@@ -29,19 +29,20 @@ import (
 
 // DecoderSSEEvent is the JSON payload sent to SSE clients
 type DecoderSSEEvent struct {
-	Type       string   `json:"type"`
-	Mode       string   `json:"mode"`
-	Band       string   `json:"band"`
-	Callsign   string   `json:"callsign"`
-	Locator    string   `json:"locator,omitempty"`
-	Country    string   `json:"country,omitempty"`
-	Continent  string   `json:"continent,omitempty"`
-	SNR        int      `json:"snr"`
-	Frequency  uint64   `json:"frequency"`
-	Message    string   `json:"message,omitempty"`
-	Timestamp  string   `json:"timestamp"`
-	DistanceKm *float64 `json:"distance_km,omitempty"`
-	BearingDeg *float64 `json:"bearing_deg,omitempty"`
+	Type        string   `json:"type"`
+	Mode        string   `json:"mode"`
+	Band        string   `json:"band"`
+	Callsign    string   `json:"callsign"`
+	Locator     string   `json:"locator,omitempty"`
+	Country     string   `json:"country,omitempty"`
+	CountryCode string   `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
+	Continent   string   `json:"continent,omitempty"`
+	SNR         int      `json:"snr"`
+	Frequency   uint64   `json:"frequency"`
+	Message     string   `json:"message,omitempty"`
+	Timestamp   string   `json:"timestamp"`
+	DistanceKm  *float64 `json:"distance_km,omitempty"`
+	BearingDeg  *float64 `json:"bearing_deg,omitempty"`
 }
 
 // decoderSSEClient represents a single connected SSE client with optional filters
@@ -86,19 +87,20 @@ func (h *DecoderSSEHub) Broadcast(decode DecodeInfo) {
 	h.lastSpotTime.Store(time.Now().UnixNano())
 
 	evt := DecoderSSEEvent{
-		Type:       "decode",
-		Mode:       decode.Mode,
-		Band:       decode.BandName,
-		Callsign:   decode.Callsign,
-		Locator:    decode.Locator,
-		Country:    decode.Country,
-		Continent:  decode.Continent,
-		SNR:        decode.SNR,
-		Frequency:  decode.Frequency,
-		Message:    decode.Message,
-		Timestamp:  decode.Timestamp.UTC().Format(time.RFC3339),
-		DistanceKm: decode.DistanceKm,
-		BearingDeg: decode.BearingDeg,
+		Type:        "decode",
+		Mode:        decode.Mode,
+		Band:        decode.BandName,
+		Callsign:    decode.Callsign,
+		Locator:     decode.Locator,
+		Country:     decode.Country,
+		CountryCode: decode.CountryCode,
+		Continent:   decode.Continent,
+		SNR:         decode.SNR,
+		Frequency:   decode.Frequency,
+		Message:     decode.Message,
+		Timestamp:   decode.Timestamp.UTC().Format(time.RFC3339),
+		DistanceKm:  decode.DistanceKm,
+		BearingDeg:  decode.BearingDeg,
 	}
 
 	data, err := json.Marshal(evt)

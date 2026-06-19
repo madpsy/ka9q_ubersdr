@@ -216,6 +216,7 @@ async function createWorldMap(countries) {
         // Match countries to features and calculate per-feature session totals
         // Process in two passes: first match named countries, then "Unknown"
         const featureCountryMap = new Map(); // feature -> backend country name
+        const featureCodeMap = new Map();    // feature -> ISO 3166-1 alpha-2 country code
         const featureSessionTotal = new Map(); // feature -> total sessions in that feature
         const countryFeatureMap = new Map(); // country name -> feature (reverse lookup)
         
@@ -231,6 +232,7 @@ async function createWorldMap(countries) {
                     // Only set if this feature hasn't been claimed by another country
                     if (!featureCountryMap.has(feature)) {
                         featureCountryMap.set(feature, loc.country);
+                        if (loc.code) featureCodeMap.set(feature, loc.code);
                         countryFeatureMap.set(loc.country, feature);
                         console.log(`Matched ${loc.country} to feature ${feature.properties.name}`);
                     }
@@ -304,12 +306,14 @@ async function createWorldMap(countries) {
                     .duration(200)
                     .style('opacity', 1);
                     
+                const _chCode = featureCodeMap.get(d);
+                const _chFlag = _chCode ? getFlagEmoji(_chCode) + '\u202F' : '';
                 if (sessions) {
-                    tooltip.html(`<strong>${displayName}</strong><br/>Sessions: ${sessions.toLocaleString()}`)
+                    tooltip.html(`<strong>${_chFlag}${displayName}</strong><br/>Sessions: ${sessions.toLocaleString()}`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 } else {
-                    tooltip.html(`<strong>${displayName}</strong><br/>No session data`)
+                    tooltip.html(`<strong>${_chFlag}${displayName}</strong><br/>No session data`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 }
@@ -345,7 +349,8 @@ async function createWorldMap(countries) {
                 tooltip.transition()
                     .duration(200)
                     .style('opacity', 1);
-                tooltip.html(`<strong>${d.country}</strong><br/>Location Sessions: ${d.sessions.toLocaleString()}<br/>Lat: ${d.lat.toFixed(2)}, Lon: ${d.lon.toFixed(2)}`)
+                const _locFlag = d.code ? getFlagEmoji(d.code) + '\u202F' : '';
+                tooltip.html(`<strong>${_locFlag}${d.country}</strong><br/>Location Sessions: ${d.sessions.toLocaleString()}<br/>Lat: ${d.lat.toFixed(2)}, Lon: ${d.lon.toFixed(2)}`)
                     .style('left', (event.pageX + 10) + 'px')
                     .style('top', (event.pageY - 28) + 'px');
             })

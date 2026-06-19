@@ -1,6 +1,14 @@
 // Band Conditions Monitor - Standalone Page
 // Shows real-time band state chart for all bands
 
+function bcIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 65 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 65 + code.toUpperCase().charCodeAt(1)
+    );
+}
+
 class BandConditionsMonitor {
     constructor() {
         this.bandStateChart = null;
@@ -215,7 +223,8 @@ class BandConditionsMonitor {
                 const badges = bandEntry.countries.map(c => {
                     const cls = (c.prediction || 'poor').toLowerCase();
                     const snr = typeof c.predicted_ssb_snr === 'number' ? c.predicted_ssb_snr.toFixed(1) : '?';
-                    return `<span class="wspr-badge ${cls}" title="${c.prediction} (${snr} dB SSB SNR)">${c.country}</span>`;
+                    const flag = c.country_code ? bcIso2ToFlag(c.country_code) + '\u202F' : '';
+                    return `<span class="wspr-badge ${cls}" title="${c.prediction} (${snr} dB SSB SNR)">${flag}${c.country}</span>`;
                 }).join('');
 
                 html += `<div class="wspr-band-block">

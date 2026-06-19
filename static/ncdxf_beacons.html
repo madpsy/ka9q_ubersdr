@@ -636,7 +636,22 @@
         <div class="summary-stats" id="summary-stats"></div>
 
         <!-- ── Per-beacon status cards ──────────────────────────────── -->
-        <div class="section-heading">📻 Beacon Status</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+            <div class="section-heading" style="margin-bottom:0;">📻 Beacon Status</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:0.85em;opacity:0.85;">
+                <label for="cards-recent-select" style="white-space:nowrap;">Show:</label>
+                <select id="cards-recent-select" style="padding:3px 8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:white;font-size:0.9em;">
+                    <option value="0" selected>All</option>
+                    <option value="10">Last 10 min</option>
+                    <option value="30">Last 30 min</option>
+                    <option value="60">Last 1 hour</option>
+                    <option value="180">Last 3 hours</option>
+                    <option value="360">Last 6 hours</option>
+                    <option value="720">Last 12 hours</option>
+                    <option value="1440">Last 24 hours</option>
+                </select>
+            </div>
+        </div>
         <div class="beacon-status-grid" id="beacon-cards"></div>
 
         <!-- ── Band propagation heat-map ────────────────────────────── -->
@@ -1334,16 +1349,31 @@ function renderSummary(spots, heardSet) {
 
 function renderBeaconCards(spots, heardSet, beaconList) {
     beaconList = beaconList || BEACONS;
+
+    // Apply the cards-recent-select time filter
+    const cardsMinutes = parseInt((document.getElementById('cards-recent-select') || {}).value || '0', 10);
+    let filteredSpots = spots;
+    if (cardsMinutes > 0) {
+        const cutoff = new Date(Date.now() - cardsMinutes * 60 * 1000);
+        filteredSpots = spots.filter(s => {
+            const ts = new Date(s.timestamp);
+            return !isNaN(ts) && ts >= cutoff;
+        });
+    }
+
+    // Recompute heardSet from the filtered spots
+    const filteredHeardSet = new Set(filteredSpots.map(s => s.callsign));
+
     // Group spots by callsign
     const byCall = {};
-    spots.forEach(s => {
+    filteredSpots.forEach(s => {
         if (!byCall[s.callsign]) byCall[s.callsign] = [];
         byCall[s.callsign].push(s);
     });
 
     const container = document.getElementById('beacon-cards');
     container.innerHTML = beaconList.map(b => {
-        const heard = heardSet.has(b.callsign);
+        const heard = filteredHeardSet.has(b.callsign);
         const bSpots = byCall[b.callsign] || [];
         const lastTime = bSpots.length > 0 ? bSpots[0].timestamp.slice(11, 19) + ' UTC' : '';
 
@@ -1880,6 +1910,16 @@ async function init() {
     bandOnlySel.addEventListener('change', () => {
         mapFilterState.bandValue = bandOnlySel.value;
         if (mapFilterState.bandEnabled) applyRecentSpotsFilter();
+    });
+
+    // Beacon cards recent filter
+    document.getElementById('cards-recent-select').addEventListener('change', () => {
+        // Re-render cards using the current allSpots with the new time window
+        if (!allSpots.length) return;
+        const heardSet = new Set(allSpots.map(s => s.callsign));
+        const selBeacon = (document.getElementById('beacon-filter') || {}).value || '';
+        const visibleBeacons = selBeacon ? BEACONS.filter(b => b.callsign === selBeacon) : BEACONS;
+        renderBeaconCards(allSpots, heardSet, visibleBeacons);
     });
 
     // Replay controls

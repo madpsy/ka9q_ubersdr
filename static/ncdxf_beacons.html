@@ -424,6 +424,11 @@
             pointer-events: none !important;
         }
         .beacon-label::before { display: none !important; }
+        /* Heard beacon — green border on both permanent label and hover popup */
+        .beacon-label-heard {
+            border-color: #4CAF50 !important;
+            box-shadow: 0 1px 6px rgba(76,175,80,0.45) !important;
+        }
         /* ── Leaflet beacon popup ───────────────────────────────────── */
         .beacon-popup {
             font-family: inherit;
@@ -1005,12 +1010,13 @@ function colourBeaconMarkers(heardSet, byCall) {
             ).join('');
             labelHtml += pills;
         }
+        const ttClass = heard ? 'beacon-label beacon-label-heard' : 'beacon-label';
         m.unbindTooltip();
         m.bindTooltip(labelHtml, {
             permanent: true,
             direction: 'right',
             offset: [8, 0],
-            className: 'beacon-label',
+            className: ttClass,
         });
 
         // Rebuild popup content via setPopupContent (works even before popup is opened)

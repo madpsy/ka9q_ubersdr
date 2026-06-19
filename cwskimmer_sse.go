@@ -31,20 +31,21 @@ import (
 
 // CWSkimmerSSEEvent is the JSON payload sent to SSE clients
 type CWSkimmerSSEEvent struct {
-	Type       string   `json:"type"`
-	Band       string   `json:"band"`
-	Frequency  float64  `json:"frequency"`
-	Callsign   string   `json:"callsign"`
-	Spotter    string   `json:"spotter"`
-	SNR        int      `json:"snr"`
-	WPM        int      `json:"wpm"`
-	Comment    string   `json:"comment,omitempty"`
-	Country    string   `json:"country,omitempty"`
-	Continent  string   `json:"continent,omitempty"`
-	CQZone     int      `json:"cq_zone,omitempty"`
-	DistanceKm *float64 `json:"distance_km,omitempty"`
-	BearingDeg *float64 `json:"bearing_deg,omitempty"`
-	Timestamp  string   `json:"timestamp"`
+	Type        string   `json:"type"`
+	Band        string   `json:"band"`
+	Frequency   float64  `json:"frequency"`
+	Callsign    string   `json:"callsign"`
+	Spotter     string   `json:"spotter"`
+	SNR         int      `json:"snr"`
+	WPM         int      `json:"wpm"`
+	Comment     string   `json:"comment,omitempty"`
+	Country     string   `json:"country,omitempty"`
+	CountryCode string   `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
+	Continent   string   `json:"continent,omitempty"`
+	CQZone      int      `json:"cq_zone,omitempty"`
+	DistanceKm  *float64 `json:"distance_km,omitempty"`
+	BearingDeg  *float64 `json:"bearing_deg,omitempty"`
+	Timestamp   string   `json:"timestamp"`
 }
 
 // cwSkimmerSSEClient represents a single connected SSE client with optional band filter
@@ -88,20 +89,21 @@ func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
 	h.lastSpotTime.Store(time.Now().UnixNano())
 
 	evt := CWSkimmerSSEEvent{
-		Type:       "cw_spot",
-		Band:       spot.Band,
-		Frequency:  spot.Frequency,
-		Callsign:   spot.DXCall,
-		Spotter:    spot.Spotter,
-		SNR:        spot.SNR,
-		WPM:        spot.WPM,
-		Comment:    spot.Comment,
-		Country:    spot.Country,
-		Continent:  spot.Continent,
-		CQZone:     spot.CQZone,
-		DistanceKm: spot.DistanceKm,
-		BearingDeg: spot.BearingDeg,
-		Timestamp:  spot.Time.UTC().Format(time.RFC3339),
+		Type:        "cw_spot",
+		Band:        spot.Band,
+		Frequency:   spot.Frequency,
+		Callsign:    spot.DXCall,
+		Spotter:     spot.Spotter,
+		SNR:         spot.SNR,
+		WPM:         spot.WPM,
+		Comment:     spot.Comment,
+		Country:     spot.Country,
+		CountryCode: spot.CountryCode,
+		Continent:   spot.Continent,
+		CQZone:      spot.CQZone,
+		DistanceKm:  spot.DistanceKm,
+		BearingDeg:  spot.BearingDeg,
+		Timestamp:   spot.Time.UTC().Format(time.RFC3339),
 	}
 
 	data, err := json.Marshal(evt)
@@ -270,10 +272,14 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) ht
 				if !ok {
 					return
 				}
-				fmt.Fprint(w, msg)
+				if _, err := fmt.Fprint(w, msg); err != nil {
+					return
+				}
 				flusher.Flush()
 			case <-ticker.C:
-				fmt.Fprint(w, hub.heartbeatJSON())
+				if _, err := fmt.Fprint(w, hub.heartbeatJSON()); err != nil {
+					return
+				}
 				flusher.Flush()
 			}
 		}

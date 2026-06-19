@@ -279,10 +279,14 @@ func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.H
 				if !ok {
 					return
 				}
-				fmt.Fprint(w, msg)
+				if _, err := fmt.Fprint(w, msg); err != nil {
+					return
+				}
 				flusher.Flush()
 			case <-ticker.C:
-				fmt.Fprint(w, hub.heartbeatJSON())
+				if _, err := fmt.Fprint(w, hub.heartbeatJSON()); err != nil {
+					return
+				}
 				flusher.Flush()
 			}
 		}

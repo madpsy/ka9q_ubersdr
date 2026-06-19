@@ -142,6 +142,23 @@
         .spots-table tbody tr:hover {
             background: rgba(255,255,255,0.06);
         }
+        /* ── Crosshair hover: row + column highlight for <table> elements ── */
+        /* Row highlight is handled by tr.xhair-row, column by td.xhair-col  */
+        .now-table tr.xhair-row td,
+        .spots-table tr.xhair-row td {
+            background: rgba(255,255,255,0.08);
+        }
+        .now-table td.xhair-col,
+        .spots-table td.xhair-col,
+        .now-table th.xhair-col,
+        .spots-table th.xhair-col {
+            background: rgba(255,255,255,0.06);
+        }
+        /* Intersection cell gets both — slightly brighter */
+        .now-table tr.xhair-row td.xhair-col,
+        .spots-table tr.xhair-row td.xhair-col {
+            background: rgba(255,255,255,0.14);
+        }
         .spots-table tbody tr.beacon-row-highlight {
             background: rgba(74,158,255,0.12);
         }
@@ -272,8 +289,32 @@
             color: #4a9eff;
             font-weight: 700;
         }
-        .hm-cell.hm-current-hour-col {
-            box-shadow: inset 0 0 0 2px rgba(74,158,255,0.85);
+        /* ── Heatmap current-hour column — whole-column tint, no per-cell box ── */
+        /* Cells use ::before overlay so the tint sits on top of inline bg colour */
+        .hm-cell.hm-current-col::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(74,158,255,0.13);
+            border-radius: inherit;
+            pointer-events: none;
+            z-index: 0;
+        }
+        /* Hour header is a plain div with no inline bg — direct background works */
+        .hm-hour.hm-current-col {
+            background: rgba(74,158,255,0.13);
+        }
+        /* ── Heatmap crosshair hover ─────────────────────────────────────── */
+        .hm-cell.hm-row-hover,
+        .hm-beacon-label.hm-row-hover {
+            background: rgba(255,255,255,0.10) !important;
+        }
+        .hm-cell.hm-col-hover,
+        .hm-hour.hm-col-hover {
+            background: rgba(255,255,255,0.07);
+        }
+        .hm-cell.hm-row-hover.hm-col-hover {
+            background: rgba(255,255,255,0.18) !important;
         }
         .hm-beacon-label {
             font-size: 0.75em;
@@ -1504,22 +1545,59 @@ function renderResults(spots) {
 }
 
 function renderSummary(spots, heardSet) {
+    // Band spot counts
     const bandCounts = {};
     spots.forEach(s => { bandCounts[s.band] = (bandCounts[s.band] || 0) + 1; });
-    const bestSNR = spots.reduce((best, s) => s.snr > best ? s.snr : best, -999);
+
+    // Beacon spot counts
+    const beaconCounts = {};
+    spots.forEach(s => { beaconCounts[s.callsign] = (beaconCounts[s.callsign] || 0) + 1; });
+
+    // Best and worst SNR (value + callsign)
+    let bestSNR = -999, bestSNRCall = null;
+    let worstSNR = 999, worstSNRCall = null;
+    spots.forEach(s => {
+        if (s.snr > bestSNR)  { bestSNR  = s.snr; bestSNRCall  = s.callsign; }
+        if (s.snr < worstSNR) { worstSNR = s.snr; worstSNRCall = s.callsign; }
+    });
+
+    // Max distance
     const bestDist = spots.reduce((best, s) => (s.distance_km && s.distance_km > best) ? s.distance_km : best, 0);
+
+    // Average SNR
+    const avgSNR = spots.length > 0
+        ? Math.round(spots.reduce((sum, s) => sum + s.snr, 0) / spots.length)
+        : null;
+
+    // Most heard beacon
+    const topBeaconEntry = Object.entries(beaconCounts).sort((a, b) => b[1] - a[1])[0];
+    const topBeacon = topBeaconEntry ? topBeaconEntry[0] : null;
+    const topBeaconCount = topBeaconEntry ? topBeaconEntry[1] : 0;
+
+    // Most heard band
+    const topBandEntry = Object.entries(bandCounts).sort((a, b) => b[1] - a[1])[0];
+    const topBand = topBandEntry ? topBandEntry[0] : null;
+    const topBandCount = topBandEntry ? topBandEntry[1] : 0;
 
     const bandSummary = Object.entries(bandCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([b, c]) => `<span class="band-pill" style="background:${BAND_COLORS[b]||'#888'}">${b}: ${c}</span>`)
         .join(' ');
 
+    const topBandPill = topBand
+        ? `<span class="band-pill" style="background:${BAND_COLORS[topBand]||'#888'};font-size:0.9em;">${topBand}</span>`
+        : '—';
+
     document.getElementById('summary-stats').innerHTML = `
         <div class="stat-box"><div class="sv">${spots.length}</div><div class="sl">Total Spots</div></div>
         <div class="stat-box"><div class="sv">${heardSet.size}</div><div class="sl">Beacons Heard</div></div>
         <div class="stat-box"><div class="sv">${BEACONS.length - heardSet.size}</div><div class="sl">Not Heard</div></div>
-        <div class="stat-box"><div class="sv">${bestSNR > -999 ? bestSNR + ' dB' : '—'}</div><div class="sl">Best SNR</div></div>
+        <div class="stat-box"><div class="sv">${worstSNR < 999 ? worstSNR + ' dB' : '—'}</div><div class="sl">Worst SNR${worstSNRCall ? ' · ' + worstSNRCall : ''}</div></div>
+        <div class="stat-box"><div class="sv">${bestSNR > -999 ? bestSNR + ' dB' : '—'}</div><div class="sl">Best SNR${bestSNRCall ? ' · ' + bestSNRCall : ''}</div></div>
+        <div class="stat-box"><div class="sv">${avgSNR !== null ? (avgSNR >= 0 ? '+' : '') + avgSNR + ' dB' : '—'}</div><div class="sl">Avg SNR</div></div>
         <div class="stat-box"><div class="sv">${bestDist > 0 ? Math.round(bestDist).toLocaleString() + ' km' : '—'}</div><div class="sl">Max Distance</div></div>
+        <div class="stat-box"><div class="sv" style="font-size:1.1em;">${topBeacon || '—'}</div><div class="sl">Most Heard${topBeacon ? ' · ' + topBeaconCount + ' spots' : ''}</div></div>
+        <div class="stat-box"><div class="sv" style="font-size:1.3em;">${topBandPill}</div><div class="sl">Most Heard Band${topBand ? ' · ' + topBandCount + ' spots' : ''}</div></div>
         <div class="stat-box" style="min-width:200px;"><div style="font-size:0.9em; margin-top:4px;">${bandSummary || '—'}</div><div class="sl">By Band</div></div>
     `;
 }
@@ -1774,24 +1852,23 @@ function renderHeatmap(spots, beaconList) {
 
         // Header row: corner + 24 hour labels
         html += `<div class="hm-corner"></div>`;
-        hours.forEach(h => {
+        hours.forEach((h, ci) => {
             const isCurrent = h === nowHour;
-            html += `<div class="hm-hour${isCurrent ? ' hm-current-hour' : ''}">${padZ(h)}${isCurrent ? '▾' : ''}</div>`;
+            html += `<div class="hm-hour${isCurrent ? ' hm-current-hour' : ''}" data-col="${ci}">${padZ(h)}${isCurrent ? '▾' : ''}</div>`;
         });
 
         // One row per beacon
-        beaconList.forEach(b => {
+        beaconList.forEach((b, ri) => {
             const _flagH = beaconFlag(b);
-            html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${_flagH ? _flagH + '\u202F' : ''}${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
-            hours.forEach(h => {
-                const isCurrent = h === nowHour;
+            html += `<div class="hm-beacon-label" data-row="${ri}" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${_flagH ? _flagH + '\u202F' : ''}${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
+            hours.forEach((h, ci) => {
                 const cell = heatData[band][b.callsign][h];
                 if (cell) {
                     const bg = snrToColor(cell.bestSNR);
                     const tip = `${b.callsign} ${padZ(h)}:00 UTC — ${cell.count} spot${cell.count !== 1 ? 's' : ''}, best SNR: ${cell.bestSNR} dB`;
-                    html += `<div class="hm-cell${isCurrent ? ' hm-current-hour-col' : ''}" style="background:${bg};opacity:0.85;" data-tip="${tip}"><span class="hm-cell-count">${cell.count}</span></div>`;
+                    html += `<div class="hm-cell" data-row="${ri}" data-col="${ci}" style="background:${bg};opacity:0.85;" data-tip="${tip}"><span class="hm-cell-count">${cell.count}</span></div>`;
                 } else {
-                    html += `<div class="hm-cell${isCurrent ? ' hm-current-hour-col' : ''}"></div>`;
+                    html += `<div class="hm-cell" data-row="${ri}" data-col="${ci}"></div>`;
                 }
             });
         });
@@ -1801,6 +1878,99 @@ function renderHeatmap(spots, beaconList) {
     });
 
     section.innerHTML = html;
+
+    // Apply current-hour column tint across the whole column (not per-cell box)
+    section.querySelectorAll('.heatmap-grid').forEach(grid => {
+        // Find the data-col index that corresponds to nowHour
+        const hourEl = grid.querySelector(`.hm-hour.hm-current-hour`);
+        if (hourEl) {
+            const col = hourEl.dataset.col;
+            grid.querySelectorAll(`[data-col="${col}"]`).forEach(el => el.classList.add('hm-current-col'));
+        }
+    });
+
+    // Attach crosshair hover to each heatmap grid
+    section.querySelectorAll('.heatmap-grid').forEach(attachHeatmapCrosshair);
+}
+
+// ── Crosshair hover helpers ───────────────────────────────────────────────
+// For <table> elements: highlights the hovered row and column simultaneously.
+// For heatmap grids: uses data-row / data-col attributes on each cell.
+
+function attachTableCrosshair(table) {
+    let prevRow = null;
+    let prevCol = -1;
+
+    function clearHighlight() {
+        if (prevRow) prevRow.classList.remove('xhair-row');
+        table.querySelectorAll('.xhair-col').forEach(el => el.classList.remove('xhair-col'));
+        prevRow = null;
+        prevCol = -1;
+    }
+
+    table.addEventListener('mouseover', e => {
+        const td = e.target.closest('td');
+        if (!td) { clearHighlight(); return; }
+        const tr = td.closest('tr');
+        if (!tr) { clearHighlight(); return; }
+
+        const colIdx = td.cellIndex;
+        if (tr === prevRow && colIdx === prevCol) return; // no change
+
+        // Clear previous
+        if (prevRow) prevRow.classList.remove('xhair-row');
+        table.querySelectorAll('.xhair-col').forEach(el => el.classList.remove('xhair-col'));
+
+        // Apply new
+        tr.classList.add('xhair-row');
+        table.querySelectorAll(`td:nth-child(${colIdx + 1}), th:nth-child(${colIdx + 1})`).forEach(el => {
+            el.classList.add('xhair-col');
+        });
+
+        prevRow = tr;
+        prevCol = colIdx;
+    });
+
+    table.addEventListener('mouseleave', clearHighlight);
+}
+
+function attachHeatmapCrosshair(grid) {
+    let prevRow = -1;
+    let prevCol = -1;
+
+    function clearHighlight() {
+        grid.querySelectorAll('.hm-row-hover, .hm-col-hover').forEach(el => {
+            el.classList.remove('hm-row-hover', 'hm-col-hover');
+        });
+        prevRow = -1;
+        prevCol = -1;
+    }
+
+    grid.addEventListener('mouseover', e => {
+        const cell = e.target.closest('[data-row],[data-col]');
+        if (!cell) { clearHighlight(); return; }
+
+        const row = cell.dataset.row !== undefined ? parseInt(cell.dataset.row, 10) : -1;
+        const col = cell.dataset.col !== undefined ? parseInt(cell.dataset.col, 10) : -1;
+
+        if (row === prevRow && col === prevCol) return;
+
+        clearHighlight();
+
+        // Highlight entire row (cells + label)
+        if (row >= 0) {
+            grid.querySelectorAll(`[data-row="${row}"]`).forEach(el => el.classList.add('hm-row-hover'));
+        }
+        // Highlight entire column (cells + hour header)
+        if (col >= 0) {
+            grid.querySelectorAll(`[data-col="${col}"]`).forEach(el => el.classList.add('hm-col-hover'));
+        }
+
+        prevRow = row;
+        prevCol = col;
+    });
+
+    grid.addEventListener('mouseleave', clearHighlight);
 }
 
 // ── CSV download ──────────────────────────────────────────────────────────
@@ -2295,6 +2465,10 @@ async function init() {
         spotsTablePage = Math.max(0, Math.ceil(spotsTableData.length / perPage) - 1);
         renderSpotsPage();
     });
+
+    // Attach crosshair hover to the static tables
+    attachTableCrosshair(document.getElementById('schedule-table'));
+    attachTableCrosshair(document.querySelector('.spots-table'));
 
     // Init map
     initMap();

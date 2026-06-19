@@ -2,13 +2,54 @@
 
 /* Twemoji flag emoji — flags-only subset (Regional Indicator pairs U+1F1E6–U+1F1FF).
    Fixes Chrome on Windows which lacks flag glyphs in Segoe UI Emoji.
-   Declared as 'Segoe UI Emoji' so Chrome's automatic emoji fallback chain picks it
-   up for flag codepoints on every element, regardless of the element's font-family.
-   Only activates for the Regional Indicator unicode block; all other codepoints
-   continue to use the real system Segoe UI Emoji font.
-   Font: Twemoji 16.0.1 SVG-COLR1, subset by fontTools. ~500 KB WOFF2. */
+   Only activates for the Regional Indicator unicode block; all other text is unaffected.
+   Font: Twemoji 16.0.1 SVG-COLR1, subset by fontTools. ~500 KB WOFF2.
+
+   The font is declared under multiple common font-family names so it is consulted
+   regardless of which font stack an element uses. The unicode-range restricts it
+   to flag codepoints only — zero effect on any other characters. */
+@font-face {
+    font-family: 'Twemoji Flags';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+}
 @font-face {
     font-family: 'Segoe UI Emoji';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+}
+@font-face {
+    font-family: 'Segoe UI';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+}
+@font-face {
+    font-family: 'Courier New';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+}
+@font-face {
+    font-family: sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+}
+@font-face {
+    font-family: monospace;
     font-style: normal;
     font-weight: 400;
     font-display: swap;

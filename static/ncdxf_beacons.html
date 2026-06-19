@@ -353,6 +353,7 @@
             border: 1px solid rgba(74,158,255,0.4) !important;
             border-radius: 4px !important;
             color: #e8f0ff !important;
+            font-family: 'Twemoji Flags', "Helvetica Neue", Arial, Helvetica, sans-serif !important;
             font-size: 11px !important;
             font-weight: 600 !important;
             padding: 2px 6px !important;
@@ -955,7 +956,7 @@ async function fetchReceiverLocation() {
 
 // ── Load beacon JSON ─────────────────────────────────────────────────────
 async function loadBeaconData() {
-    const r = await fetch('ncdxf_beacons.json');
+    const r = await fetch('ncdxf_beacons.json?v=' + Date.now());
     const d = await r.json();
     BEACONS = d.ncdxf_iaru_beacons.beacons.slice().sort((a, b) => a.slot - b.slot);
     beaconByCall = {};

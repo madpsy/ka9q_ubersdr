@@ -2548,6 +2548,12 @@ func main() {
 	http.HandleFunc("/admin/decoder/stream", adminHandler.AuthMiddleware(HandleDecoderStream(decoderSSEHub)))
 	http.HandleFunc("/admin/cwskimmer/stream", adminHandler.AuthMiddleware(HandleCWSkimmerStream(cwSkimmerSSEHub)))
 
+	// Real-time SSE feeds (public, max 2 concurrent connections per IP)
+	decoderSSELimiter := NewSSEIPLimiter(2)
+	cwSkimmerSSELimiter := NewSSEIPLimiter(2)
+	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter))
+	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter))
+
 	// Widget management endpoints (admin only)
 	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))
 	http.HandleFunc("/admin/widgets/mine", adminHandler.AuthMiddleware(widgetManager.HandleMine))

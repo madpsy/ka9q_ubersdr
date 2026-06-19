@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -12,8 +13,10 @@ import (
 
 // decoder_sse.go - Server-Sent Events hub for real-time digital decode streaming
 //
-// Endpoint: GET /admin/decoder/stream
-// Auth:     AdminHandler.AuthMiddleware (session cookie)
+// Endpoints:
+//   GET /admin/decoder/stream  — admin only (session cookie auth)
+//   GET /api/decoder/stream    — public, max 2 concurrent connections per IP
+//
 // Query params:
 //   mode=FT8|FT4|WSPR|JS8|FT2   (optional, filter by mode)
 //   band=20m_FT8|...             (optional, filter by band name)
@@ -182,6 +185,89 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 			select {
 			case <-r.Context().Done():
 				log.Printf("DecoderSSE: client disconnected (%s)", r.RemoteAddr)
+				return
+			case msg, ok := <-client.ch:
+				if !ok {
+					return
+				}
+				fmt.Fprint(w, msg)
+				flusher.Flush()
+			case <-ticker.C:
+				fmt.Fprint(w, hub.heartbeatJSON())
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// HandlePublicDecoderStream is the HTTP handler for /api/decoder/stream.
+// It is identical to HandleDecoderStream but enforces a per-IP concurrent
+// connection limit via limiter (typically 2 connections per IP).
+func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Resolve the client IP (honour X-Forwarded-For set by a trusted reverse proxy)
+		ip := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(ip); err == nil {
+			ip = host
+		}
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			// Take only the first (leftmost) address — the original client
+			end := len(fwd)
+			for i, c := range fwd {
+				if c == ',' {
+					end = i
+					break
+				}
+			}
+			ip = fwd[:end]
+		}
+
+		// Enforce concurrent connection limit
+		release, ok := limiter.Acquire(ip)
+		if !ok {
+			http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
+			return
+		}
+		defer release()
+
+		// Verify the client supports SSE flushing
+		flusher, ok2 := w.(http.Flusher)
+		if !ok2 {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse optional filters from query string
+		modeFilter := r.URL.Query().Get("mode")
+		bandFilter := r.URL.Query().Get("band")
+
+		// Set SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		// Register client
+		client := &decoderSSEClient{
+			ch:         make(chan string, 64),
+			modeFilter: modeFilter,
+			bandFilter: bandFilter,
+		}
+		hub.register(client)
+		defer hub.unregister(client)
+
+		log.Printf("DecoderSSE (public): client connected (mode=%q band=%q ip=%s)", modeFilter, bandFilter, ip)
+
+		fmt.Fprintf(w, ": connected to decoder stream\nretry: 3000\n\n")
+		flusher.Flush()
+
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				log.Printf("DecoderSSE (public): client disconnected (ip=%s)", ip)
 				return
 			case msg, ok := <-client.ch:
 				if !ok {

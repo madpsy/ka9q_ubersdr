@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -12,8 +13,9 @@ import (
 
 // cwskimmer_sse.go - Server-Sent Events hub for real-time CW Skimmer spot streaming
 //
-// Endpoint: GET /admin/cwskimmer/stream
-// Auth:     AdminHandler.AuthMiddleware (session cookie)
+// Endpoints:
+//   GET /admin/cwskimmer/stream  — admin only (session cookie auth)
+//   GET /api/cwskimmer/stream    — public, max 2 concurrent connections per IP
 // Query params:
 //   band=40m|80m|...   (optional, filter by amateur band label, e.g. "40m")
 //
@@ -176,6 +178,87 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 			select {
 			case <-r.Context().Done():
 				log.Printf("CWSkimmerSSE: client disconnected (%s)", r.RemoteAddr)
+				return
+			case msg, ok := <-client.ch:
+				if !ok {
+					return
+				}
+				fmt.Fprint(w, msg)
+				flusher.Flush()
+			case <-ticker.C:
+				fmt.Fprint(w, hub.heartbeatJSON())
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// HandlePublicCWSkimmerStream is the HTTP handler for /api/cwskimmer/stream.
+// It is identical to HandleCWSkimmerStream but enforces a per-IP concurrent
+// connection limit via limiter (typically 2 connections per IP).
+func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Resolve the client IP (honour X-Forwarded-For set by a trusted reverse proxy)
+		ip := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(ip); err == nil {
+			ip = host
+		}
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			// Take only the first (leftmost) address — the original client
+			end := len(fwd)
+			for i, c := range fwd {
+				if c == ',' {
+					end = i
+					break
+				}
+			}
+			ip = fwd[:end]
+		}
+
+		// Enforce concurrent connection limit
+		release, ok := limiter.Acquire(ip)
+		if !ok {
+			http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
+			return
+		}
+		defer release()
+
+		// Verify the client supports SSE flushing
+		flusher, ok2 := w.(http.Flusher)
+		if !ok2 {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse optional band filter from query string
+		bandFilter := r.URL.Query().Get("band")
+
+		// Set SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		// Register client
+		client := &cwSkimmerSSEClient{
+			ch:         make(chan string, 64),
+			bandFilter: bandFilter,
+		}
+		hub.register(client)
+		defer hub.unregister(client)
+
+		log.Printf("CWSkimmerSSE (public): client connected (band=%q ip=%s)", bandFilter, ip)
+
+		fmt.Fprintf(w, ": connected to CW skimmer stream\nretry: 3000\n\n")
+		flusher.Flush()
+
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				log.Printf("CWSkimmerSSE (public): client disconnected (ip=%s)", ip)
 				return
 			case msg, ok := <-client.ch:
 				if !ok {

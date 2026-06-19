@@ -444,6 +444,49 @@
             pointer-events: none !important;
         }
         .beacon-label::before { display: none !important; }
+        /* ── SSE connection status ──────────────────────────────────────── */
+        #sse-status {
+            margin-top: 6px;
+            font-size: 0.75em;
+            font-family: monospace;
+        }
+        #sse-status.sse-connecting { color: #ffc107; opacity: 0.8; }
+        #sse-status.sse-connected  { color: #4CAF50; opacity: 0.9; }
+        #sse-status.sse-error      { color: #f44336; opacity: 0.8; }
+
+        /* ── Live SSE spot — pulsing band pill ──────────────────────────── */
+        @keyframes live-pill-pulse {
+            0%   { box-shadow: 0 0 0 0 rgba(255,220,50,0.85); }
+            60%  { box-shadow: 0 0 0 6px rgba(255,220,50,0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,220,50,0); }
+        }
+        .band-pill-live {
+            animation: live-pill-pulse 1.2s ease-out;
+            outline: 2px solid rgba(255,220,50,0.9);
+            outline-offset: 1px;
+        }
+
+        /* ── Live SSE spot — beacon card / schedule row flash ───────────── */
+        @keyframes live-card-flash {
+            0%   { background: rgba(255,220,50,0.35); }
+            100% { background: transparent; }
+        }
+        .beacon-card.live-flash,
+        #schedule-tbody tr.live-flash td {
+            animation: live-card-flash 2s ease-out forwards;
+        }
+
+        /* ── Live SSE spot — map marker pulse ───────────────────────────── */
+        @keyframes live-marker-ring {
+            0%   { stroke-opacity: 0.9; stroke-width: 4; r: 11; }
+            100% { stroke-opacity: 0;   stroke-width: 0; r: 18; }
+        }
+
+        /* Live SSE beacon — gold border on permanent label */
+        .beacon-label-live {
+            border-color: #FFD700 !important;
+            box-shadow: 0 1px 8px rgba(255,215,0,0.6) !important;
+        }
         /* Heard beacon — green border on both permanent label and hover popup */
         .beacon-label-heard {
             border-color: #4CAF50 !important;
@@ -507,6 +550,7 @@
             <div style="margin-top:10px; font-size:0.82em; opacity:0.65;" id="date-display">---</div>
             <div id="time-offset" style="margin-top:6px; font-size:0.75em; opacity:0.7; font-family:monospace;"></div>
             <div id="server-latency" style="margin-top:2px; font-size:0.75em; opacity:0.55; font-family:monospace;"></div>
+            <div id="sse-status" class="sse-connecting">⬤ SSE connecting…</div>
         </div>
         <div class="now-table">
             <div style="font-size:0.82em; opacity:0.7; margin-bottom:6px;">Current transmission schedule (10 s slots)</div>
@@ -768,6 +812,7 @@ let greylineLayer = null;  // night-side overlay
 let allSpots = [];         // raw spots from API
 let receiverLat = null;
 let receiverLon = null;
+
 
 // ── Map overlay filters (Recent + Band) ──────────────────────────────────
 // Active only when NOT in replay mode. Filter map markers/lines only;
@@ -1091,9 +1136,9 @@ function colourBeaconMarkers(heardSet, byCall) {
         if (!m) return;
         const heard = heardSet.has(b.callsign);
         if (heard) {
-            m.setStyle({ fillColor: '#4CAF50', fillOpacity: 0.9, radius: 9 });
+            m.setStyle({ fillColor: '#4CAF50', fillOpacity: 0.9, radius: 9, color: '#fff', weight: 1 });
         } else {
-            m.setStyle({ fillColor: '#555', fillOpacity: 0.5, radius: 7 });
+            m.setStyle({ fillColor: '#555', fillOpacity: 0.5, radius: 7, color: '#fff', weight: 1 });
         }
 
         // Update permanent tooltip to include bands heard
@@ -1346,9 +1391,11 @@ async function loadSpots() {
                 return !isNaN(ts) && ts >= cutoff && ts <= now;
             });
             allSpots.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} (rolling 24 h).`, 'ok');
+            const _ft = serverNow(); const fetchedAt = padZ(_ft.getUTCHours()) + ':' + padZ(_ft.getUTCMinutes()) + ':' + padZ(_ft.getUTCSeconds()) + ' UTC';
+            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''} (rolling 24 h). Fetched at ${fetchedAt}`, 'ok');
         } else {
-            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''}.`, 'ok');
+            const _ft = serverNow(); const fetchedAt = padZ(_ft.getUTCHours()) + ':' + padZ(_ft.getUTCMinutes()) + ':' + padZ(_ft.getUTCSeconds()) + ' UTC';
+            setStatus(`Loaded ${allSpots.length} beacon spot${allSpots.length !== 1 ? 's' : ''}. Fetched at ${fetchedAt}`, 'ok');
         }
         renderResults(allSpots);
     } catch (err) {
@@ -1917,6 +1964,98 @@ function updateRefreshCountdown() {
     el.textContent = `Auto-refresh in ${m}:${padZ(s)}`;
 }
 
+// ── Live CW Skimmer SSE feed ─────────────────────────────────────────────
+// Connects to /api/cwskimmer/stream, watches for NCDXF beacon callsigns,
+// and flashes them on the map, schedule table, and Beacon Status cards.
+// Nothing persists — all highlights are temporary animations only.
+function connectCWSkimmerSSE() {
+    const sseEl = document.getElementById('sse-status');
+    function setSSEStatus(cls, text) {
+        if (!sseEl) return;
+        sseEl.className = cls;
+        sseEl.textContent = text;
+    }
+
+    // Flash a beacon card and its matching band pill
+    function flashBeaconCard(callsign, band) {
+        document.querySelectorAll('#beacon-cards .beacon-card').forEach(card => {
+            const callEl = card.querySelector('.bc-call');
+            if (!callEl || !callEl.textContent.includes(callsign)) return;
+            card.classList.remove('live-flash');
+            void card.offsetWidth; // reflow to restart animation
+            card.classList.add('live-flash');
+            card.querySelectorAll('.band-pill').forEach(pill => {
+                if (pill.textContent.trim().startsWith(band)) {
+                    pill.classList.remove('band-pill-live');
+                    void pill.offsetWidth;
+                    pill.classList.add('band-pill-live');
+                }
+            });
+        });
+    }
+
+    // Flash the matching row in the Current Transmission Schedule table
+    function flashScheduleRow(callsign) {
+        document.querySelectorAll('#schedule-tbody tr').forEach(row => {
+            if (row.textContent.includes(callsign)) {
+                row.classList.remove('live-flash');
+                void row.offsetWidth;
+                row.classList.add('live-flash');
+            }
+        });
+    }
+
+    // Briefly pulse the Leaflet map marker then restore its normal style
+    function pulseMarker(callsign) {
+        const m = beaconMarkers[callsign];
+        if (!m) return;
+        const prevFill  = m.options.fillColor;
+        const prevOpac  = m.options.fillOpacity;
+        const prevR     = m.options.radius;
+        m.setStyle({ radius: prevR + 5, fillColor: '#FFE033', fillOpacity: 1 });
+        setTimeout(() => m.setStyle({ radius: prevR, fillColor: prevFill, fillOpacity: prevOpac }), 800);
+    }
+
+    function connect() {
+        setSSEStatus('sse-connecting', '⬤ SSE connecting…');
+        const es = new EventSource('/api/cwskimmer/stream');
+
+        es.onopen = () => {
+            setSSEStatus('sse-connected', '⬤ Live feed connected');
+        };
+
+        es.onmessage = (e) => {
+            let spot;
+            try { spot = JSON.parse(e.data); } catch { return; }
+            if (spot.type !== 'cw_spot') return;
+
+            const call = spot.callsign;
+            const band = spot.band;
+
+            // Only care about NCDXF beacon callsigns
+            if (!beaconByCall[call]) return;
+
+            // Temporary visual flashes — nothing persists
+            flashBeaconCard(call, band);
+            flashScheduleRow(call);
+            pulseMarker(call);
+
+            // Update SSE status with last-heard info
+            const now = serverNow();
+            const hhmm = padZ(now.getUTCHours()) + ':' + padZ(now.getUTCMinutes()) + ':' + padZ(now.getUTCSeconds());
+            setSSEStatus('sse-connected', `⬤ Live: ${call} ${band} @ ${hhmm} UTC`);
+        };
+
+        es.onerror = () => {
+            setSSEStatus('sse-error', '⬤ SSE disconnected — retrying…');
+            es.close();
+            setTimeout(connect, 2000);
+        };
+    }
+
+    connect();
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────
 async function init() {
     // Set default date to today
@@ -2035,6 +2174,9 @@ async function init() {
     // Auto-load today on startup, then start auto-refresh
     await loadSpots();
     startAutoRefresh();
+
+    // Connect to live CW Skimmer SSE feed
+    connectCWSkimmerSSE();
 }
 
 document.addEventListener('DOMContentLoaded', init);

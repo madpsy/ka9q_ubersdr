@@ -1057,3 +1057,50 @@ func (rl *ImageProxyRateLimiter) GetStats() int {
 	defer rl.mu.RUnlock()
 	return len(rl.limiters)
 }
+
+// SSEIPLimiter tracks the number of *concurrent* SSE connections per IP address.
+// Unlike token-bucket limiters, this counts live connections rather than request rate.
+// Each call to Acquire increments the counter; the returned release func decrements it.
+// If the IP already has maxConns active connections, Acquire returns (nil, false).
+type SSEIPLimiter struct {
+	mu       sync.Mutex
+	counts   map[string]int
+	maxConns int
+}
+
+// NewSSEIPLimiter creates a limiter that allows at most maxConns simultaneous
+// SSE connections from the same IP address.
+func NewSSEIPLimiter(maxConns int) *SSEIPLimiter {
+	return &SSEIPLimiter{
+		counts:   make(map[string]int),
+		maxConns: maxConns,
+	}
+}
+
+// Acquire attempts to reserve a connection slot for ip.
+// On success it returns a release function (call it when the connection closes)
+// and true.  On failure (limit reached) it returns nil, false.
+func (l *SSEIPLimiter) Acquire(ip string) (release func(), ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.counts[ip] >= l.maxConns {
+		return nil, false
+	}
+	l.counts[ip]++
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.counts[ip]--
+		if l.counts[ip] <= 0 {
+			delete(l.counts, ip)
+		}
+	}, true
+}
+
+// Count returns the current number of active connections from ip.
+func (l *SSEIPLimiter) Count(ip string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.counts[ip]
+}

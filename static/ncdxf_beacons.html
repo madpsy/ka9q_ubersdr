@@ -1227,13 +1227,26 @@ async function fetchReceiverLocation() {
             }
         }
 
-        const gps = d.receiver && d.receiver.gps;
+        const rx  = d.receiver || {};
+        const gps = rx.gps;
         if (gps && gps.lat && gps.lon) {
             receiverLat = gps.lat;
             receiverLon = gps.lon;
-            const callsign = (d.receiver && d.receiver.callsign) || '';
-            const name     = (d.receiver && d.receiver.name)     || '';
+            const callsign = rx.callsign || '';
+            const name     = rx.name     || '';
             placeReceiverMarker(receiverLat, receiverLon, callsign, name);
+        }
+
+        // Populate subtitle with receiver details
+        const subtitleEl = document.getElementById('subtitle');
+        if (subtitleEl && rx.callsign) {
+            const parts = [];
+            if (rx.callsign) parts.push(`<strong>${rx.callsign}</strong>`);
+            if (rx.location)  parts.push(rx.location);
+            if (rx.name)      parts.push(rx.name);
+            if (rx.antenna)   parts.push(rx.antenna);
+            if (gps && gps.maidenhead) parts.push(gps.maidenhead);
+            subtitleEl.innerHTML = parts.join(' · ');
         }
     } catch (_) { /* no receiver location available */ }
 }

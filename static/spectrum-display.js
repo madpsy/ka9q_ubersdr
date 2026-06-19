@@ -4518,7 +4518,7 @@ class SpectrumDisplay {
         this.tooltip.style.padding = '8px 12px';
         this.tooltip.style.borderRadius = '4px';
         this.tooltip.style.fontSize = '12px';
-        this.tooltip.style.fontFamily = 'monospace';
+        this.tooltip.style.fontFamily = "'Twemoji Flags', monospace";
         this.tooltip.style.pointerEvents = 'none';
         this.tooltip.style.zIndex = '10000';
         this.tooltip.style.display = 'none';

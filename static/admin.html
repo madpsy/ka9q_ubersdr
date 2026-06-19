@@ -13545,7 +13545,7 @@ function resetStationIdColor() {
                     <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity}; cursor: pointer; transition: background-color 0.2s;"
                         onmouseenter="this.style.backgroundColor='#d4edda'; showCountryHoverMarker(${country.bearing}, ${country.distance_km})"
                         onmouseleave="this.style.backgroundColor=''; clearCountryHoverMarker()">
-                        <td style="padding: 6px; font-weight: 500;">${country.name}</td>
+                        <td style="padding: 6px; font-weight: 500;">${country.country_code ? String.fromCodePoint(0x1F1E6-65+country.country_code.toUpperCase().charCodeAt(0), 0x1F1E6-65+country.country_code.toUpperCase().charCodeAt(1)) + '\u202F' : ''}${country.name}</td>
                         <td style="padding: 6px; text-align: center; font-size: 11px; color: #999;">${country.continent || '—'}</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #667eea;">${country.bearing}°</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #666;">${Math.round(country.distance_km).toLocaleString()}</td>

@@ -483,15 +483,16 @@ func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) 
 
 // CountryBearingInfo represents a country with its bearing from the receiver
 type CountryBearingInfo struct {
-	Name       string  `json:"name"`
-	PrimaryPfx string  `json:"primary_prefix"`
-	CQZone     int     `json:"cq_zone"`
-	ITUZone    int     `json:"itu_zone"`
-	Continent  string  `json:"continent"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-	Bearing    int     `json:"bearing"`     // Bearing in degrees from receiver location (rounded to whole number)
-	Distance   float64 `json:"distance_km"` // Distance in kilometers from receiver location
+	Name        string  `json:"name"`
+	PrimaryPfx  string  `json:"primary_prefix"`
+	CountryCode string  `json:"country_code,omitempty"` // ISO 3166-1 alpha-2 (empty for non-sovereign entities)
+	CQZone      int     `json:"cq_zone"`
+	ITUZone     int     `json:"itu_zone"`
+	Continent   string  `json:"continent"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Bearing     int     `json:"bearing"`     // Bearing in degrees from receiver location (rounded to whole number)
+	Distance    float64 `json:"distance_km"` // Distance in kilometers from receiver location
 }
 
 // HandleGetCountries handles GET /api/rotctl/countries
@@ -544,15 +545,16 @@ func (h *RotctlAPIHandler) HandleGetCountries(w http.ResponseWriter, r *http.Req
 		)
 
 		countries = append(countries, CountryBearingInfo{
-			Name:       entity.Name,
-			PrimaryPfx: entity.PrimaryPfx,
-			CQZone:     entity.CQZone,
-			ITUZone:    entity.ITUZone,
-			Continent:  entity.Continent,
-			Latitude:   entity.Latitude,
-			Longitude:  entity.Longitude,
-			Bearing:    int(bearing + 0.5), // Round to nearest whole number
-			Distance:   distance,
+			Name:        entity.Name,
+			PrimaryPfx:  entity.PrimaryPfx,
+			CountryCode: entity.CountryCode,
+			CQZone:      entity.CQZone,
+			ITUZone:     entity.ITUZone,
+			Continent:   entity.Continent,
+			Latitude:    entity.Latitude,
+			Longitude:   entity.Longitude,
+			Bearing:     int(bearing + 0.5), // Round to nearest whole number
+			Distance:    distance,
 		})
 	}
 

@@ -334,6 +334,66 @@
         }
         .page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
         .page-btn:disabled { opacity: 0.3; cursor: default; }
+        /* ── Recent spots map overlay ───────────────────────────────── */
+        #recent-spots-overlay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(10, 20, 40, 0.88);
+            border: 1px solid rgba(74,158,255,0.45);
+            border-radius: 7px;
+            padding: 7px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            backdrop-filter: blur(6px);
+            transition: border-color 0.2s, background 0.2s;
+        }
+        #recent-spots-overlay.active {
+            background: rgba(74,158,255,0.18);
+            border-color: #4a9eff;
+        }
+        #recent-spots-overlay input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+            accent-color: #4a9eff;
+            flex-shrink: 0;
+        }
+        #recent-spots-overlay label {
+            color: #e8f0ff;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #recent-spots-select {
+            padding: 3px 6px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 4px;
+            color: #e8f0ff;
+            font-size: 0.82em;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        #recent-spots-select:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+        #recent-spots-badge {
+            background: #4a9eff;
+            color: #000;
+            font-size: 0.72em;
+            font-weight: 700;
+            border-radius: 8px;
+            padding: 1px 6px;
+            display: none;
+            white-space: nowrap;
+        }
         /* ── Receiver diamond marker ────────────────────────────────── */
         .rx-marker-icon {
             font-size: 22px;
@@ -501,7 +561,22 @@
             <option value="250">4×</option>
         </select>
     </div>
-    <div id="beacon-map"></div>
+    <div id="beacon-map" style="position:relative;">
+        <div id="recent-spots-overlay">
+            <input type="checkbox" id="recent-spots-cb">
+            <label for="recent-spots-cb">⏱ Recent only:</label>
+            <select id="recent-spots-select" disabled>
+                <option value="10">10 min</option>
+                <option value="30">30 min</option>
+                <option value="60" selected>1 hour</option>
+                <option value="180">3 hours</option>
+                <option value="360">6 hours</option>
+                <option value="720">12 hours</option>
+                <option value="1440">24 hours</option>
+            </select>
+            <span id="recent-spots-badge"></span>
+        </div>
+    </div>
 
     <!-- ── Summary stats ────────────────────────────────────────────── -->
     <div id="summary-section" style="display:none;">
@@ -624,6 +699,60 @@ let greylineLayer = null;  // night-side overlay
 let allSpots = [];         // raw spots from API
 let receiverLat = null;
 let receiverLon = null;
+
+// ── Recent-spots map filter ───────────────────────────────────────────────
+// Active only when NOT in replay mode. Filters map markers/lines to spots
+// within the last N minutes without touching the table / heatmap / cards.
+const recentSpotsState = {
+    enabled: false,
+    minutes: 60,
+};
+
+function recentSpotsActive() {
+    return recentSpotsState.enabled && !replayState.isPlaying && replayState.currentHour === 0;
+}
+
+function applyRecentSpotsFilter() {
+    if (!allSpots.length) return;
+    const overlay = document.getElementById('recent-spots-overlay');
+    const badge   = document.getElementById('recent-spots-badge');
+
+    if (!recentSpotsActive()) {
+        // Restore full view
+        const heardSet = new Set(allSpots.map(s => s.callsign));
+        const byCall = {};
+        allSpots.forEach(s => {
+            if (!byCall[s.callsign]) byCall[s.callsign] = [];
+            byCall[s.callsign].push(s);
+        });
+        colourBeaconMarkers(heardSet, byCall);
+        drawSpotLines(allSpots);
+        if (overlay) overlay.classList.remove('active');
+        if (badge)   badge.style.display = 'none';
+        return;
+    }
+
+    const cutoff = new Date(Date.now() - recentSpotsState.minutes * 60 * 1000);
+    const filtered = allSpots.filter(s => {
+        const ts = new Date(s.timestamp);
+        return !isNaN(ts) && ts >= cutoff;
+    });
+
+    const heardSet = new Set(filtered.map(s => s.callsign));
+    const byCall = {};
+    filtered.forEach(s => {
+        if (!byCall[s.callsign]) byCall[s.callsign] = [];
+        byCall[s.callsign].push(s);
+    });
+    colourBeaconMarkers(heardSet, byCall);
+    drawSpotLines(filtered);
+
+    if (overlay) overlay.classList.add('active');
+    if (badge) {
+        badge.textContent = filtered.length + ' spot' + (filtered.length !== 1 ? 's' : '');
+        badge.style.display = filtered.length > 0 ? '' : 'none';
+    }
+}
 
 // ── Clock ────────────────────────────────────────────────────────────────
 function padZ(n) { return n < 10 ? '0' + n : '' + n; }
@@ -1088,6 +1217,8 @@ function renderResults(spots) {
     }
     // Stop any running replay when new data arrives
     stopReplay();
+    // Apply recent-spots filter to map (if enabled)
+    applyRecentSpotsFilter();
 }
 
 function renderSummary(spots, heardSet) {
@@ -1457,6 +1588,9 @@ function replayStep() {
 function startReplay() {
     if (replayState.isPlaying) return;
     replayState.isPlaying = true;
+    // Hide the recent-spots overlay during replay — it doesn't apply
+    const overlay = document.getElementById('recent-spots-overlay');
+    if (overlay) overlay.style.display = 'none';
     document.getElementById('replay-play-btn').style.display  = 'none';
     document.getElementById('replay-pause-btn').style.display = '';
     replayStep(); // immediate first step
@@ -1477,15 +1611,11 @@ function stopReplay() {
     replayState.currentHour = 0;
     document.getElementById('replay-slider').value = 0;
     document.getElementById('replay-hour-label').textContent = '00:00 UTC';
-    // Restore full live view
-    const heardSet = new Set(allSpots.map(s => s.callsign));
-    const byCall = {};
-    allSpots.forEach(s => {
-        if (!byCall[s.callsign]) byCall[s.callsign] = [];
-        byCall[s.callsign].push(s);
-    });
-    colourBeaconMarkers(heardSet, byCall);
-    drawSpotLines(allSpots);
+    // Show the recent-spots overlay again now that replay is done
+    const overlay = document.getElementById('recent-spots-overlay');
+    if (overlay) overlay.style.display = '';
+    // Restore full live view (or recent-filtered view if enabled)
+    applyRecentSpotsFilter();
     // Restore greyline to current real time
     updateGreyline();
 }
@@ -1631,6 +1761,19 @@ async function init() {
     // CSV download buttons
     document.getElementById('csv-download-btn').addEventListener('click', downloadCSV);
     document.getElementById('heatmap-csv-btn').addEventListener('click', downloadHeatmapCSV);
+
+    // Recent-spots overlay controls
+    const recentCb  = document.getElementById('recent-spots-cb');
+    const recentSel = document.getElementById('recent-spots-select');
+    recentCb.addEventListener('change', () => {
+        recentSpotsState.enabled = recentCb.checked;
+        recentSel.disabled = !recentCb.checked;
+        applyRecentSpotsFilter();
+    });
+    recentSel.addEventListener('change', () => {
+        recentSpotsState.minutes = parseInt(recentSel.value, 10);
+        if (recentSpotsState.enabled) applyRecentSpotsFilter();
+    });
 
     // Replay controls
     document.getElementById('replay-play-btn').addEventListener('click', startReplay);

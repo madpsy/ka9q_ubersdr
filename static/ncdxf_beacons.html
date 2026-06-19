@@ -472,13 +472,15 @@
             box-shadow: 0 0 4px rgba(255,220,50,0.5);
         }
 
-        /* ── Live SSE spot — beacon card / schedule row flash ───────────── */
+        /* ── Live SSE spot — beacon card highlight (slot duration) ─────── */
+        /* Holds amber for ~8 s then fades over the last 2 s of the 10 s slot */
         @keyframes live-card-flash {
-            0%   { background: rgba(255,220,50,0.35); }
+            0%   { background: rgba(255,220,50,0.30); }
+            80%  { background: rgba(255,220,50,0.30); }
             100% { background: transparent; }
         }
         .beacon-card.live-flash {
-            animation: live-card-flash 2s ease-out forwards;
+            animation: live-card-flash 10s ease-out forwards;
         }
         /* Schedule row stays highlighted for the full 10 s slot duration */
         #schedule-tbody tr.schedule-row-live td {
@@ -966,6 +968,7 @@ function updateScheduleTable(now) {
             // Slot has rotated — clear the live state and restore the map marker
             const prevCall = liveScheduleSpot.callsign;
             liveScheduleSpot = null;
+            // Restore map marker colour
             const m = beaconMarkers[prevCall];
             if (m) {
                 const wasHeard = allSpots.some(s => s.callsign === prevCall);
@@ -975,6 +978,13 @@ function updateScheduleTable(now) {
                     m.setStyle({ fillColor: '#555', fillOpacity: 0.5, radius: 7, color: '#fff', weight: 1 });
                 }
             }
+            // Remove persistent pill highlight and card highlight from DOM
+            document.querySelectorAll('#beacon-cards .band-pill-live-hold').forEach(p => {
+                p.classList.remove('band-pill-live-hold');
+            });
+            document.querySelectorAll('#beacon-cards .beacon-card.live-flash').forEach(c => {
+                c.classList.remove('live-flash');
+            });
         }
     }
 }
@@ -1551,17 +1561,8 @@ function renderBeaconCards(spots, heardSet, beaconList) {
                 snrByBand[s.band] = s.snr;
             }
         });
-        // Sort bands in BAND_NAMES order
-        const bandPills = BAND_NAMES
-            .filter(bd => snrByBand[bd] !== undefined)
-            .map(bd => {
-                const snr = snrByBand[bd];
-                const sign = snr >= 0 ? '+' : '';
-                return `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;color:#000;">${bd} <span style="opacity:0.75;">${sign}${snr}</span></span>`;
-            }).join(' ');
-
         const _flagC = beaconFlag(b);
-        // Re-apply persistent live band pill highlight if this beacon/band is the live spot
+        // Build band pills; re-apply persistent live highlight if this beacon/band is the live spot
         const liveBandPills = BAND_NAMES
             .filter(bd => snrByBand[bd] !== undefined)
             .map(bd => {
@@ -2157,6 +2158,11 @@ function connectCWSkimmerSSE() {
                         s.callsign === call && s.band === band && s.timestamp === spot.timestamp
                     );
                     if (!alreadyHave) {
+                        // Set liveScheduleSpot BEFORE renderResults so that
+                        // renderBeaconCards and colourBeaconMarkers (tooltip) both
+                        // see the correct value and render the band pill + gold marker.
+                        liveScheduleSpot = { callsign: call, band };
+
                         // Prepend the new spot (newest-first order)
                         allSpots.unshift(spot);
 
@@ -2179,7 +2185,9 @@ function connectCWSkimmerSSE() {
                 }
             }
 
-            // Visual highlights (always, regardless of mode)
+            // Visual highlights (always, regardless of mode).
+            // markScheduleRow also sets liveScheduleSpot (idempotent if already set above)
+            // and applies DOM classes for the schedule row, card pill, and marker.
             flashBeaconCard(call, band);
             markScheduleRow(call, band);
             pulseMarker(call);

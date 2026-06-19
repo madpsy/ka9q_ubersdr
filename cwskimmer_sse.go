@@ -215,12 +215,18 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) ht
 			ip = fwd[:end]
 		}
 
-		// Enforce concurrent connection limit
+		// Enforce concurrent connection limit.
+		// release() is idempotent (sync.Once) so it is safe to call from both
+		// the context-watcher goroutine below and the defer statement.
 		release, ok := limiter.Acquire(ip)
 		if !ok {
 			http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
 			return
 		}
+		// Release the slot as soon as the client disconnects, even if the
+		// handler goroutine is still unwinding (e.g. behind a reverse proxy
+		// that delays context cancellation propagation).
+		go func() { <-r.Context().Done(); release() }()
 		defer release()
 
 		// Verify the client supports SSE flushing

@@ -1078,8 +1078,11 @@ func NewSSEIPLimiter(maxConns int) *SSEIPLimiter {
 }
 
 // Acquire attempts to reserve a connection slot for ip.
-// On success it returns a release function (call it when the connection closes)
-// and true.  On failure (limit reached) it returns nil, false.
+// On success it returns a release function and true.
+// The release function is idempotent — it is safe to call multiple times
+// (e.g. from both a goroutine watching r.Context().Done() and a defer statement);
+// the counter is decremented exactly once regardless of how many times it is called.
+// On failure (limit reached) it returns nil, false.
 func (l *SSEIPLimiter) Acquire(ip string) (release func(), ok bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -1088,13 +1091,17 @@ func (l *SSEIPLimiter) Acquire(ip string) (release func(), ok bool) {
 		return nil, false
 	}
 	l.counts[ip]++
+
+	var once sync.Once
 	return func() {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		l.counts[ip]--
-		if l.counts[ip] <= 0 {
-			delete(l.counts, ip)
-		}
+		once.Do(func() {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			l.counts[ip]--
+			if l.counts[ip] <= 0 {
+				delete(l.counts, ip)
+			}
+		})
 	}, true
 }
 

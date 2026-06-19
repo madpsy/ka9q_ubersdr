@@ -334,8 +334,8 @@
         }
         .page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
         .page-btn:disabled { opacity: 0.3; cursor: default; }
-        /* ── Recent spots map overlay ───────────────────────────────── */
-        #recent-spots-overlay {
+        /* ── Map overlay panel (Recent + Band filters) ──────────────── */
+        #map-overlay-panel {
             position: absolute;
             top: 10px;
             right: 10px;
@@ -343,35 +343,46 @@
             background: rgba(10, 20, 40, 0.88);
             border: 1px solid rgba(74,158,255,0.45);
             border-radius: 7px;
-            padding: 7px 12px;
+            padding: 8px 12px;
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex-direction: column;
+            gap: 7px;
             user-select: none;
             box-shadow: 0 2px 10px rgba(0,0,0,0.5);
             backdrop-filter: blur(6px);
             transition: border-color 0.2s, background 0.2s;
+            min-width: 220px;
         }
-        #recent-spots-overlay.active {
+        #map-overlay-panel.active {
             background: rgba(10, 28, 60, 0.92);
             border-color: #4a9eff;
             box-shadow: 0 2px 12px rgba(74,158,255,0.35);
         }
-        #recent-spots-overlay input[type="checkbox"] {
+        .overlay-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .overlay-divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.12);
+            margin: 0;
+        }
+        #map-overlay-panel input[type="checkbox"] {
             width: 15px;
             height: 15px;
             cursor: pointer;
             accent-color: #4a9eff;
             flex-shrink: 0;
         }
-        #recent-spots-overlay label {
+        #map-overlay-panel label {
             color: #e8f0ff;
             font-size: 0.85em;
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
         }
-        #recent-spots-select {
+        .overlay-select {
             padding: 3px 6px;
             background: rgba(255,255,255,0.1);
             border: 1px solid rgba(255,255,255,0.25);
@@ -380,12 +391,13 @@
             font-size: 0.82em;
             cursor: pointer;
             transition: opacity 0.2s;
+            flex: 1;
         }
-        #recent-spots-select:disabled {
+        .overlay-select:disabled {
             opacity: 0.35;
             cursor: default;
         }
-        #recent-spots-badge {
+        .overlay-badge {
             background: #4a9eff;
             color: #000d1a;
             font-size: 0.72em;
@@ -577,19 +589,36 @@
         </select>
     </div>
     <div id="beacon-map" style="position:relative;">
-        <div id="recent-spots-overlay">
-            <input type="checkbox" id="recent-spots-cb">
-            <label for="recent-spots-cb">⏱ Recent only:</label>
-            <select id="recent-spots-select" disabled>
-                <option value="10">10 min</option>
-                <option value="30">30 min</option>
-                <option value="60" selected>1 hour</option>
-                <option value="180">3 hours</option>
-                <option value="360">6 hours</option>
-                <option value="720">12 hours</option>
-                <option value="1440">24 hours</option>
-            </select>
-            <span id="recent-spots-badge"></span>
+        <div id="map-overlay-panel">
+            <!-- Row 1: Recent only -->
+            <div class="overlay-row">
+                <input type="checkbox" id="recent-spots-cb">
+                <label for="recent-spots-cb">⏱ Recent only:</label>
+                <select id="recent-spots-select" class="overlay-select" disabled>
+                    <option value="10">10 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60" selected>1 hour</option>
+                    <option value="180">3 hours</option>
+                    <option value="360">6 hours</option>
+                    <option value="720">12 hours</option>
+                    <option value="1440">24 hours</option>
+                </select>
+                <span id="recent-spots-badge" class="overlay-badge"></span>
+            </div>
+            <hr class="overlay-divider">
+            <!-- Row 2: Band only -->
+            <div class="overlay-row">
+                <input type="checkbox" id="band-only-cb">
+                <label for="band-only-cb">📻 Band only:</label>
+                <select id="band-only-select" class="overlay-select" disabled>
+                    <option value="20m">20 m</option>
+                    <option value="17m">17 m</option>
+                    <option value="15m">15 m</option>
+                    <option value="12m">12 m</option>
+                    <option value="10m">10 m</option>
+                </select>
+                <span id="band-only-badge" class="overlay-badge"></span>
+            </div>
         </div>
     </div>
 
@@ -715,24 +744,28 @@ let allSpots = [];         // raw spots from API
 let receiverLat = null;
 let receiverLon = null;
 
-// ── Recent-spots map filter ───────────────────────────────────────────────
-// Active only when NOT in replay mode. Filters map markers/lines to spots
-// within the last N minutes without touching the table / heatmap / cards.
-const recentSpotsState = {
-    enabled: false,
-    minutes: 60,
+// ── Map overlay filters (Recent + Band) ──────────────────────────────────
+// Active only when NOT in replay mode. Filter map markers/lines only;
+// the table, heatmap and cards always show the full loaded dataset.
+const mapFilterState = {
+    recentEnabled: false,
+    recentMinutes: 60,
+    bandEnabled:   false,
+    bandValue:     '20m',
 };
 
-function recentSpotsActive() {
-    return recentSpotsState.enabled && !replayState.isPlaying && replayState.currentHour === 0;
+function mapFiltersActive() {
+    return (mapFilterState.recentEnabled || mapFilterState.bandEnabled)
+        && !replayState.isPlaying && replayState.currentHour === 0;
 }
 
 function applyRecentSpotsFilter() {
     if (!allSpots.length) return;
-    const overlay = document.getElementById('recent-spots-overlay');
-    const badge   = document.getElementById('recent-spots-badge');
+    const panel      = document.getElementById('map-overlay-panel');
+    const recentBadge = document.getElementById('recent-spots-badge');
+    const bandBadge   = document.getElementById('band-only-badge');
 
-    if (!recentSpotsActive()) {
+    if (!mapFiltersActive()) {
         // Restore full view
         const heardSet = new Set(allSpots.map(s => s.callsign));
         const byCall = {};
@@ -742,16 +775,26 @@ function applyRecentSpotsFilter() {
         });
         colourBeaconMarkers(heardSet, byCall);
         drawSpotLines(allSpots);
-        if (overlay) overlay.classList.remove('active');
-        if (badge)   badge.style.display = 'none';
+        if (panel) panel.classList.remove('active');
+        if (recentBadge) recentBadge.style.display = 'none';
+        if (bandBadge)   bandBadge.style.display   = 'none';
         return;
     }
 
-    const cutoff = new Date(Date.now() - recentSpotsState.minutes * 60 * 1000);
-    const filtered = allSpots.filter(s => {
-        const ts = new Date(s.timestamp);
-        return !isNaN(ts) && ts >= cutoff;
-    });
+    // Start with all spots, then apply each active filter
+    let filtered = allSpots;
+
+    if (mapFilterState.recentEnabled) {
+        const cutoff = new Date(Date.now() - mapFilterState.recentMinutes * 60 * 1000);
+        filtered = filtered.filter(s => {
+            const ts = new Date(s.timestamp);
+            return !isNaN(ts) && ts >= cutoff;
+        });
+    }
+
+    if (mapFilterState.bandEnabled) {
+        filtered = filtered.filter(s => s.band === mapFilterState.bandValue);
+    }
 
     const heardSet = new Set(filtered.map(s => s.callsign));
     const byCall = {};
@@ -762,10 +805,23 @@ function applyRecentSpotsFilter() {
     colourBeaconMarkers(heardSet, byCall);
     drawSpotLines(filtered);
 
-    if (overlay) overlay.classList.add('active');
-    if (badge) {
-        badge.textContent = filtered.length + ' spot' + (filtered.length !== 1 ? 's' : '');
-        badge.style.display = filtered.length > 0 ? '' : 'none';
+    if (panel) panel.classList.add('active');
+
+    if (recentBadge) {
+        const recentCount = mapFilterState.recentEnabled ? filtered.length : null;
+        if (recentCount !== null) {
+            recentBadge.textContent = recentCount + ' spot' + (recentCount !== 1 ? 's' : '');
+            recentBadge.style.display = '';
+        } else {
+            recentBadge.style.display = 'none';
+        }
+    }
+    if (bandBadge) {
+        bandBadge.style.display = mapFilterState.bandEnabled ? '' : 'none';
+        if (mapFilterState.bandEnabled) {
+            const bc = filtered.length;
+            bandBadge.textContent = bc + ' spot' + (bc !== 1 ? 's' : '');
+        }
     }
 }
 
@@ -1614,8 +1670,8 @@ function replayStep() {
 function startReplay() {
     if (replayState.isPlaying) return;
     replayState.isPlaying = true;
-    // Hide the recent-spots overlay during replay — it doesn't apply
-    const overlay = document.getElementById('recent-spots-overlay');
+    // Hide the map overlay panel during replay — it doesn't apply
+    const overlay = document.getElementById('map-overlay-panel');
     if (overlay) overlay.style.display = 'none';
     document.getElementById('replay-play-btn').style.display  = 'none';
     document.getElementById('replay-pause-btn').style.display = '';
@@ -1637,8 +1693,8 @@ function stopReplay() {
     replayState.currentHour = 0;
     document.getElementById('replay-slider').value = 0;
     document.getElementById('replay-hour-label').textContent = '00:00 UTC';
-    // Show the recent-spots overlay again now that replay is done
-    const overlay = document.getElementById('recent-spots-overlay');
+    // Show the map overlay panel again now that replay is done
+    const overlay = document.getElementById('map-overlay-panel');
     if (overlay) overlay.style.display = '';
     // Restore full live view (or recent-filtered view if enabled)
     applyRecentSpotsFilter();
@@ -1788,17 +1844,29 @@ async function init() {
     document.getElementById('csv-download-btn').addEventListener('click', downloadCSV);
     document.getElementById('heatmap-csv-btn').addEventListener('click', downloadHeatmapCSV);
 
-    // Recent-spots overlay controls
+    // Map overlay filter controls
     const recentCb  = document.getElementById('recent-spots-cb');
     const recentSel = document.getElementById('recent-spots-select');
     recentCb.addEventListener('change', () => {
-        recentSpotsState.enabled = recentCb.checked;
+        mapFilterState.recentEnabled = recentCb.checked;
         recentSel.disabled = !recentCb.checked;
         applyRecentSpotsFilter();
     });
     recentSel.addEventListener('change', () => {
-        recentSpotsState.minutes = parseInt(recentSel.value, 10);
-        if (recentSpotsState.enabled) applyRecentSpotsFilter();
+        mapFilterState.recentMinutes = parseInt(recentSel.value, 10);
+        if (mapFilterState.recentEnabled) applyRecentSpotsFilter();
+    });
+
+    const bandOnlyCb  = document.getElementById('band-only-cb');
+    const bandOnlySel = document.getElementById('band-only-select');
+    bandOnlyCb.addEventListener('change', () => {
+        mapFilterState.bandEnabled = bandOnlyCb.checked;
+        bandOnlySel.disabled = !bandOnlyCb.checked;
+        applyRecentSpotsFilter();
+    });
+    bandOnlySel.addEventListener('change', () => {
+        mapFilterState.bandValue = bandOnlySel.value;
+        if (mapFilterState.bandEnabled) applyRecentSpotsFilter();
     });
 
     // Replay controls

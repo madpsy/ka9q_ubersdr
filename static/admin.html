@@ -6908,7 +6908,9 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const lastActive = audioSession?.last_active || spectrumSession?.last_active;
                 const lastSeenDisplay = lastActive ? formatDuration(Date.now() - new Date(lastActive)) : 'N/A';
 
-                let ipDisplay = `<a href="#" onclick="showGeoIPModal('${clientIP}'); return false;" style="color: #667eea; text-decoration: none; font-weight: bold; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${clientIP}</a>`;
+                const countryCode = audioSession?.country_code || spectrumSession?.country_code || '';
+                const _sessFlag = countryCode ? String.fromCodePoint(...[...countryCode.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : '';
+                let ipDisplay = `<a href="#" onclick="showGeoIPModal('${clientIP}'); return false;" style="color: #667eea; text-decoration: none; font-weight: bold; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${_sessFlag}${clientIP}</a>`;
                 if (sessions.isBypassed) {
                     const authMethod = audioSession?.auth_method || spectrumSession?.auth_method || '';
                     if (authMethod === 'password') {

@@ -429,6 +429,14 @@
             border-color: #4CAF50 !important;
             box-shadow: 0 1px 6px rgba(76,175,80,0.45) !important;
         }
+        /* ── Heard beacon popup — green border on the Leaflet wrapper ── */
+        .beacon-popup-heard .leaflet-popup-content-wrapper {
+            border: 2px solid #4CAF50 !important;
+            box-shadow: 0 2px 10px rgba(76,175,80,0.35) !important;
+        }
+        .beacon-popup-heard .leaflet-popup-tip {
+            background: #4CAF50 !important;
+        }
         /* ── Leaflet beacon popup ───────────────────────────────────── */
         .beacon-popup {
             font-family: inherit;
@@ -1051,6 +1059,16 @@ function colourBeaconMarkers(heardSet, byCall) {
             <div class="bp-detail">${b.location} · ${b.grid}</div>
             <div class="bp-spots">${spotsHtml}</div>
         </div>`);
+        // Apply/remove green border class on the popup wrapper
+        const popup = m.getPopup();
+        if (popup) {
+            popup.options.className = heard ? 'beacon-popup-heard' : '';
+            // If the popup is currently open, update the DOM directly too
+            const el = popup.getElement ? popup.getElement() : null;
+            if (el) {
+                el.classList.toggle('beacon-popup-heard', heard);
+            }
+        }
     });
     adjustBeaconLabelOffsets();
 }

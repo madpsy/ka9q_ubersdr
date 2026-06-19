@@ -273,8 +273,7 @@
             font-weight: 700;
         }
         .hm-cell.hm-current-hour-col {
-            outline: 1px solid rgba(74,158,255,0.45);
-            outline-offset: -1px;
+            box-shadow: inset 0 0 0 2px rgba(74,158,255,0.85);
         }
         .hm-beacon-label {
             font-size: 0.75em;
@@ -314,7 +313,7 @@
             pointer-events: none;
             line-height: 1;
         }
-        .hm-cell:hover::after {
+        .hm-cell[data-tip]:hover::after {
             content: attr(data-tip);
             position: absolute;
             bottom: calc(100% + 4px);

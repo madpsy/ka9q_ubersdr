@@ -1747,7 +1747,7 @@ class DigitalSpotsMap {
         });
 
         let content = `
-            <div style="font-family: monospace; font-size: 12px;">
+            <div style="font-family: 'Twemoji Flags', monospace; font-size: 12px;">
                 <b>${digMapIso2ToFlag(spot.country_code)}${spot.callsign}</b><br>
         `;
 

@@ -585,6 +585,19 @@
 <script>
 'use strict';
 
+// ── Flag emoji helper ─────────────────────────────────────────────────────
+function beaconIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    return String.fromCodePoint(
+        0x1F1E6 - 65 + code.toUpperCase().charCodeAt(0),
+        0x1F1E6 - 65 + code.toUpperCase().charCodeAt(1)
+    );
+}
+// Returns flag emoji for a beacon object (uses country_code field)
+function beaconFlag(b) {
+    return b && b.country_code ? beaconIso2ToFlag(b.country_code) : '';
+}
+
 // ── Band colours (matching cwskimmer_map.js palette) ──────────────────────
 const BAND_COLORS = {
     '20m': '#FF6B6B',
@@ -640,9 +653,10 @@ function updateScheduleTable(now) {
         const b = BEACONS[slotIdx];
         const bandName = BAND_NAMES[i];
         const color = BAND_COLORS[bandName] || '#aaa';
+        const flag = beaconFlag(b);
         html += `<tr>
             <td><span class="band-pill" style="background:${color};">${bandName} ${BANDS_MHZ[i]}</span></td>
-            <td><strong>${b.callsign}</strong></td>
+            <td><strong>${flag ? flag + '\u202F' : ''}${b.callsign}</strong></td>
             <td>${b.location}</td>
             <td>${b.entity}</td>
             <td style="font-family:monospace;">${b.grid}</td>
@@ -725,7 +739,8 @@ function placeBeaconMarkers() {
             fillOpacity: 0.7,
         });
         // Permanent callsign label — offset adjusted after render to avoid overlap
-        m.bindTooltip(b.callsign, {
+        const _flag0 = beaconFlag(b);
+        m.bindTooltip((_flag0 ? _flag0 + '\u202F' : '') + b.callsign, {
             permanent: true,
             direction: 'right',
             offset: [8, 0],
@@ -733,7 +748,7 @@ function placeBeaconMarkers() {
         });
         // Rich popup (opens on hover AND click; updated with spot data after load)
         m.bindPopup(`<div class="beacon-popup">
-            <div class="bp-call">${b.callsign}</div>
+            <div class="bp-call">${_flag0 ? _flag0 + '\u202F' : ''}${b.callsign}</div>
             <div class="bp-entity">${b.entity}</div>
             <div class="bp-detail">${b.location} · ${b.grid}</div>
             <div class="bp-spots" id="bpspot-${b.callsign}">No spots loaded yet</div>
@@ -850,7 +865,8 @@ function colourBeaconMarkers(heardSet, byCall) {
         // Update permanent tooltip to include bands heard
         const bSpots = byCall[b.callsign] || [];
         const bandSet = [...new Set(bSpots.map(s => s.band))].sort();
-        let labelHtml = `<b>${b.callsign}</b>`;
+        const _flag1 = beaconFlag(b);
+        let labelHtml = `<b>${_flag1 ? _flag1 + '\u202F' : ''}${b.callsign}</b>`;
         if (bandSet.length > 0) {
             const pills = bandSet.map(bd =>
                 `<span class="bl-pill" style="display:inline-block;padding:1px 4px;border-radius:3px;font-size:10px;background:${BAND_COLORS[bd]||'#888'};color:#000;margin-left:3px;">${bd}</span>`
@@ -892,7 +908,7 @@ function colourBeaconMarkers(heardSet, byCall) {
             spotsHtml = '<span style="color:#888;">Not heard</span>';
         }
         m.setPopupContent(`<div class="beacon-popup">
-            <div class="bp-call">${b.callsign}</div>
+            <div class="bp-call">${_flag1 ? _flag1 + '\u202F' : ''}${b.callsign}</div>
             <div class="bp-entity">${b.entity}</div>
             <div class="bp-detail">${b.location} · ${b.grid}</div>
             <div class="bp-spots">${spotsHtml}</div>
@@ -951,9 +967,10 @@ async function loadBeaconData() {
     if (sel) {
         // Keep the "All beacons" option, then add one per beacon
         sel.innerHTML = '<option value="">All beacons</option>' +
-            BEACONS.map(b =>
-                `<option value="${b.callsign}">${b.callsign} — ${b.location}</option>`
-            ).join('');
+            BEACONS.map(b => {
+                const _flagD = beaconFlag(b);
+                return `<option value="${b.callsign}">${_flagD ? _flagD + '\u202F' : ''}${b.callsign} — ${b.location}</option>`;
+            }).join('');
     }
 }
 
@@ -1124,8 +1141,9 @@ function renderBeaconCards(spots, heardSet, beaconList) {
                 return `<span class="band-pill" style="background:${BAND_COLORS[bd]||'#888'};font-size:0.75em;color:#000;">${bd} <span style="opacity:0.75;">${sign}${snr}</span></span>`;
             }).join(' ');
 
+        const _flagC = beaconFlag(b);
         return `<div class="beacon-card ${heard ? 'heard' : 'not-heard'}">
-            <div class="bc-call">Slot ${b.slot} — ${b.callsign}</div>
+            <div class="bc-call">Slot ${b.slot} — ${_flagC ? _flagC + '\u202F' : ''}${b.callsign}</div>
             <div class="bc-entity">${b.entity} · ${b.location} · ${b.grid}</div>
             ${heard
                 ? `<div class="bc-spots">${bSpots.length} spot${bSpots.length !== 1 ? 's' : ''} ${bandPills}</div>
@@ -1169,10 +1187,11 @@ function spotsRowHtml(s) {
         : valid
             ? '<td style="text-align:center;font-size:1.1em;" title="On schedule">✅</td>'
             : '<td style="text-align:center;font-size:1.1em;" title="Not on schedule for this band/time">❌</td>';
+    const _flagR = b ? beaconFlag(b) : '';
     return `<tr class="beacon-row-highlight">
         <td style="font-family:monospace;">${timeStr}</td>
         ${validCell}
-        <td><strong>${s.callsign}</strong></td>
+        <td><strong>${_flagR ? _flagR + '\u202F' : ''}${s.callsign}</strong></td>
         <td>${entity}</td>
         <td><span class="band-pill" style="background:${color};">${s.band}</span></td>
         <td style="font-family:monospace;">${s.frequency ? s.frequency.toLocaleString() : ''}</td>
@@ -1326,7 +1345,8 @@ function renderHeatmap(spots, beaconList) {
 
         // One row per beacon
         beaconList.forEach(b => {
-            html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
+            const _flagH = beaconFlag(b);
+            html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${_flagH ? _flagH + '\u202F' : ''}${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
             hours.forEach(h => {
                 const cell = heatData[band][b.callsign][h];
                 if (cell) {

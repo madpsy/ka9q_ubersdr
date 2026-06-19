@@ -267,6 +267,15 @@
             opacity: 0.6;
             padding: 1px 0;
         }
+        .hm-hour.hm-current-hour {
+            opacity: 1;
+            color: #4a9eff;
+            font-weight: 700;
+        }
+        .hm-cell.hm-current-hour-col {
+            outline: 1px solid rgba(74,158,255,0.45);
+            outline-offset: -1px;
+        }
         .hm-beacon-label {
             font-size: 0.75em;
             padding: 2px 4px;
@@ -1551,10 +1560,14 @@ function renderHeatmap(spots, beaconList) {
         </div>`;
         html += `<div class="heatmap-grid">`;
 
+        // Current UTC hour for column highlight
+        const nowHour = new Date().getUTCHours();
+
         // Header row: corner + 24 hour labels
         html += `<div class="hm-corner"></div>`;
         hours.forEach(h => {
-            html += `<div class="hm-hour">${padZ(h)}</div>`;
+            const isCurrent = h === nowHour;
+            html += `<div class="hm-hour${isCurrent ? ' hm-current-hour' : ''}">${padZ(h)}${isCurrent ? '▾' : ''}</div>`;
         });
 
         // One row per beacon
@@ -1562,13 +1575,14 @@ function renderHeatmap(spots, beaconList) {
             const _flagH = beaconFlag(b);
             html += `<div class="hm-beacon-label" title="${b.entity} · ${b.location}"><span class="hm-bl-call">${_flagH ? _flagH + '\u202F' : ''}${b.callsign}</span><span class="hm-bl-loc">${b.location}</span></div>`;
             hours.forEach(h => {
+                const isCurrent = h === nowHour;
                 const cell = heatData[band][b.callsign][h];
                 if (cell) {
                     const bg = snrToColor(cell.bestSNR);
                     const tip = `${b.callsign} ${padZ(h)}:00 UTC — ${cell.count} spot${cell.count !== 1 ? 's' : ''}, best SNR: ${cell.bestSNR} dB`;
-                    html += `<div class="hm-cell" style="background:${bg};opacity:0.85;" data-tip="${tip}"><span class="hm-cell-count">${cell.count}</span></div>`;
+                    html += `<div class="hm-cell${isCurrent ? ' hm-current-hour-col' : ''}" style="background:${bg};opacity:0.85;" data-tip="${tip}"><span class="hm-cell-count">${cell.count}</span></div>`;
                 } else {
-                    html += `<div class="hm-cell"></div>`;
+                    html += `<div class="hm-cell${isCurrent ? ' hm-current-hour-col' : ''}"></div>`;
                 }
             });
         });

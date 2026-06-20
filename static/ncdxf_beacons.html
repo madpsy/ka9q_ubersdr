@@ -1674,10 +1674,12 @@ function renderSummary(spots, heardSet) {
         ? Math.round(spots.reduce((sum, s) => sum + s.snr, 0) / spots.length)
         : null;
 
-    // Most heard beacon
+    // Most / least heard beacon
     const topBeaconEntry = Object.entries(beaconCounts).sort((a, b) => b[1] - a[1])[0];
     const topBeacon = topBeaconEntry ? topBeaconEntry[0] : null;
     const topBeaconCount = topBeaconEntry ? topBeaconEntry[1] : 0;
+    const botBeaconEntry = Object.entries(beaconCounts).sort((a, b) => a[1] - b[1])[0];
+    const botBeacon = botBeaconEntry ? botBeaconEntry[0] : null;
 
     // Most / least heard band
     const topBandEntry = Object.entries(bandCounts).sort((a, b) => b[1] - a[1])[0];
@@ -1707,7 +1709,8 @@ function renderSummary(spots, heardSet) {
         <div class="stat-box"><div class="sv">${bestSNR > -999 ? bestSNR + ' dB' : '—'}</div><div class="sl">Best SNR${bestSNRCall ? ' · ' + bestSNRCall : ''}</div></div>
         <div class="stat-box"><div class="sv">${avgSNR !== null ? (avgSNR >= 0 ? '+' : '') + avgSNR + ' dB' : '—'}</div><div class="sl">Avg SNR</div></div>
         <div class="stat-box"><div class="sv">${bestDist > 0 ? Math.round(bestDist).toLocaleString() + ' km' : '—'}</div><div class="sl">Max Distance</div></div>
-        <div class="stat-box"><div class="sv" style="font-size:1.1em;">${topBeacon || '—'}</div><div class="sl">Most Heard${topBeacon ? ' · ' + topBeaconCount + ' spots' : ''}</div></div>
+        <div class="stat-box"><div class="sv" style="font-size:1.1em;">${topBeacon || '—'}</div><div class="sl">Most Heard</div></div>
+        <div class="stat-box"><div class="sv" style="font-size:1.1em;">${botBeacon || '—'}</div><div class="sl">Least Heard</div></div>
         <div class="stat-box"><div class="sv" style="font-size:1.3em;">${topBandPill}</div><div class="sl">Most Heard Band</div></div>
         <div class="stat-box"><div class="sv" style="font-size:1.3em;">${botBandPill}</div><div class="sl">Least Heard Band</div></div>
         <div class="stat-box" style="min-width:200px;"><div style="font-size:0.9em; margin-top:4px;">${bandSummary || '—'}</div><div class="sl">By Band</div></div>

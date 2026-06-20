@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime"
 	runtimemetrics "runtime/metrics"
 	"runtime/pprof"
@@ -3171,8 +3172,70 @@ func handleManifest(w http.ResponseWriter, r *http.Request, config *Config) {
 	}
 }
 
-// handleIndexPage serves the index.html template with custom HTML injection
+// uuidRE matches a canonical lowercase UUID v4 (or any version) in the form
+// xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.  Only hex digits and hyphens in the
+// correct positions are accepted — no surrounding whitespace, no braces.
+var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// parseExcludeWidgets reads the ?exclude_widgets= query parameter and returns
+// the set of widget UUIDs that should be suppressed from the page.
+//
+// Validation rules (all silent — invalid values are simply dropped):
+//   - Parameter value is split on commas; leading/trailing whitespace stripped.
+//   - At most 20 raw tokens are examined; any beyond that are ignored.
+//   - Each token must match the canonical UUID regex (lowercase hex + hyphens).
+//   - Tokens that are valid UUIDs but not in enabledSet are silently ignored.
+func parseExcludeWidgets(r *http.Request, enabledSet map[string]bool) map[string]bool {
+	raw := r.URL.Query().Get("exclude_widgets")
+	if raw == "" {
+		return nil
+	}
+
+	tokens := strings.Split(raw, ",")
+	const maxTokens = 20
+	if len(tokens) > maxTokens {
+		tokens = tokens[:maxTokens]
+	}
+
+	excluded := make(map[string]bool)
+	for _, tok := range tokens {
+		tok = strings.TrimSpace(strings.ToLower(tok))
+		if !uuidRE.MatchString(tok) {
+			continue // not a valid UUID — drop silently
+		}
+		if !enabledSet[tok] {
+			continue // valid UUID but not an enabled widget — drop silently
+		}
+		excluded[tok] = true
+	}
+	return excluded
+}
+
+// handleIndexPage serves the index.html template with custom HTML injection.
+// Accepts an optional ?exclude_widgets=uuid1,uuid2,... query parameter that
+// suppresses specific server-enabled widgets from being injected into the page.
 func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm *WidgetManager) {
+	// Build the set of currently-enabled widget IDs for O(1) lookup.
+	enabledSet := make(map[string]bool, len(config.Server.EnabledWidgets))
+	for _, id := range config.Server.EnabledWidgets {
+		enabledSet[id] = true
+	}
+
+	// Determine which widgets the client wants excluded.
+	excluded := parseExcludeWidgets(r, enabledSet)
+
+	// Build the filtered widget ID list (preserving original order).
+	widgetIDs := config.Server.EnabledWidgets
+	if len(excluded) > 0 {
+		filtered := make([]string, 0, len(widgetIDs))
+		for _, id := range widgetIDs {
+			if !excluded[id] {
+				filtered = append(filtered, id)
+			}
+		}
+		widgetIDs = filtered
+	}
+
 	data := struct {
 		CustomHeadHTML template.HTML
 		CustomBodyHTML template.HTML
@@ -3180,7 +3243,7 @@ func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm 
 	}{
 		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
 		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
-		WidgetsHTML:    wm.AssembleHTML(config.Server.EnabledWidgets),
+		WidgetsHTML:    wm.AssembleHTML(widgetIDs),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -3866,7 +3929,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"lookup_service":       config.LookupServices.Enabled,
 		"dsp":                  buildDSPInfo(&config.DSP),
 		"addons":               enabledAddons,
-		"enabled_widgets":      widgetManager.GetPublicEnabledWidgetIDs(),
+		"enabled_widgets":      widgetManager.GetEnabledWidgetsSummary(),
 		"server_time":          time.Now().UTC().Format(time.RFC3339Nano),
 		"server_time_sync":     GetNTPSynced(),
 		"frontend":             buildStartupFrontendInfo(frontendHistory),

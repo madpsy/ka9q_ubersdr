@@ -61,6 +61,20 @@
             audioStarted: audioStarted,
         }, '*');
 
+        // Read enabled_widgets from the page's already-fetched description promise.
+        // index.html stores the /api/description response as window.descriptionPromise
+        // so we can read it without any additional network request or extension permission.
+        if (window.descriptionPromise && typeof window.descriptionPromise.then === 'function') {
+            window.descriptionPromise.then(function (desc) {
+                if (!desc) return;
+                window.postMessage({
+                    __ubersdr:      true,
+                    type:           'instance_widgets',
+                    enabledWidgets: Array.isArray(desc.enabled_widgets) ? desc.enabled_widgets : [],
+                }, '*');
+            }).catch(function () { /* not fatal */ });
+        }
+
         // Watch for the overlay being hidden (user pressed play).
         // We observe the 'class' attribute because app.js uses classList.add('hidden').
         if (overlay && !audioStarted) {
@@ -295,6 +309,14 @@
                 break;
             }
 
+            case 'instance_widgets': {
+                browser.runtime.sendMessage({
+                    type:           'ubersdr:instance_widgets',
+                    enabledWidgets: msg.enabledWidgets,
+                }).catch(() => {});
+                break;
+            }
+
             case 'state': {
                 browser.runtime.sendMessage({
                     type:  'ubersdr:state',
@@ -357,11 +379,14 @@
             }).catch(() => {});
         });
 
-        // Listen for commands from the background script.
-        browser.runtime.onMessage.addListener(handleCommand);
-
         console.log('[UberSDR Bridge] Content script active — session:', sessionId);
     }
+
+    // Register the command handler immediately (not inside init) so that
+    // cmd:remove_instance_widget works even before radioAPI is detected.
+    // This is safe — handleCommand guards against non-UberSDR pages via
+    // the initialised flag for commands that require it.
+    browser.runtime.onMessage.addListener(handleCommand);
 
     // ── Command handler ────────────────────────────────────────────────────────
     // Commands arrive from background.js. Forward them into the page world via
@@ -384,6 +409,34 @@
                     audioStarted: _audioStarted,
                 }).catch(() => {});
             }
+            return;
+        }
+
+        // cmd:remove_instance_widget — handled directly in the ISOLATED world
+        // (full DOM access, no dependency on radioAPI being ready).
+        // The server wraps each widget in HTML comment markers:
+        //   <!-- widget:uuid --> ... <!-- /widget:uuid -->
+        if (msg.type === 'cmd:remove_instance_widget') {
+            const widgetIds = Array.isArray(msg.widgetIds) ? msg.widgetIds : (msg.widgetId ? [msg.widgetId] : []);
+            widgetIds.forEach(function (wid) {
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+                let startNode = null;
+                let node;
+                while ((node = walker.nextNode())) {
+                    const text = node.nodeValue ? node.nodeValue.trim() : '';
+                    if (text === 'widget:' + wid) { startNode = node; break; }
+                }
+                if (!startNode) return;
+                const toRemove = [startNode];
+                let cur = startNode.nextSibling;
+                while (cur) {
+                    toRemove.push(cur);
+                    if (cur.nodeType === Node.COMMENT_NODE &&
+                        cur.nodeValue && cur.nodeValue.trim() === '/widget:' + wid) break;
+                    cur = cur.nextSibling;
+                }
+                toRemove.forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
+            });
             return;
         }
 

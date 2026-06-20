@@ -740,3 +740,162 @@ body {
     font-style: italic;
     padding: 4px 0;
 }
+
+/* ── Community Widgets ───────────────────────────────────────────────────── */
+
+/* Combobox wrapper — positions the floating listbox relative to the input */
+.widget-combobox-wrap {
+    position: relative;
+}
+
+.widget-combobox-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.widget-combobox-input {
+    flex: 1;
+}
+
+/* Floating listbox that appears below the input */
+.widget-listbox {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.widget-listbox-option {
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #e0e0e0;
+    border-bottom: 1px solid #0f3460;
+}
+
+.widget-listbox-option:last-child {
+    border-bottom: none;
+}
+
+.widget-listbox-option:hover,
+.widget-listbox-option.active {
+    background: #0f3460;
+}
+
+.widget-listbox-option.opt-enabled {
+    color: #27ae60;
+}
+
+.widget-listbox-option.opt-instance {
+    color: #888;
+}
+
+.widget-listbox-empty {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: #555;
+    font-style: italic;
+}
+
+/* Preview card shown when a widget is selected */
+.widget-preview {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+.widget-preview-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 3px;
+}
+
+.widget-preview-meta {
+    font-size: 10px;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.widget-preview-desc {
+    font-size: 11px;
+    color: #aaa;
+    line-height: 1.4;
+}
+
+/* List of already-enabled widgets */
+.widget-enabled-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.widget-enabled-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+.widget-enabled-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 500;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+/* Instance-native widget row — padlocked, muted appearance */
+.widget-instance-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: #111827;
+    border: 1px solid #1e2d45;
+    border-radius: 4px;
+    opacity: 0.75;
+}
+
+/* Suppressed instance widget — extra muted, strikethrough name */
+.widget-instance-item.widget-instance-suppressed {
+    opacity: 0.45;
+}
+
+.widget-instance-item.widget-instance-suppressed .widget-enabled-name {
+    text-decoration: line-through;
+    color: #666;
+}
+
+.widget-instance-lock {
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.widget-no-enabled {
+    font-size: 11px;
+    color: #555;
+    font-style: italic;
+    padding: 4px 0;
+}

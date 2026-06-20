@@ -71,12 +71,15 @@ let _pendingSdrMode = null;
 // ── Restore persisted settings on startup ─────────────────────────────────────
 
 // ── Widget state ───────────────────────────────────────────────────────────────
-// enabledWidgets: ordered array of widget UUIDs the user has enabled.
-// widgetCache:    Map<widgetId, { name, html, version, cachedAt }>
-//                Persisted in storage.local so widgets survive browser restarts.
+// enabledWidgets:            ordered array of widget UUIDs the user has enabled.
+// widgetCache:               Map<widgetId, { name, html, version, cachedAt }>
+// suppressedInstanceWidgets: set of widget UUIDs the user wants hidden even when
+//                            the instance serves them natively.  Persisted so the
+//                            suppression survives page reloads.
 
-let enabledWidgets = [];   // string[]
-let widgetCache    = {};   // { [id]: { name, html, version, cachedAt } }
+let enabledWidgets            = [];   // string[]
+let widgetCache               = {};   // { [id]: { name, html, version, cachedAt } }
+let suppressedInstanceWidgets = [];   // string[] — UUIDs to remove from instance DOM
 
 // Collector API base URL — never inject widgets into this origin.
 const COLLECTOR_ORIGIN = 'https://instances.ubersdr.org';
@@ -85,6 +88,7 @@ const COLLECTOR_API    = 'https://instances.ubersdr.org/api/widgets';
 browser.storage.local.get([
     'selectedTabId', 'flrigEnabled', 'flrigHost', 'flrigPort', 'flrigDirection',
     'pluginEnabled', 'pttMuteEnabled', 'enabledWidgets', 'widgetCache',
+    'suppressedInstanceWidgets',
 ]).then((stored) => {
     if (stored.selectedTabId   !== undefined) selectedTabId   = stored.selectedTabId;
     if (stored.flrigEnabled    !== undefined) flrigEnabled    = stored.flrigEnabled;
@@ -95,6 +99,7 @@ browser.storage.local.get([
     if (stored.pttMuteEnabled  !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
     if (Array.isArray(stored.enabledWidgets)) enabledWidgets = stored.enabledWidgets;
     if (stored.widgetCache && typeof stored.widgetCache === 'object') widgetCache = stored.widgetCache;
+    if (Array.isArray(stored.suppressedInstanceWidgets)) suppressedInstanceWidgets = stored.suppressedInstanceWidgets;
 });
 
 // ── Profiles ───────────────────────────────────────────────────────────────────
@@ -231,7 +236,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 lastState:             null,
                 vfo:                   assignedVfo,
                 audioStarted:          !!msg.audioStarted,
-                instanceEnabledWidgets: [],   // populated async from /api/description
+                instanceEnabledWidgets: [],   // populated via ubersdr:instance_widgets from content script
             });
 
             // Auto-select if this tab was flagged as pending, or if there is no
@@ -247,28 +252,11 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             // Ask the newly registered tab for a full state snapshot.
             browser.tabs.sendMessage(tabId, { type: 'cmd:get_state' }).catch(() => {});
 
-            // Fetch /api/description from this instance to learn which widgets it
-            // already serves natively.  Done async so it never blocks registration.
-            // Once we have the list we re-inject only the widgets the instance lacks.
-            (async () => {
-                try {
-                    const origin = new URL(msg.url).origin;
-                    const res = await fetch(`${origin}/api/description`, { cache: 'no-store' });
-                    if (res.ok) {
-                        const desc = await res.json();
-                        const instanceWidgets = Array.isArray(desc.enabled_widgets) ? desc.enabled_widgets : [];
-                        if (registry.has(tabId)) {
-                            registry.get(tabId).instanceEnabledWidgets = instanceWidgets;
-                            broadcastRegistry();
-                        }
-                        // Inject only the widgets the instance doesn't already serve.
-                        injectWidgetsIntoTab(tabId, msg.url);
-                        return;
-                    }
-                } catch (_) { /* non-UberSDR page or network error — fall through */ }
-                // Fallback: inject all enabled widgets (instance widget list unknown).
-                injectWidgetsIntoTab(tabId, msg.url);
-            })();
+            // Inject enabled widgets now (instance widget list not yet known — the
+            // content script will send ubersdr:instance_widgets once it reads
+            // window.descriptionPromise from the page, at which point we re-inject
+            // only the gap widgets).
+            injectWidgetsIntoTab(tabId, msg.url);
 
             // Apply any pending profile state for this tab (opened by load_profile).
             if (pendingProfileStates.has(tabId)) {
@@ -330,6 +318,27 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             if (!tabId || !registry.has(tabId)) break;
             registry.get(tabId).audioStarted = true;
             broadcastRegistry();
+            break;
+        }
+
+        // ── Content script: instance's enabled widget list (from descriptionPromise) ─
+        // The injected page-world script reads window.descriptionPromise (already
+        // fetched by index.html) and sends enabled_widgets here — no extra network
+        // request or extension permission needed.
+        case 'ubersdr:instance_widgets': {
+            const tabId = sender.tab ? sender.tab.id : null;
+            if (!tabId || !registry.has(tabId)) break;
+            const instanceWidgets = Array.isArray(msg.enabledWidgets) ? msg.enabledWidgets : [];
+            registry.get(tabId).instanceEnabledWidgets = instanceWidgets;
+            broadcastRegistry();
+            // Remove any suppressed instance widgets from this tab's DOM.
+            const toRemove = suppressedInstanceWidgets.filter(id => instanceWidgets.includes(id));
+            if (toRemove.length > 0) {
+                browser.tabs.sendMessage(tabId, {
+                    type:      'cmd:remove_instance_widget',
+                    widgetIds: toRemove,
+                }).catch(() => {});
+            }
             break;
         }
 
@@ -714,6 +723,42 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         // ── Popup: get current enabled widget list ────────────────────────────
         case 'popup:get_enabled_widgets': {
             return Promise.resolve({ enabledWidgets, widgetCache });
+        }
+
+        // ── Popup: suppress an instance-native widget (hide from DOM persistently) ─
+        case 'popup:suppress_instance_widget': {
+            const { widgetId } = msg;
+            if (!widgetId || suppressedInstanceWidgets.includes(widgetId)) break;
+            suppressedInstanceWidgets = [...suppressedInstanceWidgets, widgetId];
+            return browser.storage.local.set({ suppressedInstanceWidgets }).then(() => {
+                // Remove from all open tabs that have this widget.
+                for (const [tabId, entry] of registry) {
+                    if ((entry.instanceEnabledWidgets || []).includes(widgetId)) {
+                        browser.tabs.sendMessage(tabId, {
+                            type:      'cmd:remove_instance_widget',
+                            widgetIds: [widgetId],
+                        }).catch(() => {});
+                    }
+                }
+                broadcastToPopup({ type: 'suppressed_widgets:updated', suppressedInstanceWidgets });
+                return { ok: true };
+            });
+        }
+
+        // ── Popup: un-suppress an instance-native widget ──────────────────────
+        case 'popup:unsuppress_instance_widget': {
+            const { widgetId } = msg;
+            if (!widgetId) break;
+            suppressedInstanceWidgets = suppressedInstanceWidgets.filter(id => id !== widgetId);
+            return browser.storage.local.set({ suppressedInstanceWidgets }).then(() => {
+                broadcastToPopup({ type: 'suppressed_widgets:updated', suppressedInstanceWidgets });
+                return { ok: true };
+            });
+        }
+
+        // ── Popup: get suppressed instance widget list ────────────────────────
+        case 'popup:get_suppressed_instance_widgets': {
+            return Promise.resolve({ suppressedInstanceWidgets });
         }
 
         default:

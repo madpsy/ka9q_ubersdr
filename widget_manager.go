@@ -336,6 +336,34 @@ func (wm *WidgetManager) GetPublicEnabledWidgetIDs() []string {
 	return ids
 }
 
+// EnabledWidgetSummary is the per-widget shape returned by GetEnabledWidgetsSummary.
+type EnabledWidgetSummary struct {
+	WidgetID string `json:"widget_id"`
+	Name     string `json:"name"`
+	IsPublic bool   `json:"is_public"`
+}
+
+// GetEnabledWidgetsSummary returns a summary of all enabled widgets regardless of
+// their is_public flag. Each entry includes widget_id, name, and is_public so
+// callers can distinguish public widgets from private/unlisted ones.
+// Widgets whose cache entry is missing (fetch failed at startup) are still
+// included but with an empty name and is_public: false.
+func (wm *WidgetManager) GetEnabledWidgetsSummary() []EnabledWidgetSummary {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	result := make([]EnabledWidgetSummary, 0, len(wm.config.Server.EnabledWidgets))
+	for _, id := range wm.config.Server.EnabledWidgets {
+		s := EnabledWidgetSummary{WidgetID: id}
+		if entry, ok := wm.entries[id]; ok {
+			s.Name = entry.Name
+			s.IsPublic = entry.IsPublic
+		}
+		result = append(result, s)
+	}
+	return result
+}
+
 // AssembleHTML builds the WidgetsHTML template.HTML value for index.html rendering.
 // It iterates EnabledWidgets in order and injects each widget's HTML directly into
 // the page (wrapped in a comment marker for identification).

@@ -65,6 +65,20 @@
             sendDetected();
         });
 
+        // Read enabled_widgets from the page's already-fetched description promise.
+        // index.html stores the /api/description response as window.descriptionPromise
+        // so we can read it without any additional network request.
+        if (window.descriptionPromise && typeof window.descriptionPromise.then === 'function') {
+            window.descriptionPromise.then(function (desc) {
+                if (!desc) return;
+                window.dispatchEvent(new CustomEvent('__ubersdr_instance_widgets', {
+                    detail: {
+                        enabledWidgets: Array.isArray(desc.enabled_widgets) ? desc.enabled_widgets : [],
+                    },
+                }));
+            }).catch(function () { /* not fatal */ });
+        }
+
         // Watch for the overlay being hidden (user pressed play).
         if (overlay && !audioStarted) {
             var overlayObserver = new MutationObserver(function () {

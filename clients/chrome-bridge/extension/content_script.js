@@ -84,6 +84,16 @@
         }).catch(() => {});
     });
 
+    // page_world.js fires '__ubersdr_instance_widgets' with the instance's enabled_widgets
+    // list read from window.descriptionPromise (already fetched by index.html).
+    window.addEventListener('__ubersdr_instance_widgets', function (e) {
+        const detail = e.detail || {};
+        browser.runtime.sendMessage({
+            type:           'ubersdr:instance_widgets',
+            enabledWidgets: Array.isArray(detail.enabledWidgets) ? detail.enabledWidgets : [],
+        }).catch(() => {});
+    });
+
     // ── Initialisation (called once radioAPI is confirmed present) ─────────────
 
     function init(sessionId, audioStarted) {
@@ -148,7 +158,66 @@
             return;
         }
 
-        // Relay the command into the page world via CustomEvent.
+        // cmd:remove_instance_widget — find HTML comment markers and remove DOM nodes between them.
+        if (msg.type === 'cmd:remove_instance_widget') {
+            const widgetIds = Array.isArray(msg.widgetIds) ? msg.widgetIds : (msg.widgetId ? [msg.widgetId] : []);
+            widgetIds.forEach(function (wid) {
+                var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+                var startNode = null;
+                var node;
+                while ((node = walker.nextNode())) {
+                    var text = node.nodeValue ? node.nodeValue.trim() : '';
+                    if (text === 'widget:' + wid) { startNode = node; break; }
+                }
+                if (!startNode) return;
+                var toRemove = [startNode];
+                var cur = startNode.nextSibling;
+                while (cur) {
+                    toRemove.push(cur);
+                    if (cur.nodeType === Node.COMMENT_NODE &&
+                        cur.nodeValue && cur.nodeValue.trim() === '/widget:' + wid) break;
+                    cur = cur.nextSibling;
+                }
+                toRemove.forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
+            });
+            return;
+        }
+
+        // cmd:inject_widgets is handled directly in the content script (ISOLATED world)
+        // because it manipulates the DOM — no need to go through page_world.js.
+        if (msg.type === 'cmd:inject_widgets') {
+            if (!Array.isArray(msg.widgets)) return;
+            msg.widgets.forEach(function (w) {
+                // Guard: don't inject the same widget twice in this tab.
+                var existingId = '__ubersdr_widget_' + w.id;
+                if (document.getElementById(existingId)) return;
+
+                var container = document.createElement('div');
+                container.id = existingId;
+                var tmp = document.createElement('div');
+                tmp.innerHTML = w.html;
+
+                Array.from(tmp.childNodes).forEach(function (node) {
+                    if (node.nodeName !== 'SCRIPT') {
+                        container.appendChild(node.cloneNode(true));
+                    }
+                });
+                document.body.appendChild(container);
+
+                tmp.querySelectorAll('script').forEach(function (dead) {
+                    var live = document.createElement('script');
+                    if (dead.src) {
+                        live.src = dead.src;
+                    } else {
+                        live.textContent = dead.textContent;
+                    }
+                    document.body.appendChild(live);
+                });
+            });
+            return;
+        }
+
+        // Relay all other commands into the page world via CustomEvent.
         // page_world.js listens for '__ubersdr_cmd' and reads e.detail.
         window.dispatchEvent(new CustomEvent('__ubersdr_cmd', { detail: msg }));
     }

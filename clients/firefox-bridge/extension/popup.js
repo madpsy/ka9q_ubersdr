@@ -79,6 +79,10 @@ let publicInstances  = [];     // Cached list from instances.ubersdr.org
 // natively (from /api/description).  Updated whenever the registry changes.
 let instanceEnabledWidgets = [];
 
+// suppressedWidgetIds: UUIDs the user has chosen to hide even when the instance
+// serves them natively.  Persisted in storage via background.
+let suppressedWidgetIds = [];
+
 // ── Confirm modal ──────────────────────────────────────────────────────────────
 
 function showConfirmModal(title, body, onConfirm) {
@@ -968,6 +972,11 @@ browser.runtime.onMessage.addListener((msg) => {
             if (widgetCatalogueSelect.value) showWidgetPreview(widgetCatalogueSelect.value);
             break;
 
+        case 'suppressed_widgets:updated':
+            suppressedWidgetIds = Array.isArray(msg.suppressedInstanceWidgets) ? msg.suppressedInstanceWidgets : suppressedWidgetIds;
+            renderEnabledWidgets();
+            break;
+
         default:
             break;
     }
@@ -1093,18 +1102,22 @@ async function deleteProfile(name) {
 
 // ── Community Widgets ──────────────────────────────────────────────────────────
 
-const widgetsHeader        = document.getElementById('widgets-header');
-const widgetsArrow         = document.getElementById('widgets-arrow');
-const widgetsBody          = document.getElementById('widgets-body');
-const widgetSearch         = document.getElementById('widget-search');
-const btnWidgetRefresh     = document.getElementById('btn-widget-refresh');
+const widgetsHeader         = document.getElementById('widgets-header');
+const widgetsArrow          = document.getElementById('widgets-arrow');
+const widgetsBody           = document.getElementById('widgets-body');
+const widgetSearch          = document.getElementById('widget-search');
+const widgetListbox         = document.getElementById('widget-listbox');
+const btnWidgetRefresh      = document.getElementById('btn-widget-refresh');
 const widgetCatalogueSelect = document.getElementById('widget-catalogue-select');
-const widgetPreview        = document.getElementById('widget-preview');
-const widgetPreviewName    = document.getElementById('widget-preview-name');
-const widgetPreviewMeta    = document.getElementById('widget-preview-meta');
-const widgetPreviewDesc    = document.getElementById('widget-preview-desc');
-const btnWidgetAdd         = document.getElementById('btn-widget-add');
-const widgetEnabledList    = document.getElementById('widget-enabled-list');
+const widgetPreview         = document.getElementById('widget-preview');
+const widgetPreviewName     = document.getElementById('widget-preview-name');
+const widgetPreviewMeta     = document.getElementById('widget-preview-meta');
+const widgetPreviewDesc     = document.getElementById('widget-preview-desc');
+const btnWidgetAdd          = document.getElementById('btn-widget-add');
+const widgetEnabledList     = document.getElementById('widget-enabled-list');
+
+// Active keyboard-navigation index within the listbox (-1 = none).
+let _listboxActiveIdx = -1;
 
 // Local widget state
 let widgetCatalogue  = [];   // Full list from collector API
@@ -1116,7 +1129,9 @@ widgetsHeader.addEventListener('click', () => {
     toggleCollapsible(widgetsBody, widgetsArrow);
 });
 
-// Populate the catalogue <select> based on current search text.
+// Build the custom listbox options from the catalogue filtered by the search query.
+// Also syncs the hidden <select> value so the rest of the code (showWidgetPreview,
+// enableWidget) continues to work unchanged.
 function renderCatalogueDropdown() {
     const query = (widgetSearch.value || '').toLowerCase().trim();
     const filtered = widgetCatalogue.filter(w => {
@@ -1129,29 +1144,100 @@ function renderCatalogueDropdown() {
     // Preserve current selection if still in filtered list.
     const prevId = widgetCatalogueSelect.value;
 
-    // Rebuild options.
-    widgetCatalogueSelect.innerHTML = '<option value="">— select a widget to add —</option>';
+    // Rebuild the hidden <select> (keeps value-carrier working).
+    widgetCatalogueSelect.innerHTML = '<option value=""></option>';
     filtered.forEach(w => {
         const opt = document.createElement('option');
         opt.value = w.widget_id;
-        const alreadyEnabled    = enabledWidgetIds.includes(w.widget_id);
-        const onInstance        = instanceEnabledWidgets.includes(w.widget_id);
-        const featured          = !!w.is_featured;
-        let prefix = '';
-        if (alreadyEnabled) prefix = '✓ ';
-        else if (onInstance) prefix = '🔒 ';
-        const suffix = featured ? ' ⭐' : '';
-        opt.textContent = prefix + w.name + (w.callsign ? ` (${w.callsign})` : '') + suffix;
-        if (alreadyEnabled) opt.style.color = '#27ae60';
-        else if (onInstance) opt.style.color = '#888';
         widgetCatalogueSelect.appendChild(opt);
     });
 
-    // Restore selection if still present.
+    // Restore or clear selection.
     if (prevId && filtered.some(w => w.widget_id === prevId)) {
         widgetCatalogueSelect.value = prevId;
     } else {
+        widgetCatalogueSelect.value = '';
         widgetPreview.style.display = 'none';
+    }
+
+    // Rebuild the visible listbox (only shown when input is focused / has text).
+    _listboxActiveIdx = -1;
+    widgetListbox.innerHTML = '';
+
+    if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'widget-listbox-empty';
+        empty.textContent = query ? 'No widgets match your search.' : 'No widgets available.';
+        widgetListbox.appendChild(empty);
+    } else {
+        filtered.forEach((w, idx) => {
+            const alreadyEnabled = enabledWidgetIds.includes(w.widget_id);
+            const onInstance     = instanceEnabledWidgets.includes(w.widget_id);
+            const both           = alreadyEnabled && onInstance;
+            const featured       = !!w.is_featured;
+
+            // Prefix logic:
+            //   both (user added + instance serves) → "✓ 🔒 "  green colour
+            //   user added only                     → "✓ "      green colour
+            //   instance only                       → "🔒 "     grey colour
+            //   neither                             → ""
+            let prefix = '';
+            if (both)            prefix = '✓ 🔒 ';
+            else if (alreadyEnabled) prefix = '✓ ';
+            else if (onInstance) prefix = '🔒 ';
+            const suffix = featured ? ' ⭐' : '';
+            const label = prefix + w.name + (w.callsign ? ` (${w.callsign})` : '') + suffix;
+
+            const opt = document.createElement('div');
+            // "both" gets green (opt-enabled) since the user explicitly added it.
+            opt.className = 'widget-listbox-option' +
+                (alreadyEnabled ? ' opt-enabled' : onInstance ? ' opt-instance' : '');
+            opt.textContent = label;
+            opt.dataset.widgetId = w.widget_id;
+            opt.dataset.idx = idx;
+            opt.setAttribute('role', 'option');
+
+            opt.addEventListener('mousedown', (e) => {
+                // Use mousedown (not click) so it fires before the input loses focus.
+                e.preventDefault();
+                selectListboxOption(w.widget_id, w.name);
+            });
+
+            widgetListbox.appendChild(opt);
+        });
+    }
+}
+
+// Select a widget from the listbox: update hidden select, close listbox, show preview.
+function selectListboxOption(widgetId, widgetName) {
+    widgetCatalogueSelect.value = widgetId;
+    widgetSearch.value = widgetName || widgetId;
+    closeListbox();
+    showWidgetPreview(widgetId);
+}
+
+function openListbox() {
+    if (widgetCatalogue.length === 0) return;
+    renderCatalogueDropdown();
+    widgetListbox.style.display = 'block';
+    widgetSearch.setAttribute('aria-expanded', 'true');
+}
+
+function closeListbox() {
+    widgetListbox.style.display = 'none';
+    widgetSearch.setAttribute('aria-expanded', 'false');
+    _listboxActiveIdx = -1;
+}
+
+function moveListboxActive(delta) {
+    const opts = widgetListbox.querySelectorAll('.widget-listbox-option');
+    if (opts.length === 0) return;
+    opts.forEach(o => o.classList.remove('active'));
+    _listboxActiveIdx = Math.max(0, Math.min(opts.length - 1, _listboxActiveIdx + delta));
+    const active = opts[_listboxActiveIdx];
+    if (active) {
+        active.classList.add('active');
+        active.scrollIntoView({ block: 'nearest' });
     }
 }
 
@@ -1173,14 +1259,20 @@ function showWidgetPreview(widgetId) {
     widgetPreviewMeta.textContent = `by ${w.callsign || '?'} · v${w.version || 1} · ${enabledBy}`;
     widgetPreviewDesc.textContent = w.description || '';
 
-    const alreadyEnabled = enabledWidgetIds.includes(widgetId);
     const onInstance     = instanceEnabledWidgets.includes(widgetId);
+    const alreadyEnabled = enabledWidgetIds.includes(widgetId);
+    // Button state:
+    //   user already added it → "✓ Already added" (disabled — already in their list)
+    //   instance serves it, not yet in user list → "＋ Add to My Widgets" (enabled)
+    //     Adding it means it will inject on other instances that don't serve it natively.
+    //     On this instance it's a no-op (already present), but the list entry is useful.
+    //   neither → "＋ Add Widget" (enabled)
     if (alreadyEnabled) {
         btnWidgetAdd.textContent = '✓ Already added';
         btnWidgetAdd.disabled = true;
     } else if (onInstance) {
-        btnWidgetAdd.textContent = '🔒 Enabled by instance';
-        btnWidgetAdd.disabled = true;
+        btnWidgetAdd.textContent = '＋ Add to My Widgets';
+        btnWidgetAdd.disabled = false;
     } else {
         btnWidgetAdd.textContent = '＋ Add Widget';
         btnWidgetAdd.disabled = false;
@@ -1193,25 +1285,25 @@ function showWidgetPreview(widgetId) {
 function renderEnabledWidgets() {
     widgetEnabledList.innerHTML = '';
 
-    // ── Instance-native widgets (read-only, padlocked) ────────────────────────
-    // Show widgets the current instance already serves natively.  These are
-    // displayed first so the user understands they are already present.
-    // Exclude any that the user has also explicitly added (they appear below).
-    const instanceOnly = instanceEnabledWidgets.filter(id => !enabledWidgetIds.includes(id));
+    // ── Instance-native widgets (padlocked, with optional hide button) ────────
+    // Show ALL widgets the current instance serves natively.  Suppressed ones
+    // are shown with a strikethrough / muted style and a restore button.
+    const instanceOnly = instanceEnabledWidgets;
     instanceOnly.forEach(id => {
-        // Try to find a name from the catalogue; fall back to the UUID.
         const catalogueEntry = widgetCatalogue.find(w => w.widget_id === id);
         let label = catalogueEntry ? catalogueEntry.name : id;
         if (catalogueEntry && catalogueEntry.callsign) label += ` (${catalogueEntry.callsign})`;
         if (catalogueEntry && catalogueEntry.is_featured) label += ' ⭐';
 
+        const isSuppressed = suppressedWidgetIds.includes(id);
+
         const item = document.createElement('div');
-        item.className = 'widget-instance-item';
+        item.className = 'widget-instance-item' + (isSuppressed ? ' widget-instance-suppressed' : '');
 
         const lockEl = document.createElement('span');
         lockEl.className = 'widget-instance-lock';
-        lockEl.textContent = '🔒';
-        lockEl.title = 'Enabled by this instance';
+        lockEl.textContent = isSuppressed ? '🚫' : '🔒';
+        lockEl.title = isSuppressed ? 'Hidden by you (instance still serves it)' : 'Enabled by this instance';
         item.appendChild(lockEl);
 
         const nameEl = document.createElement('div');
@@ -1220,11 +1312,32 @@ function renderEnabledWidgets() {
         nameEl.title = id;
         item.appendChild(nameEl);
 
+        if (isSuppressed) {
+            // Restore button — un-suppress (widget reappears on next page load).
+            const restoreBtn = document.createElement('button');
+            restoreBtn.className = 'btn btn-secondary btn-sm';
+            restoreBtn.textContent = '↩';
+            restoreBtn.title = 'Restore widget (takes effect on next page load)';
+            restoreBtn.addEventListener('click', () => unsuppressInstanceWidget(id, label));
+            item.appendChild(restoreBtn);
+        } else {
+            // Hide button — suppress (removes from DOM immediately and on reload).
+            const hideBtn = document.createElement('button');
+            hideBtn.className = 'btn btn-secondary btn-sm';
+            hideBtn.textContent = '✕';
+            hideBtn.title = 'Hide widget (removes from page, persists across reloads)';
+            hideBtn.addEventListener('click', () => suppressInstanceWidget(id, label));
+            item.appendChild(hideBtn);
+        }
+
         widgetEnabledList.appendChild(item);
     });
 
     // ── User-enabled widgets ───────────────────────────────────────────────────
-    if (enabledWidgetIds.length === 0 && instanceOnly.length === 0) {
+    // Exclude any that the instance already serves — those are shown above with 🔒.
+    const userOnly = enabledWidgetIds.filter(id => !instanceEnabledWidgets.includes(id));
+
+    if (userOnly.length === 0 && instanceOnly.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'widget-no-enabled';
         empty.textContent = 'No widgets added yet.';
@@ -1232,7 +1345,7 @@ function renderEnabledWidgets() {
         return;
     }
 
-    enabledWidgetIds.forEach(id => {
+    userOnly.forEach(id => {
         const cached = widgetCacheLocal[id];
         // Show "Name (CALLSIGN)" to match the dropdown format.
         let label = cached ? cached.name : id;
@@ -1254,7 +1367,7 @@ function renderEnabledWidgets() {
         removeBtn.className = 'btn btn-secondary btn-sm';
         removeBtn.textContent = '✕';
         removeBtn.title = 'Remove widget (takes effect on next page load)';
-        removeBtn.addEventListener('click', () => disableWidget(id, name));
+        removeBtn.addEventListener('click', () => disableWidget(id, label));
         item.appendChild(removeBtn);
 
         widgetEnabledList.appendChild(item);
@@ -1357,10 +1470,50 @@ async function disableWidget(widgetId, widgetName) {
 
 // ── Widget event listeners ─────────────────────────────────────────────────────
 
-widgetSearch.addEventListener('input', () => renderCatalogueDropdown());
+// Combobox: open on focus, filter on input.
+widgetSearch.addEventListener('focus', () => openListbox());
 
-widgetCatalogueSelect.addEventListener('change', () => {
-    showWidgetPreview(widgetCatalogueSelect.value);
+widgetSearch.addEventListener('input', () => {
+    // Clear the current selection when the user edits the text.
+    widgetCatalogueSelect.value = '';
+    widgetPreview.style.display = 'none';
+    openListbox();
+});
+
+// Keyboard navigation within the listbox.
+widgetSearch.addEventListener('keydown', (e) => {
+    const isOpen = widgetListbox.style.display !== 'none';
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!isOpen) openListbox();
+        moveListboxActive(1);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveListboxActive(-1);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const active = widgetListbox.querySelector('.widget-listbox-option.active');
+        if (active) {
+            selectListboxOption(active.dataset.widgetId, active.textContent.replace(/^[✓🔒]\s/, '').replace(/ ⭐$/, ''));
+        }
+    } else if (e.key === 'Escape') {
+        closeListbox();
+        widgetSearch.blur();
+    }
+});
+
+// Close listbox when focus leaves the input (but not when clicking an option —
+// that's handled by mousedown which fires before blur).
+widgetSearch.addEventListener('blur', () => {
+    // Small delay so mousedown on an option can fire first.
+    setTimeout(() => closeListbox(), 120);
+});
+
+// Close listbox when clicking anywhere outside the combobox.
+document.addEventListener('mousedown', (e) => {
+    if (!widgetSearch.contains(e.target) && !widgetListbox.contains(e.target)) {
+        closeListbox();
+    }
 });
 
 btnWidgetAdd.addEventListener('click', () => {
@@ -1368,7 +1521,57 @@ btnWidgetAdd.addEventListener('click', () => {
     if (id) enableWidget(id);
 });
 
-btnWidgetRefresh.addEventListener('click', () => fetchWidgetCatalogue());
+btnWidgetRefresh.addEventListener('click', () => {
+    widgetSearch.value = '';
+    widgetCatalogueSelect.value = '';
+    widgetPreview.style.display = 'none';
+    fetchWidgetCatalogue();
+});
+
+// Suppress an instance-native widget (hide from DOM, persist across reloads).
+async function suppressInstanceWidget(widgetId, widgetName) {
+    try {
+        const resp = await browser.runtime.sendMessage({
+            type:     'popup:suppress_instance_widget',
+            widgetId: widgetId,
+        });
+        if (resp && resp.ok) {
+            suppressedWidgetIds = [...suppressedWidgetIds.filter(id => id !== widgetId), widgetId];
+            renderEnabledWidgets();
+            setStatus(`Widget "${widgetName}" hidden`, 'info');
+        }
+    } catch (err) {
+        setStatus('Failed to hide widget: ' + err.message, 'error');
+    }
+}
+
+// Un-suppress an instance-native widget (restores on next page load).
+async function unsuppressInstanceWidget(widgetId, widgetName) {
+    try {
+        const resp = await browser.runtime.sendMessage({
+            type:     'popup:unsuppress_instance_widget',
+            widgetId: widgetId,
+        });
+        if (resp && resp.ok) {
+            suppressedWidgetIds = suppressedWidgetIds.filter(id => id !== widgetId);
+            renderEnabledWidgets();
+            setStatus(`Widget "${widgetName}" restored (reload page to see it)`, 'info');
+        }
+    } catch (err) {
+        setStatus('Failed to restore widget: ' + err.message, 'error');
+    }
+}
+
+// Fetch the suppressed instance widget list from background storage.
+async function fetchSuppressedWidgets() {
+    try {
+        const resp = await browser.runtime.sendMessage({ type: 'popup:get_suppressed_instance_widgets' });
+        if (resp) {
+            suppressedWidgetIds = Array.isArray(resp.suppressedInstanceWidgets) ? resp.suppressedInstanceWidgets : [];
+            renderEnabledWidgets();
+        }
+    } catch (_) {}
+}
 
 // ── Boot ───────────────────────────────────────────────────────────────────────
 
@@ -1380,4 +1583,5 @@ setPttMuteButtonState(isPttMuteEnabled);
 init();
 fetchAndRenderProfiles();
 fetchEnabledWidgets();
+fetchSuppressedWidgets();
 fetchWidgetCatalogue();

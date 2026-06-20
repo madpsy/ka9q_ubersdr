@@ -1,6 +1,19 @@
-# Latest Stable - 0.1.54 - 14th Jun 2026
+# Latest Stable - 0.1.55 - 20th Jun 2026
 
-## Version 0.1.54 - Latest Stable
+## Version 0.1.55 - Latest Stable
+
+### New Features
+- Added **Country Flags** lots of country flags in many different places
+- Added **EQ and Audio Widgets** which allow easy access to notches/bandpass filter/EQ (enable from UI -> Widgets)
+- Improved **Callsign Lookup** including photo for media session and various general improvements. Note for qrz.com images you need a paid qrz.com XML Subscription
+- Added **Groups.io** for community discussions and WiKi. Brand new so a bit empty just now. ['https://groups.io/g/ubersdr/'](https://groups.io/g/ubersdr/)
+- Added **Local DX Spots** and quick local bookmark addition by right clicking on the waterfall/spectrum
+
+### Bug Fixes
+- Various media session related bug fixes for Android and Apple
+- Display issues in Admin for some tables etc
+
+## Version 0.1.54
 
 ### New Features
 - Added **Antenna Switch** control for use with KiwiSDR compatible switches such as the MS-S5 (complete API)

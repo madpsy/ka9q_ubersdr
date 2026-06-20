@@ -7513,7 +7513,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 let infoHTML = `<strong style="color: #0d47a1;">ℹ️ Your IP Address:</strong> <span style="font-family: monospace; font-weight: bold; color: #0d47a1;">${adminIPData.ip}</span>`;
                 
                 if (adminIPData.country) {
-                    infoHTML += ` <span style="color: #0d47a1;">from <strong>${adminIPData.country}</strong></span>`;
+                    const _adminFlag = adminIPData.country_code ? String.fromCodePoint(...[...adminIPData.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : '';
+                    infoHTML += ` <span style="color: #0d47a1;">from ${_adminFlag}<strong>${adminIPData.country}</strong></span>`;
                     if (adminIPData.country_code) {
                         infoHTML += ` <span style="color: #666;">(${adminIPData.country_code})</span>`;
                     }

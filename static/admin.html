@@ -2918,6 +2918,12 @@
                                     <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">User Agent</label>
                                     <input type="text" id="filterUserAgent" placeholder="e.g., Chrome, Firefox" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                                 </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Country</label>
+                                    <select id="filterCountry" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                        <option value="">All Countries</option>
+                                    </select>
+                                </div>
                             </div>
                             <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
                                 <button class="btn btn-secondary" onclick="clearAllEventFilters()" style="padding: 6px 12px; font-size: 13px;">Clear Filters</button>
@@ -22429,6 +22435,7 @@ const tooltipLine2 = timeStr;
             document.getElementById('filterDurationValue').value = '';
             document.getElementById('filterIPAddress').value = '';
             document.getElementById('filterUserAgent').value = '';
+            document.getElementById('filterCountry').value = '';
             filteredSessionID = null;
 
             // Reload events
@@ -22500,6 +22507,15 @@ const tooltipLine2 = timeStr;
                 });
             }
 
+            // Filter by country — dropdown value is country_code (or country name as fallback)
+            const countryFilter = document.getElementById('filterCountry').value;
+            if (countryFilter) {
+                filtered = filtered.filter(e => {
+                    if (e.country_code) return e.country_code === countryFilter;
+                    return (e.country || '') === countryFilter; // fallback for entries without code
+                });
+            }
+
             // Filter by session ID if set
             if (filteredSessionID) {
                 filtered = filtered.filter(e => e.user_session_id === filteredSessionID);
@@ -22513,6 +22529,34 @@ const tooltipLine2 = timeStr;
             if (!content) return;
 
             const events = data.events || [];
+
+            // Populate country dropdown from events data (preserve current selection)
+            const countrySelect = document.getElementById('filterCountry');
+            if (countrySelect) {
+                const currentVal = countrySelect.value;
+                // Collect unique countries sorted by name
+                const countryMap = new Map(); // code → name
+                events.forEach(e => {
+                    if (e.country_code && e.country) {
+                        countryMap.set(e.country_code, e.country);
+                    } else if (e.country && !e.country_code) {
+                        countryMap.set(e.country, e.country); // fallback: use name as key
+                    }
+                });
+                const sorted = [...countryMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+                countrySelect.innerHTML = '<option value="">All Countries</option>';
+                sorted.forEach(([code, name]) => {
+                    const flag = code.length === 2 ? String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : '';
+                    const opt = document.createElement('option');
+                    opt.value = code;
+                    opt.textContent = `${flag}${name}`;
+                    countrySelect.appendChild(opt);
+                });
+                // Restore previous selection if still valid
+                if (currentVal && [...countrySelect.options].some(o => o.value === currentVal)) {
+                    countrySelect.value = currentVal;
+                }
+            }
 
             if (events.length === 0) {
                 content.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">No events found in the selected time range</div>';

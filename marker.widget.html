@@ -111,6 +111,10 @@
   gap: 12px;
   margin-bottom: 4px;
 }
+/* When only the next button is visible (no prev), push it to the right */
+#sdr-marker-nav.sdr-next-only {
+  justify-content: flex-end;
+}
 
 #sdr-marker-nav .sdr-marker-navbtn {
   display: inline-flex;
@@ -666,6 +670,8 @@
     const hasPrev = updateNavButton(prevBtn, prevText, prev, 'left');
     const hasNext = updateNavButton(nextBtn, nextText, next, 'right');
     navRow.style.display = (hasPrev || hasNext) ? '' : 'none';
+    // When only next is visible, push it to the right edge
+    navRow.classList.toggle('sdr-next-only', !hasPrev && hasNext);
 
     // ── Current marker name ──
     if (!name) {

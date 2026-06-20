@@ -1056,10 +1056,11 @@
 
                 // Add permanent tooltip for current user or if chat username is available
                 let tooltipLabel = null;
+                const tooltipFlag = channel.country_code ? countryCodeToFlag(channel.country_code) : '';
                 if (isCurrentUser) {
-                    tooltipLabel = 'You';
+                    tooltipLabel = tooltipFlag ? `${tooltipFlag} You` : 'You';
                 } else if (channel.chat_username) {
-                    tooltipLabel = channel.chat_username;
+                    tooltipLabel = tooltipFlag ? `${tooltipFlag} ${channel.chat_username}` : channel.chat_username;
                 }
 
                 if (tooltipLabel) {
@@ -1243,9 +1244,10 @@
                     indicator.style.bottom = `${bottomOffset}px`;
 
                     // Build tooltip text
+                    const flagPrefix = channel.country_code ? countryCodeToFlag(channel.country_code) + ' ' : '';
                     const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                     const freqMHz = (channel.frequency / 1000000).toFixed(3);
-                    let tooltipText = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                    let tooltipText = `${flagPrefix}${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
                     const rxGPS_freq = getReceiverGPS();
                     if (rxGPS_freq && channel.latitude != null && channel.longitude != null) {
                         const distKm = haversineDistanceKm(rxGPS_freq.lat, rxGPS_freq.lon, channel.latitude, channel.longitude);
@@ -1279,11 +1281,12 @@
                     freqBar.appendChild(indicator);
 
                     // Add username label for current user or if chat username is available
+                    const freqLabelFlag = channel.country_code ? countryCodeToFlag(channel.country_code) + ' ' : '';
                     let labelText = null;
                     if (isCurrentUser) {
-                        labelText = 'You';
+                        labelText = `${freqLabelFlag}You`;
                     } else if (channel.chat_username) {
-                        labelText = channel.chat_username;
+                        labelText = `${freqLabelFlag}${channel.chat_username}`;
                     }
 
                     if (labelText) {
@@ -1503,9 +1506,10 @@
                         dot.style.marginTop = '0';
 
                         // Build tooltip text
+                        const bandFlagPrefix = channel.country_code ? countryCodeToFlag(channel.country_code) + ' ' : '';
                         const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                         const freqMHz = (channel.frequency / 1000000).toFixed(3);
-                        let dotTooltip = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                        let dotTooltip = `${bandFlagPrefix}${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
                         const rxGPS_band = getReceiverGPS();
                         if (rxGPS_band && channel.latitude != null && channel.longitude != null) {
                             const distKm = haversineDistanceKm(rxGPS_band.lat, rxGPS_band.lon, channel.latitude, channel.longitude);
@@ -1532,7 +1536,8 @@
                         barArea.appendChild(dot);
 
                         // Username label (only for current user or named users)
-                        let labelText = isCurrentUser ? 'You' : (channel.chat_username || null);
+                        const bandLabelFlag = channel.country_code ? countryCodeToFlag(channel.country_code) + ' ' : '';
+                        let labelText = isCurrentUser ? `${bandLabelFlag}You` : (channel.chat_username ? `${bandLabelFlag}${channel.chat_username}` : null);
                         if (labelText) {
                             const lbl = document.createElement('div');
                             lbl.className = 'band-username-label';

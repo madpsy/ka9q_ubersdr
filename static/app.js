@@ -15291,6 +15291,11 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 
             // ── Network send: coalesced to ≤1 WebSocket message per rAF frame ─
             scheduleTune();
+
+            // ── Haptic tick: one short pulse per frequency step ───────────────
+            if (navigator.vibrate && !document.hidden) {
+                navigator.vibrate(8);
+            }
         }
 
         // Animate knurling texture to simulate drum rotation

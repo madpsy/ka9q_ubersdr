@@ -2,6 +2,20 @@
 // Decodes FT8 weak signal digital mode
 // Version: 1.1.0
 
+// ── Flag emoji helper ──────────────────────────────────────────────────────────
+// Converts ISO 3166-1 alpha-2 code to a flag emoji via Unicode regional indicators.
+// e.g. "GB" -> "🇬🇧", "US" -> "🇺🇸". Returns '' for unknown/missing codes.
+function ft8Iso2ToFlag(iso2) {
+    if (!iso2 || iso2.length !== 2) return '';
+    try {
+        const base = 0x1F1E6 - 0x41;
+        return String.fromCodePoint(
+            base + iso2.toUpperCase().charCodeAt(0),
+            base + iso2.toUpperCase().charCodeAt(1)
+        );
+    } catch (_) { return ''; }
+}
+
 class FT8Extension extends DecoderExtension {
     constructor() {
         console.log('FT8: Constructor called');
@@ -606,9 +620,12 @@ class FT8Extension extends DecoderExtension {
         }
         cellBrg.className = 'ft8-cell-bearing';
         
-        // Country
+        // Country (with flag if country_code is available)
         const cellCountry = row.insertCell(6);
-        cellCountry.textContent = message.country || '-';
+        const ft8Flag = ft8Iso2ToFlag(message.country_code || '');
+        cellCountry.textContent = ft8Flag
+            ? ft8Flag + '\u00A0' + (message.country || '-')
+            : (message.country || '-');
         cellCountry.className = 'ft8-cell-country';
         
         // Continent
@@ -759,17 +776,18 @@ class FT8Extension extends DecoderExtension {
         }
         
         // Create CSV content
-        let csv = 'UTC,SNR,DeltaT,Frequency,Distance_km,Bearing_deg,Country,Continent,TX_Callsign,Callsign,Locator,Message,Protocol,Slot\n';
+        let csv = 'UTC,SNR,DeltaT,Frequency,Distance_km,Bearing_deg,Country,CountryCode,Continent,TX_Callsign,Callsign,Locator,Message,Protocol,Slot\n';
 
         for (const msg of this.messages) {
             const dist = msg.distance_km !== undefined && msg.distance_km !== null ? msg.distance_km.toFixed(1) : '';
             const brg = msg.bearing_deg !== undefined && msg.bearing_deg !== null ? msg.bearing_deg.toFixed(1) : '';
             const country = msg.country || '';
+            const countryCode = msg.country_code || '';
             const continent = msg.continent || '';
             const txCallsign = msg.tx_callsign || '';
             const callsign = msg.callsign || '';
             const locator = msg.locator || '';
-            csv += `${msg.utc},${msg.snr},${msg.delta_t},${msg.frequency},${dist},${brg},"${country}","${continent}","${txCallsign}","${callsign}","${locator}","${msg.message}",${msg.protocol},${msg.slot_number}\n`;
+            csv += `${msg.utc},${msg.snr},${msg.delta_t},${msg.frequency},${dist},${brg},"${country}","${countryCode}","${continent}","${txCallsign}","${callsign}","${locator}","${msg.message}",${msg.protocol},${msg.slot_number}\n`;
         }
         
         // Download as file

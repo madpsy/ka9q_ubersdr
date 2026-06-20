@@ -54,25 +54,26 @@ type FT8Decoder struct {
 
 // DecodeResult represents a decoded FT8 message
 type DecodeResult struct {
-	Timestamp      int64    `json:"timestamp"`             // Unix timestamp (seconds)
-	UTC            string   `json:"utc"`                   // UTC time string "HH:MM:SS"
-	SNR            float32  `json:"snr"`                   // Signal-to-noise ratio (dB)
-	DeltaT         float32  `json:"delta_t"`               // Time offset from slot start (seconds)
-	Frequency      float32  `json:"frequency"`             // Audio frequency (Hz)
-	Callsign       string   `json:"callsign"`              // Transmitter callsign (original from message)
-	TxCallsign     string   `json:"tx_callsign,omitempty"` // Normalized TX callsign used for CTY lookup (without <>, /)
-	Locator        string   `json:"locator,omitempty"`     // Grid square locator
-	DistanceKm     *float64 `json:"distance_km,omitempty"` // Distance from receiver in km
-	BearingDeg     *float64 `json:"bearing_deg,omitempty"` // Bearing from receiver in degrees
-	Country        string   `json:"country,omitempty"`     // Country name from CTY database
-	Continent      string   `json:"continent,omitempty"`   // Continent code (e.g., "EU", "NA")
-	Message        string   `json:"message"`               // Decoded message text
-	Protocol       string   `json:"protocol"`              // "FT8"
-	SlotNumber     uint64   `json:"slot_number"`           // Slot number since decoder start
-	Score          int      `json:"score"`                 // Sync score
-	CandidateCount int      `json:"candidate_count"`       // Total candidates found in this slot
-	LDPCFailures   int      `json:"ldpc_failures"`         // LDPC decode failures in this slot
-	CRCFailures    int      `json:"crc_failures"`          // CRC check failures in this slot
+	Timestamp      int64    `json:"timestamp"`              // Unix timestamp (seconds)
+	UTC            string   `json:"utc"`                    // UTC time string "HH:MM:SS"
+	SNR            float32  `json:"snr"`                    // Signal-to-noise ratio (dB)
+	DeltaT         float32  `json:"delta_t"`                // Time offset from slot start (seconds)
+	Frequency      float32  `json:"frequency"`              // Audio frequency (Hz)
+	Callsign       string   `json:"callsign"`               // Transmitter callsign (original from message)
+	TxCallsign     string   `json:"tx_callsign,omitempty"`  // Normalized TX callsign used for CTY lookup (without <>, /)
+	Locator        string   `json:"locator,omitempty"`      // Grid square locator
+	DistanceKm     *float64 `json:"distance_km,omitempty"`  // Distance from receiver in km
+	BearingDeg     *float64 `json:"bearing_deg,omitempty"`  // Bearing from receiver in degrees
+	Country        string   `json:"country,omitempty"`      // Country name from CTY database
+	CountryCode    string   `json:"country_code,omitempty"` // ISO 3166-1 alpha-2 country code from CTY database
+	Continent      string   `json:"continent,omitempty"`    // Continent code (e.g., "EU", "NA")
+	Message        string   `json:"message"`                // Decoded message text
+	Protocol       string   `json:"protocol"`               // "FT8"
+	SlotNumber     uint64   `json:"slot_number"`            // Slot number since decoder start
+	Score          int      `json:"score"`                  // Sync score
+	CandidateCount int      `json:"candidate_count"`        // Total candidates found in this slot
+	LDPCFailures   int      `json:"ldpc_failures"`          // LDPC decode failures in this slot
+	CRCFailures    int      `json:"crc_failures"`           // CRC check failures in this slot
 }
 
 // NewFT8Decoder creates a new FT8 decoder
@@ -335,6 +336,9 @@ func (d *FT8Decoder) enrichResult(result *DecodeResult) {
 				if infoValue.Kind() == reflect.Struct {
 					if country := infoValue.FieldByName("Country"); country.IsValid() && country.Kind() == reflect.String {
 						result.Country = country.String()
+					}
+					if countryCode := infoValue.FieldByName("CountryCode"); countryCode.IsValid() && countryCode.Kind() == reflect.String {
+						result.CountryCode = countryCode.String()
 					}
 					if continent := infoValue.FieldByName("Continent"); continent.IsValid() && continent.Kind() == reflect.String {
 						result.Continent = continent.String()

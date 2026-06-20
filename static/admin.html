@@ -24548,8 +24548,13 @@ const tooltipLine2 = timeStr;
                 
                 // Location Information
                 if (data.country || data.city) {
-                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
-                    html += `<strong style="color: #667eea;">Location:</strong><br>`;
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; position: relative;">`;
+                    html += `<strong style="color: #667eea;">Location:</strong>`;
+                    if (data.country_code) {
+                        const flagEmoji = String.fromCodePoint(...[...data.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
+                        html += `<span style="position: absolute; right: 10px; top: 10px; font-size: 24px;" title="${data.country || data.country_code}">${flagEmoji}</span>`;
+                    }
+                    html += `<br>`;
                     if (data.city) html += `<span style="margin-left: 20px;">City: ${data.city}</span><br>`;
                     if (data.subdivisions && data.subdivisions.length > 0) {
                         data.subdivisions.forEach(sub => {

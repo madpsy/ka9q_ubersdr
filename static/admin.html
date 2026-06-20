@@ -7554,7 +7554,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const bannedDate = new Date(ban.banned_at).toLocaleString();
 
                 // Format country display
-                const countryDisplay = ban.country ? `${ban.country}${ban.country_code ? ' (' + ban.country_code + ')' : ''}` : '-';
+                const _banFlag = ban.country_code ? String.fromCodePoint(...[...ban.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : '';
+                const countryDisplay = ban.country ? `${_banFlag}${ban.country}${ban.country_code ? ' (' + ban.country_code + ')' : ''}` : '-';
 
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: monospace;">${ban.ip}</td>

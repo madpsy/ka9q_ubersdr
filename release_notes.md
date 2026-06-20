@@ -8,12 +8,13 @@
 - Improved **Callsign Lookup** including photo for media session and various general improvements. Note for qrz.com images you need a paid qrz.com XML Subscription
 - Added **Groups.io** for community discussions and WiKi. Brand new so a bit empty just now. [https://groups.io/g/ubersdr/](https://groups.io/g/ubersdr/)
 - Added **Local DX Spots** and quick local bookmark addition by right clicking on the waterfall/spectrum
-- Added **NCDXF Beacons** if you have CW Skimmer enanbled you can track which beacons have been spotted (ncdxf_beacons.html). Note you must update CW Skimmer first as the previous version missed the beacon segments
+- Added **NCDXF Beacons** if you have CW Skimmer enabled you can track which beacons have been spotted (ncdxf_beacons.html). Note you must update CW Skimmer first as the previous version missed the beacon segments
 
 ### Bug Fixes
 - Various media session related bug fixes for Android and Apple
 - Display issues in Admin for some tables etc
 - CW Skimmer missing beacon segments (thanks K1RA). Requires you to update the skimmer via Admin -> CW Skimmer -> Update button
+- CW and DX Cluster markers are now added to the markers section above waterfall without need for the extension to be open
 
 ## Version 0.1.54
 

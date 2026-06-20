@@ -1105,6 +1105,16 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     const row0Spots = []; // Bottom row
     const row1Spots = []; // Top row
 
+    // Pre-seed rows with already-drawn bookmark positions so DX spot markers
+    // don't collide with them. Bookmarks draw before DX spots in the marker
+    // cache (spectrum-display.js draw order), so window.bookmarkPositions is
+    // already populated for this cache rebuild by the time we get here.
+    // pos.y == 30 → row 0 (bottom), pos.y == 15 → row 1 (top).
+    (window.bookmarkPositions || []).forEach(pos => {
+        const pseudo = { x: pos.x, labelWidth: pos.width };
+        if (pos.y >= 25) { row0Spots.push(pseudo); } else { row1Spots.push(pseudo); }
+    });
+
     visibleSpots.forEach(current => {
         // Check if it overlaps with any spot in row 0
         const overlapsRow0 = row0Spots.some(other => {

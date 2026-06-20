@@ -2749,11 +2749,14 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
     const row0Spots = []; // Bottom row
     const row1Spots = []; // Top row
 
-    // Pre-seed rows with already-drawn DX spot positions so CW markers
-    // don't collide with them. DX spots draw before CW in the marker cache
-    // (spectrum-display.js draw order), so window.dxSpotPositions is already
-    // populated for this cache rebuild by the time we get here.
+    // Pre-seed rows with already-drawn marker positions so CW labels don't
+    // collide with bookmarks or DX spots. Both draw before CW in the marker
+    // cache (spectrum-display.js draw order: bookmarks → DX → CW → voice).
     // pos.y == 30 → row 0 (bottom), pos.y == 15 → row 1 (top).
+    (window.bookmarkPositions || []).forEach(pos => {
+        const pseudo = { x: pos.x, labelWidth: pos.width };
+        if (pos.y >= 25) { row0Spots.push(pseudo); } else { row1Spots.push(pseudo); }
+    });
     (window.dxSpotPositions || []).forEach(pos => {
         const pseudo = { x: pos.x, labelWidth: pos.width };
         if (pos.y >= 25) { row0Spots.push(pseudo); } else { row1Spots.push(pseudo); }

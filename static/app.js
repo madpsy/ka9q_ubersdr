@@ -5862,6 +5862,8 @@ function handleFrequencyChange() {
         return;
     }
 
+    triggerButtonHaptic();
+
     let frequency = parseInt(valueStr);
 
     // Update page title

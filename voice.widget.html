@@ -20,7 +20,7 @@
     right: 44px;
     z-index: 9500;
     pointer-events: auto;
-    background: rgba(39, 174, 96, 0.35);
+    background: rgba(39, 174, 96, 0.65);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     color: #fff;
@@ -712,6 +712,33 @@
 
     lastActivities = state.activities || [];
     lastBand = band;
+
+    // ── Client-side enrichment from local/temp DX spots ─────────────────────
+    // The backend only enriches from the server Telnet feed. Local spots added
+    // via addLocalSpot() live only in the browser, so we fill any gaps here.
+    // Backend enrichment always wins — we only touch entries with no dx_callsign.
+    var clientSpots = (window.dxClusterExtensionInstance &&
+                       window.dxClusterExtensionInstance.spots) || [];
+    if (clientSpots.length > 0) {
+      lastActivities = lastActivities.map(function (act) {
+        if (act.dx_callsign) return act; // already enriched by backend
+        var key = Math.round((act.estimated_dial_freq || 0) / 500) * 500;
+        for (var i = 0; i < clientSpots.length; i++) {
+          var s = clientSpots[i];
+          var sKey = Math.round((s.frequency || 0) / 500) * 500;
+          if (sKey === key) {
+            return Object.assign({}, act, {
+              dx_callsign:     s.dx_call      || '',
+              dx_country:      s.country      || '',
+              dx_country_code: s.country_code || '',
+              dx_continent:    s.continent    || ''
+            });
+          }
+        }
+        return act;
+      });
+    }
+
     renderData(lastActivities, band);
   }
 

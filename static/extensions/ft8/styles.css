@@ -303,7 +303,7 @@
 .ft8-messages-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .ft8-messages-table thead {
@@ -319,7 +319,7 @@
     font-weight: 600;
     color: #ccc;
     border-bottom: 2px solid #3a3a3a;
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
     cursor: pointer;
     user-select: none;
@@ -400,7 +400,7 @@
 /* Table Cells */
 .ft8-cell-time {
     font-family: 'Courier New', monospace;
-    color: #999;
+    color: #ffffff;
     white-space: nowrap;
 }
 
@@ -425,7 +425,7 @@
 
 .ft8-cell-dt {
     font-family: 'Courier New', monospace;
-    color: #999;
+    color: #ffffff;
     text-align: left;
     white-space: nowrap;
 }
@@ -439,7 +439,7 @@
 
 .ft8-cell-distance {
     font-family: 'Courier New', monospace;
-    color: #9c27b0;
+    color: #ffffff;
     text-align: left;
     white-space: nowrap;
 }
@@ -497,7 +497,7 @@
 
 .ft8-cell-slot {
     font-family: 'Courier New', monospace;
-    color: #666;
+    color: #ffffff;
     text-align: center;
     font-size: 11px;
 }

@@ -1169,7 +1169,8 @@ class CWSpotsExtension extends DecoderExtension {
             this.badgeCache.forEach(([country, spotData]) => {
                 const badge = document.createElement('span');
                 badge.className = 'country-badge';
-                badge.textContent = country;
+                const cachedFlag = cwIso2ToFlag(spotData.country_code || '');
+                badge.textContent = cachedFlag ? cachedFlag + '\u00A0' + country : country;
                 const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
                 badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nSNR: ${snrText} dB\nWPM: ${spotData.wpm}`;
                 badge.addEventListener('click', () => {
@@ -1222,7 +1223,8 @@ class CWSpotsExtension extends DecoderExtension {
                     timestamp: spotTime,
                     snr: spot.snr,
                     wpm: spot.wpm,
-                    callsign: spot.dx_call
+                    callsign: spot.dx_call,
+                    country_code: spot.country_code || ''
                 });
             }
         });
@@ -1241,7 +1243,8 @@ class CWSpotsExtension extends DecoderExtension {
         countries.forEach(([country, spotData]) => {
             const badge = document.createElement('span');
             badge.className = 'country-badge';
-            badge.textContent = country;
+            const freshFlag = cwIso2ToFlag(spotData.country_code || '');
+            badge.textContent = freshFlag ? freshFlag + '\u00A0' + country : country;
             const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
             badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nSNR: ${snrText} dB\nWPM: ${spotData.wpm}`;
 

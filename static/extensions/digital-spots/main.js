@@ -840,7 +840,8 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.badgeCache.forEach(([country, spotData]) => {
                 const badge = document.createElement('span');
                 badge.className = 'country-badge';
-                badge.textContent = country;
+                const cachedFlag = digIso2ToFlag(spotData.country_code || '');
+                badge.textContent = cachedFlag ? cachedFlag + '\u00A0' + country : country;
                 const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
                 badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nMode: ${spotData.mode}\nSNR: ${snrText} dB`;
                 badge.addEventListener('click', () => {
@@ -891,7 +892,8 @@ class DigitalSpotsExtension extends DecoderExtension {
                     timestamp: spotTime,
                     mode: spot.mode,
                     snr: spot.snr,
-                    callsign: spot.callsign
+                    callsign: spot.callsign,
+                    country_code: spot.country_code || ''
                 });
             }
         });
@@ -910,7 +912,8 @@ class DigitalSpotsExtension extends DecoderExtension {
         countries.forEach(([country, spotData]) => {
             const badge = document.createElement('span');
             badge.className = 'country-badge';
-            badge.textContent = country;
+            const freshFlag = digIso2ToFlag(spotData.country_code || '');
+            badge.textContent = freshFlag ? freshFlag + '\u00A0' + country : country;
             const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
             badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nMode: ${spotData.mode}\nSNR: ${snrText} dB`;
 

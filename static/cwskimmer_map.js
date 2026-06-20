@@ -1268,9 +1268,9 @@ class CWSkimmerMap {
                                      this.continentFilter === 'all' && this.snrFilter === 'none';
             
             if (allFiltersDefault) {
-                countEl.textContent = `${this.spots.size} spot${this.spots.size !== 1 ? 's' : ''}`;
+                countEl.textContent = `${this.spots.size}`;
             } else {
-                countEl.textContent = `${visibleCount} / ${this.spots.size} spot${this.spots.size !== 1 ? 's' : ''}`;
+                countEl.textContent = `${visibleCount} / ${this.spots.size}`;
             }
         }
     }
@@ -2029,7 +2029,7 @@ class CWSkimmerMap {
                 <div class="live-message">
                     <div class="live-message-time">${time} UTC${localTimeStr}</div>
                     <div>
-                        <span class="live-message-callsign" style="cursor: pointer; text-decoration: underline;"
+                        <span class="live-message-callsign" style="cursor: pointer;"
                               onclick="window.cwSkimmerMap.showSpotOnMap('${spotKey}')">${cwMapIso2ToFlag(spot.country_code)}${spot.callsign}</span>
                         ${spot.country ? `<span style="color: #888; font-size: 10px;"> • ${spot.country}</span>` : ''}
                         ${spot.Continent ? `<span style="color: #888; font-size: 10px;"> • ${spot.Continent}</span>` : ''}
@@ -2344,11 +2344,11 @@ class CWSkimmerMap {
         if (seconds === 0) {
             lastSpotEl.textContent = 'now';
         } else if (seconds < 60) {
-            lastSpotEl.textContent = `${seconds}s ago`;
+            lastSpotEl.textContent = `${seconds}s`;
         } else {
             const minutes = Math.floor(seconds / 60);
             const remainingSeconds = seconds % 60;
-            lastSpotEl.textContent = `${minutes}m ${remainingSeconds}s ago`;
+            lastSpotEl.textContent = `${minutes}m ${remainingSeconds}s`;
         }
     }
 }

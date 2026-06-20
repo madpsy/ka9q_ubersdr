@@ -559,10 +559,6 @@
             gap: 7px;
             margin-bottom: 4px;
         }
-        .beacon-toast .bt-icon {
-            font-size: 1.1em;
-            flex-shrink: 0;
-        }
         .beacon-toast .bt-call {
             font-weight: 700;
             font-size: 1.05em;
@@ -2291,7 +2287,6 @@ function showBeaconToast(spot) {
     toast.className = 'beacon-toast';
     toast.innerHTML = `
         <div class="bt-header">
-            <span class="bt-icon">📡</span>
             <span class="bt-call">${flag ? flag + '\u202F' : ''}${spot.callsign}</span>
             <span class="bt-band" style="background:${bandColor};">${spot.band}</span>
         </div>

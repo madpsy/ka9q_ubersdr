@@ -515,6 +515,87 @@
         #sse-status.sse-connected  { color: #4CAF50; opacity: 0.9; }
         #sse-status.sse-error      { color: #f44336; opacity: 0.8; }
 
+        /* ── Beacon spotted toast notifications ─────────────────────────── */
+        #beacon-toast-container {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            max-width: 300px;
+        }
+        .beacon-toast {
+            background: rgba(10, 20, 40, 0.94);
+            border: 1px solid rgba(74,158,255,0.5);
+            border-left: 4px solid #4a9eff;
+            border-radius: 8px;
+            padding: 10px 14px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.55);
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+            opacity: 0;
+            transform: translateX(20px);
+            animation: toast-in 0.25s ease-out forwards;
+            font-size: 0.88em;
+            color: #e8f0ff;
+            cursor: default;
+            user-select: none;
+        }
+        .beacon-toast.toast-hiding {
+            animation: toast-out 0.4s ease-in forwards;
+        }
+        @keyframes toast-in {
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toast-out {
+            to { opacity: 0; transform: translateX(24px); }
+        }
+        .beacon-toast .bt-header {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 4px;
+        }
+        .beacon-toast .bt-icon {
+            font-size: 1.1em;
+            flex-shrink: 0;
+        }
+        .beacon-toast .bt-call {
+            font-weight: 700;
+            font-size: 1.05em;
+            color: #fff;
+            flex: 1;
+        }
+        .beacon-toast .bt-band {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            font-weight: 700;
+            color: #000;
+            flex-shrink: 0;
+        }
+        .beacon-toast .bt-detail {
+            font-size: 0.82em;
+            opacity: 0.75;
+            line-height: 1.4;
+        }
+        .beacon-toast .bt-snr {
+            font-size: 0.82em;
+            opacity: 0.85;
+            margin-top: 2px;
+            font-family: monospace;
+        }
+        .beacon-toast .bt-time {
+            font-size: 0.75em;
+            opacity: 0.5;
+            margin-top: 3px;
+            font-family: monospace;
+        }
+
         /* ── Live SSE spot — pulsing band pill ──────────────────────────── */
         @keyframes live-pill-pulse {
             0%   { box-shadow: 0 0 0 0 rgba(255,220,50,0.85); }
@@ -828,6 +909,9 @@
         </div>
     </div>
 </div>
+
+<!-- Toast notification container (fixed top-right, outside page flow) -->
+<div id="beacon-toast-container"></div>
 
 <!-- Footer -->
 <footer class="site-footer">
@@ -2185,6 +2269,53 @@ function todayUTC() {
         padZ(d.getUTCDate());
 }
 
+// ── Beacon spotted toast notifications ───────────────────────────────────
+// Each SSE spot for a known NCDXF beacon fires one toast in the top-right.
+// Toasts stack downward (newest at the bottom of the stack) and auto-dismiss
+// after 6 s with a slide-out animation.  Multiple simultaneous toasts are
+// fully supported — each is an independent DOM element.
+function showBeaconToast(spot) {
+    const container = document.getElementById('beacon-toast-container');
+    if (!container) return;
+
+    const b = beaconByCall[spot.callsign];
+    const flag = b ? beaconFlag(b) : '';
+    const entity = b ? b.entity : '';
+    const location = b ? b.location : '';
+    const bandColor = BAND_COLORS[spot.band] || '#888';
+    const snr = spot.snr != null ? (spot.snr >= 0 ? '+' : '') + spot.snr + ' dB' : '';
+    const now = serverNow();
+    const timeStr = padZ(now.getUTCHours()) + ':' + padZ(now.getUTCMinutes()) + ':' + padZ(now.getUTCSeconds()) + ' UTC';
+
+    const toast = document.createElement('div');
+    toast.className = 'beacon-toast';
+    toast.innerHTML = `
+        <div class="bt-header">
+            <span class="bt-icon">📡</span>
+            <span class="bt-call">${flag ? flag + '\u202F' : ''}${spot.callsign}</span>
+            <span class="bt-band" style="background:${bandColor};">${spot.band}</span>
+        </div>
+        <div class="bt-detail">${entity}${location ? ' · ' + location : ''}</div>
+        ${snr ? `<div class="bt-snr">SNR ${snr}${spot.frequency ? ' · ' + (spot.frequency / 1000).toFixed(1) + ' kHz' : ''}</div>` : ''}
+        <div class="bt-time">${timeStr}</div>
+    `;
+
+    // Clicking the toast dismisses it immediately
+    toast.addEventListener('click', () => dismissToast(toast));
+
+    container.appendChild(toast);
+
+    // Auto-dismiss after 6 s
+    const autoTimer = setTimeout(() => dismissToast(toast), 6000);
+
+    function dismissToast(el) {
+        clearTimeout(autoTimer);
+        if (el.classList.contains('toast-hiding')) return;
+        el.classList.add('toast-hiding');
+        el.addEventListener('animationend', () => el.remove(), { once: true });
+    }
+}
+
 // ── Live CW Skimmer SSE feed ─────────────────────────────────────────────
 // Connects to /api/cwskimmer/stream, watches for NCDXF beacon callsigns,
 // and flashes them on the map, schedule table, and Beacon Status cards.
@@ -2381,6 +2512,7 @@ function connectCWSkimmerSSE() {
             flashBeaconCard(call, band);
             markScheduleRow(call, band);
             pulseMarker(call);
+            showBeaconToast(spot);
         };
 
         es.onerror = () => {

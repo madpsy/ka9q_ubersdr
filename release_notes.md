@@ -6,7 +6,7 @@
 - Added **Country Flags** lots of country flags in many different places
 - Added **EQ and Audio Widgets** which allow easy access to notches/bandpass filter/EQ (enable from UI -> Widgets)
 - Improved **Callsign Lookup** including photo for media session and various general improvements. Note for qrz.com images you need a paid qrz.com XML Subscription
-- Added **Groups.io** for community discussions and WiKi. Brand new so a bit empty just now. ['https://groups.io/g/ubersdr/'](https://groups.io/g/ubersdr/)
+- Added **Groups.io** for community discussions and WiKi. Brand new so a bit empty just now. [https://groups.io/g/ubersdr/](https://groups.io/g/ubersdr/)
 - Added **Local DX Spots** and quick local bookmark addition by right clicking on the waterfall/spectrum
 
 ### Bug Fixes

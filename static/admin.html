@@ -24172,12 +24172,13 @@ const tooltipLine2 = timeStr;
                 const escapedNickname = log.username.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
                 // Format country display
-                const countryDisplay = log.country ? `${log.country}${log.country_code ? ' (' + log.country_code + ')' : ''}` : '-';
+                const _chatFlag = log.country_code ? String.fromCodePoint(...[...log.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : '';
+                const countryDisplay = log.country ? `${_chatFlag}${escapeHtml(log.country)}${log.country_code ? ' (' + log.country_code + ')' : ''}` : '-';
 
                 row.innerHTML = `
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${timestampStr}</td>
                     <td style="padding: 12px; font-family: monospace; font-size: 12px; cursor: pointer; color: #667eea;" onclick="filterChatByIP('${escapedIP}')" title="Click to filter by this IP">${escapeHtml(log.source_ip)}</td>
-                    <td style="padding: 12px; font-size: 12px;">${escapeHtml(countryDisplay)}</td>
+                    <td style="padding: 12px; font-size: 12px;">${countryDisplay}</td>
                     <td style="padding: 12px; font-weight: bold; color: #667eea; cursor: pointer;" onclick="filterChatByNickname('${escapedNickname}')" title="Click to filter by this nickname">${escapeHtml(log.username)}</td>
                     <td style="padding: 12px; text-align: center;">
                         <button onclick="banUser('${escapedIP}', 'Banned from chat log')" title="Ban IP ${escapeHtml(log.source_ip)}" style="background: none; border: none; font-size: 18px; cursor: pointer; padding: 2px 6px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">🚫</button>

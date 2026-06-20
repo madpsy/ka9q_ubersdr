@@ -2749,6 +2749,16 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
     const row0Spots = []; // Bottom row
     const row1Spots = []; // Top row
 
+    // Pre-seed rows with already-drawn DX spot positions so CW markers
+    // don't collide with them. DX spots draw before CW in the marker cache
+    // (spectrum-display.js draw order), so window.dxSpotPositions is already
+    // populated for this cache rebuild by the time we get here.
+    // pos.y == 30 → row 0 (bottom), pos.y == 15 → row 1 (top).
+    (window.dxSpotPositions || []).forEach(pos => {
+        const pseudo = { x: pos.x, labelWidth: pos.width };
+        if (pos.y >= 25) { row0Spots.push(pseudo); } else { row1Spots.push(pseudo); }
+    });
+
     visibleSpots.forEach(current => {
         // Check if it overlaps with any spot in row 0
         const overlapsRow0 = row0Spots.some(other => {

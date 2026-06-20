@@ -144,6 +144,22 @@
     visible.sort(function (a, b) { return a.x - b.x; });
 
     var row0 = [], row1 = [];
+
+    // Pre-seed rows with already-drawn DX spot positions so voice markers
+    // don't collide with them. DX spots draw before voice in the marker cache
+    // (spectrum-display.js draw order), so window.dxSpotPositions is already
+    // populated for this cache rebuild by the time we get here.
+    // pos.y == 30 → row 0 (bottom), pos.y == 15 → row 1 (top).
+    (window.dxSpotPositions || []).forEach(function (pos) {
+      var pseudo = { x: pos.x, labelWidth: pos.width };
+      if (pos.y >= 25) { row0.push(pseudo); } else { row1.push(pseudo); }
+    });
+    // Also pre-seed with CW spot positions (CW draws before voice too).
+    (window.cwSpotPositions || []).forEach(function (pos) {
+      var pseudo = { x: pos.x, labelWidth: pos.width };
+      if (pos.y >= 25) { row0.push(pseudo); } else { row1.push(pseudo); }
+    });
+
     function overlaps(current, others) {
       return others.some(function (other) {
         var cl = current.x - current.labelWidth / 2;

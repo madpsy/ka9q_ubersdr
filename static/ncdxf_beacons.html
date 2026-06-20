@@ -1067,6 +1067,11 @@ function updateClock() {
 // This matches BeaconClock.js by VE3SUN: beacons[(18+n-i)%18]
 const BANDS_MHZ = ['14.100', '18.110', '21.150', '24.930', '28.200'];
 const BAND_NAMES = ['20m', '17m', '15m', '12m', '10m'];
+// Nominal beacon frequency in Hz for each band (used to compute drift offset)
+const BAND_NOMINAL_HZ = {};
+BAND_NAMES.forEach((bd, i) => {
+    BAND_NOMINAL_HZ[bd] = Math.round(parseFloat(BANDS_MHZ[i]) * 1e6);
+});
 
 // The {callsign, band} of the last live spot, used to keep exactly one schedule
 // row highlighted until the 10 s slot rotates that beacon off that band.
@@ -1804,7 +1809,17 @@ function spotsRowHtml(s) {
         <td><strong>${_flagR ? _flagR + '\u202F' : ''}${s.callsign}</strong></td>
         <td>${entity}</td>
         <td><span class="band-pill" style="background:${color};">${s.band}</span></td>
-        <td style="font-family:monospace;">${s.frequency ? s.frequency.toLocaleString() : ''}</td>
+        <td style="font-family:monospace;">${(() => {
+            if (!s.frequency) return '';
+            const nominal = BAND_NOMINAL_HZ[s.band];
+            const freqStr = s.frequency.toLocaleString();
+            if (!nominal) return freqStr;
+            const delta = s.frequency - nominal;
+            if (delta === 0) return freqStr;
+            const sign = delta > 0 ? '+' : '';
+            const deltaStr = `<span style="font-size:0.8em;opacity:0.65;margin-left:4px;">(${sign}${delta} Hz)</span>`;
+            return freqStr + deltaStr;
+        })()}</td>
         <td>${s.snr}</td>
         <td>${s.wpm || '\u2014'}</td>
         <td>${dist}</td>

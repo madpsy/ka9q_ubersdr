@@ -5747,6 +5747,21 @@ class SpectrumDisplay {
             this.contextMenu.appendChild(dxItem);
         }
 
+        // ── "Add Bookmark" item — only when local bookmarks system is active ──
+        if (window.localBookmarksUI && window.localBookmarksUI.manager) {
+            const bmFreqLabel = this.formatFrequency(dialFreq);
+            const bmItem = this._makeContextMenuItem(`⭐ Add Bookmark at ${bmFreqLabel}`, () => {
+                this._showAddLocalBookmarkModal(
+                    dialFreq,
+                    bmFreqLabel,
+                    currentMode,
+                    window.currentBandwidthLow,
+                    window.currentBandwidthHigh
+                );
+            });
+            this.contextMenu.appendChild(bmItem);
+        }
+
         // Don't show an empty menu
         if (this.contextMenu.children.length === 0) {
             return;
@@ -5938,6 +5953,200 @@ class SpectrumDisplay {
         dialog.appendChild(title);
         dialog.appendChild(freqSub);
         dialog.appendChild(label);
+        dialog.appendChild(input);
+        dialog.appendChild(btnRow);
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
+
+        // Auto-focus the input after the modal is in the DOM
+        requestAnimationFrame(() => input.focus());
+    }
+
+    // Show a quick modal asking only for a name, then save a local bookmark with
+    // all current radio state (freq, mode, bandwidth) captured at right-click time.
+    _showAddLocalBookmarkModal(freqHz, freqLabel, mode, bwLow, bwHigh) {
+        // Remove any stale modal
+        const existing = document.getElementById('_local-bookmark-quick-modal');
+        if (existing) existing.remove();
+
+        // ── Backdrop ──────────────────────────────────────────────────────
+        const backdrop = document.createElement('div');
+        backdrop.id = '_local-bookmark-quick-modal';
+        Object.assign(backdrop.style, {
+            position:       'fixed',
+            inset:          '0',
+            zIndex:         '20000',
+            background:     'rgba(0,0,0,0.55)',
+            display:        'flex',
+            alignItems:     'center',
+            justifyContent: 'center',
+        });
+
+        // ── Dialog box ────────────────────────────────────────────────────
+        const dialog = document.createElement('div');
+        Object.assign(dialog.style, {
+            background:   '#1e2a38',
+            border:       '1px solid rgba(127,140,141,0.5)',
+            borderRadius: '8px',
+            padding:      '20px 24px',
+            boxShadow:    '0 8px 32px rgba(0,0,0,0.7)',
+            minWidth:     '300px',
+            maxWidth:     '380px',
+            fontFamily:   'inherit',
+            color:        '#ecf0f1',
+        });
+
+        // Title
+        const title = document.createElement('div');
+        title.textContent = '⭐ Add Local Bookmark';
+        Object.assign(title.style, {
+            fontSize:     '14px',
+            fontWeight:   '600',
+            marginBottom: '4px',
+        });
+
+        // Frequency + mode sub-label
+        const freqSub = document.createElement('div');
+        const modeStr = mode ? mode.toUpperCase() : '';
+        const bwStr = (typeof bwLow === 'number' && typeof bwHigh === 'number')
+            ? `  BW: ${bwLow}/${bwHigh} Hz` : '';
+        freqSub.textContent = `${freqLabel}${modeStr ? '  ' + modeStr : ''}${bwStr}`;
+        Object.assign(freqSub.style, {
+            fontSize:     '12px',
+            color:        '#95a5a6',
+            marginBottom: '14px',
+            fontFamily:   'monospace',
+        });
+
+        // Label
+        const label = document.createElement('label');
+        label.textContent = 'Name / Callsign';
+        Object.assign(label.style, {
+            display:       'block',
+            fontSize:      '11px',
+            color:         '#95a5a6',
+            marginBottom:  '5px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+        });
+
+        // Error message element (hidden until needed)
+        const errorMsg = document.createElement('div');
+        Object.assign(errorMsg.style, {
+            fontSize:     '11px',
+            color:        '#e74c3c',
+            marginBottom: '6px',
+            display:      'none',
+        });
+
+        // Input
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'e.g. WWV 10 MHz';
+        input.maxLength = 40;
+        Object.assign(input.style, {
+            width:        '100%',
+            boxSizing:    'border-box',
+            background:   '#0d1b2a',
+            border:       '1px solid rgba(127,140,141,0.4)',
+            borderRadius: '4px',
+            color:        '#ecf0f1',
+            fontSize:     '14px',
+            fontFamily:   'monospace',
+            padding:      '7px 10px',
+            marginBottom: '16px',
+            outline:      'none',
+        });
+
+        // Button row
+        const btnRow = document.createElement('div');
+        Object.assign(btnRow.style, {
+            display:        'flex',
+            justifyContent: 'flex-end',
+            gap:            '8px',
+        });
+
+        const makeBtn = (text, primary) => {
+            const btn = document.createElement('button');
+            btn.textContent = text;
+            btn.type = 'button';
+            Object.assign(btn.style, {
+                padding:      '6px 16px',
+                borderRadius: '4px',
+                border:       primary ? 'none' : '1px solid rgba(127,140,141,0.4)',
+                background:   primary ? '#27ae60' : 'transparent',
+                color:        '#ecf0f1',
+                fontSize:     '13px',
+                cursor:       'pointer',
+                fontFamily:   'inherit',
+            });
+            return btn;
+        };
+
+        const cancelBtn = makeBtn('Cancel', false);
+        const addBtn    = makeBtn('Add Bookmark', true);
+
+        const close = () => backdrop.remove();
+
+        const confirm = async () => {
+            const raw = input.value.trim();
+            if (!raw) {
+                input.style.borderColor = '#e74c3c';
+                input.focus();
+                return;
+            }
+            input.style.borderColor = 'rgba(127,140,141,0.4)';
+            errorMsg.style.display = 'none';
+
+            if (!window.localBookmarksUI || !window.localBookmarksUI.manager) {
+                console.warn('Add Bookmark: localBookmarksUI not available');
+                close();
+                return;
+            }
+
+            try {
+                await window.localBookmarksUI.manager.add({
+                    name:           raw,
+                    frequency:      freqHz,
+                    mode:           mode ? mode.toLowerCase() : 'usb',
+                    bandwidth_low:  typeof bwLow  === 'number' ? bwLow  : null,
+                    bandwidth_high: typeof bwHigh === 'number' ? bwHigh : null,
+                    group:          null,
+                    comment:        null,
+                    extension:      null,
+                });
+                close();
+                // Refresh dropdown + invalidate spectrum marker cache → immediate redraw
+                window.localBookmarksUI.updateMainDropdown();
+            } catch (err) {
+                // Most likely a duplicate-name error
+                errorMsg.textContent = err.message || 'Could not save bookmark';
+                errorMsg.style.display = 'block';
+                input.style.borderColor = '#e74c3c';
+                input.focus();
+            }
+        };
+
+        cancelBtn.addEventListener('click', close);
+        addBtn.addEventListener('click', confirm);
+
+        // Keyboard: Enter = confirm, Escape = cancel
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter')  { ev.preventDefault(); confirm(); }
+            if (ev.key === 'Escape') { ev.preventDefault(); close(); }
+        });
+
+        // Click outside dialog = cancel
+        backdrop.addEventListener('click', (ev) => {
+            if (ev.target === backdrop) close();
+        });
+
+        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(addBtn);
+        dialog.appendChild(title);
+        dialog.appendChild(freqSub);
+        dialog.appendChild(label);
+        dialog.appendChild(errorMsg);
         dialog.appendChild(input);
         dialog.appendChild(btnRow);
         backdrop.appendChild(dialog);

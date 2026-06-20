@@ -254,6 +254,12 @@ class DXClusterExtension extends DecoderExtension {
 
         this.addSpot(spot, true /* isNewSpot */);
 
+        // Draw the marker immediately — addSpot() debounces its redraw by 250ms
+        // which means the marker doesn't appear until after the debounce fires.
+        // The spot is already in this.spots at this point so ensureMarkersDrawn()
+        // will pick it up on the very next animation frame.
+        this.ensureMarkersDrawn();
+
         // Auto-expire: remove from the array after ageFilter minutes, then
         // force a re-render so the marker and table row disappear cleanly.
         setTimeout(() => {

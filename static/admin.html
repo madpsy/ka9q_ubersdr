@@ -7892,9 +7892,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 row.dataset.countryName = country.name.toLowerCase();
                 row.dataset.countryCode = country.alpha2.toLowerCase();
                 
+                const _allowedFlag = String.fromCodePoint(...[...country.alpha2.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
                 row.innerHTML = `
                     <td style="padding: 10px;">
-                        <strong>${country.name}</strong>
+                        ${_allowedFlag}\u202F<strong>${country.name}</strong>
                         <span style="color: #666; font-size: 12px; margin-left: 8px;">(${country.alpha2})</span>
                     </td>
                     <td style="padding: 10px; text-align: center;">
@@ -7930,9 +7931,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 row.dataset.countryName = country.name.toLowerCase();
                 row.dataset.countryCode = country.alpha2.toLowerCase();
                 
+                const _bannedFlag = String.fromCodePoint(...[...country.alpha2.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
                 row.innerHTML = `
                     <td style="padding: 10px;">
-                        <strong>${country.name}</strong>
+                        ${_bannedFlag}\u202F<strong>${country.name}</strong>
                         <span style="color: #666; font-size: 12px; margin-left: 8px;">(${country.alpha2})</span>
                     </td>
                     <td style="padding: 10px; color: #666; font-size: 13px;">${reason}</td>

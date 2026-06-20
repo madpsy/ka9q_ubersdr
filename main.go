@@ -2203,7 +2203,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor, frontendHistory, antSwitchHandler)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, gpsdoMonitor, frontendHistory, antSwitchHandler, widgetManager)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -3686,7 +3686,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler, widgetManager *WidgetManager) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -3866,6 +3866,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"lookup_service":       config.LookupServices.Enabled,
 		"dsp":                  buildDSPInfo(&config.DSP),
 		"addons":               enabledAddons,
+		"enabled_widgets":      widgetManager.GetPublicEnabledWidgetIDs(),
 		"server_time":          time.Now().UTC().Format(time.RFC3339Nano),
 		"server_time_sync":     GetNTPSynced(),
 		"frontend":             buildStartupFrontendInfo(frontendHistory),

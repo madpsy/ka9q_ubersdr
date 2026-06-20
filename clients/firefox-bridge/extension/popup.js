@@ -75,6 +75,10 @@ let isPttMuteEnabled = false;  // mirrors background pttMuteEnabled
 let isPttActive      = false;  // current PTT state from flrig
 let publicInstances  = [];     // Cached list from instances.ubersdr.org
 
+// instanceEnabledWidgets: UUIDs the currently-selected instance already serves
+// natively (from /api/description).  Updated whenever the registry changes.
+let instanceEnabledWidgets = [];
+
 // ── Confirm modal ──────────────────────────────────────────────────────────────
 
 function showConfirmModal(title, body, onConfirm) {
@@ -326,6 +330,12 @@ async function init() {
         if (resp) {
             renderTabList(resp.tabs, resp.selectedTabId);
             selectedTabId = resp.selectedTabId;
+            // Populate instanceEnabledWidgets from the selected tab's registry entry.
+            if (Array.isArray(resp.tabs)) {
+                const selTab = resp.tabs.find(t => t.tabId === resp.selectedTabId);
+                instanceEnabledWidgets = (selTab && Array.isArray(selTab.instanceEnabledWidgets))
+                    ? selTab.instanceEnabledWidgets : [];
+            }
             // Only restore last state if there are actually tabs registered —
             // otherwise renderTabList already cleared the display via renderState(null)
             // and we must not re-populate it with stale values.
@@ -898,10 +908,19 @@ browser.runtime.onMessage.addListener((msg) => {
         case 'registry:updated':
             // Background always includes the authoritative selectedTabId.
             if (msg.selectedTabId !== undefined) selectedTabId = msg.selectedTabId;
+            // Update instance-enabled widgets from the selected tab's registry entry.
+            {
+                const selTab = Array.isArray(msg.tabs) && msg.tabs.find(t => t.tabId === selectedTabId);
+                instanceEnabledWidgets = (selTab && Array.isArray(selTab.instanceEnabledWidgets))
+                    ? selTab.instanceEnabledWidgets : [];
+            }
             // Don't rebuild the tab list while the user has a VFO dropdown open —
             // doing so would destroy the open <select> mid-interaction.
             if (document.activeElement && document.activeElement.classList.contains('vfo-select')) break;
             renderTabList(msg.tabs, selectedTabId);
+            renderEnabledWidgets();
+            renderCatalogueDropdown();
+            if (widgetCatalogueSelect && widgetCatalogueSelect.value) showWidgetPreview(widgetCatalogueSelect.value);
             break;
 
         case 'state:update':
@@ -939,6 +958,14 @@ browser.runtime.onMessage.addListener((msg) => {
             // re-renders the tab list; just update local selectedTabId and status.
             if (msg.tabId) selectedTabId = msg.tabId;
             setStatus(`flrig switched to VFO ${msg.vfo}`, 'info');
+            break;
+
+        case 'widgets:updated':
+            enabledWidgetIds = Array.isArray(msg.enabledWidgets) ? msg.enabledWidgets : enabledWidgetIds;
+            if (msg.widgetCache && typeof msg.widgetCache === 'object') widgetCacheLocal = msg.widgetCache;
+            renderEnabledWidgets();
+            renderCatalogueDropdown();
+            if (widgetCatalogueSelect.value) showWidgetPreview(widgetCatalogueSelect.value);
             break;
 
         default:
@@ -1064,6 +1091,285 @@ async function deleteProfile(name) {
     );
 }
 
+// ── Community Widgets ──────────────────────────────────────────────────────────
+
+const widgetsHeader        = document.getElementById('widgets-header');
+const widgetsArrow         = document.getElementById('widgets-arrow');
+const widgetsBody          = document.getElementById('widgets-body');
+const widgetSearch         = document.getElementById('widget-search');
+const btnWidgetRefresh     = document.getElementById('btn-widget-refresh');
+const widgetCatalogueSelect = document.getElementById('widget-catalogue-select');
+const widgetPreview        = document.getElementById('widget-preview');
+const widgetPreviewName    = document.getElementById('widget-preview-name');
+const widgetPreviewMeta    = document.getElementById('widget-preview-meta');
+const widgetPreviewDesc    = document.getElementById('widget-preview-desc');
+const btnWidgetAdd         = document.getElementById('btn-widget-add');
+const widgetEnabledList    = document.getElementById('widget-enabled-list');
+
+// Local widget state
+let widgetCatalogue  = [];   // Full list from collector API
+let enabledWidgetIds = [];   // UUIDs currently enabled by the extension user
+let widgetCacheLocal = {};   // { [id]: { name, html, version, cachedAt } }
+
+// Collapsible toggle for widgets section
+widgetsHeader.addEventListener('click', () => {
+    toggleCollapsible(widgetsBody, widgetsArrow);
+});
+
+// Populate the catalogue <select> based on current search text.
+function renderCatalogueDropdown() {
+    const query = (widgetSearch.value || '').toLowerCase().trim();
+    const filtered = widgetCatalogue.filter(w => {
+        if (!query) return true;
+        return (w.name || '').toLowerCase().includes(query) ||
+               (w.description || '').toLowerCase().includes(query) ||
+               (w.callsign || '').toLowerCase().includes(query);
+    });
+
+    // Preserve current selection if still in filtered list.
+    const prevId = widgetCatalogueSelect.value;
+
+    // Rebuild options.
+    widgetCatalogueSelect.innerHTML = '<option value="">— select a widget to add —</option>';
+    filtered.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.widget_id;
+        const alreadyEnabled    = enabledWidgetIds.includes(w.widget_id);
+        const onInstance        = instanceEnabledWidgets.includes(w.widget_id);
+        const featured          = !!w.is_featured;
+        let prefix = '';
+        if (alreadyEnabled) prefix = '✓ ';
+        else if (onInstance) prefix = '🔒 ';
+        const suffix = featured ? ' ⭐' : '';
+        opt.textContent = prefix + w.name + (w.callsign ? ` (${w.callsign})` : '') + suffix;
+        if (alreadyEnabled) opt.style.color = '#27ae60';
+        else if (onInstance) opt.style.color = '#888';
+        widgetCatalogueSelect.appendChild(opt);
+    });
+
+    // Restore selection if still present.
+    if (prevId && filtered.some(w => w.widget_id === prevId)) {
+        widgetCatalogueSelect.value = prevId;
+    } else {
+        widgetPreview.style.display = 'none';
+    }
+}
+
+// Show the preview card for the selected widget.
+function showWidgetPreview(widgetId) {
+    if (!widgetId) {
+        widgetPreview.style.display = 'none';
+        return;
+    }
+    const w = widgetCatalogue.find(x => x.widget_id === widgetId);
+    if (!w) {
+        widgetPreview.style.display = 'none';
+        return;
+    }
+    widgetPreviewName.textContent = w.name || widgetId;
+    const enabledBy = Array.isArray(w.enabled_by) && w.enabled_by.length > 0
+        ? `Enabled by ${w.enabled_by.length} instance(s)`
+        : 'Not yet enabled by any instance';
+    widgetPreviewMeta.textContent = `by ${w.callsign || '?'} · v${w.version || 1} · ${enabledBy}`;
+    widgetPreviewDesc.textContent = w.description || '';
+
+    const alreadyEnabled = enabledWidgetIds.includes(widgetId);
+    const onInstance     = instanceEnabledWidgets.includes(widgetId);
+    if (alreadyEnabled) {
+        btnWidgetAdd.textContent = '✓ Already added';
+        btnWidgetAdd.disabled = true;
+    } else if (onInstance) {
+        btnWidgetAdd.textContent = '🔒 Enabled by instance';
+        btnWidgetAdd.disabled = true;
+    } else {
+        btnWidgetAdd.textContent = '＋ Add Widget';
+        btnWidgetAdd.disabled = false;
+    }
+
+    widgetPreview.style.display = 'block';
+}
+
+// Render the list of currently-enabled widgets.
+function renderEnabledWidgets() {
+    widgetEnabledList.innerHTML = '';
+
+    // ── Instance-native widgets (read-only, padlocked) ────────────────────────
+    // Show widgets the current instance already serves natively.  These are
+    // displayed first so the user understands they are already present.
+    // Exclude any that the user has also explicitly added (they appear below).
+    const instanceOnly = instanceEnabledWidgets.filter(id => !enabledWidgetIds.includes(id));
+    instanceOnly.forEach(id => {
+        // Try to find a name from the catalogue; fall back to the UUID.
+        const catalogueEntry = widgetCatalogue.find(w => w.widget_id === id);
+        let label = catalogueEntry ? catalogueEntry.name : id;
+        if (catalogueEntry && catalogueEntry.callsign) label += ` (${catalogueEntry.callsign})`;
+        if (catalogueEntry && catalogueEntry.is_featured) label += ' ⭐';
+
+        const item = document.createElement('div');
+        item.className = 'widget-instance-item';
+
+        const lockEl = document.createElement('span');
+        lockEl.className = 'widget-instance-lock';
+        lockEl.textContent = '🔒';
+        lockEl.title = 'Enabled by this instance';
+        item.appendChild(lockEl);
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'widget-enabled-name';
+        nameEl.textContent = label;
+        nameEl.title = id;
+        item.appendChild(nameEl);
+
+        widgetEnabledList.appendChild(item);
+    });
+
+    // ── User-enabled widgets ───────────────────────────────────────────────────
+    if (enabledWidgetIds.length === 0 && instanceOnly.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'widget-no-enabled';
+        empty.textContent = 'No widgets added yet.';
+        widgetEnabledList.appendChild(empty);
+        return;
+    }
+
+    enabledWidgetIds.forEach(id => {
+        const cached = widgetCacheLocal[id];
+        // Show "Name (CALLSIGN)" to match the dropdown format.
+        let label = cached ? cached.name : id;
+        if (cached && cached.callsign) label += ` (${cached.callsign})`;
+        // Append featured star if the catalogue entry marks this widget as featured.
+        const catEntry = widgetCatalogue.find(w => w.widget_id === id);
+        if (catEntry && catEntry.is_featured) label += ' ⭐';
+
+        const item = document.createElement('div');
+        item.className = 'widget-enabled-item';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'widget-enabled-name';
+        nameEl.textContent = label;
+        nameEl.title = id;
+        item.appendChild(nameEl);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-secondary btn-sm';
+        removeBtn.textContent = '✕';
+        removeBtn.title = 'Remove widget (takes effect on next page load)';
+        removeBtn.addEventListener('click', () => disableWidget(id, name));
+        item.appendChild(removeBtn);
+
+        widgetEnabledList.appendChild(item);
+    });
+}
+
+// Fetch the catalogue from the background (which fetches from collector API).
+async function fetchWidgetCatalogue() {
+    btnWidgetRefresh.disabled = true;
+    btnWidgetRefresh.textContent = '…';
+    try {
+        const resp = await browser.runtime.sendMessage({ type: 'popup:get_widget_catalogue' });
+        if (resp && resp.ok && Array.isArray(resp.widgets)) {
+            widgetCatalogue = resp.widgets;
+            renderCatalogueDropdown();
+            setStatus(`Loaded ${widgetCatalogue.length} widgets`, 'ok');
+        } else {
+            setStatus('Failed to load widget catalogue: ' + (resp && resp.error ? resp.error : 'unknown'), 'error');
+        }
+    } catch (err) {
+        setStatus('Widget catalogue error: ' + err.message, 'error');
+    } finally {
+        btnWidgetRefresh.disabled = false;
+        btnWidgetRefresh.textContent = '↻';
+    }
+}
+
+// Load the current enabled widget list from background storage.
+async function fetchEnabledWidgets() {
+    try {
+        const resp = await browser.runtime.sendMessage({ type: 'popup:get_enabled_widgets' });
+        if (resp) {
+            enabledWidgetIds = Array.isArray(resp.enabledWidgets) ? resp.enabledWidgets : [];
+            widgetCacheLocal = (resp.widgetCache && typeof resp.widgetCache === 'object') ? resp.widgetCache : {};
+            renderEnabledWidgets();
+            renderCatalogueDropdown();
+        }
+    } catch (_) {}
+}
+
+// Enable a widget: send to background which fetches html and injects into all tabs.
+async function enableWidget(widgetId) {
+    const w = widgetCatalogue.find(x => x.widget_id === widgetId);
+    const widgetName = w ? w.name : widgetId;
+    btnWidgetAdd.disabled = true;
+    btnWidgetAdd.textContent = 'Adding…';
+    try {
+        const resp = await browser.runtime.sendMessage({
+            type:       'popup:enable_widget',
+            widgetId:   widgetId,
+            widgetName: widgetName,
+        });
+        if (resp && resp.ok) {
+            enabledWidgetIds = [...enabledWidgetIds.filter(id => id !== widgetId), widgetId];
+            // Update local cache from the response so the name is available immediately.
+            if (resp.widgetCache && typeof resp.widgetCache === 'object') {
+                widgetCacheLocal = resp.widgetCache;
+            } else if (widgetCacheLocal[widgetId] === undefined) {
+                // Fallback: populate from catalogue data so name shows immediately.
+                const w = widgetCatalogue.find(x => x.widget_id === widgetId);
+                if (w) widgetCacheLocal[widgetId] = { name: w.name, callsign: w.callsign || '' };
+            }
+            renderEnabledWidgets();
+            renderCatalogueDropdown();
+            showWidgetPreview(widgetId);
+            setStatus(`Widget "${widgetName}" added`, 'ok');
+        } else {
+            setStatus('Failed to add widget: ' + (resp && resp.error ? resp.error : 'unknown'), 'error');
+            btnWidgetAdd.disabled = false;
+            btnWidgetAdd.textContent = '＋ Add Widget';
+        }
+    } catch (err) {
+        setStatus('Widget error: ' + err.message, 'error');
+        btnWidgetAdd.disabled = false;
+        btnWidgetAdd.textContent = '＋ Add Widget';
+    }
+}
+
+// Disable a widget: remove from enabled list (won't re-inject on next load).
+async function disableWidget(widgetId, widgetName) {
+    try {
+        const resp = await browser.runtime.sendMessage({
+            type:     'popup:disable_widget',
+            widgetId: widgetId,
+        });
+        if (resp && resp.ok) {
+            enabledWidgetIds = enabledWidgetIds.filter(id => id !== widgetId);
+            renderEnabledWidgets();
+            renderCatalogueDropdown();
+            // If this widget was selected in the dropdown, refresh its preview.
+            if (widgetCatalogueSelect.value === widgetId) {
+                showWidgetPreview(widgetId);
+            }
+            setStatus(`Widget "${widgetName}" removed (reload page to fully remove)`, 'info');
+        }
+    } catch (err) {
+        setStatus('Widget remove error: ' + err.message, 'error');
+    }
+}
+
+// ── Widget event listeners ─────────────────────────────────────────────────────
+
+widgetSearch.addEventListener('input', () => renderCatalogueDropdown());
+
+widgetCatalogueSelect.addEventListener('change', () => {
+    showWidgetPreview(widgetCatalogueSelect.value);
+});
+
+btnWidgetAdd.addEventListener('click', () => {
+    const id = widgetCatalogueSelect.value;
+    if (id) enableWidget(id);
+});
+
+btnWidgetRefresh.addEventListener('click', () => fetchWidgetCatalogue());
+
 // ── Boot ───────────────────────────────────────────────────────────────────────
 
 // Apply default visual states immediately (before async init response arrives).
@@ -1073,3 +1379,5 @@ setPttMuteButtonState(isPttMuteEnabled);
 
 init();
 fetchAndRenderProfiles();
+fetchEnabledWidgets();
+fetchWidgetCatalogue();

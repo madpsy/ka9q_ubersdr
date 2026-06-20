@@ -740,3 +740,111 @@ body {
     font-style: italic;
     padding: 4px 0;
 }
+
+/* ── Community Widgets ───────────────────────────────────────────────────── */
+
+.widget-search-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.widget-search-row .control-input {
+    flex: 1;
+}
+
+/* Preview card shown when a widget is selected in the dropdown */
+.widget-preview {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+.widget-preview-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 3px;
+}
+
+.widget-preview-meta {
+    font-size: 10px;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.widget-preview-desc {
+    font-size: 11px;
+    color: #aaa;
+    line-height: 1.4;
+}
+
+/* List of already-enabled widgets */
+.widget-enabled-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.widget-enabled-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+.widget-enabled-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 500;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+/* Badge shown when a widget is active in the current session but pending removal */
+.widget-pending-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    font-weight: 600;
+    color: #f39c12;
+    background: rgba(243, 156, 18, 0.15);
+    border: 1px solid rgba(243, 156, 18, 0.4);
+    border-radius: 3px;
+    padding: 1px 4px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+}
+
+/* Instance-native widget row — read-only, padlocked, muted appearance */
+.widget-instance-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: #111827;
+    border: 1px solid #1e2d45;
+    border-radius: 4px;
+    opacity: 0.75;
+}
+
+.widget-instance-lock {
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.widget-no-enabled {
+    font-size: 11px;
+    color: #555;
+    font-style: italic;
+    padding: 4px 0;
+}

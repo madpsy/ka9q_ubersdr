@@ -48,6 +48,7 @@ type widgetCacheEntry struct {
 	Callsign    string
 	InstanceID  string
 	Description string
+	IsPublic    bool
 	Version     int
 	FetchedAt   time.Time
 }
@@ -239,6 +240,7 @@ func (wm *WidgetManager) refreshAll() {
 			Callsign:    meta.Callsign,
 			InstanceID:  meta.InstanceID,
 			Description: meta.Description,
+			IsPublic:    meta.IsPublic,
 			Version:     meta.Version,
 			FetchedAt:   time.Now(),
 		}
@@ -301,6 +303,7 @@ func (wm *WidgetManager) AddToCache(widgetID string) error {
 		Callsign:    meta.Callsign,
 		InstanceID:  meta.InstanceID,
 		Description: meta.Description,
+		IsPublic:    meta.IsPublic,
 		Version:     meta.Version,
 		FetchedAt:   time.Now(),
 	}
@@ -315,6 +318,22 @@ func (wm *WidgetManager) RemoveFromCache(widgetID string) {
 	wm.mu.Lock()
 	delete(wm.entries, widgetID)
 	wm.mu.Unlock()
+}
+
+// GetPublicEnabledWidgetIDs returns the UUIDs of enabled widgets that are marked
+// as public by the collector. Widgets whose cache entry is missing (fetch failed)
+// or whose IsPublic flag is false are excluded. The order matches EnabledWidgets.
+func (wm *WidgetManager) GetPublicEnabledWidgetIDs() []string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	ids := make([]string, 0, len(wm.config.Server.EnabledWidgets))
+	for _, id := range wm.config.Server.EnabledWidgets {
+		if entry, ok := wm.entries[id]; ok && entry.IsPublic {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // AssembleHTML builds the WidgetsHTML template.HTML value for index.html rendering.

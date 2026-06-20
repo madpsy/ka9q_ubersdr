@@ -199,6 +199,46 @@
                     break;
                 }
 
+                case 'cmd:inject_widgets': {
+                    // msg.widgets = [{ id, html }, ...]
+                    // Each html blob is a self-contained <style>+<div>+<script> string.
+                    // We must re-create <script> elements so the browser actually executes them
+                    // (innerHTML does NOT execute scripts — browser security rule).
+                    if (!Array.isArray(msg.widgets)) break;
+                    msg.widgets.forEach(function (w) {
+                        // Guard: don't inject the same widget twice in this tab.
+                        var existingId = '__ubersdr_widget_' + w.id;
+                        if (document.getElementById(existingId)) return;
+
+                        // Create a container div to hold the widget's non-script content.
+                        var container = document.createElement('div');
+                        container.id = existingId;
+                        // Parse the HTML blob into a temporary holder.
+                        var tmp = document.createElement('div');
+                        tmp.innerHTML = w.html;
+
+                        // Move non-script nodes into the container and append to body.
+                        Array.from(tmp.childNodes).forEach(function (node) {
+                            if (node.nodeName !== 'SCRIPT') {
+                                container.appendChild(node.cloneNode(true));
+                            }
+                        });
+                        document.body.appendChild(container);
+
+                        // Re-create each <script> as a live element so it executes.
+                        tmp.querySelectorAll('script').forEach(function (dead) {
+                            var live = document.createElement('script');
+                            if (dead.src) {
+                                live.src = dead.src;
+                            } else {
+                                live.textContent = dead.textContent;
+                            }
+                            document.body.appendChild(live);
+                        });
+                    });
+                    break;
+                }
+
             }
         });
 

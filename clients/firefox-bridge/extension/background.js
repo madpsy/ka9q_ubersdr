@@ -70,9 +70,21 @@ let _pendingSdrMode = null;
 
 // ── Restore persisted settings on startup ─────────────────────────────────────
 
+// ── Widget state ───────────────────────────────────────────────────────────────
+// enabledWidgets: ordered array of widget UUIDs the user has enabled.
+// widgetCache:    Map<widgetId, { name, html, version, cachedAt }>
+//                Persisted in storage.local so widgets survive browser restarts.
+
+let enabledWidgets = [];   // string[]
+let widgetCache    = {};   // { [id]: { name, html, version, cachedAt } }
+
+// Collector API base URL — never inject widgets into this origin.
+const COLLECTOR_ORIGIN = 'https://instances.ubersdr.org';
+const COLLECTOR_API    = 'https://instances.ubersdr.org/api/widgets';
+
 browser.storage.local.get([
     'selectedTabId', 'flrigEnabled', 'flrigHost', 'flrigPort', 'flrigDirection',
-    'pluginEnabled', 'pttMuteEnabled',
+    'pluginEnabled', 'pttMuteEnabled', 'enabledWidgets', 'widgetCache',
 ]).then((stored) => {
     if (stored.selectedTabId   !== undefined) selectedTabId   = stored.selectedTabId;
     if (stored.flrigEnabled    !== undefined) flrigEnabled    = stored.flrigEnabled;
@@ -81,6 +93,8 @@ browser.storage.local.get([
     if (stored.flrigDirection  !== undefined) flrigDirection  = stored.flrigDirection;
     if (stored.pluginEnabled   !== undefined) pluginEnabled   = stored.pluginEnabled;
     if (stored.pttMuteEnabled  !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
+    if (Array.isArray(stored.enabledWidgets)) enabledWidgets = stored.enabledWidgets;
+    if (stored.widgetCache && typeof stored.widgetCache === 'object') widgetCache = stored.widgetCache;
 });
 
 // ── Profiles ───────────────────────────────────────────────────────────────────
@@ -210,13 +224,14 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             }
 
             registry.set(tabId, {
-                tabId:        tabId,
-                sessionId:    msg.sessionId,
-                url:          msg.url,
-                title:        msg.title || sender.tab.title || msg.url,
-                lastState:    null,
-                vfo:          assignedVfo,
-                audioStarted: !!msg.audioStarted,
+                tabId:                 tabId,
+                sessionId:             msg.sessionId,
+                url:                   msg.url,
+                title:                 msg.title || sender.tab.title || msg.url,
+                lastState:             null,
+                vfo:                   assignedVfo,
+                audioStarted:          !!msg.audioStarted,
+                instanceEnabledWidgets: [],   // populated async from /api/description
             });
 
             // Auto-select if this tab was flagged as pending, or if there is no
@@ -231,6 +246,29 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
             // Ask the newly registered tab for a full state snapshot.
             browser.tabs.sendMessage(tabId, { type: 'cmd:get_state' }).catch(() => {});
+
+            // Fetch /api/description from this instance to learn which widgets it
+            // already serves natively.  Done async so it never blocks registration.
+            // Once we have the list we re-inject only the widgets the instance lacks.
+            (async () => {
+                try {
+                    const origin = new URL(msg.url).origin;
+                    const res = await fetch(`${origin}/api/description`, { cache: 'no-store' });
+                    if (res.ok) {
+                        const desc = await res.json();
+                        const instanceWidgets = Array.isArray(desc.enabled_widgets) ? desc.enabled_widgets : [];
+                        if (registry.has(tabId)) {
+                            registry.get(tabId).instanceEnabledWidgets = instanceWidgets;
+                            broadcastRegistry();
+                        }
+                        // Inject only the widgets the instance doesn't already serve.
+                        injectWidgetsIntoTab(tabId, msg.url);
+                        return;
+                    }
+                } catch (_) { /* non-UberSDR page or network error — fall through */ }
+                // Fallback: inject all enabled widgets (instance widget list unknown).
+                injectWidgetsIntoTab(tabId, msg.url);
+            })();
 
             // Apply any pending profile state for this tab (opened by load_profile).
             if (pendingProfileStates.has(tabId)) {
@@ -617,6 +655,67 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             });
         }
 
+        // ── Popup: get widget catalogue from collector ─────────────────────────
+        case 'popup:get_widget_catalogue': {
+            return fetch(`${COLLECTOR_API}/with-instances`)
+                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+                .then(list => ({ ok: true, widgets: list }))
+                .catch(err => ({ ok: false, error: err.message }));
+        }
+
+        // ── Popup: enable a widget (fetch html, cache, inject into all tabs) ───
+        case 'popup:enable_widget': {
+            const { widgetId, widgetName } = msg;
+            if (!widgetId) break;
+            if (enabledWidgets.includes(widgetId)) {
+                return Promise.resolve({ ok: true, already: true });
+            }
+            // Fetch the full widget (includes html_content).
+            return fetch(`${COLLECTOR_API}/${widgetId}`)
+                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+                .then(async (widget) => {
+                    const html = widget.html_content || '';
+                    if (!html) throw new Error('Widget has no html_content');
+
+                    // Cache it.
+                    widgetCache[widgetId] = {
+                        name:     widget.name || widgetName || widgetId,
+                        callsign: widget.callsign || '',
+                        html:     html,
+                        version:  widget.version || 0,
+                        cachedAt: Date.now(),
+                    };
+                    enabledWidgets.push(widgetId);
+                    await browser.storage.local.set({ enabledWidgets, widgetCache });
+
+                    // Inject into all currently-open UberSDR tabs.
+                    for (const [tabId, entry] of registry) {
+                        injectWidgetsIntoTab(tabId, entry.url, [widgetId]);
+                    }
+
+                    broadcastToPopup({ type: 'widgets:updated', enabledWidgets, widgetCache });
+                    return { ok: true, widgetCache };
+                })
+                .catch(err => ({ ok: false, error: err.message }));
+        }
+
+        // ── Popup: disable a widget (remove from list; can't un-inject live JS) ─
+        case 'popup:disable_widget': {
+            const { widgetId } = msg;
+            if (!widgetId) break;
+            enabledWidgets = enabledWidgets.filter(id => id !== widgetId);
+            // Keep the cache entry so re-enabling is instant.
+            return browser.storage.local.set({ enabledWidgets }).then(() => {
+                broadcastToPopup({ type: 'widgets:updated', enabledWidgets });
+                return { ok: true };
+            });
+        }
+
+        // ── Popup: get current enabled widget list ────────────────────────────
+        case 'popup:get_enabled_widgets': {
+            return Promise.resolve({ enabledWidgets, widgetCache });
+        }
+
         default:
             break;
     }
@@ -626,15 +725,56 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
 function registrySnapshot() {
     return Array.from(registry.values()).map(e => ({
-        tabId:        e.tabId,
-        sessionId:    e.sessionId,
-        url:          e.url,
-        title:        e.title,
-        selected:     e.tabId === selectedTabId,
-        lastState:    e.lastState,
-        vfo:          e.vfo || null,   // null = unassigned (both VFOs in use)
-        audioStarted: !!e.audioStarted,
+        tabId:                 e.tabId,
+        sessionId:             e.sessionId,
+        url:                   e.url,
+        title:                 e.title,
+        selected:              e.tabId === selectedTabId,
+        lastState:             e.lastState,
+        vfo:                   e.vfo || null,   // null = unassigned (both VFOs in use)
+        audioStarted:          !!e.audioStarted,
+        instanceEnabledWidgets: e.instanceEnabledWidgets || [],
     }));
+}
+
+// Broadcast a registry update that always includes the current selectedTabId.
+function broadcastRegistry() {
+    broadcastToPopup({ type: 'registry:updated', tabs: registrySnapshot(), selectedTabId });
+}
+
+// ── Widget injection helper ────────────────────────────────────────────────────
+// Send enabled widgets to a specific tab. If widgetIds is provided only those
+// widgets are sent (used when a new widget is enabled mid-session); otherwise
+// all currently-enabled widgets are sent.
+// Never injects into the collector origin (instances.ubersdr.org).
+function injectWidgetsIntoTab(tabId, tabUrl, widgetIds) {
+    // Guard: never inject into the collector website itself.
+    try {
+        const origin = new URL(tabUrl || '').origin;
+        if (origin === COLLECTOR_ORIGIN) return;
+    } catch (_) {
+        return; // Malformed URL — skip.
+    }
+
+    // Determine which widgets to inject: the requested set minus any the instance
+    // already serves natively (to avoid double-loading the same widget HTML).
+    const instanceWidgets = (registry.has(tabId) && registry.get(tabId).instanceEnabledWidgets) || [];
+    const requestedIds = widgetIds || enabledWidgets;
+    const ids = requestedIds.filter(id => !instanceWidgets.includes(id));
+    if (!ids || ids.length === 0) return;
+
+    const widgets = ids
+        .filter(id => widgetCache[id] && widgetCache[id].html)
+        .map(id => ({ id, html: widgetCache[id].html }));
+
+    if (widgets.length === 0) return;
+
+    browser.tabs.sendMessage(tabId, {
+        type:    'cmd:inject_widgets',
+        widgets: widgets,
+    }).catch(() => {
+        // Tab may not be ready yet — not fatal.
+    });
 }
 
 // Forward a command object to the currently selected UberSDR tab.
@@ -667,11 +807,6 @@ function broadcastToPopup(msg) {
     browser.runtime.sendMessage(msg).catch(() => {
         // Popup is not open — ignore.
     });
-}
-
-// Broadcast a registry update that always includes the current selectedTabId.
-function broadcastRegistry() {
-    broadcastToPopup({ type: 'registry:updated', tabs: registrySnapshot(), selectedTabId });
 }
 
 // ── flrig XML-RPC ──────────────────────────────────────────────────────────────

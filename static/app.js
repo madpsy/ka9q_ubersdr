@@ -3654,7 +3654,21 @@ async function fetchSiteDescription() {
                                 if (myipData.city) {
                                     parts.push(myipData.city);
                                 }
-                                parts.push(myipData.country);
+
+                                // Prepend flag emoji if country_code is available
+                                let countryDisplay = myipData.country;
+                                const cc = myipData.country_code;
+                                if (cc && cc.length === 2) {
+                                    try {
+                                        const base = 0x1F1E6 - 0x41;
+                                        const flag = String.fromCodePoint(
+                                            base + cc.toUpperCase().charCodeAt(0),
+                                            base + cc.toUpperCase().charCodeAt(1)
+                                        );
+                                        countryDisplay = flag + '\u00A0' + myipData.country;
+                                    } catch (_) {}
+                                }
+                                parts.push(countryDisplay);
 
                                 const locationStr = parts.join(', ');
                                 const distanceStr = myipData.distance_km ? ` (${Math.round(myipData.distance_km)} km)` : '';

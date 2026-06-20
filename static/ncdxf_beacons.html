@@ -1679,10 +1679,13 @@ function renderSummary(spots, heardSet) {
     const topBeacon = topBeaconEntry ? topBeaconEntry[0] : null;
     const topBeaconCount = topBeaconEntry ? topBeaconEntry[1] : 0;
 
-    // Most heard band
+    // Most / least heard band
     const topBandEntry = Object.entries(bandCounts).sort((a, b) => b[1] - a[1])[0];
     const topBand = topBandEntry ? topBandEntry[0] : null;
     const topBandCount = topBandEntry ? topBandEntry[1] : 0;
+    const botBandEntry = Object.entries(bandCounts).sort((a, b) => a[1] - b[1])[0];
+    const botBand = botBandEntry ? botBandEntry[0] : null;
+    const botBandCount = botBandEntry ? botBandEntry[1] : 0;
 
     const bandSummary = Object.entries(bandCounts)
         .sort((a, b) => b[1] - a[1])
@@ -1691,6 +1694,9 @@ function renderSummary(spots, heardSet) {
 
     const topBandPill = topBand
         ? `<span class="band-pill" style="background:${BAND_COLORS[topBand]||'#888'};font-size:0.9em;">${topBand}</span>`
+        : '—';
+    const botBandPill = botBand
+        ? `<span class="band-pill" style="background:${BAND_COLORS[botBand]||'#888'};font-size:0.9em;">${botBand}</span>`
         : '—';
 
     document.getElementById('summary-stats').innerHTML = `
@@ -1702,7 +1708,8 @@ function renderSummary(spots, heardSet) {
         <div class="stat-box"><div class="sv">${avgSNR !== null ? (avgSNR >= 0 ? '+' : '') + avgSNR + ' dB' : '—'}</div><div class="sl">Avg SNR</div></div>
         <div class="stat-box"><div class="sv">${bestDist > 0 ? Math.round(bestDist).toLocaleString() + ' km' : '—'}</div><div class="sl">Max Distance</div></div>
         <div class="stat-box"><div class="sv" style="font-size:1.1em;">${topBeacon || '—'}</div><div class="sl">Most Heard${topBeacon ? ' · ' + topBeaconCount + ' spots' : ''}</div></div>
-        <div class="stat-box"><div class="sv" style="font-size:1.3em;">${topBandPill}</div><div class="sl">Most Heard Band${topBand ? ' · ' + topBandCount + ' spots' : ''}</div></div>
+        <div class="stat-box"><div class="sv" style="font-size:1.3em;">${topBandPill}</div><div class="sl">Most Heard Band</div></div>
+        <div class="stat-box"><div class="sv" style="font-size:1.3em;">${botBandPill}</div><div class="sl">Least Heard Band</div></div>
         <div class="stat-box" style="min-width:200px;"><div style="font-size:0.9em; margin-top:4px;">${bandSummary || '—'}</div><div class="sl">By Band</div></div>
     `;
 }

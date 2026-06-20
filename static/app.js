@@ -5988,6 +5988,8 @@ function setBand(bandName) {
         return;
     }
 
+    triggerButtonHaptic();
+
     // Calculate band center frequency
     const centerFreq = Math.round((range.min + range.max) / 2);
 
@@ -6076,6 +6078,15 @@ function setBand(bandName) {
     }
 }
 
+// ── Haptic feedback helper ────────────────────────────────────────────────────
+// Short tactile confirmation for button presses (mode buttons, tuning step
+// buttons). Silently no-ops on iOS Safari and desktop where the API is absent.
+function triggerButtonHaptic() {
+    if (navigator.vibrate && !document.hidden) {
+        navigator.vibrate(12); // 12ms — firm tap, distinct from the 8ms wheel tick
+    }
+}
+
 // Adjust frequency by a given amount (Hz)
 function adjustFrequency(deltaHz) {
     const freqInput = document.getElementById('frequency');
@@ -6120,6 +6131,7 @@ function adjustFrequency(deltaHz) {
         window.ttsAnnouncements.announceFrequencyChange(roundedFreq);
     }
 
+    triggerButtonHaptic();
     autoTune();
 }
 
@@ -6274,6 +6286,9 @@ function updateURL() {
 function setMode(mode, preserveBandwidth = false) {
     currentMode = mode;
     window.currentMode = mode; // Update global reference
+    // Only fire haptic when the user tapped a mode button directly,
+    // not when called programmatically (e.g. chat sync, URL restore).
+    if (!preserveBandwidth) triggerButtonHaptic();
 
     // Reset SAM silence watchdog state on every mode change so a fresh
     // basebandPower change is required before the 2-second timer starts.
@@ -11258,6 +11273,7 @@ function spectrumZoomIn() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
+    triggerButtonHaptic();
     spectrumDisplay.zoomIn();
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
@@ -11279,6 +11295,7 @@ function spectrumZoomOut() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
+    triggerButtonHaptic();
     spectrumDisplay.zoomOut();
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
@@ -11300,6 +11317,7 @@ function spectrumResetZoom() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
+    triggerButtonHaptic();
     spectrumDisplay.resetZoom();
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL (will remove zoom params when at 1x)
@@ -11322,6 +11340,7 @@ function spectrumMaxZoom() {
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
 
+    triggerButtonHaptic();
     // Send binBandwidth=10 to land at 10 Hz/bin — the maximum zoom for normal UI operation.
     // The server supports down to 0.5 Hz/bin but that is only reachable via explicit
     // requests (URL params, chat sync) — not via the Max button or + button.
@@ -11394,6 +11413,7 @@ function spectrumZoomSlider(position, sliderEl) {
     if (!isBoundary) {
         const now = Date.now();
         if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
+        if (navigator.vibrate && !document.hidden) navigator.vibrate(6); // lighter slider tick
         lastZoomTime = now;
     } else {
         // Reset throttle so boundary calls (reset/max) are never blocked by

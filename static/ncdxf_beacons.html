@@ -853,6 +853,21 @@
 
         <!-- ── Spots table ───────────────────────────────────────────── -->
         <div class="section-heading">📋 Spots Log</div>
+        <!-- Real-time text filter bar -->
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+            <span style="font-size:0.82em; opacity:0.65; white-space:nowrap;">Filter:</span>
+            <input id="spots-filter-callsign" type="text" placeholder="Callsign…"
+                style="padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:4px; color:white; font-size:0.85em; width:110px;"
+                autocomplete="off" spellcheck="false">
+            <input id="spots-filter-entity" type="text" placeholder="Entity…"
+                style="padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:4px; color:white; font-size:0.85em; width:140px;"
+                autocomplete="off" spellcheck="false">
+            <input id="spots-filter-band" type="text" placeholder="Band (e.g. 20m)…"
+                style="padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:4px; color:white; font-size:0.85em; width:130px;"
+                autocomplete="off" spellcheck="false">
+            <button id="spots-filter-clear" class="page-btn" title="Clear all filters" style="font-size:0.8em; padding:3px 8px; opacity:0.7;">✕ Clear</button>
+            <span id="spots-filter-count" style="font-size:0.8em; opacity:0.6; margin-left:4px;"></span>
+        </div>
         <!-- Pagination top bar -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
             <div style="display:flex; align-items:center; gap:8px; font-size:0.88em;">
@@ -1796,8 +1811,38 @@ function isValidBeaconSpot(spot) {
 }
 
 // ── Spots table pagination state ─────────────────────────────────────────
-let spotsTableData = [];   // full sorted spots array
-let spotsTablePage = 0;    // current 0-based page index
+let spotsTableData = [];       // full sorted spots array
+let spotsTableFiltered = [];   // after text-filter applied
+let spotsTablePage = 0;        // current 0-based page index
+
+// ── Spots log text filter ─────────────────────────────────────────────────
+const spotsFilter = { callsign: '', entity: '', band: '' };
+
+function applySpotFilter() {
+    const cs  = spotsFilter.callsign.toLowerCase();
+    const ent = spotsFilter.entity.toLowerCase();
+    const bd  = spotsFilter.band.toLowerCase();
+
+    spotsTableFiltered = spotsTableData.filter(s => {
+        if (cs  && !s.callsign.toLowerCase().includes(cs))  return false;
+        const b = beaconByCall[s.callsign];
+        if (ent && !(b && b.entity.toLowerCase().includes(ent))) return false;
+        if (bd  && !s.band.toLowerCase().includes(bd))      return false;
+        return true;
+    });
+
+    // Update filter count badge
+    const countEl = document.getElementById('spots-filter-count');
+    if (countEl) {
+        const active = cs || ent || bd;
+        countEl.textContent = active
+            ? `${spotsTableFiltered.length} of ${spotsTableData.length} shown`
+            : '';
+    }
+
+    spotsTablePage = 0;
+    renderSpotsPage();
+}
 
 function spotsRowHtml(s) {
     const b = beaconByCall[s.callsign];
@@ -1840,11 +1885,15 @@ function spotsRowHtml(s) {
 function renderSpotsPage() {
     const tbody  = document.getElementById('spots-tbody');
     const perPageVal = parseInt(document.getElementById('spots-per-page').value, 10);
-    const total  = spotsTableData.length;
+    const total  = spotsTableFiltered.length;
 
     if (total === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;opacity:0.6;padding:20px;">No spots</td></tr>';
-        document.getElementById('spots-count').textContent = '';
+        const msg = spotsTableData.length > 0
+            ? 'No spots match the current filter'
+            : 'No spots';
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;opacity:0.6;padding:20px;">${msg}</td></tr>`;
+        document.getElementById('spots-count').textContent =
+            spotsTableData.length > 0 ? spotsTableData.length + ' spot' + (spotsTableData.length !== 1 ? 's' : '') + ' total' : '';
         document.getElementById('spots-page-info').textContent = '';
         document.getElementById('spots-page-label').textContent = '';
         ['spots-first-btn','spots-prev-btn','spots-next-btn','spots-last-btn'].forEach(id => {
@@ -1860,13 +1909,14 @@ function renderSpotsPage() {
 
     const start = showAll ? 0 : spotsTablePage * perPage;
     const end   = showAll ? total : Math.min(start + perPage, total);
-    const page  = spotsTableData.slice(start, end);
+    const page  = spotsTableFiltered.slice(start, end);
 
     tbody.innerHTML = page.map(spotsRowHtml).join('');
 
     // Update info labels
     document.getElementById('spots-count').textContent =
-        total + ' spot' + (total !== 1 ? 's' : '');
+        spotsTableData.length + ' spot' + (spotsTableData.length !== 1 ? 's' : '') +
+        (total < spotsTableData.length ? ` (${total} filtered)` : '');
     document.getElementById('spots-page-info').textContent =
         showAll ? `Showing all ${total}` : `${start + 1}–${end} of ${total}`;
     document.getElementById('spots-page-label').textContent =
@@ -1882,7 +1932,8 @@ function renderSpotsPage() {
 function renderSpotsTable(spots) {
     spotsTableData = spots;
     spotsTablePage = 0;
-    renderSpotsPage();
+    // Re-apply any active text filter (or initialise spotsTableFiltered to full set if none active)
+    applySpotFilter();
     // Enable CSV button only when there's data
     const csvBtn = document.getElementById('csv-download-btn');
     if (csvBtn) csvBtn.disabled = spots.length === 0;
@@ -2633,9 +2684,32 @@ async function init() {
         renderSpotsPage();
     });
     document.getElementById('spots-last-btn').addEventListener('click', () => {
-        const perPage = parseInt(document.getElementById('spots-per-page').value, 10) || spotsTableData.length;
-        spotsTablePage = Math.max(0, Math.ceil(spotsTableData.length / perPage) - 1);
+        const perPage = parseInt(document.getElementById('spots-per-page').value, 10) || spotsTableFiltered.length;
+        spotsTablePage = Math.max(0, Math.ceil(spotsTableFiltered.length / perPage) - 1);
         renderSpotsPage();
+    });
+
+    // Spots log real-time text filters
+    document.getElementById('spots-filter-callsign').addEventListener('input', e => {
+        spotsFilter.callsign = e.target.value.trim();
+        applySpotFilter();
+    });
+    document.getElementById('spots-filter-entity').addEventListener('input', e => {
+        spotsFilter.entity = e.target.value.trim();
+        applySpotFilter();
+    });
+    document.getElementById('spots-filter-band').addEventListener('input', e => {
+        spotsFilter.band = e.target.value.trim();
+        applySpotFilter();
+    });
+    document.getElementById('spots-filter-clear').addEventListener('click', () => {
+        spotsFilter.callsign = '';
+        spotsFilter.entity   = '';
+        spotsFilter.band     = '';
+        document.getElementById('spots-filter-callsign').value = '';
+        document.getElementById('spots-filter-entity').value   = '';
+        document.getElementById('spots-filter-band').value     = '';
+        applySpotFilter();
     });
 
     // Attach crosshair hover to the static tables

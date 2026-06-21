@@ -2110,6 +2110,25 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 
+            // Widget toast — show once per session on desktop only
+            if (!_isMobile) {
+                (async () => {
+                    try {
+                        const desc = await window.descriptionPromise;
+                        const widgets = (desc && desc.enabled_widgets) || [];
+                        if (widgets.length > 0 &&
+                            !sessionStorage.getItem('widgetToastShown')) {
+                            sessionStorage.setItem('widgetToastShown', '1');
+                            showNotification(
+                                'Instance has Widgets enabled — click the Latency bar in the bottom right to customise',
+                                'info',
+                                5000
+                            );
+                        }
+                    } catch (_) {}
+                })();
+            }
+
             // Enable screen wake lock to prevent mobile browsers from suspending WebSocket connections
             // This must be called from a user gesture (this click handler)
             const wakeLockEnabled = await screenWakeLock.enable();

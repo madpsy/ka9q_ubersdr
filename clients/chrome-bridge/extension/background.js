@@ -89,46 +89,26 @@ const ALARM_FLRIG_RECONNECT = 'flrig_reconnect';
 // runs via setTimeout chains that are re-started each time the SW wakes.
 // This is the standard MV3 pattern for high-frequency polling.
 
-// ── Widget state ───────────────────────────────────────────────────────────────
-// enabledWidgets:   ordered array of widget UUIDs the user has enabled.
-// widgetCache:      Map<widgetId, { name, html, version, cachedAt }>
-// suppressedWidgets: per-origin map of widget UUIDs the user wants excluded.
-//                   { [origin: string]: string[] }
-//                   When the user suppresses a widget the tab is navigated to
-//                   ?exclude_widgets=uuid1,uuid2 so the server never renders it.
-
-let enabledWidgets   = [];   // string[]
-let widgetCache      = {};   // { [id]: { name, html, version, cachedAt } }
-let suppressedWidgets = {};  // { [origin]: string[] }
-
-// Collector API base URL — never inject widgets into this origin.
-const COLLECTOR_ORIGIN = 'https://instances.ubersdr.org';
-const COLLECTOR_API    = 'https://instances.ubersdr.org/api/widgets';
-
 // ── Restore persisted settings on startup ─────────────────────────────────────
 
 async function restoreState() {
     const stored = await chrome.storage.local.get([
         'selectedTabId', 'flrigEnabled', 'flrigHost', 'flrigPort', 'flrigDirection',
         'pluginEnabled', 'pttMuteEnabled', 'registrySnapshot', 'lastKnownState',
-        'enabledWidgets', 'widgetCache', 'suppressedWidgets',
     ]);
-    if (stored.selectedTabId  !== undefined) selectedTabId  = stored.selectedTabId;
-    if (stored.flrigEnabled   !== undefined) flrigEnabled   = stored.flrigEnabled;
-    if (stored.flrigHost      !== undefined) flrigHost      = stored.flrigHost;
-    if (stored.flrigPort      !== undefined) flrigPort      = stored.flrigPort;
-    if (stored.flrigDirection !== undefined) flrigDirection = stored.flrigDirection;
-    if (stored.pluginEnabled  !== undefined) pluginEnabled  = stored.pluginEnabled;
-    if (stored.pttMuteEnabled !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
+    if (stored.selectedTabId   !== undefined) selectedTabId   = stored.selectedTabId;
+    if (stored.flrigEnabled    !== undefined) flrigEnabled    = stored.flrigEnabled;
+    if (stored.flrigHost       !== undefined) flrigHost       = stored.flrigHost;
+    if (stored.flrigPort       !== undefined) flrigPort       = stored.flrigPort;
+    if (stored.flrigDirection  !== undefined) flrigDirection  = stored.flrigDirection;
+    if (stored.pluginEnabled   !== undefined) pluginEnabled   = stored.pluginEnabled;
+    if (stored.pttMuteEnabled  !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
 
     // Restore registry snapshot and last known state from local storage.
     // Using storage.local (not storage.session) because session storage requires
     // Chrome 102+ and may not be available; local storage always works and
     // survives the frequent SW sleep/wake cycles in MV3.
     if (stored.lastKnownState) lastKnownState = stored.lastKnownState;
-    if (Array.isArray(stored.enabledWidgets)) enabledWidgets = stored.enabledWidgets;
-    if (stored.widgetCache && typeof stored.widgetCache === 'object') widgetCache = stored.widgetCache;
-    if (stored.suppressedWidgets && typeof stored.suppressedWidgets === 'object') suppressedWidgets = stored.suppressedWidgets;
     if (stored.registrySnapshot) {
         for (const entry of stored.registrySnapshot) {
             registry.set(entry.tabId, entry);
@@ -246,19 +226,18 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // If a tab navigates away from UberSDR the content script will send a deregister
 // message. We also watch onUpdated but only remove the tab if the URL has actually
-// changed to a different origin — this avoids falsely evicting tabs when:
-//   • Chrome fires spurious 'loading' events (e.g. after SW wake/restore)
-//   • The tab navigates to ?exclude_widgets=... (same-origin, just query params)
+// changed away from the registered URL — this avoids falsely evicting tabs when
+// Chrome fires spurious 'loading' events (e.g. after SW wake/restore).
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (changeInfo.status === 'loading' && registry.has(tabId)) {
-        // Only evict if the tab URL has changed to a different origin.
+        // Only evict if the tab URL has changed to something different.
         // If changeInfo.url is undefined the tab is reloading the same page — keep it.
         if (!changeInfo.url) return;
         const entry = registry.get(tabId);
         try {
-            const newOrigin = new URL(changeInfo.url).origin;
-            const oldOrigin = new URL(entry.url).origin;
-            if (newOrigin === oldOrigin && newOrigin !== 'null') return; // Same origin — keep it
+            const newHost = new URL(changeInfo.url).host;
+            const oldHost = new URL(entry.url).host;
+            if (newHost === oldHost) return; // Same host — likely a reload, keep it
         } catch (_) {}
         registry.delete(tabId);
         if (selectedTabId === tabId) {
@@ -313,14 +292,13 @@ function handleMessage(msg, sender) {
             }
 
             registry.set(tabId, {
-                tabId:                  tabId,
-                sessionId:              msg.sessionId,
-                url:                    msg.url,
-                title:                  msg.title || sender.tab.title || msg.url,
-                lastState:              null,
-                vfo:                    assignedVfo,
-                audioStarted:           !!msg.audioStarted,
-                instanceEnabledWidgets: [],  // array of {widget_id,name,is_public}
+                tabId:        tabId,
+                sessionId:    msg.sessionId,
+                url:          msg.url,
+                title:        msg.title || sender.tab.title || msg.url,
+                lastState:    null,
+                vfo:          assignedVfo,
+                audioStarted: !!msg.audioStarted,
             });
 
             if (tabId === pendingSelectTabId || selectedTabId === null || !registry.has(selectedTabId)) {
@@ -333,20 +311,6 @@ function handleMessage(msg, sender) {
             broadcastRegistry();
 
             chrome.tabs.sendMessage(tabId, { type: 'cmd:get_state' }).catch(() => {});
-
-            // Apply stored widget suppressions for this origin by navigating to
-            // ?exclude_widgets=uuid1,uuid2 if the URL doesn't already match.
-            try {
-                const origin = new URL(msg.url).origin;
-                const suppressed = suppressedWidgets[origin] || [];
-                if (suppressed.length > 0 && !urlExcludeMatchesSuppressed(msg.url, suppressed)) {
-                    chrome.tabs.update(tabId, { url: buildExcludeUrl(msg.url, suppressed) }).catch(() => {});
-                    break; // Tab is navigating — skip widget injection for this registration
-                }
-            } catch (_) {}
-
-            // Inject enabled community widgets into this tab.
-            injectWidgetsIntoTab(tabId, msg.url);
 
             if (pendingProfileStates.has(tabId)) {
                 const inst = pendingProfileStates.get(tabId);
@@ -403,19 +367,6 @@ function handleMessage(msg, sender) {
             if (!tabId || !registry.has(tabId)) break;
             registry.get(tabId).audioStarted = true;
             broadcastRegistry();
-            break;
-        }
-
-        // ── Content script: instance's enabled widget list ────────────────────
-        // Receives array of { widget_id, name, is_public } objects from page_world.js.
-        case 'ubersdr:instance_widgets': {
-            const tabId = sender.tab ? sender.tab.id : null;
-            if (!tabId || !registry.has(tabId)) break;
-            const instanceWidgets = Array.isArray(msg.enabledWidgets) ? msg.enabledWidgets : [];
-            registry.get(tabId).instanceEnabledWidgets = instanceWidgets;
-            broadcastRegistry();
-            // Re-inject community widgets now that we know what the instance serves.
-            injectWidgetsIntoTab(tabId, registry.get(tabId).url);
             break;
         }
 
@@ -694,126 +645,6 @@ function handleMessage(msg, sender) {
             });
         }
 
-        // ── Popup: get widget catalogue from collector ─────────────────────────
-        case 'popup:get_widget_catalogue': {
-            return fetch(`${COLLECTOR_API}/with-instances`)
-                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-                .then(list => ({ ok: true, widgets: list }))
-                .catch(err => ({ ok: false, error: err.message }));
-        }
-
-        // ── Popup: enable a widget (fetch html, cache, inject into all tabs) ───
-        case 'popup:enable_widget': {
-            const { widgetId, widgetName } = msg;
-            if (!widgetId) break;
-            if (enabledWidgets.includes(widgetId)) {
-                return Promise.resolve({ ok: true, already: true });
-            }
-            return fetch(`${COLLECTOR_API}/${widgetId}`)
-                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-                .then(async (widget) => {
-                    const html = widget.html_content || '';
-                    if (!html) throw new Error('Widget has no html_content');
-
-                    widgetCache[widgetId] = {
-                        name:     widget.name || widgetName || widgetId,
-                        callsign: widget.callsign || '',
-                        html:     html,
-                        version:  widget.version || 0,
-                        cachedAt: Date.now(),
-                    };
-                    enabledWidgets.push(widgetId);
-                    await chrome.storage.local.set({ enabledWidgets, widgetCache });
-
-                    for (const [tabId, entry] of registry) {
-                        injectWidgetsIntoTab(tabId, entry.url, [widgetId]);
-                    }
-
-                    broadcastToPopup({ type: 'widgets:updated', enabledWidgets, widgetCache });
-                    return { ok: true, widgetCache };
-                })
-                .catch(err => ({ ok: false, error: err.message }));
-        }
-
-        // ── Popup: disable a widget (remove from list; reload tabs to un-inject) ─
-        // Injected JS can't be removed from a live page, so we reload all registered
-        // UberSDR tabs so the widget is gone immediately.
-        case 'popup:disable_widget': {
-            const { widgetId } = msg;
-            if (!widgetId) break;
-            enabledWidgets = enabledWidgets.filter(id => id !== widgetId);
-            return chrome.storage.local.set({ enabledWidgets }).then(() => {
-                broadcastToPopup({ type: 'widgets:updated', enabledWidgets });
-                // Reload all registered tabs so the widget is removed from the live page.
-                for (const [tabId] of registry) {
-                    chrome.tabs.reload(tabId).catch(() => {});
-                }
-                return { ok: true };
-            });
-        }
-
-        // ── Popup: get current enabled widget list ────────────────────────────
-        case 'popup:get_enabled_widgets': {
-            return Promise.resolve({ enabledWidgets, widgetCache });
-        }
-
-        // ── Popup: suppress an instance-native widget ─────────────────────────
-        // Navigates the tab to ?exclude_widgets=... so the server never renders it.
-        case 'popup:suppress_instance_widget': {
-            const { widgetId } = msg;
-            if (!widgetId) break;
-            const activeEntry = selectedTabId ? registry.get(selectedTabId) : null;
-            if (!activeEntry) break;
-            let origin;
-            try { origin = new URL(activeEntry.url).origin; } catch (_) { break; }
-            const current = suppressedWidgets[origin] || [];
-            if (current.includes(widgetId)) return Promise.resolve({ ok: true });
-            suppressedWidgets[origin] = [...current, widgetId];
-            return chrome.storage.local.set({ suppressedWidgets }).then(() => {
-                for (const [tabId, entry] of registry) {
-                    try {
-                        if (new URL(entry.url).origin === origin) {
-                            chrome.tabs.update(tabId, { url: buildExcludeUrl(entry.url, suppressedWidgets[origin]) }).catch(() => {});
-                        }
-                    } catch (_) {}
-                }
-                broadcastToPopup({ type: 'suppressed_widgets:updated', origin, suppressedWidgets });
-                return { ok: true };
-            });
-        }
-
-        // ── Popup: un-suppress an instance-native widget ──────────────────────
-        case 'popup:unsuppress_instance_widget': {
-            const { widgetId } = msg;
-            if (!widgetId) break;
-            const activeEntry = selectedTabId ? registry.get(selectedTabId) : null;
-            if (!activeEntry) break;
-            let origin;
-            try { origin = new URL(activeEntry.url).origin; } catch (_) { break; }
-            const current = suppressedWidgets[origin] || [];
-            suppressedWidgets[origin] = current.filter(id => id !== widgetId);
-            return chrome.storage.local.set({ suppressedWidgets }).then(() => {
-                for (const [tabId, entry] of registry) {
-                    try {
-                        if (new URL(entry.url).origin === origin) {
-                            chrome.tabs.update(tabId, { url: buildExcludeUrl(entry.url, suppressedWidgets[origin]) }).catch(() => {});
-                        }
-                    } catch (_) {}
-                }
-                broadcastToPopup({ type: 'suppressed_widgets:updated', origin, suppressedWidgets });
-                return { ok: true };
-            });
-        }
-
-        // ── Popup: get suppressed widget list for the active tab's origin ─────
-        case 'popup:get_suppressed_instance_widgets': {
-            const activeEntry = selectedTabId ? registry.get(selectedTabId) : null;
-            let origin = null;
-            try { if (activeEntry) origin = new URL(activeEntry.url).origin; } catch (_) {}
-            const suppressed = origin ? (suppressedWidgets[origin] || []) : [];
-            return Promise.resolve({ suppressedInstanceWidgets: suppressed });
-        }
-
         default:
             break;
     }
@@ -823,80 +654,15 @@ function handleMessage(msg, sender) {
 
 function registrySnapshot() {
     return Array.from(registry.values()).map(e => ({
-        tabId:                  e.tabId,
-        sessionId:              e.sessionId,
-        url:                    e.url,
-        title:                  e.title,
-        selected:               e.tabId === selectedTabId,
-        lastState:              e.lastState,
-        vfo:                    e.vfo || null,
-        audioStarted:           !!e.audioStarted,
-        instanceEnabledWidgets: e.instanceEnabledWidgets || [],  // array of {widget_id,name,is_public}
+        tabId:        e.tabId,
+        sessionId:    e.sessionId,
+        url:          e.url,
+        title:        e.title,
+        selected:     e.tabId === selectedTabId,
+        lastState:    e.lastState,
+        vfo:          e.vfo || null,
+        audioStarted: !!e.audioStarted,
     }));
-}
-
-// ── URL helpers for ?exclude_widgets= suppression ──────────────────────────────
-
-// Build a URL with the ?exclude_widgets= param set to the given UUID list.
-// If suppressedIds is empty the param is removed entirely.
-function buildExcludeUrl(tabUrl, suppressedIds) {
-    try {
-        const url = new URL(tabUrl);
-        if (!suppressedIds || suppressedIds.length === 0) {
-            url.searchParams.delete('exclude_widgets');
-        } else {
-            url.searchParams.set('exclude_widgets', suppressedIds.join(','));
-        }
-        return url.toString();
-    } catch (_) {
-        return tabUrl;
-    }
-}
-
-// Returns true if the URL's exclude_widgets param already matches the stored
-// suppressed list (sorted comparison).  Used to prevent navigation loops.
-function urlExcludeMatchesSuppressed(tabUrl, suppressedIds) {
-    try {
-        const url = new URL(tabUrl);
-        const param = url.searchParams.get('exclude_widgets') || '';
-        const fromUrl = param ? param.split(',').filter(Boolean).sort() : [];
-        const fromStorage = [...(suppressedIds || [])].sort();
-        return JSON.stringify(fromUrl) === JSON.stringify(fromStorage);
-    } catch (_) {
-        return false;
-    }
-}
-
-// ── Widget injection helper ────────────────────────────────────────────────────
-// Send enabled widgets to a specific tab. If widgetIds is provided only those
-// widgets are sent; otherwise all currently-enabled widgets are sent.
-// Never injects into the collector origin.
-function injectWidgetsIntoTab(tabId, tabUrl, widgetIds) {
-    try {
-        const origin = new URL(tabUrl || '').origin;
-        if (origin === COLLECTOR_ORIGIN) return;
-    } catch (_) {
-        return;
-    }
-
-    // Filter out widgets the instance already serves natively.
-    // instanceEnabledWidgets is now an array of {widget_id, name, is_public} objects.
-    const instanceWidgets = (registry.has(tabId) && registry.get(tabId).instanceEnabledWidgets) || [];
-    const instanceIds = instanceWidgets.map(w => (typeof w === 'object' ? w.widget_id : w));
-    const requestedIds = widgetIds || enabledWidgets;
-    const ids = requestedIds.filter(id => !instanceIds.includes(id));
-    if (!ids || ids.length === 0) return;
-
-    const widgets = ids
-        .filter(id => widgetCache[id] && widgetCache[id].html)
-        .map(id => ({ id, html: widgetCache[id].html }));
-
-    if (widgets.length === 0) return;
-
-    chrome.tabs.sendMessage(tabId, {
-        type:    'cmd:inject_widgets',
-        widgets: widgets,
-    }).catch(() => {});
 }
 
 function forwardCommandToTab(command) {

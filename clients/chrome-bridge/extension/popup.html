@@ -201,40 +201,6 @@
         </div>
     </div>
 
-    <!-- ── Community Widgets ────────────────────────────────────────────────── -->
-    <div class="section">
-        <div class="collapsible-header" id="widgets-header">
-            <div class="section-title" style="margin-bottom:0">Community Widgets</div>
-            <span class="collapsible-arrow" id="widgets-arrow">▶</span>
-        </div>
-        <div class="collapsible-body" id="widgets-body">
-            <!-- Combined search + select combobox -->
-            <div class="widget-combobox-wrap" style="margin-top:8px">
-                <div class="widget-combobox-row">
-                    <input class="control-input widget-combobox-input" type="text"
-                           id="widget-search" placeholder="Search widgets…"
-                           autocomplete="off" role="combobox" aria-expanded="false"
-                           aria-haspopup="listbox" aria-autocomplete="list">
-                    <button class="btn btn-secondary btn-sm" id="btn-widget-refresh" title="Refresh catalogue">↻</button>
-                </div>
-                <div class="widget-listbox" id="widget-listbox" role="listbox" style="display:none"></div>
-            </div>
-            <!-- Hidden value carrier -->
-            <select id="widget-catalogue-select" style="display:none"></select>
-
-            <!-- Selected widget preview card -->
-            <div id="widget-preview" class="widget-preview" style="display:none">
-                <div class="widget-preview-name" id="widget-preview-name"></div>
-                <div class="widget-preview-meta" id="widget-preview-meta"></div>
-                <div class="widget-preview-desc" id="widget-preview-desc"></div>
-                <button class="btn btn-success btn-sm" id="btn-widget-add" style="margin-top:6px">＋ Add Widget</button>
-            </div>
-
-            <!-- Enabled widgets list -->
-            <div id="widget-enabled-list" class="widget-enabled-list"></div>
-        </div>
-    </div>
-
     <!-- ── Status bar ────────────────────────────────────────────────────────── -->
     <div class="status-bar" id="status-bar">Ready</div>
 

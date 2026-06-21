@@ -61,20 +61,6 @@
             audioStarted: audioStarted,
         }, '*');
 
-        // Read enabled_widgets from the page's already-fetched description promise.
-        // index.html stores the /api/description response as window.descriptionPromise
-        // so we can read it without any additional network request or extension permission.
-        if (window.descriptionPromise && typeof window.descriptionPromise.then === 'function') {
-            window.descriptionPromise.then(function (desc) {
-                if (!desc) return;
-                window.postMessage({
-                    __ubersdr:      true,
-                    type:           'instance_widgets',
-                    enabledWidgets: Array.isArray(desc.enabled_widgets) ? desc.enabled_widgets : [],
-                }, '*');
-            }).catch(function () { /* not fatal */ });
-        }
-
         // Watch for the overlay being hidden (user pressed play).
         // We observe the 'class' attribute because app.js uses classList.add('hidden').
         if (overlay && !audioStarted) {
@@ -213,46 +199,6 @@
                     break;
                 }
 
-                case 'cmd:inject_widgets': {
-                    // msg.widgets = [{ id, html }, ...]
-                    // Each html blob is a self-contained <style>+<div>+<script> string.
-                    // We must re-create <script> elements so the browser actually executes them
-                    // (innerHTML does NOT execute scripts — browser security rule).
-                    if (!Array.isArray(msg.widgets)) break;
-                    msg.widgets.forEach(function (w) {
-                        // Guard: don't inject the same widget twice in this tab.
-                        var existingId = '__ubersdr_widget_' + w.id;
-                        if (document.getElementById(existingId)) return;
-
-                        // Create a container div to hold the widget's non-script content.
-                        var container = document.createElement('div');
-                        container.id = existingId;
-                        // Parse the HTML blob into a temporary holder.
-                        var tmp = document.createElement('div');
-                        tmp.innerHTML = w.html;
-
-                        // Move non-script nodes into the container and append to body.
-                        Array.from(tmp.childNodes).forEach(function (node) {
-                            if (node.nodeName !== 'SCRIPT') {
-                                container.appendChild(node.cloneNode(true));
-                            }
-                        });
-                        document.body.appendChild(container);
-
-                        // Re-create each <script> as a live element so it executes.
-                        tmp.querySelectorAll('script').forEach(function (dead) {
-                            var live = document.createElement('script');
-                            if (dead.src) {
-                                live.src = dead.src;
-                            } else {
-                                live.textContent = dead.textContent;
-                            }
-                            document.body.appendChild(live);
-                        });
-                    });
-                    break;
-                }
-
             }
         });
 
@@ -306,14 +252,6 @@
                 _sessionId    = msg.sessionId;
                 _audioStarted = !!msg.audioStarted;
                 init(msg.sessionId, msg.audioStarted);
-                break;
-            }
-
-            case 'instance_widgets': {
-                browser.runtime.sendMessage({
-                    type:           'ubersdr:instance_widgets',
-                    enabledWidgets: msg.enabledWidgets,
-                }).catch(() => {});
                 break;
             }
 
@@ -379,12 +317,11 @@
             }).catch(() => {});
         });
 
+        // Listen for commands from the background script.
+        browser.runtime.onMessage.addListener(handleCommand);
+
         console.log('[UberSDR Bridge] Content script active — session:', sessionId);
     }
-
-    // Register the command handler immediately (not inside init) so commands
-    // work even before radioAPI is detected.
-    browser.runtime.onMessage.addListener(handleCommand);
 
     // ── Command handler ────────────────────────────────────────────────────────
     // Commands arrive from background.js. Forward them into the page world via

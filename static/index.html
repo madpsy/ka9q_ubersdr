@@ -41,10 +41,18 @@
         if (!Array.isArray(ids) || ids.length === 0) return;
 
         // Avoid redirect loop: only redirect if the URL param doesn't already match.
+        // Compare sorted lists so order differences don't cause spurious redirects.
         var params = new URLSearchParams(location.search);
         var current = (params.get('exclude_widgets') || '').split(',').filter(Boolean).sort().join(',');
         var desired = ids.slice().sort().join(',');
         if (current === desired) return;
+
+        // Secondary guard: if we already redirected this navigation (e.g. service
+        // worker served a cached page without the query param), don't loop.
+        // sessionStorage is cleared on tab close so this is safe across sessions.
+        var SESSION_KEY = 'excludeWidgetsRedirected';
+        if (sessionStorage.getItem(SESSION_KEY) === desired) return;
+        sessionStorage.setItem(SESSION_KEY, desired);
 
         params.set('exclude_widgets', ids.join(','));
         location.replace(location.pathname + '?' + params.toString() + location.hash);

@@ -12724,6 +12724,10 @@ function applyWidgetVisibility() {
     } else {
         params.delete('exclude_widgets');
     }
+    // Clear the sessionStorage redirect guard so the next page load performs a
+    // fresh check. Without this, if the service worker serves a cached page
+    // (dropping the query param), the guard would incorrectly block the redirect.
+    try { sessionStorage.removeItem('excludeWidgetsRedirected'); } catch (e) {}
     var qs = params.toString();
     location.replace(location.pathname + (qs ? '?' + qs : '') + location.hash);
 }

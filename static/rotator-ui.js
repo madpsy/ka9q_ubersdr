@@ -991,7 +991,7 @@ class RotatorUI {
                 ? Math.round(data.position.azimuth) + '°'
                 : '';
             const msg = az ? `🧭 Rotator stopped at ${az}` : '🧭 Rotator stopped';
-            if (typeof window.showNotification === 'function') {
+            if (typeof window.showNotification === 'function' && !window._isMobile) {
                 window.showNotification(msg, 'success', 4000);
             }
         }
@@ -1230,7 +1230,7 @@ class RotatorUI {
             const selectedChanged = newSelected  !== this.lastAntSelected;
             const groundedChanged = newGrounded  !== this.lastAntGrounded;
 
-            if ((selectedChanged || groundedChanged) && typeof window.showNotification === 'function') {
+            if ((selectedChanged || groundedChanged) && typeof window.showNotification === 'function' && !window._isMobile) {
                 let msg;
                 if (newGrounded) {
                     msg = '⏚ Antenna grounded';

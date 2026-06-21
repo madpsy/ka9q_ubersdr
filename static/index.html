@@ -27,6 +27,29 @@
             }
         })();
     </script>
+    <!-- Widget exclusion early redirect — runs synchronously before any assets load.
+         Reads excludedWidgetIds from localStorage and redirects with ?exclude_widgets=
+         so the server renders the page without those widgets. Must stay before all
+         other scripts to fire before WebSocket / audio asset loads. -->
+    <script>
+    (function () {
+        var STORAGE_KEY = 'excludedWidgetIds';
+        var stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+        var ids;
+        try { ids = JSON.parse(stored); } catch (e) { return; }
+        if (!Array.isArray(ids) || ids.length === 0) return;
+
+        // Avoid redirect loop: only redirect if the URL param doesn't already match.
+        var params = new URLSearchParams(location.search);
+        var current = (params.get('exclude_widgets') || '').split(',').filter(Boolean).sort().join(',');
+        var desired = ids.slice().sort().join(',');
+        if (current === desired) return;
+
+        params.set('exclude_widgets', ids.join(','));
+        location.replace(location.pathname + '?' + params.toString() + location.hash);
+    })();
+    </script>
     <!-- Opus decoder for handling Opus-compressed audio -->
     <script src="opus-decoder.min.js"></script>
     <!-- JSZip for creating ZIP files -->
@@ -1367,6 +1390,20 @@
                             Which markers the dial-wheel ‹ › arrows and lock-screen ⏮ ⏭ step through.
                         </p>
                     </div>
+                </div>
+
+                <!-- Widget Visibility — populated by populateWidgetVisibilitySection() when the modal opens.
+                     Hidden entirely when no widgets are configured on this instance. -->
+                <div id="widget-visibility-section" style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px; display: none;">
+                    <p style="font-weight: bold; color: #ecf0f1; margin-bottom: 8px;">Embedded Widgets</p>
+                    <p style="font-size: 0.82em; color: #888; margin-bottom: 10px;">
+                        Uncheck widgets you want to hide. Changes take effect on reload.
+                    </p>
+                    <div id="widget-visibility-list"></div>
+                    <button id="widget-visibility-apply" onclick="applyWidgetVisibility()"
+                        style="display: none; margin-top: 12px; padding: 8px 18px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                        Apply &amp; Reload
+                    </button>
                 </div>
 
                 <div style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px;">

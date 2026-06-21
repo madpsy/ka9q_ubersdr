@@ -382,10 +382,8 @@
         console.log('[UberSDR Bridge] Content script active — session:', sessionId);
     }
 
-    // Register the command handler immediately (not inside init) so that
-    // cmd:remove_instance_widget works even before radioAPI is detected.
-    // This is safe — handleCommand guards against non-UberSDR pages via
-    // the initialised flag for commands that require it.
+    // Register the command handler immediately (not inside init) so commands
+    // work even before radioAPI is detected.
     browser.runtime.onMessage.addListener(handleCommand);
 
     // ── Command handler ────────────────────────────────────────────────────────
@@ -409,34 +407,6 @@
                     audioStarted: _audioStarted,
                 }).catch(() => {});
             }
-            return;
-        }
-
-        // cmd:remove_instance_widget — handled directly in the ISOLATED world
-        // (full DOM access, no dependency on radioAPI being ready).
-        // The server wraps each widget in HTML comment markers:
-        //   <!-- widget:uuid --> ... <!-- /widget:uuid -->
-        if (msg.type === 'cmd:remove_instance_widget') {
-            const widgetIds = Array.isArray(msg.widgetIds) ? msg.widgetIds : (msg.widgetId ? [msg.widgetId] : []);
-            widgetIds.forEach(function (wid) {
-                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
-                let startNode = null;
-                let node;
-                while ((node = walker.nextNode())) {
-                    const text = node.nodeValue ? node.nodeValue.trim() : '';
-                    if (text === 'widget:' + wid) { startNode = node; break; }
-                }
-                if (!startNode) return;
-                const toRemove = [startNode];
-                let cur = startNode.nextSibling;
-                while (cur) {
-                    toRemove.push(cur);
-                    if (cur.nodeType === Node.COMMENT_NODE &&
-                        cur.nodeValue && cur.nodeValue.trim() === '/widget:' + wid) break;
-                    cur = cur.nextSibling;
-                }
-                toRemove.forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
-            });
             return;
         }
 

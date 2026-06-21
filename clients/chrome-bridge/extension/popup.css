@@ -877,20 +877,17 @@ body {
     opacity: 0.75;
 }
 
-/* Suppressed instance widget — extra muted, strikethrough name */
-.widget-instance-item.widget-instance-suppressed {
-    opacity: 0.45;
-}
-
-.widget-instance-item.widget-instance-suppressed .widget-enabled-name {
-    text-decoration: line-through;
-    color: #666;
-}
-
 .widget-instance-lock {
     flex-shrink: 0;
     font-size: 12px;
     line-height: 1;
+}
+
+/* Suppressed (hidden) instance widget — dimmed to indicate it's excluded */
+.widget-instance-item.widget-instance-hidden {
+    opacity: 0.45;
+    border-color: #2a2a3a;
+    background: #0d1117;
 }
 
 .widget-no-enabled {

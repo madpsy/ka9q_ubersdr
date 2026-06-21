@@ -158,31 +158,6 @@
             return;
         }
 
-        // cmd:remove_instance_widget — find HTML comment markers and remove DOM nodes between them.
-        if (msg.type === 'cmd:remove_instance_widget') {
-            const widgetIds = Array.isArray(msg.widgetIds) ? msg.widgetIds : (msg.widgetId ? [msg.widgetId] : []);
-            widgetIds.forEach(function (wid) {
-                var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
-                var startNode = null;
-                var node;
-                while ((node = walker.nextNode())) {
-                    var text = node.nodeValue ? node.nodeValue.trim() : '';
-                    if (text === 'widget:' + wid) { startNode = node; break; }
-                }
-                if (!startNode) return;
-                var toRemove = [startNode];
-                var cur = startNode.nextSibling;
-                while (cur) {
-                    toRemove.push(cur);
-                    if (cur.nodeType === Node.COMMENT_NODE &&
-                        cur.nodeValue && cur.nodeValue.trim() === '/widget:' + wid) break;
-                    cur = cur.nextSibling;
-                }
-                toRemove.forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
-            });
-            return;
-        }
-
         // cmd:inject_widgets is handled directly in the content script (ISOLATED world)
         // because it manipulates the DOM — no need to go through page_world.js.
         if (msg.type === 'cmd:inject_widgets') {

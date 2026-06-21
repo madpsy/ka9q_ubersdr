@@ -6279,6 +6279,15 @@ function updateURL() {
         }
     }
 
+    // Preserve exclude_widgets from localStorage so the param stays in the URL
+    // even after updateURL() rewrites it (updateURL builds params from scratch).
+    try {
+        const excludedIds = JSON.parse(localStorage.getItem('excludedWidgetIds') || '[]');
+        if (Array.isArray(excludedIds) && excludedIds.length > 0) {
+            params.set('exclude_widgets', excludedIds.join(','));
+        }
+    } catch (e) { /* ignore malformed storage */ }
+
     // Update URL without reloading page
     const newURL = window.location.pathname + '?' + params.toString();
     window.history.replaceState({}, '', newURL);
@@ -12630,6 +12639,95 @@ window.bookmarkSearch        = bookmarkSearch;
 window.bookmarkSearchFocus   = bookmarkSearchFocus;
 window.bookmarkSearchKeydown = bookmarkSearchKeydown;
 
+// ---------------------------------------------------------------------------
+// Widget Visibility (exclude_widgets)
+// ---------------------------------------------------------------------------
+
+/**
+ * Populate the widget visibility checklist inside the Audio Settings modal.
+ * Called each time the modal opens. Uses window.apiDescription (already
+ * resolved by the time any user can open the modal) — no async needed.
+ *
+ * Also prunes stale UUIDs from localStorage: if a widget was removed from
+ * the server's enabled_widgets list since the last visit, its UUID is
+ * silently dropped from storage (the server already ignores it, but this
+ * keeps the UI and URL tidy).
+ */
+function populateWidgetVisibilitySection() {
+    var data = window.apiDescription;
+    var widgets = (data && data.enabled_widgets) || [];
+    var section = document.getElementById('widget-visibility-section');
+    var list    = document.getElementById('widget-visibility-list');
+    var applyBtn = document.getElementById('widget-visibility-apply');
+    if (!section || !list || !applyBtn) return;
+
+    // Build a Set of currently-enabled widget UUIDs from the server.
+    var enabledIds = new Set(widgets.map(function (w) { return w.widget_id; }));
+
+    // Prune stale UUIDs from localStorage (widgets removed server-side).
+    var stored = [];
+    try { stored = JSON.parse(localStorage.getItem('excludedWidgetIds') || '[]'); } catch (e) {}
+    var cleaned = stored.filter(function (id) { return enabledIds.has(id); });
+    if (cleaned.length !== stored.length) {
+        localStorage.setItem('excludedWidgetIds', JSON.stringify(cleaned));
+    }
+
+    if (widgets.length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+
+    var excluded = new Set(cleaned);
+    var originalState = JSON.stringify([...excluded].sort());
+
+    list.innerHTML = '';
+    widgets.forEach(function (w) {
+        var label = document.createElement('label');
+        label.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;color:#ecf0f1;';
+
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !excluded.has(w.widget_id);
+        cb.style.cssText = 'width:16px;height:16px;cursor:pointer;flex-shrink:0;';
+        cb.addEventListener('change', function () {
+            var ex = new Set();
+            try { JSON.parse(localStorage.getItem('excludedWidgetIds') || '[]').forEach(function (id) { ex.add(id); }); } catch (e) {}
+            if (cb.checked) { ex.delete(w.widget_id); } else { ex.add(w.widget_id); }
+            localStorage.setItem('excludedWidgetIds', JSON.stringify([...ex]));
+            var newState = JSON.stringify([...ex].sort());
+            applyBtn.style.display = (newState !== originalState) ? 'inline-block' : 'none';
+        });
+
+        var span = document.createElement('span');
+        // Fall back to a truncated UUID if the name is empty (cache miss at server startup).
+        span.textContent = (w.name && w.name.trim()) ? w.name : ('Widget ' + w.widget_id.slice(0, 8) + '\u2026');
+
+        label.appendChild(cb);
+        label.appendChild(span);
+        list.appendChild(label);
+    });
+
+    section.style.display = 'block';
+    applyBtn.style.display = 'none';
+}
+
+/**
+ * Apply the current widget exclusion list and reload the page.
+ * Preserves all existing URL params (freq, mode, bwl, bwh, ext, zoom_*).
+ */
+function applyWidgetVisibility() {
+    var ids = [];
+    try { ids = JSON.parse(localStorage.getItem('excludedWidgetIds') || '[]'); } catch (e) {}
+    var params = new URLSearchParams(location.search);
+    if (ids.length > 0) {
+        params.set('exclude_widgets', ids.join(','));
+    } else {
+        params.delete('exclude_widgets');
+    }
+    var qs = params.toString();
+    location.replace(location.pathname + (qs ? '?' + qs : '') + location.hash);
+}
+
 // Audio Buffer Configuration Functions
 function openBufferConfigModal() {
     const modal = document.getElementById('buffer-config-modal');
@@ -12677,6 +12775,9 @@ function openBufferConfigModal() {
         // Sync the marker prev/next type selector (dial wheel + media session)
         const navSelect = document.getElementById('marker-nav-mode');
         if (navSelect) navSelect.value = markerNavMode;
+
+        // Populate widget visibility checklist (no-op when no widgets configured)
+        populateWidgetVisibilitySection();
 
         modal.style.display = 'flex';
     }
@@ -13461,6 +13562,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
+window.applyWidgetVisibility = applyWidgetVisibility;
 window.loadBufferThreshold = loadBufferThreshold; // needed by ui-config.js applyServerUIDefaults()
 window.setMediaSessionEnabled = setMediaSessionEnabled;
 window.setMediaSessionSkipMode = setMediaSessionSkipMode;

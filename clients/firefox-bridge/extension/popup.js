@@ -75,12 +75,13 @@ let isPttMuteEnabled = false;  // mirrors background pttMuteEnabled
 let isPttActive      = false;  // current PTT state from flrig
 let publicInstances  = [];     // Cached list from instances.ubersdr.org
 
-// instanceEnabledWidgets: UUIDs the currently-selected instance already serves
-// natively (from /api/description).  Updated whenever the registry changes.
+// instanceEnabledWidgets: widgets the currently-selected instance already serves
+// natively (from /api/description).  Array of { widget_id, name, is_public }.
+// Updated whenever the registry changes.
 let instanceEnabledWidgets = [];
 
-// suppressedWidgetIds: UUIDs the user has chosen to hide even when the instance
-// serves them natively.  Persisted in storage via background.
+// suppressedWidgetIds: UUIDs the user has chosen to exclude via ?exclude_widgets=.
+// Persisted per-origin in storage via background.
 let suppressedWidgetIds = [];
 
 // ── Confirm modal ──────────────────────────────────────────────────────────────
@@ -973,8 +974,14 @@ browser.runtime.onMessage.addListener((msg) => {
             break;
 
         case 'suppressed_widgets:updated':
-            suppressedWidgetIds = Array.isArray(msg.suppressedInstanceWidgets) ? msg.suppressedInstanceWidgets : suppressedWidgetIds;
-            renderEnabledWidgets();
+            // Background sends { origin, suppressedWidgets } — extract the list for
+            // the active tab's origin directly from the message (no async round-trip).
+            if (msg.suppressedWidgets && typeof msg.suppressedWidgets === 'object' && msg.origin) {
+                suppressedWidgetIds = Array.isArray(msg.suppressedWidgets[msg.origin])
+                    ? msg.suppressedWidgets[msg.origin]
+                    : [];
+                renderEnabledWidgets();
+            }
             break;
 
         default:
@@ -1172,7 +1179,7 @@ function renderCatalogueDropdown() {
     } else {
         filtered.forEach((w, idx) => {
             const alreadyEnabled = enabledWidgetIds.includes(w.widget_id);
-            const onInstance     = instanceEnabledWidgets.includes(w.widget_id);
+            const onInstance     = instanceEnabledWidgets.some(iw => iw.widget_id === w.widget_id);
             const both           = alreadyEnabled && onInstance;
             const featured       = !!w.is_featured;
 
@@ -1259,7 +1266,7 @@ function showWidgetPreview(widgetId) {
     widgetPreviewMeta.textContent = `by ${w.callsign || '?'} · v${w.version || 1} · ${enabledBy}`;
     widgetPreviewDesc.textContent = w.description || '';
 
-    const onInstance     = instanceEnabledWidgets.includes(widgetId);
+    const onInstance     = instanceEnabledWidgets.some(iw => iw.widget_id === widgetId);
     const alreadyEnabled = enabledWidgetIds.includes(widgetId);
     // Button state:
     //   user already added it → "✓ Already added" (disabled — already in their list)
@@ -1285,25 +1292,33 @@ function showWidgetPreview(widgetId) {
 function renderEnabledWidgets() {
     widgetEnabledList.innerHTML = '';
 
-    // ── Instance-native widgets (padlocked, with optional hide button) ────────
-    // Show ALL widgets the current instance serves natively.  Suppressed ones
-    // are shown with a strikethrough / muted style and a restore button.
-    const instanceOnly = instanceEnabledWidgets;
-    instanceOnly.forEach(id => {
-        const catalogueEntry = widgetCatalogue.find(w => w.widget_id === id);
-        let label = catalogueEntry ? catalogueEntry.name : id;
-        if (catalogueEntry && catalogueEntry.callsign) label += ` (${catalogueEntry.callsign})`;
-        if (catalogueEntry && catalogueEntry.is_featured) label += ' ⭐';
+    // ── Instance-native widgets (padlocked, with optional hide/restore button) ─
+    // instanceEnabledWidgets is an array of { widget_id, name, is_public }.
+    // Split into active (not suppressed) and suppressed (hidden via ?exclude_widgets=).
+    // Suppressed widgets show a restore button; active ones show a hide button.
+    const activeInstanceWidgets    = instanceEnabledWidgets.filter(w => !suppressedWidgetIds.includes(w.widget_id));
+    const suppressedInstanceWidgets = instanceEnabledWidgets.filter(w => suppressedWidgetIds.includes(w.widget_id));
 
-        const isSuppressed = suppressedWidgetIds.includes(id);
+    function buildInstanceWidgetItem(w, isSuppressed) {
+        const id   = w.widget_id;
+        const name = w.name || id;
+        const catEntry = widgetCatalogue.find(c => c.widget_id === id);
+        const featured = catEntry && catEntry.is_featured;
+        let label = name;
+        if (!w.is_public) label += ' 🔐';
+        if (featured)     label += ' ⭐';
 
         const item = document.createElement('div');
-        item.className = 'widget-instance-item' + (isSuppressed ? ' widget-instance-suppressed' : '');
+        item.className = 'widget-instance-item' + (isSuppressed ? ' widget-instance-hidden' : '');
 
         const lockEl = document.createElement('span');
         lockEl.className = 'widget-instance-lock';
-        lockEl.textContent = isSuppressed ? '🚫' : '🔒';
-        lockEl.title = isSuppressed ? 'Hidden by you (instance still serves it)' : 'Enabled by this instance';
+        lockEl.textContent = isSuppressed ? '🙈' : '🔒';
+        lockEl.title = isSuppressed
+            ? 'Hidden by you (click ↩ to restore)'
+            : (w.is_public
+                ? 'Enabled by this instance (visible to all users)'
+                : 'Enabled by this instance (private — instance owner only)');
         item.appendChild(lockEl);
 
         const nameEl = document.createElement('div');
@@ -1313,31 +1328,35 @@ function renderEnabledWidgets() {
         item.appendChild(nameEl);
 
         if (isSuppressed) {
-            // Restore button — un-suppress (widget reappears on next page load).
+            // Restore button — navigates tab back without this exclusion.
             const restoreBtn = document.createElement('button');
             restoreBtn.className = 'btn btn-secondary btn-sm';
             restoreBtn.textContent = '↩';
-            restoreBtn.title = 'Restore widget (takes effect on next page load)';
+            restoreBtn.title = 'Restore widget (reloads page with this widget)';
             restoreBtn.addEventListener('click', () => unsuppressInstanceWidget(id, label));
             item.appendChild(restoreBtn);
         } else {
-            // Hide button — suppress (removes from DOM immediately and on reload).
+            // Hide button — navigates tab to ?exclude_widgets=uuid so server omits it.
             const hideBtn = document.createElement('button');
             hideBtn.className = 'btn btn-secondary btn-sm';
             hideBtn.textContent = '✕';
-            hideBtn.title = 'Hide widget (removes from page, persists across reloads)';
+            hideBtn.title = 'Hide widget (reloads page without this widget)';
             hideBtn.addEventListener('click', () => suppressInstanceWidget(id, label));
             item.appendChild(hideBtn);
         }
 
-        widgetEnabledList.appendChild(item);
-    });
+        return item;
+    }
+
+    activeInstanceWidgets.forEach(w => widgetEnabledList.appendChild(buildInstanceWidgetItem(w, false)));
+    suppressedInstanceWidgets.forEach(w => widgetEnabledList.appendChild(buildInstanceWidgetItem(w, true)));
 
     // ── User-enabled widgets ───────────────────────────────────────────────────
     // Exclude any that the instance already serves — those are shown above with 🔒.
-    const userOnly = enabledWidgetIds.filter(id => !instanceEnabledWidgets.includes(id));
+    const instanceIds = instanceEnabledWidgets.map(w => w.widget_id);
+    const userOnly = enabledWidgetIds.filter(id => !instanceIds.includes(id));
 
-    if (userOnly.length === 0 && instanceOnly.length === 0) {
+    if (userOnly.length === 0 && instanceEnabledWidgets.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'widget-no-enabled';
         empty.textContent = 'No widgets added yet.';
@@ -1461,7 +1480,7 @@ async function disableWidget(widgetId, widgetName) {
             if (widgetCatalogueSelect.value === widgetId) {
                 showWidgetPreview(widgetId);
             }
-            setStatus(`Widget "${widgetName}" removed (reload page to fully remove)`, 'info');
+            setStatus(`Widget "${widgetName}" removed — reloading page…`, 'info');
         }
     } catch (err) {
         setStatus('Widget remove error: ' + err.message, 'error');
@@ -1528,7 +1547,8 @@ btnWidgetRefresh.addEventListener('click', () => {
     fetchWidgetCatalogue();
 });
 
-// Suppress an instance-native widget (hide from DOM, persist across reloads).
+// Suppress an instance-native widget — navigates the tab to ?exclude_widgets=uuid
+// so the server never renders it.  The page reloads; the widget is gone.
 async function suppressInstanceWidget(widgetId, widgetName) {
     try {
         const resp = await browser.runtime.sendMessage({
@@ -1536,16 +1556,20 @@ async function suppressInstanceWidget(widgetId, widgetName) {
             widgetId: widgetId,
         });
         if (resp && resp.ok) {
-            suppressedWidgetIds = [...suppressedWidgetIds.filter(id => id !== widgetId), widgetId];
-            renderEnabledWidgets();
-            setStatus(`Widget "${widgetName}" hidden`, 'info');
+            setStatus(`Reloading page to hide "${widgetName}"…`, 'info');
+            // Optimistically update local state so the UI reflects the change
+            // immediately without waiting for the suppressed_widgets:updated broadcast.
+            if (!suppressedWidgetIds.includes(widgetId)) {
+                suppressedWidgetIds = [...suppressedWidgetIds, widgetId];
+                renderEnabledWidgets();
+            }
         }
     } catch (err) {
         setStatus('Failed to hide widget: ' + err.message, 'error');
     }
 }
 
-// Un-suppress an instance-native widget (restores on next page load).
+// Un-suppress an instance-native widget — navigates the tab without the exclusion.
 async function unsuppressInstanceWidget(widgetId, widgetName) {
     try {
         const resp = await browser.runtime.sendMessage({
@@ -1553,16 +1577,17 @@ async function unsuppressInstanceWidget(widgetId, widgetName) {
             widgetId: widgetId,
         });
         if (resp && resp.ok) {
+            setStatus(`Reloading page to restore "${widgetName}"…`, 'info');
+            // Optimistically update local state immediately.
             suppressedWidgetIds = suppressedWidgetIds.filter(id => id !== widgetId);
             renderEnabledWidgets();
-            setStatus(`Widget "${widgetName}" restored (reload page to see it)`, 'info');
         }
     } catch (err) {
         setStatus('Failed to restore widget: ' + err.message, 'error');
     }
 }
 
-// Fetch the suppressed instance widget list from background storage.
+// Fetch the suppressed widget list for the active tab's origin from background.
 async function fetchSuppressedWidgets() {
     try {
         const resp = await browser.runtime.sendMessage({ type: 'popup:get_suppressed_instance_widgets' });

@@ -851,6 +851,7 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 	data := map[string]interface{}{
 		"frequency":    spot.Frequency,
 		"dx_call":      spot.DXCall,
+		"spotter":      spot.Spotter,
 		"snr":          spot.SNR,
 		"wpm":          spot.WPM,
 		"comment":      spot.Comment,
@@ -871,6 +872,14 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 	}
 	if spot.BearingDeg != nil {
 		data["bearing_deg"] = *spot.BearingDeg
+	}
+
+	// Add QRZ enrichment if available (only when callsign lookup is enabled)
+	if spot.Name != "" {
+		data["name_fmt"] = spot.Name
+	}
+	if spot.State != "" {
+		data["state"] = spot.State
 	}
 
 	message := map[string]interface{}{

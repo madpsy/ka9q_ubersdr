@@ -32,6 +32,11 @@ type CWSkimmerSpot struct {
 	Longitude   float64  `json:"longitude"`
 	DistanceKm  *float64 `json:"distance_km,omitempty"`
 	BearingDeg  *float64 `json:"bearing_deg,omitempty"`
+
+	// QRZ enrichment (only populated when callsign lookup is enabled and the
+	// lookup succeeds; keys match the public /api/lookup endpoint)
+	Name  string `json:"name_fmt,omitempty"` // Operator name (QRZ name_fmt)
+	State string `json:"state,omitempty"`    // State/region (QRZ)
 }
 
 // CWSkimmerClient manages connection to a CW Skimmer server
@@ -659,6 +664,8 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 				spot.Latitude = qrz.Lat
 				spot.Longitude = qrz.Lon
 			}
+			spot.Name = qrz.NameFmt
+			spot.State = qrz.State
 		}
 	}
 

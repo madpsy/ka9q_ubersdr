@@ -1016,6 +1016,8 @@ class CWSkimmerMap {
             country: spot.country,
             country_code: spot.country_code,
             Continent: spot.continent,
+            name: spot.name_fmt,
+            state: spot.state,
             CQZone: spot.cq_zone,
             ITUZone: spot.itu_zone,
             // Server already converted CTY coords to standard format (+ for East, - for West)
@@ -1179,8 +1181,16 @@ class CWSkimmerMap {
                 <b>${cwMapIso2ToFlag(spot.country_code)}${spot.callsign}</b><br>
         `;
 
+        if (spot.name) {
+            content += `<b>Name:</b> ${spot.name}<br>`;
+        }
+
         if (spot.country) {
             content += `<b>Country:</b> ${spot.country}<br>`;
+        }
+
+        if (spot.state) {
+            content += `<b>State:</b> ${spot.state}<br>`;
         }
 
         content += `

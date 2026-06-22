@@ -53,6 +53,10 @@ type CWSkimmerSSEEvent struct {
 	CountryCode string   `json:"country_code,omitempty"` // ISO 3166-1 alpha-2
 	Continent   string   `json:"continent,omitempty"`
 	CQZone      int      `json:"cq_zone,omitempty"`
+	Name        string   `json:"name_fmt,omitempty"` // QRZ operator name (when lookup enabled)
+	State       string   `json:"state,omitempty"`    // QRZ state/region (when lookup enabled)
+	Latitude    *float64 `json:"latitude,omitempty"`
+	Longitude   *float64 `json:"longitude,omitempty"`
 	DistanceKm  *float64 `json:"distance_km,omitempty"`
 	BearingDeg  *float64 `json:"bearing_deg,omitempty"`
 	Timestamp   string   `json:"timestamp"`
@@ -119,9 +123,18 @@ func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
 		CountryCode: spot.CountryCode,
 		Continent:   spot.Continent,
 		CQZone:      spot.CQZone,
+		Name:        spot.Name,
+		State:       spot.State,
 		DistanceKm:  spot.DistanceKm,
 		BearingDeg:  spot.BearingDeg,
 		Timestamp:   spot.Time.UTC().Format(time.RFC3339),
+	}
+
+	// Include coordinates only when known (0,0 is the "unknown" sentinel)
+	if spot.Latitude != 0 || spot.Longitude != 0 {
+		lat, lon := spot.Latitude, spot.Longitude
+		evt.Latitude = &lat
+		evt.Longitude = &lon
 	}
 
 	data, err := json.Marshal(evt)

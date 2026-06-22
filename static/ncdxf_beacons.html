@@ -1454,10 +1454,10 @@ async function fetchReceiverLocation() {
             const offsetMs   = t1 - corrected;                 // +ve = browser ahead
             // Store offset so the clock uses server time going forward
             serverClockOffsetMs = -offsetMs;                   // subtract browser lead
-            // Show latency (RTT)
+            // Show round-trip time
             const latEl = document.getElementById('server-latency');
             if (latEl) {
-                latEl.textContent = `Latency: ${rtt} ms`;
+                latEl.textContent = `RTT: ${rtt} ms`;
             }
 
             const el = document.getElementById('time-offset');

@@ -2474,10 +2474,18 @@ function connectCWSkimmerSSE() {
     async function connect() {
         setSSEStatus('sse-connecting', '⬤ SSE connecting…');
 
+        // Build the SSE URL with all 18 beacon callsigns as a server-side filter.
+        // The server will only stream spots matching these callsigns, saving bandwidth.
+        // buildCallsignParam() returns all beacon callsigns joined by commas (max 20).
+        const beaconCallsigns = BEACONS.map(b => b.callsign).slice(0, 20).join(',');
+        const sseUrl = beaconCallsigns
+            ? `/api/cwskimmer/stream?callsign=${encodeURIComponent(beaconCallsigns)}`
+            : '/api/cwskimmer/stream';
+
         // Pre-flight fetch to detect 503 (disabled) and 429 (rate-limited)
         // before opening an EventSource (which hides HTTP status codes).
         try {
-            const probe = await fetch('/api/cwskimmer/stream', {
+            const probe = await fetch(sseUrl, {
                 method: 'GET',
                 headers: { 'Accept': 'text/event-stream' },
             });
@@ -2512,7 +2520,7 @@ function connectCWSkimmerSSE() {
         }
 
         // Probe succeeded — open the real EventSource connection
-        const es = new EventSource('/api/cwskimmer/stream');
+        const es = new EventSource(sseUrl);
 
         es.onopen = () => {
             setSSEStatus('sse-connected', '⬤ Live feed connected');

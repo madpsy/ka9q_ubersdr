@@ -333,7 +333,10 @@ func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter, server
 }
 
 // parseCallsignFilter parses a comma-delimited callsign list (max 20) into a lookup map.
-// All callsigns are uppercased. Returns nil if the input is empty or contains no valid entries.
+// Each entry is uppercased and validated via isValidCallsign (3–15 chars, must match
+// standard amateur callsign pattern including portable suffixes like /P or /MM).
+// Invalid entries are silently dropped. Returns nil if the input is empty or
+// contains no valid entries.
 func parseCallsignFilter(raw string) map[string]bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -344,9 +347,13 @@ func parseCallsignFilter(raw string) map[string]bool {
 	m := make(map[string]bool, min(len(parts), maxCallsigns))
 	for _, p := range parts {
 		cs := strings.ToUpper(strings.TrimSpace(p))
-		if cs != "" {
-			m[cs] = true
+		if cs == "" {
+			continue
 		}
+		if !isValidCallsign(cs) {
+			continue
+		}
+		m[cs] = true
 		if len(m) >= maxCallsigns {
 			break
 		}

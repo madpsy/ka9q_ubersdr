@@ -881,6 +881,9 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 	if spot.State != "" {
 		data["state"] = spot.State
 	}
+	if spot.Grid != "" {
+		data["grid"] = spot.Grid
+	}
 
 	message := map[string]interface{}{
 		"type": "cw_spot",

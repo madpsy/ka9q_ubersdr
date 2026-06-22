@@ -55,6 +55,7 @@ type CWSkimmerSSEEvent struct {
 	CQZone      int      `json:"cq_zone,omitempty"`
 	Name        string   `json:"name_fmt,omitempty"` // QRZ operator name (when lookup enabled)
 	State       string   `json:"state,omitempty"`    // QRZ state/region (when lookup enabled)
+	Grid        string   `json:"grid,omitempty"`     // QRZ Maidenhead grid (when lookup enabled)
 	Latitude    *float64 `json:"latitude,omitempty"`
 	Longitude   *float64 `json:"longitude,omitempty"`
 	DistanceKm  *float64 `json:"distance_km,omitempty"`
@@ -125,6 +126,7 @@ func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
 		CQZone:      spot.CQZone,
 		Name:        spot.Name,
 		State:       spot.State,
+		Grid:        spot.Grid,
 		DistanceKm:  spot.DistanceKm,
 		BearingDeg:  spot.BearingDeg,
 		Timestamp:   spot.Time.UTC().Format(time.RFC3339),

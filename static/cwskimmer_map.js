@@ -1018,6 +1018,7 @@ class CWSkimmerMap {
             Continent: spot.continent,
             name: spot.name_fmt,
             state: spot.state,
+            grid: spot.grid,
             CQZone: spot.cq_zone,
             ITUZone: spot.itu_zone,
             // Server already converted CTY coords to standard format (+ for East, - for West)
@@ -1191,6 +1192,10 @@ class CWSkimmerMap {
 
         if (spot.state) {
             content += `<b>State:</b> ${spot.state}<br>`;
+        }
+
+        if (spot.grid) {
+            content += `<b>Grid:</b> ${spot.grid}<br>`;
         }
 
         content += `

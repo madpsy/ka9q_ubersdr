@@ -37,6 +37,7 @@ type CWSkimmerSpot struct {
 	// lookup succeeds; keys match the public /api/lookup endpoint)
 	Name  string `json:"name_fmt,omitempty"` // Operator name (QRZ name_fmt)
 	State string `json:"state,omitempty"`    // State/region (QRZ)
+	Grid  string `json:"grid,omitempty"`     // Maidenhead grid square (QRZ)
 }
 
 // CWSkimmerClient manages connection to a CW Skimmer server
@@ -666,6 +667,7 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 			}
 			spot.Name = qrz.NameFmt
 			spot.State = qrz.State
+			spot.Grid = qrz.Grid
 		}
 	}
 

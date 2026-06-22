@@ -11839,6 +11839,40 @@ function resetStationIdColor() {
 
             container.appendChild(rbnSpotsSection);
 
+            // Callsign Lookup Section
+            const lookupSection = document.createElement('div');
+            lookupSection.className = 'config-section';
+            lookupSection.innerHTML = '<h3>Callsign Lookup</h3>';
+
+            // Callsign Lookup Enabled select (Yes/No dropdown)
+            const lookupEnabledDiv = document.createElement('div');
+            lookupEnabledDiv.className = 'config-field';
+            const lookupLabel = document.createElement('label');
+            lookupLabel.textContent = 'Use Callsign Lookup for Location';
+            lookupEnabledDiv.appendChild(lookupLabel);
+            const lookupSelect = document.createElement('select');
+            lookupSelect.dataset.key = 'callsign_lookup_enabled';
+            const lookupYes = document.createElement('option');
+            lookupYes.value = 'true';
+            lookupYes.textContent = 'Yes';
+            const lookupNo = document.createElement('option');
+            lookupNo.value = 'false';
+            lookupNo.textContent = 'No';
+            lookupSelect.appendChild(lookupYes);
+            lookupSelect.appendChild(lookupNo);
+            // Default to false when not explicitly set to true
+            lookupSelect.value = (currentCWSkimmerConfig.callsign_lookup_enabled === true || currentCWSkimmerConfig.callsign_lookup_enabled === 'true') ? 'true' : 'false';
+            lookupSelect.addEventListener('change', (e) => {
+                currentCWSkimmerConfig.callsign_lookup_enabled = e.target.value === 'true';
+            });
+            lookupEnabledDiv.appendChild(lookupSelect);
+            const lookupSmall = document.createElement('small');
+            lookupSmall.textContent = "Use the callsign lookup provider (e.g. QRZ.com) for spot coordinates instead of the CTY database. QRZ gives the operator's actual location; CTY only knows the country centre. Falls back to CTY when lookup is unavailable. Requires Lookup Services to be enabled and configured. (default: No)";
+            lookupEnabledDiv.appendChild(lookupSmall);
+            lookupSection.appendChild(lookupEnabledDiv);
+
+            container.appendChild(lookupSection);
+
             // PSKReporter Settings Section
             const pskReporterSection = document.createElement('div');
             pskReporterSection.className = 'config-section';

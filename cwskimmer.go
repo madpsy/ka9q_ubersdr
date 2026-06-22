@@ -483,36 +483,38 @@ func (c *CWSkimmerClient) processLine(line string, spotHandlers []func(CWSkimmer
 		// Note: lastSpotTime is now updated by the caller before calling processLine
 		// This avoids any lock acquisition in this function
 
-		// Enrich with CTY data (no locks held)
-		c.enrichSpot(&spot)
+		// Enrich and dispatch in a goroutine so the main read loop is never
+		// blocked. enrichSpot may perform a network callsign lookup (QRZ) when
+		// callsign_lookup_enabled is set, so it must not run inline.
+		go func(spot CWSkimmerSpot) {
+			// Enrich with CTY data, optionally overriding the location with a
+			// precise callsign-lookup result (no locks held).
+			c.enrichSpot(&spot)
 
-		// Record in metrics ASYNCHRONOUSLY (prevents blocking main read loop)
-		if c.metrics != nil {
-			go c.metrics.RecordSpot(spot.Band, spot.DXCall, spot.WPM)
-		}
+			// Record in metrics
+			if c.metrics != nil {
+				go c.metrics.RecordSpot(spot.Band, spot.DXCall, spot.WPM)
+			}
 
-		// Log to CSV ASYNCHRONOUSLY (already queues to channel, but wrap in goroutine for safety)
-		if c.config.SpotsLogEnabled && c.spotsLogger != nil {
-			go func(s CWSkimmerSpot) {
-				if err := c.spotsLogger.LogSpot(&s); err != nil {
+			// Log to CSV (already queues to a channel internally)
+			if c.config.SpotsLogEnabled && c.spotsLogger != nil {
+				if err := c.spotsLogger.LogSpot(&spot); err != nil {
 					log.Printf("CW Skimmer: Failed to log spot: %v", err)
 				}
-			}(spot)
-		}
+			}
 
-		// Submit to PSKReporter ASYNCHRONOUSLY (prevents blocking on network I/O)
-		if c.config.PSKReporterEnabled && c.pskReporter != nil {
-			go func(s CWSkimmerSpot) {
-				if err := c.submitToPSKReporter(&s); err != nil {
+			// Submit to PSKReporter
+			if c.config.PSKReporterEnabled && c.pskReporter != nil {
+				if err := c.submitToPSKReporter(&spot); err != nil {
 					log.Printf("CW Skimmer: Failed to submit to PSKReporter: %v", err)
 				}
-			}(spot)
-		}
+			}
 
-		// Call spot handlers (handlers already copied by caller, no locks needed)
-		for _, handler := range spotHandlers {
-			go handler(spot)
-		}
+			// Call spot handlers (handlers already copied by caller, no locks needed)
+			for _, handler := range spotHandlers {
+				go handler(spot)
+			}
+		}(spot)
 	} else {
 		// Call message handlers for non-spot lines (handlers already copied by caller)
 		for _, handler := range messageHandlers {
@@ -614,7 +616,18 @@ func (c *CWSkimmerClient) parseCWSpot(line string) (CWSkimmerSpot, bool) {
 	return spot, true
 }
 
-// enrichSpot enriches a spot with CTY data and distance/bearing
+// enrichSpot enriches a spot with country/zone data, coordinates, and
+// distance/bearing.
+//
+// Country, zones and continent always come from the CTY database. Coordinates
+// default to the CTY entity/prefix centroid, but when callsign_lookup_enabled
+// is set and a callsign lookup provider (e.g. QRZ.com) returns a record with
+// real coordinates, those are used instead — they reflect the operator's
+// actual location rather than the country centre. Lookup failures fall back
+// silently to the CTY coordinates.
+//
+// May perform a network call (the callsign lookup); callers must run it off
+// the main read loop.
 func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 	if c.ctyDatabase == nil {
 		return
@@ -633,14 +646,29 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		// CTY parser already converts to standard format (+ for East, - for West)
 		spot.Latitude = info.Latitude
 		spot.Longitude = info.Longitude
+	}
 
-		// Calculate distance and bearing if receiver location is set
-		if c.receiverLat != 0 || c.receiverLon != 0 {
-			if info.Latitude != 0 || info.Longitude != 0 {
-				distance, bearing := CalculateDistanceAndBearing(c.receiverLat, c.receiverLon, spot.Latitude, spot.Longitude)
-				spot.DistanceKm = &distance
-				spot.BearingDeg = &bearing
+	// Optionally override the location with a precise callsign-lookup result.
+	// globalQRZService is non-nil only when lookup_services is enabled and the
+	// QRZ provider is configured. The lookup is cache-first (repeat callsigns
+	// are free); the service caps outbound concurrency and caches not-found
+	// results internally.
+	if c.config.CallsignLookupEnabled && globalQRZService != nil {
+		if qrz, err := globalQRZService.Lookup(spot.DXCall); err == nil && qrz != nil {
+			if qrz.Lat != 0 || qrz.Lon != 0 {
+				spot.Latitude = qrz.Lat
+				spot.Longitude = qrz.Lon
 			}
+		}
+	}
+
+	// Calculate distance and bearing from the receiver using whichever
+	// coordinates were resolved above.
+	if c.receiverLat != 0 || c.receiverLon != 0 {
+		if spot.Latitude != 0 || spot.Longitude != 0 {
+			distance, bearing := CalculateDistanceAndBearing(c.receiverLat, c.receiverLon, spot.Latitude, spot.Longitude)
+			spot.DistanceKm = &distance
+			spot.BearingDeg = &bearing
 		}
 	}
 }

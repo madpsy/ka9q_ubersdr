@@ -32,6 +32,14 @@ type CWSkimmerConfig struct {
 	// RBN Spots
 	RBNSpots bool `yaml:"rbn_spots"` // Forward spots to Reverse Beacon Network (default: true)
 
+	// Callsign lookup enrichment
+	// When enabled, spot coordinates are taken from the configured callsign
+	// lookup provider (e.g. QRZ.com) instead of the CTY database, giving the
+	// operator's actual location rather than the DXCC entity centroid.
+	// Falls back to CTY when lookup is unavailable or returns no coordinates.
+	// Requires lookup_services to be enabled and configured (see config.yaml).
+	CallsignLookupEnabled bool `yaml:"callsign_lookup_enabled"` // Default: false
+
 	// PSKReporter configuration
 	PSKReporterEnabled  bool   `yaml:"pskreporter_enabled"`  // Enable PSKReporter uploads
 	PSKReporterCallsign string `yaml:"pskreporter_callsign"` // Callsign for PSKReporter (defaults to main callsign)

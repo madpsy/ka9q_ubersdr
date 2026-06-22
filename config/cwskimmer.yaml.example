@@ -49,6 +49,15 @@ metrics_summary_data_dir: "cwskimmer_summaries"  # Directory for summary files (
 # Forward spots to the Reverse Beacon Network (default: true)
 rbn_spots: true
 
+# Callsign lookup enrichment (default: false)
+# When enabled, spot coordinates come from the configured callsign lookup
+# provider (e.g. QRZ.com) instead of the CTY database. QRZ returns the
+# operator's actual location, whereas CTY only knows the DXCC entity centroid
+# (i.e. roughly the country centre). Falls back to CTY automatically when the
+# lookup provider is disabled, unreachable, or has no record/coordinates.
+# Requires lookup_services to be enabled and configured in config.yaml.
+callsign_lookup_enabled: false
+
 # PSKReporter configuration
 pskreporter_enabled: false
 pskreporter_callsign: "N0CALL"  # Defaults to main callsign if not specified

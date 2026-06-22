@@ -775,6 +775,7 @@
         let receiverLat            = null;   // from /api/description receiver.gps.lat
         let receiverLon            = null;
         let receiverCallsign       = null;   // from /api/description receiver.callsign
+        let stateNames             = {};     // abbreviation → full name, from /state_names.json
         let lookupGeneration = 0;      // incremented on every new lookup; stale rAF callbacks bail out
 
         // In-memory cache of successful lookup results, keyed by normalised callsign.
@@ -803,6 +804,13 @@
                 }
             })
             .catch(() => {}); // silently ignore if unavailable
+
+        // Fetch state/province abbreviation → full name mapping once on load.
+        // Failure is non-fatal: the State row falls back to the raw abbreviation.
+        fetch('/state_names.json')
+            .then(r => r.ok ? r.json() : null)
+            .then(map => { if (map) stateNames = map; })
+            .catch(() => {});
 
         // ── DOM refs ─────────────────────────────────────────────────────
 
@@ -1135,9 +1143,10 @@
                 fullName = parts.join(' ');
             }
 
-            // Build address — addr1 (street) and zip are suppressed server-side; country gets its own row
-            const addrParts = [d.addr2, d.state].filter(Boolean);
-            const address   = addrParts.join(', ');
+            // Build address — addr1 (street) and zip are suppressed server-side; state and country get their own rows
+            const address   = d.addr2 || '';
+            // Resolve state/province abbreviation to full name (e.g. "FL" → "Florida"); fall back to raw value
+            const stateName = d.state ? (stateNames[d.state.toUpperCase()] || d.state) : '';
 
             // QRZ profile URL
             const qrzUrl = `https://www.qrz.com/db/${encodeURIComponent(callsign)}`;
@@ -1173,6 +1182,7 @@
             if (d.addr2 || d.state || d.country) {
                 addDivider();
                 if (address) addRow('Location', address);
+                addRow('State',   stateName);
                 addRow('Country', d.country);
             }
 

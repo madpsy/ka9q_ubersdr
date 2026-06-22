@@ -52,6 +52,9 @@ class CWSkimmerMap {
         this.latestNewContinent = null;
         this.latestNewCountry = null;
 
+        // State/province abbreviation to full name mapping (loaded from state_names.json)
+        this.stateNames = {};
+
         // Continent code to name mapping
         this.continentNames = {
             'AF': 'Africa',
@@ -111,6 +114,19 @@ class CWSkimmerMap {
         return { lat: latOffset, lon: lonOffset };
     }
 
+    async loadStateNames() {
+        // Load the state/province abbreviation → full name mapping.
+        // Failure is non-fatal: tooltips fall back to the raw abbreviation.
+        try {
+            const resp = await fetch('/state_names.json');
+            if (resp.ok) {
+                this.stateNames = await resp.json();
+            }
+        } catch (e) {
+            console.warn('[CW Skimmer Map] Failed to load state names:', e);
+        }
+    }
+
     async init() {
         // Setup overlay close button
         this.setupOverlay();
@@ -120,6 +136,9 @@ class CWSkimmerMap {
 
         // Initialize map
         this.initMap();
+
+        // Load state/province name mapping
+        await this.loadStateNames();
 
         // Load receiver location
         await this.loadReceiverLocation();
@@ -1191,7 +1210,8 @@ class CWSkimmerMap {
         }
 
         if (spot.state) {
-            content += `<b>State:</b> ${spot.state}<br>`;
+            const stateName = this.stateNames[spot.state.toUpperCase()] || spot.state;
+            content += `<b>State:</b> ${stateName}<br>`;
         }
 
         if (spot.grid) {

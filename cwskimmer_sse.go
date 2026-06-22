@@ -6,28 +6,38 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+// Note: parseCallsignFilter and callsignFilterKeys are defined in decoder_sse.go
+
 // cwskimmer_sse.go - Server-Sent Events hub for real-time CW Skimmer spot streaming
 //
 // Endpoints:
-//   GET /admin/cwskimmer/stream  — admin only (session cookie auth)
-//   GET /api/cwskimmer/stream    — public, max 2 concurrent connections per IP
+//
+//	GET /admin/cwskimmer/stream  — admin only (session cookie auth)
+//	GET /api/cwskimmer/stream    — public, max 2 concurrent connections per IP
+//
 // Query params:
-//   band=40m|80m|...   (optional, filter by amateur band label, e.g. "40m")
+//
+//	band=40m|80m|...                    (optional, filter by amateur band label, e.g. "40m")
+//	callsign=SM4SEF,G4ABC,...           (optional, up to 20 comma-delimited callsigns,
+//	                                     exact match, case-insensitive)
 //
 // Each SSE event is a JSON object:
-//   { "type": "cw_spot", "band": "40m", "frequency": 7035300,
-//     "callsign": "SM4SEF", "spotter": "MM3NDH", "snr": 12, "wpm": 19,
-//     "comment": "CQ", "country": "...", "continent": "EU",
-//     "distance_km": 1234.5, "bearing_deg": 45.0, "timestamp": "..." }
+//
+//	{ "type": "cw_spot", "band": "40m", "frequency": 7035300,
+//	  "callsign": "SM4SEF", "spotter": "MM3NDH", "snr": 12, "wpm": 19,
+//	  "comment": "CQ", "country": "...", "continent": "EU",
+//	  "distance_km": 1234.5, "bearing_deg": 45.0, "timestamp": "..." }
 //
 // A heartbeat event is sent every second:
-//   event: heartbeat
-//   data: {"last_spot": "2026-04-13T07:00:00Z"}   (or null if no spot yet)
+//
+//	event: heartbeat
+//	data: {"last_spot": "2026-04-13T07:00:00Z"}   (or null if no spot yet)
 
 // CWSkimmerSSEEvent is the JSON payload sent to SSE clients
 type CWSkimmerSSEEvent struct {
@@ -48,10 +58,11 @@ type CWSkimmerSSEEvent struct {
 	Timestamp   string   `json:"timestamp"`
 }
 
-// cwSkimmerSSEClient represents a single connected SSE client with optional band filter
+// cwSkimmerSSEClient represents a single connected SSE client with optional filters
 type cwSkimmerSSEClient struct {
-	ch         chan string
-	bandFilter string // empty = all bands
+	ch             chan string
+	bandFilter     string          // empty = all bands
+	callsignFilter map[string]bool // nil/empty = all callsigns; non-nil = exact match set (uppercased), max 20
 }
 
 // CWSkimmerSSEHub manages all connected SSE clients for the CW skimmer feed
@@ -124,8 +135,11 @@ func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
 	defer h.mu.RUnlock()
 
 	for c := range h.clients {
-		// Apply server-side band filter
+		// Apply server-side filters
 		if c.bandFilter != "" && c.bandFilter != spot.Band {
+			continue
+		}
+		if len(c.callsignFilter) > 0 && !c.callsignFilter[strings.ToUpper(spot.DXCall)] {
 			continue
 		}
 		// Non-blocking send — drop if client is slow
@@ -162,8 +176,9 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 			return
 		}
 
-		// Parse optional band filter from query string
+		// Parse optional filters from query string
 		bandFilter := r.URL.Query().Get("band")
+		callsignFilter := parseCallsignFilter(r.URL.Query().Get("callsign"))
 
 		// Set SSE headers
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -173,13 +188,14 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 
 		// Register client
 		client := &cwSkimmerSSEClient{
-			ch:         make(chan string, 64),
-			bandFilter: bandFilter,
+			ch:             make(chan string, 64),
+			bandFilter:     bandFilter,
+			callsignFilter: callsignFilter,
 		}
 		hub.register(client)
 		defer hub.unregister(client)
 
-		log.Printf("CWSkimmerSSE: client connected (band=%q remote=%s)", bandFilter, r.RemoteAddr)
+		log.Printf("CWSkimmerSSE: client connected (band=%q callsigns=%v remote=%s)", bandFilter, callsignFilterKeys(callsignFilter), r.RemoteAddr)
 
 		// Send an initial comment + retry hint to confirm connection
 		fmt.Fprintf(w, ": connected to CW skimmer stream\nretry: 3000\n\n")
@@ -211,7 +227,8 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 // HandlePublicCWSkimmerStream is the HTTP handler for /api/cwskimmer/stream.
 // It is identical to HandleCWSkimmerStream but enforces a per-IP concurrent
 // connection limit via limiter (typically 2 connections per IP).
-func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) http.HandlerFunc {
+// Bypassed IPs (timeout_bypass_ips or bypass_password) are exempt from the limit.
+func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter, serverConfig *ServerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Return 503 if the CW skimmer subsystem is not active
 		if !hub.enabled.Load() {
@@ -236,19 +253,22 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) ht
 			ip = fwd[:end]
 		}
 
-		// Enforce concurrent connection limit.
-		// release() is idempotent (sync.Once) so it is safe to call from both
-		// the context-watcher goroutine below and the defer statement.
-		release, ok := limiter.Acquire(ip)
-		if !ok {
-			http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
-			return
+		// Bypassed IPs are exempt from the concurrent connection limit.
+		if !serverConfig.IsIPTimeoutBypassed(ip) {
+			// Enforce concurrent connection limit.
+			// release() is idempotent (sync.Once) so it is safe to call from both
+			// the context-watcher goroutine below and the defer statement.
+			release, ok := limiter.Acquire(ip)
+			if !ok {
+				http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
+				return
+			}
+			// Release the slot as soon as the client disconnects, even if the
+			// handler goroutine is still unwinding (e.g. behind a reverse proxy
+			// that delays context cancellation propagation).
+			go func() { <-r.Context().Done(); release() }()
+			defer release()
 		}
-		// Release the slot as soon as the client disconnects, even if the
-		// handler goroutine is still unwinding (e.g. behind a reverse proxy
-		// that delays context cancellation propagation).
-		go func() { <-r.Context().Done(); release() }()
-		defer release()
 
 		// Verify the client supports SSE flushing
 		flusher, ok2 := w.(http.Flusher)
@@ -257,8 +277,9 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) ht
 			return
 		}
 
-		// Parse optional band filter from query string
+		// Parse optional filters from query string
 		bandFilter := r.URL.Query().Get("band")
+		callsignFilter := parseCallsignFilter(r.URL.Query().Get("callsign"))
 
 		// Set SSE headers
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -268,13 +289,14 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter) ht
 
 		// Register client
 		client := &cwSkimmerSSEClient{
-			ch:         make(chan string, 64),
-			bandFilter: bandFilter,
+			ch:             make(chan string, 64),
+			bandFilter:     bandFilter,
+			callsignFilter: callsignFilter,
 		}
 		hub.register(client)
 		defer hub.unregister(client)
 
-		log.Printf("CWSkimmerSSE (public): client connected (band=%q ip=%s)", bandFilter, ip)
+		log.Printf("CWSkimmerSSE (public): client connected (band=%q callsigns=%v ip=%s)", bandFilter, callsignFilterKeys(callsignFilter), ip)
 
 		fmt.Fprintf(w, ": connected to CW skimmer stream\nretry: 3000\n\n")
 		flusher.Flush()

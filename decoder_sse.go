@@ -6,6 +6,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,21 +16,27 @@ import (
 // decoder_sse.go - Server-Sent Events hub for real-time digital decode streaming
 //
 // Endpoints:
-//   GET /admin/decoder/stream  — admin only (session cookie auth)
-//   GET /api/decoder/stream    — public, max 2 concurrent connections per IP
+//
+//	GET /admin/decoder/stream  — admin only (session cookie auth)
+//	GET /api/decoder/stream    — public, max 2 concurrent connections per IP
 //
 // Query params:
-//   mode=FT8|FT4|WSPR|JS8|FT2   (optional, filter by mode)
-//   band=20m_FT8|...             (optional, filter by band name)
+//
+//	mode=FT8|FT4|WSPR|JS8|FT2          (optional, filter by mode)
+//	band=20m_FT8|...                    (optional, filter by band name)
+//	callsign=G4ABC,W1AW,...             (optional, up to 20 comma-delimited callsigns,
+//	                                     exact match, case-insensitive)
 //
 // Each SSE event is a JSON object:
-//   { "type": "decode", "mode": "FT8", "band": "20m_FT8",
-//     "callsign": "...", "locator": "...", "snr": -10,
-//     "frequency": 14074000, "message": "...", "timestamp": "..." }
+//
+//	{ "type": "decode", "mode": "FT8", "band": "20m_FT8",
+//	  "callsign": "...", "locator": "...", "snr": -10,
+//	  "frequency": 14074000, "message": "...", "timestamp": "..." }
 //
 // A heartbeat event is sent every second:
-//   event: heartbeat
-//   data: {"last_spot": "2026-04-13T07:00:00Z"}   (or null if no spot yet)
+//
+//	event: heartbeat
+//	data: {"last_spot": "2026-04-13T07:00:00Z"}   (or null if no spot yet)
 
 // DecoderSSEEvent is the JSON payload sent to SSE clients
 type DecoderSSEEvent struct {
@@ -50,9 +58,10 @@ type DecoderSSEEvent struct {
 
 // decoderSSEClient represents a single connected SSE client with optional filters
 type decoderSSEClient struct {
-	ch         chan string
-	modeFilter string // empty = all modes
-	bandFilter string // empty = all bands
+	ch             chan string
+	modeFilter     string          // empty = all modes
+	bandFilter     string          // empty = all bands
+	callsignFilter map[string]bool // nil/empty = all callsigns; non-nil = exact match set (uppercased), max 20
 }
 
 // DecoderSSEHub manages all connected SSE clients for the digital decoder feed
@@ -131,6 +140,9 @@ func (h *DecoderSSEHub) Broadcast(decode DecodeInfo) {
 		if c.bandFilter != "" && c.bandFilter != decode.BandName {
 			continue
 		}
+		if len(c.callsignFilter) > 0 && !c.callsignFilter[strings.ToUpper(decode.Callsign)] {
+			continue
+		}
 		// Non-blocking send — drop if client is slow
 		select {
 		case c.ch <- line:
@@ -168,6 +180,7 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 		// Parse optional filters from query string
 		modeFilter := r.URL.Query().Get("mode")
 		bandFilter := r.URL.Query().Get("band")
+		callsignFilter := parseCallsignFilter(r.URL.Query().Get("callsign"))
 
 		// Set SSE headers
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -177,14 +190,15 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 
 		// Register client
 		client := &decoderSSEClient{
-			ch:         make(chan string, 64),
-			modeFilter: modeFilter,
-			bandFilter: bandFilter,
+			ch:             make(chan string, 64),
+			modeFilter:     modeFilter,
+			bandFilter:     bandFilter,
+			callsignFilter: callsignFilter,
 		}
 		hub.register(client)
 		defer hub.unregister(client)
 
-		log.Printf("DecoderSSE: client connected (mode=%q band=%q remote=%s)", modeFilter, bandFilter, r.RemoteAddr)
+		log.Printf("DecoderSSE: client connected (mode=%q band=%q callsigns=%v remote=%s)", modeFilter, bandFilter, callsignFilterKeys(callsignFilter), r.RemoteAddr)
 
 		// Send an initial comment + retry hint to confirm connection
 		fmt.Fprintf(w, ": connected to decoder stream\nretry: 3000\n\n")
@@ -216,7 +230,8 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 // HandlePublicDecoderStream is the HTTP handler for /api/decoder/stream.
 // It is identical to HandleDecoderStream but enforces a per-IP concurrent
 // connection limit via limiter (typically 2 connections per IP).
-func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.HandlerFunc {
+// Bypassed IPs (timeout_bypass_ips or bypass_password) are exempt from the limit.
+func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter, serverConfig *ServerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Return 503 if the decoder subsystem is not active
 		if !hub.enabled.Load() {
@@ -241,19 +256,22 @@ func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.H
 			ip = fwd[:end]
 		}
 
-		// Enforce concurrent connection limit.
-		// release() is idempotent (sync.Once) so it is safe to call from both
-		// the context-watcher goroutine below and the defer statement.
-		release, ok := limiter.Acquire(ip)
-		if !ok {
-			http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
-			return
+		// Bypassed IPs are exempt from the concurrent connection limit.
+		if !serverConfig.IsIPTimeoutBypassed(ip) {
+			// Enforce concurrent connection limit.
+			// release() is idempotent (sync.Once) so it is safe to call from both
+			// the context-watcher goroutine below and the defer statement.
+			release, ok := limiter.Acquire(ip)
+			if !ok {
+				http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
+				return
+			}
+			// Release the slot as soon as the client disconnects, even if the
+			// handler goroutine is still unwinding (e.g. behind a reverse proxy
+			// that delays context cancellation propagation).
+			go func() { <-r.Context().Done(); release() }()
+			defer release()
 		}
-		// Release the slot as soon as the client disconnects, even if the
-		// handler goroutine is still unwinding (e.g. behind a reverse proxy
-		// that delays context cancellation propagation).
-		go func() { <-r.Context().Done(); release() }()
-		defer release()
 
 		// Verify the client supports SSE flushing
 		flusher, ok2 := w.(http.Flusher)
@@ -265,6 +283,7 @@ func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.H
 		// Parse optional filters from query string
 		modeFilter := r.URL.Query().Get("mode")
 		bandFilter := r.URL.Query().Get("band")
+		callsignFilter := parseCallsignFilter(r.URL.Query().Get("callsign"))
 
 		// Set SSE headers
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -274,14 +293,15 @@ func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.H
 
 		// Register client
 		client := &decoderSSEClient{
-			ch:         make(chan string, 64),
-			modeFilter: modeFilter,
-			bandFilter: bandFilter,
+			ch:             make(chan string, 64),
+			modeFilter:     modeFilter,
+			bandFilter:     bandFilter,
+			callsignFilter: callsignFilter,
 		}
 		hub.register(client)
 		defer hub.unregister(client)
 
-		log.Printf("DecoderSSE (public): client connected (mode=%q band=%q ip=%s)", modeFilter, bandFilter, ip)
+		log.Printf("DecoderSSE (public): client connected (mode=%q band=%q callsigns=%v ip=%s)", modeFilter, bandFilter, callsignFilterKeys(callsignFilter), ip)
 
 		fmt.Fprintf(w, ": connected to decoder stream\nretry: 3000\n\n")
 		flusher.Flush()
@@ -310,4 +330,43 @@ func HandlePublicDecoderStream(hub *DecoderSSEHub, limiter *SSEIPLimiter) http.H
 			}
 		}
 	}
+}
+
+// parseCallsignFilter parses a comma-delimited callsign list (max 20) into a lookup map.
+// All callsigns are uppercased. Returns nil if the input is empty or contains no valid entries.
+func parseCallsignFilter(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	const maxCallsigns = 20
+	parts := strings.Split(raw, ",")
+	m := make(map[string]bool, min(len(parts), maxCallsigns))
+	for _, p := range parts {
+		cs := strings.ToUpper(strings.TrimSpace(p))
+		if cs != "" {
+			m[cs] = true
+		}
+		if len(m) >= maxCallsigns {
+			break
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// callsignFilterKeys returns the keys of a callsign filter map as a sorted slice,
+// for use in log messages.
+func callsignFilterKeys(m map[string]bool) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

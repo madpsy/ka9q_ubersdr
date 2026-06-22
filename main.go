@@ -2552,10 +2552,11 @@ func main() {
 	http.HandleFunc("/admin/cwskimmer/stream", adminHandler.AuthMiddleware(HandleCWSkimmerStream(cwSkimmerSSEHub)))
 
 	// Real-time SSE feeds (public, max 2 concurrent connections per IP)
+	// Bypassed IPs (timeout_bypass_ips) are exempt from the connection limit.
 	decoderSSELimiter := NewSSEIPLimiter(2)
 	cwSkimmerSSELimiter := NewSSEIPLimiter(2)
-	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter))
-	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter))
+	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter, &config.Server))
+	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter, &config.Server))
 
 	// Widget management endpoints (admin only)
 	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))

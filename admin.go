@@ -4115,6 +4115,7 @@ func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.
 			"metrics_log_interval_secs": 300,
 			"metrics_summary_data_dir":  "data/cw_metrics_summary",
 			"rbn_spots":                 true,
+			"callsign_lookup_enabled":   false,
 			"pskreporter_enabled":       false,
 			"pskreporter_callsign":      "N0CALL",
 			"pskreporter_locator":       "",
@@ -4145,6 +4146,7 @@ func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.
 		"metrics_log_interval_secs": cwskimmerConfig.MetricsLogIntervalSecs,
 		"metrics_summary_data_dir":  cwskimmerConfig.MetricsSummaryDataDir,
 		"rbn_spots":                 cwskimmerConfig.RBNSpots,
+		"callsign_lookup_enabled":   cwskimmerConfig.CallsignLookupEnabled,
 		"pskreporter_enabled":       cwskimmerConfig.PSKReporterEnabled,
 		"pskreporter_callsign":      cwskimmerConfig.PSKReporterCallsign,
 		"pskreporter_locator":       cwskimmerConfig.PSKReporterLocator,
@@ -4198,6 +4200,7 @@ func (ah *AdminHandler) handleUpdateCWSkimmerConfig(w http.ResponseWriter, r *ht
 			ah.cwSkimmerConfig.Callsign = updated.Callsign
 			ah.cwSkimmerConfig.Enabled = updated.Enabled
 			ah.cwSkimmerConfig.RBNSpots = updated.RBNSpots
+			ah.cwSkimmerConfig.CallsignLookupEnabled = updated.CallsignLookupEnabled
 			ah.cwSkimmerConfig.PSKReporterEnabled = updated.PSKReporterEnabled
 			ah.cwSkimmerConfig.PSKReporterCallsign = updated.PSKReporterCallsign
 			ah.cwSkimmerConfig.PSKReporterLocator = updated.PSKReporterLocator

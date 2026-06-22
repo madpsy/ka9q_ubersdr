@@ -16,6 +16,9 @@ class CWSkimmerMap {
         this.spots = new Map(); // Store spots by unique key (callsign-band)
         this.markers = new Map(); // Store Leaflet markers
         this.markerClusterGroup = null; // Leaflet marker cluster group
+        this.markerLayerGroup = null; // Plain layer group used when clustering is disabled
+        this.activeMarkerLayer = null; // Currently active container for markers (cluster or plain)
+        this.clustersEnabled = true; // Whether marker clustering is enabled (default on)
         this.receiverMarker = null;
         this.receiverLocation = null;
         this.receiverInfo = null;
@@ -168,6 +171,7 @@ class CWSkimmerMap {
         const showSummary = localStorage.getItem('cwskimmer_showSummary');
         const showWeather = localStorage.getItem('cwskimmer_showWeather');
         const showLegend = localStorage.getItem('cwskimmer_showLegend');
+        const showClusters = localStorage.getItem('cwskimmer_showClusters');
 
         // Load filter values
         const ageFilter = localStorage.getItem('cwskimmer_ageFilter');
@@ -200,6 +204,11 @@ class CWSkimmerMap {
         if (showLegend !== null) {
             const checkbox = document.getElementById('show-legend-checkbox');
             if (checkbox) checkbox.checked = showLegend === 'true';
+        }
+        if (showClusters !== null) {
+            this.clustersEnabled = showClusters === 'true';
+            const checkbox = document.getElementById('show-clusters-checkbox');
+            if (checkbox) checkbox.checked = this.clustersEnabled;
         }
 
         // Apply filter values
@@ -579,8 +588,13 @@ class CWSkimmerMap {
                 });
             }
         });
-        
-        this.map.addLayer(this.markerClusterGroup);
+
+        // Plain layer group used when the user disables clustering
+        this.markerLayerGroup = L.layerGroup();
+
+        // Add whichever container matches the saved preference
+        this.activeMarkerLayer = this.clustersEnabled ? this.markerClusterGroup : this.markerLayerGroup;
+        this.map.addLayer(this.activeMarkerLayer);
 
         // Setup filters
         this.setupFilters();
@@ -660,6 +674,32 @@ class CWSkimmerMap {
                 this.savePreference('showLegend', e.target.checked);
             });
         }
+
+        const clustersCheckbox = document.getElementById('show-clusters-checkbox');
+        if (clustersCheckbox) {
+            clustersCheckbox.addEventListener('change', (e) => {
+                this.setClustersEnabled(e.target.checked);
+                this.savePreference('showClusters', e.target.checked);
+            });
+        }
+    }
+
+    setClustersEnabled(enabled) {
+        if (this.clustersEnabled === enabled) return;
+        this.clustersEnabled = enabled;
+
+        // Remove the current container (and its markers) from the map
+        if (this.activeMarkerLayer && this.map.hasLayer(this.activeMarkerLayer)) {
+            this.map.removeLayer(this.activeMarkerLayer);
+        }
+        if (this.activeMarkerLayer) {
+            this.activeMarkerLayer.clearLayers();
+        }
+
+        // Swap to the appropriate container and re-render markers
+        this.activeMarkerLayer = enabled ? this.markerClusterGroup : this.markerLayerGroup;
+        this.map.addLayer(this.activeMarkerLayer);
+        this.applyFilters();
     }
 
     toggleStatsPanel(show) {
@@ -742,8 +782,8 @@ class CWSkimmerMap {
     }
 
     applyFilters() {
-        // Clear cluster group and re-add filtered markers
-        this.markerClusterGroup.clearLayers();
+        // Clear active marker container and re-add filtered markers
+        this.activeMarkerLayer.clearLayers();
         
         const now = Date.now();
         this.markers.forEach((marker, key) => {
@@ -765,7 +805,7 @@ class CWSkimmerMap {
             }
 
             if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-                this.markerClusterGroup.addLayer(marker);
+                this.activeMarkerLayer.addLayer(marker);
             }
         });
         
@@ -1045,7 +1085,7 @@ class CWSkimmerMap {
     addOrUpdateMarker(key, spot) {
         // Remove existing marker if present
         if (this.markers.has(key)) {
-            this.markerClusterGroup.removeLayer(this.markers.get(key));
+            this.activeMarkerLayer.removeLayer(this.markers.get(key));
         }
 
         // Get color for band
@@ -1121,7 +1161,7 @@ class CWSkimmerMap {
         }
         
         if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-            this.markerClusterGroup.addLayer(marker);
+            this.activeMarkerLayer.addLayer(marker);
         }
 
         // Store marker
@@ -1188,7 +1228,7 @@ class CWSkimmerMap {
     removeSpot(key) {
         // Remove marker from cluster group
         if (this.markers.has(key)) {
-            this.markerClusterGroup.removeLayer(this.markers.get(key));
+            this.activeMarkerLayer.removeLayer(this.markers.get(key));
             this.markers.delete(key);
         }
 

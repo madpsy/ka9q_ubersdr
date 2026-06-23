@@ -29,6 +29,7 @@ class CWSkimmerMap {
         this.ageFilter = '60'; // Current age filter (max age in minutes) - default 1 hour
         this.bandFilter = 'all'; // Current band filter
         this.countryFilter = 'all'; // Current country filter
+        this.stateFilter = 'all'; // Current state/province filter (only used for US/Canada)
         this.continentFilter = 'all'; // Current continent filter
         this.snrFilter = 'none'; // Current SNR filter (minimum SNR)
         this.reconnectAttempts = 0; // Track reconnection attempts
@@ -196,6 +197,7 @@ class CWSkimmerMap {
         const ageFilter = localStorage.getItem('cwskimmer_ageFilter');
         const bandFilter = localStorage.getItem('cwskimmer_bandFilter');
         const countryFilter = localStorage.getItem('cwskimmer_countryFilter');
+        const stateFilter = localStorage.getItem('cwskimmer_stateFilter');
         const continentFilter = localStorage.getItem('cwskimmer_continentFilter');
         const snrFilter = localStorage.getItem('cwskimmer_snrFilter');
 
@@ -245,6 +247,11 @@ class CWSkimmerMap {
             this.countryFilter = countryFilter;
             const select = document.getElementById('country-filter');
             if (select) select.value = countryFilter;
+        }
+        // State filter is dependent on country; the value is the source of truth and
+        // the dropdown is populated/shown later by updateStateFilter() as spots arrive.
+        if (stateFilter) {
+            this.stateFilter = stateFilter;
         }
         if (continentFilter) {
             this.continentFilter = continentFilter;
@@ -777,6 +784,20 @@ class CWSkimmerMap {
             countryFilter.addEventListener('change', (e) => {
                 this.countryFilter = e.target.value;
                 this.savePreference('countryFilter', e.target.value);
+                // Reset the dependent state filter when the country changes, then
+                // rebuild/show the state dropdown for the new selection.
+                this.stateFilter = 'all';
+                this.savePreference('stateFilter', 'all');
+                this.updateStateFilter();
+                this.applyFilters();
+            });
+        }
+
+        const stateFilter = document.getElementById('state-filter');
+        if (stateFilter) {
+            stateFilter.addEventListener('change', (e) => {
+                this.stateFilter = e.target.value;
+                this.savePreference('stateFilter', e.target.value);
                 this.applyFilters();
             });
         }
@@ -798,6 +819,9 @@ class CWSkimmerMap {
                 this.applyFilters();
             });
         }
+
+        // Set initial state-dropdown visibility based on the restored country filter
+        this.updateStateFilter();
     }
 
     applyFilters() {
@@ -811,9 +835,10 @@ class CWSkimmerMap {
 
             const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
             const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+            const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
             const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
             const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-            
+
             // Age filter check
             let ageMatch = true;
             if (this.ageFilter !== 'none') {
@@ -823,7 +848,7 @@ class CWSkimmerMap {
                 ageMatch = age <= maxAgeMs;
             }
 
-            if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
+            if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
                 this.activeMarkerLayer.addLayer(marker);
             }
         });
@@ -1182,7 +1207,8 @@ class CWSkimmerMap {
             ageMatch = age <= maxAgeMs;
         }
         
-        if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
+        const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
+        if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
             this.activeMarkerLayer.addLayer(marker);
         }
 
@@ -1334,13 +1360,14 @@ class CWSkimmerMap {
                     ageMatch = age <= maxAgeMs;
                 }
                 
-                if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
+                const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
+                if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
                     visibleCount++;
                 }
             });
             
             const allFiltersDefault = this.ageFilter === 'none' && this.bandFilter === 'all' && this.countryFilter === 'all' &&
-                                     this.continentFilter === 'all' && this.snrFilter === 'none';
+                                     this.stateFilter === 'all' && this.continentFilter === 'all' && this.snrFilter === 'none';
             
             if (allFiltersDefault) {
                 countEl.textContent = `${this.spots.size}`;
@@ -1419,6 +1446,64 @@ class CWSkimmerMap {
                 this.applyFilters();
             }
         }
+
+        // Refresh the dependent US/Canada state filter
+        this.updateStateFilter();
+    }
+
+    // updateStateFilter shows the state dropdown only when the United States or
+    // Canada is selected as the country, and populates it with the states/provinces
+    // present in the current spots for that country. Hidden (and reset) otherwise.
+    updateStateFilter() {
+        const stateFilter = document.getElementById('state-filter');
+        if (!stateFilter) return;
+
+        const isStateCountry = this.countryFilter === 'United States' || this.countryFilter === 'Canada';
+        if (!isStateCountry) {
+            stateFilter.style.display = 'none';
+            if (this.stateFilter !== 'all') {
+                this.stateFilter = 'all';
+                this.savePreference('stateFilter', 'all');
+            }
+            stateFilter.value = 'all';
+            return;
+        }
+
+        // Collect the distinct state codes seen among spots for the selected country
+        const states = new Set();
+        this.spots.forEach(spot => {
+            if (spot.country === this.countryFilter && spot.state) {
+                states.add(spot.state);
+            }
+        });
+
+        // Sort by full display name (fall back to the raw code)
+        const stateName = (code) => this.stateNames[code.toUpperCase()] || code;
+        const sorted = Array.from(states).sort((a, b) => stateName(a).localeCompare(stateName(b)));
+
+        stateFilter.innerHTML = '<option value="all">All States</option>';
+        sorted.forEach(code => {
+            const option = document.createElement('option');
+            option.value = code;
+            option.textContent = stateName(code);
+            stateFilter.appendChild(option);
+        });
+
+        // Restore the desired selection (this.stateFilter is the source of truth,
+        // set from saved preferences or the change handler).
+        if (this.stateFilter !== 'all' && states.has(this.stateFilter)) {
+            stateFilter.value = this.stateFilter;
+        } else {
+            stateFilter.value = 'all';
+            if (this.stateFilter !== 'all') {
+                // Previously selected state no longer present — reset to 'all'
+                this.stateFilter = 'all';
+                this.savePreference('stateFilter', 'all');
+                this.applyFilters();
+            }
+        }
+
+        stateFilter.style.display = '';
     }
 
     updateTopCountries(spots, containerEl) {
@@ -1643,6 +1728,10 @@ class CWSkimmerMap {
             }
             // Apply country filter
             if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+                return;
+            }
+            // Apply state filter
+            if (this.stateFilter !== 'all' && spot.state !== this.stateFilter) {
                 return;
             }
             // Apply continent filter
@@ -1977,6 +2066,11 @@ class CWSkimmerMap {
                 return false;
             }
 
+            // Apply state filter
+            if (this.stateFilter !== 'all' && spot.state !== this.stateFilter) {
+                return false;
+            }
+
             // Apply continent filter
             if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
                 return false;
@@ -2276,7 +2370,8 @@ class CWSkimmerMap {
                 ageMatch = age <= maxAgeMs;
             }
 
-            if (!ageMatch || !bandMatch || !countryMatch || !continentMatch || !snrMatch) {
+            const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
+            if (!ageMatch || !bandMatch || !countryMatch || !stateMatch || !continentMatch || !snrMatch) {
                 return;
             }
 

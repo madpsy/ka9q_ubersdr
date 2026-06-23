@@ -10824,59 +10824,62 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateURL();
             },
             onFrequencyClick: (freq) => {
-                // When user clicks on spectrum, tune to that frequency
-                const freqInput = document.getElementById('frequency');
-                if (freqInput && document.activeElement !== freqInput) {
-                    setFrequencyInputValue(Math.round(freq));
+                // Route spectrum-click tunes through the canonical radioAPI.setFrequency()
+                // — the same path tuneToChannel() uses for DX/CW/chat-marker clicks.
+                // The previous manual reimplementation (setFrequencyInputValue +
+                // notifyFrequencyChange + connect/autoTune) had observable first/second-
+                // click failures: the first two clicks would land back on the band default
+                // ("landing page") instead of the clicked frequency; only the third onward
+                // worked.
+                const rounded = Math.round(freq);
+                const sd = spectrumDisplay;
+
+                // Recenter only when the click target isn't already in the visible span —
+                // matches tuneToChannel()'s heuristic and avoids unnecessary pans.
+                let centerSpectrum = true;
+                if (sd && sd.centerFreq && sd.totalBandwidth) {
+                    const lo = sd.centerFreq - sd.totalBandwidth / 2;
+                    const hi = sd.centerFreq + sd.totalBandwidth / 2;
+                    centerSpectrum = !(rounded >= lo && rounded <= hi);
                 }
 
-                // Update cursor immediately
-                updateSpectrumCursor();
+                // Fully zoomed out: also tell the spectrum WS to zoom in at the click.
+                const wasFullyZoomedOut = sd && sd.zoomLevel <= 1.0;
+                if (wasFullyZoomedOut && sd.ws && sd.ws.readyState === WebSocket.OPEN) {
+                    sd.ws.send(JSON.stringify({
+                        type: 'zoom',
+                        frequency: rounded,
+                        binBandwidth: 400.0
+                    }));
+                }
 
-                // Update band selector
-                updateBandSelector();
+                // The click already moved us; skip the auto-pan that would otherwise fire.
+                if (sd) sd.skipNextPan = true;
 
-                // Update URL with new frequency
-                updateURL();
-
-                // Notify extensions of frequency change
                 if (window.radioAPI) {
-                    window.radioAPI.notifyFrequencyChange(Math.round(freq));
-                }
-
-                // Announce frequency change for accessibility (TTS)
-                if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
-                    window.ttsAnnouncements.announceFrequencyChange(Math.round(freq));
-                }
-
-                // Check if fully zoomed out (zoom level = 1.0)
-                if (spectrumDisplay && spectrumDisplay.zoomLevel <= 1.0) {
-                    // Fully zoomed out - perform max zoom at clicked frequency
-                    if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-                        spectrumDisplay.ws.send(JSON.stringify({
-                            type: 'zoom',
-                            frequency: Math.round(freq),
-                            binBandwidth: 400.0
-                        }));
-                        log(`Tuned to ${formatFrequency(freq)} and zoomed to max from spectrum click`);
-                    }
-
-                    // Connect if not already connected
-                    if (!wsManager.isConnected()) {
-                        connect();
-                    } else {
-                        autoTune();
-                    }
+                    window.radioAPI.setFrequency(rounded, centerSpectrum);
                 } else {
-                    // Already zoomed in - just tune
-                    if (!wsManager.isConnected()) {
-                        connect();
-                        log(`Connecting and tuning to ${formatFrequency(freq)} from spectrum click`);
-                    } else {
+                    // Pre-radioAPI fallback — keep old behaviour to avoid regressions
+                    // during early page load before extensions.js has registered radioAPI.
+                    setFrequencyInputValue(rounded);
+                    updateSpectrumCursor();
+                    updateBandSelector();
+                    updateURL();
+                    if (wsManager.isConnected()) {
                         autoTune();
-                        log(`Tuned to ${formatFrequency(freq)} from spectrum click`);
+                    } else {
+                        connect();
                     }
                 }
+
+                // TTS announce (radioAPI.setFrequency does not announce on its own).
+                if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+                    window.ttsAnnouncements.announceFrequencyChange(rounded);
+                }
+
+                log(wasFullyZoomedOut
+                    ? `Tuned to ${formatFrequency(freq)} and zoomed to max from spectrum click`
+                    : `Tuned to ${formatFrequency(freq)} from spectrum click`);
             }
         });
 

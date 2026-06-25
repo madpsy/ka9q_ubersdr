@@ -1440,6 +1440,20 @@
         </div>
     </div>
 
+    <!-- Per-Mode Settings Modal (right-click a mode button) -->
+    <div id="mode-settings-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 460px;">
+            <div class="modal-header">
+                <h2 id="mode-settings-title">Mode Settings</h2>
+                <button class="modal-close" onclick="closeModeSettingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Controls are rendered dynamically from MODE_SETTINGS by openModeSettingsModal() -->
+                <div id="mode-settings-body"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Country Spots Modal (for Digital Spots Extension) -->
     <div id="country-spots-modal" class="country-spots-modal" style="display: none;">
         <div class="country-spots-modal-content">

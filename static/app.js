@@ -8315,6 +8315,178 @@ function applyOffset() {
     performFrequencyShift();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-mode settings (right-click a mode button)
+//
+// MODE_SETTINGS maps a mode → a settings group describing the extra controls
+// shown in the right-click modal. To add settings for a new mode, add an entry
+// here: give it a `controls` array and an `apply(values)` function that pushes
+// the values to the server. Modes with no entry show "No Additional Settings".
+//
+// Each control: { id, label, min, max, step, default, unit, decimals }.
+// `apply(values)` receives an object keyed by control id holding the current
+// numeric value of every control in the group.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// AGC controls — shared by USB and LSB (mirrors the ubersdr-audio Go client).
+// Defaults match share/presets.conf: hang-time 1.1 s, recovery-rate 20 dB/s.
+const AGC_MODE_SETTINGS = {
+    controls: [
+        { id: 'agcHangTime',     label: 'AGC Hang Time',     min: 0, max: 10,  step: 0.1, default: 1.1, unit: 's',    decimals: 1 },
+        { id: 'agcRecoveryRate', label: 'AGC Recovery Rate', min: 1, max: 100, step: 1,   default: 20,  unit: 'dB/s', decimals: 0 },
+    ],
+    apply: (values) => {
+        if (!wsManager || !wsManager.ws || wsManager.ws.readyState !== WebSocket.OPEN) return;
+        wsManager.send({
+            type: 'set_agc',
+            agcHangTime: values.agcHangTime,
+            agcRecoveryRate: values.agcRecoveryRate,
+        });
+    },
+};
+
+const MODE_SETTINGS = {
+    usb: AGC_MODE_SETTINGS,
+    lsb: AGC_MODE_SETTINGS,
+    // Add other modes here in the future, e.g.:
+    // fm: { controls: [...], apply: (v) => { ... } },
+};
+
+// Persisted current values for every control id (keyed by control id), so the
+// slider positions survive reloads.
+let modeSettingValues = {};
+try {
+    modeSettingValues = JSON.parse(localStorage.getItem('modeSettingValues') || '{}') || {};
+} catch (e) {
+    modeSettingValues = {};
+}
+
+function saveModeSettingValues() {
+    try {
+        localStorage.setItem('modeSettingValues', JSON.stringify(modeSettingValues));
+    } catch (e) { /* ignore quota / private-mode errors */ }
+}
+
+// Current value for a control, falling back to its default.
+function getModeSettingValue(control) {
+    const v = modeSettingValues[control.id];
+    return (typeof v === 'number' && !isNaN(v)) ? v : control.default;
+}
+
+function openModeSettingsModal(mode) {
+    const modal = document.getElementById('mode-settings-modal');
+    const title = document.getElementById('mode-settings-title');
+    const body = document.getElementById('mode-settings-body');
+    if (!modal || !title || !body) return;
+
+    title.textContent = `${mode.toUpperCase()} Settings`;
+    body.innerHTML = '';
+
+    const group = MODE_SETTINGS[mode];
+    if (!group || !group.controls || group.controls.length === 0) {
+        const p = document.createElement('p');
+        p.textContent = 'No Additional Settings';
+        p.style.cssText = 'color: #888; text-align: center; margin: 20px 0; font-style: italic;';
+        body.appendChild(p);
+        modal.style.display = 'flex';
+        return;
+    }
+
+    // Snapshot of the group's current values, updated live as sliders move.
+    const values = {};
+    group.controls.forEach(c => { values[c.id] = getModeSettingValue(c); });
+
+    group.controls.forEach(control => {
+        const fmt = (v) => `${v.toFixed(control.decimals)} ${control.unit}`;
+
+        const row = document.createElement('div');
+        row.style.cssText = 'margin-bottom: 18px;';
+
+        const header = document.createElement('div');
+        header.style.cssText = 'display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;';
+
+        const label = document.createElement('label');
+        label.textContent = control.label;
+        label.style.cssText = 'color: #ecf0f1; font-weight: bold;';
+
+        const valLabel = document.createElement('span');
+        valLabel.style.cssText = 'color: #28a745; font-family: monospace; font-size: 0.95em;';
+        valLabel.textContent = fmt(values[control.id]);
+
+        header.appendChild(label);
+        header.appendChild(valLabel);
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = control.min;
+        slider.max = control.max;
+        slider.step = control.step;
+        slider.value = values[control.id];
+        slider.style.cssText = 'width: 100%;';
+
+        // Mirror the ubersdr-audio Go client: update the label live while
+        // dragging ('input'), but only persist + send on release ('change'),
+        // so we don't flood the server with set_agc messages mid-drag.
+        slider.addEventListener('input', () => {
+            valLabel.textContent = fmt(parseFloat(slider.value));
+        });
+        slider.addEventListener('change', () => {
+            const v = parseFloat(slider.value);
+            values[control.id] = v;
+            valLabel.textContent = fmt(v);
+            modeSettingValues[control.id] = v;
+            saveModeSettingValues();
+            group.apply(values);
+        });
+
+        row.appendChild(header);
+        row.appendChild(slider);
+        body.appendChild(row);
+    });
+
+    modal.style.display = 'flex';
+}
+
+function closeModeSettingsModal() {
+    const modal = document.getElementById('mode-settings-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// Wire right-click (context menu) on every mode button to open the settings modal.
+function initModeSettingsContextMenu() {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('contextmenu', (e) => {
+            const mode = btn.id.replace(/^mode-/, '');
+            if (!mode) return;
+            e.preventDefault();
+            openModeSettingsModal(mode);
+        });
+    });
+
+    // Close when clicking the backdrop.
+    const modal = document.getElementById('mode-settings-modal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModeSettingsModal();
+        });
+    }
+    // Close on Escape (only while our modal is open).
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const m = document.getElementById('mode-settings-modal');
+        if (m && m.style.display !== 'none') closeModeSettingsModal();
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initModeSettingsContextMenu);
+} else {
+    initModeSettingsContextMenu();
+}
+
+window.openModeSettingsModal = openModeSettingsModal;
+window.closeModeSettingsModal = closeModeSettingsModal;
+
 // Shift detected frequency to 1 kHz by adjusting dial frequency
 function shiftFrequencyTo1kHz() {
     // Only works in USB, LSB, CWU, CWL modes

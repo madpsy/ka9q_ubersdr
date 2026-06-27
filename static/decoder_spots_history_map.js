@@ -407,7 +407,7 @@ class DecoderSpotsHistoryMap {
         });
 
         let content = `
-            <div style="font-family: 'Twemoji Flags', monospace; font-size: 12px;">
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">
                 <b><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" style="color: #000; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${this.flagForCountry(spot.country)}${spot.callsign}</a></b><br>
         `;
 

@@ -557,7 +557,7 @@ function cwAnalyticsIso2ToFlag(code) {
             });
 
             // Create popup content
-            let popupContent = `<div style="font-family: 'Twemoji Flags', monospace; font-size: 12px;">`;
+            let popupContent = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">`;
             popupContent += `<b>${flagForAnalyticsCountry(country.country)}${country.country}</b><br>`;
             popupContent += `<b>Continent:</b> ${country.continent}<br>`;
             popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
@@ -622,7 +622,7 @@ function cwAnalyticsIso2ToFlag(code) {
             });
 
             // Create popup content
-            let popupContent = `<div style="font-family: 'Twemoji Flags', monospace; font-size: 12px;">`;
+            let popupContent = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">`;
             popupContent += `<b>${flagForAnalyticsCountry(country.country)}${country.country}</b><br>`;
             popupContent += `<b>Continent:</b> ${country.continent}<br>`;
             popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
@@ -1670,7 +1670,7 @@ function cwAnalyticsIso2ToFlag(code) {
             });
 
             // Create popup content
-            let popupContent = `<div style="font-family: 'Twemoji Flags', monospace; font-size: 12px;">`;
+            let popupContent = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">`;
             popupContent += `<b>${flagForAnalyticsCountry(countryName)}${countryName}</b><br>`;
             popupContent += `<b>Hour:</b> ${hourStr} UTC<br>`;
             popupContent += `<b>Spots:</b> ${spots.toLocaleString()}<br>`;

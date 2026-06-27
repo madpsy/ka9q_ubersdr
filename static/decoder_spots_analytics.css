@@ -256,6 +256,7 @@ input::placeholder {
 .entity-name {
     font-size: 1.3em;
     font-weight: bold;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .entity-spots {

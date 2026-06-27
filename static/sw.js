@@ -63,7 +63,9 @@ self.addEventListener('fetch', (event) => {
         // Cache a clone of successful responses for the shell assets
         if (response.ok && SHELL_ASSETS.includes(url.pathname)) {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          caches.open(CACHE_NAME)
+            .then((cache) => cache.put(event.request, clone))
+            .catch(() => {}); // ignore storage errors
         }
         return response;
       })
@@ -76,6 +78,12 @@ self.addEventListener('fetch', (event) => {
               headers: { 'Content-Type': 'text/html' },
             })
         )
+      )
+      // Safety net: ensure respondWith never rejects, even if caches.match() fails
+      .catch(() =>
+        new Response('<h1>UberSDR</h1><p>You are offline. Please reconnect to use UberSDR.</p>', {
+          headers: { 'Content-Type': 'text/html' },
+        })
       )
   );
 });

@@ -190,7 +190,7 @@
             border-radius: 4px;
             white-space: pre;
             font-size: 11px;
-            line-height: 1.4;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
             z-index: 99999;
             pointer-events: none;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -204,6 +204,7 @@
             white-space: nowrap;
             pointer-events: none;
             transform: translateY(-50%);
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
 
         .band-tick {
@@ -290,6 +291,7 @@
             white-space: nowrap;
             transform: translateX(-50%);
             pointer-events: none;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
 
         .loading {
@@ -378,6 +380,7 @@
             font-size: 12px;
             padding: 4px 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
 
         .channel-tooltip::before {
@@ -393,6 +396,7 @@
             font-size: 12px;
             padding: 4px 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
 
         .channel-tooltip-you::before {

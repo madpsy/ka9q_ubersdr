@@ -1410,7 +1410,7 @@ function digAnalyticsIso2ToFlag(code) {
             { icon: receiverIcon }
         ).addTo(map);
 
-        marker.bindPopup('<div style="font-family: monospace; font-size: 12px;"><b>Receiver Location</b></div>');
+        marker.bindPopup('<div style="font-family: ui-monospace, \'Courier New\', monospace; font-size: 12px; line-height: 1.4;"><b>Receiver Location</b></div>');
         marker.bindTooltip('Receiver Location', {
             direction: 'top',
             offset: [0, -15],

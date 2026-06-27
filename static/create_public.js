@@ -1510,7 +1510,7 @@ async function testInstanceReporter() {
         message += `<strong>Status:</strong> ${result.collector_response_status || 'N/A'}<br>`;
         message += `<strong>Message:</strong> ${result.collector_response_message || 'N/A'}<br>`;
         if (result.public_uuid) {
-            message += `<strong>Public UUID:</strong> <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace;">${result.public_uuid}</code><br>`;
+            message += `<strong>Public UUID:</strong> <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: ui-monospace, 'Courier New', monospace;">${result.public_uuid}</code><br>`;
         }
 
         // Show result with appropriate styling

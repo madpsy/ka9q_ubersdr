@@ -262,7 +262,7 @@ class DecoderSpotsHistoryMap {
             { icon: receiverIcon }
         ).addTo(this.map);
 
-        this.receiverMarker.bindPopup('<div style="font-family: monospace; font-size: 12px;"><b>Receiver Location</b></div>');
+        this.receiverMarker.bindPopup('<div style="font-family: ui-monospace, \'Courier New\', monospace; font-size: 12px; line-height: 1.4;"><b>Receiver Location</b></div>');
         this.receiverMarker.bindTooltip('Receiver Location', {
             direction: 'top',
             offset: [0, -15],

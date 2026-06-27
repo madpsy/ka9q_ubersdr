@@ -8425,7 +8425,7 @@ function openModeSettingsModal(mode) {
         label.style.cssText = 'color: #ecf0f1; font-weight: bold;';
 
         const valLabel = document.createElement('span');
-        valLabel.style.cssText = 'color: #28a745; font-family: monospace; font-size: 0.95em;';
+        valLabel.style.cssText = "color: #28a745; font-family: ui-monospace, 'Courier New', monospace; font-size: 0.95em;";
         valLabel.textContent = fmt(values[control.id]);
 
         header.appendChild(label);

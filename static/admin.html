@@ -6860,7 +6860,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     0x1F1E6 - 65 + code.toUpperCase().charCodeAt(0),
                     0x1F1E6 - 65 + code.toUpperCase().charCodeAt(1)
                 );
-                return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#e8eaf6;border:1px solid #9fa8da;border-radius:12px;font-size:12px;color:#3949ab;white-space:nowrap;">${flag}\u202F${name}</span>`;
+                return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#e8eaf6;border:1px solid #9fa8da;border-radius:12px;font-size:12px;color:#3949ab;white-space:nowrap;line-height:1.4;">${flag}\u202F${name}</span>`;
             }).join('');
 
             wrap.style.display = '';
@@ -7941,7 +7941,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 
                 const _allowedFlag = String.fromCodePoint(...[...country.alpha2.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
                 row.innerHTML = `
-                    <td style="padding: 10px;">
+                    <td style="padding: 10px; line-height: 1.4;">
                         ${_allowedFlag}\u202F<strong>${country.name}</strong>
                         <span style="color: #666; font-size: 12px; margin-left: 8px;">(${country.alpha2})</span>
                     </td>
@@ -7980,7 +7980,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 
                 const _bannedFlag = String.fromCodePoint(...[...country.alpha2.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
                 row.innerHTML = `
-                    <td style="padding: 10px;">
+                    <td style="padding: 10px; line-height: 1.4;">
                         ${_bannedFlag}\u202F<strong>${country.name}</strong>
                         <span style="color: #666; font-size: 12px; margin-left: 8px;">(${country.alpha2})</span>
                     </td>

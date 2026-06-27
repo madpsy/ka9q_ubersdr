@@ -13,7 +13,7 @@
         }
 
         body {
-            font-family: 'Twemoji Flags', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, 'Twemoji Flags', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
@@ -7061,7 +7061,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 row.style.borderBottom = '1px solid #dee2e6';
                 if (sessions.isBypassed) row.style.background = '#e8f5e9';
                 row.innerHTML = `
-                    <td style="padding: 12px; font-family: 'Twemoji Flags', monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
+                    <td style="padding: 12px; font-family: monospace, 'Twemoji Flags'; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
                     <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : (userAgent.length > 32 ? userAgent.substring(0, 32) + '…' : userAgent)}</td>
                     <td style="padding: 12px; font-size: 12px;">${chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>'}</td>
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>

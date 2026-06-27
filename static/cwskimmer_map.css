@@ -5,7 +5,7 @@
         }
 
         body {
-            font-family: 'Twemoji Flags', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, 'Twemoji Flags', sans-serif;
             background: #1a1a1a;
             color: #fff;
             overflow: hidden;
@@ -377,7 +377,7 @@
             border-left: 3px solid #4a9eff;
             border-radius: 4px;
             font-size: 11px;
-            font-family: 'Twemoji Flags', monospace;
+            font-family: monospace, 'Twemoji Flags';
         }
 
         .live-message-time {

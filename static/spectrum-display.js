@@ -4518,7 +4518,8 @@ class SpectrumDisplay {
         this.tooltip.style.padding = '8px 12px';
         this.tooltip.style.borderRadius = '4px';
         this.tooltip.style.fontSize = '12px';
-        this.tooltip.style.fontFamily = "'Twemoji Flags', monospace";
+        this.tooltip.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace";
+        this.tooltip.style.lineHeight = '1.4';
         this.tooltip.style.pointerEvents = 'none';
         this.tooltip.style.zIndex = '10000';
         this.tooltip.style.display = 'none';
@@ -5579,7 +5580,7 @@ class SpectrumDisplay {
         // Header label
         const header = document.createElement('div');
         header.style.padding = '6px 16px 4px';
-        header.style.fontFamily = 'monospace';
+        header.style.fontFamily = "ui-monospace, 'Courier New', monospace";
         header.style.fontSize = '11px';
         header.style.color = '#888';
         header.style.borderBottom = '1px solid #eee';
@@ -5590,7 +5591,7 @@ class SpectrumDisplay {
             const item = document.createElement('div');
             item.style.padding = '7px 16px';
             item.style.cursor = 'pointer';
-            item.style.fontFamily = 'monospace';
+            item.style.fontFamily = "ui-monospace, 'Courier New', monospace";
             item.style.fontSize = '13px';
             item.style.display = 'flex';
             item.style.alignItems = 'center';
@@ -5778,7 +5779,7 @@ class SpectrumDisplay {
         const item = document.createElement('div');
         item.style.padding = '8px 16px';
         item.style.cursor = 'pointer';
-        item.style.fontFamily = 'monospace';
+        item.style.fontFamily = "ui-monospace, 'Courier New', monospace";
         item.style.fontSize = '13px';
         item.textContent = text;
         item.addEventListener('mouseenter', () => {
@@ -5847,7 +5848,7 @@ class SpectrumDisplay {
             fontSize:     '12px',
             color:        '#95a5a6',
             marginBottom: '14px',
-            fontFamily:   'monospace',
+            fontFamily:   "ui-monospace, 'Courier New', monospace",
         });
 
         // Label
@@ -5875,7 +5876,7 @@ class SpectrumDisplay {
             borderRadius: '4px',
             color:        '#ecf0f1',
             fontSize:     '14px',
-            fontFamily:   'monospace',
+            fontFamily:   "ui-monospace, 'Courier New', monospace",
             padding:      '7px 10px',
             marginBottom: '16px',
             outline:      'none',
@@ -6015,7 +6016,7 @@ class SpectrumDisplay {
             fontSize:     '12px',
             color:        '#95a5a6',
             marginBottom: '14px',
-            fontFamily:   'monospace',
+            fontFamily:   "ui-monospace, 'Courier New', monospace",
         });
 
         // Label
@@ -6052,7 +6053,7 @@ class SpectrumDisplay {
             borderRadius: '4px',
             color:        '#ecf0f1',
             fontSize:     '14px',
-            fontFamily:   'monospace',
+            fontFamily:   "ui-monospace, 'Courier New', monospace",
             padding:      '7px 10px',
             marginBottom: '16px',
             outline:      'none',

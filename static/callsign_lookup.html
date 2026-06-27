@@ -48,7 +48,7 @@
             border-radius: 5px;
             color: #fff;
             font-size: 14px;
-            font-family: monospace, 'Twemoji Flags';
+            font-family: -apple-system, BlinkMacSystemFont, monospace, 'Twemoji Flags';
             text-transform: uppercase;
             outline: none;
             transition: border-color 0.2s;
@@ -222,9 +222,10 @@
             font-size: 28px;
             font-weight: 700;
             color: #ffc107;
-            font-family: monospace, 'Twemoji Flags';
+            font-family: -apple-system, BlinkMacSystemFont, monospace, 'Twemoji Flags';
             margin-bottom: 4px;
             letter-spacing: 1px;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
 
         .aliases-row {
@@ -1100,7 +1101,7 @@
 
             leafletMarker = L.marker([lat, lon], { icon })
                 .addTo(leafletMap)
-                .bindPopup(`<b>${flag}${esc(callsign)}</b>${countryLine}${popupExtra}`, {
+                .bindPopup(`<div style="line-height:1.4;"><b>${flag}${esc(callsign)}</b>${countryLine}${popupExtra}</div>`, {
                     autoPanPaddingTopLeft: L.point(10, 60)
                 })
                 .openPopup();

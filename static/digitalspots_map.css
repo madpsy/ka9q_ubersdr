@@ -4,6 +4,19 @@
             box-sizing: border-box;
         }
 
+        /* Leaflet tooltip/popup font fix — Safari computes line-height:normal as
+           enormous when the Twemoji font is in the font stack, causing a gap above
+           the first line. Force a sane line-height and safe font stack. */
+        .leaflet-tooltip,
+        .leaflet-popup-content,
+        .leaflet-popup-content-wrapper {
+            line-height: 1.4 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, Helvetica, sans-serif !important;
+        }
+        .leaflet-popup-content p {
+            margin: 8px 0 !important;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, 'Twemoji Flags', sans-serif;
             background: #1a1a1a;

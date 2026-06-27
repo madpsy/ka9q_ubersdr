@@ -229,6 +229,7 @@
 .cw-spots-table td {
     padding: 6px 8px;
     border-bottom: 1px solid #2a2a2a;
+    line-height: 1.4;
 }
 
 .cw-spots-table tbody tr {

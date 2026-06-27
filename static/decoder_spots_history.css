@@ -165,6 +165,7 @@ h1 {
     text-align: left;
     font-weight: bold;
     border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+    line-height: 1.4;
 }
 
 .spots-table th.sortable {
@@ -208,6 +209,7 @@ h1 {
 .spots-table td {
     padding: 10px 12px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    line-height: 1.4;
 }
 
 .spots-table tr:hover {

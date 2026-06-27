@@ -4,6 +4,10 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            height: 100%;
+        }
+
         body {
             font-family: 'Twemoji Flags', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #1a1a1a;

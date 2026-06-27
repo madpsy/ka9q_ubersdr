@@ -188,6 +188,7 @@
             font-weight: bold;
             font-size: 1.05em;
             color: #fff;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
         .beacon-card .bc-entity {
             font-size: 0.8em;
@@ -348,6 +349,7 @@
         .hm-beacon-label .hm-bl-call {
             font-weight: 700;
             flex-shrink: 0;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
         .hm-beacon-label .hm-bl-loc {
             opacity: 0.55;
@@ -496,8 +498,9 @@
             border: 1px solid rgba(74,158,255,0.4) !important;
             border-radius: 4px !important;
             color: #e8f0ff !important;
-            font-family: "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif !important;
             font-size: 11px !important;
+            line-height: 1.4 !important;
             font-weight: 600 !important;
             padding: 2px 6px !important;
             white-space: nowrap !important;
@@ -564,6 +567,7 @@
             font-size: 1.05em;
             color: #fff;
             flex: 1;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
         .beacon-toast .bt-band {
             display: inline-block;
@@ -660,6 +664,7 @@
             font-weight: bold;
             color: #1a3a6a;
             margin-bottom: 2px;
+            line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
         }
         .beacon-popup .bp-entity {
             font-size: 0.88em;
@@ -1105,7 +1110,7 @@ function updateScheduleTable(now) {
         const flag = beaconFlag(b);
         html += `<tr>
             <td><span class="band-pill" style="background:${color};">${bandName} ${BANDS_MHZ[i]}</span></td>
-            <td><strong>${flag ? flag + '\u202F' : ''}${b.callsign}</strong></td>
+            <td style="line-height:1.4;"><strong>${flag ? flag + '\u202F' : ''}${b.callsign}</strong></td>
             <td>${b.location}</td>
             <td>${b.entity}</td>
             <td style="font-family:monospace;">${b.grid}</td>
@@ -1861,7 +1866,7 @@ function spotsRowHtml(s) {
     return `<tr class="beacon-row-highlight">
         <td style="font-family:monospace;">${timeStr}</td>
         ${validCell}
-        <td><strong>${_flagR ? _flagR + '\u202F' : ''}${s.callsign}</strong></td>
+        <td style="line-height:1.4;"><strong>${_flagR ? _flagR + '\u202F' : ''}${s.callsign}</strong></td>
         <td>${entity}</td>
         <td><span class="band-pill" style="background:${color};">${s.band}</span></td>
         <td style="font-family:monospace;">${(() => {

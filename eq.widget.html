@@ -237,7 +237,10 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: rgba(0, 230, 118, 0.9);
+    background: rgba(0, 230, 118, 0.9) !important; /* !important: host page rules with equal
+                                                       specificity but later cascade order (e.g.
+                                                       dynamically loaded stylesheets) would
+                                                       otherwise override the green thumb colour */
     border: 1px solid rgba(0,0,0,0.3);
   }
   #eqw-widget .eqw-slider::-moz-range-track {
@@ -249,7 +252,7 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: rgba(0, 230, 118, 0.9);
+    background: rgba(0, 230, 118, 0.9) !important; /* same reason as webkit thumb above */
     border: 1px solid rgba(0,0,0,0.3);
   }
 

@@ -346,10 +346,14 @@ type SmoothingConfig struct {
 }
 
 // SpectrumDefaultConfig contains default parameters for new spectrum channels
+// SpectrumDefaultConfig holds the fixed default parameters for the spectrum display.
+// These values are intentionally not user-configurable via config.yaml — they are
+// hardcoded in LoadConfig to ensure the display always covers exactly 0-30 MHz.
+// (totalBandwidth = BinCount × BinBandwidth must equal 30,000,000 Hz)
 type SpectrumDefaultConfig struct {
-	CenterFrequency uint64  `yaml:"center_frequency"`
-	BinCount        int     `yaml:"bin_count"`
-	BinBandwidth    float64 `yaml:"bin_bandwidth"`
+	CenterFrequency uint64  `yaml:"-"`
+	BinCount        int     `yaml:"-"`
+	BinBandwidth    float64 `yaml:"-"`
 }
 
 // SpectrogramConfig contains settings for the daily wideband spectrogram recorder.
@@ -869,15 +873,17 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Admin.AllowedIPs = []string{"0.0.0.0/0"} // Default: allow all IPv4
 	}
 
-	// Set spectrum defaults if not specified
+	// Set spectrum defaults if not specified.
+	// These are intentionally not exposed in config.yaml — changing them breaks the
+	// 0-30 MHz display (totalBandwidth = binCount × binBandwidth must equal 30 MHz).
 	if config.Spectrum.Default.CenterFrequency == 0 {
-		config.Spectrum.Default.CenterFrequency = 15000000 // 15 MHz for 0-30 MHz coverage
+		config.Spectrum.Default.CenterFrequency = 15000000 // 15 MHz center for 0-30 MHz coverage
 	}
 	if config.Spectrum.Default.BinCount == 0 {
 		config.Spectrum.Default.BinCount = 1024
 	}
 	if config.Spectrum.Default.BinBandwidth == 0 {
-		config.Spectrum.Default.BinBandwidth = 30000.0 // 30 kHz bins for full HF
+		config.Spectrum.Default.BinBandwidth = 29296.875 // 30,000,000 Hz / 1024 bins
 	}
 	if config.Spectrum.PollPeriodMs == 0 {
 		config.Spectrum.PollPeriodMs = 100 // 100ms default (10 Hz update rate)

@@ -544,19 +544,6 @@ audio:
 spectrum:
   # Enable per-user spectrum channels
   enabled: true
-  # Default parameters for new spectrum channels (users can zoom/pan)
-  default:
-    # Default center frequency (Hz) - 15 MHz for 0-30 MHz coverage
-    center_frequency: 15000000
-    # Default number of bins - kept constant for consistent display
-    bin_count: 1024
-    # Default bandwidth per bin (Hz) - calculated for exact 0-30 MHz coverage
-    # 30,000,000 Hz / 1024 bins = 29,296.875 Hz per bin
-    # Users can adjust this to zoom in/out:
-    #   29.3 kHz = 0-30 MHz (full HF band)
-    #   10 kHz = ~10 MHz view
-    #    1 kHz = ~1 MHz detailed view
-    bin_bandwidth: 29296.875
   # Poll period in milliseconds (how often to request spectrum data)
   # Lower values = faster updates but more CPU/network usage
   poll_period_ms: 100

@@ -16043,6 +16043,12 @@ function _dockApplyMobileLayout() {
                         btn.dataset.on = cb.checked ? 'true' : 'false';
                     }
                 });
+                // Sync toggle when checkbox is changed externally (e.g. by spectrum-display.js)
+                if (cb) {
+                    cb.addEventListener('change', () => {
+                        btn.dataset.on = cb.checked ? 'true' : 'false';
+                    });
+                }
                 togglesWrap.appendChild(btn);
             });
 
@@ -16060,10 +16066,26 @@ function _dockApplyMobileLayout() {
                     apCb.dispatchEvent(new Event('change', { bubbles: true }));
                     btn.dataset.on = apCb.checked ? 'true' : 'false';
                 });
+                apCb.addEventListener('change', () => {
+                    btn.dataset.on = apCb.checked ? 'true' : 'false';
+                });
                 togglesWrap.appendChild(btn);
             }
 
             mainGroup.appendChild(togglesWrap);
+
+            // Deferred sync: spectrum-display.js sets checkbox.checked directly
+            // without dispatching change events, so re-read after initialization
+            setTimeout(() => {
+                const wrap = document.getElementById('mobile-spectrum-toggles');
+                if (wrap) {
+                    wrap.querySelectorAll('.mobile-spectrum-toggle').forEach(b => {
+                        const cbId = b.dataset.checkboxId;
+                        const c = cbId && document.getElementById(cbId);
+                        if (c) b.dataset.on = c.checked ? 'true' : 'false';
+                    });
+                }
+            }, 500);
         }
     }
 

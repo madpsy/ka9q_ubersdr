@@ -2592,11 +2592,13 @@ input[type="range"]::-moz-range-thumb {
     /* Mobile spectrum toggle buttons (green=on, orange=off) */
     .mobile-spectrum-toggles {
         display: flex;
-        gap: 4px;
+        gap: 6px;
         align-items: center;
+        flex: 1;
     }
 
     .mobile-spectrum-toggle {
+        flex: 1;
         padding: 6px 18px;
         border: none;
         border-radius: 4px;

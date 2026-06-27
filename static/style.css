@@ -2575,7 +2575,7 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .spectrum-display-controls label {
-        padding: 6px 4px !important;
+        padding: 4px 4px 10px !important;
     }
 
     /* Hide spectrum controls not needed on mobile */

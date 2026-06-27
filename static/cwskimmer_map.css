@@ -9,6 +9,7 @@
             background: #1a1a1a;
             color: #fff;
             overflow: hidden;
+            line-height: 1.2;
         }
 
         #map {

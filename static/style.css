@@ -2695,6 +2695,13 @@ input[type="range"]::-moz-range-thumb {
         border-bottom: 2px solid #3498db;
     }
 
+    .mobile-tab-arrow {
+        font-size: 0.75em;
+        margin-left: 2px;
+        display: inline-block;
+        transition: transform 0.15s ease;
+    }
+
     .mobile-tab-btn:not(.active):active {
         background: rgba(52, 73, 94, 0.9);
     }

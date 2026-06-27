@@ -137,13 +137,13 @@
         },
         {
             target: '.mobile-tab-bar',
-            title: '🗂️ Control Tabs',
-            body: `<p>Controls are organised into tabs to give the waterfall more space:</p>
+            title: '🗂️ Control Panels',
+            body: `<p>These toggle buttons expand extra controls below them:</p>
                    <ul>
                      <li><strong>🎛 Tune</strong> — mode selection, bandwidth and squelch</li>
                      <li><strong>📡 Bookmarks</strong> — server bookmarks, personal bookmarks and search</li>
                    </ul>
-                   <p>Tap a tab to switch. Your last selection is remembered.</p>`,
+                   <p>Tap to expand, tap again to collapse and maximise the waterfall.</p>`,
             position: 'top',
             platform: 'mobile',
             condition: () => !!document.getElementById('mobile-tab-bar')

@@ -16023,22 +16023,22 @@ function _dockApplyMobileLayout() {
             tabBar.className = 'mobile-tab-bar';
 
             const tabTune = document.createElement('button');
-            tabTune.className = 'mobile-tab-btn active';
-            tabTune.textContent = '🎛 Tune';
+            tabTune.className = 'mobile-tab-btn';
+            tabTune.innerHTML = '🎛 Tune <span class="mobile-tab-arrow">▼</span>';
             tabTune.dataset.tab = 'tune';
 
             const tabBookmarks = document.createElement('button');
             tabBookmarks.className = 'mobile-tab-btn';
-            tabBookmarks.textContent = '📡 Bookmarks';
+            tabBookmarks.innerHTML = '📡 Bookmarks <span class="mobile-tab-arrow">▼</span>';
             tabBookmarks.dataset.tab = 'bookmarks';
 
             tabBar.appendChild(tabTune);
             tabBar.appendChild(tabBookmarks);
 
-            // Create tab content panels
+            // Create tab content panels (both collapsed by default)
             const tunePanelEl = document.createElement('div');
             tunePanelEl.id = 'mobile-tab-tune';
-            tunePanelEl.className = 'mobile-tab-content active';
+            tunePanelEl.className = 'mobile-tab-content';
 
             const bookmarksPanelEl = document.createElement('div');
             bookmarksPanelEl.id = 'mobile-tab-bookmarks';
@@ -16071,25 +16071,66 @@ function _dockApplyMobileLayout() {
             controlGroup2.insertBefore(tunePanelEl, tabBar.nextSibling);
             controlGroup2.insertBefore(bookmarksPanelEl, tunePanelEl.nextSibling);
 
-            // Tab switching handler
-            function switchMobileTab(tabName) {
-                tabBar.querySelectorAll('.mobile-tab-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.tab === tabName);
-                });
-                tunePanelEl.classList.toggle('active', tabName === 'tune');
-                bookmarksPanelEl.classList.toggle('active', tabName === 'bookmarks');
-                try { localStorage.setItem('mobileActiveTab', tabName); } catch {}
+            // Update arrow indicators on tab buttons
+            function updateTabArrows() {
+                const tuneArrow = tabTune.querySelector('.mobile-tab-arrow');
+                const bookmarksArrow = tabBookmarks.querySelector('.mobile-tab-arrow');
+                if (tuneArrow) tuneArrow.textContent = tunePanelEl.classList.contains('active') ? '▲' : '▼';
+                if (bookmarksArrow) bookmarksArrow.textContent = bookmarksPanelEl.classList.contains('active') ? '▲' : '▼';
+            }
+
+            // Tab toggle handler — tapping the active tab collapses it (no panel shown),
+            // tapping an inactive tab opens it and closes the other.
+            function toggleMobileTab(tabName) {
+                const tuneActive = tunePanelEl.classList.contains('active');
+                const bookmarksActive = bookmarksPanelEl.classList.contains('active');
+
+                if (tabName === 'tune') {
+                    if (tuneActive) {
+                        // Collapse — hide everything
+                        tunePanelEl.classList.remove('active');
+                        tabTune.classList.remove('active');
+                        try { localStorage.setItem('mobileActiveTab', 'none'); } catch {}
+                    } else {
+                        // Open tune, close bookmarks
+                        tunePanelEl.classList.add('active');
+                        bookmarksPanelEl.classList.remove('active');
+                        tabTune.classList.add('active');
+                        tabBookmarks.classList.remove('active');
+                        try { localStorage.setItem('mobileActiveTab', 'tune'); } catch {}
+                    }
+                } else if (tabName === 'bookmarks') {
+                    if (bookmarksActive) {
+                        // Collapse — hide everything
+                        bookmarksPanelEl.classList.remove('active');
+                        tabBookmarks.classList.remove('active');
+                        try { localStorage.setItem('mobileActiveTab', 'none'); } catch {}
+                    } else {
+                        // Open bookmarks, close tune
+                        bookmarksPanelEl.classList.add('active');
+                        tunePanelEl.classList.remove('active');
+                        tabBookmarks.classList.add('active');
+                        tabTune.classList.remove('active');
+                        try { localStorage.setItem('mobileActiveTab', 'bookmarks'); } catch {}
+                    }
+                }
+                updateTabArrows();
                 // Refresh dock overlay position since content height changed
                 if (typeof _dockPositionWrapper === 'function') _dockPositionWrapper();
             }
 
-            tabTune.onclick = () => switchMobileTab('tune');
-            tabBookmarks.onclick = () => switchMobileTab('bookmarks');
+            tabTune.onclick = () => toggleMobileTab('tune');
+            tabBookmarks.onclick = () => toggleMobileTab('bookmarks');
 
-            // Restore last active tab from localStorage
+            // Restore last active tab from localStorage (default: both collapsed)
             try {
                 const saved = localStorage.getItem('mobileActiveTab');
-                if (saved === 'bookmarks') switchMobileTab('bookmarks');
+                if (saved === 'tune') {
+                    toggleMobileTab('tune');
+                } else if (saved === 'bookmarks') {
+                    toggleMobileTab('bookmarks');
+                }
+                // else: 'none' or null — keep default (both collapsed)
             } catch {}
         }
     }

@@ -16107,7 +16107,7 @@ function _dockApplyMobileLayout() {
 
             const tabTune = document.createElement('button');
             tabTune.className = 'mobile-tab-btn';
-            tabTune.innerHTML = '🎛 Tune <span class="mobile-tune-sq-dot" style="display:none; width:8px; height:8px; border-radius:50%; background:#28a745; margin-right:4px; vertical-align:middle;"></span><span class="mobile-tab-arrow">▼</span>';
+            tabTune.innerHTML = '🎛 Tune <span class="mobile-tune-sq-dot" style="display:none; width:9px; height:9px; border-radius:50%; background:#7fff00; box-shadow:0 0 0 2px #fff; margin-right:5px; vertical-align:middle;"></span><span class="mobile-tab-arrow">▼</span>';
             tabTune.dataset.tab = 'tune';
 
             const tabBookmarks = document.createElement('button');
@@ -16185,7 +16185,8 @@ function _dockApplyMobileLayout() {
                         const snr = (bp != null && nd != null && bp > -900 && nd > -900) ? bp - nd : null;
                         const gating = !squelchOff && snr !== null && snr < t;
                         sqDot.style.display = 'inline-block';
-                        sqDot.style.background = gating ? '#dc3545' : '#28a745';
+                        sqDot.style.background = gating ? '#dc3545' : '#7fff00';
+                        sqDot.style.boxShadow = '0 0 0 2px #fff';
                         sqDot.title = gating ? 'Squelch closed' : 'Squelch open';
                     } else {
                         sqDot.style.display = 'none';
@@ -16250,6 +16251,8 @@ function _dockApplyMobileLayout() {
                 }
                 // else: 'none' or null — keep default (both collapsed)
             } catch {}
+            // Always run once to set initial arrow/label/dot state
+            updateTabArrows();
         }
     }
 }

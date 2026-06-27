@@ -2310,10 +2310,24 @@ input[type="range"]::-moz-range-thumb {
         max-height: none !important;
         overflow: visible !important;
         overflow-y: visible !important;
-        padding-bottom: 12px !important;
+        padding-bottom: 0 !important;
         /* On mobile the whole docked panel captures taps so they never fall
            through the transparent gaps to the waterfall behind it. */
         pointer-events: auto !important;
+    }
+
+    /* Visual-only background extension that bridges the gap between the dock
+       overlay and the spectrum controls bar. Uses pointer-events:none so taps
+       pass through to the spectrum controls bar beneath. */
+    #dock-overlay-wrapper::after {
+        content: '';
+        position: absolute;
+        bottom: -14px;
+        left: 0;
+        right: 0;
+        height: 14px;
+        background: rgba(44, 62, 80, var(--controls-opacity));
+        pointer-events: none;
     }
 
     /* Hide the waterfall drag-resize handle on mobile — waterfall fills full

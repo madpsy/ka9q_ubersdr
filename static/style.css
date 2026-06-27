@@ -4559,7 +4559,7 @@ input[type="range"]::-moz-range-thumb {
     transition: color 0.2s ease;
     user-select: none;
     white-space: nowrap;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .decoder-extension-resize-handle:hover .resize-handle-hint {

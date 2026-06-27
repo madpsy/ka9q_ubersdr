@@ -5,7 +5,7 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, 'Twemoji Flags', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, 'Twemoji Flags', sans-serif;
             background: #1a1a1a;
             color: #fff;
             overflow: hidden;

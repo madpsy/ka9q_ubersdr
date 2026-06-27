@@ -2,7 +2,7 @@
 
 .radio-sync-container {
     padding: 15px;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .radio-sync-section {
@@ -450,7 +450,7 @@
     color: #3498db;
     text-shadow: 0 0 5px rgba(52, 152, 219, 0.5);
     animation: none;
-    font-family: 'Segoe UI', 'Arial', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial', sans-serif;
     font-weight: 300;
 }
 

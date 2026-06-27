@@ -138,6 +138,16 @@
             cursor: pointer;
         }
 
+        .activity-item.scan-active {
+            background: #1a3a2a;
+            outline: 2px solid #27ae60;
+            outline-offset: -2px;
+        }
+
+        .activity-item.scan-active:hover {
+            background: #1e4a32;
+        }
+
         .activity-item:last-child {
             border-bottom: none;
         }
@@ -1027,6 +1037,9 @@
             const statusEl = document.getElementById('scan-status');
             statusEl.textContent = '';
             statusEl.classList.remove('active');
+
+            // Remove row highlight
+            document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('scan-active'));
             
             // Resume auto-refresh
             startAutoRefresh();
@@ -1037,7 +1050,19 @@
             
             const activity = scanActivities[currentScanIndex];
             tuneToFrequency(activity.frequency, activity.mode);
+            highlightCurrentRow();
             updateScanStatus();
+        }
+
+        function highlightCurrentRow() {
+            // Remove highlight from all rows
+            document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('scan-active'));
+            // Highlight the current row by index (only non-subheader items)
+            const items = document.querySelectorAll('.activity-item');
+            if (items[currentScanIndex]) {
+                items[currentScanIndex].classList.add('scan-active');
+                items[currentScanIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
         }
 
         function updateScanStatus() {
@@ -1113,6 +1138,7 @@
             // Update current scan index for navigation consistency
             currentScanIndex = randomIndex;
             scanActivities = activities;
+            highlightCurrentRow();
         }
 
         // Auto-refresh every 2.5 seconds

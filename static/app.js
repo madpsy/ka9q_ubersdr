@@ -8467,28 +8467,50 @@ function initModeSettingsContextMenu() {
         });
 
         // ── Mobile: manual long-press ────────────────────────────────────
+        // We call e.preventDefault() on touchstart to stop the browser's
+        // text-selection gesture.  Because that also suppresses the synthetic
+        // click event, we re-fire click manually on a short tap (touchend
+        // before the long-press timer fires).
         let longPressTimer = null;
+        let longPressTriggered = false;
 
-        // passive:false is required so we can call preventDefault() and stop
-        // the browser starting a text-selection gesture on the button text.
         btn.addEventListener('touchstart', (e) => {
-            e.preventDefault();
+            e.preventDefault();   // stops text-selection; we restore click below
+            longPressTriggered = false;
             longPressTimer = setTimeout(() => {
+                longPressTriggered = true;
                 longPressTimer = null;
                 openModeSettingsModal(mode);
             }, 500);
         }, { passive: false });
 
-        const cancelLongPress = () => {
+        btn.addEventListener('touchend', (e) => {
             if (longPressTimer !== null) {
                 clearTimeout(longPressTimer);
                 longPressTimer = null;
             }
-        };
+            // Short tap: re-fire click so onclick="setMode(...)" still works.
+            if (!longPressTriggered) {
+                btn.click();
+            }
+        });
 
-        btn.addEventListener('touchend',    cancelLongPress);
-        btn.addEventListener('touchmove',   cancelLongPress); // drag/scroll cancels
-        btn.addEventListener('touchcancel', cancelLongPress);
+        btn.addEventListener('touchmove', () => {
+            // Finger moved — cancel long-press; don't fire click either.
+            if (longPressTimer !== null) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            longPressTriggered = true; // prevent click on touchend
+        });
+
+        btn.addEventListener('touchcancel', () => {
+            if (longPressTimer !== null) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            longPressTriggered = true;
+        });
     });
 
     // Close when clicking the backdrop.

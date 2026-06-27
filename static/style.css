@@ -2310,7 +2310,7 @@ input[type="range"]::-moz-range-thumb {
         max-height: none !important;
         overflow: visible !important;
         overflow-y: visible !important;
-        padding-bottom: 12px !important;
+        padding-bottom: 20px !important;
         /* On mobile the whole docked panel captures taps so they never fall
            through the transparent gaps to the waterfall behind it. */
         pointer-events: auto !important;

@@ -2557,40 +2557,16 @@ input[type="range"]::-moz-range-thumb {
         display: flex !important;
     }
 
-    /* Enlarge touch targets for spectrum controls bar on mobile.
-       The base font-size is 0.65em which makes everything tiny;
-       override to 1em so labels/checkboxes are finger-friendly. */
+    /* Increase invisible touch area for spectrum controls bar on mobile
+       without changing visual size. The touch guard in spectrum-display.js
+       prevents the canvas from stealing taps in this region. */
     .spectrum-display-controls {
-        font-size: 0.85em !important;
-        padding: 10px 10px !important;
-        gap: 14px !important;
+        padding: 8px 10px !important;
         touch-action: manipulation;
-        -webkit-tap-highlight-color: transparent;
     }
 
     .spectrum-display-controls label {
         padding: 6px 4px !important;
-        min-height: 36px;
-        display: flex !important;
-        align-items: center;
-        gap: 6px !important;
-        font-size: 1em !important;
-    }
-
-    .spectrum-display-controls input[type="checkbox"] {
-        width: 22px !important;
-        height: 22px !important;
-        min-width: 22px;
-    }
-
-    .spectrum-display-controls button {
-        min-height: 36px;
-        min-width: 36px;
-    }
-
-    .spectrum-display-controls select {
-        min-height: 36px;
-        padding: 6px 10px !important;
     }
 
     /* Hide spectrum controls not needed on mobile */

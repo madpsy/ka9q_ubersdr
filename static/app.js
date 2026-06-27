@@ -912,8 +912,10 @@ function _unmuteAudioContextForHttpStream() {
 }
 
 // Mobile device detection — used for UI display (device emoji)
+// Exclude Windows from the maxTouchPoints heuristic so that Windows
+// touchscreen laptops/desktops are correctly treated as desktop devices.
 const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-                  navigator.maxTouchPoints > 1;
+                  (navigator.maxTouchPoints > 1 && !/Windows/i.test(navigator.userAgent));
 // Expose for other scripts (e.g. idle-detector.js) that load independently
 window._isMobile = _isMobile;
 // Expose audioContext globally for recorder

@@ -7289,6 +7289,8 @@ function updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh) {
         const totalBandwidthKHz = (totalBandwidthHz / 1000).toFixed(1);
         bandwidthElement.textContent = `${totalBandwidthKHz} kHz`;
     }
+    // Refresh mobile Tune button label (shows mode/bandwidth when collapsed)
+    if (typeof window._updateMobileTuneLabel === 'function') window._updateMobileTuneLabel();
 }
 
 // Auto-tune when frequency or mode changes
@@ -16158,13 +16160,20 @@ function _dockApplyMobileLayout() {
                 const bookmarksArrow = tabBookmarks.querySelector('.mobile-tab-arrow');
                 if (tuneArrow) tuneArrow.textContent = tuneOpen ? '▲' : '▼';
                 if (bookmarksArrow) bookmarksArrow.textContent = bookmarksOpen ? '▲' : '▼';
-                // Show current mode in Tune button when collapsed
+                // Show current mode + bandwidth in Tune button when collapsed
                 const mode = (window.currentMode || '').toUpperCase();
-                tabTune.childNodes[0].textContent = tuneOpen ? '🎛 Tune ' : `🎛 Tune (${mode}) `;
+                if (!tuneOpen) {
+                    const bwLow = window.currentBandwidthLow || 0;
+                    const bwHigh = window.currentBandwidthHigh || 0;
+                    const bwK = (Math.abs(bwHigh - bwLow) / 1000).toFixed(1);
+                    tabTune.childNodes[0].textContent = `🎛 Tune (${mode}/${bwK}k) `;
+                } else {
+                    tabTune.childNodes[0].textContent = '🎛 Tune ';
+                }
                 // Add bottom spacing only when both panels are collapsed
                 tabBar.classList.toggle('all-collapsed', !tuneOpen && !bookmarksOpen);
             }
-            // Expose so setMode() can refresh the label when mode changes
+            // Expose so setMode() and bandwidth changes can refresh the label
             window._updateMobileTuneLabel = updateTabArrows;
 
             // Tab toggle handler — tapping the active tab collapses it (no panel shown),

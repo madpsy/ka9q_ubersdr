@@ -4572,6 +4572,17 @@ class SpectrumDisplay {
         };
 
         const handleTouchStart = (e) => {
+            // Ignore touches that land on the spectrum controls bar overlay
+            // (checkboxes, buttons, selects) — let them handle the event natively.
+            const controlsBar = document.querySelector('.spectrum-display-controls');
+            if (controlsBar && e.touches.length > 0) {
+                const touch = e.touches[0];
+                const barRect = controlsBar.getBoundingClientRect();
+                if (touch.clientY >= barRect.top && touch.clientY <= barRect.bottom &&
+                    touch.clientX >= barRect.left && touch.clientX <= barRect.right) {
+                    return; // Touch is inside the controls bar — don't start pan/zoom
+                }
+            }
             if (e.touches.length === 2) {
                 // Two-finger touch - prepare for pinch zoom
                 e.preventDefault();

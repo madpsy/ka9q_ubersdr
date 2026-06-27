@@ -6355,6 +6355,11 @@ function setMode(mode, preserveBandwidth = false) {
         activeBtn.classList.add('active');
     }
 
+    // Sync mobile mode toggle buttons (if present)
+    document.querySelectorAll('.mobile-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+
     // Show/hide bandwidth vs squelch controls based on mode
     const bandwidthControls = document.getElementById('bandwidth-controls');
     const squelchControls = document.getElementById('squelch-controls');
@@ -15910,7 +15915,7 @@ function _dockApply() {
     }
 }
 
-// Apply mobile-specific DOM rearrangements (bandwidth + SNR squelch row, NR + EQ buttons).
+// Apply mobile-specific DOM rearrangements (tabs, mode toggles, bandwidth + SNR squelch row, NR + EQ buttons).
 // Safe to call multiple times — guards against creating #bw-squelch-row twice.
 function _dockApplyMobileLayout() {
     if (document.getElementById('bw-squelch-row')) return; // already applied
@@ -15922,39 +15927,224 @@ function _dockApplyMobileLayout() {
         mobileRow.appendChild(bwEl);
         const snrRow = document.getElementById('snr-squelch-row');
         if (snrRow) {
-            // Reorder children of snrRow so label+span come before the slider,
-            // giving us: [Squelch] [Off] on line 1, [slider] on line 2.
-            // Original DOM order: label | [wrapper-div > input] | span
-            // snrSlider may be wrapped in a div by initSNRSquelch(); get the direct child.
             const snrSlider = document.getElementById('snr-squelch-slider');
             const snrValue  = document.getElementById('snr-squelch-value');
             const sliderNode = snrSlider
                 ? (snrSlider.parentElement !== snrRow ? snrSlider.parentElement : snrSlider)
                 : null;
             if (sliderNode && snrValue) {
-                // Move span to be right before the slider (or its wrapper)
                 snrRow.insertBefore(snrValue, sliderNode);
             }
             mobileRow.appendChild(snrRow);
         }
-        // Move NR + EQ buttons to the frequency input row (next to step dropdown/btns/wheel).
-        // They live in #audio-buttons-group, which is hidden on mobile (.audio-controls
-        // is display:none), so relocating them out of that panel also makes them visible.
+        // Move NR + EQ buttons to the frequency input row
         const nrBtn = document.getElementById('nr2-quick-toggle');
         const eqBtn = document.getElementById('eq-quick-toggle');
         const freqScrollCtrl = document.getElementById('frequency-scroll-controls');
         if (freqScrollCtrl && freqScrollCtrl.parentElement) {
-            // Append in order so they read NR | EQ at the end of the row.
             if (nrBtn) freqScrollCtrl.parentElement.appendChild(nrBtn);
             if (eqBtn) freqScrollCtrl.parentElement.appendChild(eqBtn);
+        }
+    }
+
+    // ── Mobile Mode Toggle Pairs ──────────────────────────────────────────
+    // Replace the 8-button 4×2 grid with 4 combined toggle buttons in 1 row.
+    // The original .preset-buttons is hidden by CSS; we create new elements.
+    if (!document.getElementById('mobile-mode-toggles')) {
+        const MODE_PAIRS = [
+            ['lsb', 'usb'],
+            ['cwl', 'cwu'],
+            ['am',  'sam'],
+            ['fm',  'nfm']
+        ];
+        const togglesRow = document.createElement('div');
+        togglesRow.id = 'mobile-mode-toggles';
+        togglesRow.className = 'mobile-mode-toggles';
+
+        MODE_PAIRS.forEach(([modeA, modeB]) => {
+            const pair = document.createElement('div');
+            pair.className = 'mobile-mode-pair';
+
+            const btnA = document.createElement('button');
+            btnA.textContent = modeA.toUpperCase();
+            btnA.dataset.mode = modeA;
+            btnA.className = 'mobile-mode-btn' + (window.currentMode === modeA ? ' active' : '');
+            btnA.onclick = () => { if (typeof setMode === 'function') setMode(modeA); };
+
+            const btnB = document.createElement('button');
+            btnB.textContent = modeB.toUpperCase();
+            btnB.dataset.mode = modeB;
+            btnB.className = 'mobile-mode-btn' + (window.currentMode === modeB ? ' active' : '');
+            btnB.onclick = () => { if (typeof setMode === 'function') setMode(modeB); };
+
+            pair.appendChild(btnA);
+            pair.appendChild(btnB);
+            togglesRow.appendChild(pair);
+        });
+
+        // Insert the toggles row where the original .preset-buttons is
+        const presetBtns = document.querySelector('.preset-buttons');
+        if (presetBtns && presetBtns.parentElement) {
+            presetBtns.parentElement.insertBefore(togglesRow, presetBtns.nextSibling);
+        }
+    }
+
+    // ── Mobile Tab System ─────────────────────────────────────────────────
+    // Create a tab bar with "Tune" and "Bookmarks" tabs. Move the relevant
+    // controls into tab content panels. The pinned section (band buttons,
+    // frequency input, tuning buttons) stays above the tabs.
+    if (!document.getElementById('mobile-tab-bar')) {
+        const controlGroup2 = document.querySelector('.controls .control-group:nth-child(2)');
+        if (controlGroup2) {
+            // Create tab bar
+            const tabBar = document.createElement('div');
+            tabBar.id = 'mobile-tab-bar';
+            tabBar.className = 'mobile-tab-bar';
+
+            const tabTune = document.createElement('button');
+            tabTune.className = 'mobile-tab-btn active';
+            tabTune.textContent = '🎛 Tune';
+            tabTune.dataset.tab = 'tune';
+
+            const tabBookmarks = document.createElement('button');
+            tabBookmarks.className = 'mobile-tab-btn';
+            tabBookmarks.textContent = '📡 Bookmarks';
+            tabBookmarks.dataset.tab = 'bookmarks';
+
+            tabBar.appendChild(tabTune);
+            tabBar.appendChild(tabBookmarks);
+
+            // Create tab content panels
+            const tunePanelEl = document.createElement('div');
+            tunePanelEl.id = 'mobile-tab-tune';
+            tunePanelEl.className = 'mobile-tab-content active';
+
+            const bookmarksPanelEl = document.createElement('div');
+            bookmarksPanelEl.id = 'mobile-tab-bookmarks';
+            bookmarksPanelEl.className = 'mobile-tab-content';
+
+            // Move mode toggles + BW/squelch into Tune tab
+            const modeToggles = document.getElementById('mobile-mode-toggles');
+            const bwSqRow = document.getElementById('bw-squelch-row');
+            const squelchControls = document.getElementById('squelch-controls');
+            if (modeToggles) tunePanelEl.appendChild(modeToggles);
+            if (bwSqRow) tunePanelEl.appendChild(bwSqRow);
+            if (squelchControls) tunePanelEl.appendChild(squelchControls);
+
+            // Move bookmark dropdowns + search into Bookmarks tab
+            // The bookmark selects are in a flex div inside the first .control-group
+            const controlGroup1 = document.querySelector('.controls .control-group:nth-child(1)');
+            const bookmarkSelectsDiv = controlGroup1
+                ? controlGroup1.querySelector('#bookmark-selector')?.parentElement
+                : null;
+            const bookmarkSearchWrap = document.querySelector('.bookmark-search-wrap');
+            const extensionsRow = document.getElementById('extensions-row');
+
+            if (bookmarkSelectsDiv) bookmarksPanelEl.appendChild(bookmarkSelectsDiv);
+            if (bookmarkSearchWrap) bookmarksPanelEl.appendChild(bookmarkSearchWrap);
+            if (extensionsRow) bookmarksPanelEl.appendChild(extensionsRow);
+
+            // Insert tab bar and panels into the second control group
+            // (after the bookmark search / before mode buttons area)
+            controlGroup2.insertBefore(tabBar, controlGroup2.firstChild);
+            controlGroup2.insertBefore(tunePanelEl, tabBar.nextSibling);
+            controlGroup2.insertBefore(bookmarksPanelEl, tunePanelEl.nextSibling);
+
+            // Tab switching handler
+            function switchMobileTab(tabName) {
+                tabBar.querySelectorAll('.mobile-tab-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.tab === tabName);
+                });
+                tunePanelEl.classList.toggle('active', tabName === 'tune');
+                bookmarksPanelEl.classList.toggle('active', tabName === 'bookmarks');
+                try { localStorage.setItem('mobileActiveTab', tabName); } catch {}
+                // Refresh dock overlay position since content height changed
+                if (typeof _dockPositionWrapper === 'function') _dockPositionWrapper();
+            }
+
+            tabTune.onclick = () => switchMobileTab('tune');
+            tabBookmarks.onclick = () => switchMobileTab('bookmarks');
+
+            // Restore last active tab from localStorage
+            try {
+                const saved = localStorage.getItem('mobileActiveTab');
+                if (saved === 'bookmarks') switchMobileTab('bookmarks');
+            } catch {}
         }
     }
 }
 
 // Undo mobile-specific DOM rearrangements. Safe to call when no mobile layout exists.
 function _dockRemoveMobileLayout() {
-    // Grab all references BEFORE removing bwSqRow — elements inside a removed
-    // node are detached from the document and getElementById() won't find them.
+    // ── Undo tabs ─────────────────────────────────────────────────────────
+    // Restore elements from tab panels back to their original parents BEFORE
+    // removing the tab containers, so they stay in the document.
+    const tunePanel = document.getElementById('mobile-tab-tune');
+    const bookmarksPanel = document.getElementById('mobile-tab-bookmarks');
+    const tabBar = document.getElementById('mobile-tab-bar');
+
+    if (bookmarksPanel) {
+        // Restore bookmark selects div to the first control group
+        const controlGroup1 = document.querySelector('.controls .control-group:nth-child(1)');
+        const bookmarkSelectsDiv = bookmarksPanel.querySelector('#bookmark-selector')?.parentElement;
+        const bookmarkSearchWrap = bookmarksPanel.querySelector('.bookmark-search-wrap');
+        const extensionsRow = document.getElementById('extensions-row');
+        const bandSelector = document.getElementById('band-selector');
+
+        if (controlGroup1) {
+            // Restore bookmark selects after band-selector (original position)
+            if (bookmarkSelectsDiv) {
+                if (bandSelector && bandSelector.nextSibling) {
+                    controlGroup1.insertBefore(bookmarkSelectsDiv, bandSelector.nextSibling);
+                } else {
+                    controlGroup1.appendChild(bookmarkSelectsDiv);
+                }
+            }
+            // Restore extensions row after bookmark selects
+            if (extensionsRow) {
+                const bsDiv = bookmarkSelectsDiv || bandSelector;
+                if (bsDiv && bsDiv.nextSibling) {
+                    controlGroup1.insertBefore(extensionsRow, bsDiv.nextSibling);
+                } else {
+                    controlGroup1.appendChild(extensionsRow);
+                }
+            }
+        }
+
+        // Restore bookmark search to the second control group
+        const controlGroup2 = document.querySelector('.controls .control-group:nth-child(2)');
+        if (bookmarkSearchWrap && controlGroup2) {
+            // Insert before .preset-buttons (original position)
+            const presetBtns = controlGroup2.querySelector('.preset-buttons');
+            if (presetBtns) {
+                controlGroup2.insertBefore(bookmarkSearchWrap, presetBtns);
+            } else {
+                controlGroup2.appendChild(bookmarkSearchWrap);
+            }
+        }
+    }
+
+    if (tunePanel) {
+        // Move bw-squelch-row and squelch-controls back to the second control group
+        const controlGroup2 = document.querySelector('.controls .control-group:nth-child(2)');
+        const bwSqRow = document.getElementById('bw-squelch-row');
+        const squelchControls = document.getElementById('squelch-controls');
+        if (controlGroup2) {
+            if (bwSqRow) controlGroup2.appendChild(bwSqRow);
+            if (squelchControls) controlGroup2.appendChild(squelchControls);
+        }
+    }
+
+    // Remove tab bar and tab panels
+    if (tabBar) tabBar.remove();
+    if (tunePanel) tunePanel.remove();
+    if (bookmarksPanel) bookmarksPanel.remove();
+
+    // ── Undo mode toggles ─────────────────────────────────────────────────
+    const modeToggles = document.getElementById('mobile-mode-toggles');
+    if (modeToggles) modeToggles.remove();
+
+    // ── Undo bw-squelch-row (original logic) ──────────────────────────────
     const bwSqRow    = document.getElementById('bw-squelch-row');
     const snrRow     = document.getElementById('snr-squelch-row');
     const volSqGroup = document.getElementById('volume-squelch-group');
@@ -15963,9 +16153,7 @@ function _dockRemoveMobileLayout() {
 
     if (bwSqRow) {
         const bwEl = document.getElementById('bandwidth-controls');
-        // Move #bandwidth-controls back to its original parent (before bwSqRow)
         if (bwEl) bwSqRow.parentElement.insertBefore(bwEl, bwSqRow);
-        // Move snrRow out of bwSqRow BEFORE removing it, so it stays in the document
         if (snrRow && snrRow.parentElement === bwSqRow) {
             bwSqRow.parentElement.insertBefore(snrRow, bwSqRow);
         }
@@ -15973,10 +16161,8 @@ function _dockRemoveMobileLayout() {
     }
 
     if (snrRow && volSqGroup) {
-        // Always restore span to last position (original: label | [wrapper > slider] | span)
         const snrValue = document.getElementById('snr-squelch-value');
         if (snrValue) snrRow.appendChild(snrValue);
-        // Re-insert snrRow into volSqGroup after #volume-row (its original position)
         if (snrRow.parentElement !== volSqGroup) {
             const volumeRow = document.getElementById('volume-row');
             if (volumeRow && volumeRow.nextSibling) {
@@ -15989,7 +16175,6 @@ function _dockRemoveMobileLayout() {
 
     const audioBtnsGroup = document.getElementById('audio-buttons-group');
     if (nrBtn && audioBtnsGroup && nrBtn.parentElement !== audioBtnsGroup) {
-        // Insert before #nb-quick-toggle to restore original order: Mute | NR | NB | ...
         const nbBtn = document.getElementById('nb-quick-toggle');
         if (nbBtn && nbBtn.parentElement === audioBtnsGroup) {
             audioBtnsGroup.insertBefore(nrBtn, nbBtn);
@@ -15998,7 +16183,6 @@ function _dockRemoveMobileLayout() {
         }
     }
     if (eqBtn && audioBtnsGroup && eqBtn.parentElement !== audioBtnsGroup) {
-        // Insert before #rec-btn to restore original order: ... | RMN | EQ | Rec
         const recBtn = document.getElementById('rec-btn');
         if (recBtn && recBtn.parentElement === audioBtnsGroup) {
             audioBtnsGroup.insertBefore(eqBtn, recBtn);

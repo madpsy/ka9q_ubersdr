@@ -136,6 +136,34 @@
             platform: 'both'
         },
         {
+            target: '.mobile-tab-bar',
+            title: '🗂️ Control Tabs',
+            body: `<p>Controls are organised into tabs to give the waterfall more space:</p>
+                   <ul>
+                     <li><strong>🎛 Tune</strong> — mode selection, bandwidth and squelch</li>
+                     <li><strong>📡 Bookmarks</strong> — server bookmarks, personal bookmarks and search</li>
+                   </ul>
+                   <p>Tap a tab to switch. Your last selection is remembered.</p>`,
+            position: 'top',
+            platform: 'mobile',
+            condition: () => !!document.getElementById('mobile-tab-bar')
+        },
+        {
+            target: '.mobile-mode-toggles',
+            title: '📻 Mode Selection',
+            body: `<p>Tap either side of each button to select a mode:</p>
+                   <ul>
+                     <li><strong>LSB / USB</strong> — lower / upper sideband</li>
+                     <li><strong>CWL / CWU</strong> — CW lower / upper</li>
+                     <li><strong>AM / SAM</strong> — AM / synchronous AM</li>
+                     <li><strong>FM / NFM</strong> — FM / narrow FM</li>
+                   </ul>
+                   <p>The active mode is highlighted in dark green.</p>`,
+            position: 'top',
+            platform: 'mobile',
+            condition: () => !!document.getElementById('mobile-mode-toggles')
+        },
+        {
             target: '.bandwidth-controls',
             title: '↔️ Bandwidth',
             body: `<p>The <strong>BW slider</strong> sets the receive bandwidth. Narrower bandwidth

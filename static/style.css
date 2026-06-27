@@ -2608,6 +2608,101 @@ input[type="range"]::-moz-range-thumb {
     #browser-zoom-group {
         display: none !important;
     }
+
+    /* ── Mobile Tab System ─────────────────────────────────────────────────
+       Tabs group the dock overlay controls into switchable panels so the
+       waterfall gets more vertical space. Only active inside the mobile
+       @media block — desktop is unaffected. */
+
+    /* Hide original 8-button mode grid on mobile — replaced by toggle pairs */
+    .preset-buttons {
+        display: none !important;
+    }
+
+    /* Mobile mode toggle pairs — 4 combined buttons in a single row */
+    .mobile-mode-toggles {
+        display: flex !important;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    .mobile-mode-pair {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mobile-mode-pair button {
+        flex: 1;
+        padding: 7px 2px;
+        background-color: #28a745;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-size: 0.8em;
+        font-weight: bold;
+        transition: background-color 0.15s;
+        white-space: nowrap;
+    }
+
+    .mobile-mode-pair button:first-child {
+        border-radius: 4px 0 0 4px;
+        border-right: 1px solid rgba(255, 255, 255, 0.25);
+    }
+
+    .mobile-mode-pair button:last-child {
+        border-radius: 0 4px 4px 0;
+    }
+
+    .mobile-mode-pair button.active {
+        background-color: #155724 !important;
+    }
+
+    .mobile-mode-pair button:not(.active) {
+        background-color: #1e7e34;
+        opacity: 0.65;
+    }
+
+    /* Tab bar */
+    .mobile-tab-bar {
+        display: flex;
+        gap: 2px;
+        padding: 4px 6px 0;
+    }
+
+    .mobile-tab-btn {
+        flex: 1;
+        padding: 5px 8px;
+        background: rgba(52, 73, 94, 0.7);
+        color: #95a5a6;
+        border: none;
+        border-radius: 4px 4px 0 0;
+        font-size: 0.8em;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        white-space: nowrap;
+    }
+
+    .mobile-tab-btn.active {
+        background: rgba(44, 62, 80, 0.85);
+        color: #ecf0f1;
+        border-bottom: 2px solid #3498db;
+    }
+
+    .mobile-tab-btn:not(.active):active {
+        background: rgba(52, 73, 94, 0.9);
+    }
+
+    /* Tab content panels */
+    .mobile-tab-content {
+        display: none;
+        padding: 4px 6px 6px;
+    }
+
+    .mobile-tab-content.active {
+        display: block;
+    }
 }
 
 /* Browser zoom buttons — hidden by default (desktop), shown on narrow via media query above */

@@ -4,16 +4,11 @@
             box-sizing: border-box;
         }
 
-        html, body {
-            height: 100%;
-        }
-
         body {
             font-family: 'Twemoji Flags', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #1a1a1a;
             color: #fff;
             overflow: hidden;
-            line-height: 1.2;
         }
 
         #map {
@@ -46,14 +41,12 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            min-height: 0;
         }
 
         .header-right {
             display: flex;
             align-items: center;
             gap: 15px;
-            min-height: 0;
         }
 
         .header h1 {

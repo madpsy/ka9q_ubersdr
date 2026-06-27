@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="fonts/fonts.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Digital Spots Map</title>
     <link rel="stylesheet" href="leaflet.css" />
     <link rel="stylesheet" href="digitalspots_map.css" />
@@ -11,9 +11,9 @@
 </head>
 <body>
     <!-- Resolution Info Overlay -->
-    <div id="resolution-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); z-index: 10000; display: flex; align-items: center; justify-content: center;">
-        <div style="background: #2a2a2a; border: 2px solid #4a9eff; border-radius: 12px; padding: 30px 40px; max-width: 500px; max-height: 90vh; overflow-y: auto; text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);">
-            <div style="font-size: 48px; line-height: 1; margin-bottom: 20px;">📺</div>
+    <div id="resolution-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); z-index: 10000; display: flex; overflow-y: auto;">
+        <div style="margin: auto; background: #2a2a2a; border: 2px solid #4a9eff; border-radius: 12px; padding: 30px 40px; max-width: 500px; max-height: 90vh; overflow-y: auto; text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);">
+            <div style="font-size: 48px; margin-bottom: 20px;">📺</div>
             <h2 style="color: #4a9eff; margin-bottom: 20px; font-size: 1.5em;">Optimal Viewing</h2>
             <p style="color: #ccc; line-height: 1.6; margin-bottom: 25px; font-size: 1.1em;">
                 This page is best viewed <strong style="color: #fff;">full screen (F11)</strong> on a <strong style="color: #fff;">1080p monitor</strong> or <strong style="color: #fff;">4K scaled to 200%</strong>.
@@ -34,8 +34,8 @@
             <span id="last-spot-time" class="spot-count">-</span>
         </div>
         <div class="header-right">
-            <div class="filter-group" style="flex-direction: column; align-items: flex-start;">
-                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; margin-bottom: 2px;">
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
                     <input type="checkbox" id="show-stats-checkbox" checked style="margin: 0; cursor: pointer;">
                     <span>Stats</span>
                 </label>
@@ -44,8 +44,8 @@
                     <span>Summary</span>
                 </label>
             </div>
-            <div class="filter-group" style="flex-direction: column; align-items: flex-start;">
-                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; margin-bottom: 2px;">
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
                     <input type="checkbox" id="show-live-checkbox" checked style="margin: 0; cursor: pointer;">
                     <span>Live</span>
                 </label>
@@ -54,8 +54,8 @@
                     <span>Cycles</span>
                 </label>
             </div>
-            <div class="filter-group" style="flex-direction: column; align-items: flex-start;">
-                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; margin-bottom: 2px;">
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
                     <input type="checkbox" id="show-weather-checkbox" style="margin: 0; cursor: pointer;">
                     <span>Weather</span>
                 </label>

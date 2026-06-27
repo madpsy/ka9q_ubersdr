@@ -211,7 +211,8 @@ async function createWorldMap(countries) {
             .style('font-size', '14px')
             .style('pointer-events', 'none')
             .style('opacity', 0)
-            .style('z-index', 1000);
+            .style('z-index', 1000)
+            .style('line-height', '1.4');
         
         // Match countries to features and calculate per-feature session totals
         // Process in two passes: first match named countries, then "Unknown"

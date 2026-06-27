@@ -41,12 +41,14 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            min-height: 0;
         }
 
         .header-right {
             display: flex;
             align-items: center;
             gap: 15px;
+            min-height: 0;
         }
 
         .header h1 {

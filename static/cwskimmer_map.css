@@ -317,7 +317,7 @@
             top: 70px;
             right: 10px;
             width: 350px;
-            max-height: 500px;
+            max-height: 380px;
             background: rgba(26, 26, 26, 0.95);
             backdrop-filter: blur(10px);
             border: 1px solid #333;
@@ -362,7 +362,7 @@
 
         .live-messages-content {
             overflow-y: auto;
-            max-height: 450px;
+            max-height: 330px;
             padding: 10px;
         }
 
@@ -377,7 +377,7 @@
             border-left: 3px solid #4a9eff;
             border-radius: 4px;
             font-size: 11px;
-            font-family: monospace, 'Twemoji Flags';
+            font-family: ui-monospace, 'Courier New', monospace, 'Twemoji Flags';
         }
 
         .live-message-time {

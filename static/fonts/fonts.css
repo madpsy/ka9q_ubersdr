@@ -122,10 +122,10 @@
    Leaflet's default is "Helvetica Neue", Arial, Helvetica, sans-serif — none of which
    include flag glyphs on Windows Chrome. These rules prepend the flag font globally. */
 .leaflet-container {
-    font-family: "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif;
 }
 .leaflet-popup-content {
-    font-family: "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif;
 }
 
 /* Nixie One — display/nixie tube style, regular 400 only */

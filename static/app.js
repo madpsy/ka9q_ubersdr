@@ -7171,6 +7171,8 @@ function updateSNRSquelchDisplay() {
         }
     }
     // ───────────────────────────────────────────────────────────────────────
+    // Refresh mobile Tune button squelch dot
+    if (typeof window._updateMobileTuneLabel === 'function') window._updateMobileTuneLabel();
 }
 
 let _snrSquelchTimer = null;
@@ -16105,7 +16107,7 @@ function _dockApplyMobileLayout() {
 
             const tabTune = document.createElement('button');
             tabTune.className = 'mobile-tab-btn';
-            tabTune.innerHTML = '🎛 Tune <span class="mobile-tab-arrow">▼</span>';
+            tabTune.innerHTML = '🎛 Tune <span class="mobile-tune-sq-dot" style="display:none; width:8px; height:8px; border-radius:50%; background:#28a745; margin-right:4px; vertical-align:middle;"></span><span class="mobile-tab-arrow">▼</span>';
             tabTune.dataset.tab = 'tune';
 
             const tabBookmarks = document.createElement('button');
@@ -16163,17 +16165,36 @@ function _dockApplyMobileLayout() {
                 // Show current mode + bandwidth in Tune button when collapsed
                 const mode = (window.currentMode || '').toUpperCase();
                 if (!tuneOpen) {
-                    const bwLow = window.currentBandwidthLow || 0;
-                    const bwHigh = window.currentBandwidthHigh || 0;
-                    const bwK = (Math.abs(bwHigh - bwLow) / 1000).toFixed(1);
+                    const bwSpan = document.getElementById('bandwidth-combined-value');
+                    const bwHz = bwSpan ? parseInt(bwSpan.textContent) || 0 : 0;
+                    const bwK = (bwHz / 1000).toFixed(1);
                     tabTune.childNodes[0].textContent = `🎛 Tune (${mode}/${bwK}k) `;
                 } else {
                     tabTune.childNodes[0].textContent = '🎛 Tune ';
                 }
+                // Squelch dot: green=open/off, red=gating — only shown when collapsed
+                const sqDot = tabTune.querySelector('.mobile-tune-sq-dot');
+                if (sqDot) {
+                    if (!tuneOpen) {
+                        const snrSl = document.getElementById('snr-squelch-slider');
+                        const t = snrSl && typeof snrSquelchThreshold === 'function'
+                            ? snrSquelchThreshold(snrSl.value) : null;
+                        const squelchOff = t === null || t <= SNR_SQUELCH_SENTINEL + 1;
+                        const bp = window.currentBasebandPower;
+                        const nd = window.currentNoiseDensity;
+                        const snr = (bp != null && nd != null && bp > -900 && nd > -900) ? bp - nd : null;
+                        const gating = !squelchOff && snr !== null && snr < t;
+                        sqDot.style.display = 'inline-block';
+                        sqDot.style.background = gating ? '#dc3545' : '#28a745';
+                        sqDot.title = gating ? 'Squelch closed' : 'Squelch open';
+                    } else {
+                        sqDot.style.display = 'none';
+                    }
+                }
                 // Add bottom spacing only when both panels are collapsed
                 tabBar.classList.toggle('all-collapsed', !tuneOpen && !bookmarksOpen);
             }
-            // Expose so setMode() and bandwidth changes can refresh the label
+            // Expose so setMode(), bandwidth changes, and SNR updates can refresh the label
             window._updateMobileTuneLabel = updateTabArrows;
 
             // Tab toggle handler — tapping the active tab collapses it (no panel shown),

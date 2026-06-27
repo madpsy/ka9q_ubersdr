@@ -2592,15 +2592,15 @@ input[type="range"]::-moz-range-thumb {
     /* Mobile spectrum toggle buttons (green=on, orange=off) */
     .mobile-spectrum-toggles {
         display: flex;
-        gap: 3px;
+        gap: 4px;
         align-items: center;
     }
 
     .mobile-spectrum-toggle {
-        padding: 6px 8px;
+        padding: 6px 10px;
         border: none;
         border-radius: 4px;
-        font-size: 0.85em;
+        font-size: 1.3em;
         font-weight: bold;
         cursor: pointer;
         white-space: nowrap;
@@ -2611,14 +2611,14 @@ input[type="range"]::-moz-range-thumb {
         transition: background-color 0.15s;
     }
 
-    .mobile-spectrum-toggle.on {
-        background-color: #27ae60;
-        color: #fff;
+    .mobile-spectrum-toggle[data-on="true"] {
+        background-color: #27ae60 !important;
+        color: #fff !important;
     }
 
-    .mobile-spectrum-toggle.off {
-        background-color: #e67e22;
-        color: #fff;
+    .mobile-spectrum-toggle[data-on="false"] {
+        background-color: #e67e22 !important;
+        color: #fff !important;
         opacity: 0.8;
     }
 

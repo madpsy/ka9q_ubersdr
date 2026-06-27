@@ -16032,14 +16032,15 @@ function _dockApplyMobileLayout() {
             SPECTRUM_TOGGLES.forEach(({ id, label }) => {
                 const cb = document.getElementById(id);
                 const btn = document.createElement('button');
-                btn.className = 'mobile-spectrum-toggle ' + (cb && cb.checked ? 'on' : 'off');
+                btn.className = 'mobile-spectrum-toggle';
+                btn.dataset.on = (cb && cb.checked) ? 'true' : 'false';
                 btn.textContent = label;
                 btn.dataset.checkboxId = id;
                 btn.addEventListener('click', () => {
                     if (cb) {
                         cb.checked = !cb.checked;
                         cb.dispatchEvent(new Event('change', { bubbles: true }));
-                        btn.className = 'mobile-spectrum-toggle ' + (cb.checked ? 'on' : 'off');
+                        btn.dataset.on = cb.checked ? 'true' : 'false';
                     }
                 });
                 togglesWrap.appendChild(btn);
@@ -16050,13 +16051,14 @@ function _dockApplyMobileLayout() {
             const apLabel = document.getElementById('spectrum-label-autopause');
             if (apCb && apLabel && apLabel.style.display !== 'none') {
                 const btn = document.createElement('button');
-                btn.className = 'mobile-spectrum-toggle ' + (apCb.checked ? 'on' : 'off');
+                btn.className = 'mobile-spectrum-toggle';
+                btn.dataset.on = apCb.checked ? 'true' : 'false';
                 btn.textContent = 'Pause';
                 btn.dataset.checkboxId = 'spectrum-autopause-enable';
                 btn.addEventListener('click', () => {
                     apCb.checked = !apCb.checked;
                     apCb.dispatchEvent(new Event('change', { bubbles: true }));
-                    btn.className = 'mobile-spectrum-toggle ' + (apCb.checked ? 'on' : 'off');
+                    btn.dataset.on = apCb.checked ? 'true' : 'false';
                 });
                 togglesWrap.appendChild(btn);
             }

@@ -2594,15 +2594,13 @@ input[type="range"]::-moz-range-thumb {
         display: flex;
         gap: 6px;
         align-items: center;
-        flex: 1;
     }
 
     .mobile-spectrum-toggle {
-        flex: 1;
-        padding: 6px 18px !important;
+        padding: 6px 14px !important;
         border: none;
         border-radius: 4px;
-        font-size: 1.4em !important;
+        font-size: 1.2em !important;
         font-weight: bold;
         cursor: pointer;
         white-space: nowrap;
@@ -2611,7 +2609,6 @@ input[type="range"]::-moz-range-thumb {
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
         transition: background-color 0.15s;
-        min-height: 36px;
         min-width: auto !important;
         text-align: center;
     }

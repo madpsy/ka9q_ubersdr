@@ -2310,7 +2310,7 @@ input[type="range"]::-moz-range-thumb {
         max-height: none !important;
         overflow: visible !important;
         overflow-y: visible !important;
-        padding-bottom: 20px !important;
+        padding-bottom: 12px !important;
         /* On mobile the whole docked panel captures taps so they never fall
            through the transparent gaps to the waterfall behind it. */
         pointer-events: auto !important;
@@ -2672,7 +2672,13 @@ input[type="range"]::-moz-range-thumb {
     .mobile-tab-bar {
         display: flex;
         gap: 2px;
-        padding: 4px 6px 6px;
+        padding: 4px 6px 0;
+    }
+
+    /* When both panels are collapsed, add bottom spacing so the tab buttons
+       don't overlap the spectrum controls bar beneath the dock overlay. */
+    .mobile-tab-bar.all-collapsed {
+        padding-bottom: 24px;
     }
 
     .mobile-tab-btn {

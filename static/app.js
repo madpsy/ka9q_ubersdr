@@ -16020,7 +16020,7 @@ function _dockApplyMobileLayout() {
             // Create tab bar
             const tabBar = document.createElement('div');
             tabBar.id = 'mobile-tab-bar';
-            tabBar.className = 'mobile-tab-bar';
+            tabBar.className = 'mobile-tab-bar all-collapsed';
 
             const tabTune = document.createElement('button');
             tabTune.className = 'mobile-tab-btn';
@@ -16071,12 +16071,16 @@ function _dockApplyMobileLayout() {
             controlGroup2.insertBefore(tunePanelEl, tabBar.nextSibling);
             controlGroup2.insertBefore(bookmarksPanelEl, tunePanelEl.nextSibling);
 
-            // Update arrow indicators on tab buttons
+            // Update arrow indicators on tab buttons and collapsed spacing class
             function updateTabArrows() {
+                const tuneOpen = tunePanelEl.classList.contains('active');
+                const bookmarksOpen = bookmarksPanelEl.classList.contains('active');
                 const tuneArrow = tabTune.querySelector('.mobile-tab-arrow');
                 const bookmarksArrow = tabBookmarks.querySelector('.mobile-tab-arrow');
-                if (tuneArrow) tuneArrow.textContent = tunePanelEl.classList.contains('active') ? '▲' : '▼';
-                if (bookmarksArrow) bookmarksArrow.textContent = bookmarksPanelEl.classList.contains('active') ? '▲' : '▼';
+                if (tuneArrow) tuneArrow.textContent = tuneOpen ? '▲' : '▼';
+                if (bookmarksArrow) bookmarksArrow.textContent = bookmarksOpen ? '▲' : '▼';
+                // Add bottom spacing only when both panels are collapsed
+                tabBar.classList.toggle('all-collapsed', !tuneOpen && !bookmarksOpen);
             }
 
             // Tab toggle handler — tapping the active tab collapses it (no panel shown),

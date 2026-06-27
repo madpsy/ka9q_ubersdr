@@ -780,7 +780,7 @@
 
             // Re-apply highlight after DOM rebuild if a row was previously selected
             if (scanActivities.length > 0) {
-                highlightCurrentRow();
+                highlightCurrentRow(false); // auto-refresh repaint — don't scroll
             }
         }
 
@@ -817,7 +817,7 @@
 
             // Re-apply highlight after DOM rebuild if a row was previously selected
             if (scanActivities.length > 0) {
-                highlightCurrentRow();
+                highlightCurrentRow(false); // auto-refresh repaint — don't scroll
             }
         }
 
@@ -1060,11 +1060,11 @@
             
             const activity = scanActivities[currentScanIndex];
             tuneToFrequency(activity.frequency, activity.mode);
-            highlightCurrentRow();
+            highlightCurrentRow(true); // auto-scan/nav moved us — scroll to show it
             updateScanStatus();
         }
 
-        function highlightCurrentRow() {
+        function highlightCurrentRow(scroll) {
             // Remove highlight from all rows
             document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('scan-active'));
             if (scanActivities.length === 0) return;
@@ -1074,7 +1074,9 @@
             const target = document.querySelector(`.activity-item[data-freq="${activity.frequency}"][data-mode="${activity.mode}"]`);
             if (target) {
                 target.classList.add('scan-active');
-                target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                if (scroll) {
+                    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
             }
         }
 
@@ -1095,7 +1097,7 @@
             scanActivities = loadActivitiesForNavigation();
             currentScanIndex = scanActivities.findIndex(a => a.frequency === freq && a.mode === mode);
             if (currentScanIndex === -1) currentScanIndex = 0;
-            highlightCurrentRow();
+            highlightCurrentRow(false); // user clicked it — no need to scroll
         }
 
         function updateScanStatus() {
@@ -1171,7 +1173,7 @@
             // Update current scan index for navigation consistency
             currentScanIndex = randomIndex;
             scanActivities = activities;
-            highlightCurrentRow();
+            highlightCurrentRow(true); // random pick — scroll to show it
         }
 
         // Auto-refresh every 2.5 seconds

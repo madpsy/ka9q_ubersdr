@@ -315,6 +315,7 @@
 
 .cw-spots-table .spot-country {
     color: #aaa;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .cw-spots-table .spot-distance {
@@ -433,6 +434,11 @@
 
 .country-spots-modal-table .modal-country {
     color: #17a2b8;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
+}
+
+.country-badge {
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .country-spots-modal-table .modal-wpm {

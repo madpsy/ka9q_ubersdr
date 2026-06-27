@@ -157,6 +157,7 @@ body {
     text-align: center;
     min-width: 200px;
     transition: all 0.3s ease;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .latest-spot.snr-excellent {

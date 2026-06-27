@@ -8466,42 +8466,32 @@ function initModeSettingsContextMenu() {
             openModeSettingsModal(mode);
         });
 
-        // ── Mobile: manual long-press ────────────────────────────────────
-        // We call e.preventDefault() on touchstart to stop the browser's
-        // text-selection gesture.  Because that also suppresses the synthetic
-        // click event, we re-fire click manually on a short tap (touchend
-        // before the long-press timer fires).
+        // ── Mobile: long-press ───────────────────────────────────────────
+        // We use a passive touchstart (no preventDefault) so the browser's
+        // normal tap→click flow is preserved for short taps.
+        // The text-selection problem is handled purely by CSS
+        // (user-select:none + touch-action:manipulation on .preset-buttons button).
         let longPressTimer = null;
-        let longPressTriggered = false;
 
-        btn.addEventListener('touchstart', (e) => {
-            e.preventDefault();   // stops text-selection; we restore click below
-            longPressTriggered = false;
+        btn.addEventListener('touchstart', () => {
             longPressTimer = setTimeout(() => {
-                longPressTriggered = true;
                 longPressTimer = null;
                 openModeSettingsModal(mode);
-            }, 500);
-        }, { passive: false });
+            }, 600);
+        });   // passive (default) — does NOT call preventDefault, so click still fires
 
-        btn.addEventListener('touchend', (e) => {
+        btn.addEventListener('touchend', () => {
             if (longPressTimer !== null) {
                 clearTimeout(longPressTimer);
                 longPressTimer = null;
-            }
-            // Short tap: re-fire click so onclick="setMode(...)" still works.
-            if (!longPressTriggered) {
-                btn.click();
             }
         });
 
         btn.addEventListener('touchmove', () => {
-            // Finger moved — cancel long-press; don't fire click either.
             if (longPressTimer !== null) {
                 clearTimeout(longPressTimer);
                 longPressTimer = null;
             }
-            longPressTriggered = true; // prevent click on touchend
         });
 
         btn.addEventListener('touchcancel', () => {
@@ -8509,7 +8499,6 @@ function initModeSettingsContextMenu() {
                 clearTimeout(longPressTimer);
                 longPressTimer = null;
             }
-            longPressTriggered = true;
         });
     });
 

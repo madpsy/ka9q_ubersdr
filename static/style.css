@@ -1688,6 +1688,8 @@ button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digita
     font-size: 0.74em;
     font-weight: 600;
     letter-spacing: 0.02em;
+    line-height: 1.4;        /* prevent Safari Twemoji ascent/descent inflation */
+    font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', 'Segoe UI', Tahoma, sans-serif;
     color: rgba(255, 255, 255, 0.95);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
     /* Subtle backing tinted with the meter's own track colour (--panel-dark)

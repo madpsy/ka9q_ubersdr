@@ -2672,7 +2672,7 @@ input[type="range"]::-moz-range-thumb {
     .mobile-tab-bar {
         display: flex;
         gap: 2px;
-        padding: 4px 6px 0;
+        padding: 4px 6px 6px;
     }
 
     .mobile-tab-btn {

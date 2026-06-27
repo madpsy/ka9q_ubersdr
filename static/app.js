@@ -15961,6 +15961,25 @@ function _dockApplyMobileLayout() {
         togglesRow.id = 'mobile-mode-toggles';
         togglesRow.className = 'mobile-mode-toggles';
 
+        // Helper: attach long-press → openModeSettingsModal to a mobile toggle button.
+        // Same pattern as initModeSettingsContextMenu() but for dynamically created buttons.
+        function _attachModeLongPress(btn, mode) {
+            let lpTimer = null;
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (typeof openModeSettingsModal === 'function') openModeSettingsModal(mode);
+            });
+            btn.addEventListener('touchstart', () => {
+                lpTimer = setTimeout(() => {
+                    lpTimer = null;
+                    if (typeof openModeSettingsModal === 'function') openModeSettingsModal(mode);
+                }, 600);
+            });
+            btn.addEventListener('touchend', () => { if (lpTimer !== null) { clearTimeout(lpTimer); lpTimer = null; } });
+            btn.addEventListener('touchmove', () => { if (lpTimer !== null) { clearTimeout(lpTimer); lpTimer = null; } });
+            btn.addEventListener('touchcancel', () => { if (lpTimer !== null) { clearTimeout(lpTimer); lpTimer = null; } });
+        }
+
         MODE_PAIRS.forEach(([modeA, modeB]) => {
             const pair = document.createElement('div');
             pair.className = 'mobile-mode-pair';
@@ -15970,12 +15989,14 @@ function _dockApplyMobileLayout() {
             btnA.dataset.mode = modeA;
             btnA.className = 'mobile-mode-btn' + (window.currentMode === modeA ? ' active' : '');
             btnA.onclick = () => { if (typeof setMode === 'function') setMode(modeA); };
+            _attachModeLongPress(btnA, modeA);
 
             const btnB = document.createElement('button');
             btnB.textContent = modeB.toUpperCase();
             btnB.dataset.mode = modeB;
             btnB.className = 'mobile-mode-btn' + (window.currentMode === modeB ? ' active' : '');
             btnB.onclick = () => { if (typeof setMode === 'function') setMode(modeB); };
+            _attachModeLongPress(btnB, modeB);
 
             pair.appendChild(btnA);
             pair.appendChild(btnB);

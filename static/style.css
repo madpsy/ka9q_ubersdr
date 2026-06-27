@@ -2643,6 +2643,11 @@ input[type="range"]::-moz-range-thumb {
         font-weight: bold;
         transition: background-color 0.15s;
         white-space: nowrap;
+        /* Prevent text selection on long-press (mode settings modal) */
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+        -webkit-touch-callout: none;
     }
 
     .mobile-mode-pair button:first-child {

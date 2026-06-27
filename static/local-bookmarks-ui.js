@@ -128,11 +128,11 @@ class LocalBookmarksUI {
                         <label>Passband (Hz)</label>
                         <div style="display: flex; gap: 10px; align-items: center;">
                             <div style="flex: 1;">
-                                <input type="number" id="local-bookmarks-edit-bw-low" placeholder="Low (e.g. -2800)" step="1" min="-6000" max="6000" style="width: 100%;">
+                                <input type="text" id="local-bookmarks-edit-bw-low" placeholder="Low (e.g. -2800)" inputmode="numeric" pattern="-?[0-9]+" style="width: 100%;">
                                 <small>Lower edge offset from carrier (−6000 to 6000)</small>
                             </div>
                             <div style="flex: 1;">
-                                <input type="number" id="local-bookmarks-edit-bw-high" placeholder="High (e.g. 2800)" step="1" min="-6000" max="6000" style="width: 100%;">
+                                <input type="text" id="local-bookmarks-edit-bw-high" placeholder="High (e.g. 2800)" inputmode="numeric" pattern="-?[0-9]+" style="width: 100%;">
                                 <small>Upper edge offset from carrier (−6000 to 6000)</small>
                             </div>
                         </div>

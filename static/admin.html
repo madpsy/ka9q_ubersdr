@@ -1297,13 +1297,13 @@
                         </div>
                         <div class="config-field">
                             <label>Bandwidth Low (Optional)</label>
-                            <input type="number" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" min="-8000" max="8000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
+                            <input type="text" id="newBookmarkBandwidthLow" placeholder="e.g., -2800" inputmode="numeric" pattern="-?[0-9]+" oninput="validateBookmarkForm()">
                             <small id="bookmarkBwLowError" style="color: #dc3545; display: none;"></small>
                             <small>Lower passband edge in Hz relative to carrier. Leave blank to use mode default (pre-filled on mode change).</small>
                         </div>
                         <div class="config-field">
                             <label>Bandwidth High (Optional)</label>
-                            <input type="number" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" min="-8000" max="8000" oninput="sanitizeNumberInput(this); validateBookmarkForm()">
+                            <input type="text" id="newBookmarkBandwidthHigh" placeholder="e.g., 2800" inputmode="numeric" pattern="-?[0-9]+" oninput="validateBookmarkForm()">
                             <small id="bookmarkBwHighError" style="color: #dc3545; display: none;"></small>
                             <small>Upper passband edge in Hz relative to carrier. Leave blank to use mode default (pre-filled on mode change).</small>
                         </div>

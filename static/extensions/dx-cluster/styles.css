@@ -135,11 +135,13 @@
     color: #ffc107;
     text-transform: uppercase;
     font-size: 11px;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .dx-cluster-table td {
     padding: 6px 8px;
     border-bottom: 1px solid #2a2a2a;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .dx-cluster-table tbody tr {

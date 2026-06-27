@@ -402,6 +402,7 @@
     font-family: 'Courier New', monospace;
     color: #ffffff;
     white-space: nowrap;
+    line-height: 1.4; /* prevent Safari Twemoji ascent/descent inflation */
 }
 
 .ft8-cell-snr {
@@ -409,6 +410,7 @@
     font-weight: 600;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-snr-positive {
@@ -428,6 +430,7 @@
     color: #ffffff;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-cell-freq {
@@ -435,6 +438,7 @@
     color: #4a9eff;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-cell-distance {
@@ -442,6 +446,7 @@
     color: #ffffff;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-cell-bearing {
@@ -449,6 +454,7 @@
     color: #ff9800;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-cell-country {
@@ -458,6 +464,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.4;
 }
 
 .ft8-cell-continent {
@@ -465,6 +472,7 @@
     color: #00bcd4;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-cell-tx-callsign {
@@ -472,6 +480,7 @@
     color: #e0e0e0;
     text-align: left;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 .ft8-callsign-link {
@@ -488,6 +497,7 @@
     font-family: 'Courier New', monospace;
     font-weight: 500;
     color: #e0e0e0;
+    line-height: 1.4;
 }
 
 .ft8-message-cq {
@@ -500,6 +510,7 @@
     color: #ffffff;
     text-align: center;
     font-size: 11px;
+    line-height: 1.4;
 }
 
 /* Help Text */

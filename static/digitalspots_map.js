@@ -1468,7 +1468,7 @@ class DigitalSpotsMap {
         ).addTo(this.map);
 
         // Build popup content with receiver info
-        let popupContent = '<div style="font-family: monospace; font-size: 12px;"><b>Receiver Location</b><br>';
+        let popupContent = '<div style="font-family: ui-monospace, \'Courier New\', monospace; font-size: 12px; line-height: 1.4;"><b>Receiver Location</b><br>';
         
         if (this.receiverInfo) {
             if (this.receiverInfo.name) {
@@ -1747,7 +1747,7 @@ class DigitalSpotsMap {
         });
 
         let content = `
-            <div style="font-family: 'Twemoji Flags', monospace; font-size: 12px;">
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">
                 <b>${digMapIso2ToFlag(spot.country_code)}${spot.callsign}</b><br>
         `;
 

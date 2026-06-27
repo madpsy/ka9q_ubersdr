@@ -245,6 +245,20 @@ const wsManager = new WebSocketManager({
                     log(`Restored SNR squelch: ${t} dB`);
                 }
             }
+
+            // Restore AGC settings after connect/reconnect.
+            // AGC_MODE_SETTINGS is shared by USB and LSB — values are mode-agnostic.
+            // Only send if the user has previously saved values (i.e. interacted with the modal).
+            // This ensures the server session has the correct overrides from the start,
+            // so they are available to re-apply after any subsequent mode-change preset reload.
+            const _agcHasHang = typeof modeSettingValues.agcHangTime === 'number';
+            const _agcHasRate = typeof modeSettingValues.agcRecoveryRate === 'number';
+            if (_agcHasHang || _agcHasRate) {
+                const _agcValues = {};
+                AGC_MODE_SETTINGS.controls.forEach(c => { _agcValues[c.id] = getModeSettingValue(c); });
+                AGC_MODE_SETTINGS.apply(_agcValues);
+                log(`Restored AGC: hangTime=${_agcValues.agcHangTime}s, recoveryRate=${_agcValues.agcRecoveryRate}dB/s`);
+            }
         }, 0);
     },
     onDisconnect: () => {

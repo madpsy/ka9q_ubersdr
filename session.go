@@ -172,6 +172,13 @@ type Session struct {
 	AudioGateMinPower   float32
 	AudioGateLastOpenAt time.Time // zero = gate never opened; reset each time a packet passes
 
+	// User-overridden AGC parameters (radiod-side — sent via set_agc).
+	// nil means the user has not overridden this field; the radiod preset value is used.
+	// These are re-applied after every mode change because the preset reload resets radiod's AGC.
+	// Protected by mu.
+	UserAGCHangTime     *float32
+	UserAGCRecoveryRate *float32
+
 	// Client-requested mute.  When true, streamAudio() suppresses all audio
 	// packets (both WebSocket and HTTP paths) but continues sending
 	// signal-quality silence packets so the client can still display S-meter

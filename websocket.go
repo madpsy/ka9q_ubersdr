@@ -926,6 +926,24 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					// 500ms gives radiod enough time to fully process the preset
 					time.Sleep(500 * time.Millisecond)
 
+					// Re-apply user AGC overrides if set.
+					// The preset reload triggered by the mode change resets radiod's AGC to preset defaults,
+					// so we must re-send the user's values here, at the same point we re-send bandwidth.
+					currentSession.mu.RLock()
+					reapplyAGC := AGCParams{
+						HangTime:     currentSession.UserAGCHangTime,
+						RecoveryRate: currentSession.UserAGCRecoveryRate,
+					}
+					hasAGCOverride := currentSession.UserAGCHangTime != nil || currentSession.UserAGCRecoveryRate != nil
+					currentSession.mu.RUnlock()
+
+					if hasAGCOverride {
+						if err := wsh.sessions.UpdateAGC(currentSession.ID, reapplyAGC); err != nil {
+							log.Printf("Warning: failed to re-apply AGC after mode change for session %s: %v", currentSession.ID, err)
+							// Non-fatal — continue with bandwidth update
+						}
+					}
+
 					// Step 2: Send bandwidth values that match frontend defaults for this mode
 					// Wide IQ modes (iq48, iq96, iq192, iq384) should use their preset bandwidth values
 					// Define wideIQModes for this scope
@@ -1105,6 +1123,16 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				wsh.sendError(conn, "Failed to update AGC: "+err.Error())
 				continue
 			}
+
+			// Persist user overrides so they survive mode changes (preset reloads reset radiod AGC).
+			currentSession.mu.Lock()
+			if msg.AgcHangTime != nil {
+				currentSession.UserAGCHangTime = msg.AgcHangTime
+			}
+			if msg.AgcRecoveryRate != nil {
+				currentSession.UserAGCRecoveryRate = msg.AgcRecoveryRate
+			}
+			currentSession.mu.Unlock()
 
 			// Echo back what was applied
 			applied := map[string]interface{}{}

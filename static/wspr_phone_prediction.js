@@ -1032,9 +1032,22 @@ const app = (() => {
 
         if (projection) {
             projection.scale(width / 6.3).translate([width / 2, height / 2]);
+
+            // Reset any accumulated zoom/pan transform so the new projection
+            // starts clean — otherwise the old transform misaligns everything.
+            if (svg && mapGroup) {
+                svg.call(d3.zoom().transform, d3.zoomIdentity);
+                mapGroup.attr('transform', null);
+            }
+
+            // Redraw country paths with updated projection
             if (pathGen && countryPaths) {
                 countryPaths.attr('d', pathGen);
             }
+
+            // Redraw all overlay layers (grid squares, spot markers, receiver
+            // marker, user location marker) at their new projected positions.
+            updateMap(predictions, gridSquares);
         }
     }
 

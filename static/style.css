@@ -2566,28 +2566,60 @@ input[type="range"]::-moz-range-thumb {
         display: flex !important;
     }
 
-    /* Increase invisible touch area for spectrum controls bar on mobile
-       without changing visual size. The touch guard in spectrum-display.js
-       prevents the canvas from stealing taps in this region. */
+    /* On mobile, replace checkbox labels with toggle buttons for easier tapping */
     .spectrum-display-controls {
         padding: 8px 10px !important;
         touch-action: manipulation;
     }
 
-    .spectrum-display-controls label {
-        padding: 4px 4px 10px !important;
-    }
-
-    /* Hide spectrum controls not needed on mobile */
+    /* Hide all checkbox labels on mobile — replaced by toggle buttons */
     #spectrum-vfo-toggle,
     #spectrum-btn-center,
     #spectrum-label-scroll,
     #spectrum-label-snap,
     #spectrum-label-edge-tune,
+    #spectrum-label-spectrum,
+    #spectrum-label-smooth,
+    #spectrum-label-gpu,
+    #spectrum-label-hold,
+    #spectrum-label-autopause,
     #spectrum-label-manual,
     #spectrum-control-group-manual,
     #spectrum-manual-range-controls {
         display: none !important;
+    }
+
+    /* Mobile spectrum toggle buttons (green=on, orange=off) */
+    .mobile-spectrum-toggles {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+    }
+
+    .mobile-spectrum-toggle {
+        padding: 6px 8px;
+        border: none;
+        border-radius: 4px;
+        font-size: 0.85em;
+        font-weight: bold;
+        cursor: pointer;
+        white-space: nowrap;
+        touch-action: manipulation;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        transition: background-color 0.15s;
+    }
+
+    .mobile-spectrum-toggle.on {
+        background-color: #27ae60;
+        color: #fff;
+    }
+
+    .mobile-spectrum-toggle.off {
+        background-color: #e67e22;
+        color: #fff;
+        opacity: 0.8;
     }
 
     /* Keep − and + zoom buttons on mobile; hide Min/Max */

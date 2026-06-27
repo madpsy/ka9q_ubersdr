@@ -16013,6 +16013,58 @@ function _dockApplyMobileLayout() {
         }
     }
 
+    // ── Mobile Spectrum Toggle Buttons ────────────────────────────────────
+    // Replace the tiny checkbox labels in the spectrum controls bar with
+    // larger toggle buttons (green=on, orange=off) for easier mobile tapping.
+    if (!document.getElementById('mobile-spectrum-toggles')) {
+        const SPECTRUM_TOGGLES = [
+            { id: 'spectrum-line-graph-enable', label: 'Spec' },
+            { id: 'spectrum-smooth-enable',     label: 'Smooth' },
+            { id: 'spectrum-gpu-scroll-enable',  label: 'GPU' },
+            { id: 'spectrum-hold-enable',        label: 'Hold' },
+        ];
+        const mainGroup = document.getElementById('spectrum-control-group-main');
+        if (mainGroup) {
+            const togglesWrap = document.createElement('div');
+            togglesWrap.id = 'mobile-spectrum-toggles';
+            togglesWrap.className = 'mobile-spectrum-toggles';
+
+            SPECTRUM_TOGGLES.forEach(({ id, label }) => {
+                const cb = document.getElementById(id);
+                const btn = document.createElement('button');
+                btn.className = 'mobile-spectrum-toggle ' + (cb && cb.checked ? 'on' : 'off');
+                btn.textContent = label;
+                btn.dataset.checkboxId = id;
+                btn.addEventListener('click', () => {
+                    if (cb) {
+                        cb.checked = !cb.checked;
+                        cb.dispatchEvent(new Event('change', { bubbles: true }));
+                        btn.className = 'mobile-spectrum-toggle ' + (cb.checked ? 'on' : 'off');
+                    }
+                });
+                togglesWrap.appendChild(btn);
+            });
+
+            // Also add the auto-pause toggle if it's visible
+            const apCb = document.getElementById('spectrum-autopause-enable');
+            const apLabel = document.getElementById('spectrum-label-autopause');
+            if (apCb && apLabel && apLabel.style.display !== 'none') {
+                const btn = document.createElement('button');
+                btn.className = 'mobile-spectrum-toggle ' + (apCb.checked ? 'on' : 'off');
+                btn.textContent = 'Pause';
+                btn.dataset.checkboxId = 'spectrum-autopause-enable';
+                btn.addEventListener('click', () => {
+                    apCb.checked = !apCb.checked;
+                    apCb.dispatchEvent(new Event('change', { bubbles: true }));
+                    btn.className = 'mobile-spectrum-toggle ' + (apCb.checked ? 'on' : 'off');
+                });
+                togglesWrap.appendChild(btn);
+            }
+
+            mainGroup.appendChild(togglesWrap);
+        }
+    }
+
     // ── Mobile Tab System ─────────────────────────────────────────────────
     // Create a tab bar with "Tune" and "Bookmarks" tabs. Move the relevant
     // controls into tab content panels. The pinned section (band buttons,
@@ -16217,6 +16269,10 @@ function _dockRemoveMobileLayout() {
     // ── Undo mode toggles ─────────────────────────────────────────────────
     const modeToggles = document.getElementById('mobile-mode-toggles');
     if (modeToggles) modeToggles.remove();
+
+    // ── Undo spectrum toggle buttons ──────────────────────────────────────
+    const specToggles = document.getElementById('mobile-spectrum-toggles');
+    if (specToggles) specToggles.remove();
 
     // ── Undo bw-squelch-row (original logic) ──────────────────────────────
     const bwSqRow    = document.getElementById('bw-squelch-row');

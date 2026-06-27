@@ -55,7 +55,7 @@ function setupPskCountryAutocomplete() {
         if (matches.length === 0) { list.style.display = 'none'; return; }
         matches.forEach((country, idx) => {
             const item = document.createElement('div');
-            item.style.cssText = 'padding:6px 10px; cursor:pointer; color:#fff; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+            item.style.cssText = 'padding:6px 10px; cursor:pointer; color:#fff; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.4;';
             item.textContent = pskIso2ToFlag(country.country_code) + country.name;
             item.dataset.name = country.name;
             item.addEventListener('mousedown', (e) => {
@@ -468,7 +468,7 @@ function renderTablePage() {
         html += `
             <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); transition: background 0.3s ease;" onmouseover="this.style.background='rgba(255, 255, 255, 0.08)'" onmouseout="this.style.background='transparent'">
                 <td style="padding: 10px;"><strong>${escapeHtml(stat.callsign)}</strong></td>
-                <td style="padding: 10px;">${pskFlagForCountry(stat.country)}${escapeHtml(stat.country || '-')}</td>
+                <td style="padding: 10px; line-height: 1.4;">${pskFlagForCountry(stat.country)}${escapeHtml(stat.country || '-')}</td>
                 <td style="padding: 10px;">${escapeHtml(stat.band)}</td>
                 <td style="padding: 10px;">${escapeHtml(stat.mode)}</td>
                 <td style="padding: 10px; text-align: center;">${stat.submission_count}</td>
@@ -619,7 +619,7 @@ function displayCountries(data) {
             `;
 
             countries.forEach(country => {
-                html += `<span style="padding: 4px 12px; background: #4CAF50; color: white; border-radius: 4px; font-size: 0.9em;">${pskFlagForCountry(country)}${escapeHtml(country)}</span>`;
+                html += `<span style="padding: 4px 12px; background: #4CAF50; color: white; border-radius: 4px; font-size: 0.9em; line-height: 1.4;">${pskFlagForCountry(country)}${escapeHtml(country)}</span>`;
             });
 
             html += `

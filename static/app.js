@@ -8453,14 +8453,42 @@ function closeModeSettingsModal() {
 }
 
 // Wire right-click (context menu) on every mode button to open the settings modal.
+// On mobile, a manual long-press timer is used because the browser's text-selection
+// gesture intercepts the touch before contextmenu can fire.
 function initModeSettingsContextMenu() {
     document.querySelectorAll('.mode-btn').forEach(btn => {
+        const mode = btn.id.replace(/^mode-/, '');
+        if (!mode) return;
+
+        // ── Desktop: right-click ─────────────────────────────────────────
         btn.addEventListener('contextmenu', (e) => {
-            const mode = btn.id.replace(/^mode-/, '');
-            if (!mode) return;
             e.preventDefault();
             openModeSettingsModal(mode);
         });
+
+        // ── Mobile: manual long-press ────────────────────────────────────
+        let longPressTimer = null;
+
+        // passive:false is required so we can call preventDefault() and stop
+        // the browser starting a text-selection gesture on the button text.
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            longPressTimer = setTimeout(() => {
+                longPressTimer = null;
+                openModeSettingsModal(mode);
+            }, 500);
+        }, { passive: false });
+
+        const cancelLongPress = () => {
+            if (longPressTimer !== null) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        };
+
+        btn.addEventListener('touchend',    cancelLongPress);
+        btn.addEventListener('touchmove',   cancelLongPress); // drag/scroll cancels
+        btn.addEventListener('touchcancel', cancelLongPress);
     });
 
     // Close when clicking the backdrop.

@@ -629,23 +629,27 @@
       if (window.innerWidth > 768) return; // full widget handles desktop
       if (hideTimer) clearTimeout(hideTimer);
 
-      // Hide the img until the new src is loaded to avoid flashing the old image.
-      toastImg.style.visibility = 'hidden';
+      // Keep the container hidden until the image has fully loaded to avoid
+      // flashing a black box while the image is still fetching.
+      toast.style.display = 'none';
+      toast.style.opacity = '1';
       toastImg.alt = alt || '';
-      toastImg.onload = function () {
-        toastImg.style.visibility = '';
-      };
+
       toastImg.onerror = function () {
         toast.style.display = 'none';
       };
-      toastImg.src = src;
 
-      toast.style.opacity = '1';
-      toast.style.display = 'block';
-      hideTimer = setTimeout(function () {
-        toast.style.opacity = '0';
-        setTimeout(function () { toast.style.display = 'none'; }, 400);
-      }, 3000);
+      toastImg.onload = function () {
+        // Only reveal the toast once the image is ready, then start the
+        // 3-second countdown from the moment the photo is actually visible.
+        toast.style.display = 'block';
+        hideTimer = setTimeout(function () {
+          toast.style.opacity = '0';
+          setTimeout(function () { toast.style.display = 'none'; }, 400);
+        }, 3000);
+      };
+
+      toastImg.src = src;
     }
 
     window.addEventListener('callsign_lookup_complete', function (e) {

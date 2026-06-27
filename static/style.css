@@ -1163,6 +1163,11 @@ body {
     cursor: pointer;
     font-size: 0.9em;
     transition: all 0.3s;
+    /* Prevent text-selection on long-press (mobile) */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;  /* suppresses iOS Copy/Look Up callout */
+    touch-action: manipulation;   /* prevents tap-delay and gesture interference */
 }
 
 .preset-buttons button:hover:not(.active) {

@@ -774,7 +774,7 @@
                         </div>
                     </div>
                 `;
-                html += activities.map((activity, i) => renderActivityRow(activity, i)).join('');
+                html += activities.map(activity => renderActivityRow(activity)).join('');
             }
             activityList.innerHTML = html;
 
@@ -813,7 +813,7 @@
                 return;
             }
 
-            activityList.innerHTML = data.activities.map((activity, i) => renderActivityRow(activity, i)).join('');
+            activityList.innerHTML = data.activities.map(activity => renderActivityRow(activity)).join('');
 
             // Re-apply highlight after DOM rebuild if a row was previously selected
             if (scanActivities.length > 0) {
@@ -834,7 +834,7 @@
             }
         }
 
-        function renderActivityRow(activity, rowIndex) {
+        function renderActivityRow(activity) {
             const freq = formatFrequency(activity.estimated_dial_freq || activity.start_freq);
             const modeUpper = activity.mode || 'LSB';
             const mode = modeUpper.toLowerCase();
@@ -863,14 +863,12 @@
                 : '';
 
             const callsignAttr = dxCallsign ? ` data-callsign="${dxCallsign}"` : '';
-            const rowIndexAttr = rowIndex !== undefined ? ` data-row-index="${rowIndex}"` : '';
-            const selectCall = rowIndex !== undefined ? `selectRow(${rowIndex}); ` : '';
             const onclickAttr = dxCallsign
-                ? `${selectCall}tuneToFrequency(${dialFreq}, '${mode}'); lookupDXCallsign('${dxCallsign}')`
-                : `${selectCall}tuneToFrequency(${dialFreq}, '${mode}')`;
+                ? `selectRow(${dialFreq}, '${mode}'); tuneToFrequency(${dialFreq}, '${mode}'); lookupDXCallsign('${dxCallsign}')`
+                : `selectRow(${dialFreq}, '${mode}'); tuneToFrequency(${dialFreq}, '${mode}')`;
 
             return `
-                <div class="activity-item" onclick="${onclickAttr}"${callsignAttr}${rowIndexAttr}>
+                <div class="activity-item" onclick="${onclickAttr}"${callsignAttr} data-freq="${dialFreq}" data-mode="${mode}">
                     <div class="frequency">${freq}</div>
                     <div>
                         <span class="mode">${modeUpper}</span>
@@ -1069,19 +1067,34 @@
         function highlightCurrentRow() {
             // Remove highlight from all rows
             document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('scan-active'));
-            // Highlight by data-row-index attribute so it works in both single-band and all-bands mode
-            const target = document.querySelector(`.activity-item[data-row-index="${currentScanIndex}"]`);
+            if (scanActivities.length === 0) return;
+            // Match by frequency+mode so it works regardless of DOM order or all-bands grouping
+            const activity = scanActivities[currentScanIndex];
+            if (!activity) return;
+            const target = document.querySelector(`.activity-item[data-freq="${activity.frequency}"][data-mode="${activity.mode}"]`);
             if (target) {
                 target.classList.add('scan-active');
                 target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             }
         }
 
-        function selectRow(index) {
-            // Called when user manually clicks a row — sets the current index so
-            // prev/next navigation and auto-refresh re-highlighting stay in sync.
-            currentScanIndex = index;
+        function selectRow(freq, mode) {
+            // Called when user manually clicks a row.
+            // Stop any running scan first.
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+                document.getElementById('scan-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                document.getElementById('interval-input').disabled = false;
+                document.getElementById('scan-status').textContent = '';
+                document.getElementById('scan-status').classList.remove('active');
+                startAutoRefresh();
+            }
+            // Update scanActivities so prev/next navigation works from this row.
             scanActivities = loadActivitiesForNavigation();
+            currentScanIndex = scanActivities.findIndex(a => a.frequency === freq && a.mode === mode);
+            if (currentScanIndex === -1) currentScanIndex = 0;
             highlightCurrentRow();
         }
 

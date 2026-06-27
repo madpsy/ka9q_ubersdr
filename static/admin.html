@@ -7061,7 +7061,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 row.style.borderBottom = '1px solid #dee2e6';
                 if (sessions.isBypassed) row.style.background = '#e8f5e9';
                 row.innerHTML = `
-                    <td style="padding: 12px; font-family: monospace, 'Twemoji Flags'; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
+                    <td style="padding: 12px; font-family: -apple-system, BlinkMacSystemFont, monospace, 'Twemoji Flags'; font-size: 12px; max-width: 140px; word-wrap: break-word; line-height: 1.4;">${ipDisplay}</td>
                     <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : (userAgent.length > 32 ? userAgent.substring(0, 32) + '…' : userAgent)}</td>
                     <td style="padding: 12px; font-size: 12px;">${chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>'}</td>
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
@@ -7560,7 +7560,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 
                 if (adminIPData.country) {
                     const _adminFlag = adminIPData.country_code ? String.fromCodePoint(...[...adminIPData.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : '';
-                    infoHTML += ` <span style="color: #0d47a1;">from ${_adminFlag}<strong>${adminIPData.country}</strong></span>`;
+                    infoHTML += ` <span style="color: #0d47a1; line-height: 1.4;">from ${_adminFlag}<strong>${adminIPData.country}</strong></span>`;
                     if (adminIPData.country_code) {
                         infoHTML += ` <span style="color: #666;">(${adminIPData.country_code})</span>`;
                     }
@@ -7606,7 +7606,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: monospace;">${ban.ip}</td>
-                    <td style="padding: 12px; font-size: 12px;">${countryDisplay}</td>
+                    <td style="padding: 12px; font-size: 12px; line-height: 1.4;">${countryDisplay}</td>
                     <td style="padding: 12px;">${ban.reason || 'No reason provided'}</td>
                     <td style="padding: 12px;">${bannedDate}</td>
                     <td style="padding: 12px;">${ban.banned_by || 'Unknown'}</td>
@@ -8277,7 +8277,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 }
                 if (data.country) {
                     const flag = data.country_code ? String.fromCodePoint(...[...data.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
-                    infoHtml += `<br><strong>Country:</strong> ${flag} ${data.country}${data.country_code ? ' (' + data.country_code + ')' : ''}`;
+                    infoHtml += `<br><strong>Country:</strong> <span style="line-height:1.4;">${flag} ${data.country}${data.country_code ? ' (' + data.country_code + ')' : ''}</span>`;
                 }
                 if (data.isp || data.asn) {
                     infoHtml += `<br><strong>ISP / ASN:</strong> `;
@@ -13629,7 +13629,7 @@ function resetStationIdColor() {
                     <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity}; cursor: pointer; transition: background-color 0.2s;"
                         onmouseenter="this.style.backgroundColor='#d4edda'; showCountryHoverMarker(${country.bearing}, ${country.distance_km})"
                         onmouseleave="this.style.backgroundColor=''; clearCountryHoverMarker()">
-                        <td style="padding: 6px; font-weight: 500;">${country.country_code ? String.fromCodePoint(0x1F1E6-65+country.country_code.toUpperCase().charCodeAt(0), 0x1F1E6-65+country.country_code.toUpperCase().charCodeAt(1)) + '\u202F' : ''}${country.name}</td>
+                        <td style="padding: 6px; font-weight: 500; line-height: 1.4;">${country.country_code ? String.fromCodePoint(0x1F1E6-65+country.country_code.toUpperCase().charCodeAt(0), 0x1F1E6-65+country.country_code.toUpperCase().charCodeAt(1)) + '\u202F' : ''}${country.name}</td>
                         <td style="padding: 6px; text-align: center; font-size: 11px; color: #999;">${country.continent || '—'}</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #667eea;">${country.bearing}°</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #666;">${Math.round(country.distance_km).toLocaleString()}</td>
@@ -22784,7 +22784,7 @@ const tooltipLine2 = timeStr;
                             </button>
                         </td>
                         <td style="padding: 10px; font-family: monospace; font-size: 12px;">${event.client_ip || 'N/A'}</td>
-                        <td style="padding: 10px; font-size: 12px;">${event.country_code ? String.fromCodePoint(...[...event.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : ''}${event.country || '—'}</td>
+                        <td style="padding: 10px; font-size: 12px; line-height: 1.4;">${event.country_code ? String.fromCodePoint(...[...event.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) + '\u202F' : ''}${event.country || '—'}</td>
                         <td style="padding: 10px; font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;" title="${userAgent}">${userAgentShort}</td>
                         <td style="padding: 10px; font-size: 11px;">${event.bands && event.bands.length > 0 ? event.bands.join(', ') : '—'}</td>
                         <td style="padding: 10px; font-size: 11px;">${event.modes && event.modes.length > 0 ? event.modes.map(m => m.toUpperCase()).join(', ') : '—'}</td>
@@ -24297,7 +24297,7 @@ const tooltipLine2 = timeStr;
                 row.innerHTML = `
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${timestampStr}</td>
                     <td style="padding: 12px; font-family: monospace; font-size: 12px; cursor: pointer; color: #667eea;" onclick="filterChatByIP('${escapedIP}')" title="Click to filter by this IP">${escapeHtml(log.source_ip)}</td>
-                    <td style="padding: 12px; font-size: 12px;">${countryDisplay}</td>
+                    <td style="padding: 12px; font-size: 12px; line-height: 1.4;">${countryDisplay}</td>
                     <td style="padding: 12px; font-weight: bold; color: #667eea; cursor: pointer;" onclick="filterChatByNickname('${escapedNickname}')" title="Click to filter by this nickname">${escapeHtml(log.username)}</td>
                     <td style="padding: 12px; text-align: center;">
                         <button onclick="banUser('${escapedIP}', 'Banned from chat log')" title="Ban IP ${escapeHtml(log.source_ip)}" style="background: none; border: none; font-size: 18px; cursor: pointer; padding: 2px 6px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">🚫</button>
@@ -24675,7 +24675,7 @@ const tooltipLine2 = timeStr;
                     html += `<strong style="color: #667eea;">Location:</strong>`;
                     if (data.country_code) {
                         const flagEmoji = String.fromCodePoint(...[...data.country_code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
-                        html += `<span style="position: absolute; right: 10px; top: 10px; font-size: 24px;" title="${data.country || data.country_code}">${flagEmoji}</span>`;
+                        html += `<span style="position: absolute; right: 10px; top: 10px; font-size: 24px; line-height: 1.4;" title="${data.country || data.country_code}">${flagEmoji}</span>`;
                     }
                     html += `<br>`;
                     if (data.city) html += `<span style="margin-left: 20px;">City: ${data.city}</span><br>`;

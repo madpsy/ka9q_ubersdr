@@ -2592,15 +2592,16 @@ input[type="range"]::-moz-range-thumb {
     /* Mobile spectrum toggle buttons (green=on, orange=off) */
     .mobile-spectrum-toggles {
         display: flex;
-        gap: 6px;
+        gap: 4px;
         align-items: center;
+        flex-wrap: wrap;
     }
 
     .mobile-spectrum-toggle {
-        padding: 6px 14px !important;
+        padding: 6px 8px !important;
         border: none;
         border-radius: 4px;
-        font-size: 1.2em !important;
+        font-size: 1.1em !important;
         font-weight: bold;
         cursor: pointer;
         white-space: nowrap;

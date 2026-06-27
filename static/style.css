@@ -2597,10 +2597,10 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .mobile-spectrum-toggle {
-        padding: 6px 10px;
+        padding: 6px 14px;
         border: none;
         border-radius: 4px;
-        font-size: 1.3em;
+        font-size: 1.4em;
         font-weight: bold;
         cursor: pointer;
         white-space: nowrap;
@@ -2609,6 +2609,7 @@ input[type="range"]::-moz-range-thumb {
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
         transition: background-color 0.15s;
+        min-height: 36px;
     }
 
     .mobile-spectrum-toggle[data-on="true"] {

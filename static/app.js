@@ -6360,6 +6360,9 @@ function setMode(mode, preserveBandwidth = false) {
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
 
+    // Refresh mobile Tune button label (shows mode when collapsed)
+    if (typeof window._updateMobileTuneLabel === 'function') window._updateMobileTuneLabel();
+
     // Show/hide bandwidth vs squelch controls based on mode
     const bandwidthControls = document.getElementById('bandwidth-controls');
     const squelchControls = document.getElementById('squelch-controls');
@@ -16079,9 +16082,14 @@ function _dockApplyMobileLayout() {
                 const bookmarksArrow = tabBookmarks.querySelector('.mobile-tab-arrow');
                 if (tuneArrow) tuneArrow.textContent = tuneOpen ? '▲' : '▼';
                 if (bookmarksArrow) bookmarksArrow.textContent = bookmarksOpen ? '▲' : '▼';
+                // Show current mode in Tune button when collapsed
+                const mode = (window.currentMode || '').toUpperCase();
+                tabTune.childNodes[0].textContent = tuneOpen ? '🎛 Tune ' : `🎛 Tune (${mode}) `;
                 // Add bottom spacing only when both panels are collapsed
                 tabBar.classList.toggle('all-collapsed', !tuneOpen && !bookmarksOpen);
             }
+            // Expose so setMode() can refresh the label when mode changes
+            window._updateMobileTuneLabel = updateTabArrows;
 
             // Tab toggle handler — tapping the active tab collapses it (no panel shown),
             // tapping an inactive tab opens it and closes the other.

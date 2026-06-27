@@ -2557,6 +2557,30 @@ input[type="range"]::-moz-range-thumb {
         display: flex !important;
     }
 
+    /* On mobile, make the spectrum controls bar position:fixed so it sits
+       above the dock overlay (z-index 800) and receives taps reliably. */
+    .spectrum-display-controls {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        z-index: 801 !important;
+        padding: 8px 10px !important;
+    }
+
+    /* Enlarge touch targets for spectrum bar checkboxes and labels */
+    .spectrum-control-group label {
+        padding: 4px 2px !important;
+        min-height: 28px;
+        display: flex !important;
+        align-items: center;
+    }
+
+    .spectrum-control-group input[type="checkbox"] {
+        width: 18px !important;
+        height: 18px !important;
+        min-width: 18px;
+    }
+
     /* Hide spectrum controls not needed on mobile */
     #spectrum-vfo-toggle,
     #spectrum-btn-center,

@@ -2597,7 +2597,7 @@ input[type="range"]::-moz-range-thumb {
     }
 
     .mobile-spectrum-toggle {
-        padding: 6px 14px;
+        padding: 6px 18px;
         border: none;
         border-radius: 4px;
         font-size: 1.4em;

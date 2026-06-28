@@ -10182,6 +10182,16 @@ function resetStationIdColor() {
                 return document.getElementById('widgetEditorPublic').checked;
             }
 
+            function hasFiles(dt) {
+                // dt.types is a DOMStringList in some browsers (no .includes),
+                // so use Array.from or a loop for compatibility.
+                if (!dt || !dt.types) return false;
+                for (var i = 0; i < dt.types.length; i++) {
+                    if (dt.types[i] === 'Files') return true;
+                }
+                return false;
+            }
+
             function showDrop() {
                 capture.style.display = 'block';
                 overlay.style.display = 'flex';
@@ -10192,12 +10202,17 @@ function resetStationIdColor() {
                 overlay.style.display = 'none';
             }
 
+            // Prevent the browser from navigating away if a file is dropped outside
+            // our capture zone (e.g. on the page background).
+            document.addEventListener('dragover',  function(e) { e.preventDefault(); });
+            document.addEventListener('drop',      function(e) { e.preventDefault(); });
+
             // dragenter on the wrapper fires when the file first enters the zone
             // (including over the textarea). Show the capture layer so subsequent
             // dragover/drop events land on it rather than the textarea.
             zone.addEventListener('dragenter', function(e) {
                 if (isLocked()) return;
-                if (!e.dataTransfer.types.includes('Files')) return;
+                if (!hasFiles(e.dataTransfer)) return;
                 e.preventDefault();
                 showDrop();
             });

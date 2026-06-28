@@ -1568,6 +1568,30 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// yamlFreqToUint64 extracts a frequency value from a YAML-decoded map entry.
+//
+// yaml.v3 decodes YAML integers into Go's int type on 64-bit platforms.
+// However, when bookmarks are saved via the bulk-replace PUT path the JSON
+// body is decoded into map[string]interface{}, which causes encoding/json to
+// produce float64 for all numbers.  yaml.Marshal then writes those as
+// floating-point literals (e.g. 2.105e+07), which yaml.Unmarshal reads back
+// as float64.  We therefore must handle all three numeric types.
+func yamlFreqToUint64(v interface{}) (uint64, bool) {
+	switch f := v.(type) {
+	case uint64:
+		return f, true
+	case int:
+		if f >= 0 {
+			return uint64(f), true
+		}
+	case float64:
+		if f >= 0 {
+			return uint64(f), true
+		}
+	}
+	return 0, false
+}
+
 // handleUpdateBookmarks updates a single bookmark by name+frequency or replaces all bookmarks
 func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Request) {
 	nameParam := r.URL.Query().Get("name")
@@ -1575,10 +1599,21 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 
 	// If no name/frequency provided, replace all bookmarks (for import functionality)
 	if nameParam == "" || freqParam == "" {
-		var bookmarksConfig map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&bookmarksConfig); err != nil {
+		// Decode into a typed wrapper so that encoding/json uses the correct
+		// Go types (uint64 for frequency) rather than float64 for all numbers.
+		// This prevents frequencies from being written as floating-point
+		// literals in the YAML file, which would break subsequent lookups.
+		var incoming struct {
+			Bookmarks []Bookmark `json:"bookmarks"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
 			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
 			return
+		}
+
+		// Re-wrap as the map shape the YAML file expects.
+		bookmarksConfig := map[string]interface{}{
+			"bookmarks": incoming.Bookmarks,
 		}
 
 		// Backup existing file with timestamp before replacing
@@ -1663,12 +1698,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	for i, bookmarkInterface := range bookmarks {
 		if bookmarkMap, ok := bookmarkInterface.(map[string]interface{}); ok {
 			name, nameOk := bookmarkMap["name"].(string)
-			var freq uint64
-			if freqVal, ok := bookmarkMap["frequency"].(uint64); ok {
-				freq = freqVal
-			} else if freqVal, ok := bookmarkMap["frequency"].(int); ok {
-				freq = uint64(freqVal)
-			}
+			freq, _ := yamlFreqToUint64(bookmarkMap["frequency"])
 
 			if nameOk && name == nameParam && freq == originalFreq {
 				bookmarkIndex = i
@@ -1772,12 +1802,7 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 	for i, bookmarkInterface := range bookmarks {
 		if bookmarkMap, ok := bookmarkInterface.(map[string]interface{}); ok {
 			name, nameOk := bookmarkMap["name"].(string)
-			var bookmarkFreq uint64
-			if freqVal, ok := bookmarkMap["frequency"].(uint64); ok {
-				bookmarkFreq = freqVal
-			} else if freqVal, ok := bookmarkMap["frequency"].(int); ok {
-				bookmarkFreq = uint64(freqVal)
-			}
+			bookmarkFreq, _ := yamlFreqToUint64(bookmarkMap["frequency"])
 
 			if nameOk && name == nameParam && bookmarkFreq == freq {
 				bookmarkIndex = i

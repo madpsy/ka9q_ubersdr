@@ -16,6 +16,30 @@ description: Create a widget for the UberSDR web SDR interface — a self-contai
 > 2. **Mobile hiding** — CSS `@media` + `html.is-mobile` + JS guard
 > 3. **Drag-to-reposition** with `localStorage` persistence
 
+> **ALWAYS start by reading the reference widgets in `widgets/`.**
+> Before writing any new widget, **read at least one or two existing widgets in
+> the `widgets/` directory** — they are the canonical, working reference
+> implementations and the single best source of truth for the exact patterns,
+> conventions, and host integrations used in this project. Pick the closest
+> match to what you're building (see the table below) and copy its structure.
+> Do not write a widget from memory or from this document alone when a concrete
+> example exists.
+
+### Reference widgets to read (in `widgets/`)
+
+| File | Good example of |
+|---|---|
+| `world_clocks.widget.html` | Self-contained `<canvas>` widget, `setInterval` redraw, extra `localStorage` prefs |
+| `qrz_lookup.widget.html` | `callsign_lookup_complete` event bus, REST API call, `esc()` rendering |
+| `audio.widget.html` | Web Audio analyser, RAF render loop capped to ~30 fps |
+| `eq.widget.html` | Calling host DSP functions (`window.updateEqualizer`, presets) |
+| `cw_spots.widget.html` | Reading host extension state (`window.cwSpotsExtensionInstance`), transient notifications |
+| `marker.widget.html` | Wide layout, `1024px` mobile breakpoint, frequency tuning |
+| `voice.widget.html` | Compact right-column status panel |
+| `games.widget.html` | Vertically centred layout, self-contained interactivity |
+| `frequency.widget.html` | Minimal badge, reading `#frequency` `data-hz-value` |
+| `sstv.widget.html` | Tall image panel, addon proxy integration |
+
 ## What is a widget?
 
 A widget is a **self-contained HTML fragment** (style + markup + script) that the
@@ -822,6 +846,7 @@ Before showing interactive controls, check `window.instanceDescription`:
 - [ ] **Drag-to-reposition** — `mousedown`/`mousemove`/`mouseup` + `localStorage` persistence
 
 **Structure & safety:**
+- [ ] **Read a reference widget in `widgets/`** that's closest to this one and followed its patterns
 - [ ] Saved in `widgets-custom/<slug>.widget.html` (NOT in the bundled `widgets/` directory)
 - [ ] Unique CSS ID/class namespace — no collisions with host page or other widgets
 - [ ] Opening HTML comment with name and description

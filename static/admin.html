@@ -10212,6 +10212,7 @@ function resetStationIdColor() {
             // (including over the textarea). Show the capture layer so subsequent
             // dragover/drop events land on it rather than the textarea.
             zone.addEventListener('dragenter', function(e) {
+                console.log('[DropZone] dragenter — locked:', isLocked(), 'hasFiles:', hasFiles(e.dataTransfer), 'target:', e.target.id || e.target.tagName);
                 if (isLocked()) return;
                 if (!hasFiles(e.dataTransfer)) return;
                 e.preventDefault();

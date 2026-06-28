@@ -16420,6 +16420,7 @@ function _dockApplyMobileLayout() {
     // already run against the unwrapped .controls children.
     if (!document.getElementById('mobile-landscape-row')) {
         const controls = document.querySelector('.controls');
+        const bandBar = document.querySelector('#dock-overlay-wrapper .band-status-bar');
         if (controls) {
             const cg1 = controls.querySelector('.control-group:nth-child(1)');
             const cg2 = controls.querySelector('.control-group:nth-child(2)');
@@ -16432,11 +16433,13 @@ function _dockApplyMobileLayout() {
                 leftCol.id = 'mobile-landscape-left';
                 leftCol.appendChild(cg1);
 
-                // Right column: tab bar + tune/bookmarks panels
-                // The band-status-bar stays in the dock wrapper above .controls
-                // so it spans full width in both portrait and landscape.
+                // Right column: band status bar + tab bar/panels.
+                // In portrait CSS gives #mobile-landscape-right order:-1 so the
+                // band bar visually appears above the left column (full-width row).
+                // In landscape it sits naturally above the tabs within the right column.
                 const rightCol = document.createElement('div');
                 rightCol.id = 'mobile-landscape-right';
+                if (bandBar) rightCol.appendChild(bandBar);
                 rightCol.appendChild(cg2);
 
                 row.appendChild(leftCol);

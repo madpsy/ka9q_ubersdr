@@ -1,0 +1,5 @@
+# User-created widgets live here and are NOT tracked by git.
+# Ignore everything in this directory except the files we want to keep.
+*
+!.gitignore
+!README.md

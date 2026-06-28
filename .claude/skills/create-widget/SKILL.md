@@ -1,6 +1,6 @@
 ---
 name: create-widget
-description: Create a widget for the UberSDR web SDR interface — a self-contained HTML fragment (style + markup + script) injected into the host page, NOT a full HTML document. Use this whenever building, adding, or editing an UberSDR widget in widgets/*.widget.html.
+description: Create a widget for the UberSDR web SDR interface — a self-contained HTML fragment (style + markup + script) injected into the host page, NOT a full HTML document. Use this whenever building, adding, or editing an UberSDR widget. New user-created widgets live in widgets-custom/*.widget.html; the widgets/ directory holds the bundled reference implementations.
 ---
 
 # Skill: Create a UberSDR Widget
@@ -37,8 +37,16 @@ shadow DOM, no module boundary.
 | Convention | Example |
 |---|---|
 | Filename | `<slug>.widget.html` |
-| Canonical location | `widgets/<slug>.widget.html` |
+| Location for **new** widgets | `widgets-custom/<slug>.widget.html` |
+| Bundled reference widgets | `widgets/<slug>.widget.html` |
 | CSS ID prefix | `#<slug>-widget` (all IDs must be unique across the whole page) |
+
+> **Where to put a new widget:** create it in **`widgets-custom/`**. That
+> directory is for user-created widgets and is **git-ignored**, so your local
+> widgets won't be committed or clobbered by upstream updates. The `widgets/`
+> directory holds the project's bundled, version-controlled reference
+> implementations — read them for examples, but **do not add new widgets there**
+> (and don't edit them unless you're intentionally changing a shipped widget).
 
 Always prefix **every** CSS ID and class with a short, unique namespace (e.g.
 `qrz-`, `aviz-`, `eqw-`, `csn-`) to avoid collisions with the host page or
@@ -787,6 +795,7 @@ Before showing interactive controls, check `window.instanceDescription`:
 - [ ] **Drag-to-reposition** — `mousedown`/`mousemove`/`mouseup` + `localStorage` persistence
 
 **Structure & safety:**
+- [ ] Saved in `widgets-custom/<slug>.widget.html` (NOT in the bundled `widgets/` directory)
 - [ ] Unique CSS ID/class namespace — no collisions with host page or other widgets
 - [ ] Opening HTML comment with name and description
 - [ ] IIFE wrapper `(function () { 'use strict'; ... })();`

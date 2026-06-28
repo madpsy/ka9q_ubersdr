@@ -2797,51 +2797,46 @@ input[type="range"]::-moz-range-thumb {
      .controls
        #mobile-landscape-row
          #mobile-landscape-left   ← .control-group 1 (freq + tuning)
-         #mobile-landscape-right  ← .band-status-bar + .control-group 2 (tabs)
+         #mobile-landscape-right  ← .control-group 2 (tabs)
 
-   Portrait: #mobile-landscape-right uses order:-1 + width:100% to appear
-   above #mobile-landscape-left (band bar at top, then freq/tuning, then tabs).
+   The .band-status-bar is moved into #mobile-landscape-right only in landscape
+   (via JS orientationchange listener) and restored to the dock wrapper in portrait.
 
+   Portrait: single column — left then right, full width each.
    Landscape: two-column side-by-side — left=freq/tuning, right=band bar+tabs.
    ─────────────────────────────────────────────────────────────────────────── */
 #mobile-landscape-row {
     display: flex;
-    flex-wrap: wrap;       /* allows right col to wrap above left col in portrait */
+    flex-direction: column;
     width: 100%;
 }
 
-/* Portrait: right column (band bar + tabs) wraps to top, full width */
-#mobile-landscape-left {
-    order: 1;
+#mobile-landscape-left,
+#mobile-landscape-right {
     width: 100%;
     min-width: 0;
 }
 
 #mobile-landscape-right {
-    order: 0;              /* appears before left column in portrait */
-    width: 100%;
-    min-width: 0;
     display: flex;
     flex-direction: column;
 }
 
 @media (orientation: landscape) and (max-width: 1024px) {
     #mobile-landscape-row {
-        flex-wrap: nowrap;
+        flex-direction: row;
         align-items: flex-start;
         gap: 8px;
     }
 
     /* Left column: freq input + tuning — natural width */
     #mobile-landscape-left {
-        order: 0;
         width: auto;
         flex: 0 0 auto;
     }
 
-    /* Right column: band bar + tabs — takes remaining space */
+    /* Right column: band bar (moved by JS) + tabs — takes remaining space */
     #mobile-landscape-right {
-        order: 1;
         width: auto;
         flex: 1;
     }

@@ -16420,7 +16420,6 @@ function _dockApplyMobileLayout() {
     // already run against the unwrapped .controls children.
     if (!document.getElementById('mobile-landscape-row')) {
         const controls = document.querySelector('.controls');
-        const bandBar = document.querySelector('#dock-overlay-wrapper .band-status-bar');
         if (controls) {
             const cg1 = controls.querySelector('.control-group:nth-child(1)');
             const cg2 = controls.querySelector('.control-group:nth-child(2)');
@@ -16433,13 +16432,11 @@ function _dockApplyMobileLayout() {
                 leftCol.id = 'mobile-landscape-left';
                 leftCol.appendChild(cg1);
 
-                // Right column: band status bar + tab bar/panels.
-                // In portrait CSS gives #mobile-landscape-right order:-1 so the
-                // band bar visually appears above the left column (full-width row).
-                // In landscape it sits naturally above the tabs within the right column.
+                // Right column: tab bar/panels only.
+                // The band-status-bar is moved here by _syncLandscapeBandBar()
+                // when in landscape, and restored to the dock wrapper in portrait.
                 const rightCol = document.createElement('div');
                 rightCol.id = 'mobile-landscape-right';
-                if (bandBar) rightCol.appendChild(bandBar);
                 rightCol.appendChild(cg2);
 
                 row.appendChild(leftCol);
@@ -16447,6 +16444,13 @@ function _dockApplyMobileLayout() {
 
                 // Insert the row where .controls' first child was
                 controls.insertBefore(row, controls.firstChild);
+
+                // Sync band bar position immediately and on orientation change
+                _syncLandscapeBandBar();
+                if (!window._landscapeOrientationListener) {
+                    window._landscapeOrientationListener = () => _syncLandscapeBandBar();
+                    window.addEventListener('resize', window._landscapeOrientationListener);
+                }
             }
         }
     }

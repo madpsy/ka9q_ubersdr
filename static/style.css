@@ -2794,12 +2794,16 @@ input[type="range"]::-moz-range-thumb {
 
 /* ── Mobile landscape two-column layout ──────────────────────────────────────
    When a mobile device is in landscape orientation, place the tuning controls
-   (left column: freq input + buttons/wheel) and the band status bar + tabs
-   (right column) side-by-side to save vertical space.
+   (left column: freq input + buttons/wheel) and the tab bar/panels (right
+   column) side-by-side to save vertical space.
+   The band-status-bar stays in the dock wrapper above .controls and spans
+   full width in both portrait and landscape.
    Structure created by _dockApplyMobileLayout():
-     #mobile-landscape-row
-       #mobile-landscape-left   ← .control-group 1 (freq + tuning)
-       #mobile-landscape-right  ← .band-status-bar + .control-group 2 (tabs)
+     .band-status-bar          ← stays in dock wrapper, full-width above
+     .controls
+       #mobile-landscape-row
+         #mobile-landscape-left   ← .control-group 1 (freq + tuning)
+         #mobile-landscape-right  ← .control-group 2 (tabs)
    Portrait: single-column stack (flex-direction: column, default).
    Landscape: two-column row via @media (orientation: landscape).
    ─────────────────────────────────────────────────────────────────────────── */
@@ -2816,23 +2820,18 @@ input[type="range"]::-moz-range-thumb {
         gap: 8px;
     }
 
-    /* Left column: freq input + tuning buttons/wheel — fixed width */
+    /* Left column: freq input + tuning buttons/wheel — natural width */
     #mobile-landscape-left {
         flex: 0 0 auto;
         min-width: 0;
     }
 
-    /* Right column: band status bar + tab bar/panels — takes remaining space */
+    /* Right column: tab bar + tune/bookmarks panels — takes remaining space */
     #mobile-landscape-right {
         flex: 1;
         min-width: 0;
         display: flex;
         flex-direction: column;
-    }
-
-    /* Band status bar sits above the tabs in the right column */
-    #mobile-landscape-right .band-status-bar {
-        width: 100%;
     }
 
     /* Tab panels expand within the right column only */

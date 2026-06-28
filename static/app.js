@@ -16420,7 +16420,6 @@ function _dockApplyMobileLayout() {
     // already run against the unwrapped .controls children.
     if (!document.getElementById('mobile-landscape-row')) {
         const controls = document.querySelector('.controls');
-        const bandBar = document.querySelector('#dock-overlay-wrapper .band-status-bar');
         if (controls) {
             const cg1 = controls.querySelector('.control-group:nth-child(1)');
             const cg2 = controls.querySelector('.control-group:nth-child(2)');
@@ -16433,10 +16432,11 @@ function _dockApplyMobileLayout() {
                 leftCol.id = 'mobile-landscape-left';
                 leftCol.appendChild(cg1);
 
-                // Right column: band status bar (if present) + tabs
+                // Right column: tab bar + tune/bookmarks panels
+                // The band-status-bar stays in the dock wrapper above .controls
+                // so it spans full width in both portrait and landscape.
                 const rightCol = document.createElement('div');
                 rightCol.id = 'mobile-landscape-right';
-                if (bandBar) rightCol.appendChild(bandBar);
                 rightCol.appendChild(cg2);
 
                 row.appendChild(leftCol);
@@ -16454,23 +16454,15 @@ function _dockRemoveMobileLayout() {
     // ── Undo landscape two-column row ─────────────────────────────────────
     // Must be FIRST — unwrap before any nth-child selectors run, so that
     // .controls .control-group:nth-child(1/2) still resolve correctly below.
-    // Also restore the band-status-bar to the dock overlay wrapper (its
-    // original position before it was moved into the right column).
+    // The band-status-bar is NOT moved (it stays in the dock wrapper always),
+    // so no band-bar restoration is needed here.
     const landscapeRow = document.getElementById('mobile-landscape-row');
     if (landscapeRow) {
         const leftCol  = document.getElementById('mobile-landscape-left');
         const rightCol = document.getElementById('mobile-landscape-right');
-        const wrapper  = document.getElementById('dock-overlay-wrapper');
         const controls = document.querySelector('.controls');
 
-        // Restore band-status-bar from right column back to dock wrapper
-        if (rightCol && wrapper) {
-            const bandBar = rightCol.querySelector('.band-status-bar');
-            if (bandBar) wrapper.insertBefore(bandBar, controls || wrapper.firstChild);
-        }
-
-        // Unwrap left column children back into .controls (prepend in order:
-        // iterate in reverse so firstChild ends up first after prepending)
+        // Unwrap left column children back into .controls (preserve order)
         if (leftCol && controls) {
             const leftChildren = Array.from(leftCol.childNodes);
             const anchor = controls.firstChild;

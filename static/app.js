@@ -15810,34 +15810,26 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             stopAll();
         }
 
-        // ── Touch (mobile) ───────────────────────────────────────────────────
-        btn.addEventListener('touchstart', function () {
-            touchActive = true;
-            startLongPress();
-        }, { passive: true });
-        btn.addEventListener('touchend', function () {
-            touchActive = false;
-            cancelLongPress();
-        }, { passive: true });
-        btn.addEventListener('touchcancel', function () {
-            touchActive = false;
-            cancelLongPress();
-        }, { passive: true });
-        btn.addEventListener('touchmove', function () {
-            touchActive = false;
-            cancelLongPress();
-        }, { passive: true });
-
-        // ── Mouse (desktop / trackpad) ───────────────────────────────────────
-        // Guard against the synthesised mousedown that browsers fire after
-        // touchstart on touch devices — if a touch is already active, skip.
-        btn.addEventListener('mousedown', function (e) {
-            if (e.button !== 0) return; // left button only
-            if (touchActive) return;    // already handled by touch path
+        // ── Pointer events (covers both touch and mouse uniformly) ───────────
+        // Using the Pointer Events API with setPointerCapture keeps the pointer
+        // locked to the button even if the cursor drifts slightly outside it,
+        // which prevents the sporadic cancellation seen with mouseleave.
+        // touchActive guards against double-firing on touch devices that also
+        // synthesise mouse events.
+        btn.addEventListener('pointerdown', function (e) {
+            if (e.button !== 0 && e.pointerType === 'mouse') return; // left button only for mouse
+            if (e.pointerType === 'touch') touchActive = true;
+            try { btn.setPointerCapture(e.pointerId); } catch (_) {}
             startLongPress();
         });
-        btn.addEventListener('mouseup',    cancelLongPress);
-        btn.addEventListener('mouseleave', cancelLongPress);
+        btn.addEventListener('pointerup', function (e) {
+            if (e.pointerType === 'touch') touchActive = false;
+            cancelLongPress();
+        });
+        btn.addEventListener('pointercancel', function (e) {
+            if (e.pointerType === 'touch') touchActive = false;
+            cancelLongPress();
+        });
 
         // Suppress the browser's context-menu / callout on long-press.
         btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });

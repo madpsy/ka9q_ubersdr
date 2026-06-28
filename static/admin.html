@@ -10164,11 +10164,14 @@ function resetStationIdColor() {
         }
 
         function initWidgetDropZone() {
-            const zone    = document.getElementById('widgetHtmlDropZone');
+            // Attach drag-and-drop directly to the <textarea> — the textarea element
+            // intercepts drag events itself so listeners on the parent div are not
+            // reliably reached. The visual overlay is shown/hidden via the wrapper.
+            const ta      = document.getElementById('widgetEditorHTML');
             const overlay = document.getElementById('widgetDropOverlay');
-            if (!zone || !overlay) return;
+            if (!ta || !overlay) return;
 
-            zone.addEventListener('dragover', function(e) {
+            ta.addEventListener('dragover', function(e) {
                 // Ignore if the public-widget lock is active
                 if (document.getElementById('widgetEditorPublic').checked) return;
                 e.preventDefault();
@@ -10176,15 +10179,11 @@ function resetStationIdColor() {
                 overlay.style.display = 'flex';
             });
 
-            zone.addEventListener('dragleave', function(e) {
-                // Only hide when the pointer truly leaves the drop zone,
-                // not when it moves over a child element (e.g. the textarea).
-                if (!zone.contains(e.relatedTarget)) {
-                    overlay.style.display = 'none';
-                }
+            ta.addEventListener('dragleave', function(e) {
+                overlay.style.display = 'none';
             });
 
-            zone.addEventListener('drop', function(e) {
+            ta.addEventListener('drop', function(e) {
                 e.preventDefault();
                 overlay.style.display = 'none';
                 if (document.getElementById('widgetEditorPublic').checked) return;

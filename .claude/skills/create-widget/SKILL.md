@@ -1,4 +1,15 @@
+---
+name: create-widget
+description: Create a widget for the UberSDR web SDR interface — a self-contained HTML fragment (style + markup + script) injected into the host page, NOT a full HTML document. Use this whenever building, adding, or editing an UberSDR widget in widgets/*.widget.html.
+---
+
 # Skill: Create a UberSDR Widget
+
+> **A widget is an HTML *fragment*, not a full HTML document.**
+> Do **NOT** include `<!DOCTYPE>`, `<html>`, `<head>`, `<body>`, `<meta>`, or
+> `<title>` tags. A widget consists only of a `<style>` block, the widget markup,
+> and a `<script>` block — these are injected verbatim into the host page, which
+> already provides the full document shell.
 
 > **Three things every widget MUST have, no exceptions:**
 > 1. A **visible ✕ close button** in the header — users must always be able to dismiss a widget
@@ -10,7 +21,9 @@
 A widget is a **self-contained HTML fragment** (style + markup + script) that the
 UberSDR server fetches from the collector (`instances.ubersdr.org`), caches in
 memory, and injects verbatim into the main `index.html` page at render time via
-Go's `template.HTML`. Every widget in `widgets/*.widget.html` is a canonical
+Go's `template.HTML`. Because it is injected into an existing page, a widget is
+**never a standalone HTML document** — it has no `<!DOCTYPE>`, `<html>`, `<head>`,
+or `<body>` of its own. Every widget in `widgets/*.widget.html` is a canonical
 reference implementation.
 
 Widgets run in the **same browsing context** as the main SDR page — they share

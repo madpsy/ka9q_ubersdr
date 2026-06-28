@@ -274,8 +274,51 @@ func (wm *WidgetManager) refreshAll() {
 	}
 }
 
-// backgroundRefresh runs a ticker that refreshes all enabled widgets every widgetCacheTTL.
+// hasMissingEntries returns true if any enabled widget has no cache entry yet.
+// Used by backgroundRefresh to decide whether fast retries are still needed.
+func (wm *WidgetManager) hasMissingEntries() bool {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	for _, id := range wm.config.Server.EnabledWidgets {
+		if _, ok := wm.entries[id]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
+// backgroundRefresh runs a background goroutine that:
+//  1. Retries failed startup fetches with a short back-off schedule
+//     (30 s → 60 s → 120 s → 300 s) until all enabled widgets are cached
+//     or the schedule is exhausted.
+//  2. Then refreshes all widgets every widgetCacheTTL (15 min) to pick up
+//     version updates.
 func (wm *WidgetManager) backgroundRefresh() {
+	// retryDelays defines the back-off schedule used when widgets are still
+	// missing from the cache after the initial startup fetch.
+	retryDelays := []time.Duration{
+		30 * time.Second,
+		60 * time.Second,
+		2 * time.Minute,
+		5 * time.Minute,
+	}
+
+	// Phase 1: fast retries while there are uncached widgets.
+	for i, delay := range retryDelays {
+		select {
+		case <-wm.stopChan:
+			return
+		case <-time.After(delay):
+		}
+		if !wm.hasMissingEntries() {
+			log.Printf("[WidgetManager] All widgets cached after retry %d — switching to normal refresh interval", i+1)
+			break
+		}
+		log.Printf("[WidgetManager] Retry %d/%d: fetching uncached widget(s)", i+1, len(retryDelays))
+		wm.refreshAll()
+	}
+
+	// Phase 2: normal periodic refresh.
 	ticker := time.NewTicker(widgetCacheTTL)
 	defer ticker.Stop()
 	for {

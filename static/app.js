@@ -16407,10 +16407,43 @@ function _dockApplyMobileLayout() {
             updateTabArrows();
         }
     }
+
+    // ── Mobile Landscape Two-Column Layout ────────────────────────────────
+    // Wrap the two .control-group elements in a flex row so that in landscape
+    // orientation the tuning controls (left) and tune/bookmarks tabs (right)
+    // sit side-by-side, saving vertical space. CSS handles the actual layout
+    // switch via @media (orientation: landscape). This must be the LAST step
+    // so that all nth-child selectors above have already run against the
+    // unwrapped .controls children.
+    if (!document.getElementById('mobile-landscape-row')) {
+        const controls = document.querySelector('.controls');
+        if (controls) {
+            const cg1 = controls.querySelector('.control-group:nth-child(1)');
+            const cg2 = controls.querySelector('.control-group:nth-child(2)');
+            if (cg1 && cg2) {
+                const row = document.createElement('div');
+                row.id = 'mobile-landscape-row';
+                controls.insertBefore(row, cg1);
+                row.appendChild(cg1);
+                row.appendChild(cg2);
+            }
+        }
+    }
 }
 
 // Undo mobile-specific DOM rearrangements. Safe to call when no mobile layout exists.
 function _dockRemoveMobileLayout() {
+    // ── Undo landscape two-column row ─────────────────────────────────────
+    // Must be FIRST — unwrap before any nth-child selectors run, so that
+    // .controls .control-group:nth-child(1/2) still resolve correctly below.
+    const landscapeRow = document.getElementById('mobile-landscape-row');
+    if (landscapeRow) {
+        while (landscapeRow.firstChild) {
+            landscapeRow.parentElement.insertBefore(landscapeRow.firstChild, landscapeRow);
+        }
+        landscapeRow.remove();
+    }
+
     // ── Undo tabs ─────────────────────────────────────────────────────────
     // Restore elements from tab panels back to their original parents BEFORE
     // removing the tab containers, so they stay in the document.

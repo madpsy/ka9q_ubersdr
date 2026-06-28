@@ -2792,6 +2792,43 @@ input[type="range"]::-moz-range-thumb {
     }
 }
 
+/* ── Mobile landscape two-column layout ──────────────────────────────────────
+   When a mobile device is in landscape orientation, place the tuning controls
+   (left column) and the tune/bookmarks tabs (right column) side-by-side to
+   save vertical space and give the spectrum display more room.
+   The #mobile-landscape-row wrapper is created by _dockApplyMobileLayout().
+   Portrait mode uses the default single-column stacking (flex-direction: column).
+   ─────────────────────────────────────────────────────────────────────────── */
+#mobile-landscape-row {
+    display: flex;
+    flex-direction: column; /* portrait default */
+    width: 100%;
+}
+
+@media (orientation: landscape) and (max-width: 1024px) {
+    #mobile-landscape-row {
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    /* Each column takes equal width; min-width:0 prevents flex overflow */
+    #mobile-landscape-row > .control-group {
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* In landscape the tab panels expand within their column only */
+    #mobile-landscape-row .mobile-tab-content.active {
+        display: block;
+    }
+
+    /* Tighten the all-collapsed bottom padding in landscape — less space needed */
+    #mobile-landscape-row .mobile-tab-bar.all-collapsed {
+        padding-bottom: 8px;
+    }
+}
+
 /* Browser zoom buttons — hidden by default (desktop), shown on narrow via media query above */
 #browser-zoom-group {
     display: none;

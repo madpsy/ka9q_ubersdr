@@ -510,6 +510,23 @@
       slider.title = b.label + ' Hz';
       slot.appendChild(slider);
 
+      // ── Extension-proof display guard ──────────────────────────────────────
+      // Some browser extensions (ad blockers, accessibility tools, userscripts)
+      // inject `style="display: none !important"` onto all input[type="range"]
+      // elements on the page. A MutationObserver watches for that and immediately
+      // restores the slider to visible. Using setProperty with 'important' priority
+      // on the restore call beats any subsequent re-injection by the extension.
+      (function guardSlider(s) {
+        function restore() {
+          if (s.style.display === 'none' || s.style.getPropertyPriority('display') === 'important') {
+            s.style.removeProperty('display');
+            s.style.setProperty('display', 'block', 'important');
+          }
+        }
+        restore(); // fix immediately in case the extension already ran before us
+        new MutationObserver(restore).observe(s, { attributes: true, attributeFilter: ['style'] });
+      })(slider);
+
       var label = document.createElement('div');
       label.className = 'eqw-label';
       label.textContent = b.label;

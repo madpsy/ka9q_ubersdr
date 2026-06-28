@@ -5271,6 +5271,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
         // Bookmarks management
         let currentBookmarks = [];
+        let bookmarkSortKey = 'frequency'; // default sort column
+        let bookmarkSortAsc = true;
 
         // Populate extension dropdown with available extensions from API
         async function populateExtensionDropdown(currentExtension = '') {
@@ -5367,6 +5369,16 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             renderBookmarks();
         }
 
+        function sortBookmarksBy(key) {
+            if (bookmarkSortKey === key) {
+                bookmarkSortAsc = !bookmarkSortAsc;
+            } else {
+                bookmarkSortKey = key;
+                bookmarkSortAsc = true;
+            }
+            renderBookmarks();
+        }
+
         function renderBookmarks() {
             const container = document.getElementById('bookmarksList');
             container.innerHTML = '';
@@ -5375,14 +5387,29 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             // Apply live filter
             const filterInput = document.getElementById('bookmarkFilterInput');
             const query = filterInput ? filterInput.value.trim().toLowerCase() : '';
-            const visibleBookmarks = query
+            let visibleBookmarks = query
                 ? currentBookmarks.filter(b => {
                     return (b.name || '').toLowerCase().includes(query) ||
                            String(b.frequency || '').includes(query) ||
                            (b.group || '').toLowerCase().includes(query) ||
                            (b.comment || '').toLowerCase().includes(query);
                   })
-                : currentBookmarks;
+                : currentBookmarks.slice();
+
+            // Apply sort
+            visibleBookmarks.sort((a, b) => {
+                let av, bv;
+                if (bookmarkSortKey === 'frequency') {
+                    av = a.frequency || 0;
+                    bv = b.frequency || 0;
+                } else {
+                    av = (a[bookmarkSortKey] || '').toString().toLowerCase();
+                    bv = (b[bookmarkSortKey] || '').toString().toLowerCase();
+                }
+                if (av < bv) return bookmarkSortAsc ? -1 : 1;
+                if (av > bv) return bookmarkSortAsc ? 1 : -1;
+                return 0;
+            });
 
             if (currentBookmarks.length === 0) {
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No bookmarks found. Click "Add New Bookmark" to create one.</p>';
@@ -5394,20 +5421,30 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 return;
             }
 
+            // Build sort indicator helper
+            function sortIndicator(key) {
+                if (bookmarkSortKey !== key) return ' <span style="color:#bbb;font-size:11px;">⇅</span>';
+                return bookmarkSortAsc
+                    ? ' <span style="color:#495057;font-size:11px;">▲</span>'
+                    : ' <span style="color:#495057;font-size:11px;">▼</span>';
+            }
+            const thStyle = 'padding: 12px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap;';
+            const thStyleCenter = 'padding: 12px; text-align: center; white-space: nowrap;';
+
             const table = document.createElement('table');
             table.style.width = '100%';
             table.style.borderCollapse = 'collapse';
             table.innerHTML = `
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                        <th style="padding: 12px; text-align: left;">Name</th>
-                        <th style="padding: 12px; text-align: left;">Frequency (Hz)</th>
-                        <th style="padding: 12px; text-align: left;">Mode</th>
-                        <th style="padding: 12px; text-align: left;">Group</th>
+                        <th style="${thStyle}" onclick="sortBookmarksBy('name')">Name${sortIndicator('name')}</th>
+                        <th style="${thStyle}" onclick="sortBookmarksBy('frequency')">Frequency (Hz)${sortIndicator('frequency')}</th>
+                        <th style="${thStyle}" onclick="sortBookmarksBy('mode')">Mode${sortIndicator('mode')}</th>
+                        <th style="${thStyle}" onclick="sortBookmarksBy('group')">Group${sortIndicator('group')}</th>
                         <th style="padding: 12px; text-align: left;">Comment</th>
                         <th style="padding: 12px; text-align: left;">Extension</th>
                         <th style="padding: 12px; text-align: left;">Bandwidth</th>
-                        <th style="padding: 12px; text-align: center;">Actions</th>
+                        <th style="${thStyleCenter}">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="bookmarksTableBody"></tbody>

@@ -2656,9 +2656,14 @@ input[type="range"]::-moz-range-thumb {
         gap: 10px !important;
     }
 
-    /* Show vertical zoom slider on narrow screens, fixed 225px from top */
+    /* Show vertical zoom slider on narrow screens, fixed 225px from top.
+       position:fixed escapes .spectrum-display-container's stacking context so
+       z-index:850 beats #dock-overlay-wrapper (z-index:800) and the slider is
+       never covered by the controls overlay in landscape mode. */
     #spectrum-vzoom-slider {
         display: block !important;
+        position: fixed;
+        z-index: 850;
         top: 225px !important;
         transform: rotate(-90deg) !important;
         transform-origin: center center;

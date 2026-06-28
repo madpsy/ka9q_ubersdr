@@ -15203,7 +15203,8 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         if (!isMobileLayout()) {
             tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
-            // Restore edge tune if it was overridden by a previous wheel session
+            // Restore edge tune to the user's original preference if it was
+            // overridden by a mobile tuning session (wheel or buttons mode).
             if (edgeTuneCheckbox && edgeTuneStateBeforeWheel !== null) {
                 if (edgeTuneCheckbox.checked !== edgeTuneStateBeforeWheel) {
                     edgeTuneCheckbox.checked = edgeTuneStateBeforeWheel;
@@ -15235,16 +15236,18 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         } else {
             tuningBtns.style.display = 'flex';
             wheelCont.style.display  = 'none';
-            // Restore edge tune to whatever it was before wheel mode
-            if (edgeTuneStateBeforeWheel !== null) {
-                const restore = edgeTuneStateBeforeWheel;
-                edgeTuneStateBeforeWheel = null;
-                localStorage.setItem('edgeTuneEnabled', restore.toString());
-                if (edgeTuneCheckbox) {
-                    edgeTuneCheckbox.checked = restore;
-                    edgeTuneCheckbox.dispatchEvent(new Event('change'));
-                }
+            // Buttons mode also enables edge tune so the spectrum follows the
+            // tuning buttons, matching the behaviour of the wheel.
+            // Save the previous state (if not already saved from a wheel session)
+            // so it can be restored when the user leaves tuning mode entirely.
+            if (edgeTuneStateBeforeWheel === null) {
+                edgeTuneStateBeforeWheel = localStorage.getItem('edgeTuneEnabled') === 'true';
             }
+            if (edgeTuneCheckbox) {
+                edgeTuneCheckbox.checked = true;
+                edgeTuneCheckbox.dispatchEvent(new Event('change'));
+            }
+            localStorage.setItem('edgeTuneEnabled', 'true');
         }
     }
 

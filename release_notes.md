@@ -1,6 +1,19 @@
-# Latest Stable - 0.1.55 - 20th Jun 2026
+# Latest Stable - 0.1.56 - 28th Jun 2026
 
-## Version 0.1.55 - Latest Stable
+## Version 0.1.56
+
+### New Features
+- Added **Disable Widgets** per client so users can disable widgets if they wish (audio settings modal for now)
+- Added **CW Spot QRZ Lookup** to get lat/lon via QRZ.com if available and enabled
+- Added **Dynamic Controls** for mobile users to reduce height of controls
+- Added **AGC Controls** for SSB - right click (or long tap) on a mode button. Still in testing but logic now exists
+
+### Bug Fixes
+- Safari was broken for various pages with flags from previous release
+- Admin bookmarks manager had various bugs around deletion and editing
+- NCDXF Beacons listed bad spots on bands beacons aren't valid on
+
+## Version 0.1.55
 
 ### New Features
 - Added **Country Flags** lots of country flags in many different places

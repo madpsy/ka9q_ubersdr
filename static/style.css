@@ -2833,12 +2833,21 @@ input[type="range"]::-moz-range-thumb {
     #mobile-landscape-left {
         width: auto;
         flex: 0 0 auto;
+        /* Bottom clearance so tuning buttons/wheel don't overlap the
+           spectrum-display-controls bar beneath the dock overlay */
+        padding-bottom: 28px;
     }
 
     /* Right column: band bar (moved by JS) + tabs — takes remaining space */
     #mobile-landscape-right {
         width: auto;
         flex: 1;
+    }
+
+    /* Gap between band buttons (inserted by JS above the control-group)
+       and the Tune / Bookmarks tab toggle buttons */
+    #mobile-landscape-right > .control-group {
+        margin-top: 4px;
     }
 
     /* Tab panels expand within the right column only */

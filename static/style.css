@@ -2625,6 +2625,14 @@ input[type="range"]::-moz-range-thumb {
         opacity: 0.8;
     }
 
+    .mobile-spectrum-toggle:disabled,
+    .mobile-spectrum-toggle[data-disabled="true"] {
+        background-color: #555 !important;
+        color: #999 !important;
+        opacity: 0.5 !important;
+        cursor: not-allowed !important;
+    }
+
     /* Keep − and + zoom buttons on mobile; hide Min/Max */
     #spectrum-zoom-btn-min,
     #spectrum-zoom-btn-max {

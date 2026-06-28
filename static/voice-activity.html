@@ -138,16 +138,6 @@
             cursor: pointer;
         }
 
-        .activity-item.scan-active {
-            background: #1a3a2a;
-            outline: 2px solid #27ae60;
-            outline-offset: -2px;
-        }
-
-        .activity-item.scan-active:hover {
-            background: #1e4a32;
-        }
-
         .activity-item:last-child {
             border-bottom: none;
         }
@@ -777,11 +767,6 @@
                 html += activities.map(activity => renderActivityRow(activity)).join('');
             }
             activityList.innerHTML = html;
-
-            // Re-apply highlight after DOM rebuild if a row was previously selected
-            if (scanActivities.length > 0) {
-                highlightCurrentRow(false); // auto-refresh repaint — don't scroll
-            }
         }
 
         function displayData(data) {
@@ -814,11 +799,6 @@
             }
 
             activityList.innerHTML = data.activities.map(activity => renderActivityRow(activity)).join('');
-
-            // Re-apply highlight after DOM rebuild if a row was previously selected
-            if (scanActivities.length > 0) {
-                highlightCurrentRow(false); // auto-refresh repaint — don't scroll
-            }
         }
 
         // Converts ISO 3166-1 alpha-2 code to a flag emoji using regional indicator symbols.
@@ -864,11 +844,11 @@
 
             const callsignAttr = dxCallsign ? ` data-callsign="${dxCallsign}"` : '';
             const onclickAttr = dxCallsign
-                ? `selectRow(${dialFreq}, '${mode}'); tuneToFrequency(${dialFreq}, '${mode}'); lookupDXCallsign('${dxCallsign}')`
-                : `selectRow(${dialFreq}, '${mode}'); tuneToFrequency(${dialFreq}, '${mode}')`;
+                ? `tuneToFrequency(${dialFreq}, '${mode}'); lookupDXCallsign('${dxCallsign}')`
+                : `tuneToFrequency(${dialFreq}, '${mode}')`;
 
             return `
-                <div class="activity-item" onclick="${onclickAttr}"${callsignAttr} data-freq="${dialFreq}" data-mode="${mode}">
+                <div class="activity-item" onclick="${onclickAttr}"${callsignAttr}>
                     <div class="frequency">${freq}</div>
                     <div>
                         <span class="mode">${modeUpper}</span>
@@ -1047,9 +1027,6 @@
             const statusEl = document.getElementById('scan-status');
             statusEl.textContent = '';
             statusEl.classList.remove('active');
-
-            // Remove row highlight
-            document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('scan-active'));
             
             // Resume auto-refresh
             startAutoRefresh();
@@ -1060,44 +1037,7 @@
             
             const activity = scanActivities[currentScanIndex];
             tuneToFrequency(activity.frequency, activity.mode);
-            highlightCurrentRow(true); // auto-scan/nav moved us — scroll to show it
             updateScanStatus();
-        }
-
-        function highlightCurrentRow(scroll) {
-            // Remove highlight from all rows
-            document.querySelectorAll('.activity-item').forEach(el => el.classList.remove('scan-active'));
-            if (scanActivities.length === 0) return;
-            // Match by frequency+mode so it works regardless of DOM order or all-bands grouping
-            const activity = scanActivities[currentScanIndex];
-            if (!activity) return;
-            const target = document.querySelector(`.activity-item[data-freq="${activity.frequency}"][data-mode="${activity.mode}"]`);
-            if (target) {
-                target.classList.add('scan-active');
-                if (scroll) {
-                    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                }
-            }
-        }
-
-        function selectRow(freq, mode) {
-            // Called when user manually clicks a row.
-            // Stop any running scan first.
-            if (scanInterval) {
-                clearInterval(scanInterval);
-                scanInterval = null;
-                document.getElementById('scan-btn').disabled = false;
-                document.getElementById('stop-btn').disabled = true;
-                document.getElementById('interval-input').disabled = false;
-                document.getElementById('scan-status').textContent = '';
-                document.getElementById('scan-status').classList.remove('active');
-                startAutoRefresh();
-            }
-            // Update scanActivities so prev/next navigation works from this row.
-            scanActivities = loadActivitiesForNavigation();
-            currentScanIndex = scanActivities.findIndex(a => a.frequency === freq && a.mode === mode);
-            if (currentScanIndex === -1) currentScanIndex = 0;
-            highlightCurrentRow(false); // user clicked it — no need to scroll
         }
 
         function updateScanStatus() {
@@ -1173,7 +1113,6 @@
             // Update current scan index for navigation consistency
             currentScanIndex = randomIndex;
             scanActivities = activities;
-            highlightCurrentRow(true); // random pick — scroll to show it
         }
 
         // Auto-refresh every 2.5 seconds

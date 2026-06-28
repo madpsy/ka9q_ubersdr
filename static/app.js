@@ -16033,6 +16033,7 @@ function _dockApplyMobileLayout() {
             togglesWrap.id = 'mobile-spectrum-toggles';
             togglesWrap.className = 'mobile-spectrum-toggles';
 
+            const spectrumBtnMap = {}; // id -> btn, for cross-button state sync
             SPECTRUM_TOGGLES.forEach(({ id, label }) => {
                 const cb = document.getElementById(id);
                 const btn = document.createElement('button');
@@ -16040,8 +16041,17 @@ function _dockApplyMobileLayout() {
                 btn.dataset.on = (cb && cb.checked) ? 'true' : 'false';
                 btn.textContent = label;
                 btn.dataset.checkboxId = id;
+                spectrumBtnMap[id] = btn;
+
+                // Helper: update disabled appearance based on underlying checkbox.disabled
+                const syncDisabled = () => {
+                    const isDisabled = cb && cb.disabled;
+                    btn.disabled = !!isDisabled;
+                    btn.dataset.disabled = isDisabled ? 'true' : 'false';
+                };
+
                 btn.addEventListener('click', () => {
-                    if (cb) {
+                    if (cb && !cb.disabled) {
                         cb.checked = !cb.checked;
                         cb.dispatchEvent(new Event('change', { bubbles: true }));
                         btn.dataset.on = cb.checked ? 'true' : 'false';
@@ -16051,15 +16061,32 @@ function _dockApplyMobileLayout() {
                 if (cb) {
                     cb.addEventListener('change', () => {
                         btn.dataset.on = cb.checked ? 'true' : 'false';
+                        syncDisabled();
                     });
                 }
+                syncDisabled();
                 togglesWrap.appendChild(btn);
             });
 
-            // Also add the auto-pause toggle if it's visible
+            // When Spec is toggled, sync disabled state of Smooth and Hold buttons
+            const specCb = document.getElementById('spectrum-line-graph-enable');
+            if (specCb) {
+                specCb.addEventListener('change', () => {
+                    ['spectrum-smooth-enable', 'spectrum-hold-enable'].forEach(depId => {
+                        const depCb = document.getElementById(depId);
+                        const depBtn = spectrumBtnMap[depId];
+                        if (depBtn && depCb) {
+                            depBtn.disabled = depCb.disabled;
+                            depBtn.dataset.disabled = depCb.disabled ? 'true' : 'false';
+                            depBtn.dataset.on = depCb.checked ? 'true' : 'false';
+                        }
+                    });
+                });
+            }
+
+            // Always add the auto-pause toggle on mobile (label is hidden by default but feature is mobile-relevant)
             const apCb = document.getElementById('spectrum-autopause-enable');
-            const apLabel = document.getElementById('spectrum-label-autopause');
-            if (apCb && apLabel && apLabel.style.display !== 'none') {
+            if (apCb) {
                 const btn = document.createElement('button');
                 btn.className = 'mobile-spectrum-toggle';
                 btn.dataset.on = apCb.checked ? 'true' : 'false';
@@ -16086,7 +16113,11 @@ function _dockApplyMobileLayout() {
                     wrap.querySelectorAll('.mobile-spectrum-toggle').forEach(b => {
                         const cbId = b.dataset.checkboxId;
                         const c = cbId && document.getElementById(cbId);
-                        if (c) b.dataset.on = c.checked ? 'true' : 'false';
+                        if (c) {
+                            b.dataset.on = c.checked ? 'true' : 'false';
+                            b.disabled = c.disabled;
+                            b.dataset.disabled = c.disabled ? 'true' : 'false';
+                        }
                     });
                 }
             }, 500);

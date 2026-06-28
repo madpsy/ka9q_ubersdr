@@ -16070,19 +16070,26 @@ function _dockApplyMobileLayout() {
 
             // When Spec is toggled, sync disabled state of Smooth and Hold buttons
             const specCb = document.getElementById('spectrum-line-graph-enable');
-            if (specCb) {
-                specCb.addEventListener('change', () => {
-                    ['spectrum-smooth-enable', 'spectrum-hold-enable'].forEach(depId => {
-                        const depCb = document.getElementById(depId);
-                        const depBtn = spectrumBtnMap[depId];
-                        if (depBtn && depCb) {
-                            depBtn.disabled = depCb.disabled;
-                            depBtn.dataset.disabled = depCb.disabled ? 'true' : 'false';
-                            depBtn.dataset.on = depCb.checked ? 'true' : 'false';
-                        }
-                    });
+            // Helper: set disabled appearance on Smooth/Hold based on Spec state
+            const syncSpecDependents = () => {
+                const specEnabled = specCb && specCb.checked;
+                ['spectrum-smooth-enable', 'spectrum-hold-enable'].forEach(depId => {
+                    const depCb = document.getElementById(depId);
+                    const depBtn = spectrumBtnMap[depId];
+                    if (depBtn) {
+                        const shouldDisable = !specEnabled;
+                        depBtn.disabled = shouldDisable;
+                        depBtn.dataset.disabled = shouldDisable ? 'true' : 'false';
+                        if (depCb) depBtn.dataset.on = depCb.checked ? 'true' : 'false';
+                    }
                 });
+            };
+            if (specCb) {
+                // Use setTimeout(0) so spectrum-display.js's own change handler runs first
+                specCb.addEventListener('change', () => setTimeout(syncSpecDependents, 0));
             }
+            // Initial sync after spectrum-display.js has initialized (500ms)
+            setTimeout(syncSpecDependents, 500);
 
             // Always add the auto-pause toggle on mobile (label is hidden by default but feature is mobile-relevant)
             const apCb = document.getElementById('spectrum-autopause-enable');

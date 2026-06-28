@@ -16036,6 +16036,33 @@ function _dockApply() {
     }
 }
 
+// Move the .band-status-bar into #mobile-landscape-right when in landscape,
+// or restore it to the dock wrapper when in portrait. Called on init and resize.
+function _syncLandscapeBandBar() {
+    const rightCol = document.getElementById('mobile-landscape-right');
+    const wrapper  = document.getElementById('dock-overlay-wrapper');
+    const controls = document.querySelector('.controls');
+    if (!rightCol || !wrapper) return;
+
+    const isLandscape = window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches
+                     || (window._isMobile && window.innerWidth > window.innerHeight);
+
+    const bandBar = wrapper.querySelector('.band-status-bar') || rightCol.querySelector('.band-status-bar');
+    if (!bandBar) return;
+
+    if (isLandscape) {
+        // Move band bar to top of right column (before the tab control group)
+        if (bandBar.parentElement !== rightCol) {
+            rightCol.insertBefore(bandBar, rightCol.firstChild);
+        }
+    } else {
+        // Restore band bar to dock wrapper, before .controls
+        if (bandBar.parentElement !== wrapper) {
+            wrapper.insertBefore(bandBar, controls || wrapper.firstChild);
+        }
+    }
+}
+
 // Apply mobile-specific DOM rearrangements (tabs, mode toggles, bandwidth + SNR squelch row, NR + EQ buttons).
 // Safe to call multiple times — guards against creating #bw-squelch-row twice.
 function _dockApplyMobileLayout() {
@@ -16461,6 +16488,13 @@ function _dockRemoveMobileLayout() {
     // ── Undo landscape two-column row ─────────────────────────────────────
     // Must be FIRST — unwrap before any nth-child selectors run, so that
     // .controls .control-group:nth-child(1/2) still resolve correctly below.
+
+    // Remove the orientation sync listener
+    if (window._landscapeOrientationListener) {
+        window.removeEventListener('resize', window._landscapeOrientationListener);
+        window._landscapeOrientationListener = null;
+    }
+
     const landscapeRow = document.getElementById('mobile-landscape-row');
     if (landscapeRow) {
         const leftCol  = document.getElementById('mobile-landscape-left');
@@ -16469,6 +16503,7 @@ function _dockRemoveMobileLayout() {
         const controls = document.querySelector('.controls');
 
         // Restore band-status-bar from right column back to dock wrapper
+        // (it may have been moved there by _syncLandscapeBandBar in landscape mode)
         if (rightCol && wrapper) {
             const bandBar = rightCol.querySelector('.band-status-bar');
             if (bandBar) wrapper.insertBefore(bandBar, controls || wrapper.firstChild);

@@ -518,7 +518,10 @@
       // on the restore call beats any subsequent re-injection by the extension.
       (function guardSlider(s) {
         function restore() {
-          if (s.style.display === 'none' || s.style.getPropertyPriority('display') === 'important') {
+          // Only act when the slider is actually hidden — not when !important is
+          // present but display is already 'block' (which would be our own previous
+          // restore call, causing an infinite observer → restore → observer loop).
+          if (s.style.display === 'none') {
             s.style.removeProperty('display');
             s.style.setProperty('display', 'block', 'important');
           }

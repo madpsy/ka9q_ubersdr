@@ -2793,45 +2793,57 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ── Mobile landscape two-column layout ──────────────────────────────────────
-   When a mobile device is in landscape orientation, place the tuning controls
-   (left column: freq input + buttons/wheel) and the tab bar/panels (right
-   column) side-by-side to save vertical space.
-   The band-status-bar stays in the dock wrapper above .controls and spans
-   full width in both portrait and landscape.
    Structure created by _dockApplyMobileLayout():
-     .band-status-bar          ← stays in dock wrapper, full-width above
      .controls
        #mobile-landscape-row
          #mobile-landscape-left   ← .control-group 1 (freq + tuning)
-         #mobile-landscape-right  ← .control-group 2 (tabs)
-   Portrait: single-column stack (flex-direction: column, default).
-   Landscape: two-column row via @media (orientation: landscape).
+         #mobile-landscape-right  ← .band-status-bar + .control-group 2 (tabs)
+
+   Portrait: #mobile-landscape-right uses order:-1 + width:100% to appear
+   above #mobile-landscape-left (band bar at top, then freq/tuning, then tabs).
+
+   Landscape: two-column side-by-side — left=freq/tuning, right=band bar+tabs.
    ─────────────────────────────────────────────────────────────────────────── */
 #mobile-landscape-row {
     display: flex;
-    flex-direction: column; /* portrait default — single column */
+    flex-wrap: wrap;       /* allows right col to wrap above left col in portrait */
     width: 100%;
+}
+
+/* Portrait: right column (band bar + tabs) wraps to top, full width */
+#mobile-landscape-left {
+    order: 1;
+    width: 100%;
+    min-width: 0;
+}
+
+#mobile-landscape-right {
+    order: 0;              /* appears before left column in portrait */
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 @media (orientation: landscape) and (max-width: 1024px) {
     #mobile-landscape-row {
-        flex-direction: row;
+        flex-wrap: nowrap;
         align-items: flex-start;
         gap: 8px;
     }
 
-    /* Left column: freq input + tuning buttons/wheel — natural width */
+    /* Left column: freq input + tuning — natural width */
     #mobile-landscape-left {
+        order: 0;
+        width: auto;
         flex: 0 0 auto;
-        min-width: 0;
     }
 
-    /* Right column: tab bar + tune/bookmarks panels — takes remaining space */
+    /* Right column: band bar + tabs — takes remaining space */
     #mobile-landscape-right {
+        order: 1;
+        width: auto;
         flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
     }
 
     /* Tab panels expand within the right column only */

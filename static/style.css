@@ -2794,14 +2794,18 @@ input[type="range"]::-moz-range-thumb {
 
 /* ── Mobile landscape two-column layout ──────────────────────────────────────
    When a mobile device is in landscape orientation, place the tuning controls
-   (left column) and the tune/bookmarks tabs (right column) side-by-side to
-   save vertical space and give the spectrum display more room.
-   The #mobile-landscape-row wrapper is created by _dockApplyMobileLayout().
-   Portrait mode uses the default single-column stacking (flex-direction: column).
+   (left column: freq input + buttons/wheel) and the band status bar + tabs
+   (right column) side-by-side to save vertical space.
+   Structure created by _dockApplyMobileLayout():
+     #mobile-landscape-row
+       #mobile-landscape-left   ← .control-group 1 (freq + tuning)
+       #mobile-landscape-right  ← .band-status-bar + .control-group 2 (tabs)
+   Portrait: single-column stack (flex-direction: column, default).
+   Landscape: two-column row via @media (orientation: landscape).
    ─────────────────────────────────────────────────────────────────────────── */
 #mobile-landscape-row {
     display: flex;
-    flex-direction: column; /* portrait default */
+    flex-direction: column; /* portrait default — single column */
     width: 100%;
 }
 
@@ -2812,19 +2816,32 @@ input[type="range"]::-moz-range-thumb {
         gap: 8px;
     }
 
-    /* Each column takes equal width; min-width:0 prevents flex overflow */
-    #mobile-landscape-row > .control-group {
-        flex: 1;
+    /* Left column: freq input + tuning buttons/wheel — fixed width */
+    #mobile-landscape-left {
+        flex: 0 0 auto;
         min-width: 0;
     }
 
-    /* In landscape the tab panels expand within their column only */
-    #mobile-landscape-row .mobile-tab-content.active {
+    /* Right column: band status bar + tab bar/panels — takes remaining space */
+    #mobile-landscape-right {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Band status bar sits above the tabs in the right column */
+    #mobile-landscape-right .band-status-bar {
+        width: 100%;
+    }
+
+    /* Tab panels expand within the right column only */
+    #mobile-landscape-right .mobile-tab-content.active {
         display: block;
     }
 
-    /* Tighten the all-collapsed bottom padding in landscape — less space needed */
-    #mobile-landscape-row .mobile-tab-bar.all-collapsed {
+    /* Tighten the all-collapsed bottom padding in landscape */
+    #mobile-landscape-right .mobile-tab-bar.all-collapsed {
         padding-bottom: 8px;
     }
 }

@@ -16409,23 +16409,41 @@ function _dockApplyMobileLayout() {
     }
 
     // ── Mobile Landscape Two-Column Layout ────────────────────────────────
-    // Wrap the two .control-group elements in a flex row so that in landscape
-    // orientation the tuning controls (left) and tune/bookmarks tabs (right)
-    // sit side-by-side, saving vertical space. CSS handles the actual layout
-    // switch via @media (orientation: landscape). This must be the LAST step
-    // so that all nth-child selectors above have already run against the
-    // unwrapped .controls children.
+    // In landscape orientation, place the tuning controls (freq input +
+    // buttons/wheel) in the left column and the band status bar + tab bar
+    // in the right column, saving vertical space.
+    // Layout:
+    //   LEFT: .control-group:nth-child(1) (freq input, tuning buttons/wheel)
+    //   RIGHT: .band-status-bar + .control-group:nth-child(2) (tabs)
+    // CSS switches the row to flex-direction: row in landscape.
+    // This must be the LAST step so all nth-child selectors above have
+    // already run against the unwrapped .controls children.
     if (!document.getElementById('mobile-landscape-row')) {
         const controls = document.querySelector('.controls');
+        const bandBar = document.querySelector('#dock-overlay-wrapper .band-status-bar');
         if (controls) {
             const cg1 = controls.querySelector('.control-group:nth-child(1)');
             const cg2 = controls.querySelector('.control-group:nth-child(2)');
             if (cg1 && cg2) {
                 const row = document.createElement('div');
                 row.id = 'mobile-landscape-row';
-                controls.insertBefore(row, cg1);
-                row.appendChild(cg1);
-                row.appendChild(cg2);
+
+                // Left column: freq input + tuning buttons/wheel
+                const leftCol = document.createElement('div');
+                leftCol.id = 'mobile-landscape-left';
+                leftCol.appendChild(cg1);
+
+                // Right column: band status bar (if present) + tabs
+                const rightCol = document.createElement('div');
+                rightCol.id = 'mobile-landscape-right';
+                if (bandBar) rightCol.appendChild(bandBar);
+                rightCol.appendChild(cg2);
+
+                row.appendChild(leftCol);
+                row.appendChild(rightCol);
+
+                // Insert the row where .controls' first child was
+                controls.insertBefore(row, controls.firstChild);
             }
         }
     }
@@ -16436,11 +16454,30 @@ function _dockRemoveMobileLayout() {
     // ── Undo landscape two-column row ─────────────────────────────────────
     // Must be FIRST — unwrap before any nth-child selectors run, so that
     // .controls .control-group:nth-child(1/2) still resolve correctly below.
+    // Also restore the band-status-bar to the dock overlay wrapper (its
+    // original position before it was moved into the right column).
     const landscapeRow = document.getElementById('mobile-landscape-row');
     if (landscapeRow) {
-        while (landscapeRow.firstChild) {
-            landscapeRow.parentElement.insertBefore(landscapeRow.firstChild, landscapeRow);
+        const leftCol  = document.getElementById('mobile-landscape-left');
+        const rightCol = document.getElementById('mobile-landscape-right');
+        const wrapper  = document.getElementById('dock-overlay-wrapper');
+        const controls = document.querySelector('.controls');
+
+        // Restore band-status-bar from right column back to dock wrapper
+        if (rightCol && wrapper) {
+            const bandBar = rightCol.querySelector('.band-status-bar');
+            if (bandBar) wrapper.insertBefore(bandBar, controls || wrapper.firstChild);
         }
+
+        // Unwrap left column children back into .controls
+        if (leftCol && controls) {
+            while (leftCol.firstChild) controls.insertBefore(leftCol.firstChild, controls.firstChild);
+        }
+        // Unwrap right column children back into .controls
+        if (rightCol && controls) {
+            while (rightCol.firstChild) controls.appendChild(rightCol.firstChild);
+        }
+
         landscapeRow.remove();
     }
 

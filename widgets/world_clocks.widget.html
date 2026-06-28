@@ -1,0 +1,405 @@
+<!--
+  World Clocks
+  ============
+  Compact 2x3 grid of analogue clocks for six time zones (Zulu/UTC first,
+  then Los Angeles, New York, London, Tokyo, Sydney). Each analogue clock
+  shows hour, minute and second hands, a small 24h digital readout and a
+  day/night tint. Clicking any clock toggles ALL clocks between analogue
+  and digital-only (24h HH:MM:SS); that choice is remembered.
+  Timezones (and DST) are resolved with Intl.DateTimeFormat, so no
+  external services or host globals are required.
+  Drag to reposition; position and display mode saved in localStorage.
+-->
+
+<style>
+  #wclk-widget {
+    position: fixed;
+    top: 300px;
+    left: 44px;
+    z-index: 9500;
+    pointer-events: auto;
+    background: rgba(52, 73, 94, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    font-weight: bold;
+    line-height: 1.4;
+    white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(241, 196, 15, 0.6);
+    cursor: grab;
+    user-select: none;
+  }
+
+  #wclk-widget.wclk-dragging {
+    cursor: grabbing;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  #wclk-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px 4px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+  }
+
+  #wclk-title {
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+  }
+
+  #wclk-close {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  #wclk-close:hover { color: #fff; background: rgba(0,0,0,0.3); }
+
+  #wclk-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 8px 9px 9px;
+  }
+
+  .wclk-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .wclk-face {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    cursor: pointer;
+  }
+
+  .wclk-face canvas {
+    display: block;
+    width: 64px;
+    height: 64px;
+  }
+
+  .wclk-bigdigital {
+    display: none;            /* shown only in digital mode */
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    color: rgba(241, 196, 15, 0.95);
+    background: rgba(44, 62, 80, 0.55);
+    border: 1px solid rgba(241, 196, 15, 0.5);
+    border-radius: 50%;
+    box-sizing: border-box;
+  }
+
+  .wclk-city {
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+  }
+
+  .wclk-digital {
+    font-size: 10px;
+    color: rgba(241, 196, 15, 0.95);
+    letter-spacing: 0.5px;
+  }
+
+  /* Digital-only mode: hide the analogue face + the small readout,
+     show the large 24h digital clock in the face area. */
+  #wclk-widget.wclk-mode-digital .wclk-face canvas { display: none; }
+  #wclk-widget.wclk-mode-digital .wclk-bigdigital  { display: flex; }
+  #wclk-widget.wclk-mode-digital .wclk-digital     { display: none; }
+
+  @media (max-width: 768px) {
+    #wclk-widget { display: none !important; }
+  }
+  html.is-mobile #wclk-widget { display: none !important; }
+</style>
+
+<div id="wclk-widget" style="display:none;">
+  <div id="wclk-header">
+    <span id="wclk-title">World Clocks</span>
+    <span id="wclk-close" title="Dismiss">&#x2715;</span>
+  </div>
+  <div id="wclk-body"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window._isMobile || window.innerWidth <= 768) return;
+
+  var LS_POS_KEY     = 'wclk_widget_pos';
+  var LS_MODE_KEY    = 'wclk_widget_mode';
+  var DRAG_THRESHOLD = 5;
+
+  var widget  = document.getElementById('wclk-widget');
+  var closeEl = document.getElementById('wclk-close');
+  var bodyEl  = document.getElementById('wclk-body');
+
+  var dragState  = null;
+  var wasDragged = false;
+  var dismissed  = false;
+  var timerId    = null;
+
+  // ── Cities ──────────────────────────────────────────────────────────
+  var CITIES = [
+    { label: 'Zulu',        tz: 'UTC'                },
+    { label: 'Los Angeles', tz: 'America/Los_Angeles'},
+    { label: 'New York',    tz: 'America/New_York'   },
+    { label: 'London',      tz: 'Europe/London'      },
+    { label: 'Tokyo',       tz: 'Asia/Tokyo'         },
+    { label: 'Sydney',      tz: 'Australia/Sydney'   }
+  ];
+
+  var DPR  = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  var SIZE = 64;            // CSS pixels
+  var clocks = [];         // { city, ctx, digital, big }
+
+  // Build the cells
+  CITIES.forEach(function (city) {
+    var cell = document.createElement('div');
+    cell.className = 'wclk-cell';
+
+    var face = document.createElement('div');
+    face.className = 'wclk-face';
+    face.title = 'Click to toggle analogue / digital';
+
+    var canvas = document.createElement('canvas');
+    canvas.width  = SIZE * DPR;
+    canvas.height = SIZE * DPR;
+
+    var big = document.createElement('div');
+    big.className = 'wclk-bigdigital';
+    big.textContent = '--:--:--';
+
+    face.appendChild(canvas);
+    face.appendChild(big);
+
+    var name = document.createElement('div');
+    name.className = 'wclk-city';
+    name.textContent = city.label;
+
+    var digital = document.createElement('div');
+    digital.className = 'wclk-digital';
+    digital.textContent = '--:--';
+
+    cell.appendChild(face);
+    cell.appendChild(name);
+    cell.appendChild(digital);
+    bodyEl.appendChild(cell);
+
+    var ctx = canvas.getContext('2d');
+    ctx.scale(DPR, DPR);
+
+    // Click toggles the (global) display mode. Ignore clicks that were
+    // really the end of a drag.
+    face.addEventListener('click', function (e) {
+      if (wasDragged) return;
+      e.stopPropagation();
+      setMode(!digitalMode);
+    });
+
+    clocks.push({ city: city, ctx: ctx, digital: digital, big: big });
+  });
+
+  // ── Display mode (analogue vs digital) ──────────────────────────────
+  var digitalMode = false;
+  (function restoreMode() {
+    try { digitalMode = localStorage.getItem(LS_MODE_KEY) === 'digital'; }
+    catch (e) { /* ignore */ }
+  })();
+
+  function setMode(toDigital) {
+    digitalMode = !!toDigital;
+    widget.classList.toggle('wclk-mode-digital', digitalMode);
+    try { localStorage.setItem(LS_MODE_KEY, digitalMode ? 'digital' : 'analogue'); }
+    catch (e) { /* ignore */ }
+    tick();
+  }
+  widget.classList.toggle('wclk-mode-digital', digitalMode);
+
+  // ── Time helpers ────────────────────────────────────────────────────
+  // Resolve hour/minute/second for a timezone via Intl (handles DST).
+  function partsFor(tz, now) {
+    var fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, hour12: false,
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    var p = fmt.formatToParts(now);
+    var out = { hour: 0, minute: 0, second: 0 };
+    for (var i = 0; i < p.length; i++) {
+      if (p[i].type === 'hour')   out.hour   = parseInt(p[i].value, 10) % 24;
+      if (p[i].type === 'minute') out.minute = parseInt(p[i].value, 10);
+      if (p[i].type === 'second') out.second = parseInt(p[i].value, 10);
+    }
+    return out;
+  }
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  // ── Drawing ─────────────────────────────────────────────────────────
+  function drawClock(ctx, t) {
+    var c = SIZE / 2;
+    var r = c - 2;
+
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    // Day / night face tint (06:00–18:00 = day)
+    var isDay = t.hour >= 6 && t.hour < 18;
+    var face  = isDay ? 'rgba(236, 240, 241, 0.95)' : 'rgba(44, 62, 80, 0.95)';
+    var tick  = isDay ? 'rgba(44, 62, 80, 0.65)'   : 'rgba(236, 240, 241, 0.55)';
+    var hands = isDay ? '#2c3e50'                   : '#ecf0f1';
+
+    // Face
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.fillStyle = face;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(241, 196, 15, 0.85)';
+    ctx.stroke();
+
+    // Hour ticks
+    ctx.strokeStyle = tick;
+    for (var i = 0; i < 12; i++) {
+      var a = (i / 12) * Math.PI * 2;
+      var inner = r - (i % 3 === 0 ? 7 : 4);
+      ctx.lineWidth = (i % 3 === 0) ? 1.6 : 1;
+      ctx.beginPath();
+      ctx.moveTo(c + Math.sin(a) * inner, c - Math.cos(a) * inner);
+      ctx.lineTo(c + Math.sin(a) * r,     c - Math.cos(a) * r);
+      ctx.stroke();
+    }
+
+    var secA = (t.second / 60) * Math.PI * 2;
+    var minA = ((t.minute + t.second / 60) / 60) * Math.PI * 2;
+    var hrA  = (((t.hour % 12) + t.minute / 60) / 12) * Math.PI * 2;
+
+    function hand(angle, len, width, color) {
+      ctx.beginPath();
+      ctx.lineCap = 'round';
+      ctx.lineWidth = width;
+      ctx.strokeStyle = color;
+      ctx.moveTo(c, c);
+      ctx.lineTo(c + Math.sin(angle) * len, c - Math.cos(angle) * len);
+      ctx.stroke();
+    }
+
+    hand(hrA,  r * 0.50, 2.4, hands);
+    hand(minA, r * 0.74, 1.8, hands);
+    hand(secA, r * 0.82, 1,   'rgba(231, 76, 60, 0.95)');
+
+    // Centre cap
+    ctx.beginPath();
+    ctx.arc(c, c, 1.8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(231, 76, 60, 0.95)';
+    ctx.fill();
+  }
+
+  function tick() {
+    if (dismissed) return;
+    var now = new Date();
+    clocks.forEach(function (cl) {
+      var t = partsFor(cl.city.tz, now);
+      if (digitalMode) {
+        cl.big.textContent = pad(t.hour) + ':' + pad(t.minute) + ':' + pad(t.second);
+      } else {
+        drawClock(cl.ctx, t);
+        cl.digital.textContent = pad(t.hour) + ':' + pad(t.minute);
+      }
+    });
+  }
+
+  // ── Position restore ────────────────────────────────────────────────
+  (function restorePosition() {
+    try {
+      var saved = localStorage.getItem(LS_POS_KEY);
+      if (saved) {
+        var pos = JSON.parse(saved);
+        if (typeof pos.top === 'number' && typeof pos.left === 'number') {
+          widget.style.top  = pos.top  + 'px';
+          widget.style.left = pos.left + 'px';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Drag ────────────────────────────────────────────────────────────
+  widget.addEventListener('mousedown', function (e) {
+    if (e.target === closeEl || closeEl.contains(e.target)) return;
+    if (e.button !== 0) return;
+    var rect = widget.getBoundingClientRect();
+    dragState = { startX: e.clientX, startY: e.clientY,
+                  origTop: rect.top, origLeft: rect.left };
+    wasDragged = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!wasDragged && Math.sqrt(dx*dx + dy*dy) > DRAG_THRESHOLD) {
+      wasDragged = true;
+      widget.classList.add('wclk-dragging');
+    }
+    if (wasDragged) {
+      var newTop  = Math.max(0, Math.min(dragState.origTop  + dy,
+                                         window.innerHeight - widget.offsetHeight));
+      var newLeft = Math.max(0, Math.min(dragState.origLeft + dx,
+                                         window.innerWidth  - widget.offsetWidth));
+      widget.style.top  = newTop  + 'px';
+      widget.style.left = newLeft + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragState) return;
+    widget.classList.remove('wclk-dragging');
+    if (wasDragged) {
+      try {
+        localStorage.setItem(LS_POS_KEY, JSON.stringify({
+          top:  parseInt(widget.style.top,  10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    dragState = null;
+    setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // ── Close ───────────────────────────────────────────────────────────
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    dismissed = true;
+    widget.style.display = 'none';
+    if (timerId) { clearInterval(timerId); timerId = null; }
+  });
+
+  // ── Go ──────────────────────────────────────────────────────────────
+  widget.style.display = '';
+  tick();
+  timerId = setInterval(tick, 1000);
+
+})();
+</script>

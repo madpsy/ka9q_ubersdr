@@ -1670,9 +1670,13 @@ function renderResults(spots) {
 }
 
 function renderSummary(spots, heardSet) {
-    // Band spot counts
+    // Band spot counts — only count known NCDXF beacon bands
     const bandCounts = {};
-    spots.forEach(s => { bandCounts[s.band] = (bandCounts[s.band] || 0) + 1; });
+    spots.forEach(s => {
+        if (BAND_NAMES.includes(s.band)) {
+            bandCounts[s.band] = (bandCounts[s.band] || 0) + 1;
+        }
+    });
 
     // Beacon spot counts
     const beaconCounts = {};

@@ -1420,6 +1420,11 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Prevent text-selection on long-press (mobile) */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;  /* suppresses iOS Copy/Look Up callout */
+    touch-action: manipulation;   /* prevents tap-delay and gesture interference */
 }
 
 .tuning-buttons button:hover {

@@ -15718,6 +15718,106 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     updateMarkerNavButtons();
 })();
 
+// ── Tuning-button long-press repeat (mobile) ──────────────────────────────────
+// On mobile, a long-press on a tuning button (◄◄ ◄ ◂ ▸ ► ►►) repeats the
+// button's action with an accelerating interval:
+//   • 500 ms initial hold before the first repeat fires
+//   • Repeats start at 250 ms, then ramp down to 100 ms over ~3 seconds
+//   • Releasing the touch (or moving off the button) cancels the repeat
+//
+// The snap (●) and marker-jump (‹ ›) buttons are excluded — they are
+// idempotent / navigation actions that don't benefit from repeat.
+//
+// Implementation uses touchstart/touchend/touchcancel so it works on mobile
+// without conflicting with the existing onclick handlers (which still fire
+// on a short tap).  contextmenu is suppressed on these buttons to prevent
+// the browser's long-press menu from appearing.
+(function initTuningButtonLongPress() {
+    const container = document.querySelector('.tuning-buttons');
+    if (!container) return;
+
+    // Buttons that should NOT repeat (snap + marker-jump).
+    const EXCLUDE = new Set(['tuning-btn-snap', 'tuning-btn-marker']);
+
+    // Acceleration schedule: interval starts at INTERVAL_START ms and
+    // decreases by INTERVAL_STEP every ACCEL_EVERY ms, flooring at INTERVAL_MIN.
+    const INITIAL_DELAY   = 500;   // ms before first repeat
+    const INTERVAL_START  = 250;   // ms between first repeats
+    const INTERVAL_MIN    = 100;   // ms floor
+    const INTERVAL_STEP   = 50;    // ms reduction per acceleration tick
+    const ACCEL_EVERY     = 500;   // ms between acceleration steps
+
+    function shouldExclude(btn) {
+        return [...btn.classList].some(c => EXCLUDE.has(c));
+    }
+
+    // Extract the action function from the button's onclick attribute.
+    // Calls the inline onclick handler directly (not btn.click(), which would
+    // re-trigger touchstart and create a feedback loop).
+    // Returns a callable or null if the button has no onclick.
+    function getAction(btn) {
+        const handler = btn.onclick;
+        if (typeof handler !== 'function') return null;
+        return function () {
+            try { handler.call(btn, new MouseEvent('click')); } catch (_) {}
+        };
+    }
+
+    container.querySelectorAll('button').forEach(function (btn) {
+        if (shouldExclude(btn)) return;
+
+        let initialTimer  = null;
+        let repeatTimer   = null;
+        let accelTimer    = null;
+        let currentInterval = INTERVAL_START;
+
+        function stopAll() {
+            if (initialTimer  !== null) { clearTimeout(initialTimer);   initialTimer  = null; }
+            if (repeatTimer   !== null) { clearTimeout(repeatTimer);    repeatTimer   = null; }
+            if (accelTimer    !== null) { clearInterval(accelTimer);    accelTimer    = null; }
+            currentInterval = INTERVAL_START;
+        }
+
+        function scheduleRepeat(action) {
+            repeatTimer = setTimeout(function fire() {
+                action();
+                repeatTimer = setTimeout(fire, currentInterval);
+            }, currentInterval);
+        }
+
+        btn.addEventListener('touchstart', function (e) {
+            const action = getAction(btn);
+            if (!action) return;
+
+            stopAll();
+
+            initialTimer = setTimeout(function () {
+                initialTimer = null;
+                // First repeat fires immediately after the initial delay
+                action();
+                currentInterval = INTERVAL_START;
+                scheduleRepeat(action);
+
+                // Gradually accelerate: reduce interval every ACCEL_EVERY ms
+                accelTimer = setInterval(function () {
+                    currentInterval = Math.max(INTERVAL_MIN, currentInterval - INTERVAL_STEP);
+                }, ACCEL_EVERY);
+            }, INITIAL_DELAY);
+        }, { passive: true });
+
+        function cancelLongPress() {
+            stopAll();
+        }
+
+        btn.addEventListener('touchend',    cancelLongPress, { passive: true });
+        btn.addEventListener('touchcancel', cancelLongPress, { passive: true });
+        btn.addEventListener('touchmove',   cancelLongPress, { passive: true });
+
+        // Suppress the browser's context-menu / callout on long-press.
+        btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    });
+})();
+
 // ── Browser zoom buttons (narrow/mobile view only) ────────────────────────────
 (function () {
     const STEP = 0.05;

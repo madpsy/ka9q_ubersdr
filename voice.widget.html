@@ -868,8 +868,26 @@
         var mode     = row.getAttribute('data-mode');
         var callsign = row.getAttribute('data-callsign');
         tuneToFrequency(hz, mode);
-        if (callsign && typeof window.lookupCallsign === 'function') {
-          window.lookupCallsign(callsign);
+        if (callsign) {
+          // Notify the callsign_lookup.html popup directly — works regardless
+          // of whether qrz_lookup.widget.html is loaded as a widget.
+          var lw = window._callsignLookupWindow;
+          if (lw && !lw.closed) {
+            var base = callsign.split('/').reduce(function (a, b) {
+              return b.length > a.length ? b : a;
+            }, '');
+            try {
+              lw.postMessage(
+                { type: 'callsign_lookup', callsign: base },
+                window.location.origin
+              );
+              lw.focus();
+            } catch (_) {}
+          }
+          // Also update the inline qrz_lookup widget if it happens to be loaded.
+          if (typeof window.lookupCallsign === 'function') {
+            window.lookupCallsign(callsign);
+          }
         }
       });
 

@@ -16063,6 +16063,18 @@ function _syncLandscapeBandBar() {
             specCb.checked = false;
             specCb.dispatchEvent(new Event('change', { bubbles: true }));
         }
+
+        // Auto-open the Tune tab in landscape if no tab is currently open,
+        // so the mode/BW controls are immediately visible without a tap.
+        const tunePanel = document.getElementById('mobile-tab-tune');
+        if (tunePanel && !tunePanel.classList.contains('active')) {
+            const bookmarksPanel = document.getElementById('mobile-tab-bookmarks');
+            const neitherOpen = !bookmarksPanel || !bookmarksPanel.classList.contains('active');
+            if (neitherOpen && typeof window._toggleMobileTab === 'function') {
+                window._landscapeTuneAutoOpened = true;
+                window._toggleMobileTab('tune');
+            }
+        }
     } else {
         // Restore band bar to dock wrapper, before .controls
         if (bandBar.parentElement !== wrapper) {
@@ -16076,6 +16088,16 @@ function _syncLandscapeBandBar() {
             if (specCb && !specCb.checked) {
                 specCb.checked = true;
                 specCb.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
+        // Collapse the Tune tab if it was auto-opened by landscape mode
+        // (don't collapse if the user explicitly opened it themselves)
+        if (window._landscapeTuneAutoOpened) {
+            window._landscapeTuneAutoOpened = false;
+            const tunePanel = document.getElementById('mobile-tab-tune');
+            if (tunePanel && tunePanel.classList.contains('active') && typeof window._toggleMobileTab === 'function') {
+                window._toggleMobileTab('tune');
             }
         }
     }
@@ -16397,6 +16419,7 @@ function _dockApplyMobileLayout() {
 
             // Tab toggle handler — tapping the active tab collapses it (no panel shown),
             // tapping an inactive tab opens it and closes the other.
+            // Exposed on window so _syncLandscapeBandBar() can call it from outside this closure.
             function toggleMobileTab(tabName) {
                 const tuneActive = tunePanelEl.classList.contains('active');
                 const bookmarksActive = bookmarksPanelEl.classList.contains('active');
@@ -16437,6 +16460,8 @@ function _dockApplyMobileLayout() {
 
             tabTune.onclick = () => toggleMobileTab('tune');
             tabBookmarks.onclick = () => toggleMobileTab('bookmarks');
+            // Expose for _syncLandscapeBandBar() which runs outside this closure
+            window._toggleMobileTab = toggleMobileTab;
 
             // Restore last active tab from localStorage (default: both collapsed)
             try {

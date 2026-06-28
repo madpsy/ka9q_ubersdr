@@ -16457,13 +16457,18 @@ function _dockRemoveMobileLayout() {
     // ── Undo landscape two-column row ─────────────────────────────────────
     // Must be FIRST — unwrap before any nth-child selectors run, so that
     // .controls .control-group:nth-child(1/2) still resolve correctly below.
-    // The band-status-bar is NOT moved (it stays in the dock wrapper always),
-    // so no band-bar restoration is needed here.
     const landscapeRow = document.getElementById('mobile-landscape-row');
     if (landscapeRow) {
         const leftCol  = document.getElementById('mobile-landscape-left');
         const rightCol = document.getElementById('mobile-landscape-right');
+        const wrapper  = document.getElementById('dock-overlay-wrapper');
         const controls = document.querySelector('.controls');
+
+        // Restore band-status-bar from right column back to dock wrapper
+        if (rightCol && wrapper) {
+            const bandBar = rightCol.querySelector('.band-status-bar');
+            if (bandBar) wrapper.insertBefore(bandBar, controls || wrapper.firstChild);
+        }
 
         // Unwrap left column children back into .controls (preserve order)
         if (leftCol && controls) {

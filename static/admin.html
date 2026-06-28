@@ -10176,11 +10176,14 @@ function resetStationIdColor() {
             const zone    = document.getElementById('widgetHtmlDropZone');
             const capture = document.getElementById('widgetDragCapture');
             const overlay = document.getElementById('widgetDropOverlay');
-            console.log('[DropZone] init — zone:', !!zone, 'capture:', !!capture, 'overlay:', !!overlay);
-            if (!zone || !capture || !overlay) { console.warn('[DropZone] missing elements — aborting'); return; }
+            if (!zone || !capture || !overlay) return;
 
             function isLocked() {
-                return document.getElementById('widgetEditorPublic').checked;
+                // Locked only while the public-widget warning overlay is actively shown
+                // (i.e. the user has not yet clicked "I Understand"). Once dismissed,
+                // drag-and-drop is allowed even though the public checkbox stays checked.
+                const ov = document.getElementById('widgetEditorPublicOverlay');
+                return ov && ov.style.display !== 'none' && ov.style.display !== '';
             }
 
             function hasFiles(dt) {
@@ -10212,8 +10215,6 @@ function resetStationIdColor() {
             // (including over the textarea). Show the capture layer so subsequent
             // dragover/drop events land on it rather than the textarea.
             zone.addEventListener('dragenter', function(e) {
-                console.log('[DropZone] dragenter — locked:', isLocked(), 'hasFiles:', hasFiles(e.dataTransfer), 'target:', e.target.id || e.target.tagName);
-                if (isLocked()) return;
                 if (!hasFiles(e.dataTransfer)) return;
                 e.preventDefault();
                 showDrop();

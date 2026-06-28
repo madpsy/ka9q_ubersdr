@@ -845,6 +845,29 @@ Before showing interactive controls, check `window.instanceDescription`:
 
 ---
 
+## Installing the widget on your instance
+
+Once the widget HTML is ready, add it to a running UberSDR instance through the
+admin UI:
+
+1. Log in to the admin panel at **`http://ubersdr.local:8080/admin.html`**
+   (substitute your instance's host/port).
+2. Open the **UI** tab.
+3. Scroll down to the **Widgets** section.
+4. Click the **My Widgets** tab.
+5. Click **+ New Widget**.
+6. Fill out a **Name** and a short **Description**, then paste the generated
+   widget code into the **HTML content** field.
+7. **Save** the widget, then **enable** it on your instance.
+8. *(Optional)* Tick **Make public** to share the widget — public widgets are
+   published to the collector and become available to other instances.
+
+> The HTML content field expects the same fragment you'd save to
+> `widgets-custom/<slug>.widget.html` — `<style>` + markup + `<script>`, with no
+> `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` wrapper.
+
+---
+
 ## Minimal widget template
 
 Use this as a starting point for a new widget:

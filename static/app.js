@@ -15770,7 +15770,6 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         let repeatTimer     = null;
         let accelTimer      = null;
         let currentInterval = INTERVAL_START;
-        let touchActive     = false; // prevents synthesised mousedown after touchstart
 
         function stopAll() {
             if (initialTimer  !== null) { clearTimeout(initialTimer);   initialTimer  = null; }
@@ -15814,22 +15813,15 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
         // Using the Pointer Events API with setPointerCapture keeps the pointer
         // locked to the button even if the cursor drifts slightly outside it,
         // which prevents the sporadic cancellation seen with mouseleave.
-        // touchActive guards against double-firing on touch devices that also
-        // synthesise mouse events.
+        // setPointerCapture also suppresses compatibility mouse events on touch
+        // devices, so there is no risk of double-firing.
         btn.addEventListener('pointerdown', function (e) {
-            if (e.button !== 0 && e.pointerType === 'mouse') return; // left button only for mouse
-            if (e.pointerType === 'touch') touchActive = true;
+            if (e.pointerType === 'mouse' && e.button !== 0) return; // left button only for mouse
             try { btn.setPointerCapture(e.pointerId); } catch (_) {}
             startLongPress();
         });
-        btn.addEventListener('pointerup', function (e) {
-            if (e.pointerType === 'touch') touchActive = false;
-            cancelLongPress();
-        });
-        btn.addEventListener('pointercancel', function (e) {
-            if (e.pointerType === 'touch') touchActive = false;
-            cancelLongPress();
-        });
+        btn.addEventListener('pointerup',     cancelLongPress);
+        btn.addEventListener('pointercancel', cancelLongPress);
 
         // Suppress the browser's context-menu / callout on long-press.
         btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });

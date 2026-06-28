@@ -1,0 +1,1393 @@
+<!-- ═══════════════════════════════════════════════════════════
+     UberSDR Games Widget
+     • Wide-screen only (hidden ≤1024px)
+     • Fixed to left edge, vertically centred
+     • Games: Noughts & Crosses, Minesweeper, 15-Puzzle, Memory, Connect 4
+     • ◀ ▶ arrows to switch games
+     • Drag widget to reposition
+     ═══════════════════════════════════════════════════════════ -->
+
+<style>
+@media (max-width: 1024px) {
+  #sdr-games-widget { display: none !important; }
+}
+/* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+html.is-mobile #sdr-games-widget { display: none !important; }
+
+#sdr-games-widget {
+  position: fixed;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 900;
+  width: 190px;
+  background: rgba(30, 42, 56, 0.92);
+  border: 1px solid rgba(127, 140, 141, 0.5);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  font-family: inherit;
+  color: #ecf0f1;
+  user-select: none;
+  cursor: grab;
+}
+
+#sdr-games-widget.dragging {
+  cursor: grabbing;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+  opacity: 0.95;
+}
+
+/* ── Title bar ── */
+#sdr-games-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.sdr-games-nav {
+  background: none !important;
+  border: none !important;
+  color: #95a5a6 !important;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+  font-weight: normal !important;
+}
+.sdr-games-nav:hover { background: none !important; color: #ecf0f1 !important; }
+
+/* Interactive children restore default cursor so grab doesn't show over them */
+#sdr-games-widget button,
+#sdr-games-widget select,
+#sdr-games-widget input,
+.sdr-ttt-cell,
+.sdr-ms-cell,
+.sdr-p15-cell,
+.sdr-mem-card,
+.sdr-c4-cell {
+  cursor: pointer;
+}
+.sdr-ttt-cell.taken,
+.sdr-ms-cell.revealed,
+.sdr-p15-cell.blank,
+.sdr-mem-card.flipped,
+.sdr-mem-card.matched,
+.sdr-c4-cell.taken {
+  cursor: default;
+}
+
+#sdr-games-title {
+  font-size: 11px;
+  color: #95a5a6;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  flex: 1;
+}
+
+/* ── Game panels ── */
+.sdr-game-panel { display: none; }
+.sdr-game-panel.active { display: block; }
+
+/* ── Shared status / footer ── */
+.sdr-game-status {
+  font-size: 11px;
+  text-align: center;
+  min-height: 16px;
+  margin-bottom: 6px;
+  color: #f39c12;
+  font-weight: bold;
+}
+
+.sdr-game-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sdr-game-score {
+  font-size: 10px;
+  color: #7f8c8d;
+  white-space: nowrap;
+}
+
+/* Override global green button rule (style.css applies #28a745 to all buttons) */
+#sdr-games-widget button {
+  background: #2c3e50 !important;
+  color: #ecf0f1 !important;
+  border: 1px solid #7f8c8d !important;
+  font-weight: normal !important;
+  transform: none !important;
+  transition: background 0.15s, border-color 0.15s !important;
+}
+#sdr-games-widget button:hover {
+  background: #34495e !important;
+  transform: none !important;
+}
+
+.sdr-game-btn {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sdr-game-btn.close:hover { background: #3d2020 !important; border-color: #7f3030 !important; }
+
+/* ══════════════════════════════════════
+   NOUGHTS & CROSSES
+   ══════════════════════════════════════ */
+#sdr-ttt-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.sdr-ttt-cell {
+  aspect-ratio: 1;
+  background: rgba(52, 73, 94, 0.8);
+  border: 1px solid rgba(127, 140, 141, 0.4);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sdr-ttt-cell:hover:not(.taken) {
+  background: rgba(52, 152, 219, 0.35);
+  border-color: #3498db;
+}
+.sdr-ttt-cell.taken { cursor: default; }
+.sdr-ttt-cell.win {
+  background: rgba(52, 152, 219, 0.3);
+  border-color: #3498db;
+}
+
+/* ══════════════════════════════════════
+   MINESWEEPER
+   ══════════════════════════════════════ */
+#sdr-ms-board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.sdr-ms-cell {
+  aspect-ratio: 1;
+  background: rgba(52, 73, 94, 0.9);
+  border: 1px solid rgba(127, 140, 141, 0.35);
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.sdr-ms-cell:hover:not(.revealed):not(.flagged) {
+  background: rgba(52, 152, 219, 0.35);
+}
+.sdr-ms-cell.revealed {
+  background: rgba(20, 30, 40, 0.7);
+  cursor: default;
+  border-color: rgba(127,140,141,0.15);
+}
+.sdr-ms-cell.flagged { background: rgba(52, 73, 94, 0.9); }
+.sdr-ms-cell.mine-hit { background: rgba(220, 38, 38, 0.6) !important; }
+
+/* Number colours */
+.sdr-ms-1 { color: #60a5fa; }
+.sdr-ms-2 { color: #5dade2; }
+.sdr-ms-3 { color: #f87171; }
+.sdr-ms-4 { color: #818cf8; }
+.sdr-ms-5 { color: #fb923c; }
+.sdr-ms-6 { color: #22d3ee; }
+.sdr-ms-7 { color: #e879f9; }
+.sdr-ms-8 { color: #94a3b8; }
+
+#sdr-ms-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #7f8c8d;
+  margin-bottom: 4px;
+}
+
+/* ══════════════════════════════════════
+   15-PUZZLE
+   ══════════════════════════════════════ */
+#sdr-p15-board {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.sdr-p15-cell {
+  aspect-ratio: 1;
+  background: rgba(52, 73, 94, 0.85);
+  border: 1px solid rgba(127, 140, 141, 0.4);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: bold;
+  color: #ecf0f1;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.sdr-p15-cell:hover:not(.blank) {
+  background: rgba(52, 152, 219, 0.35);
+  border-color: #3498db;
+}
+.sdr-p15-cell.blank {
+  background: rgba(20, 30, 40, 0.5);
+  border-color: rgba(127,140,141,0.15);
+  cursor: default;
+}
+.sdr-p15-cell.solved {
+  background: rgba(52, 152, 219, 0.2);
+  border-color: rgba(52, 152, 219, 0.5);
+  color: #7fb3d3;
+}
+
+#sdr-p15-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #7f8c8d;
+  margin-bottom: 4px;
+}
+
+/* ══════════════════════════════════════
+   MEMORY / PAIRS
+   ══════════════════════════════════════ */
+#sdr-mem-board {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.sdr-mem-card {
+  aspect-ratio: 1;
+  background: rgba(52, 73, 94, 0.85);
+  border: 1px solid rgba(127, 140, 141, 0.4);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.12s;
+  user-select: none;
+}
+.sdr-mem-card:hover:not(.flipped):not(.matched) {
+  background: rgba(52, 152, 219, 0.3);
+  border-color: #3498db;
+}
+.sdr-mem-card.flipped {
+  background: rgba(44, 62, 80, 0.95);
+  border-color: rgba(127,140,141,0.6);
+  cursor: default;
+}
+.sdr-mem-card.matched {
+  background: rgba(52, 152, 219, 0.2);
+  border-color: rgba(52, 152, 219, 0.5);
+  cursor: default;
+}
+
+#sdr-mem-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #7f8c8d;
+  margin-bottom: 4px;
+}
+
+/* ══════════════════════════════════════
+   CONNECT 4
+   ══════════════════════════════════════ */
+#sdr-c4-board {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.sdr-c4-cell {
+  aspect-ratio: 1;
+  background: rgba(20, 30, 48, 0.85);
+  border: 1px solid rgba(127, 140, 141, 0.3);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sdr-c4-cell:hover:not(.taken) {
+  background: rgba(52, 152, 219, 0.25);
+  border-color: #3498db;
+}
+.sdr-c4-cell.taken { cursor: default; }
+.sdr-c4-cell.p1 { background: #e74c3c; border-color: #c0392b; }
+.sdr-c4-cell.p2 { background: #f1c40f; border-color: #d4ac0d; }
+.sdr-c4-cell.win { box-shadow: 0 0 6px 2px rgba(255,255,255,0.5); }
+
+.sdr-c4-col-btn {
+  width: 100%;
+  font-size: 9px;
+  padding: 2px 0;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: center;
+}
+
+#sdr-c4-cols {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-bottom: 3px;
+}
+</style>
+
+<div id="sdr-games-widget">
+
+  <!-- Title bar with nav arrows -->
+  <div id="sdr-games-titlebar">
+    <button class="sdr-games-nav" id="sdr-games-prev" title="Previous game">◀</button>
+    <span id="sdr-games-title">Noughts &amp; Crosses</span>
+    <button class="sdr-games-nav" id="sdr-games-next" title="Next game">▶</button>
+  </div>
+
+  <!-- ── Game 0: Noughts & Crosses ── -->
+  <div class="sdr-game-panel active" id="sdr-panel-ttt">
+    <div class="sdr-game-status" id="sdr-ttt-status">Your turn ✕</div>
+    <div id="sdr-ttt-board">
+      <div class="sdr-ttt-cell" data-i="0"></div>
+      <div class="sdr-ttt-cell" data-i="1"></div>
+      <div class="sdr-ttt-cell" data-i="2"></div>
+      <div class="sdr-ttt-cell" data-i="3"></div>
+      <div class="sdr-ttt-cell" data-i="4"></div>
+      <div class="sdr-ttt-cell" data-i="5"></div>
+      <div class="sdr-ttt-cell" data-i="6"></div>
+      <div class="sdr-ttt-cell" data-i="7"></div>
+      <div class="sdr-ttt-cell" data-i="8"></div>
+    </div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-ttt-score">W:0 D:0 L:0</span>
+      <button class="sdr-game-btn close" id="sdr-ttt-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-ttt-new-btn">New</button>
+    </div>
+  </div>
+
+  <!-- ── Game 3: Memory / Pairs ── -->
+  <div class="sdr-game-panel" id="sdr-panel-mem">
+    <div id="sdr-mem-info">
+      <span id="sdr-mem-moves">Pairs: 0/8</span>
+      <span id="sdr-mem-flips">Flips: 0</span>
+    </div>
+    <div class="sdr-game-status" id="sdr-mem-status">Click a card to start</div>
+    <div id="sdr-mem-board"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-mem-score">Best: —</span>
+      <button class="sdr-game-btn close" id="sdr-mem-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-mem-new-btn">New</button>
+    </div>
+  </div>
+
+  <!-- ── Game 2: 15-Puzzle ── -->
+  <div class="sdr-game-panel" id="sdr-panel-p15">
+    <div id="sdr-p15-info">
+      <span id="sdr-p15-moves">Moves: 0</span>
+      <span id="sdr-p15-best">Best: —</span>
+    </div>
+    <div class="sdr-game-status" id="sdr-p15-status">Click Shuffle to start</div>
+    <div id="sdr-p15-board"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-p15-score">W:0</span>
+      <button class="sdr-game-btn close" id="sdr-p15-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-p15-shuffle-btn">Shuffle</button>
+    </div>
+  </div>
+
+  <!-- ── Game 1: Minesweeper ── -->
+  <div class="sdr-game-panel" id="sdr-panel-ms">
+    <div id="sdr-ms-info">
+      <span id="sdr-ms-mines">💣 10</span>
+      <span id="sdr-ms-timer">⏱ 0s</span>
+    </div>
+    <div class="sdr-game-status" id="sdr-ms-status">Click to start</div>
+    <div id="sdr-ms-board"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-ms-score">W:0 L:0</span>
+      <button class="sdr-game-btn close" id="sdr-ms-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-ms-new-btn">New</button>
+    </div>
+  </div>
+
+  <!-- ── Game 4: Connect 4 ── -->
+  <div class="sdr-game-panel" id="sdr-panel-c4">
+    <div class="sdr-game-status" id="sdr-c4-status">Your turn 🔴</div>
+    <div id="sdr-c4-cols"></div>
+    <div id="sdr-c4-board"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-c4-score">W:0 D:0 L:0</span>
+      <button class="sdr-game-btn close" id="sdr-c4-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-c4-new-btn">New</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Do not run on real mobile devices (UA + touch-points detection by app.js)
+  // or on narrow-viewport screens — the widget is hidden by CSS anyway.
+  if (window._isMobile || window.innerWidth <= 1024) return;
+
+  // ── Callsign (from /api/description, already fetched by host app) ──
+  // window.instanceDescription is populated asynchronously; read it lazily.
+  function getCallsign() {
+    return (window.instanceDescription && window.instanceDescription.receiver &&
+            window.instanceDescription.receiver.callsign) || 'UberSDR';
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // GAME SWITCHER
+  // ══════════════════════════════════════════════════════════════════
+  const GAMES = [
+    { id: 'sdr-panel-ttt', title: 'Noughts &amp; Crosses' },
+    { id: 'sdr-panel-ms',  title: 'Minesweeper' },
+    { id: 'sdr-panel-p15', title: '15-Puzzle' },
+    { id: 'sdr-panel-mem', title: 'Memory' },
+    { id: 'sdr-panel-c4',  title: 'Connect 4' },
+  ];
+  let currentGame = 0;
+
+  const titleEl  = document.getElementById('sdr-games-title');
+  const widget   = document.getElementById('sdr-games-widget');
+
+  // ── Drag to reposition ────────────────────────────────────────────
+  (function initDrag() {
+    const LS_KEY = 'sdr-games-widget-pos';
+    let dragging = false, startX, startY, origLeft, origTop;
+
+    // Restore saved position from localStorage (if any)
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY));
+      if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+        const maxL = window.innerWidth  - widget.offsetWidth;
+        const maxT = window.innerHeight - widget.offsetHeight;
+        widget.style.left      = Math.max(0, Math.min(maxL, saved.left)) + 'px';
+        widget.style.top       = Math.max(0, Math.min(maxT, saved.top))  + 'px';
+        widget.style.transform = 'none';
+      }
+    } catch (_) {}
+
+    // Resolve current pixel position (handles the initial translateY(-50%) state)
+    function resolvePosition() {
+      const r = widget.getBoundingClientRect();
+      widget.style.left      = r.left + 'px';
+      widget.style.top       = r.top  + 'px';
+      widget.style.transform = 'none';
+    }
+
+    function savePosition() {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify({
+          left: parseFloat(widget.style.left),
+          top:  parseFloat(widget.style.top),
+        }));
+      } catch (_) {}
+    }
+
+    widget.addEventListener('pointerdown', e => {
+      // Only drag from non-interactive targets
+      if (e.target.closest('button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell')) return;
+      e.preventDefault();
+      resolvePosition();
+      dragging = true;
+      startX   = e.clientX;
+      startY   = e.clientY;
+      origLeft = parseFloat(widget.style.left);
+      origTop  = parseFloat(widget.style.top);
+      widget.classList.add('dragging');
+      widget.setPointerCapture(e.pointerId);
+    });
+
+    widget.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      // Clamp to viewport
+      const maxL = window.innerWidth  - widget.offsetWidth;
+      const maxT = window.innerHeight - widget.offsetHeight;
+      widget.style.left = Math.max(0, Math.min(maxL, origLeft + dx)) + 'px';
+      widget.style.top  = Math.max(0, Math.min(maxT, origTop  + dy)) + 'px';
+    });
+
+    widget.addEventListener('pointerup', () => {
+      if (dragging) savePosition();
+      dragging = false;
+      widget.classList.remove('dragging');
+    });
+    widget.addEventListener('pointercancel', () => { dragging = false; widget.classList.remove('dragging'); });
+
+    // Re-clamp position when the window is resized so the widget never goes off-screen
+    window.addEventListener('resize', () => {
+      if (widget.style.left && widget.style.top && widget.style.transform === 'none') {
+        const maxL = window.innerWidth  - widget.offsetWidth;
+        const maxT = window.innerHeight - widget.offsetHeight;
+        widget.style.left = Math.max(0, Math.min(maxL, parseFloat(widget.style.left))) + 'px';
+        widget.style.top  = Math.max(0, Math.min(maxT, parseFloat(widget.style.top)))  + 'px';
+      }
+    });
+  })();
+
+  function showGame(idx) {
+    GAMES.forEach((g, i) => {
+      document.getElementById(g.id).classList.toggle('active', i === idx);
+    });
+    titleEl.innerHTML = GAMES[idx].title;
+    currentGame = idx;
+  }
+
+  document.getElementById('sdr-games-prev').addEventListener('click', () => {
+    showGame((currentGame - 1 + GAMES.length) % GAMES.length);
+  });
+  document.getElementById('sdr-games-next').addEventListener('click', () => {
+    showGame((currentGame + 1) % GAMES.length);
+  });
+
+  // Close buttons
+  document.getElementById('sdr-ttt-close-btn').addEventListener('click',  () => { widget.style.display = 'none'; });
+  document.getElementById('sdr-ms-close-btn').addEventListener('click',   () => { widget.style.display = 'none'; });
+  document.getElementById('sdr-p15-close-btn').addEventListener('click',  () => { widget.style.display = 'none'; });
+  document.getElementById('sdr-mem-close-btn').addEventListener('click',  () => { widget.style.display = 'none'; });
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // NOUGHTS & CROSSES
+  // ══════════════════════════════════════════════════════════════════
+  (function ttt() {
+    const HUMAN = 'X', AI = 'O';
+    const WINS  = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    let board, gameOver, clickReady, humanTurn, score = { w: 0, d: 0, l: 0 };
+    // null = random next game; HUMAN or AI = that side starts next game
+    let nextStarter = null;
+    // Adaptive blunder rate: starts at 0.5, adjusts after each game.
+    // +0.12 when player loses (AI gets easier faster), -0.08 when player wins (AI gets harder slower).
+    // Clamped 0.15–0.85 so the AI is never trivially easy or impossibly hard.
+    let blunderRate = 0.5;
+    function adaptBlunder(playerWon) {
+      if (playerWon === null) return; // draw — no change
+      blunderRate = Math.min(0.85, Math.max(0.15,
+        playerWon ? blunderRate - 0.08 : blunderRate + 0.12
+      ));
+    }
+
+    const cells    = () => document.querySelectorAll('.sdr-ttt-cell');
+    const statusEl = document.getElementById('sdr-ttt-status');
+    const scoreEl  = document.getElementById('sdr-ttt-score');
+
+    function checkWinner(b) {
+      for (const [a, c, d] of WINS)
+        if (b[a] && b[a] === b[c] && b[a] === b[d]) return b[a];
+      return b.includes('') ? null : 'draw';
+    }
+    function winLine(b) {
+      for (const line of WINS)
+        if (b[line[0]] && b[line[0]] === b[line[1]] && b[line[0]] === b[line[2]])
+          return line;
+      return null;
+    }
+    function renderBoard() {
+      cells().forEach((el, i) => {
+        el.textContent = board[i] === HUMAN ? '✕' : board[i] === AI ? '◯' : '';
+        el.classList.toggle('taken', board[i] !== '');
+        el.classList.remove('win');
+      });
+    }
+    function minimax(b, isMax, depth) {
+      const w = checkWinner(b);
+      if (w === AI)     return 10 - depth;
+      if (w === HUMAN)  return depth - 10;
+      if (w === 'draw') return 0;
+      let best = isMax ? -Infinity : Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (b[i] !== '') continue;
+        b[i] = isMax ? AI : HUMAN;
+        const val = minimax(b, !isMax, depth + 1);
+        b[i] = '';
+        best = isMax ? Math.max(best, val) : Math.min(best, val);
+      }
+      return best;
+    }
+    function bestMove() {
+      // Collect all empty squares
+      const empty = [];
+      for (let i = 0; i < 9; i++) if (board[i] === '') empty.push(i);
+      if (empty.length === 0) return -1;
+      // With probability blunderRate, pick a random empty square instead of optimal
+      if (Math.random() < blunderRate) return empty[Math.floor(Math.random() * empty.length)];
+      let best = -Infinity, move = -1;
+      for (const i of empty) {
+        board[i] = AI;
+        const val = minimax(board, false, 0);
+        board[i] = '';
+        if (val > best) { best = val; move = i; }
+      }
+      return move;
+    }
+    function endGame(result) {
+      gameOver = true;
+      clickReady = false;
+      setTimeout(() => { clickReady = true; }, 600);
+      const line = winLine(board);
+      if (line) line.forEach(i => cells()[i].classList.add('win'));
+      if (result === HUMAN)      { score.w++; statusEl.textContent = '🎉 You win!';                      nextStarter = HUMAN; adaptBlunder(true); }
+      else if (result === AI)    { score.l++; statusEl.textContent = `🤖 ${getCallsign()} wins!`;        nextStarter = AI;    adaptBlunder(false); }
+      else                       { score.d++; statusEl.textContent = '🤝 Draw!';    nextStarter = null;  adaptBlunder(null); }
+      scoreEl.textContent = `W:${score.w} D:${score.d} L:${score.l}`;
+    }
+    function aiMove() {
+      humanTurn = false;
+      const idx = bestMove();
+      if (idx === -1) return;
+      board[idx] = AI;
+      renderBoard();
+      const result = checkWinner(board);
+      if (result) endGame(result);
+      else { humanTurn = true; statusEl.textContent = 'Your turn ✕'; }
+    }
+    function newGame() {
+      // If the previous game wasn't finished, treat it as no result (random start)
+      if (!gameOver) nextStarter = null;
+      board = Array(9).fill('');
+      gameOver   = false;
+      clickReady = true;
+      humanTurn  = false;
+      // blunderRate is now adaptive — do not re-roll randomly
+      renderBoard();
+      // Determine who starts: winner of last game, or random on first game / draw
+      const starter = nextStarter !== null ? nextStarter : (Math.random() < 0.5 ? HUMAN : AI);
+      if (starter === HUMAN) {
+        humanTurn = true;
+        statusEl.textContent = 'Your turn ✕';
+      } else {
+        statusEl.textContent = 'AI goes first…';
+        setTimeout(aiMove, 300);
+      }
+    }
+
+    document.getElementById('sdr-ttt-board').addEventListener('click', e => {
+      const cell = e.target.closest('.sdr-ttt-cell');
+      if (!cell) return;
+      if (gameOver) { if (clickReady) newGame(); return; }
+      if (!humanTurn) return;
+      const i = parseInt(cell.dataset.i, 10);
+      if (board[i] !== '') return;
+      humanTurn = false;
+      board[i] = HUMAN;
+      renderBoard();
+      const result = checkWinner(board);
+      if (result) { endGame(result); return; }
+      statusEl.textContent = 'AI thinking…';
+      setTimeout(aiMove, 120);
+    });
+    document.getElementById('sdr-ttt-new-btn').addEventListener('click', newGame);
+
+    newGame();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // MINESWEEPER  (8×8, 10 mines)
+  // ══════════════════════════════════════════════════════════════════
+  (function ms() {
+    const ROWS = 8, COLS = 8, TOTAL_MINES = 10;
+    let board, revealed, flagged, gameOver, started, timerInterval, elapsed;
+    let score = { w: 0, l: 0 };
+
+    const boardEl  = document.getElementById('sdr-ms-board');
+    const statusEl = document.getElementById('sdr-ms-status');
+    const minesEl  = document.getElementById('sdr-ms-mines');
+    const timerEl  = document.getElementById('sdr-ms-timer');
+    const scoreEl  = document.getElementById('sdr-ms-score');
+
+    const idx = (r, c) => r * COLS + c;
+
+    function neighbours(r, c) {
+      const nb = [];
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) nb.push([nr, nc]);
+        }
+      return nb;
+    }
+
+    function placeMines(safeR, safeC) {
+      const safe = new Set(
+        [[-1,0],[0,-1],[0,0],[0,1],[1,0],[-1,-1],[-1,1],[1,-1],[1,1]]
+          .map(([dr,dc]) => idx(safeR+dr, safeC+dc))
+          .filter(i => i >= 0 && i < ROWS*COLS)
+      );
+      let placed = 0;
+      while (placed < TOTAL_MINES) {
+        const i = Math.floor(Math.random() * ROWS * COLS);
+        if (!board[i] && !safe.has(i)) { board[i] = -1; placed++; }
+      }
+      // Compute counts
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          if (board[idx(r,c)] === -1) continue;
+          board[idx(r,c)] = neighbours(r,c).filter(([nr,nc]) => board[idx(nr,nc)] === -1).length;
+        }
+    }
+
+    function startTimer() {
+      elapsed = 0;
+      timerEl.textContent = '⏱ 0s';
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        elapsed++;
+        timerEl.textContent = `⏱ ${elapsed}s`;
+      }, 1000);
+    }
+
+    function stopTimer() { clearInterval(timerInterval); }
+
+    function floodReveal(r, c) {
+      const stack = [[r, c]];
+      while (stack.length) {
+        const [cr, cc] = stack.pop();
+        const i = idx(cr, cc);
+        if (revealed[i] || flagged[i]) continue;
+        revealed[i] = true;
+        cellEls()[i].classList.add('revealed');
+        const v = board[i];
+        if (v > 0) {
+          cellEls()[i].textContent = v;
+          cellEls()[i].classList.add(`sdr-ms-${v}`);
+        }
+        if (v === 0) neighbours(cr, cc).forEach(([nr,nc]) => stack.push([nr,nc]));
+      }
+    }
+
+    function cellEls() { return boardEl.querySelectorAll('.sdr-ms-cell'); }
+
+    function checkWin() {
+      const unrevealed = ROWS * COLS - revealed.filter(Boolean).length;
+      return unrevealed === TOTAL_MINES;
+    }
+
+    function revealAllMines(hitIdx) {
+      for (let i = 0; i < ROWS * COLS; i++) {
+        if (board[i] === -1) {
+          const el = cellEls()[i];
+          el.textContent = '💣';
+          el.classList.add('revealed');
+          if (i === hitIdx) el.classList.add('mine-hit');
+        }
+      }
+    }
+
+    function updateMineCount() {
+      const flagCount = flagged.filter(Boolean).length;
+      minesEl.textContent = `💣 ${TOTAL_MINES - flagCount}`;
+    }
+
+    function newGame() {
+      board    = Array(ROWS * COLS).fill(0);
+      revealed = Array(ROWS * COLS).fill(false);
+      flagged  = Array(ROWS * COLS).fill(false);
+      gameOver = false;
+      started  = false;
+      stopTimer();
+      elapsed  = 0;
+      timerEl.textContent  = '⏱ 0s';
+      minesEl.textContent  = `💣 ${TOTAL_MINES}`;
+      statusEl.textContent = 'Click to start';
+
+      // Rebuild cells
+      boardEl.innerHTML = '';
+      for (let i = 0; i < ROWS * COLS; i++) {
+        const el = document.createElement('div');
+        el.className = 'sdr-ms-cell';
+        el.dataset.i = i;
+        boardEl.appendChild(el);
+      }
+    }
+
+    boardEl.addEventListener('click', e => {
+      const cell = e.target.closest('.sdr-ms-cell');
+      if (!cell || gameOver) return;
+      const i   = parseInt(cell.dataset.i, 10);
+      const r   = Math.floor(i / COLS), c = i % COLS;
+      if (flagged[i] || revealed[i]) return;
+
+      if (!started) {
+        started = true;
+        placeMines(r, c);
+        startTimer();
+        statusEl.textContent = 'Good luck!';
+      }
+
+      if (board[i] === -1) {
+        // Hit a mine
+        gameOver = true;
+        stopTimer();
+        score.l++;
+        scoreEl.textContent  = `W:${score.w} L:${score.l}`;
+        statusEl.textContent = '💥 Boom!';
+        revealAllMines(i);
+        return;
+      }
+
+      floodReveal(r, c);
+
+      if (checkWin()) {
+        gameOver = true;
+        stopTimer();
+        score.w++;
+        scoreEl.textContent  = `W:${score.w} L:${score.l}`;
+        statusEl.textContent = `🎉 Clear! ${elapsed}s`;
+      } else {
+        statusEl.textContent = 'Good luck!';
+      }
+    });
+
+    boardEl.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const cell = e.target.closest('.sdr-ms-cell');
+      if (!cell || gameOver) return;
+      const i = parseInt(cell.dataset.i, 10);
+      if (revealed[i]) return;
+      flagged[i] = !flagged[i];
+      cell.textContent = flagged[i] ? '🚩' : '';
+      cell.classList.toggle('flagged', flagged[i]);
+      updateMineCount();
+    });
+
+    document.getElementById('sdr-ms-new-btn').addEventListener('click', newGame);
+
+    newGame();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // 15-PUZZLE  (4×4, 15 tiles + 1 blank)
+  // ══════════════════════════════════════════════════════════════════
+  (function p15() {
+    const SIZE = 4, TOTAL = SIZE * SIZE;
+    let tiles, blankIdx, moves, bestMoves, wins, started;
+
+    const boardEl  = document.getElementById('sdr-p15-board');
+    const statusEl = document.getElementById('sdr-p15-status');
+    const movesEl  = document.getElementById('sdr-p15-moves');
+    const bestEl   = document.getElementById('sdr-p15-best');
+    const scoreEl  = document.getElementById('sdr-p15-score');
+
+    // Check if the puzzle is solvable (even number of inversions + blank on even row from bottom)
+    function isSolvable(arr) {
+      let inv = 0;
+      for (let i = 0; i < TOTAL - 1; i++)
+        for (let j = i + 1; j < TOTAL; j++)
+          if (arr[i] && arr[j] && arr[i] > arr[j]) inv++;
+      const blankRow = Math.floor(arr.indexOf(0) / SIZE);
+      const blankFromBottom = SIZE - blankRow;
+      return SIZE % 2 === 1
+        ? inv % 2 === 0
+        : (blankFromBottom % 2 === 0) ? inv % 2 === 1 : inv % 2 === 0;
+    }
+
+    function shuffle() {
+      do {
+        tiles = Array.from({ length: TOTAL }, (_, i) => i); // 0 = blank
+        for (let i = TOTAL - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+        }
+      } while (!isSolvable(tiles) || isSolved());
+      blankIdx = tiles.indexOf(0);
+      moves    = 0;
+      started  = true;
+      movesEl.textContent  = 'Moves: 0';
+      statusEl.textContent = 'Slide tiles to solve!';
+      render();
+    }
+
+    function isSolved() {
+      return tiles.every((v, i) => v === (i + 1) % TOTAL);
+    }
+
+    function render() {
+      boardEl.innerHTML = '';
+      const solved = isSolved();
+      tiles.forEach((v, i) => {
+        const el = document.createElement('div');
+        el.className = 'sdr-p15-cell' + (v === 0 ? ' blank' : '') + (solved && v !== 0 ? ' solved' : '');
+        el.textContent = v === 0 ? '' : v;
+        el.dataset.i = i;
+        boardEl.appendChild(el);
+      });
+    }
+
+    function tryMove(cellIdx) {
+      if (!started) return;
+      const r = Math.floor(cellIdx / SIZE), c = cellIdx % SIZE;
+      const br = Math.floor(blankIdx / SIZE), bc = blankIdx % SIZE;
+      // Must be directly adjacent (not diagonal)
+      if (!((Math.abs(r - br) === 1 && c === bc) || (Math.abs(c - bc) === 1 && r === br))) return;
+      // Swap tile with blank
+      [tiles[cellIdx], tiles[blankIdx]] = [tiles[blankIdx], tiles[cellIdx]];
+      blankIdx = cellIdx;
+      moves++;
+      movesEl.textContent = `Moves: ${moves}`;
+      render();
+      if (isSolved()) {
+        started = false;
+        wins++;
+        if (bestMoves === null || moves < bestMoves) bestMoves = moves;
+        scoreEl.textContent = `W:${wins}`;
+        bestEl.textContent  = `Best: ${bestMoves}`;
+        statusEl.textContent = `🎉 Solved in ${moves}!`;
+      }
+    }
+
+    function init() {
+      tiles     = Array.from({ length: TOTAL }, (_, i) => (i + 1) % TOTAL);
+      blankIdx  = TOTAL - 1;
+      moves     = 0;
+      wins      = 0;
+      bestMoves = null;
+      started   = false;
+      statusEl.textContent = 'Click Shuffle to start';
+      movesEl.textContent  = 'Moves: 0';
+      bestEl.textContent   = 'Best: —';
+      render();
+    }
+
+    boardEl.addEventListener('click', e => {
+      const cell = e.target.closest('.sdr-p15-cell');
+      if (!cell || cell.classList.contains('blank')) return;
+      tryMove(parseInt(cell.dataset.i, 10));
+    });
+
+    document.getElementById('sdr-p15-shuffle-btn').addEventListener('click', shuffle);
+
+    init();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // MEMORY / PAIRS  (4×4 grid, 8 emoji pairs)
+  // ══════════════════════════════════════════════════════════════════
+  (function mem() {
+    const EMOJIS = ['📻','🛰️','📡','🔭','⚡','🌊','🎯','🔬'];
+    let cards, flipped, matched, flips, lockBoard, bestFlips, wins;
+
+    const boardEl  = document.getElementById('sdr-mem-board');
+    const statusEl = document.getElementById('sdr-mem-status');
+    const movesEl  = document.getElementById('sdr-mem-moves');
+    const flipsEl  = document.getElementById('sdr-mem-flips');
+    const scoreEl  = document.getElementById('sdr-mem-score');
+
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function render() {
+      boardEl.innerHTML = '';
+      cards.forEach((emoji, i) => {
+        const el = document.createElement('div');
+        el.className = 'sdr-mem-card';
+        el.dataset.i = i;
+        el.dataset.emoji = emoji;
+        // Show face-down initially
+        el.textContent = '';
+        boardEl.appendChild(el);
+      });
+    }
+
+    function cardEl(i) { return boardEl.querySelector(`.sdr-mem-card[data-i="${i}"]`); }
+
+    function checkWin() {
+      return matched.length === EMOJIS.length;
+    }
+
+    function handleClick(idx) {
+      if (lockBoard) return;
+      if (flipped.includes(idx)) return;
+      if (matched.some(pair => pair.includes(idx))) return;
+
+      const el = cardEl(idx);
+      el.textContent = cards[idx];
+      el.classList.add('flipped');
+      flips++;
+      flipsEl.textContent = `Flips: ${flips}`;
+      flipped.push(idx);
+
+      if (flipped.length === 2) {
+        lockBoard = true;
+        const [a, b] = flipped;
+        if (cards[a] === cards[b]) {
+          // Match
+          matched.push([a, b]);
+          cardEl(a).classList.add('matched');
+          cardEl(b).classList.add('matched');
+          cardEl(a).classList.remove('flipped');
+          cardEl(b).classList.remove('flipped');
+          flipped = [];
+          lockBoard = false;
+          movesEl.textContent = `Pairs: ${matched.length}/${EMOJIS.length}`;
+          if (checkWin()) {
+            wins++;
+            if (bestFlips === null || flips < bestFlips) bestFlips = flips;
+            scoreEl.textContent  = `Best: ${bestFlips}`;
+            statusEl.textContent = `🎉 Done in ${flips} flips!`;
+          }
+        } else {
+          // No match — flip back after delay
+          setTimeout(() => {
+            cardEl(a).textContent = '';
+            cardEl(b).textContent = '';
+            cardEl(a).classList.remove('flipped');
+            cardEl(b).classList.remove('flipped');
+            flipped    = [];
+            lockBoard  = false;
+          }, 800);
+        }
+      }
+    }
+
+    function newGame() {
+      const deck = shuffle([...EMOJIS, ...EMOJIS]);
+      cards      = deck;
+      flipped    = [];
+      matched    = [];
+      flips      = 0;
+      lockBoard  = false;
+      movesEl.textContent  = `Pairs: 0/${EMOJIS.length}`;
+      flipsEl.textContent  = 'Flips: 0';
+      statusEl.textContent = 'Find all pairs!';
+      render();
+    }
+
+    function init() {
+      wins      = 0;
+      bestFlips = null;
+      scoreEl.textContent = 'Best: —';
+      newGame();
+    }
+
+    boardEl.addEventListener('click', e => {
+      const card = e.target.closest('.sdr-mem-card');
+      if (!card) return;
+      handleClick(parseInt(card.dataset.i, 10));
+    });
+
+    document.getElementById('sdr-mem-new-btn').addEventListener('click', newGame);
+
+    init();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // CONNECT 4  (7 cols × 6 rows, human=red, AI=yellow)
+  // ══════════════════════════════════════════════════════════════════
+  (function c4() {
+    const ROWS = 6, COLS = 7;
+    const HUMAN = 1, AI = 2;
+    let board, gameOver, clickReady, humanTurn, score = { w: 0, d: 0, l: 0 };
+    let nextStarter = null;   // same winner-starts logic as ttt
+    // Adaptive blunder rate: starts at 0.5, adjusts after each game.
+    // +0.12 when player loses (AI gets easier faster), -0.08 when player wins (AI gets harder slower).
+    // Clamped 0.15–0.85 so the AI is never trivially easy or impossibly hard.
+    let blunderRate = 0.5;
+    function adaptBlunder(playerWon) {
+      if (playerWon === null) return; // draw — no change
+      blunderRate = Math.min(0.85, Math.max(0.15,
+        playerWon ? blunderRate - 0.08 : blunderRate + 0.12
+      ));
+    }
+
+    const boardEl  = document.getElementById('sdr-c4-board');
+    const colsEl   = document.getElementById('sdr-c4-cols');
+    const statusEl = document.getElementById('sdr-c4-status');
+    const scoreEl  = document.getElementById('sdr-c4-score');
+
+    const idx = (r, c) => r * COLS + c;
+
+    // ── Board helpers ──────────────────────────────────────────────
+    function emptyBoard() { return Array(ROWS * COLS).fill(0); }
+
+    function dropRow(b, col) {
+      for (let r = ROWS - 1; r >= 0; r--)
+        if (b[idx(r, col)] === 0) return r;
+      return -1; // full
+    }
+
+    function checkWin(b, player) {
+      // horizontal
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c <= COLS - 4; c++)
+          if ([0,1,2,3].every(d => b[idx(r, c+d)] === player)) return true;
+      // vertical
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 0; c < COLS; c++)
+          if ([0,1,2,3].every(d => b[idx(r+d, c)] === player)) return true;
+      // diagonal ↘
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 0; c <= COLS - 4; c++)
+          if ([0,1,2,3].every(d => b[idx(r+d, c+d)] === player)) return true;
+      // diagonal ↙
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 3; c < COLS; c++)
+          if ([0,1,2,3].every(d => b[idx(r+d, c-d)] === player)) return true;
+      return false;
+    }
+
+    function winCells(b, player) {
+      const lines = [];
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c <= COLS - 4; c++)
+          if ([0,1,2,3].every(d => b[idx(r,c+d)] === player))
+            lines.push([0,1,2,3].map(d => idx(r,c+d)));
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 0; c < COLS; c++)
+          if ([0,1,2,3].every(d => b[idx(r+d,c)] === player))
+            lines.push([0,1,2,3].map(d => idx(r+d,c)));
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 0; c <= COLS - 4; c++)
+          if ([0,1,2,3].every(d => b[idx(r+d,c+d)] === player))
+            lines.push([0,1,2,3].map(d => idx(r+d,c+d)));
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 3; c < COLS; c++)
+          if ([0,1,2,3].every(d => b[idx(r+d,c-d)] === player))
+            lines.push([0,1,2,3].map(d => idx(r+d,c-d)));
+      return lines.length ? lines[0] : null;
+    }
+
+    function isDraw(b) { return b.every(v => v !== 0); }
+
+    // ── Scoring heuristic for minimax ─────────────────────────────
+    function scoreWindow(w, player) {
+      const opp = player === AI ? HUMAN : AI;
+      const p = w.filter(v => v === player).length;
+      const e = w.filter(v => v === 0).length;
+      const o = w.filter(v => v === opp).length;
+      if (p === 4) return 100;
+      if (p === 3 && e === 1) return 5;
+      if (p === 2 && e === 2) return 2;
+      if (o === 3 && e === 1) return -4;
+      return 0;
+    }
+
+    function heuristic(b) {
+      let s = 0;
+      // centre column bonus
+      const centre = [0,1,2,3,4,5].map(r => b[idx(r, 3)]);
+      s += centre.filter(v => v === AI).length * 3;
+      // horizontal
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c <= COLS - 4; c++)
+          s += scoreWindow([0,1,2,3].map(d => b[idx(r,c+d)]), AI);
+      // vertical
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 0; c < COLS; c++)
+          s += scoreWindow([0,1,2,3].map(d => b[idx(r+d,c)]), AI);
+      // diagonal ↘
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 0; c <= COLS - 4; c++)
+          s += scoreWindow([0,1,2,3].map(d => b[idx(r+d,c+d)]), AI);
+      // diagonal ↙
+      for (let r = 0; r <= ROWS - 4; r++)
+        for (let c = 3; c < COLS; c++)
+          s += scoreWindow([0,1,2,3].map(d => b[idx(r+d,c-d)]), AI);
+      return s;
+    }
+
+    function minimax(b, depth, alpha, beta, isMax) {
+      if (checkWin(b, AI))    return  1000 + depth;
+      if (checkWin(b, HUMAN)) return -1000 - depth;
+      if (isDraw(b) || depth === 0) return heuristic(b);
+      const cols = [3,2,4,1,5,0,6].filter(c => dropRow(b, c) !== -1);
+      if (cols.length === 0) return 0;
+      if (isMax) {
+        let best = -Infinity;
+        for (const c of cols) {
+          const r = dropRow(b, c);
+          b[idx(r,c)] = AI;
+          best = Math.max(best, minimax(b, depth-1, alpha, beta, false));
+          b[idx(r,c)] = 0;
+          alpha = Math.max(alpha, best);
+          if (alpha >= beta) break;
+        }
+        return best;
+      } else {
+        let best = Infinity;
+        for (const c of cols) {
+          const r = dropRow(b, c);
+          b[idx(r,c)] = HUMAN;
+          best = Math.min(best, minimax(b, depth-1, alpha, beta, true));
+          b[idx(r,c)] = 0;
+          beta = Math.min(beta, best);
+          if (alpha >= beta) break;
+        }
+        return best;
+      }
+    }
+
+    function bestCol() {
+      const available = [3,2,4,1,5,0,6].filter(c => dropRow(board, c) !== -1);
+      if (available.length === 0) return -1;
+      if (Math.random() < blunderRate)
+        return available[Math.floor(Math.random() * available.length)];
+      let best = -Infinity, col = available[0];
+      for (const c of available) {
+        const r = dropRow(board, c);
+        board[idx(r,c)] = AI;
+        const val = minimax(board, 4, -Infinity, Infinity, false);
+        board[idx(r,c)] = 0;
+        if (val > best) { best = val; col = c; }
+      }
+      return col;
+    }
+
+    // ── Rendering ─────────────────────────────────────────────────
+    function render() {
+      const cells = boardEl.querySelectorAll('.sdr-c4-cell');
+      cells.forEach((el, i) => {
+        el.className = 'sdr-c4-cell' + (board[i] ? ' taken' : '');
+        if (board[i] === HUMAN) el.classList.add('p1');
+        if (board[i] === AI)    el.classList.add('p2');
+      });
+    }
+
+    function buildBoard() {
+      boardEl.innerHTML = '';
+      colsEl.innerHTML  = '';
+      for (let i = 0; i < ROWS * COLS; i++) {
+        const el = document.createElement('div');
+        el.className = 'sdr-c4-cell';
+        el.dataset.col = i % COLS;
+        boardEl.appendChild(el);
+      }
+      for (let c = 0; c < COLS; c++) {
+        const btn = document.createElement('button');
+        btn.className = 'sdr-game-btn sdr-c4-col-btn';
+        btn.textContent = '▼';
+        btn.dataset.col = c;
+        colsEl.appendChild(btn);
+      }
+    }
+
+    function highlightWin(player) {
+      const line = winCells(board, player);
+      if (!line) return;
+      const cells = boardEl.querySelectorAll('.sdr-c4-cell');
+      line.forEach(i => cells[i].classList.add('win'));
+    }
+
+    // ── Game flow ─────────────────────────────────────────────────
+    function endGame(winner) {
+      gameOver = true;
+      clickReady = false;
+      setTimeout(() => { clickReady = true; }, 600);
+      highlightWin(winner);
+      if (winner === HUMAN)      { score.w++; statusEl.textContent = '🎉 You win!';                      nextStarter = HUMAN; adaptBlunder(true); }
+      else if (winner === AI)    { score.l++; statusEl.textContent = `🤖 ${getCallsign()} wins!`;        nextStarter = AI;    adaptBlunder(false); }
+      else                       { score.d++; statusEl.textContent = '🤝 Draw!';     nextStarter = null;  adaptBlunder(null); }
+      scoreEl.textContent = `W:${score.w} D:${score.d} L:${score.l}`;
+    }
+
+    function aiMove() {
+      humanTurn = false;
+      const col = bestCol();
+      if (col === -1) return;
+      const r = dropRow(board, col);
+      board[idx(r, col)] = AI;
+      render();
+      if (checkWin(board, AI))   { endGame(AI);   return; }
+      if (isDraw(board))         { endGame(null);  return; }
+      humanTurn = true;
+      statusEl.textContent = 'Your turn 🔴';
+    }
+
+    function dropPiece(col) {
+      if (gameOver) { if (clickReady) newGame(); return; }
+      if (!humanTurn) return;
+      const r = dropRow(board, col);
+      if (r === -1) return; // column full
+      humanTurn = false;
+      board[idx(r, col)] = HUMAN;
+      render();
+      if (checkWin(board, HUMAN)) { endGame(HUMAN); return; }
+      if (isDraw(board))          { endGame(null);  return; }
+      statusEl.textContent = 'AI thinking…';
+      setTimeout(aiMove, 150);
+    }
+
+    function newGame() {
+      // If the previous game wasn't finished, treat it as no result (random start)
+      if (!gameOver) nextStarter = null;
+      board      = emptyBoard();
+      gameOver   = false;
+      clickReady = true;
+      humanTurn  = false;
+      // blunderRate is now adaptive — do not re-roll randomly
+      buildBoard();
+      const starter = nextStarter !== null ? nextStarter : (Math.random() < 0.5 ? HUMAN : AI);
+      if (starter === HUMAN) {
+        humanTurn = true;
+        statusEl.textContent = 'Your turn 🔴';
+      } else {
+        statusEl.textContent = 'AI goes first…';
+        setTimeout(aiMove, 350);
+      }
+    }
+
+    // ── Event listeners ───────────────────────────────────────────
+    boardEl.addEventListener('click', e => {
+      if (gameOver) { if (clickReady) newGame(); return; }
+      const cell = e.target.closest('.sdr-c4-cell');
+      if (!cell) return;
+      dropPiece(parseInt(cell.dataset.col, 10));
+    });
+
+    colsEl.addEventListener('click', e => {
+      const btn = e.target.closest('.sdr-c4-col-btn');
+      if (!btn) return;
+      dropPiece(parseInt(btn.dataset.col, 10));
+    });
+
+    document.getElementById('sdr-c4-new-btn').addEventListener('click', newGame);
+    document.getElementById('sdr-c4-close-btn').addEventListener('click', () => {
+      document.getElementById('sdr-games-widget').style.display = 'none';
+    });
+
+    newGame();
+  })();
+
+})();
+</script>

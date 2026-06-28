@@ -1,0 +1,659 @@
+<!-- ═══════════════════════════════════════════════════════════
+     UberSDR SSTV Latest Image Widget
+     • Wide-screen only (hidden ≤1024px)
+     • Fixed to right edge, vertically centred
+     • Shows the latest decoded SSTV image
+     • Polls /addon/sstv/api/images?limit=1 every 60 s
+     • Only re-fetches the image when the record ID changes
+     • ← / → arrows browse history (offset-based)
+     • Drag widget to reposition
+     ═══════════════════════════════════════════════════════════ -->
+
+<style>
+@media (max-width: 1024px) {
+  #sdr-sstv-widget { display: none !important; }
+}
+/* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+html.is-mobile #sdr-sstv-widget { display: none !important; }
+
+#sdr-sstv-widget {
+  position: fixed;
+  left: 12px;
+  top: 80px;
+  z-index: 900;
+  width: 210px;
+  background: rgba(30, 42, 56, 0.92);
+  border: 1px solid rgba(127, 140, 141, 0.5);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  font-family: inherit;
+  line-height: 1.4;
+  color: #ecf0f1;
+  user-select: none;
+  cursor: grab;
+}
+
+#sdr-sstv-widget.dragging {
+  cursor: grabbing;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+  opacity: 0.95;
+}
+
+/* ── Title bar ── */
+#sdr-sstv-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+#sdr-sstv-title {
+  font-size: 11px;
+  color: #95a5a6;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 1;
+}
+
+/* ── Nav arrows + close button group ── */
+#sdr-sstv-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+#sdr-sstv-prev-btn,
+#sdr-sstv-next-btn,
+#sdr-sstv-close-btn {
+  background: none !important;
+  border: none !important;
+  color: #7f8c8d !important;
+  font-size: 13px;
+  cursor: pointer !important;
+  padding: 0 3px;
+  line-height: 1;
+  font-weight: normal !important;
+  transform: none !important;
+  transition: color 0.15s !important;
+}
+#sdr-sstv-prev-btn:hover:not(:disabled),
+#sdr-sstv-next-btn:hover:not(:disabled),
+#sdr-sstv-close-btn:hover {
+  color: #ecf0f1 !important;
+  background: none !important;
+  transform: none !important;
+}
+#sdr-sstv-prev-btn:disabled,
+#sdr-sstv-next-btn:disabled {
+  color: #3d5166 !important;
+  cursor: default !important;
+}
+
+/* Slight left margin to separate arrows from close */
+#sdr-sstv-close-btn {
+  padding-left: 6px;
+}
+
+/* ── Image area ── */
+#sdr-sstv-img-wrap {
+  position: relative;
+  width: 100%;
+  background: rgba(15, 25, 38, 0.8);
+  border-radius: 4px;
+  overflow: hidden;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#sdr-sstv-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: zoom-in !important;
+}
+
+#sdr-sstv-placeholder {
+  font-size: 11px;
+  color: #7f8c8d;
+  text-align: center;
+  padding: 20px 8px;
+}
+
+/* ── Info strip ── */
+#sdr-sstv-info {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 6px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+#sdr-sstv-info .si-label {
+  color: #7f8c8d;
+  white-space: nowrap;
+}
+
+#sdr-sstv-info .si-value {
+  color: #ecf0f1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Footer ── */
+#sdr-sstv-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  gap: 4px;
+}
+
+#sdr-sstv-age {
+  font-size: 10px;
+  color: #7f8c8d;
+  white-space: nowrap;
+  flex: 1;
+}
+
+#sdr-sstv-dl-btn,
+#sdr-sstv-refresh-btn {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer !important;
+  white-space: nowrap;
+  background: #2c3e50 !important;
+  color: #ecf0f1 !important;
+  border: 1px solid #7f8c8d !important;
+  font-weight: normal !important;
+  transform: none !important;
+  transition: background 0.15s, border-color 0.15s !important;
+  text-decoration: none;
+  display: inline-block;
+  line-height: 1.4;
+}
+#sdr-sstv-dl-btn:hover,
+#sdr-sstv-refresh-btn:hover {
+  background: #34495e !important;
+  transform: none !important;
+  color: #ecf0f1 !important;
+}
+
+/* ── Lightbox ── */
+#sdr-sstv-lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0,0,0,0.88);
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+#sdr-sstv-lightbox.open {
+  display: flex;
+}
+#sdr-sstv-lightbox img {
+  max-width: 95vw;
+  max-height: 95vh;
+  border-radius: 4px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+  cursor: zoom-out;
+  image-rendering: pixelated;
+}
+</style>
+
+<!-- Lightbox (outside widget so it covers the full viewport) -->
+<div id="sdr-sstv-lightbox">
+  <img id="sdr-sstv-lightbox-img" src="about:blank" alt="SSTV full size">
+</div>
+
+<div id="sdr-sstv-widget">
+
+  <!-- Title bar -->
+  <div id="sdr-sstv-titlebar">
+    <span id="sdr-sstv-title">📡 Latest SSTV</span>
+    <div id="sdr-sstv-nav">
+      <button id="sdr-sstv-prev-btn" title="Older image" disabled>&#8592;</button>
+      <button id="sdr-sstv-next-btn" title="Newer image" disabled>&#8594;</button>
+      <button id="sdr-sstv-close-btn" title="Hide widget">✕</button>
+    </div>
+  </div>
+
+  <!-- Image -->
+  <div id="sdr-sstv-img-wrap">
+    <div id="sdr-sstv-placeholder">Loading…</div>
+    <img id="sdr-sstv-img" src="about:blank" alt="Latest SSTV image" style="display:none">
+  </div>
+
+  <!-- Metadata -->
+  <div id="sdr-sstv-info"></div>
+
+  <!-- Footer -->
+  <div id="sdr-sstv-footer">
+    <span id="sdr-sstv-age">—</span>
+    <a id="sdr-sstv-dl-btn" href="about:blank" download title="Download image">⬇ Save</a>
+    <button id="sdr-sstv-refresh-btn" title="Refresh now">↻ Refresh</button>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const API_BASE  = '/addon/sstv/api/images?limit=1&snr_series=0&complete=1&min_snr=38';
+  const IMG_BASE  = '/addon/sstv/images/';
+  const POLL_MS   = 60_000; // 1 minute
+
+  const widget      = document.getElementById('sdr-sstv-widget');
+  const imgEl       = document.getElementById('sdr-sstv-img');
+  const placeholder = document.getElementById('sdr-sstv-placeholder');
+  const infoEl      = document.getElementById('sdr-sstv-info');
+  const ageEl       = document.getElementById('sdr-sstv-age');
+  const titleEl     = document.getElementById('sdr-sstv-title');
+  const lightbox    = document.getElementById('sdr-sstv-lightbox');
+  const lbImg       = document.getElementById('sdr-sstv-lightbox-img');
+  const prevBtn     = document.getElementById('sdr-sstv-prev-btn');
+  const nextBtn     = document.getElementById('sdr-sstv-next-btn');
+
+  let currentID    = null;  // ID of the record currently displayed
+  let currentRxEnd = null;  // ISO string of rx_end for the age counter
+  let currentOffset = 0;    // 0 = latest; positive = older
+  let ageTimer     = null;
+  let pollTimer    = null;
+
+  // ── SSTV mode name table (matches app.js) ──────────────────────────
+  const MODE_NAMES = {
+    M1:'Martin 1', M2:'Martin 2', S1:'Scottie 1', S2:'Scottie 2',
+    SDX:'Scottie DX', R36:'Robot 36', R72:'Robot 72',
+    PD50:'PD50', PD90:'PD90', PD120:'PD120', PD160:'PD160',
+    PD180:'PD180', PD240:'PD240', PD290:'PD290',
+    'SC2-60':'SC2 60', 'SC2-120':'SC2 120', 'SC2-180':'SC2 180',
+  };
+  function modeName(s) { return (s && (MODE_NAMES[s] || s)) || '—'; }
+
+  // ── Formatting helpers ─────────────────────────────────────────────
+  function fmtFreq(hz) {
+    if (!hz) return '—';
+    if (hz >= 1e6) return (hz / 1e6).toFixed(3) + ' MHz';
+    if (hz >= 1e3) return (hz / 1e3).toFixed(1) + ' kHz';
+    return hz + ' Hz';
+  }
+
+  function fmtSNR(v) {
+    return (v != null && v !== 0) ? v.toFixed(1) + ' dB' : '—';
+  }
+
+  function fmtAge(isoEnd) {
+    if (!isoEnd) return '';
+    const secs = Math.round((Date.now() - new Date(isoEnd).getTime()) / 1000);
+    if (secs < 0)   return 'just now';
+    if (secs < 60)  return secs + 's ago';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60)  return mins + 'm ago';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)   return hrs + 'h ' + (mins % 60) + 'm ago';
+    return Math.floor(hrs / 24) + 'd ago';
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+  }
+
+  // ── Age ticker ─────────────────────────────────────────────────────
+  function startAgeTicker() {
+    if (ageTimer) clearInterval(ageTimer);
+    ageTimer = setInterval(() => {
+      if (currentRxEnd) ageEl.textContent = fmtAge(currentRxEnd);
+    }, 15_000);
+  }
+
+  // ── Update title to reflect browsing position ──────────────────────
+  function updateTitle() {
+    if (currentOffset === 0) {
+      titleEl.textContent = '📡 Latest SSTV';
+    } else {
+      titleEl.textContent = '📡 SSTV −' + currentOffset;
+    }
+  }
+
+  // ── Update nav button disabled states ─────────────────────────────
+  // nextBtn (→ newer) is disabled when we're already at the latest (offset 0).
+  // prevBtn (← older) is disabled when the last fetch returned no record at
+  // offset+1 (i.e. there is no older image).  We track this via noOlderImage.
+  let noOlderImage = false;
+
+  function updateNavButtons() {
+    nextBtn.disabled = (currentOffset === 0);
+    prevBtn.disabled = noOlderImage;
+  }
+
+  // ── Render record ──────────────────────────────────────────────────
+  function renderRecord(rec) {
+    currentID    = rec.id;
+    currentRxEnd = rec.rx_end || null;
+
+    const src = IMG_BASE + rec.file;
+    imgEl.src = src;
+    imgEl.style.display = '';
+    placeholder.style.display = 'none';
+
+    // Metadata
+    const rows = [
+      ['Mode',  modeName(rec.sstv_mode)],
+      ['Freq',  fmtFreq(rec.frequency_hz) + (rec.audio_mode ? ' ' + rec.audio_mode.toUpperCase() : '')],
+      ['SNR',   fmtSNR(rec.snr_avg_db)],
+      ['RX end', fmtTime(rec.rx_end)],
+    ];
+    if (rec.callsign) rows.splice(1, 0, ['Call', rec.callsign]);
+
+    infoEl.innerHTML = rows.map(([l, v]) =>
+      `<span class="si-label">${l}</span><span class="si-value" title="${v}">${v}</span>`
+    ).join('');
+
+    // Download link
+    const dlBtn = document.getElementById('sdr-sstv-dl-btn');
+    if (dlBtn) {
+      dlBtn.href = src;
+      dlBtn.download = src.split('/').pop() || 'sstv.png';
+    }
+
+    // Age
+    ageEl.textContent = fmtAge(rec.rx_end);
+    startAgeTicker();
+  }
+
+  // ── Fetch image at a specific offset ──────────────────────────────
+  // offset 0 = latest, 1 = second-latest, etc.
+  // Returns a Promise that resolves to the record or null.
+  function fetchAtOffset(offset) {
+    const url = API_BASE + '&offset=' + offset;
+    return fetch(url)
+      .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(records => {
+        if (!Array.isArray(records) || records.length === 0) return null;
+        return records[0];
+      });
+  }
+
+  // ── Poll (always fetches latest, offset 0) ─────────────────────────
+  // Only auto-updates the display when the user is viewing the latest image.
+  function poll() {
+    fetchAtOffset(0)
+      .then(rec => {
+        if (!rec) {
+          // No images at all
+          if (currentOffset === 0) {
+            placeholder.textContent = 'No images yet';
+            placeholder.style.display = '';
+            imgEl.style.display = 'none';
+            infoEl.innerHTML = '';
+            ageEl.textContent = '';
+          }
+          return;
+        }
+
+        if (currentOffset === 0) {
+          // User is viewing the latest — update if the record changed.
+          if (rec.id !== currentID) {
+            noOlderImage = false; // new latest arrived; reset older-image sentinel
+            renderRecord(rec);
+            // Probe whether there is an older image so ← can be enabled.
+            probeOlderImage();
+          } else {
+            // Same record — just refresh the age label.
+            if (currentRxEnd) ageEl.textContent = fmtAge(currentRxEnd);
+          }
+        }
+        // If the user is browsing history, don't disturb the current view.
+      })
+      .catch(err => {
+        console.warn('[sstv-widget] poll error:', err);
+        if (!currentID) {
+          placeholder.textContent = 'Unavailable';
+          placeholder.style.display = '';
+          imgEl.style.display = 'none';
+        }
+      });
+  }
+
+  // Check whether there is an image at offset+1 so we can enable/disable ←.
+  function probeOlderImage() {
+    fetchAtOffset(currentOffset + 1)
+      .then(rec => {
+        noOlderImage = (rec === null);
+        updateNavButtons();
+      })
+      .catch(() => {
+        noOlderImage = true;
+        updateNavButtons();
+      });
+  }
+
+  function schedulePoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, POLL_MS);
+  }
+
+  // ── Navigate to a specific offset ─────────────────────────────────
+  function navigateTo(offset) {
+    if (offset < 0) offset = 0;
+
+    placeholder.textContent = 'Loading…';
+    placeholder.style.display = '';
+    imgEl.style.display = 'none';
+
+    fetchAtOffset(offset)
+      .then(rec => {
+        if (!rec) {
+          // No image at this offset — clamp back.
+          if (offset > 0) {
+            // We went too far back; stay at the previous offset.
+            navigateTo(offset - 1);
+          } else {
+            placeholder.textContent = 'No images yet';
+            placeholder.style.display = '';
+            infoEl.innerHTML = '';
+            ageEl.textContent = '';
+          }
+          return;
+        }
+
+        currentOffset = offset;
+        renderRecord(rec);
+        updateTitle();
+
+        // Probe whether there is an image one step older to enable/disable ←.
+        fetchAtOffset(currentOffset + 1)
+          .then(older => {
+            noOlderImage = (older === null);
+            updateNavButtons();
+          })
+          .catch(() => {
+            noOlderImage = true;
+            updateNavButtons();
+          });
+      })
+      .catch(err => {
+        console.warn('[sstv-widget] navigate error:', err);
+        placeholder.textContent = 'Unavailable';
+        placeholder.style.display = '';
+        imgEl.style.display = 'none';
+      });
+  }
+
+  // ── Lightbox ───────────────────────────────────────────────────────
+  imgEl.addEventListener('click', () => {
+    if (!imgEl.src || imgEl.style.display === 'none') return;
+    lbImg.src = imgEl.src;
+    function applyScale() {
+      if (imgEl.naturalWidth) {
+        lbImg.style.width  = (imgEl.naturalWidth  * 2) + 'px';
+        lbImg.style.height = 'auto';
+      }
+    }
+    if (imgEl.complete && imgEl.naturalWidth) {
+      applyScale();
+    } else {
+      lbImg.onload = applyScale;
+    }
+    lightbox.classList.add('open');
+  });
+
+  lightbox.addEventListener('click', () => {
+    lightbox.classList.remove('open');
+    lbImg.src = '';
+    lbImg.style.width  = '';
+    lbImg.style.height = '';
+  });
+
+  // ── Close button ───────────────────────────────────────────────────
+  document.getElementById('sdr-sstv-close-btn').addEventListener('click', () => {
+    widget.style.display = 'none';
+  });
+
+  // ── Nav arrow buttons ──────────────────────────────────────────────
+  prevBtn.addEventListener('click', () => {
+    if (!prevBtn.disabled) navigateTo(currentOffset + 1);
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (!nextBtn.disabled) navigateTo(currentOffset - 1);
+  });
+
+  // ── Manual refresh ─────────────────────────────────────────────────
+  document.getElementById('sdr-sstv-refresh-btn').addEventListener('click', () => {
+    // Jump back to latest and force a re-fetch.
+    currentOffset = 0;
+    currentID = null;
+    noOlderImage = false;
+    updateTitle();
+    updateNavButtons();
+    poll();
+    schedulePoll();
+  });
+
+  // ── Drag to reposition ─────────────────────────────────────────────
+  (function initDrag() {
+    const LS_KEY = 'sdr-sstv-widget-pos';
+    let dragging = false, startX, startY, origLeft, origTop;
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY));
+      if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+        const maxL = window.innerWidth  - widget.offsetWidth;
+        const maxT = window.innerHeight - widget.offsetHeight;
+        widget.style.left      = Math.max(0, Math.min(maxL, saved.left)) + 'px';
+        widget.style.top       = Math.max(0, Math.min(maxT, saved.top))  + 'px';
+        widget.style.right     = 'auto';
+        widget.style.transform = 'none';
+      }
+    } catch (_) {}
+
+    function resolvePosition() {
+      const r = widget.getBoundingClientRect();
+      widget.style.left      = r.left + 'px';
+      widget.style.top       = r.top  + 'px';
+      widget.style.right     = 'auto';
+      widget.style.transform = 'none';
+    }
+
+    function savePosition() {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify({
+          left: parseFloat(widget.style.left),
+          top:  parseFloat(widget.style.top),
+        }));
+      } catch (_) {}
+    }
+
+    widget.addEventListener('pointerdown', e => {
+      if (e.target.closest('button, a, img')) return;
+      e.preventDefault();
+      resolvePosition();
+      dragging = true;
+      startX   = e.clientX;
+      startY   = e.clientY;
+      origLeft = parseFloat(widget.style.left);
+      origTop  = parseFloat(widget.style.top);
+      widget.classList.add('dragging');
+      widget.setPointerCapture(e.pointerId);
+    });
+
+    widget.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      const maxL = window.innerWidth  - widget.offsetWidth;
+      const maxT = window.innerHeight - widget.offsetHeight;
+      widget.style.left = Math.max(0, Math.min(maxL, origLeft + (e.clientX - startX))) + 'px';
+      widget.style.top  = Math.max(0, Math.min(maxT, origTop  + (e.clientY - startY))) + 'px';
+    });
+
+    widget.addEventListener('pointerup', () => {
+      if (dragging) savePosition();
+      dragging = false;
+      widget.classList.remove('dragging');
+    });
+    widget.addEventListener('pointercancel', () => { dragging = false; widget.classList.remove('dragging'); });
+
+    window.addEventListener('resize', () => {
+      if (widget.style.left && widget.style.top && widget.style.transform === 'none') {
+        const maxL = window.innerWidth  - widget.offsetWidth;
+        const maxT = window.innerHeight - widget.offsetHeight;
+        widget.style.left = Math.max(0, Math.min(maxL, parseFloat(widget.style.left))) + 'px';
+        widget.style.top  = Math.max(0, Math.min(maxT, parseFloat(widget.style.top)))  + 'px';
+      }
+    });
+  })();
+
+  // ── Boot ───────────────────────────────────────────────────────────
+  function boot() {
+    // Do not run on real mobile devices (UA + touch-points detection by app.js)
+    // or on narrow-viewport screens — the widget is hidden by CSS anyway.
+    if (window._isMobile || window.innerWidth <= 1024) return;
+    const deadline = Date.now() + 10_000;
+    const interval = setInterval(() => {
+      if (!window.instanceDescription) {
+        if (Date.now() > deadline) {
+          clearInterval(interval);
+          console.warn('[sstv-widget] timed out waiting for instanceDescription — widget hidden');
+          widget.style.display = 'none';
+        }
+        return;
+      }
+      clearInterval(interval);
+      const addons = Array.isArray(window.instanceDescription.addons)
+        ? window.instanceDescription.addons : [];
+      const hasSstv = addons.some(name => name.toLowerCase() === 'sstv');
+      console.log('[sstv-widget] addons:', addons, '| hasSstv:', hasSstv);
+      if (!hasSstv) {
+        console.log('[sstv-widget] SSTV addon not listed — showing install prompt');
+        placeholder.textContent = 'This widget requires the SSTV Addon. Install via Admin → Addons';
+        placeholder.style.display = '';
+        imgEl.style.display = 'none';
+        infoEl.innerHTML = '';
+        document.getElementById('sdr-sstv-footer').style.display = 'none';
+        return;
+      }
+      console.log('[sstv-widget] SSTV addon active — starting poll');
+      // Initial state: both nav buttons disabled until first poll completes.
+      updateNavButtons();
+      poll();
+      schedulePoll();
+    }, 100);
+  }
+
+  boot();
+
+})();
+</script>

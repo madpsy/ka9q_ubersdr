@@ -9,7 +9,7 @@
 - Added **AGC Controls** for SSB - right click (or long tap) on a mode button. Still in testing but logic now exists
 
 ### Bug Fixes
-- Safari was broken for various pages with flags from previous release
+- Safari was broken for various pages with country flags from previous release
 - Admin bookmarks manager had various bugs around deletion and editing
 - NCDXF Beacons listed bad spots on bands beacons aren't valid on
 

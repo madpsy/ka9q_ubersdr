@@ -1504,6 +1504,14 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Reject bookmarks outside the valid HF range (10 kHz – 30 MHz)
+	const bookmarkMinFreq uint64 = 10000
+	const bookmarkMaxFreq uint64 = 30000000
+	if newBookmark.Frequency < bookmarkMinFreq || newBookmark.Frequency > bookmarkMaxFreq {
+		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (10 kHz – 30 MHz)", newBookmark.Frequency), http.StatusBadRequest)
+		return
+	}
+
 	// Read existing bookmarks
 	var bookmarksConfig map[string]interface{}
 	data, err := os.ReadFile(ah.getConfigPath("bookmarks.yaml"))
@@ -1611,6 +1619,21 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 			return
 		}
 
+		// Filter out bookmarks outside the valid HF range (10 kHz – 30 MHz).
+		const bulkMinFreq uint64 = 10000
+		const bulkMaxFreq uint64 = 30000000
+		accepted := incoming.Bookmarks[:0]
+		skippedCount := 0
+		for _, b := range incoming.Bookmarks {
+			if b.Frequency >= bulkMinFreq && b.Frequency <= bulkMaxFreq {
+				accepted = append(accepted, b)
+			} else {
+				skippedCount++
+				log.Printf("Skipping bookmark '%s' at %d Hz: outside valid HF range (10 kHz – 30 MHz)", b.Name, b.Frequency)
+			}
+		}
+		incoming.Bookmarks = accepted
+
 		// Re-wrap as the map shape the YAML file expects.
 		bookmarksConfig := map[string]interface{}{
 			"bookmarks": incoming.Bookmarks,
@@ -1647,9 +1670,11 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "success",
-			"message": "Bookmarks updated successfully",
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "success",
+			"message":  "Bookmarks updated successfully",
+			"accepted": len(incoming.Bookmarks),
+			"skipped":  skippedCount,
 		})
 		return
 	}
@@ -1670,6 +1695,14 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	// Validate bookmark
 	if updatedBookmark.Name == "" || updatedBookmark.Frequency == 0 || updatedBookmark.Mode == "" {
 		http.Error(w, "Name, frequency, and mode are required", http.StatusBadRequest)
+		return
+	}
+
+	// Reject updated frequency outside the valid HF range (10 kHz – 30 MHz)
+	const singleMinFreq uint64 = 10000
+	const singleMaxFreq uint64 = 30000000
+	if updatedBookmark.Frequency < singleMinFreq || updatedBookmark.Frequency > singleMaxFreq {
+		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (10 kHz – 30 MHz)", updatedBookmark.Frequency), http.StatusBadRequest)
 		return
 	}
 

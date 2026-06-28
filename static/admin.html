@@ -5954,6 +5954,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             };
 
             const converted = [];
+            let skipped = 0;
 
             for (const entry of kiwiBookmarks) {
                 if (!Array.isArray(entry) || entry.length < 3) continue;
@@ -5962,6 +5963,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 // Convert frequency from kHz to Hz
                 const frequency = Math.round(freqKHz * 1000);
+
+                // Skip entries outside the valid HF range (10 kHz – 30 MHz)
+                if (frequency < 10000 || frequency > 30000000) {
+                    skipped++;
+                    continue;
+                }
 
                 // Map KiwiSDR modes to UberSDR modes.
                 // Any mode not in this map is unsupported by UberSDR's demodulator
@@ -6020,7 +6027,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 converted.push(bookmark);
             }
 
-            return converted;
+            return { bookmarks: converted, skipped };
         }
 
         /**
@@ -6159,11 +6166,14 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     return;
                 }
 
-                // Convert KiwiSDR bookmarks to UberSDR format
-                const importedBookmarks = convertKiwiSDRBookmarks(data.dx);
+                // Convert KiwiSDR bookmarks to UberSDR format (entries > 30 MHz are filtered out)
+                const { bookmarks: importedBookmarks, skipped: skippedFreq } = convertKiwiSDRBookmarks(data.dx);
 
                 if (importedBookmarks.length === 0) {
-                    showAlert('No valid bookmarks found in KiwiSDR file', 'error');
+                    const msg = skippedFreq > 0
+                        ? `No valid bookmarks found in KiwiSDR file (${skippedFreq} skipped: outside 10 kHz – 30 MHz range)`
+                        : 'No valid bookmarks found in KiwiSDR file';
+                    showAlert(msg, 'error');
                     return;
                 }
 
@@ -6188,8 +6198,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 if (!response.ok) throw new Error('Failed to save imported bookmarks');
 
+                // Check if the backend also skipped any (safety net)
+                let serverSkipped = 0;
+                try {
+                    const result = await response.clone().json().catch(() => ({}));
+                    serverSkipped = result.skipped || 0;
+                } catch (_) {}
+
                 await loadBookmarks();
-                showAlert(`Successfully imported ${importedBookmarks.length} KiwiSDR bookmark(s) (${importMode})`, 'success');
+                let successMsg = `Successfully imported ${importedBookmarks.length} KiwiSDR bookmark(s) (${importMode})`;
+                const totalSkipped = skippedFreq + serverSkipped;
+                if (totalSkipped > 0) successMsg += ` — ${totalSkipped} skipped (outside 10 kHz – 30 MHz)`;
+                showAlert(successMsg, 'success');
             } catch (error) {
                 showAlert('Error importing KiwiSDR bookmarks: ' + error.message, 'error');
             }
@@ -6206,11 +6226,19 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const text = await file.text();
                 let importedBookmarks;
 
+                let skippedFreq = 0;
+
                 if (file.name.endsWith('.json')) {
                     const data = JSON.parse(text);
                     // Accept both a bare array (from /api/bookmarks) and a
                     // wrapped object { bookmarks: [...] } (from Export Bookmarks)
-                    importedBookmarks = Array.isArray(data) ? data : (data.bookmarks || []);
+                    const raw = Array.isArray(data) ? data : (data.bookmarks || []);
+                    importedBookmarks = raw.filter(b => {
+                        const f = Number(b.frequency);
+                        if (f >= 10000 && f <= 30000000) return true;
+                        skippedFreq++;
+                        return false;
+                    });
                 } else {
                     // Simple YAML parsing for bookmarks
                     // This is a basic implementation - in production use a proper YAML parser
@@ -6252,8 +6280,21 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     }
                 }
 
+                // Also filter YAML-parsed bookmarks by frequency range
+                if (!file.name.endsWith('.json')) {
+                    importedBookmarks = importedBookmarks.filter(b => {
+                        const f = Number(b.frequency);
+                        if (f >= 10000 && f <= 30000000) return true;
+                        skippedFreq++;
+                        return false;
+                    });
+                }
+
                 if (importedBookmarks.length === 0) {
-                    showAlert('No valid bookmarks found in file', 'error');
+                    const msg = skippedFreq > 0
+                        ? `No valid bookmarks found in file (${skippedFreq} skipped: outside 10 kHz – 30 MHz range)`
+                        : 'No valid bookmarks found in file';
+                    showAlert(msg, 'error');
                     return;
                 }
 
@@ -6278,8 +6319,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 if (!response.ok) throw new Error('Failed to save imported bookmarks');
 
+                // Check if the backend also skipped any (safety net)
+                let serverSkipped = 0;
+                try {
+                    const result = await response.clone().json().catch(() => ({}));
+                    serverSkipped = result.skipped || 0;
+                } catch (_) {}
+
                 await loadBookmarks();
-                showAlert(`Successfully imported ${importedBookmarks.length} bookmark(s) (${importMode})`, 'success');
+                let successMsg = `Successfully imported ${importedBookmarks.length} bookmark(s) (${importMode})`;
+                const totalSkipped = skippedFreq + serverSkipped;
+                if (totalSkipped > 0) successMsg += ` — ${totalSkipped} skipped (outside 10 kHz – 30 MHz)`;
+                showAlert(successMsg, 'success');
             } catch (error) {
                 showAlert('Error importing bookmarks: ' + error.message, 'error');
             }

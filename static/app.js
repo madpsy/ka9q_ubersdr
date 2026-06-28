@@ -918,6 +918,9 @@ const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
                   (navigator.maxTouchPoints > 1 && !/Windows/i.test(navigator.userAgent));
 // Expose for other scripts (e.g. idle-detector.js) that load independently
 window._isMobile = _isMobile;
+// Stamp a CSS class on <html> so widget stylesheets can hide themselves on real
+// mobile devices without relying solely on viewport-width media queries.
+if (_isMobile) document.documentElement.classList.add('is-mobile');
 // Expose audioContext globally for recorder
 window.audioContext = null;
 // Expose ws globally for compatibility (will be set by wsManager)

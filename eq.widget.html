@@ -335,6 +335,8 @@
   @media (max-width: 768px) {
     #eqw-widget { display: none !important; }
   }
+  /* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+  html.is-mobile #eqw-widget { display: none !important; }
 </style>
 
 <div id="eqw-widget" class="eqw-off">
@@ -785,8 +787,10 @@
   // ── Start ───────────────────────────────────────────────────────────────────
   var pollId = null;
 
-  // Match the CSS breakpoint exactly so JS and CSS agree on what counts as mobile.
+  // Match the CSS breakpoint and the UA-based mobile flag so JS and CSS agree on
+  // what counts as mobile. window._isMobile is set by app.js (UA + touch-points).
   var mobileQuery = window.matchMedia('(max-width: 768px)');
+  var _isMobileDevice = !!window._isMobile;
 
   function stopLoops() {
     if (pollId)   { clearInterval(pollId);           pollId   = null; }
@@ -837,8 +841,9 @@
   }
 
   function start() {
-    // Do not run any loops when the widget is hidden by the mobile media query.
-    if (mobileQuery.matches) return;
+    // Do not run any loops when the widget is hidden on mobile (narrow screen or
+    // real mobile device detected via UA + touch-points by app.js).
+    if (mobileQuery.matches || _isMobileDevice) return;
     buildBands();
     applyReady();
     watchClipIndicator();
@@ -851,8 +856,10 @@
 
   // Respond to viewport width changes (e.g. device rotation, browser resize).
   // Stop all loops when the screen becomes narrow; restart when it widens again.
+  // Note: _isMobileDevice never changes at runtime (UA is fixed), so we only
+  // need to re-check the media query here.
   mobileQuery.addEventListener('change', function (e) {
-    if (e.matches) {
+    if (e.matches || _isMobileDevice) {
       // Entering mobile — stop all background work.
       stopLoops();
     } else {

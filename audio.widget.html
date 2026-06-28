@@ -211,6 +211,8 @@
   @media (max-width: 768px) {
     #aviz-widget { display: none !important; }
   }
+  /* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+  html.is-mobile #aviz-widget { display: none !important; }
 </style>
 
 <div id="aviz-widget">
@@ -309,13 +311,13 @@
   var dragState = null;
   var wasDragged = false;
 
-  // The widget is hidden by CSS on narrow screens (@media max-width:768px). Track
-  // that with matchMedia so the render loop can skip the FFT reads + canvas draws
-  // entirely while hidden — no point burning CPU on visuals nobody can see.
+  // The widget is hidden by CSS on narrow screens (@media max-width:768px) and on
+  // real mobile devices (window._isMobile set by app.js via UA + touch-points).
+  // Track both so the render loop can skip FFT reads + canvas draws while hidden.
   var narrowMQ = window.matchMedia('(max-width: 768px)');
-  var hiddenByWidth = narrowMQ.matches;
+  var hiddenByWidth = narrowMQ.matches || !!window._isMobile;
   function onWidthChange(e) {
-    hiddenByWidth = e.matches;
+    hiddenByWidth = e.matches || !!window._isMobile;
     // Force a clean resize/redraw when it becomes visible again.
     if (!hiddenByWidth) { lastReady = false; }
   }

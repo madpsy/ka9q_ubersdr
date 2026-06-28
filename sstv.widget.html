@@ -13,6 +13,8 @@
 @media (max-width: 1024px) {
   #sdr-sstv-widget { display: none !important; }
 }
+/* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+html.is-mobile #sdr-sstv-widget { display: none !important; }
 
 #sdr-sstv-widget {
   position: fixed;
@@ -616,6 +618,9 @@
 
   // ── Boot ───────────────────────────────────────────────────────────
   function boot() {
+    // Do not run on real mobile devices (UA + touch-points detection by app.js)
+    // or on narrow-viewport screens — the widget is hidden by CSS anyway.
+    if (window._isMobile || window.innerWidth <= 1024) return;
     const deadline = Date.now() + 10_000;
     const interval = setInterval(() => {
       if (!window.instanceDescription) {

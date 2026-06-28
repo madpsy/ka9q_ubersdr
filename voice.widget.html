@@ -315,6 +315,8 @@
   @media (max-width: 768px) {
     #va-widget { display: none !important; }
   }
+  /* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+  html.is-mobile #va-widget { display: none !important; }
 </style>
 
 <div id="va-widget">
@@ -1088,6 +1090,9 @@
 
   // ── Subscribe to the shared voice-activity service ─────────────────────────
   function start() {
+    // Do not run on real mobile devices (UA + touch-points detection by app.js)
+    // or on narrow-viewport screens — the widget is hidden by CSS anyway.
+    if (window._isMobile || window.innerWidth <= 768) return;
     if (dismissed) return;
     if (!window.VoiceActivityService) {
       setTimeout(start, 200);

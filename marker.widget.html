@@ -22,6 +22,8 @@
 @media (max-width: 1024px) {
   #sdr-marker-widget { display: none !important; }
 }
+/* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+html.is-mobile #sdr-marker-widget { display: none !important; }
 
 #sdr-marker-widget {
   position: fixed;
@@ -832,6 +834,10 @@
   })();
 
   // ── Boot ───────────────────────────────────────────────────────────
+  // Do not run on real mobile devices (UA + touch-points detection by app.js)
+  // or on narrow-viewport screens — the widget is hidden by CSS anyway.
+  if (window._isMobile || window.innerWidth <= 1024) return;
+
   update();
 
   // Instant response to tuning: the host rewrites #frequency's data-hz-value

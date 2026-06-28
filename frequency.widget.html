@@ -1,0 +1,59 @@
+<script>
+(async () => {
+  if (window._isMobile || window.innerWidth < 768) return;
+
+  let desc;
+  try {
+    desc = await window.descriptionPromise;
+  } catch { return; }
+
+  const ref = desc?.frequency_reference;
+  if (!ref || ref.frequency_offset === undefined || ref.frequency_offset === null) return;
+
+  const offset = ref.frequency_offset;
+
+  let color, label;
+  if (offset === 0) {
+    color = '#4caf50';
+    label = '✓ Freq Perfect';
+  } else if (Math.abs(offset) <= 2) {
+    color = '#ffeb3b';
+    label = `Freq Offset: ${offset > 0 ? '+' : ''}${offset} Hz`;
+  } else {
+    color = '#f44336';
+    label = `Freq Offset: ${offset > 0 ? '+' : ''}${offset} Hz`;
+  }
+
+  const badge = document.createElement('div');
+  badge.style.cssText = [
+    'position:absolute',
+    'top:8px',
+    'left:8px',
+    'z-index:99997',
+    'background:rgba(0,0,0,0.65)',
+    'backdrop-filter:blur(4px)',
+    '-webkit-backdrop-filter:blur(4px)',
+    `color:${color}`,
+    'font:bold 11px/1.4 monospace',
+    'padding:4px 8px',
+    'border-radius:5px',
+    `border:1px solid ${color}`,
+    'pointer-events:none',
+    'white-space:nowrap',
+    'letter-spacing:0.03em'
+  ].join(';');
+
+  badge.textContent = label;
+
+  const attach = () => {
+    if (document.body) {
+      document.body.style.position = 'relative'; // helps absolute positioning
+      document.body.appendChild(badge);
+    }
+  };
+
+  document.readyState === 'loading'
+    ? document.addEventListener('DOMContentLoaded', attach)
+    : attach();
+})();
+</script>

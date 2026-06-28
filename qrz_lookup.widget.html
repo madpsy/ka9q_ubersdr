@@ -216,6 +216,8 @@
   @media (max-width: 768px) {
     #qrz-widget { display: none !important; }
   }
+  /* Also hide the full widget on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
+  html.is-mobile #qrz-widget { display: none !important; }
 
   /* Mobile-only photo toast — top-left corner, 3-second auto-hide */
   #qrz-mobile-photo-toast {
@@ -243,6 +245,8 @@
   @media (min-width: 769px) {
     #qrz-mobile-photo-toast { display: none !important; }
   }
+  /* On real mobile devices the toast is always allowed — override the min-width hide. */
+  html.is-mobile #qrz-mobile-photo-toast { display: revert !important; }
 </style>
 
 <!-- Photo modal — appended to body so it overlays everything -->
@@ -627,7 +631,7 @@
     var hideTimer = null;
 
     function showMobilePhoto(src, alt) {
-      if (window.innerWidth > 768) return; // full widget handles desktop
+      if (!window._isMobile && window.innerWidth > 768) return; // full widget handles desktop
       if (hideTimer) clearTimeout(hideTimer);
 
       // Keep the container hidden until the image has fully loaded to avoid

@@ -16582,12 +16582,13 @@ function toggleControlsDock() {
 // Expose to global scope — app.js is a module so inline onclick= handlers need window.*
 window.toggleControlsDock = toggleControlsDock;
 
-// Returns true if the viewport is narrow enough to be considered mobile.
-// Dock feature is disabled on mobile — the layout is already single-column
-// and the overlay would be too cramped.
+// Returns true if the device is mobile or the viewport is narrow enough to be
+// considered mobile. Uses either the UA-based _isMobile flag (set at load time)
+// or the CSS mobile breakpoint (max-width: 1024px), whichever is true.
+// This ensures actual mobile/tablet devices always get the mobile layout even
+// when their viewport is wider than 1024px (e.g. iPad landscape).
 function _dockIsMobile() {
-    // Match the CSS mobile breakpoint (max-width: 1024px)
-    return window.innerWidth <= 1024;
+    return window._isMobile || window.innerWidth <= 1024;
 }
 
 function initControlsDock() {

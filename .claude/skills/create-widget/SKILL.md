@@ -32,6 +32,33 @@ shadow DOM, no module boundary.
 
 ---
 
+## Example requests
+
+Widgets can be purely self-contained (driven only by the browser, with no host
+services) or deeply integrated with the SDR (reading `window.instanceDescription`,
+tuning the radio, reacting to spots, etc.). A few representative things a user
+might ask for:
+
+- *"A widget showing analogue clocks for several world cities, with UTC/Zulu
+  first, that I can click to switch between analogue and a 24-hour digital
+  readout."* — self-contained; uses `Intl.DateTimeFormat` for timezones (and
+  DST), a `setInterval` redraw loop on `<canvas>`, and a second `localStorage`
+  key to remember the analogue/digital choice. See
+  `widgets-custom/world_clocks.widget.html` for the worked implementation.
+- *"A panel that shows the current band conditions / space weather."* —
+  reads host state and/or polls a server API.
+- *"A clickable list of my favourite frequencies that tunes the radio."* —
+  calls host functions like `window.setFrequency` / `window.setMode`.
+- *"A live readout of the callsign currently being looked up."* — listens on
+  the `callsign_lookup_complete` event bus.
+
+Whatever the request, every widget still obeys the three non-negotiables (close
+button, mobile hiding, drag-to-reposition) and any user preference it exposes
+(display mode, units, selected items, …) should be persisted to `localStorage`
+under its own `<slug>_widget_*` key so it survives a reload.
+
+---
+
 ## File naming & location
 
 | Convention | Example |

@@ -242,11 +242,11 @@
     object-fit: cover;
     display: block;
   }
+  /* Hide the toast on wide desktop viewports, but not on real mobile devices
+     in landscape (html.is-mobile is set by app.js via UA + touch-points). */
   @media (min-width: 769px) {
-    #qrz-mobile-photo-toast { display: none !important; }
+    html:not(.is-mobile) #qrz-mobile-photo-toast { display: none !important; }
   }
-  /* On real mobile devices the toast is always allowed — override the min-width hide. */
-  html.is-mobile #qrz-mobile-photo-toast { display: revert !important; }
 </style>
 
 <!-- Photo modal — appended to body so it overlays everything -->

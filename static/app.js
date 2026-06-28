@@ -16055,10 +16055,28 @@ function _syncLandscapeBandBar() {
         if (bandBar.parentElement !== rightCol) {
             rightCol.insertBefore(bandBar, rightCol.firstChild);
         }
+
+        // Auto-disable spectrum line graph in landscape to save vertical space
+        const specCb = document.getElementById('spectrum-line-graph-enable');
+        if (specCb && specCb.checked && !window._landscapeSpecWasOn) {
+            window._landscapeSpecWasOn = true;
+            specCb.checked = false;
+            specCb.dispatchEvent(new Event('change', { bubbles: true }));
+        }
     } else {
         // Restore band bar to dock wrapper, before .controls
         if (bandBar.parentElement !== wrapper) {
             wrapper.insertBefore(bandBar, controls || wrapper.firstChild);
+        }
+
+        // Restore spectrum line graph if it was on before landscape
+        if (window._landscapeSpecWasOn) {
+            window._landscapeSpecWasOn = false;
+            const specCb = document.getElementById('spectrum-line-graph-enable');
+            if (specCb && !specCb.checked) {
+                specCb.checked = true;
+                specCb.dispatchEvent(new Event('change', { bubbles: true }));
+            }
         }
     }
 }

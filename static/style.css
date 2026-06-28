@@ -2850,6 +2850,15 @@ input[type="range"]::-moz-range-thumb {
     #mobile-landscape-right .mobile-tab-bar.all-collapsed {
         padding-bottom: 8px;
     }
+
+    /* Hide chat panel tab and time overlay to save screen space in landscape mobile */
+    #chat-panel {
+        display: none !important;
+    }
+
+    .time-display {
+        display: none !important;
+    }
 }
 
 /* Browser zoom buttons — hidden by default (desktop), shown on narrow via media query above */

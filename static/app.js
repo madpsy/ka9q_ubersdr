@@ -16469,11 +16469,14 @@ function _dockRemoveMobileLayout() {
             if (bandBar) wrapper.insertBefore(bandBar, controls || wrapper.firstChild);
         }
 
-        // Unwrap left column children back into .controls
+        // Unwrap left column children back into .controls (prepend in order:
+        // iterate in reverse so firstChild ends up first after prepending)
         if (leftCol && controls) {
-            while (leftCol.firstChild) controls.insertBefore(leftCol.firstChild, controls.firstChild);
+            const leftChildren = Array.from(leftCol.childNodes);
+            const anchor = controls.firstChild;
+            leftChildren.forEach(child => controls.insertBefore(child, anchor));
         }
-        // Unwrap right column children back into .controls
+        // Unwrap right column children back into .controls (append in order)
         if (rightCol && controls) {
             while (rightCol.firstChild) controls.appendChild(rightCol.firstChild);
         }

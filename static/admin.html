@@ -2533,6 +2533,11 @@
                                         <textarea id="widgetEditorHTML" rows="12"
                                             placeholder="&lt;!-- Your widget HTML here --&gt;"
                                             style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
+                                        <!-- Transparent capture layer — shown only during a file drag so it sits above
+                                             the textarea and receives dragover/drop events (textareas don't fire drop
+                                             for OS file drags). Invisible itself; the visual feedback comes from the
+                                             overlay below. -->
+                                        <div id="widgetDragCapture" style="display:none;position:absolute;inset:0;z-index:10;cursor:copy;"></div>
                                         <div id="widgetDropOverlay" style="display:none;position:absolute;inset:0;background:rgba(90,103,216,0.12);border-radius:4px;border:2px dashed #5a67d8;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;gap:10px;box-sizing:border-box;pointer-events:none;">
                                             <div style="font-size:28px;">📂</div>
                                             <div style="font-weight:600;font-size:14px;color:#5a67d8;">Drop .html file to load</div>
@@ -10164,29 +10169,56 @@ function resetStationIdColor() {
         }
 
         function initWidgetDropZone() {
-            // Attach drag-and-drop directly to the <textarea> — the textarea element
-            // intercepts drag events itself so listeners on the parent div are not
-            // reliably reached. The visual overlay is shown/hidden via the wrapper.
-            const ta      = document.getElementById('widgetEditorHTML');
+            // Browsers do not fire 'drop' for OS file drags on <textarea> elements.
+            // The workaround: listen for 'dragenter' on the wrapper div (which does
+            // fire), then show a transparent capture div that sits above the textarea.
+            // That capture div receives dragover/dragleave/drop reliably.
+            const zone    = document.getElementById('widgetHtmlDropZone');
+            const capture = document.getElementById('widgetDragCapture');
             const overlay = document.getElementById('widgetDropOverlay');
-            if (!ta || !overlay) return;
+            if (!zone || !capture || !overlay) return;
 
-            ta.addEventListener('dragover', function(e) {
-                // Ignore if the public-widget lock is active
-                if (document.getElementById('widgetEditorPublic').checked) return;
+            function isLocked() {
+                return document.getElementById('widgetEditorPublic').checked;
+            }
+
+            function showDrop() {
+                capture.style.display = 'block';
+                overlay.style.display = 'flex';
+            }
+
+            function hideDrop() {
+                capture.style.display = 'none';
+                overlay.style.display = 'none';
+            }
+
+            // dragenter on the wrapper fires when the file first enters the zone
+            // (including over the textarea). Show the capture layer so subsequent
+            // dragover/drop events land on it rather than the textarea.
+            zone.addEventListener('dragenter', function(e) {
+                if (isLocked()) return;
+                if (!e.dataTransfer.types.includes('Files')) return;
+                e.preventDefault();
+                showDrop();
+            });
+
+            // The capture div sits above the textarea and receives all drag events.
+            capture.addEventListener('dragover', function(e) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'copy';
-                overlay.style.display = 'flex';
             });
 
-            ta.addEventListener('dragleave', function(e) {
-                overlay.style.display = 'none';
+            capture.addEventListener('dragleave', function(e) {
+                // Hide when the pointer leaves the capture div entirely.
+                if (!zone.contains(e.relatedTarget)) {
+                    hideDrop();
+                }
             });
 
-            ta.addEventListener('drop', function(e) {
+            capture.addEventListener('drop', function(e) {
                 e.preventDefault();
-                overlay.style.display = 'none';
-                if (document.getElementById('widgetEditorPublic').checked) return;
+                hideDrop();
+                if (isLocked()) return;
                 const file = e.dataTransfer.files[0];
                 if (!file) return;
                 const reader = new FileReader();

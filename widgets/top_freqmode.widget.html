@@ -1,0 +1,470 @@
+<!-- Top Freq/Mode Tracker
+     =====================
+     Keeps a rolling top-10 leaderboard of the frequency + mode
+     combinations you actually use. Scoring is time-weighted: a combo
+     earns +1 for every full minute you stay parked on it (same dial freq
+     AND same mode). The first point lands once you have been on it for
+     more than one minute, so brief tuning past a frequency never counts —
+     and the longer you sit on a frequency, the higher it climbs.
+
+     • Click any row to tune straight back to that freq + mode.
+     • The currently-tuned combo is highlighted.
+     • Counts persist in localStorage and survive reloads.
+     • Drag the header to reposition; position saved in localStorage.
+
+     Requires host globals: #frequency (data-hz-value), window.currentMode,
+     and the canonical tune path — window.setFrequencyInputValue,
+     window.updateBandButtons, window.setMode, window.updateURL,
+     window.autoTune, window.spectrumDisplay.
+-->
+
+<style>
+  #tfm-widget {
+    position: fixed;
+    top: 300px;
+    left: 44px;
+    z-index: 9500;
+    pointer-events: auto;
+    width: 190px;
+
+    background: rgba(52, 73, 94, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    font-weight: bold;
+    line-height: 1.4;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(155, 89, 182, 0.7); /* purple accent */
+    user-select: none;
+  }
+
+  #tfm-widget.tfm-dragging {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  #tfm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px 4px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+    cursor: grab;
+  }
+  #tfm-header.tfm-dragging { cursor: grabbing; }
+
+  #tfm-title {
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  #tfm-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  #tfm-reset, #tfm-close {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  #tfm-close { font-size: 13px; }
+  #tfm-reset:hover, #tfm-close:hover { color: #fff; background: rgba(0,0,0,0.3); }
+
+  #tfm-body { padding: 4px 6px 6px; }
+
+  #tfm-empty {
+    padding: 8px 4px;
+    color: rgba(255,255,255,0.55);
+    font-weight: normal;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .tfm-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .tfm-row:hover { background: rgba(255,255,255,0.12); }
+  .tfm-row.tfm-active {
+    background: rgba(155, 89, 182, 0.30);
+    box-shadow: inset 0 0 0 1px rgba(155, 89, 182, 0.6);
+  }
+
+  .tfm-rank {
+    flex: none;
+    width: 14px;
+    text-align: right;
+    color: rgba(255,255,255,0.45);
+    font-weight: normal;
+  }
+  .tfm-freq {
+    flex: 1 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tfm-mode {
+    flex: none;
+    color: rgba(155, 89, 182, 1);
+    text-transform: uppercase;
+    font-size: 10px;
+  }
+  .tfm-count {
+    flex: none;
+    min-width: 18px;
+    text-align: center;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.35);
+    color: rgba(255,255,255,0.9);
+    font-size: 10px;
+  }
+
+  #tfm-pending {
+    margin-top: 4px;
+    padding: 2px 5px;
+    font-weight: normal;
+    font-size: 10px;
+    color: rgba(255,255,255,0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @media (max-width: 768px) {
+    #tfm-widget { display: none !important; }
+  }
+  html.is-mobile #tfm-widget { display: none !important; }
+</style>
+
+<div id="tfm-widget" style="display:none;">
+  <div id="tfm-header">
+    <span id="tfm-title">Top Freq / Mode</span>
+    <span id="tfm-head-actions">
+      <span id="tfm-reset" title="Clear all counts">&#x21bb;</span>
+      <span id="tfm-close" title="Dismiss">&#x2715;</span>
+    </span>
+  </div>
+  <div id="tfm-body">
+    <div id="tfm-empty">No data yet — park on a frequency for 1&nbsp;minute to log it.</div>
+    <div id="tfm-list"></div>
+    <div id="tfm-pending" style="display:none;"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window._isMobile || window.innerWidth <= 768) return;
+
+  var LS_POS_KEY   = 'top_freqmode_widget_pos';
+  var LS_DATA_KEY  = 'top_freqmode_widget_data';
+  var DWELL_MS     = 60 * 1000;   // +1 per full minute parked (first point at 1 min)
+  var POLL_MS      = 500;         // backstop for mode changes (plain var, no DOM hook)
+  var DISPLAY_MAX  = 10;          // rows shown
+  var STORE_MAX    = 200;         // combos retained before evicting the weakest
+  var DRAG_THRESHOLD = 5;
+
+  var widget   = document.getElementById('tfm-widget');
+  var header   = document.getElementById('tfm-header');
+  var closeEl  = document.getElementById('tfm-close');
+  var resetEl  = document.getElementById('tfm-reset');
+  var listEl   = document.getElementById('tfm-list');
+  var emptyEl  = document.getElementById('tfm-empty');
+  var pendEl   = document.getElementById('tfm-pending');
+
+  var dismissed = false;
+
+  // ── Data model ───────────────────────────────────────────────────────
+  // combos: { "<hz>|<mode>": { hz, mode, count, last } }
+  var combos = {};
+  (function loadData() {
+    try {
+      var raw = localStorage.getItem(LS_DATA_KEY);
+      if (raw) {
+        var obj = JSON.parse(raw);
+        if (obj && typeof obj === 'object') combos = obj;
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  function saveData() {
+    try { localStorage.setItem(LS_DATA_KEY, JSON.stringify(combos)); } catch (e) { /* ignore */ }
+  }
+
+  // Sorted highest-count-first, newest as tiebreaker.
+  function sortedCombos() {
+    return Object.keys(combos).map(function (k) { return combos[k]; })
+      .sort(function (a, b) {
+        if (b.count !== a.count) return b.count - a.count;
+        return (b.last || 0) - (a.last || 0);
+      });
+  }
+
+  // Bound storage so a long session never grows unbounded — drop the weakest.
+  function prune() {
+    var keys = Object.keys(combos);
+    if (keys.length <= STORE_MAX) return;
+    var sorted = sortedCombos();
+    var keep = {};
+    sorted.slice(0, STORE_MAX).forEach(function (c) { keep[c.hz + '|' + c.mode] = c; });
+    combos = keep;
+  }
+
+  // ── Reading the dial ─────────────────────────────────────────────────
+  function getDialHz() {
+    var f = document.getElementById('frequency');
+    if (!f) return null;
+    var hz = parseInt(f.getAttribute('data-hz-value') || f.value, 10);
+    return isNaN(hz) ? null : hz;
+  }
+
+  function currentCombo() {
+    var hz = getDialHz();
+    var mode = (window.currentMode || '').toLowerCase();
+    if (hz === null || !mode) return null;
+    return { hz: hz, mode: mode, key: hz + '|' + mode };
+  }
+
+  function formatFreq(hz) {
+    if (hz >= 1e6) {
+      return (hz / 1e6).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' MHz';
+    }
+    return (hz / 1e3).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kHz';
+  }
+
+  // ── Dwell tracking ───────────────────────────────────────────────────
+  var activeKey      = null;   // combo we are currently parked on
+  var dwellInterval  = null;   // ticks every minute while parked → +1 each tick
+  var dwellCombo     = null;   // combo the interval is scoring
+  var dwellMinutes   = 0;      // minutes credited so far in the current dwell
+
+  function recordMinute(c) {
+    var rec = combos[c.key];
+    if (rec) {
+      rec.count += 1;
+      rec.last = Date.now();
+    } else {
+      combos[c.key] = { hz: c.hz, mode: c.mode, count: 1, last: Date.now() };
+    }
+    prune();
+    saveData();
+    render();
+  }
+
+  function onComboChange() {
+    if (dismissed) return;
+    var c = currentCombo();
+    var key = c ? c.key : null;
+    if (key === activeKey) return;   // no real change
+
+    activeKey = key;
+    if (dwellInterval) { clearInterval(dwellInterval); dwellInterval = null; }
+    dwellCombo   = c;
+    dwellMinutes = 0;
+
+    if (c) {
+      dwellInterval = setInterval(function () {
+        dwellMinutes += 1;
+        recordMinute(c);             // another full minute parked → +1
+      }, DWELL_MS);
+    }
+    render();                        // move the highlight / pending line immediately
+  }
+
+  // ── Tune to a stored combo ───────────────────────────────────────────
+  // Mirrors the "jump to a saved frequency" path used by voice.widget.html /
+  // the bookmark dropdown: set the input value, sync band buttons, set mode,
+  // push URL state, autoTune() to apply, then pan the spectrum to follow.
+  function tuneTo(rec) {
+    if (!rec || typeof rec.hz !== 'number') return;
+    var hz = rec.hz;
+
+    if (typeof window.setFrequencyInputValue === 'function') {
+      window.setFrequencyInputValue(Math.round(hz));
+    } else {
+      var fi = document.getElementById('frequency');
+      if (fi) fi.value = Math.round(hz);
+    }
+    if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
+    if (rec.mode && typeof window.setMode === 'function') window.setMode(rec.mode, false);
+    if (typeof window.updateURL === 'function') window.updateURL();
+    if (typeof window.autoTune === 'function') window.autoTune();
+
+    // Re-centre the spectrum the same way the bookmark dropdown does:
+    // send an explicit pan and suppress edge-detection for 2 s so it doesn't fight.
+    var spectrum = window.spectrumDisplay;
+    if (spectrum && spectrum.connected && spectrum.ws) {
+      spectrum.skipEdgeDetectionTemporary = true;
+      setTimeout(function () { if (spectrum) spectrum.skipEdgeDetectionTemporary = false; }, 2000);
+      try { spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: hz })); } catch (e) { /* ignore */ }
+    }
+    onComboChange();
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────
+  function render() {
+    if (dismissed) return;
+    var rows = sortedCombos().slice(0, DISPLAY_MAX);
+
+    if (rows.length === 0) {
+      emptyEl.style.display = '';
+      listEl.innerHTML = '';
+    } else {
+      emptyEl.style.display = 'none';
+      listEl.innerHTML = '';
+      rows.forEach(function (rec, i) {
+        var row = document.createElement('div');
+        row.className = 'tfm-row' + (rec.hz + '|' + rec.mode === activeKey ? ' tfm-active' : '');
+        row.title = 'Tune to ' + formatFreq(rec.hz) + ' ' + rec.mode.toUpperCase();
+
+        var rank = document.createElement('span');
+        rank.className = 'tfm-rank';
+        rank.textContent = (i + 1);
+
+        var freq = document.createElement('span');
+        freq.className = 'tfm-freq';
+        freq.textContent = formatFreq(rec.hz);
+
+        var mode = document.createElement('span');
+        mode.className = 'tfm-mode';
+        mode.textContent = rec.mode.toUpperCase();
+
+        var count = document.createElement('span');
+        count.className = 'tfm-count';
+        count.textContent = rec.count;
+
+        row.appendChild(rank);
+        row.appendChild(freq);
+        row.appendChild(mode);
+        row.appendChild(count);
+        row.addEventListener('click', function () { tuneTo(rec); });
+        listEl.appendChild(row);
+      });
+    }
+
+    // Pending line: show what we're currently clocking time on.
+    if (dwellInterval && dwellCombo) {
+      pendEl.style.display = '';
+      pendEl.textContent = '⏳ ' + formatFreq(dwellCombo.hz) + ' ' + dwellCombo.mode.toUpperCase() +
+        (dwellMinutes ? ' (+' + dwellMinutes + ')' : ' (<1m)');
+    } else {
+      pendEl.style.display = 'none';
+    }
+  }
+
+  // ── Reset ────────────────────────────────────────────────────────────
+  resetEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (!Object.keys(combos).length) return;
+    combos = {};
+    saveData();
+    render();
+  });
+
+  // ── Close ────────────────────────────────────────────────────────────
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    dismissed = true;
+    widget.style.display = 'none';
+    if (dwellInterval) { clearInterval(dwellInterval); dwellInterval = null; }
+  });
+
+  // ── Position restore ─────────────────────────────────────────────────
+  (function restorePosition() {
+    try {
+      var saved = localStorage.getItem(LS_POS_KEY);
+      if (saved) {
+        var pos = JSON.parse(saved);
+        if (typeof pos.top === 'number' && typeof pos.left === 'number') {
+          widget.style.top  = pos.top  + 'px';
+          widget.style.left = pos.left + 'px';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ── Drag (header handle only, so row clicks stay clean) ──────────────
+  var dragState = null, wasDragged = false;
+
+  header.addEventListener('mousedown', function (e) {
+    if (e.target === closeEl || e.target === resetEl) return;
+    if (e.button !== 0) return;
+    var rect = widget.getBoundingClientRect();
+    dragState = { startX: e.clientX, startY: e.clientY, origTop: rect.top, origLeft: rect.left };
+    wasDragged = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!wasDragged && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+      wasDragged = true;
+      widget.classList.add('tfm-dragging');
+      header.classList.add('tfm-dragging');
+    }
+    if (wasDragged) {
+      var newTop  = Math.max(0, Math.min(dragState.origTop  + dy, window.innerHeight - widget.offsetHeight));
+      var newLeft = Math.max(0, Math.min(dragState.origLeft + dx, window.innerWidth  - widget.offsetWidth));
+      widget.style.top  = newTop  + 'px';
+      widget.style.left = newLeft + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragState) return;
+    widget.classList.remove('tfm-dragging');
+    header.classList.remove('tfm-dragging');
+    if (wasDragged) {
+      try {
+        localStorage.setItem(LS_POS_KEY, JSON.stringify({
+          top:  parseInt(widget.style.top, 10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    dragState = null;
+    setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // ── Boot ─────────────────────────────────────────────────────────────
+  widget.style.display = '';
+  render();
+  onComboChange();   // start the dwell timer for whatever we're tuned to now
+
+  // Instant reaction to tuning — host rewrites #frequency's data-hz-value.
+  var freqInput = document.getElementById('frequency');
+  if (freqInput && 'MutationObserver' in window) {
+    new MutationObserver(onComboChange).observe(freqInput, {
+      attributes: true,
+      attributeFilter: ['data-hz-value', 'value']
+    });
+  }
+
+  // Backstop for mode changes (window.currentMode is a plain variable).
+  setInterval(onComboChange, POLL_MS);
+
+})();
+</script>

@@ -72,7 +72,9 @@ might ask for:
 - *"A panel that shows the current band conditions / space weather."* —
   reads host state and/or polls a server API.
 - *"A clickable list of my favourite frequencies that tunes the radio."* —
-  calls host functions like `window.setFrequency` / `window.setMode`.
+  tunes via the canonical recipe (`setFrequencyInputValue` → `updateBandButtons`
+  → `setMode` → `updateURL` → `autoTune`, then pan the spectrum). See
+  "Tuning the radio (canonical recipe)" below.
 - *"A live readout of the callsign currently being looked up."* — listens on
   the `callsign_lookup_complete` event bus.
 
@@ -638,12 +640,12 @@ All are optional — guard with `typeof` or existence checks before use.
 
 | Function | Signature | Description |
 |---|---|---|
-| `window.setFrequency` | `(hz: number)` | Tune to frequency |
-| `window.setMode` | `(mode: string, save: boolean)` | Change demodulator mode |
-| `window.setFrequencyInputValue` | `(hz: number)` | Update frequency input without tuning |
-| `window.autoTune` | `()` | Apply current frequency input |
-| `window.updateBandButtons` | `(hz: number)` | Sync band button highlights |
-| `window.updateURL` | `()` | Push current state to URL |
+| `window.setFrequencyInputValue` | `(hz: number)` | Write the dial input **without** tuning — step 1 of the tune recipe |
+| `window.updateBandButtons` | `(hz: number)` | Sync band-button highlight to a frequency |
+| `window.setMode` | `(mode: string, save: boolean)` | Change demodulator mode (`save=false` from widgets) |
+| `window.updateURL` | `()` | Push current freq/mode state to the URL |
+| `window.autoTune` | `()` | **Apply** the dial input — this is what actually tunes |
+| `window.setFrequency` | `(hz: number)` | Dial-wheel/edge-arrow tune. **Not** the jump-to-saved-frequency path — see "Tuning the radio" below |
 | `window.lookupCallsign` | `(callsign: string)` | Trigger QRZ lookup widget |
 | `window.findMarkers` | `(hz, mode, navTypes)` | Find current/prev/next markers |
 | `window.toggleEqualizer` | `()` | Toggle EQ on/off |
@@ -675,6 +677,74 @@ All are optional — guard with `typeof` or existence checks before use.
 | `#bandpass-width` | Bandpass width slider |
 | `#notch-enable` | Notch enable checkbox |
 | `#stereo-virtualizer-enable` | Stereo virtualiser checkbox |
+
+---
+
+## Tuning the radio (canonical recipe)
+
+When a widget tunes the receiver to a **saved / chosen frequency + mode** (a
+favourites list, a spot click, a "jump to" button, etc.) it must use the full
+sequence below — the same path `voice.widget.html`, `cw_spots.widget.html`, and
+the bookmark dropdown use. Do **not** just call `window.setFrequency(hz)`: that
+is the dial-wheel/edge-arrow path and skips `autoTune()`, the band-button sync,
+and the URL update, so the radio often won't actually retune.
+
+Every call is optional host glue — guard each with `typeof` and keep the
+fallback that writes `#frequency` directly, so the widget degrades gracefully.
+
+```js
+// Tune to a saved { hz, mode }. Mirrors voice.widget.html / the bookmark dropdown.
+function tuneTo(hz, mode) {
+  if (typeof hz !== 'number' || isNaN(hz)) return;
+
+  // 1. Write the dial input (rounded to whole Hz) — does NOT tune by itself.
+  if (typeof window.setFrequencyInputValue === 'function') {
+    window.setFrequencyInputValue(Math.round(hz));
+  } else {
+    var fi = document.getElementById('frequency');
+    if (fi) fi.value = Math.round(hz);
+  }
+
+  // 2. Sync the band-button highlight.
+  if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
+
+  // 3. Set the demodulator mode (save=false — don't overwrite the user's default).
+  if (mode && typeof window.setMode === 'function') window.setMode(mode, false);
+
+  // 4. Push the new freq/mode to the URL.
+  if (typeof window.updateURL === 'function') window.updateURL();
+
+  // 5. APPLY the input — this is the call that actually retunes the receiver.
+  if (typeof window.autoTune === 'function') window.autoTune();
+
+  // 6. Re-centre the spectrum to follow, and suppress edge-detection for 2 s
+  //    so it doesn't fight the pan (same as the bookmark dropdown).
+  var spectrum = window.spectrumDisplay;
+  if (spectrum && spectrum.connected && spectrum.ws) {
+    spectrum.skipEdgeDetectionTemporary = true;
+    setTimeout(function () { if (spectrum) spectrum.skipEdgeDetectionTemporary = false; }, 2000);
+    try { spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: hz })); } catch (e) { /* ignore */ }
+  }
+}
+```
+
+**Order matters:** input value → band buttons → mode → URL → `autoTune()` →
+spectrum pan. `autoTune()` reads the value written in step 1, so step 1 must run
+first; `setMode()` runs before `autoTune()` so the tune applies with the right
+mode.
+
+> **`window.setFrequency(hz)` vs this recipe.** `setFrequency` is the
+> dial-wheel/edge-arrow handler — fine for stepping the current dial, but it is
+> **not** how you jump to an arbitrary saved frequency. For favourites,
+> bookmarks, spot clicks, and "tune to this" buttons, always use the 6-step
+> recipe above.
+
+> **`window.radio` path (extensions).** Some builds expose `window.radio`
+> (a `RadioAPI`). If present, `window.radio.setFrequency(hz, centerSpectrum)`
+> + `window.radio.setMode(mode, false)` is equivalent and may be preferred
+> inside extension code. `cw_spots.widget.html` shows the `window.radio`-first
+> pattern with a fallback to the globals above. For most widgets the global
+> recipe is simpler and sufficient.
 
 ---
 

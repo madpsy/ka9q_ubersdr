@@ -10176,7 +10176,8 @@ function resetStationIdColor() {
             const zone    = document.getElementById('widgetHtmlDropZone');
             const capture = document.getElementById('widgetDragCapture');
             const overlay = document.getElementById('widgetDropOverlay');
-            if (!zone || !capture || !overlay) return;
+            console.log('[DropZone] init — zone:', !!zone, 'capture:', !!capture, 'overlay:', !!overlay);
+            if (!zone || !capture || !overlay) { console.warn('[DropZone] missing elements — aborting'); return; }
 
             function isLocked() {
                 return document.getElementById('widgetEditorPublic').checked;

@@ -1,6 +1,6 @@
 <!-- Top Freq/Mode Tracker
      =====================
-     Keeps a rolling top-10 leaderboard of the frequency + mode
+     Keeps a rolling top-5 leaderboard of the frequency + mode
      combinations you actually use. Scoring is time-weighted: a combo
      earns +1 for every full minute you stay parked on it (same dial freq
      AND same mode). The first point lands once you have been on it for
@@ -181,7 +181,7 @@
   var LS_DATA_KEY  = 'top_freqmode_widget_data';
   var DWELL_MS     = 60 * 1000;   // +1 per full minute parked (first point at 1 min)
   var POLL_MS      = 500;         // backstop for mode changes (plain var, no DOM hook)
-  var DISPLAY_MAX  = 10;          // rows shown
+  var DISPLAY_MAX  = 5;           // rows shown
   var STORE_MAX    = 200;         // combos retained before evicting the weakest
   var DRAG_THRESHOLD = 5;
 

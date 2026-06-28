@@ -630,11 +630,14 @@ All are optional — guard with `typeof` or existence checks before use.
 | `window.vuAnalyser` | `AnalyserNode` | Web Audio analyser node (post-processing) |
 | `window.analyser` | `AnalyserNode` | Fallback analyser node |
 | `window.audioContext` | `AudioContext` | Web Audio context |
-| `window._callsignLookupCache` | `Map` | Callsign lookup cache: `Map<string, {data, imageUrl}>` |
-| `window.cwSpotsExtensionInstance` | `object` | CW spots extension: `.spots[]` |
-| `window.dxClusterExtensionInstance` | `object` | DX cluster extension: `.spots[]` |
+| `window._callsignLookupCache` | `Map` | **Shared** callsign lookup cache: `Map<string, {data, imageUrl}|null>` — writing to it (via `_fetchCallsignForMediaSession`) is visible to every lookup surface |
+| `window._lookupServiceEnabled` | `boolean` | Mirror of `instanceDescription.lookup_service` |
+| `window.cwSpotsExtensionInstance` | `object` | CW spots extension: `.spots[]` (each `{frequency, dx_call, country_code}`) |
+| `window.dxClusterExtensionInstance` | `object` | DX cluster extension: `.spots[]` (each `{frequency, dx_call, country_code}`) |
 | `window.dxClusterClient` | `object` | DX cluster WebSocket client |
+| `window.VoiceActivityService` | `object` | Voice activity service — `.getLatest()` (`{enabled, band}`), `.getAllActivities()` |
 | `window.markerNavTypes` | `string[]|null` | Host marker type filter preference |
+| `window.wsManager` | `object` | Audio WebSocket manager — `.ws.readyState === WebSocket.OPEN` ⇒ an audio session is active |
 
 ### Functions (call with existence check)
 
@@ -659,7 +662,7 @@ All are optional — guard with `typeof` or existence checks before use.
 | `window.toggleBandpassFilter` | `()` | Toggle bandpass on/off |
 | `window.updateFFTSize` | `()` | Apply FFT size change |
 | `window._normaliseCallsign` | `(raw: string) → string` | Strip /suffix, keep longest segment |
-| `window._fetchCallsignForMediaSession` | `(cs: string) → Promise` | Fetch + cache callsign data |
+| `window._fetchCallsignForMediaSession` | `(cs: string) → Promise` | Fetch + cache callsign data — **also broadcasts** to all lookup surfaces (see "Markers, spots & callsign lookups"); for a non-leaking lookup, fetch `/api/lookup` directly |
 | `window._refreshCallsignDisplays` | `()` | Refresh all callsign display elements |
 | `window._notifyLookupWidgetIfCached` | `(marker)` | Fire lookup event from cache |
 
@@ -677,6 +680,142 @@ All are optional — guard with `typeof` or existence checks before use.
 | `#bandpass-width` | Bandpass width slider |
 | `#notch-enable` | Notch enable checkbox |
 | `#stereo-virtualizer-enable` | Stereo virtualiser checkbox |
+
+---
+
+## Markers, spots & callsign lookups
+
+Widgets that work with on-air activity (spot lists, "guess the callsign" games,
+marker navigation, flag/country display) draw on three host subsystems: the
+**marker sources**, the **callsign lookup service**, and the **country list
+API**. `marker.widget.html` is the canonical reference for all of this —
+read its `collectMarkers()` / `fallbackFindMarkers()` and `updateInfoPanel()`.
+
+### Marker sources & types
+
+There is no single "all markers" global — markers are assembled on demand from
+several live arrays. Each carries a callsign only for some types:
+
+| Source global | Marker type | Per-item fields | Callsign field |
+|---|---|---|---|
+| `window.cwSpotsExtensionInstance.spots` | `cw` | `{frequency, dx_call, country_code}` | `dx_call` (always a callsign) |
+| `window.dxClusterExtensionInstance.spots` | `dx` | `{frequency, dx_call, country_code}` | `dx_call` (always a callsign) |
+| `window.VoiceActivityService.getAllActivities()` | `voice` | `{estimated_dial_freq\|start_freq, mode, band, dx_callsign, dx_country_code}` | `dx_callsign` (may be absent → placeholder name like `Voice 60m`) |
+| `window.bookmarks` | `bookmark-local` / `bookmark-server` | `{frequency, mode, name, source}` | **none** — `name` is a label, *not* reliably a callsign |
+
+Notes:
+- `country_code` / `dx_country_code` are **ISO 3166-1 alpha-2** codes (for flag
+  emoji), *not* country names. They may be empty.
+- Voice activities only exist when the service is enabled — guard with
+  `var st = window.VoiceActivityService && window.VoiceActivityService.getLatest(); if (st && st.enabled) { … }`.
+- To collect **distinct callsigns** for something like a quiz, pull `dx_call`
+  from CW + DX spots and `dx_callsign` from voice activities, into a `Set`.
+  Skip bookmarks (their names aren't callsigns).
+
+```js
+function collectCallsigns() {
+  var set = new Set();
+  var cw = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
+  var dx = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
+  cw.forEach(function (s) { if (s && s.dx_call) set.add(s.dx_call); });
+  dx.forEach(function (s) { if (s && s.dx_call) set.add(s.dx_call); });
+  var va = window.VoiceActivityService;
+  var st = va && va.getLatest && va.getLatest();
+  if (va && st && st.enabled && typeof va.getAllActivities === 'function') {
+    va.getAllActivities().forEach(function (a) { if (a && a.dx_callsign) set.add(a.dx_callsign); });
+  }
+  return Array.from(set);
+}
+```
+
+### Current / prev / next marker for the dial
+
+For "what's near the dial right now" use `window.findMarkers(dialHz, mode, navTypes)`
+→ `{ current, prev, next }`, each `{ freq, mode, name, type, callsign, countryCode }`
+or `null`. `navTypes` is an array of allowed types (`['cw','dx',…]`) or `null`
+for all; honour `window.markerNavTypes` (the host's Audio-Settings preference)
+when you want to match the dial wheel.
+
+### Is the callsign lookup service usable?
+
+Two independent conditions — check **both** before relying on lookups:
+
+```js
+// 1. Service enabled on this instance
+var lookupOn = (window.instanceDescription &&
+                window.instanceDescription.lookup_service === true) ||
+               window._lookupServiceEnabled === true;
+
+// 2. An audio session exists — /api/lookup returns 401 without one.
+var audioOn = !!(window.wsManager && window.wsManager.ws &&
+                 window.wsManager.ws.readyState === WebSocket.OPEN);
+```
+
+`/api/lookup` status codes: **401** no audio session, **404** not found,
+**429** rate-limited (don't cache — retry later), **503** service disabled.
+The result object exposes the country as **`data.country`** (fall back to
+`data.land`); other fields include `name`, `name_fmt`, `fname`, `nickname`,
+`grid`, and `image`.
+
+### Two ways to look up a callsign — pick deliberately
+
+**A. Shared path — `window._fetchCallsignForMediaSession(cs)` → `Promise`.**
+On success it writes `window._callsignLookupCache` **and broadcasts the result
+to every lookup surface**: it dispatches the `callsign_lookup_complete` event
+and calls `_refreshCallsignDisplays()`, so the QRZ lookup widget, the marker
+widget, and the media session all update. Use this when you *want* the shared
+UI to reflect the lookup (the normal case). Read the result from the cache
+after it resolves:
+
+```js
+window._fetchCallsignForMediaSession(cs).then(function () {
+  var e = window._callsignLookupCache.get(cs);          // {data, imageUrl} | null
+  var country = (e && e.data && e.data.country) ? e.data.country.trim() : '';
+});
+```
+
+**B. Private path — fetch `/api/lookup` yourself.** Use this when the result
+**must not leak** to other widgets — e.g. a "guess the country" game where the
+QRZ widget showing the answer would spoil it. Hitting the endpoint directly
+neither broadcasts nor touches the shared cache, so keep your own private
+`Map` if you want to dedupe/cache:
+
+```js
+function lookupCountryPrivate(cs) {
+  var uuid = window.userSessionID || '';
+  if (!uuid) return Promise.resolve(null);
+  return fetch('/api/lookup?callsign=' + encodeURIComponent(cs) + '&uuid=' + encodeURIComponent(uuid))
+    .then(function (r) {
+      if (r.status === 429) return null;          // rate-limited → retry later, don't cache
+      if (!r.ok) return null;                     // 401/404/503
+      return r.json().then(function (d) {
+        return (d && d.country) ? String(d.country).trim() : null;
+      });
+    })
+    .catch(function () { return null; });
+}
+```
+
+`games.widget.html` (the "Callsign Quiz") is the worked example of the private
+path plus the dual enabled/audio gating above.
+
+### Country list — `/api/cty/countries`
+
+Returns the full DXCC country list. Fetch it **once** and cache it in the
+widget (don't refetch per use):
+
+```js
+fetch('/api/cty/countries')
+  .then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (j) {
+    if (j && j.success && j.data && j.data.countries) {
+      // j.data.countries = [{ name, country_code, continent }, …]
+    }
+  });
+```
+
+`country_code` here is ISO2 (use it for flag emoji); `name` is the display
+name. Sibling endpoint `/api/cty/continents` returns the continent list.
 
 ---
 

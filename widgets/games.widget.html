@@ -2,7 +2,8 @@
      UberSDR Games Widget
      • Wide-screen only (hidden ≤1024px)
      • Fixed to left edge, vertically centred
-     • Games: Noughts & Crosses, Minesweeper, 15-Puzzle, Memory, Connect 4
+     • Games: Noughts & Crosses, Minesweeper, 15-Puzzle, Memory, Connect 4, Mini Sudoku, Lights Out, Mastermind
+       and Callsign Quiz (the last only when the lookup service is enabled, audio is active, and ≥10 callsign markers exist)
      • ◀ ▶ arrows to switch games
      • Drag widget to reposition
      ═══════════════════════════════════════════════════════════ -->
@@ -67,7 +68,10 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 .sdr-ms-cell,
 .sdr-p15-cell,
 .sdr-mem-card,
-.sdr-c4-cell {
+.sdr-c4-cell,
+.sdr-su-cell,
+.sdr-lo-cell,
+.sdr-mm-sw {
   cursor: pointer;
 }
 .sdr-ttt-cell.taken,
@@ -359,6 +363,210 @@ html.is-mobile #sdr-games-widget { display: none !important; }
   gap: 3px;
   margin-bottom: 3px;
 }
+
+/* ══════════════════════════════════════
+   MINI SUDOKU (6×6, digits 1-6, 2×3 boxes)
+   ══════════════════════════════════════ */
+#sdr-su-board {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  border: 2px solid rgba(127, 140, 141, 0.75);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+.sdr-su-cell {
+  aspect-ratio: 1;
+  background: rgba(52, 73, 94, 0.85);
+  border-right: 1px solid rgba(127, 140, 141, 0.3);
+  border-bottom: 1px solid rgba(127, 140, 141, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 1;
+  color: #3498db;          /* player entries */
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.sdr-su-cell:hover:not(.given) { background: rgba(52, 152, 219, 0.25); }
+.sdr-su-cell.given {
+  color: #ecf0f1;          /* clues */
+  cursor: default;
+}
+.sdr-su-cell.sel { background: rgba(52, 152, 219, 0.45) !important; }
+.sdr-su-cell.conflict { color: #e74c3c !important; }
+/* thicker lines on the 2×3 box boundaries */
+.sdr-su-cell.bdr-r { border-right: 2px solid rgba(127, 140, 141, 0.75); }
+.sdr-su-cell.bdr-b { border-bottom: 2px solid rgba(127, 140, 141, 0.75); }
+
+#sdr-su-pad {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-bottom: 2px;
+}
+.sdr-su-key {
+  font-size: 12px;
+  padding: 4px 0;
+  border-radius: 3px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* ══════════════════════════════════════
+   LIGHTS OUT (5×5)
+   ══════════════════════════════════════ */
+#sdr-lo-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #7f8c8d;
+  margin-bottom: 4px;
+}
+#sdr-lo-board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  margin-bottom: 5px;
+}
+.sdr-lo-cell {
+  aspect-ratio: 1;
+  background: rgba(30, 40, 52, 0.9);     /* off */
+  border: 1px solid rgba(127, 140, 141, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+.sdr-lo-cell:hover { border-color: #3498db; }
+.sdr-lo-cell.on {
+  background: #f1c40f;                    /* lit */
+  border-color: #d4ac0d;
+  box-shadow: 0 0 6px 1px rgba(241, 196, 15, 0.55);
+}
+
+/* ══════════════════════════════════════
+   MASTERMIND (crack a 4-peg, 6-colour code)
+   ══════════════════════════════════════ */
+#sdr-mm-board {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.sdr-mm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sdr-mm-row.active {
+  background: rgba(52, 152, 219, 0.12);
+  border-radius: 4px;
+}
+.sdr-mm-row.reveal {
+  border-top: 1px solid rgba(231, 76, 60, 0.5);
+  margin-top: 2px;
+  padding-top: 4px;
+}
+.sdr-mm-pegs {
+  display: grid;
+  grid-template-columns: repeat(4, 26px);
+  gap: 5px;
+}
+.sdr-mm-peg {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(20, 30, 48, 0.7);     /* empty slot */
+  border: 1px solid rgba(127, 140, 141, 0.35);
+}
+/* Code colours (shared by pegs and palette swatches) */
+.sdr-mm-c0 { background: #e74c3c; border-color: #c0392b; }
+.sdr-mm-c1 { background: #3498db; border-color: #2980b9; }
+.sdr-mm-c2 { background: #2ecc71; border-color: #27ae60; }
+.sdr-mm-c3 { background: #f1c40f; border-color: #d4ac0d; }
+.sdr-mm-c4 { background: #e67e22; border-color: #ca6f1e; }
+.sdr-mm-c5 { background: #9b59b6; border-color: #884ea0; }
+
+/* Feedback: ● black = right colour+spot, ○ white = right colour wrong spot */
+.sdr-mm-fb {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+}
+.sdr-mm-fb i {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(127, 140, 141, 0.22);
+}
+.sdr-mm-fb i.black { background: #0a0a0a; border: 1px solid #ecf0f1; box-shadow: 0 0 0 1px rgba(0,0,0,0.6); }
+.sdr-mm-fb i.white { background: #ecf0f1; }
+
+#sdr-mm-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.sdr-mm-sw {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transition: outline 0.1s;
+}
+.sdr-mm-sw:hover { outline: 2px solid #fff; }
+
+#sdr-mm-controls {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.sdr-mm-btn {
+  font-size: 11px;
+  padding: 4px 0;
+  border-radius: 3px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* ══════════════════════════════════════
+   CALLSIGN QUIZ (guess the country — needs lookup service + ≥10 markers)
+   ══════════════════════════════════════ */
+#sdr-cq-call {
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+  letter-spacing: 1px;
+  color: #ecf0f1;
+  margin: 2px 0 7px;
+  min-height: 26px;
+}
+#sdr-cq-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.sdr-cq-opt {
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sdr-cq-opt.done { cursor: default; }
+/* Prefixed with #sdr-games-widget so these out-specify the base
+   `#sdr-games-widget button { background: …!important }` rule. */
+#sdr-games-widget .sdr-cq-opt.correct { background: rgba(46, 204, 113, 0.45) !important; border-color: #2ecc71 !important; color: #fff !important; }
+#sdr-games-widget .sdr-cq-opt.wrong   { background: rgba(231, 76, 60, 0.45) !important;  border-color: #e74c3c !important; color: #fff !important; }
 </style>
 
 <div id="sdr-games-widget">
@@ -448,6 +656,62 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     </div>
   </div>
 
+  <!-- ── Game 5: Mini Sudoku ── -->
+  <div class="sdr-game-panel" id="sdr-panel-su">
+    <div class="sdr-game-status" id="sdr-su-status">Tap a cell, then a number</div>
+    <div id="sdr-su-board"></div>
+    <div id="sdr-su-pad"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-su-score">W:0</span>
+      <button class="sdr-game-btn close" id="sdr-su-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-su-new-btn">New</button>
+    </div>
+  </div>
+
+  <!-- ── Game 6: Lights Out ── -->
+  <div class="sdr-game-panel" id="sdr-panel-lo">
+    <div id="sdr-lo-info">
+      <span id="sdr-lo-moves">Moves: 0</span>
+      <span id="sdr-lo-on">Lit: 0</span>
+    </div>
+    <div class="sdr-game-status" id="sdr-lo-status">Turn off all the lights</div>
+    <div id="sdr-lo-board"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-lo-score">W:0</span>
+      <button class="sdr-game-btn close" id="sdr-lo-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-lo-new-btn">New</button>
+    </div>
+  </div>
+
+  <!-- ── Game 7: Mastermind ── -->
+  <div class="sdr-game-panel" id="sdr-panel-mm">
+    <div class="sdr-game-status" id="sdr-mm-status">Crack the code</div>
+    <div id="sdr-mm-board"></div>
+    <div id="sdr-mm-palette"></div>
+    <div id="sdr-mm-controls">
+      <button class="sdr-mm-btn" id="sdr-mm-undo">⌫ Undo</button>
+      <button class="sdr-mm-btn" id="sdr-mm-submit">Submit</button>
+    </div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-mm-score">W:0 L:0</span>
+      <button class="sdr-game-btn close" id="sdr-mm-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-mm-new-btn">New</button>
+    </div>
+  </div>
+
+  <!-- ── Game 8: Callsign Quiz (added to the rotation only when the lookup
+       service is enabled, audio is active, and ≥10 callsign markers exist) ── -->
+  <div class="sdr-game-panel" id="sdr-panel-cq">
+    <div class="sdr-game-status" id="sdr-cq-status">Guess the country</div>
+    <div id="sdr-cq-call">…</div>
+    <div id="sdr-cq-options"></div>
+    <div class="sdr-game-footer">
+      <span class="sdr-game-score" id="sdr-cq-score">Streak:0 Best:0</span>
+      <button class="sdr-game-btn close" id="sdr-cq-close-btn" title="Hide widget">Close</button>
+      <button class="sdr-game-btn" id="sdr-cq-next-btn">Next</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -474,6 +738,9 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     { id: 'sdr-panel-p15', title: '15-Puzzle' },
     { id: 'sdr-panel-mem', title: 'Memory' },
     { id: 'sdr-panel-c4',  title: 'Connect 4' },
+    { id: 'sdr-panel-su',  title: 'Sudoku' },
+    { id: 'sdr-panel-lo',  title: 'Lights Out' },
+    { id: 'sdr-panel-mm',  title: 'Mastermind' },
   ];
   let currentGame = 0;
 
@@ -516,7 +783,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
     widget.addEventListener('pointerdown', e => {
       // Only drag from non-interactive targets
-      if (e.target.closest('button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell')) return;
+      if (e.target.closest('button, select, input, .sdr-ttt-cell, .sdr-ms-cell, .sdr-p15-cell, .sdr-mem-card, .sdr-c4-cell, .sdr-su-cell, .sdr-lo-cell, .sdr-mm-sw')) return;
       e.preventDefault();
       resolvePosition();
       dragging = true;
@@ -1387,6 +1654,672 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     });
 
     newGame();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // MINI SUDOKU (6×6 — digits 1-6, boxes are 2 rows × 3 cols)
+  // ══════════════════════════════════════════════════════════════════
+  (function sudoku() {
+    const N = 6, BR = 2, BC = 3;       // box: 2 rows × 3 cols
+    const MAX_REMOVE = 16;             // keep ~20 givens → easy puzzle
+
+    const boardEl  = document.getElementById('sdr-su-board');
+    const padEl    = document.getElementById('sdr-su-pad');
+    const statusEl = document.getElementById('sdr-su-status');
+    const scoreEl  = document.getElementById('sdr-su-score');
+
+    let cur = [], given = [], sel = -1, solved = false, wins = 0;
+
+    function shuffle(a) {
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // Can value v legally go at index i of grid g? (g[i] is treated as empty)
+    function valid(g, i, v) {
+      const r = Math.floor(i / N), c = i % N;
+      for (let k = 0; k < N; k++) {
+        if (g[r * N + k] === v) return false;   // row
+        if (g[k * N + c] === v) return false;   // col
+      }
+      const br = Math.floor(r / BR) * BR, bc = Math.floor(c / BC) * BC;
+      for (let dr = 0; dr < BR; dr++)
+        for (let dc = 0; dc < BC; dc++)
+          if (g[(br + dr) * N + (bc + dc)] === v) return false;  // box
+      return true;
+    }
+
+    // Fill an empty grid with a complete valid solution (randomised backtracking)
+    function fill(g, pos) {
+      if (pos === N * N) return true;
+      for (const v of shuffle([1, 2, 3, 4, 5, 6])) {
+        if (valid(g, pos, v)) {
+          g[pos] = v;
+          if (fill(g, pos + 1)) return true;
+          g[pos] = 0;
+        }
+      }
+      return false;
+    }
+
+    // Count solutions, stopping once `limit` is reached
+    function countSolutions(g, limit) {
+      let count = 0;
+      (function solve(pos) {
+        if (count >= limit) return;
+        if (pos === N * N) { count++; return; }
+        if (g[pos] !== 0) { solve(pos + 1); return; }
+        for (let v = 1; v <= N; v++) {
+          if (valid(g, pos, v)) {
+            g[pos] = v;
+            solve(pos + 1);
+            g[pos] = 0;
+            if (count >= limit) return;
+          }
+        }
+      })(0);
+      return count;
+    }
+
+    // Build a puzzle: full solution → remove cells while a unique solution remains
+    function generate() {
+      const g = new Array(N * N).fill(0);
+      fill(g, 0);
+      let removed = 0;
+      for (const i of shuffle([...Array(N * N).keys()])) {
+        if (removed >= MAX_REMOVE) break;
+        const backup = g[i];
+        g[i] = 0;
+        if (countSolutions(g.slice(), 2) === 1) removed++;
+        else g[i] = backup;             // restore — removal lost uniqueness
+      }
+      cur   = g.slice();
+      given = g.map(v => v !== 0);
+    }
+
+    // Indices that clash with another filled cell (row / col / box)
+    function findConflicts() {
+      const bad = new Set();
+      for (let i = 0; i < N * N; i++) {
+        const v = cur[i];
+        if (!v) continue;
+        const r = Math.floor(i / N), c = i % N;
+        for (let k = 0; k < N; k++) {
+          const a = r * N + k, b = k * N + c;
+          if (a !== i && cur[a] === v) { bad.add(i); bad.add(a); }
+          if (b !== i && cur[b] === v) { bad.add(i); bad.add(b); }
+        }
+        const br = Math.floor(r / BR) * BR, bc = Math.floor(c / BC) * BC;
+        for (let dr = 0; dr < BR; dr++)
+          for (let dc = 0; dc < BC; dc++) {
+            const j = (br + dr) * N + (bc + dc);
+            if (j !== i && cur[j] === v) { bad.add(i); bad.add(j); }
+          }
+      }
+      return bad;
+    }
+
+    function boxClasses(i) {
+      const r = Math.floor(i / N), c = i % N;
+      let cls = '';
+      if (c % BC === BC - 1 && c !== N - 1) cls += ' bdr-r';
+      if (r % BR === BR - 1 && r !== N - 1) cls += ' bdr-b';
+      return cls;
+    }
+
+    function render() {
+      const conflicts = findConflicts();
+      boardEl.innerHTML = '';
+      for (let i = 0; i < N * N; i++) {
+        const d = document.createElement('div');
+        d.className = 'sdr-su-cell' + boxClasses(i);
+        if (given[i]) d.classList.add('given');
+        if (i === sel) d.classList.add('sel');
+        if (conflicts.has(i)) d.classList.add('conflict');
+        d.dataset.i = i;
+        d.textContent = cur[i] ? cur[i] : '';
+        boardEl.appendChild(d);
+      }
+      scoreEl.textContent = 'W:' + wins;
+    }
+
+    function checkWin() {
+      if (cur.some(v => v === 0)) return;
+      if (findConflicts().size > 0) return;
+      solved = true;
+      wins++;
+      sel = -1;
+      statusEl.textContent = 'Solved! 🎉';
+      render();
+    }
+
+    function setSelected(v) {
+      if (solved || sel < 0 || given[sel]) return;
+      cur[sel] = v;            // v === 0 erases
+      render();
+      checkWin();
+    }
+
+    function buildPad() {
+      padEl.innerHTML = '';
+      for (let v = 1; v <= N; v++) {
+        const b = document.createElement('button');
+        b.className = 'sdr-su-key';
+        b.textContent = v;
+        b.dataset.v = v;
+        padEl.appendChild(b);
+      }
+      const er = document.createElement('button');
+      er.className = 'sdr-su-key';
+      er.textContent = '⌫';
+      er.dataset.v = 0;
+      padEl.appendChild(er);
+    }
+
+    function newGame() {
+      generate();
+      sel = -1;
+      solved = false;
+      statusEl.textContent = 'Tap a cell, then a number';
+      render();
+    }
+
+    // ── Event listeners ───────────────────────────────────────────
+    boardEl.addEventListener('click', e => {
+      const cell = e.target.closest('.sdr-su-cell');
+      if (!cell || solved) return;
+      const i = parseInt(cell.dataset.i, 10);
+      if (given[i] || sel === i) sel = -1;   // givens aren't editable; re-tap deselects
+      else sel = i;
+      render();
+    });
+
+    padEl.addEventListener('click', e => {
+      const k = e.target.closest('.sdr-su-key');
+      if (!k) return;
+      setSelected(parseInt(k.dataset.v, 10));
+    });
+
+    document.getElementById('sdr-su-new-btn').addEventListener('click', newGame);
+    document.getElementById('sdr-su-close-btn').addEventListener('click', () => {
+      document.getElementById('sdr-games-widget').style.display = 'none';
+    });
+
+    buildPad();
+    newGame();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // LIGHTS OUT (5×5 — clicking a cell toggles it + its 4 neighbours)
+  // ══════════════════════════════════════════════════════════════════
+  (function lightsOut() {
+    const N = 5;
+    const boardEl  = document.getElementById('sdr-lo-board');
+    const statusEl = document.getElementById('sdr-lo-status');
+    const scoreEl  = document.getElementById('sdr-lo-score');
+    const movesEl  = document.getElementById('sdr-lo-moves');
+    const litEl    = document.getElementById('sdr-lo-on');
+
+    let grid = [], moves = 0, wins = 0, won = false;
+
+    const idx = (r, c) => r * N + c;
+
+    function toggle(r, c) {
+      if (r >= 0 && r < N && c >= 0 && c < N) grid[idx(r, c)] = !grid[idx(r, c)];
+    }
+    function press(r, c) {
+      toggle(r, c); toggle(r - 1, c); toggle(r + 1, c); toggle(r, c - 1); toggle(r, c + 1);
+    }
+    function litCount() { return grid.reduce((n, v) => n + (v ? 1 : 0), 0); }
+
+    function render() {
+      boardEl.innerHTML = '';
+      for (let i = 0; i < N * N; i++) {
+        const d = document.createElement('div');
+        d.className = 'sdr-lo-cell' + (grid[i] ? ' on' : '');
+        d.dataset.i = i;
+        boardEl.appendChild(d);
+      }
+      movesEl.textContent = 'Moves: ' + moves;
+      litEl.textContent   = 'Lit: ' + litCount();
+      scoreEl.textContent = 'W:' + wins;
+    }
+
+    function newGame() {
+      // Scramble from an all-off board with random presses → always solvable
+      grid = new Array(N * N).fill(false);
+      const scrambles = 5 + Math.floor(Math.random() * 6);   // 5-10 presses
+      for (let k = 0; k < scrambles; k++)
+        press(Math.floor(Math.random() * N), Math.floor(Math.random() * N));
+      // guard against a scramble that lands back on all-off
+      if (litCount() === 0) press(Math.floor(Math.random() * N), Math.floor(Math.random() * N));
+      moves = 0;
+      won = false;
+      statusEl.textContent = 'Turn off all the lights';
+      render();
+    }
+
+    function checkWin() {
+      if (litCount() > 0) return;
+      won = true;
+      wins++;
+      statusEl.textContent = 'Cleared in ' + moves + '! 🎉';
+      render();
+    }
+
+    boardEl.addEventListener('click', e => {
+      if (won) return;
+      const cell = e.target.closest('.sdr-lo-cell');
+      if (!cell) return;
+      const i = parseInt(cell.dataset.i, 10);
+      press(Math.floor(i / N), i % N);
+      moves++;
+      render();
+      checkWin();
+    });
+
+    document.getElementById('sdr-lo-new-btn').addEventListener('click', newGame);
+    document.getElementById('sdr-lo-close-btn').addEventListener('click', () => {
+      document.getElementById('sdr-games-widget').style.display = 'none';
+    });
+
+    newGame();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // MASTERMIND (computer hides a 4-peg code from 6 colours; you deduce it)
+  // ══════════════════════════════════════════════════════════════════
+  (function mastermind() {
+    const SLOTS = 4, COLORS = 6, MAX_ROWS = 8;
+
+    const boardEl  = document.getElementById('sdr-mm-board');
+    const palEl    = document.getElementById('sdr-mm-palette');
+    const statusEl = document.getElementById('sdr-mm-status');
+    const scoreEl  = document.getElementById('sdr-mm-score');
+
+    let secret = [], guesses = [], current = [];
+    let over = false, won = false, wins = 0, losses = 0;
+
+    // Score a guess: black = right colour & spot, white = right colour wrong spot
+    function score(guess) {
+      let black = 0;
+      const sLeft = new Array(COLORS).fill(0), gLeft = new Array(COLORS).fill(0);
+      for (let i = 0; i < SLOTS; i++) {
+        if (guess[i] === secret[i]) black++;
+        else { sLeft[secret[i]]++; gLeft[guess[i]]++; }
+      }
+      let white = 0;
+      for (let c = 0; c < COLORS; c++) white += Math.min(sLeft[c], gLeft[c]);
+      return { black, white };
+    }
+
+    function fbDots(black, white) {
+      const wrap = document.createElement('div');
+      wrap.className = 'sdr-mm-fb';
+      for (let k = 0; k < SLOTS; k++) {
+        const dot = document.createElement('i');
+        if (k < black) dot.className = 'black';
+        else if (k < black + white) dot.className = 'white';
+        wrap.appendChild(dot);
+      }
+      return wrap;
+    }
+
+    function pegRow(values, extraClass) {
+      const row = document.createElement('div');
+      row.className = 'sdr-mm-row' + (extraClass ? ' ' + extraClass : '');
+      const pegs = document.createElement('div');
+      pegs.className = 'sdr-mm-pegs';
+      for (let i = 0; i < SLOTS; i++) {
+        const p = document.createElement('div');
+        p.className = 'sdr-mm-peg' + (values[i] != null ? ' sdr-mm-c' + values[i] : '');
+        pegs.appendChild(p);
+      }
+      row.appendChild(pegs);
+      return row;
+    }
+
+    function render() {
+      boardEl.innerHTML = '';
+      for (let r = 0; r < MAX_ROWS; r++) {
+        if (r < guesses.length) {
+          const row = pegRow(guesses[r].pegs);
+          row.appendChild(fbDots(guesses[r].black, guesses[r].white));
+          boardEl.appendChild(row);
+        } else if (r === guesses.length && !over) {
+          const row = pegRow(current, 'active');
+          row.appendChild(fbDots(0, 0));
+          boardEl.appendChild(row);
+        } else {
+          const row = pegRow([]);
+          row.appendChild(fbDots(0, 0));
+          boardEl.appendChild(row);
+        }
+      }
+      // Reveal the secret when the player has run out of guesses
+      if (over && !won) {
+        const row = pegRow(secret, 'reveal');
+        row.appendChild(fbDots(0, 0));
+        boardEl.appendChild(row);
+      }
+      scoreEl.textContent = 'W:' + wins + ' L:' + losses;
+    }
+
+    function addColor(c) {
+      if (over || current.length >= SLOTS) return;
+      current.push(c);
+      render();
+    }
+
+    function undo() {
+      if (over || current.length === 0) return;
+      current.pop();
+      render();
+    }
+
+    function submit() {
+      if (over || current.length < SLOTS) return;
+      const res = score(current);
+      guesses.push({ pegs: current.slice(), black: res.black, white: res.white });
+      current = [];
+      if (res.black === SLOTS) {
+        over = true; won = true; wins++;
+        statusEl.textContent = 'Cracked in ' + guesses.length + '! 🎉';
+      } else if (guesses.length >= MAX_ROWS) {
+        over = true; won = false; losses++;
+        statusEl.textContent = 'Out of guesses — code shown';
+      }
+      render();
+    }
+
+    function newGame() {
+      // Computer picks a random code (duplicates allowed, as in classic Mastermind)
+      secret = Array.from({ length: SLOTS }, () => Math.floor(Math.random() * COLORS));
+      guesses = [];
+      current = [];
+      over = false;
+      won = false;
+      statusEl.textContent = 'Crack the code';
+      render();
+    }
+
+    function buildPalette() {
+      palEl.innerHTML = '';
+      for (let c = 0; c < COLORS; c++) {
+        const s = document.createElement('div');
+        s.className = 'sdr-mm-sw sdr-mm-c' + c;
+        s.dataset.c = c;
+        palEl.appendChild(s);
+      }
+    }
+
+    // ── Event listeners ───────────────────────────────────────────
+    palEl.addEventListener('click', e => {
+      const s = e.target.closest('.sdr-mm-sw');
+      if (s) addColor(parseInt(s.dataset.c, 10));
+    });
+    document.getElementById('sdr-mm-undo').addEventListener('click', undo);
+    document.getElementById('sdr-mm-submit').addEventListener('click', submit);
+    document.getElementById('sdr-mm-new-btn').addEventListener('click', newGame);
+    document.getElementById('sdr-mm-close-btn').addEventListener('click', () => {
+      document.getElementById('sdr-games-widget').style.display = 'none';
+    });
+
+    buildPalette();
+    newGame();
+  })();
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // CALLSIGN QUIZ — guess which country a real on-air callsign is from.
+  // Only joins the ◀ ▶ rotation when the instance has the lookup service
+  // enabled, audio is active (lookups need an audio session), and there are
+  // at least 10 callsign markers to draw from.
+  // ══════════════════════════════════════════════════════════════════
+  (function callsignQuiz() {
+    const COUNTRY_GAME = { id: 'sdr-panel-cq', title: 'Callsign Quiz' };
+    const MIN_MARKERS  = 10;   // gate: need this many distinct callsigns
+    const MAX_ATTEMPTS = 8;    // give up after this many failed lookups per round
+
+    const panel     = document.getElementById('sdr-panel-cq');
+    const callEl    = document.getElementById('sdr-cq-call');
+    const optionsEl = document.getElementById('sdr-cq-options');
+    const statusEl  = document.getElementById('sdr-cq-status');
+    const scoreEl   = document.getElementById('sdr-cq-score');
+
+    let countries = null, countriesLoading = false;
+    let busy = false, answered = false, currentCountry = '';
+    let streak = 0, best = 0;
+    let autoNext = null;   // timer that advances to the next round after an answer
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    function shuffle(a) {
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+    const isActive = () => panel.classList.contains('active');
+
+    // ── Callsign pool ─────────────────────────────────────────────────
+    // We accumulate every callsign ever seen (persisted in localStorage) rather
+    // than only what's on the dial right now, so the quiz pool keeps growing
+    // across sessions and doesn't shrink as spots expire.
+    const LS_SEEN_KEY = 'sdr-cq-seen';
+    const SEEN_MAX = 2000;          // cap to bound localStorage; oldest dropped first
+    let seen = new Set();
+    try {
+      const a = JSON.parse(localStorage.getItem(LS_SEEN_KEY));
+      if (Array.isArray(a)) seen = new Set(a);
+    } catch (_) {}
+
+    // Snapshot the callsigns currently visible across the marker sources.
+    function liveCallsigns() {
+      const set = new Set();
+      const cw = (window.cwSpotsExtensionInstance && window.cwSpotsExtensionInstance.spots) || [];
+      const dx = (window.dxClusterExtensionInstance && window.dxClusterExtensionInstance.spots) || [];
+      for (const s of cw) if (s && s.dx_call) set.add(s.dx_call);
+      for (const s of dx) if (s && s.dx_call) set.add(s.dx_call);
+      const va = window.VoiceActivityService;
+      if (va && typeof va.getAllActivities === 'function') {
+        const st = va.getLatest && va.getLatest();
+        if (st && st.enabled)
+          for (const a of va.getAllActivities()) if (a && a.dx_callsign) set.add(a.dx_callsign);
+      }
+      return set;
+    }
+
+    // Merge the current snapshot into the persistent pool; save if it grew.
+    function harvest() {
+      let added = false;
+      for (const cs of liveCallsigns()) if (!seen.has(cs)) { seen.add(cs); added = true; }
+      if (!added) return;
+      while (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);  // drop oldest
+      try { localStorage.setItem(LS_SEEN_KEY, JSON.stringify([...seen])); } catch (_) {}
+    }
+
+    function available() {
+      harvest();   // keep the pool fresh whenever availability is evaluated
+      const lookupOn = (window.instanceDescription && window.instanceDescription.lookup_service === true)
+        || window._lookupServiceEnabled === true;
+      const audioOn = !!(window.wsManager && window.wsManager.ws &&
+        window.wsManager.ws.readyState === WebSocket.OPEN);
+      return lookupOn && audioOn && seen.size >= MIN_MARKERS;
+    }
+
+    // Add/remove the game from the rotation as conditions change. The country
+    // game, when present, is always the last entry in GAMES.
+    function syncRotation() {
+      const idx = GAMES.indexOf(COUNTRY_GAME);
+      const want = available();
+      if (want && idx === -1) {
+        GAMES.push(COUNTRY_GAME);
+      } else if (!want && idx !== -1) {
+        if (currentGame === idx) showGame(0);   // move off it before removing
+        GAMES.splice(idx, 1);
+        if (currentGame > idx) currentGame--;
+      }
+    }
+
+    // ── Lookups ───────────────────────────────────────────────────────
+    function ensureCountries() {
+      if (countries || countriesLoading) return Promise.resolve();
+      countriesLoading = true;
+      return fetch('/api/cty/countries')
+        .then(r => (r.ok ? r.json() : null))
+        .then(j => { if (j && j.success && j.data && j.data.countries) countries = j.data.countries; })
+        .catch(() => {})
+        .finally(() => { countriesLoading = false; });
+    }
+
+    // Private lookup results (callsign → country string, or null = no country).
+    // We deliberately do NOT use window._fetchCallsignForMediaSession /
+    // _callsignLookupCache: those broadcast the result to every lookup surface
+    // (QRZ widget, marker widget, …), which would reveal the answer. Fetching
+    // /api/lookup directly keeps the quiz isolated.
+    const myCache = new Map();
+
+    function lookupCountry(cs) {
+      const uuid = window.userSessionID || '';
+      if (!uuid) return Promise.resolve(null);
+      const url = '/api/lookup?callsign=' + encodeURIComponent(cs) + '&uuid=' + encodeURIComponent(uuid);
+      return fetch(url).then(resp => {
+        if (resp.status === 429) return null;                  // rate-limited → leave uncached, retry later
+        if (!resp.ok) { myCache.set(cs, null); return null; }  // 404/401/503 → dead
+        return resp.json().then(d => {
+          const c = (d && d.country) ? String(d.country).trim() : '';
+          myCache.set(cs, c || null);
+          return c || null;
+        });
+      }).catch(() => null);                                    // network error → leave uncached
+    }
+
+    // Recently-asked callsigns, so Next keeps serving fresh ones instead of
+    // repeating whichever happens to be cached.
+    const recent = [];
+    const RECENT_MAX = 30;
+
+    // Shuffle candidates for variety; only push cached-failures (no country)
+    // to the back so we don't waste attempts on them. Recently-asked callsigns
+    // are excluded until the pool is exhausted, then the history resets.
+    function orderedCandidates() {
+      harvest();                 // fold in any newly-arrived callsigns first
+      const all = [...seen];
+      const recentSet = new Set(recent);
+      let pool = all.filter(cs => !recentSet.has(cs));
+      if (pool.length === 0) { recent.length = 0; pool = all; }   // exhausted → start over
+      const live = [], dead = [];
+      for (const cs of pool) {
+        if (myCache.has(cs) && myCache.get(cs) === null) dead.push(cs);  // looked up, no country
+        else live.push(cs);                                             // unknown or known-good
+      }
+      return [...shuffle(live), ...shuffle(dead)];
+    }
+
+    function buildOptions(correct) {
+      const pool = countries.map(c => c.name).filter(n => n && n !== correct);
+      const opts = shuffle([correct, ...shuffle(pool).slice(0, 4)]);
+      optionsEl.innerHTML = '';
+      for (const name of opts) {
+        const b = document.createElement('button');
+        b.className = 'sdr-cq-opt';
+        b.textContent = name;
+        b.dataset.name = name;
+        optionsEl.appendChild(b);
+      }
+    }
+
+    async function newRound() {
+      if (busy) return;
+      clearTimeout(autoNext); autoNext = null;
+      busy = true;
+      answered = false;
+      optionsEl.innerHTML = '';
+      callEl.textContent = '…';
+      statusEl.textContent = 'Finding a callsign…';
+
+      await ensureCountries();
+      if (!countries || countries.length < 5) {
+        statusEl.textContent = 'Country list unavailable';
+        busy = false;
+        return;
+      }
+
+      const calls = orderedCandidates();
+      let found = null;
+      const limit = Math.min(MAX_ATTEMPTS, calls.length);
+      for (let i = 0; i < limit; i++) {
+        const country = await lookupCountry(calls[i]);
+        if (country) { found = { cs: calls[i], country }; break; }
+        if (!isActive()) { busy = false; return; }   // user navigated away
+        await sleep(1000);                            // failed/not-found → try next
+        if (!isActive()) { busy = false; return; }
+      }
+
+      if (!found) {
+        callEl.textContent = '—';
+        statusEl.textContent = 'No lookups succeeded — press Next';
+        busy = false;
+        return;
+      }
+
+      recent.push(found.cs);
+      if (recent.length > RECENT_MAX) recent.shift();
+      currentCountry = found.country;
+      callEl.textContent = found.cs;
+      buildOptions(found.country);
+      statusEl.textContent = 'Which country?';
+      busy = false;
+    }
+
+    // ── Answer handling ───────────────────────────────────────────────
+    optionsEl.addEventListener('click', e => {
+      const b = e.target.closest('.sdr-cq-opt');
+      if (!b || answered || busy) return;
+      answered = true;
+      const pick = b.dataset.name;
+      for (const x of optionsEl.children) {
+        x.classList.add('done');
+        if (x.dataset.name === currentCountry) x.classList.add('correct');
+        else if (x === b) x.classList.add('wrong');
+      }
+      if (pick === currentCountry) {
+        streak++;
+        if (streak > best) best = streak;
+        statusEl.textContent = 'Correct! ✓';
+      } else {
+        streak = 0;
+        statusEl.textContent = 'Nope — ' + currentCountry;
+      }
+      scoreEl.textContent = 'Streak:' + streak + ' Best:' + best;
+
+      // Auto-advance after 3s unless the user presses Next (or leaves) first.
+      clearTimeout(autoNext);
+      autoNext = setTimeout(() => { if (isActive()) newRound(); }, 3000);
+    });
+
+    document.getElementById('sdr-cq-next-btn').addEventListener('click', () => { if (!busy) newRound(); });
+    document.getElementById('sdr-cq-close-btn').addEventListener('click', () => {
+      clearTimeout(autoNext); autoNext = null;
+      document.getElementById('sdr-games-widget').style.display = 'none';
+    });
+
+    // Start a fresh round the moment the panel becomes the active game (and it
+    // doesn't already have a question waiting / in flight).
+    new MutationObserver(() => {
+      if (isActive() && !busy && !answered && optionsEl.children.length === 0) newRound();
+    }).observe(panel, { attributes: true, attributeFilter: ['class'] });
+
+    // Re-evaluate availability on a timer (spots/audio arrive asynchronously).
+    syncRotation();
+    setInterval(syncRotation, 8000);
   })();
 
 })();

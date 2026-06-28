@@ -1247,6 +1247,9 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>Note:</strong> Bookmark changes take effect immediately and are visible to all users without requiring a server restart.
                     </div>
+                    <div style="margin-bottom: 12px;">
+                        <input type="text" id="bookmarkFilterInput" placeholder="🔍 Filter by name, frequency, group or comment…" oninput="filterBookmarks()" style="width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid #ced4da; border-radius: 5px; font-size: 14px;">
+                    </div>
                     <div id="bookmarksList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading bookmarks...</p>
@@ -5360,13 +5363,34 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             }
         }
 
+        function filterBookmarks() {
+            renderBookmarks();
+        }
+
         function renderBookmarks() {
             const container = document.getElementById('bookmarksList');
             container.innerHTML = '';
             container.classList.remove('loading');
 
+            // Apply live filter
+            const filterInput = document.getElementById('bookmarkFilterInput');
+            const query = filterInput ? filterInput.value.trim().toLowerCase() : '';
+            const visibleBookmarks = query
+                ? currentBookmarks.filter(b => {
+                    return (b.name || '').toLowerCase().includes(query) ||
+                           String(b.frequency || '').includes(query) ||
+                           (b.group || '').toLowerCase().includes(query) ||
+                           (b.comment || '').toLowerCase().includes(query);
+                  })
+                : currentBookmarks;
+
             if (currentBookmarks.length === 0) {
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No bookmarks found. Click "Add New Bookmark" to create one.</p>';
+                return;
+            }
+
+            if (visibleBookmarks.length === 0) {
+                container.innerHTML = `<p style="text-align: center; color: #666; padding: 40px;">No bookmarks match "<strong>${query}</strong>".</p>`;
                 return;
             }
 
@@ -5391,7 +5415,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             container.appendChild(table);
 
             const tbody = document.getElementById('bookmarksTableBody');
-            currentBookmarks.forEach((bookmark, index) => {
+            visibleBookmarks.forEach((bookmark, index) => {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
 

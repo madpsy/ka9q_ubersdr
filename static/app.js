@@ -15728,10 +15728,11 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
 // The snap (●) and marker-jump (‹ ›) buttons are excluded — they are
 // idempotent / navigation actions that don't benefit from repeat.
 //
-// Implementation uses touchstart/touchend/touchcancel so it works on mobile
-// without conflicting with the existing onclick handlers (which still fire
-// on a short tap).  contextmenu is suppressed on these buttons to prevent
-// the browser's long-press menu from appearing.
+// Implementation uses the Pointer Events API (pointerdown/pointerup/pointercancel)
+// with setPointerCapture so the pointer stays locked to the button even if the
+// cursor drifts slightly — this prevents the sporadic cancellation seen with
+// mouseleave.  Short taps still fire the existing onclick handlers normally.
+// contextmenu is suppressed to prevent the browser's long-press callout menu.
 (function initTuningButtonLongPress() {
     const container = document.querySelector('.tuning-buttons');
     if (!container) return;

@@ -15766,10 +15766,11 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     container.querySelectorAll('button').forEach(function (btn) {
         if (shouldExclude(btn)) return;
 
-        let initialTimer  = null;
-        let repeatTimer   = null;
-        let accelTimer    = null;
+        let initialTimer    = null;
+        let repeatTimer     = null;
+        let accelTimer      = null;
         let currentInterval = INTERVAL_START;
+        let touchActive     = false; // prevents synthesised mousedown after touchstart
 
         function stopAll() {
             if (initialTimer  !== null) { clearTimeout(initialTimer);   initialTimer  = null; }
@@ -15785,7 +15786,7 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
             }, currentInterval);
         }
 
-        btn.addEventListener('touchstart', function (e) {
+        function startLongPress() {
             const action = getAction(btn);
             if (!action) return;
 
@@ -15803,15 +15804,40 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
                     currentInterval = Math.max(INTERVAL_MIN, currentInterval - INTERVAL_STEP);
                 }, ACCEL_EVERY);
             }, INITIAL_DELAY);
-        }, { passive: true });
+        }
 
         function cancelLongPress() {
             stopAll();
         }
 
-        btn.addEventListener('touchend',    cancelLongPress, { passive: true });
-        btn.addEventListener('touchcancel', cancelLongPress, { passive: true });
-        btn.addEventListener('touchmove',   cancelLongPress, { passive: true });
+        // ── Touch (mobile) ───────────────────────────────────────────────────
+        btn.addEventListener('touchstart', function () {
+            touchActive = true;
+            startLongPress();
+        }, { passive: true });
+        btn.addEventListener('touchend', function () {
+            touchActive = false;
+            cancelLongPress();
+        }, { passive: true });
+        btn.addEventListener('touchcancel', function () {
+            touchActive = false;
+            cancelLongPress();
+        }, { passive: true });
+        btn.addEventListener('touchmove', function () {
+            touchActive = false;
+            cancelLongPress();
+        }, { passive: true });
+
+        // ── Mouse (desktop / trackpad) ───────────────────────────────────────
+        // Guard against the synthesised mousedown that browsers fire after
+        // touchstart on touch devices — if a touch is already active, skip.
+        btn.addEventListener('mousedown', function (e) {
+            if (e.button !== 0) return; // left button only
+            if (touchActive) return;    // already handled by touch path
+            startLongPress();
+        });
+        btn.addEventListener('mouseup',    cancelLongPress);
+        btn.addEventListener('mouseleave', cancelLongPress);
 
         // Suppress the browser's context-menu / callout on long-press.
         btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });

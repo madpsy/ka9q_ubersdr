@@ -306,7 +306,7 @@ type ServerConfig struct {
 type AudioConfig struct {
 	BufferSize        int            `yaml:"buffer_size"`
 	DefaultSampleRate int            `yaml:"default_sample_rate"`
-	ModeSampleRates   map[string]int `yaml:"mode_sample_rates"`
+	ModeSampleRates   map[string]int `yaml:"mode_sample_rates"` // parsed but ignored; rates are hardcoded in GetSampleRateForMode
 	Opus              OpusConfig     `yaml:"opus"`
 }
 
@@ -1260,12 +1260,30 @@ func LoadConfig(filename string) (*Config, error) {
 	return &config, nil
 }
 
-// GetSampleRateForMode returns the appropriate sample rate for a given mode
+// GetSampleRateForMode returns the hardcoded sample rate for a given mode.
+// These values must match the samprate settings in ka9q-radio's presets.conf.
+// The ModeSampleRates field in the config is parsed (so old configs don't error)
+// but is intentionally ignored here to prevent stale config values from causing
+// sample-rate mismatches (e.g. half-speed audio when presets.conf is updated).
 func (c *AudioConfig) GetSampleRateForMode(mode string) int {
-	if rate, ok := c.ModeSampleRates[mode]; ok {
-		return rate
+	switch mode {
+	case "usb", "lsb", "cwu", "cwl":
+		return 12000
+	case "am", "sam", "fm", "nfm":
+		return 24000
+	case "iq":
+		return 10000
+	case "iq48":
+		return 48000
+	case "iq96":
+		return 96000
+	case "iq192":
+		return 192000
+	case "iq384":
+		return 384000
+	default:
+		return 12000 // safe default for any unknown mode
 	}
-	return c.DefaultSampleRate
 }
 
 // Validate checks if the configuration is valid

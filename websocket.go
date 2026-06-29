@@ -586,7 +586,10 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	var bandwidthLow, bandwidthHigh *int
-	const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs/passwords exempt)
+	// Maximum bandwidth limit in Hz (Nyquist of 24 kHz sample rate used by AM/SAM/FM/NFM).
+	// The websdr_websocket.go applyParamCommand() applies a tighter per-mode Nyquist clamp
+	// on top of this, so raising this to 12000 is safe for all modes.
+	const maxBandwidth = 12000 // bypassed IPs/passwords exempt
 	isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP, password)
 
 	// Only process bandwidth parameters for non-wide IQ modes
@@ -594,7 +597,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		if bwl := query.Get("bandwidthLow"); bwl != "" {
 			var val int
 			if _, err := fmt.Sscanf(bwl, "%d", &val); err == nil {
-				// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+				// Validate bandwidth range: -12000 to +12000 Hz (unless IP is bypassed)
 				if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
 					log.Printf("Rejected WebSocket connection: bandwidthLow %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
 					wsh.sendError(conn, fmt.Sprintf("Bandwidth low %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
@@ -606,7 +609,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		if bwh := query.Get("bandwidthHigh"); bwh != "" {
 			var val int
 			if _, err := fmt.Sscanf(bwh, "%d", &val); err == nil {
-				// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+				// Validate bandwidth range: -12000 to +12000 Hz (unless IP is bypassed)
 				if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
 					log.Printf("Rejected WebSocket connection: bandwidthHigh %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
 					wsh.sendError(conn, fmt.Sprintf("Bandwidth high %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
@@ -872,10 +875,12 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}
 
 				// At least one bandwidth value was sent
-				const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs/passwords exempt)
+				// 12000 Hz = Nyquist of 24 kHz sample rate (AM/SAM/FM/NFM).
+				// applyParamCommand() in websdr_websocket.go applies a tighter per-mode clamp.
+				const maxBandwidth = 12000 // bypassed IPs/passwords exempt
 				isBypassed := wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword)
 				if msg.BandwidthLow != nil {
-					// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+					// Validate bandwidth range: -12000 to +12000 Hz (unless IP is bypassed)
 					if !isBypassed && (*msg.BandwidthLow < -maxBandwidth || *msg.BandwidthLow > maxBandwidth) {
 						wsh.sendError(conn, fmt.Sprintf("Bandwidth low %d Hz is out of valid range (±%d Hz)", *msg.BandwidthLow, maxBandwidth))
 						continue // Don't close connection, just reject this tune request
@@ -883,7 +888,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					newBandwidthLow = *msg.BandwidthLow
 				}
 				if msg.BandwidthHigh != nil {
-					// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+					// Validate bandwidth range: -12000 to +12000 Hz (unless IP is bypassed)
 					if !isBypassed && (*msg.BandwidthHigh < -maxBandwidth || *msg.BandwidthHigh > maxBandwidth) {
 						wsh.sendError(conn, fmt.Sprintf("Bandwidth high %d Hz is out of valid range (±%d Hz)", *msg.BandwidthHigh, maxBandwidth))
 						continue // Don't close connection, just reject this tune request

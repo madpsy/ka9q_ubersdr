@@ -31,8 +31,8 @@ type ChatUser struct {
 	LastUpdateTime    time.Time   // For rate limiting user updates (frequency/mode)
 	Frequency         uint64      // User's current frequency in Hz (optional)
 	Mode              string      // User's current mode (optional)
-	BWHigh            int         // High bandwidth cutoff in Hz (-10000 to 10000, optional)
-	BWLow             int         // Low bandwidth cutoff in Hz (-10000 to 10000, optional)
+	BWHigh            int         // High bandwidth cutoff in Hz (-12000 to 12000, optional)
+	BWLow             int         // Low bandwidth cutoff in Hz (-12000 to 12000, optional)
 	ZoomBW            float64     // Spectrum zoom bandwidth in Hz (optional)
 	CAT               bool        // CAT control enabled (optional)
 	TX                bool        // Transmitting status (optional)
@@ -376,8 +376,8 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	// Update bandwidth high if provided AND different
 	if bwHigh, ok := updates["bw_high"].(float64); ok {
-		// Validate bandwidth cutoffs (-10000 to 10000 Hz)
-		if bwHigh < -10000 || bwHigh > 10000 {
+		// Validate bandwidth cutoffs (-12000 to 12000 Hz — Nyquist of 24 kHz sample rate)
+		if bwHigh < -12000 || bwHigh > 12000 {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidBandwidth
 		}
@@ -390,8 +390,8 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	// Update bandwidth low if provided AND different
 	if bwLow, ok := updates["bw_low"].(float64); ok {
-		// Validate bandwidth cutoffs (-10000 to 10000 Hz)
-		if bwLow < -10000 || bwLow > 10000 {
+		// Validate bandwidth cutoffs (-12000 to 12000 Hz — Nyquist of 24 kHz sample rate)
+		if bwLow < -12000 || bwLow > 12000 {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidBandwidth
 		}
@@ -1411,7 +1411,7 @@ var (
 	ErrUsernameAlreadyTaken    = &ChatError{"username already taken - please choose a different username"}
 	ErrInvalidFrequency        = &ChatError{"invalid frequency - must be between 0 and 30000000 Hz"}
 	ErrInvalidMode             = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm, or any IQ mode (iq, iq48, iq96, iq192, iq384)"}
-	ErrInvalidBandwidth        = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -10000 and 10000 Hz"}
+	ErrInvalidBandwidth        = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -12000 and 12000 Hz"}
 )
 
 // ChatError represents a chat-related error

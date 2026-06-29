@@ -129,11 +129,11 @@ class LocalBookmarksUI {
                         <div style="display: flex; gap: 10px; align-items: center;">
                             <div style="flex: 1;">
                                 <input type="text" id="local-bookmarks-edit-bw-low" placeholder="Low (e.g. -2800)" inputmode="numeric" pattern="-?[0-9]+" style="width: 100%;">
-                                <small>Lower edge offset from carrier (−6000 to 6000)</small>
+                                <small>Lower edge offset from carrier (±6000 Hz; ±12000 for AM/SAM/FM/NFM)</small>
                             </div>
                             <div style="flex: 1;">
                                 <input type="text" id="local-bookmarks-edit-bw-high" placeholder="High (e.g. 2800)" inputmode="numeric" pattern="-?[0-9]+" style="width: 100%;">
-                                <small>Upper edge offset from carrier (−6000 to 6000)</small>
+                                <small>Upper edge offset from carrier (±6000 Hz; ±12000 for AM/SAM/FM/NFM)</small>
                             </div>
                         </div>
                         <small>Leave blank to use the mode default bandwidth</small>
@@ -580,12 +580,12 @@ class LocalBookmarksUI {
             return;
         }
 
-        // Range check: FM allows ±8000, all other modes ±6000
+        // Range check: AM/SAM/FM/NFM allow ±12000 (Nyquist of 24 kHz sample rate); all other modes ±6000
         if (bwLowFilled) {
             const bwLow   = parseInt(bwLowRaw);
             const bwHigh  = parseInt(bwHighRaw);
             const bwMode  = document.getElementById('local-bookmarks-edit-mode').value;
-            const bwLimit = (bwMode === 'fm') ? 8000 : 6000;
+            const bwLimit = ['am', 'sam', 'fm', 'nfm'].includes(bwMode) ? 12000 : 6000;
             if (isNaN(bwLow) || bwLow < -bwLimit || bwLow > bwLimit) {
                 this.showAlert('edit', 'error', `Bandwidth Low must be between −${bwLimit} and ${bwLimit} Hz for ${bwMode.toUpperCase()}.`);
                 return;
@@ -821,7 +821,9 @@ class LocalBookmarksUI {
 }
 
 // Mode bandwidth defaults [low, high] in Hz relative to carrier.
-// FM is the only mode that exceeds the ±6000 Hz limit (uses ±8000).
+// AM/SAM/FM/NFM use a 24 kHz sample rate (Nyquist = ±12000 Hz max).
+// USB/LSB/CW use a 12 kHz sample rate (Nyquist = ±6000 Hz max).
+// These are default passbands for new bookmarks, not the maximum allowed values.
 LocalBookmarksUI.BW_DEFAULTS = {
     usb: [50,    2700],
     lsb: [-2700, -50],

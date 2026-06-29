@@ -38,8 +38,8 @@ const Tune = (() => {
   function isSSBMode(m)    { return ['usb','lsb'].includes(m || _mode); }
 
   function bwSliderMax(mode) {
-    if (['am','sam'].includes(mode)) return 12000; // 24 kHz samprate → Nyquist = 12 kHz
-    if (mode === 'fm') return 8000;
+    // AM/SAM/FM/NFM use 24 kHz samprate → Nyquist = 12 kHz
+    if (['am','sam','fm','nfm'].includes(mode)) return 12000;
     if (mode === 'iq') return 12000;
     return 5000;
   }

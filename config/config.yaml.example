@@ -513,23 +513,11 @@ server:
 audio:
   # Audio buffer size in samples
   buffer_size: 4096
-  # Default sample rate in Hz
+  # Default sample rate in Hz (fallback for unknown modes; normally not needed)
   default_sample_rate: 12000
-  # Sample rates per mode (must match radiod preset sample rates)
-  mode_sample_rates:
-    usb: 12000
-    lsb: 12000
-    cwu: 12000    # CW Upper (for USB bands) preset in radiod uses 12 kHz
-    cwl: 12000    # CW Lower (for LSB bands) preset in radiod uses 12 kHz
-    am: 24000     # AM preset in radiod uses 24 kHz (allows up to ±12 kHz filter edges)
-    sam: 24000    # SAM (Synchronous AM) preset in radiod uses 24 kHz (allows up to ±12 kHz filter edges)
-    fm: 24000     # FM preset in radiod uses 24 kHz
-    nfm: 24000    # NFM (Narrow FM) preset in radiod uses 24 kHz
-    iq: 10000     # Generic IQ mode
-    iq48: 48000   # Wide bandwidth IQ output for 48 kHz of real bandwidth
-    iq96: 96000  # Wide bandwidth IQ output for 96 kHz of real bandwidth
-    iq192: 192000 # Wide bandwidth IQ output for 192 kHz of real bandwidth
-    iq384: 384000 # Wide bandwidth IQ output for 384 kHz of real bandwidth
+  # Note: per-mode sample rates are hardcoded in config.go (GetSampleRateForMode)
+  # and must match the samprate settings in ka9q-radio's presets.conf.
+  # Do NOT add a mode_sample_rates block here — it will be silently ignored.
   # Opus compression settings
   opus:
     # Opus bitrate in bits per second (6000-510000, typical: 24000-64000)

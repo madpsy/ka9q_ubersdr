@@ -54,12 +54,14 @@ var modeLabels = []string{"USB", "LSB", "AM", "SAM", "FM", "CWU", "CWL", "IQ"}
 var wideIQLabels = []string{"IQ48", "IQ96", "IQ192", "IQ384"}
 
 // bwSliderMax returns the maximum slider value (Hz) for a given mode.
+// All values are the Nyquist limit of the mode's sample rate:
+//   - AM/SAM/FM/NFM use 24 kHz samprate → Nyquist = 12 kHz
+//   - USB/LSB/CW use 12 kHz samprate → Nyquist = 6 kHz (slider shows half-BW)
+//   - IQ: slider shows total BW; server gets ±half
 func bwSliderMax(mode string) float64 {
 	switch mode {
-	case "am", "sam":
+	case "am", "sam", "fm", "nfm":
 		return 12000 // 24 kHz samprate → Nyquist = 12 kHz
-	case "fm":
-		return 8000
 	case "iq":
 		return 12000
 	default:
@@ -87,13 +89,13 @@ func bwDefaultSlider(mode string) float64 {
 
 // bwToLoHi converts a slider value to (lo, hi) bandwidth cuts for the server.
 //
-//	USB/CWU: lo=0,          hi=+val
-//	LSB/CWL: lo=-val,       hi=0
-//	AM/FM:   lo=-val,       hi=+val   (symmetric)
-//	IQ:      lo=-(val/2),   hi=+(val/2)  (slider shows total BW; server gets ±half)
+//	USB/CWU:          lo=0,        hi=+val
+//	LSB/CWL:          lo=-val,     hi=0
+//	AM/SAM/FM/NFM:    lo=-val,     hi=+val   (symmetric)
+//	IQ:               lo=-(val/2), hi=+(val/2)  (slider shows total BW; server gets ±half)
 //
-// For IQ the slider goes up to 10 kHz (total bandwidth) but the server expects
-// symmetric edges, so a 10 kHz slider value → lo=-5000, hi=+5000.
+// For IQ the slider goes up to 12 kHz (total bandwidth) but the server expects
+// symmetric edges, so a 12 kHz slider value → lo=-6000, hi=+6000.
 func bwToLoHi(mode string, val float64) (lo, hi int) {
 	v := int(val)
 	switch mode {

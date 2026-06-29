@@ -1,8 +1,9 @@
 <!--
   CW Spot Notification Widget
   ============================
-  Displays the latest CW spot as a transient notification in the top-left
-  of the page, below the frequency notches. Fades after 3 seconds.
+  Displays the latest 5 CW spots as a persistent panel in the top-left
+  of the page, below the frequency notches. Each spot row is clickable
+  to tune to that frequency. The panel is draggable and dismissible.
   Works independently of the CW Spots extension.
 -->
 
@@ -18,8 +19,8 @@
     -webkit-backdrop-filter: blur(6px);
     color: #fff;
     border-radius: 6px;
-    padding: 6px 12px 6px 9px;
-    font-family: 'Courier New', Courier, monospace;
+    padding: 5px 8px 5px 9px;
+    font-family: 'Twemoji Flags', 'Courier New', Courier, monospace;
     font-size: 12px;
     font-weight: bold;
     line-height: 1.4;
@@ -31,11 +32,12 @@
     opacity: 0;
     transition: opacity 0.35s ease;
     display: none;
+    min-width: 180px;
   }
 
   #cw-spot-notification.cw-spot-dragging {
     cursor: grabbing;
-    transition: none; /* no opacity transition while dragging */
+    transition: none;
     box-shadow: 0 4px 20px rgba(0,0,0,0.8);
   }
 
@@ -47,26 +49,41 @@
     opacity: 0;
   }
 
-  #cw-spot-notification .csn-top {
+  #cw-spot-notification .csn-header {
     display: flex;
-    align-items: baseline;
-    gap: 6px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
     padding-right: 18px; /* room for close button */
   }
 
-  #cw-spot-notification .csn-callsign {
-    font-size: 13px;
-    letter-spacing: 0.5px;
+  #cw-spot-notification .csn-title {
+    font-size: 9px;
+    font-weight: normal;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
   }
 
-  #cw-spot-notification .csn-band {
-    background: rgba(0,0,0,0.28);
-    border-radius: 3px;
-    padding: 1px 5px;
-    font-size: 10px;
+  #cw-spot-notification .csn-map-btn {
+    font-size: 9px;
     font-weight: bold;
-    white-space: nowrap;
-    flex-shrink: 0;
+    letter-spacing: 0.4px;
+    color: rgba(255,255,255,0.8);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 3px;
+    padding: 1px 6px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    line-height: 1.4;
+    user-select: none;
+  }
+
+  #cw-spot-notification .csn-map-btn:hover {
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    border-color: rgba(255,255,255,0.5);
   }
 
   #cw-spot-notification .csn-close {
@@ -91,11 +108,73 @@
     background: rgba(0,0,0,0.3);
   }
 
-  #cw-spot-notification .csn-meta {
-    font-size: 10px;
+  #cw-spot-notification .csn-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  #cw-spot-notification .csn-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: baseline;
+    gap: 0 5px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+
+  #cw-spot-notification .csn-row:hover {
+    background: rgba(255,255,255,0.12);
+  }
+
+  #cw-spot-notification .csn-row.csn-row-new {
+    animation: csnRowFlash 0.5s ease-out;
+  }
+
+  #cw-spot-notification .csn-row.csn-row-active {
+    background: rgba(46, 204, 113, 0.2);
+    border-left: 2px solid #2ecc71;
+    padding-left: 2px; /* compensate for border */
+  }
+
+  #cw-spot-notification .csn-row.csn-row-active:hover {
+    background: rgba(46, 204, 113, 0.32);
+  }
+
+  @keyframes csnRowFlash {
+    0%   { background: rgba(255,255,255,0.28); }
+    100% { background: transparent; }
+  }
+
+  #cw-spot-notification .csn-callsign {
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #cw-spot-notification .csn-band {
+    background: rgba(0,0,0,0.28);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 9px;
+    font-weight: bold;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  #cw-spot-notification .csn-age {
+    font-size: 9px;
     font-weight: normal;
-    color: rgba(255,255,255,0.88);
-    margin-top: 1px;
+    color: #fff;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 22px;
+    text-align: right;
   }
 
   @keyframes csnPulse {
@@ -113,44 +192,51 @@
       display: none !important;
     }
   }
-  /* Also hide on real mobile devices detected via UA (window._isMobile → html.is-mobile). */
   html.is-mobile #cw-spot-notification { display: none !important; }
 </style>
 
-<div id="cw-spot-notification" title="Click to tune to this CW spot">
+<div id="cw-spot-notification" title="Click a spot to tune">
   <span class="csn-close" id="csn-close" title="Dismiss">&#x2715;</span>
-  <div class="csn-top">
-    <span class="csn-callsign" id="csn-callsign">--</span>
-    <span class="csn-band"     id="csn-band"></span>
+  <div class="csn-header">
+    <span class="csn-title">CW Spots</span>
+    <span class="csn-map-btn" id="csn-map-btn" title="Open CW Skimmer Map">Map</span>
   </div>
-  <div class="csn-meta" id="csn-meta"></div>
+  <div class="csn-list" id="csn-list"></div>
 </div>
 
 <script>
 (function () {
   'use strict';
 
-  // Do not run on real mobile devices (UA + touch-points detection by app.js)
-  // or on narrow-viewport screens — the widget is hidden by CSS anyway.
   if (window._isMobile || window.innerWidth <= 768) return;
 
+  var MAX_SPOTS      = 5;
   var POLL_INTERVAL  = 300;
   var MAX_POLL_TRIES = 200;
   var LS_POS_KEY     = 'cw_spot_widget_pos';
-  var DRAG_THRESHOLD = 5; // px — below this is a click, above is a drag
+  var DRAG_THRESHOLD = 5;
 
-  var pulseTimer  = null;
-  var latestSpot  = null;
-  var subscribed  = false;
-  var dismissed   = false;
-  var tries       = 0;
-  var lastBand    = null; // last known active band from band buttons
+  var pulseTimer   = null;
+  var spotsByBand  = {}; // band -> [spot, ...] newest first, max MAX_SPOTS each
+  var allSpots     = []; // global ring buffer (newest first) for when no band selected
+  var subscribed   = false;
+  var dismissed    = false;
+  var tries        = 0;
+  var lastBand     = null;
 
   var notif   = document.getElementById('cw-spot-notification');
-  var callEl  = document.getElementById('csn-callsign');
-  var bandEl  = document.getElementById('csn-band');
-  var metaEl  = document.getElementById('csn-meta');
+  var listEl  = document.getElementById('csn-list');
   var closeEl = document.getElementById('csn-close');
+  var mapBtn  = document.getElementById('csn-map-btn');
+
+  // ── Flag emoji helper ────────────────────────────────────────────────────
+  function csnIso2ToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var c = code.toUpperCase();
+    var base = 0x1F1E6 - 0x41;
+    try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+    catch (e) { return ''; }
+  }
 
   // ── Position restore from localStorage ──────────────────────────────────
   (function restorePosition() {
@@ -167,15 +253,13 @@
   })();
 
   // ── Drag-to-reposition ───────────────────────────────────────────────────
-  var dragState = null; // { startX, startY, origTop, origLeft }
+  var dragState = null;
   var wasDragged = false;
 
   notif.addEventListener('mousedown', function (e) {
-    // Don't start drag on the close button
     if (e.target === closeEl || closeEl.contains(e.target)) return;
-    // Only primary button
+    if (e.target === mapBtn  || mapBtn.contains(e.target))  return;
     if (e.button !== 0) return;
-
     var rect = notif.getBoundingClientRect();
     dragState = {
       startX:   e.clientX,
@@ -184,23 +268,20 @@
       origLeft: rect.left
     };
     wasDragged = false;
-    e.preventDefault(); // prevent text selection
+    e.preventDefault();
   });
 
   document.addEventListener('mousemove', function (e) {
     if (!dragState) return;
     var dx = e.clientX - dragState.startX;
     var dy = e.clientY - dragState.startY;
-
     if (!wasDragged && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
       wasDragged = true;
       notif.classList.add('cw-spot-dragging');
     }
-
     if (wasDragged) {
       var newTop  = Math.max(0, dragState.origTop  + dy);
       var newLeft = Math.max(0, dragState.origLeft + dx);
-      // Clamp to viewport
       newTop  = Math.min(newTop,  window.innerHeight - notif.offsetHeight);
       newLeft = Math.min(newLeft, window.innerWidth  - notif.offsetWidth);
       notif.style.top  = newTop  + 'px';
@@ -212,7 +293,6 @@
     if (!dragState) return;
     notif.classList.remove('cw-spot-dragging');
     if (wasDragged) {
-      // Save position to localStorage
       try {
         localStorage.setItem(LS_POS_KEY, JSON.stringify({
           top:  parseInt(notif.style.top,  10),
@@ -220,34 +300,34 @@
         }));
       } catch (e) { /* ignore */ }
     }
-    dragState  = null;
-    // wasDragged is read by the click handler below — reset after a tick
+    dragState = null;
     setTimeout(function () { wasDragged = false; }, 0);
   });
 
-  // ── Band filter helpers ──────────────────────────────────────────────────
+  // ── Band helpers ─────────────────────────────────────────────────────────
   function getCurrentBand() {
     var btn = document.querySelector('.band-status-badge.active');
     return btn ? btn.getAttribute('data-band') : null;
   }
 
-  // Poll for band changes every 500 ms; hide notification if band changed
+  // Re-render when band selection changes
   setInterval(function () {
     var band = getCurrentBand();
     if (band !== lastBand) {
       lastBand = band;
-      // Hide current notification if it's for a different band
-      if (latestSpot && band && latestSpot.band !== band) {
-        notif.classList.remove('cw-spot-visible');
-        notif.classList.add('cw-spot-fading');
-        setTimeout(function () {
-          if (!notif.classList.contains('cw-spot-visible')) {
-            notif.style.display = 'none';
-          }
-        }, 400);
-      }
+      renderList();
     }
   }, 500);
+
+
+  // ── Age formatting ───────────────────────────────────────────────────────
+  function fmtAge(ts) {
+    var secs = Math.floor((Date.now() - ts) / 1000);
+    if (secs < 60)  return '<1m';
+    var mins = Math.floor(secs / 60);
+    if (mins < 60)  return mins + 'm';
+    return Math.floor(mins / 60) + 'h';
+  }
 
   function esc(str) {
     return String(str || '')
@@ -257,26 +337,142 @@
       .replace(/"/g, '&quot;');
   }
 
+  // ── Tune to a spot ───────────────────────────────────────────────────────
+  // Mirrors tuneToFrequency() from voice.widget.html exactly.
+  function tuneToSpot(spot) {
+    if (!spot || !spot.frequency) return;
+    var hz   = spot.frequency;
+    var mode = hz < 10000000 ? 'cwl' : 'cwu';
+
+    if (typeof window.setFrequencyInputValue === 'function') {
+      window.setFrequencyInputValue(Math.round(hz));
+    } else {
+      var fi = document.getElementById('frequency');
+      if (fi) fi.value = Math.round(hz);
+    }
+    if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
+    if (typeof window.setMode === 'function') window.setMode(mode, false);
+    if (typeof window.updateURL === 'function') window.updateURL();
+    if (typeof window.autoTune === 'function') window.autoTune();
+
+    // Re-centre the spectrum via WebSocket pan message, suppressing edge-detection
+    // for 2 s so it doesn't fight the pan — same approach as voice.widget.html.
+    var spectrum = window.spectrumDisplay;
+    if (spectrum && spectrum.connected && spectrum.ws) {
+      spectrum.skipEdgeDetectionTemporary = true;
+      setTimeout(function () {
+        if (spectrum) spectrum.skipEdgeDetectionTemporary = false;
+      }, 2000);
+      spectrum.ws.send(JSON.stringify({ type: 'pan', frequency: hz }));
+    }
+  }
+
+  // ── Render the spot list ─────────────────────────────────────────────────
+  function renderList() {
+    var band    = getCurrentBand();
+    // Show last 5 for the active band; if no band selected, show last 5 overall
+    var visible = band
+      ? (spotsByBand[band] || [])
+      : allSpots;
+
+    if (visible.length === 0) {
+      // If panel is already visible (from a previous band), show a placeholder
+      if (notif.classList.contains('cw-spot-visible')) {
+        listEl.innerHTML = '<div style="font-size:10px;font-weight:normal;color:rgba(255,255,255,0.5);padding:2px 4px;">' +
+          (band ? 'Waiting for ' + band + ' spots\u2026' : 'Waiting for spots\u2026') + '</div>';
+      }
+      return;
+    }
+
+    // Build rows HTML
+    var html = '';
+    for (var i = 0; i < visible.length; i++) {
+      var s       = visible[i];
+      var flag    = csnIso2ToFlag(s.country_code || '');
+      var call    = esc(s.dx_call || s.callsign || '?');
+      var band_   = esc(s.band || '');
+      var isNew   = (i === 0 && s._isNew);
+
+      var age = s._receivedAt ? fmtAge(s._receivedAt) : '';
+      html += '<div class="csn-row' + (isNew ? ' csn-row-new' : '') + '" data-idx="' + i + '" data-freq="' + (s.frequency || 0) + '">';
+      html += '<span class="csn-callsign">' + (flag ? flag + '\u00A0' : '') + call + '</span>';
+      html += '<span class="csn-band">'    + band_  + '</span>';
+      html += '<span class="csn-age">'     + age    + '</span>';
+      html += '</div>';
+    }
+
+    listEl.innerHTML = html;
+
+    // Attach click handlers to each row
+    var rows = listEl.querySelectorAll('.csn-row');
+    for (var j = 0; j < rows.length; j++) {
+      (function (row, spot) {
+        row.addEventListener('click', function (e) {
+          if (wasDragged) return;
+          e.stopPropagation();
+          tuneToSpot(spot);
+        });
+      })(rows[j], visible[j]);
+    }
+
+    // Clear _isNew flag after render
+    if (visible.length > 0) visible[0]._isNew = false;
+
+    // Apply active-row highlight immediately after render
+    updateActiveRow();
+  }
+
+  // ── Active row highlight (mirrors voice.widget.html) ─────────────────────
+  var FREQ_TOLERANCE_HZ = 50;
+
+  function getDialHz() {
+    var f = document.getElementById('frequency');
+    if (!f) return null;
+    var hz = parseInt(f.getAttribute('data-hz-value') || f.value, 10);
+    return isNaN(hz) ? null : hz;
+  }
+
+  function updateActiveRow() {
+    var dialHz = getDialHz();
+    var rows   = listEl.querySelectorAll('.csn-row');
+    rows.forEach(function (row) {
+      var rowHz = parseFloat(row.getAttribute('data-freq'));
+      var match = dialHz !== null && Math.abs(rowHz - dialHz) <= FREQ_TOLERANCE_HZ;
+      row.classList.toggle('csn-row-active', match);
+    });
+  }
+
+  // ── Periodic age refresh ─────────────────────────────────────────────────
+  setInterval(function () {
+    if (!dismissed) renderList();
+  }, 30000);
+
+  // ── Show / add a new spot ────────────────────────────────────────────────
   function showSpot(spot) {
     if (dismissed) return;
-    // Filter: only show spots for the currently active band (if one is selected)
-    var band = getCurrentBand();
-    if (band && spot.band && spot.band !== band) return;
-    latestSpot = spot;
 
-    // Top row: callsign (left) + band badge (right)
-    callEl.textContent = spot.dx_call || spot.callsign || '?';
-    bandEl.textContent = spot.band || '';
+    // Stamp time for age display — prefer server timestamp, fall back to now
+    spot._receivedAt = spot.timestamp ? new Date(spot.timestamp).getTime() : Date.now();
+    spot._isNew = true;
 
-    // Meta row: country · frequency
-    var country = spot.country  || '';
-    var freqHz  = spot.frequency;
-    var freqStr = freqHz ? (freqHz / 1e6).toFixed(3) : '';
-    var meta = '';
-    if (country) meta += esc(country);
-    if (freqStr)  meta += (meta ? ' &middot; ' : '') + esc(freqStr);
-    metaEl.innerHTML = meta;
+    // Add to per-band ring buffer
+    var band = spot.band || '_unknown';
+    if (!spotsByBand[band]) spotsByBand[band] = [];
+    spotsByBand[band].unshift(spot);
+    if (spotsByBand[band].length > MAX_SPOTS) spotsByBand[band].length = MAX_SPOTS;
 
+    // Also maintain global ring buffer (for when no band is selected)
+    allSpots.unshift(spot);
+    if (allSpots.length > MAX_SPOTS) allSpots.length = MAX_SPOTS;
+
+    // Only pulse/show if this spot is for the currently active band (or no band selected)
+    var activeBand = getCurrentBand();
+    if (activeBand && spot.band && spot.band !== activeBand) {
+      // Spot is for a different band — update silently, no pulse
+      return;
+    }
+
+    // Show panel
     notif.style.display = 'block';
 
     if (pulseTimer) { clearTimeout(pulseTimer); pulseTimer = null; }
@@ -289,8 +485,11 @@
       notif.classList.remove('cw-spot-pulse');
       pulseTimer = null;
     }, 600);
+
+    renderList();
   }
 
+  // ── Dismiss ──────────────────────────────────────────────────────────────
   function dismiss() {
     dismissed = true;
     notif.classList.add('cw-spot-fading');
@@ -303,71 +502,31 @@
     dismiss();
   });
 
-  notif.addEventListener('click', function () {
-    // Ignore click if it was actually the end of a drag
-    if (wasDragged) return;
-    if (!latestSpot || !latestSpot.frequency) return;
-    var hz = latestSpot.frequency;
-    var mode = hz < 10000000 ? 'cwl' : 'cwu';
-
-    // Edge-tune: only re-center spectrum if the frequency is not already visible.
-    // Mirrors tuneToSpot() in the CW Spots extension exactly.
-    var centerSpectrum = true;
-    var spectrum = window.spectrumDisplay;
-    if (spectrum && spectrum.centerFreq && spectrum.totalBandwidth) {
-      var minVisible = spectrum.centerFreq - (spectrum.totalBandwidth / 2);
-      var maxVisible = spectrum.centerFreq + (spectrum.totalBandwidth / 2);
-      centerSpectrum = !(hz >= minVisible && hz <= maxVisible);
-    }
-
-    // Use window.radio if available (extensions path), otherwise use app.js globals directly.
-    if (window.radio && typeof window.radio.setFrequency === 'function') {
-      window.radio.setFrequency(hz, centerSpectrum);
-      if (typeof window.radio.setMode === 'function') window.radio.setMode(mode, false);
-    } else {
-      // Direct globals — same underlying calls that RadioAPI.setFrequency() makes.
-      if (typeof window.setFrequencyInputValue === 'function') {
-        window.setFrequencyInputValue(Math.round(hz));
-      } else {
-        var fi = document.getElementById('frequency');
-        if (fi) fi.value = Math.round(hz);
-      }
-      if (typeof window.updateBandButtons === 'function') window.updateBandButtons(hz);
-      if (typeof window.updateURL === 'function') window.updateURL();
-
-      // Edge-tune: temporarily enable the edge-tune checkbox if centering is needed.
-      if (centerSpectrum) {
-        var etCb = document.getElementById('spectrum-edge-tune-enable');
-        var etOrig = etCb ? etCb.checked : false;
-        if (etCb && !etOrig) {
-          etCb.checked = true;
-          etCb.dispatchEvent(new Event('change'));
-          setTimeout(function () {
-            if (etCb) { etCb.checked = etOrig; etCb.dispatchEvent(new Event('change')); }
-          }, 2000);
-        }
-      }
-
-      if (typeof window.autoTune === 'function') window.autoTune();
-      if (typeof window.setMode === 'function') window.setMode(mode, false);
-    }
+  mapBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    window.open('/cwskimmer_map.html', 'cwskimmer_map',
+      'width=1200,height=800,menubar=no,toolbar=no,location=no,status=no');
   });
 
+  // ── Subscribe to CW spots ────────────────────────────────────────────────
   function trySubscribe() {
     if (subscribed) return true;
     var client = window.dxClusterClient;
     if (!client) return false;
 
+    var usedOnCWSpot = false;
+
     if (typeof client.onCWSpot === 'function') {
       client.onCWSpot(function (spot) { showSpot(spot); });
+      usedOnCWSpot = true;
     }
 
     if (typeof client.subscribeToCWSpots === 'function') {
       client.subscribeToCWSpots();
     }
 
-    // Belt-and-suspenders: patch handleMessage to catch every cw_spot
-    if (typeof client.handleMessage === 'function') {
+    // Only patch handleMessage if onCWSpot wasn't available, to avoid duplicates
+    if (!usedOnCWSpot && typeof client.handleMessage === 'function') {
       var orig = client.handleMessage.bind(client);
       client.handleMessage = function (msg) {
         orig(msg);
@@ -394,6 +553,18 @@
   } else {
     setTimeout(poll, 0);
   }
+
+  // ── Frequency tracking for active-row highlight ───────────────────────────
+  // MutationObserver catches instant frequency changes; interval catches
+  // mode-only changes and acts as a backstop (same pattern as voice.widget.html).
+  var freqInput = document.getElementById('frequency');
+  if (freqInput && 'MutationObserver' in window) {
+    new MutationObserver(updateActiveRow).observe(freqInput, {
+      attributes: true,
+      attributeFilter: ['data-hz-value', 'value']
+    });
+  }
+  setInterval(updateActiveRow, 250);
 
 })();
 </script>

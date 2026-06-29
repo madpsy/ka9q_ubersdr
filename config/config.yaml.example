@@ -521,8 +521,8 @@ audio:
     lsb: 12000
     cwu: 12000    # CW Upper (for USB bands) preset in radiod uses 12 kHz
     cwl: 12000    # CW Lower (for LSB bands) preset in radiod uses 12 kHz
-    am: 12000     # AM preset in radiod uses 12 kHz
-    sam: 12000    # SAM (Synchronous AM) preset in radiod uses 12 kHz
+    am: 24000     # AM preset in radiod uses 24 kHz (allows up to ±12 kHz filter edges)
+    sam: 24000    # SAM (Synchronous AM) preset in radiod uses 24 kHz (allows up to ±12 kHz filter edges)
     fm: 24000     # FM preset in radiod uses 24 kHz
     nfm: 24000    # NFM (Narrow FM) preset in radiod uses 24 kHz
     iq: 10000     # Generic IQ mode

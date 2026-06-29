@@ -56,8 +56,10 @@ var wideIQLabels = []string{"IQ48", "IQ96", "IQ192", "IQ384"}
 // bwSliderMax returns the maximum slider value (Hz) for a given mode.
 func bwSliderMax(mode string) float64 {
 	switch mode {
-	case "am", "sam", "fm":
-		return 6000
+	case "am", "sam":
+		return 12000 // 24 kHz samprate → Nyquist = 12 kHz
+	case "fm":
+		return 8000
 	case "iq":
 		return 12000
 	default:

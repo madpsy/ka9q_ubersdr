@@ -1100,9 +1100,9 @@ function loadVFOState(vfo) {
             break;
         case 'am':
         case 'sam':
-            minLow = -6000;
+            minLow = -12000;
             maxLow = 0;
-            maxHigh = 6000;
+            maxHigh = 12000;
             break;
         case 'cwu':
         case 'cwl':
@@ -6450,10 +6450,10 @@ function setMode(mode, preserveBandwidth = false) {
     		break;
         case 'am':
         case 'sam':
-            minLow = -6000;
+            minLow = -12000;
             maxLow = 0;
             defaultLow = -5000;
-            maxHigh = 6000;
+            maxHigh = 12000;
             defaultHigh = 5000;
             break;
         case 'cwu':
@@ -6845,7 +6845,7 @@ function syncCombinedSliderToMode() {
             slider.value = Math.max(50, Math.abs(currentBandwidthHigh));
             break;
         case 'am': case 'sam':
-            slider.max   = 6000;
+            slider.max   = 12000;
             slider.value = Math.max(50, Math.abs(currentBandwidthHigh));
             break;
         case 'fm':

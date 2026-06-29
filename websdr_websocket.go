@@ -586,11 +586,11 @@ func (c *websdrConn) applyParamCommand(text string) {
 	}
 
 	// Clamp lo/hi to the Nyquist limit of the audio path.
-	// FM uses 24 kHz sample rate (Nyquist = 12 kHz); all other modes use
+	// FM, AM, and SAM use 24 kHz sample rate (Nyquist = 12 kHz); SSB/CW use
 	// 12 kHz sample rate (Nyquist = 6 kHz).  lo must be ≤ 0, hi must be ≥ 0.
 	{
-		maxBWKHz := 6.0  // SSB / CW / AM
-		if c.mode == 4 { // FM
+		maxBWKHz := 6.0                                // SSB / CW
+		if c.mode == 1 || c.mode == 2 || c.mode == 4 { // AM, SAM, FM
 			maxBWKHz = 12.0
 		}
 		if c.loKHz < -maxBWKHz {

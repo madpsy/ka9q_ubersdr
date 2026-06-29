@@ -38,7 +38,8 @@ const Tune = (() => {
   function isSSBMode(m)    { return ['usb','lsb'].includes(m || _mode); }
 
   function bwSliderMax(mode) {
-    if (['am','sam','fm'].includes(mode)) return 6000;
+    if (['am','sam'].includes(mode)) return 12000; // 24 kHz samprate → Nyquist = 12 kHz
+    if (mode === 'fm') return 8000;
     if (mode === 'iq') return 12000;
     return 5000;
   }
@@ -47,7 +48,7 @@ const Tune = (() => {
     switch (mode) {
       case 'usb': case 'lsb': return 2700;
       case 'cwu': case 'cwl': return 600;
-      case 'am':  case 'sam': return 4000;
+      case 'am':  case 'sam': return 5000;
       case 'fm':              return 5000;
       case 'iq':              return 12000;
       default:                return 2700;

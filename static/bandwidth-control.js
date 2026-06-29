@@ -85,9 +85,9 @@ export function adjustBandwidth(direction) {
             // AM/SAM: change both symmetrically
             newLow = currentBandwidthLow - change;
             newHigh = currentBandwidthHigh + change;
-            // Clamp to valid range (-6000 to 6000 Hz)
-            newLow = Math.max(-6000, Math.min(0, newLow));
-            newHigh = Math.max(0, Math.min(6000, newHigh));
+            // Clamp to valid range (-12000 to 12000 Hz, matching 24 kHz samprate Nyquist)
+            newLow = Math.max(-12000, Math.min(0, newLow));
+            newHigh = Math.max(0, Math.min(12000, newHigh));
             break;
             
         case 'fm':

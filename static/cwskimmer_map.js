@@ -888,6 +888,20 @@ class CWSkimmerMap {
                 // Keep world view - don't zoom in on receiver
                 // this.map.setView([this.receiverLocation.lat, this.receiverLocation.lon], 5);
             }
+
+            // If lookup_service is enabled and the user has no stored cluster preference,
+            // default clusters to OFF for first-time visitors.
+            if (data.lookup_service === true && localStorage.getItem('cwskimmer_showClusters') === null) {
+                this.clustersEnabled = false;
+                const checkbox = document.getElementById('show-clusters-checkbox');
+                if (checkbox) checkbox.checked = false;
+                // Swap the active marker layer from cluster group to plain layer group
+                if (this.map && this.activeMarkerLayer) {
+                    this.map.removeLayer(this.activeMarkerLayer);
+                    this.activeMarkerLayer = this.markerLayerGroup;
+                    this.map.addLayer(this.activeMarkerLayer);
+                }
+            }
         } catch (error) {
             console.error('Error loading receiver location:', error);
         }

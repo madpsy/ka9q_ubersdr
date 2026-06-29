@@ -3,7 +3,7 @@
      • Wide-screen only (hidden ≤1024px)
      • Fixed to left edge, vertically centred
      • Games: Noughts & Crosses, Minesweeper, 15-Puzzle, Memory, Connect 4, Mini Sudoku, Lights Out, Mastermind
-       and Callsign Quiz (the last only when the lookup service is enabled, audio is active, and ≥10 callsign markers exist)
+       and Callsign Quiz (the last only when ≥10 callsign markers have been seen; uses local CTY lookup)
      • ◀ ▶ arrows to switch games
      • Drag widget to reposition
      ═══════════════════════════════════════════════════════════ -->
@@ -2078,9 +2078,8 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
   // ══════════════════════════════════════════════════════════════════
   // CALLSIGN QUIZ — guess which country a real on-air callsign is from.
-  // Only joins the ◀ ▶ rotation when the instance has the lookup service
-  // enabled, audio is active (lookups need an audio session), and there are
-  // at least 10 callsign markers to draw from.
+  // Uses the local /api/cty/lookup endpoint (no external service required).
+  // Joins the ◀ ▶ rotation once at least 10 callsign markers have been seen.
   // ══════════════════════════════════════════════════════════════════
   (function callsignQuiz() {
     const COUNTRY_GAME = { id: 'sdr-panel-cq', title: 'Callsign Quiz' };
@@ -2099,6 +2098,16 @@ html.is-mobile #sdr-games-widget { display: none !important; }
     let autoNext = null;   // timer that advances to the next round after an answer
 
     const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // ── Flag emoji helper (ISO 3166-1 alpha-2 → regional indicator pair) ──
+    function iso2ToFlag(code) {
+      if (!code || code.length !== 2) return '';
+      const c = code.toUpperCase();
+      const base = 0x1F1E6 - 0x41;
+      try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+      catch (e) { return ''; }
+    }
+
     function shuffle(a) {
       for (let i = a.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -2147,11 +2156,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
 
     function available() {
       harvest();   // keep the pool fresh whenever availability is evaluated
-      const lookupOn = (window.instanceDescription && window.instanceDescription.lookup_service === true)
-        || window._lookupServiceEnabled === true;
-      const audioOn = !!(window.wsManager && window.wsManager.ws &&
-        window.wsManager.ws.readyState === WebSocket.OPEN);
-      return lookupOn && audioOn && seen.size >= MIN_MARKERS;
+      return seen.size >= MIN_MARKERS;
     }
 
     // Add/remove the game from the rotation as conditions change. The country
@@ -2179,24 +2184,22 @@ html.is-mobile #sdr-games-widget { display: none !important; }
         .finally(() => { countriesLoading = false; });
     }
 
-    // Private lookup results (callsign → country string, or null = no country).
-    // We deliberately do NOT use window._fetchCallsignForMediaSession /
-    // _callsignLookupCache: those broadcast the result to every lookup surface
-    // (QRZ widget, marker widget, …), which would reveal the answer. Fetching
-    // /api/lookup directly keeps the quiz isolated.
+    // Private lookup results (callsign → { country, code } object, or null = no country).
+    // Uses /api/cty/lookup so the result is isolated from the shared lookup
+    // cache (which would reveal the answer to other widgets).
     const myCache = new Map();
 
     function lookupCountry(cs) {
-      const uuid = window.userSessionID || '';
-      if (!uuid) return Promise.resolve(null);
-      const url = '/api/lookup?callsign=' + encodeURIComponent(cs) + '&uuid=' + encodeURIComponent(uuid);
+      const url = '/api/cty/lookup?callsign=' + encodeURIComponent(cs);
       return fetch(url).then(resp => {
-        if (resp.status === 429) return null;                  // rate-limited → leave uncached, retry later
-        if (!resp.ok) { myCache.set(cs, null); return null; }  // 404/401/503 → dead
+        if (!resp.ok && resp.status !== 404) return null;     // 503 etc → leave uncached, retry later
         return resp.json().then(d => {
-          const c = (d && d.country) ? String(d.country).trim() : '';
-          myCache.set(cs, c || null);
-          return c || null;
+          const country = (d && d.success && d.data && d.data.country)
+                          ? String(d.data.country).trim() : '';
+          const code    = (d && d.success && d.data && d.data.country_code)
+                          ? String(d.data.country_code).trim() : '';
+          myCache.set(cs, country ? { country, code } : null);
+          return country ? { country, code } : null;
         });
       }).catch(() => null);                                    // network error → leave uncached
     }
@@ -2223,14 +2226,16 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       return [...shuffle(live), ...shuffle(dead)];
     }
 
-    function buildOptions(correct) {
-      const pool = countries.map(c => c.name).filter(n => n && n !== correct);
-      const opts = shuffle([correct, ...shuffle(pool).slice(0, 4)]);
+    function buildOptions(correct, correctCode) {
+      const pool = countries.filter(c => c.name && c.name !== correct);
+      const distractors = shuffle(pool).slice(0, 4).map(c => ({ name: c.name, code: c.country_code || '' }));
+      const opts = shuffle([{ name: correct, code: correctCode }, ...distractors]);
       optionsEl.innerHTML = '';
-      for (const name of opts) {
+      for (const { name, code } of opts) {
         const b = document.createElement('button');
         b.className = 'sdr-cq-opt';
-        b.textContent = name;
+        const flag = iso2ToFlag(code);
+        b.textContent = (flag ? flag + '\u00A0' : '') + name;
         b.dataset.name = name;
         optionsEl.appendChild(b);
       }
@@ -2256,8 +2261,8 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       let found = null;
       const limit = Math.min(MAX_ATTEMPTS, calls.length);
       for (let i = 0; i < limit; i++) {
-        const country = await lookupCountry(calls[i]);
-        if (country) { found = { cs: calls[i], country }; break; }
+        const result = await lookupCountry(calls[i]);
+        if (result) { found = { cs: calls[i], country: result.country, code: result.code }; break; }
         if (!isActive()) { busy = false; return; }   // user navigated away
         await sleep(1000);                            // failed/not-found → try next
         if (!isActive()) { busy = false; return; }
@@ -2274,7 +2279,7 @@ html.is-mobile #sdr-games-widget { display: none !important; }
       if (recent.length > RECENT_MAX) recent.shift();
       currentCountry = found.country;
       callEl.textContent = found.cs;
-      buildOptions(found.country);
+      buildOptions(found.country, found.code);
       statusEl.textContent = 'Which country?';
       busy = false;
     }

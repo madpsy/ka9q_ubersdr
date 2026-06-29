@@ -29,13 +29,11 @@
     font-size: 11px;
     font-weight: bold;
     line-height: 1.4;
-    white-space: nowrap;
     box-shadow: 0 2px 10px rgba(0,0,0,0.6);
     border-left: 3px solid rgba(255,255,255,0.4);
     cursor: grab;
     user-select: none;
-    min-width: 160px;
-    max-width: 220px;
+    width: 180px;
   }
 
   #va-widget.va-dragging {
@@ -230,7 +228,7 @@
     flex-shrink: 0;
   }
 
-  .va-snr.va-snr-strong { color: #2ecc71; }
+  .va-snr.va-snr-strong { color: #fff; }
   .va-snr.va-snr-good   { color: #f1c40f; }
   .va-snr.va-snr-weak   { color: rgba(255,255,255,0.55); }
 
@@ -272,9 +270,9 @@
 
   /* ── Country badges ─────────────────────────────────────────────────────── */
   #va-widget-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
+    display: block;
+    white-space: normal;
+    line-height: 1.8;
     padding: 4px 8px 5px;
     border-top: 1px solid rgba(255,255,255,0.1);
   }
@@ -284,6 +282,7 @@
   }
 
   .va-badge {
+    display: inline-block;
     font-size: 9px;
     font-weight: bold;
     font-family: 'Courier New', Courier, monospace;
@@ -295,9 +294,11 @@
     border: 1px solid rgba(255,255,255,0.15);
     transition: background 0.12s, color 0.12s, border-color 0.12s;
     white-space: nowrap;
-    max-width: 90px;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 110px;
+    margin: 0 2px 2px 0;
+    vertical-align: middle;
   }
 
   .va-badge:hover {

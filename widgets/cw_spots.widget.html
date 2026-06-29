@@ -20,7 +20,7 @@
     color: #fff;
     border-radius: 6px;
     padding: 5px 8px 5px 9px;
-    font-family: 'Twemoji Flags', 'Courier New', Courier, monospace;
+    font-family: 'Courier New', Courier, monospace;
     font-size: 12px;
     font-weight: bold;
     line-height: 1.4;
@@ -193,9 +193,43 @@
     }
   }
   html.is-mobile #cw-spot-notification { display: none !important; }
+
+  /* ── Row tooltip ──────────────────────────────────────────────────────── */
+  #csn-tooltip {
+    position: fixed;
+    z-index: 10100;
+    pointer-events: none;
+    background: rgba(10, 40, 50, 0.97);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 5px;
+    padding: 6px 9px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.9);
+    white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.7);
+    display: none;
+    line-height: 1.6;
+  }
+
+  #csn-tooltip.csn-tt-visible {
+    display: block;
+  }
+
+  #csn-tooltip .csn-tt-call {
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 2px;
+  }
+
+  #csn-tooltip .csn-tt-row {
+    color: rgba(255,255,255,0.75);
+  }
 </style>
 
-<div id="cw-spot-notification" title="Click a spot to tune">
+<div id="csn-tooltip"></div>
+<div id="cw-spot-notification">
   <span class="csn-close" id="csn-close" title="Dismiss">&#x2715;</span>
   <div class="csn-header">
     <span class="csn-title">CW Spots</span>
@@ -224,10 +258,11 @@
   var tries        = 0;
   var lastBand     = null;
 
-  var notif   = document.getElementById('cw-spot-notification');
-  var listEl  = document.getElementById('csn-list');
-  var closeEl = document.getElementById('csn-close');
-  var mapBtn  = document.getElementById('csn-map-btn');
+  var notif      = document.getElementById('cw-spot-notification');
+  var listEl     = document.getElementById('csn-list');
+  var closeEl    = document.getElementById('csn-close');
+  var mapBtn     = document.getElementById('csn-map-btn');
+  var tooltipEl  = document.getElementById('csn-tooltip');
 
   // ── Flag emoji helper ────────────────────────────────────────────────────
   function csnIso2ToFlag(code) {
@@ -260,6 +295,7 @@
     if (e.target === closeEl || closeEl.contains(e.target)) return;
     if (e.target === mapBtn  || mapBtn.contains(e.target))  return;
     if (e.button !== 0) return;
+    hideTooltip();
     var rect = notif.getBoundingClientRect();
     dragState = {
       startX:   e.clientX,
@@ -411,7 +447,30 @@
           if (wasDragged) return;
           e.stopPropagation();
           tuneToSpot(spot);
+
+          // Callsign lookup — notify popup window and/or inline widget
+          var callsign = spot.dx_call || spot.callsign || '';
+          if (callsign) {
+            // Pick the longest segment (handles portable suffixes like G3XYZ/P)
+            var base = callsign.split('/').reduce(function (a, b) {
+              return b.length > a.length ? b : a;
+            }, '');
+            var lw = window._callsignLookupWindow;
+            if (lw && !lw.closed) {
+              try {
+                lw.postMessage({ type: 'callsign_lookup', callsign: base }, window.location.origin);
+                lw.focus();
+              } catch (_) {}
+            }
+            if (typeof window.lookupCallsign === 'function') {
+              window.lookupCallsign(callsign);
+            }
+          }
         });
+
+        row.addEventListener('mouseenter', function (e) { showTooltip(spot, e); });
+        row.addEventListener('mousemove',  function (e) { positionTooltip(e); });
+        row.addEventListener('mouseleave', function ()  { hideTooltip(); });
       })(rows[j], visible[j]);
     }
 
@@ -420,6 +479,55 @@
 
     // Apply active-row highlight immediately after render
     updateActiveRow();
+  }
+
+  // ── Tooltip helpers ──────────────────────────────────────────────────────
+  function escTT(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function showTooltip(spot, e) {
+    var callsign = spot.dx_call || spot.callsign || '';
+    var flag     = csnIso2ToFlag(spot.country_code || '');
+    var country  = spot.country || '';
+    var freqHz   = spot.frequency;
+    var freqStr  = freqHz ? (freqHz / 1e6).toFixed(4) + ' MHz' : '';
+    var snr      = spot.snr != null ? (spot.snr >= 0 ? '+' : '') + spot.snr + ' dB' : '';
+    var wpm      = spot.wpm ? spot.wpm + ' WPM' : '';
+    var timeStr  = '';
+    if (spot._receivedAt) {
+      var d = new Date(spot._receivedAt);
+      timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    }
+
+    var html = '<div class="csn-tt-call">' +
+      (flag ? flag + '\u00A0' : '') + escTT(callsign) + '</div>';
+    if (country)  html += '<div class="csn-tt-row">' + escTT(country) + '</div>';
+    if (freqStr)  html += '<div class="csn-tt-row">' + escTT(freqStr) + '</div>';
+    if (snr)      html += '<div class="csn-tt-row">SNR: ' + escTT(snr) + '</div>';
+    if (wpm)      html += '<div class="csn-tt-row">' + escTT(wpm) + '</div>';
+    if (timeStr)  html += '<div class="csn-tt-row">' + escTT(timeStr) + '</div>';
+
+    tooltipEl.innerHTML = html;
+    tooltipEl.classList.add('csn-tt-visible');
+    positionTooltip(e);
+  }
+
+  function positionTooltip(e) {
+    var ttW = tooltipEl.offsetWidth;
+    var ttH = tooltipEl.offsetHeight;
+    var x   = e.clientX + 14;
+    var y   = e.clientY - ttH / 2;
+    if (x + ttW > window.innerWidth  - 8) x = e.clientX - ttW - 10;
+    if (y < 4)                            y = 4;
+    if (y + ttH > window.innerHeight - 4) y = window.innerHeight - ttH - 4;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top  = y + 'px';
+  }
+
+  function hideTooltip() {
+    tooltipEl.classList.remove('csn-tt-visible');
   }
 
   // ── Active row highlight (mirrors voice.widget.html) ─────────────────────
@@ -492,6 +600,7 @@
   // ── Dismiss ──────────────────────────────────────────────────────────────
   function dismiss() {
     dismissed = true;
+    hideTooltip();
     notif.classList.add('cw-spot-fading');
     notif.classList.remove('cw-spot-visible');
     setTimeout(function () { notif.style.display = 'none'; }, 400);

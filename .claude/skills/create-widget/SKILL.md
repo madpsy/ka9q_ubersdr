@@ -712,6 +712,58 @@ Notes:
   from CW + DX spots and `dx_callsign` from voice activities, into a `Set`.
   Skip bookmarks (their names aren't callsigns).
 
+### Flag emoji rendering
+
+Convert an ISO 3166-1 alpha-2 country code to a flag emoji using regional
+indicator symbols. Every widget that shows flags uses this same helper:
+
+```js
+function iso2ToFlag(code) {
+  if (!code || code.length !== 2) return '';
+  var c = code.toUpperCase();
+  var base = 0x1F1E6 - 0x41;
+  try { return String.fromCodePoint(base + c.charCodeAt(0), base + c.charCodeAt(1)); }
+  catch (e) { return ''; }
+}
+```
+
+**Rendering rules — follow these exactly to avoid Safari layout bugs:**
+
+1. **Use the standard widget font stack** (`'Courier New', Courier, monospace`) —
+   do **not** add `'Twemoji Flags'`, `'Apple Color Emoji'`, or other emoji fonts
+   to the widget's `font-family`. Safari and all modern browsers resolve regional
+   indicator pairs to the system emoji font automatically; adding explicit emoji
+   fonts before the monospace fallback causes Safari to misrender or produce
+   large gaps.
+
+2. **Do NOT wrap the flag in a `<span>` with a different `font-family`** — switching
+   font families mid-inline-element causes "massive gap" layout bugs in Safari.
+   Emit the flag as plain inline text.
+
+3. **Separate flag from text with `\u00A0`** (non-breaking space), not a regular
+   space, so the flag and callsign don't wrap independently.
+
+4. **Place the flag before the callsign** (e.g. `🇬🇧\u00A0G3XYZ`) — this is the
+   established convention across all widgets.
+
+5. **Pass the combined string through `esc()` before `innerHTML`** — `esc()` only
+   escapes `&`, `<`, `>`, `"`, so flag emoji (plain Unicode) pass through unchanged.
+
+```js
+// Correct — plain inline text, flag before callsign, esc() applied to whole string
+var display = flag ? flag + '\u00A0' + callsign : callsign;
+el.innerHTML = esc(display);
+
+// Wrong — wrapper span causes Safari layout gaps
+el.innerHTML = '<span style="font-family:emoji">' + flag + '</span>' + esc(callsign);
+
+// Wrong — emoji font in widget font-family causes Safari misrender
+// font-family: 'Twemoji Flags', 'Apple Color Emoji', 'Courier New', monospace;
+```
+
+Reference implementations: `qrz_lookup.widget.html` (line ~554),
+`voice.widget.html` (line ~839), `cw_spots.widget.html`.
+
 ```js
 function collectCallsigns() {
   var set = new Set();

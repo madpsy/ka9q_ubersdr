@@ -11772,13 +11772,16 @@ function spectrumZoomSlider(position, sliderEl) {
         // (designed for scroll/pinch/keyboard). When called from the slider itself we must
         // preserve _zoomSource='slider' so the optimistic updateZoomSlider() inside those
         // functions does not snap the thumb back to the server-computed position.
+        // Call zoomIn()/zoomOut() the correct number of times to reach the target step,
+        // not just once — otherwise tapping far from the current position only moves one step.
         const _savedZoomSource = _zoomSource;
+        const steps = Math.abs(position - currentStep);
         if (position > currentStep) {
-            spectrumDisplay.zoomIn();
+            for (let i = 0; i < steps; i++) spectrumDisplay.zoomIn();
         } else {
-            spectrumDisplay.zoomOut();
+            for (let i = 0; i < steps; i++) spectrumDisplay.zoomOut();
         }
-        _zoomSource = _savedZoomSource; // restore 'slider' ownership after the call
+        _zoomSource = _savedZoomSource; // restore 'slider' ownership after the calls
         updateURL();
         return;
     }

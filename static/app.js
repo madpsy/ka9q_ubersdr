@@ -4292,25 +4292,6 @@ async function handleBinaryMessage(data) {
 
         // Check if AudioContext sample rate needs to change
         if (audioContext && sampleRate !== currentAudioContextSampleRate) {
-            if (_isMobileChrome) {
-                // Android Chrome — WebSocket audio mode: skip AudioContext recreation.
-                //
-                // Recreating the AudioContext causes a stutter gap because any audio
-                // packets that arrive while the node graph is being rebuilt are silently
-                // dropped by the `analyser.context !== audioContext` guard in
-                // playAudioBuffer().  The gap is random (depends on network timing) and
-                // is more disruptive than the mild resampling Chrome does internally when
-                // the AudioContext sample rate doesn't match the incoming stream.
-                //
-                // Fix: just update the rate tracker and reset the scheduler.  The
-                // underrun check in playAudioBuffer() (`nextPlayTime < currentTime`)
-                // fires on the next packet and resets to currentTime + MIN_BUFFER_SEC,
-                // giving a clean, gap-free restart of the scheduling timeline.
-                currentAudioContextSampleRate = sampleRate;
-                nextPlayTime = 0;
-                window.nextPlayTime = 0;
-                log(`Sample rate changed to ${sampleRate} Hz (Android: skipping AudioContext recreation to avoid stutter)`);
-            } else {
             log(`Sample rate changed from ${currentAudioContextSampleRate} Hz to ${sampleRate} Hz - recreating AudioContext`);
 
             // Close old context
@@ -4421,7 +4402,6 @@ async function handleBinaryMessage(data) {
             }
 
             log(`AudioContext recreated at ${sampleRate} Hz (eliminates Chrome resampling artifacts)`);
-            } // end !_isMobileChrome
         }
 
         // Decode Opus packet to PCM using decodeFrame method
@@ -5120,25 +5100,6 @@ async function handleAudio(msg) {
 async function handlePCMAudio(msg) {
     // Check if sample rate changed - if so, recreate AudioContext
     if (audioContext && msg.sampleRate !== currentAudioContextSampleRate) {
-        if (_isMobileChrome) {
-            // Android Chrome — WebSocket audio mode: skip AudioContext recreation.
-            //
-            // Recreating the AudioContext causes a stutter gap because any audio
-            // packets that arrive while the node graph is being rebuilt are silently
-            // dropped by the `analyser.context !== audioContext` guard in
-            // playAudioBuffer().  The gap is random (depends on network timing) and
-            // is more disruptive than the mild resampling Chrome does internally when
-            // the AudioContext sample rate doesn't match the incoming stream.
-            //
-            // Fix: just update the rate tracker and reset the scheduler.  The
-            // underrun check in playAudioBuffer() (`nextPlayTime < currentTime`)
-            // fires on the next packet and resets to currentTime + MIN_BUFFER_SEC,
-            // giving a clean, gap-free restart of the scheduling timeline.
-            currentAudioContextSampleRate = msg.sampleRate;
-            nextPlayTime = 0;
-            window.nextPlayTime = 0;
-            log(`Sample rate changed to ${msg.sampleRate} Hz (Android: skipping AudioContext recreation to avoid stutter)`);
-        } else {
         log(`Sample rate changed from ${currentAudioContextSampleRate} Hz to ${msg.sampleRate} Hz - recreating AudioContext`);
 
         // Store old context reference to check if nodes belong to it
@@ -5252,7 +5213,6 @@ async function handlePCMAudio(msg) {
         }
 
         log(`AudioContext recreated at ${msg.sampleRate} Hz (eliminates Chrome resampling artifacts)`);
-        } // end !_isMobileChrome
     }
 
     // Decode base64 PCM data

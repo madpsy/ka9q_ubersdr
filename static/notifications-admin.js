@@ -90,6 +90,150 @@ const FILTER_FIELDS = {
 const EVENT_TYPES = Object.keys(FILTER_FIELDS);
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS — template field definitions per event type
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const TEMPLATE_FIELDS = {
+    cw_spot: [
+        { name: '.DXCall',      goType: 'string',   desc: 'Spotted callsign.' },
+        { name: '.Spotter',     goType: 'string',   desc: 'Spotter callsign.' },
+        { name: '.Frequency',   goType: 'float64',  desc: 'Frequency in Hz. Use <code>{{khz .Frequency}}</code> for display.' },
+        { name: '.Band',        goType: 'string',   desc: 'Band name, e.g. "40m".' },
+        { name: '.SNR',         goType: 'int',      desc: 'Signal-to-noise ratio in dB.' },
+        { name: '.WPM',         goType: 'int',      desc: 'Speed in words per minute.' },
+        { name: '.Mode',        goType: 'string',   desc: 'Mode string: "CW" or "RTTY".' },
+        { name: '.Comment',     goType: 'string',   desc: 'Spot comment (may be empty).' },
+        { name: '.Country',     goType: 'string',   desc: 'CTY country name.' },
+        { name: '.CountryCode', goType: 'string',   desc: 'ISO alpha-2 code. Use <code>{{flag .CountryCode}}</code> for emoji.' },
+        { name: '.CQZone',      goType: 'int',      desc: 'CQ zone.' },
+        { name: '.ITUZone',     goType: 'int',      desc: 'ITU zone.' },
+        { name: '.Continent',   goType: 'string',   desc: 'Continent code.' },
+        { name: '.DistanceKm',  goType: '*float64', desc: 'Distance in km (nil if unknown). Guard with <code>{{if .DistanceKm}}</code>.' },
+        { name: '.BearingDeg',  goType: '*float64', desc: 'Bearing in degrees (nil if unknown). Use <code>{{bearing .BearingDeg}}</code>.' },
+        { name: '.Latitude',    goType: 'float64',  desc: 'Station latitude in decimal degrees (0 if unknown).' },
+        { name: '.Longitude',   goType: 'float64',  desc: 'Station longitude in decimal degrees (0 if unknown).' },
+        { name: '.Name',        goType: 'string',   desc: 'Operator name (may be empty).' },
+        { name: '.Grid',        goType: 'string',   desc: 'Maidenhead locator (may be empty).' },
+        { name: '.Time',        goType: 'time.Time',desc: 'Spot timestamp.' },
+    ],
+    dx_spot: [
+        { name: '.DXCall',      goType: 'string',   desc: 'Spotted callsign.' },
+        { name: '.Spotter',     goType: 'string',   desc: 'Spotter callsign.' },
+        { name: '.Frequency',   goType: 'float64',  desc: 'Frequency in Hz. Use <code>{{khz .Frequency}}</code> for display.' },
+        { name: '.Band',        goType: 'string',   desc: 'Band name.' },
+        { name: '.Comment',     goType: 'string',   desc: 'Spot comment (may be empty).' },
+        { name: '.Country',     goType: 'string',   desc: 'CTY country name.' },
+        { name: '.CountryCode', goType: 'string',   desc: 'ISO alpha-2 code. Use <code>{{flag .CountryCode}}</code> for emoji.' },
+        { name: '.Continent',   goType: 'string',   desc: 'Continent code.' },
+        { name: '.TimeOffset',  goType: 'float64',  desc: 'Time offset in minutes from spot time.' },
+        { name: '.Time',        goType: 'time.Time',desc: 'Spot timestamp.' },
+    ],
+    digital_decode: [
+        { name: '.Callsign',      goType: 'string',   desc: 'Decoded callsign.' },
+        { name: '.Locator',       goType: 'string',   desc: 'Maidenhead locator (may be empty).' },
+        { name: '.Country',       goType: 'string',   desc: 'CTY country name.' },
+        { name: '.CountryCode',   goType: 'string',   desc: 'ISO alpha-2 code. Use <code>{{flag .CountryCode}}</code> for emoji.' },
+        { name: '.CQZone',        goType: 'int',      desc: 'CQ zone.' },
+        { name: '.ITUZone',       goType: 'int',      desc: 'ITU zone.' },
+        { name: '.Continent',     goType: 'string',   desc: 'Continent code.' },
+        { name: '.SNR',           goType: 'int',      desc: 'SNR in dB.' },
+        { name: '.Frequency',     goType: 'uint64',   desc: 'Signal frequency in Hz. Use <code>{{mhz .Frequency}}</code> for display.' },
+        { name: '.DialFrequency', goType: 'uint64',   desc: 'Dial frequency in Hz. Use <code>{{mhz .DialFrequency}}</code> for display.' },
+        { name: '.Mode',          goType: 'string',   desc: 'Decode mode: FT8, FT4, WSPR, JS8.' },
+        { name: '.Message',       goType: 'string',   desc: 'Full decoded message text.' },
+        { name: '.Band',          goType: 'string',   desc: 'Band name.' },
+        { name: '.DistanceKm',    goType: '*float64', desc: 'Distance in km (nil if unknown). Guard with <code>{{if .DistanceKm}}</code>.' },
+        { name: '.BearingDeg',    goType: '*float64', desc: 'Bearing in degrees (nil if unknown). Use <code>{{bearing .BearingDeg}}</code>.' },
+        { name: '.DBm',           goType: 'int',      desc: 'Transmit power in dBm (WSPR only).' },
+        { name: '.TxFrequency',   goType: 'uint64',   desc: 'Transmit frequency in Hz (WSPR only). Use <code>{{mhz .TxFrequency}}</code>.' },
+        { name: '.Timestamp',     goType: 'time.Time',desc: 'Decode timestamp.' },
+    ],
+    space_weather: [
+        { name: '.SFI',                goType: 'float64', desc: 'Solar Flux Index.' },
+        { name: '.KIndex',             goType: 'int',     desc: 'Current K-index (0–9).' },
+        { name: '.KIndexStatus',       goType: 'string',  desc: 'K-index status description.' },
+        { name: '.AIndex',             goType: 'int',     desc: 'Current A-index.' },
+        { name: '.SolarWindBz',        goType: 'float64', desc: 'Solar wind Bz component in nT.' },
+        { name: '.PropagationQuality', goType: 'string',  desc: 'Human-readable propagation quality string.' },
+        { name: '.PreviousKIndex',     goType: 'int',     desc: 'K-index from previous update (for trend arrows).' },
+        { name: '.PreviousSFI',        goType: 'float64', desc: 'SFI from previous update.' },
+    ],
+    antenna_switch: [
+        { name: '.Action',   goType: 'string',   desc: 'Action: select, ground, add, remove, default.' },
+        { name: '.Antenna',  goType: 'int',      desc: 'Antenna port number (0 for ground/default).' },
+        { name: '.Label',    goType: 'string',   desc: 'Human-readable antenna name.' },
+        { name: '.Selected', goType: '[]int',    desc: 'Resulting selected antenna ports. Use <code>{{range .Selected}}</code> or <code>{{join ", " .Selected}}</code>.' },
+        { name: '.Grounded', goType: 'bool',     desc: 'True when all antennas are grounded.' },
+        { name: '.Source',   goType: 'string',   desc: 'Command source: public, admin, startup, scheduler.' },
+        { name: '.Time',     goType: 'time.Time',desc: 'Event timestamp.' },
+    ],
+    rotator: [
+        { name: '.Azimuth',         goType: 'float64',  desc: 'Current azimuth in degrees.' },
+        { name: '.Elevation',       goType: 'float64',  desc: 'Current elevation in degrees.' },
+        { name: '.Moving',          goType: 'bool',     desc: 'True while the rotator is moving.' },
+        { name: '.TargetAzimuth',   goType: 'float64',  desc: 'Target azimuth in degrees.' },
+        { name: '.TargetElevation', goType: 'float64',  desc: 'Target elevation in degrees.' },
+        { name: '.Time',            goType: 'time.Time',desc: 'Event timestamp.' },
+    ],
+    system_monitor: [
+        { name: '.Component',         goType: 'string',   desc: 'Subsystem name.' },
+        { name: '.Healthy',           goType: 'bool',     desc: 'Current health state.' },
+        { name: '.PreviouslyHealthy', goType: 'bool',     desc: 'Health state before this event.' },
+        { name: '.Issues',            goType: '[]string', desc: 'List of issue descriptions. Use <code>{{join ", " .Issues}}</code>.' },
+        { name: '.Status',            goType: 'string',   desc: 'Status string: degraded, recovered, or unknown.' },
+        { name: '.Time',              goType: 'time.Time',desc: 'Event timestamp.' },
+    ],
+    user_session: [
+        { name: '.Action',        goType: 'string',   desc: '"connected" or "disconnected".' },
+        { name: '.ClientIP',      goType: 'string',   desc: 'Client IP address.' },
+        { name: '.Country',       goType: 'string',   desc: 'CTY/GeoIP country name.' },
+        { name: '.CountryCode',   goType: 'string',   desc: 'ISO alpha-2 code. Use <code>{{flag .CountryCode}}</code> for emoji.' },
+        { name: '.Continent',     goType: 'string',   desc: 'Continent code.' },
+        { name: '.UserAgent',     goType: 'string',   desc: 'HTTP User-Agent string.' },
+        { name: '.UserSessionID', goType: 'string',   desc: 'Internal session UUID.' },
+        { name: '.Frequency',     goType: 'uint64',   desc: 'Tuned frequency in Hz at connect time.' },
+        { name: '.Mode',          goType: 'string',   desc: 'Mode at connect time.' },
+        { name: '.Time',          goType: 'time.Time',desc: 'Event timestamp.' },
+    ],
+    server_startup: [
+        { name: '.Version',   goType: 'string',   desc: 'UberSDR version string.' },
+        { name: '.Callsign',  goType: 'string',   desc: 'Configured station callsign.' },
+        { name: '.Name',      goType: 'string',   desc: 'Configured station name.' },
+        { name: '.StartTime', goType: 'time.Time',desc: 'Server start timestamp.' },
+    ],
+    voice_activity: [
+        { name: '.Band',              goType: 'string',   desc: 'Band name.' },
+        { name: '.CenterFreq',        goType: 'uint64',   desc: 'Signal centre frequency in Hz. Use <code>{{mhz .CenterFreq}}</code>.' },
+        { name: '.EstimatedDialFreq', goType: 'uint64',   desc: 'Estimated dial frequency in Hz. Use <code>{{mhz .EstimatedDialFreq}}</code>.' },
+        { name: '.StartFreq',         goType: 'uint64',   desc: 'Signal start frequency in Hz.' },
+        { name: '.EndFreq',           goType: 'uint64',   desc: 'Signal end frequency in Hz.' },
+        { name: '.Bandwidth',         goType: 'uint64',   desc: 'Signal bandwidth in Hz.' },
+        { name: '.Mode',              goType: 'string',   desc: 'Estimated mode (USB, LSB, AM, etc.).' },
+        { name: '.SNR',               goType: 'float32',  desc: 'Detected SNR in dB. Wrap with <code>f32</code> before printf/mulf.' },
+        { name: '.Confidence',        goType: 'float32',  desc: 'Detection confidence 0.0–1.0. Wrap with <code>f32</code> before printf/mulf.' },
+        { name: '.DXCallsign',        goType: 'string',   desc: 'DX cluster enriched callsign (may be empty).' },
+        { name: '.DXCountry',         goType: 'string',   desc: 'DX cluster enriched country name (may be empty).' },
+        { name: '.DXCountryCode',     goType: 'string',   desc: 'DX cluster enriched ISO alpha-2 code (may be empty).' },
+        { name: '.DXContinent',       goType: 'string',   desc: 'DX cluster enriched continent code (may be empty).' },
+        { name: '.Time',              goType: 'time.Time',desc: 'Detection timestamp.' },
+    ],
+};
+
+const TEMPLATE_FUNCS = [
+    { name: 'flag',    sig: 'flag code',      desc: 'ISO alpha-2 → flag emoji. e.g. "JP" → 🇯🇵',                                    example: '{{flag .CountryCode}}' },
+    { name: 'bearing', sig: 'bearing deg',    desc: 'Compass direction string (N, NE, ENE…). Handles nil *float64 → "?".',           example: '{{bearing .BearingDeg}}' },
+    { name: 'deref',   sig: 'deref ptr',      desc: 'Nil-safe dereference of *float64. Returns 0.0 for nil.',                        example: '{{printf "%.0f" (deref .DistanceKm)}}' },
+    { name: 'divf',    sig: 'divf a b',       desc: 'Float division. Returns 0 if b is 0.',                                          example: '{{printf "%.3f" (divf .Frequency 1000000.0)}}' },
+    { name: 'mulf',    sig: 'mulf a b',       desc: 'Float multiplication. Use with f32 for float32 fields.',                        example: '{{printf "%.0f" (mulf (f32 .Confidence) 100)}}' },
+    { name: 'f32',     sig: 'f32 v',          desc: 'Converts float32 to float64 for use with printf, mulf, divf.',                  example: '{{printf "%.1f" (f32 .SNR)}}' },
+    { name: 'mhz',     sig: 'mhz hz',         desc: 'uint64 Hz → MHz string with 3 decimal places. For digital_decode / voice_activity frequencies.', example: '{{mhz .EstimatedDialFreq}}' },
+    { name: 'khz',     sig: 'khz hz',         desc: 'float64 Hz → kHz string with 1 decimal place. For cw_spot / dx_spot .Frequency only.',           example: '{{khz .Frequency}}' },
+    { name: 'join',    sig: 'join sep items', desc: 'Joins a string slice with a separator.',                                        example: '{{join ", " .Issues}}' },
+    { name: 'upper',   sig: 'upper s',        desc: 'Converts string to upper case.',                                                example: '{{upper .Mode}}' },
+    { name: 'lower',   sig: 'lower s',        desc: 'Converts string to lower case.',                                                example: '{{lower .Band}}' },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -271,6 +415,72 @@ async function loadConfig() {
     }
 }
 
+function downloadConfig() {
+    const date = new Date();
+    const pad = function(n) { return String(n).padStart(2, '0'); };
+    const stamp = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate());
+    const filename = 'notifications-config-' + stamp + '.json';
+
+    const json = JSON.stringify(localConfig, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function uploadConfig(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        let parsed;
+        try {
+            parsed = JSON.parse(e.target.result);
+        } catch (err) {
+            showAlert(el('overviewAlerts'), 'error', 'Invalid JSON file: ' + err.message, false);
+            return;
+        }
+
+        // Basic shape validation
+        if (typeof parsed !== 'object' || parsed === null ||
+            !('enabled' in parsed) || !('channels' in parsed) || !('rules' in parsed)) {
+            showAlert(el('overviewAlerts'), 'error', 'File does not look like a notifications config (missing enabled/channels/rules keys).', false);
+            return;
+        }
+        if (typeof parsed.channels !== 'object' || Array.isArray(parsed.channels)) {
+            showAlert(el('overviewAlerts'), 'error', 'Invalid config: "channels" must be an object.', false);
+            return;
+        }
+        if (!Array.isArray(parsed.rules)) {
+            showAlert(el('overviewAlerts'), 'error', 'Invalid config: "rules" must be an array.', false);
+            return;
+        }
+
+        localConfig.enabled  = !!parsed.enabled;
+        localConfig.channels = parsed.channels;
+        localConfig.rules    = parsed.rules;
+
+        // Sync master toggle to loaded value
+        el('masterEnable').checked = localConfig.enabled;
+
+        // Re-render channels and rules tabs
+        renderChannels();
+        renderRules();
+
+        showAlert(el('overviewAlerts'), 'success',
+            'Config loaded from "' + escHtml(file.name) + '" (' +
+            Object.keys(localConfig.channels).length + ' channel(s), ' +
+            localConfig.rules.length + ' rule(s)). ' +
+            'Click "Save All Changes" on the Channels or Rules tab to persist to the server.',
+            false);
+    };
+    reader.readAsText(file);
+}
+
 function initOverview() {
     el('btnRefreshHealth').addEventListener('click', loadHealth);
 
@@ -278,6 +488,19 @@ function initOverview() {
         localConfig.enabled = el('masterEnable').checked;
         const ok = await saveConfig(el('overviewAlerts'));
         if (ok) await loadHealth();
+    });
+
+    el('btnDownloadConfig').addEventListener('click', downloadConfig);
+
+    el('btnUploadConfig').addEventListener('click', function() {
+        el('configUploadInput').value = '';   // reset so same file can be re-uploaded
+        el('configUploadInput').click();
+    });
+
+    el('configUploadInput').addEventListener('change', function() {
+        if (this.files && this.files[0]) {
+            uploadConfig(this.files[0]);
+        }
     });
 }
 
@@ -771,10 +994,11 @@ function showRuleForm(editIdx) {
             '</div>' +
             '<div class="config-section">' +
                 '<div class="config-section-title">Template <span style="font-weight:400;font-size:0.8rem;color:#888">(optional — leave blank to use default)</span></div>' +
-                '<div class="form-group" style="margin-bottom:0">' +
+                '<div class="form-group">' +
                     '<textarea id="ruleTemplate" rows="4" placeholder="Go template, e.g. DX: {{.DXCall}} on {{khz .Frequency}} kHz">' + escHtml(rule.template || '') + '</textarea>' +
-                    '<div class="form-hint">Uses Go text/template syntax. Available fields depend on the event type.</div>' +
+                    '<div class="form-hint">Uses Go <code>text/template</code> syntax. See available fields below.</div>' +
                 '</div>' +
+                '<div id="templateFieldsRef"></div>' +
             '</div>' +
             '<div class="form-actions">' +
                 '<button type="button" class="btn" id="btnSaveRule">Save Rule</button>' +
@@ -782,12 +1006,14 @@ function showRuleForm(editIdx) {
             '</div>' +
         '</div>';
 
-    // Render filter fields for current event
+    // Render filter fields and template reference for current event
     renderFilterFields(rule.event, rule.filters);
+    renderTemplateFields(rule.event);
 
-    // Re-render filters when event type changes
+    // Re-render filters and template reference when event type changes
     el('ruleEvent').addEventListener('change', function() {
         renderFilterFields(el('ruleEvent').value, {});
+        renderTemplateFields(el('ruleEvent').value);
     });
 
     el('btnCancelRule').addEventListener('click', function() {
@@ -879,6 +1105,50 @@ function renderFilterFields(eventType, currentFilters) {
             '<div>' + inputHtml + '</div>' +
         '</div>';
     }).join('');
+}
+
+function renderTemplateFields(eventType) {
+    const container = document.getElementById('templateFieldsRef');
+    if (!container) return;
+
+    const fields = TEMPLATE_FIELDS[eventType] || [];
+
+    let html = '<details class="template-ref" open>' +
+        '<summary class="template-ref-summary">Available fields for <strong>' + escHtml(eventType) + '</strong></summary>' +
+        '<div class="template-ref-body">';
+
+    if (fields.length === 0) {
+        html += '<p style="font-size:0.8rem;color:#888;margin:0">No template fields defined for this event type.</p>';
+    } else {
+        html += '<table class="template-ref-table">' +
+            '<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>' +
+            '<tbody>';
+        fields.forEach(function(f) {
+            html += '<tr>' +
+                '<td><code>' + escHtml(f.name) + '</code></td>' +
+                '<td><span class="template-ref-type">' + escHtml(f.goType) + '</span></td>' +
+                '<td>' + f.desc + '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+    }
+
+    html += '<details class="template-ref-funcs">' +
+        '<summary>Template functions</summary>' +
+        '<table class="template-ref-table">' +
+        '<thead><tr><th>Function</th><th>Example</th><th>Description</th></tr></thead>' +
+        '<tbody>';
+    TEMPLATE_FUNCS.forEach(function(fn) {
+        html += '<tr>' +
+            '<td><code>' + escHtml(fn.sig) + '</code></td>' +
+            '<td><code>' + escHtml(fn.example) + '</code></td>' +
+            '<td>' + escHtml(fn.desc) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></details>';
+
+    html += '</div></details>';
+    container.innerHTML = html;
 }
 
 function readFilterFields(eventType) {

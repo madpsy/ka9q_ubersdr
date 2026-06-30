@@ -77,16 +77,20 @@ func (rl *notifRateLimiter) cleanup(maxAge time.Duration) {
 
 // NotificationStats holds runtime counters for the admin API.
 type NotificationStats struct {
-	TotalPublished   int64            `json:"total_published"`
-	TotalMatched     int64            `json:"total_matched"`
-	TotalSent        int64            `json:"total_sent"`
-	TotalErrors      int64            `json:"total_errors"`
-	TotalRateLimited int64            `json:"total_rate_limited"`
-	ByRule           map[string]int64 `json:"by_rule"`
-	ByChannel        map[string]int64 `json:"by_channel"`
-	LastSentAt       *time.Time       `json:"last_sent_at,omitempty"`
-	LastError        string           `json:"last_error,omitempty"`
-	LastErrorAt      *time.Time       `json:"last_error_at,omitempty"`
+	TotalPublished       int64            `json:"total_published"`
+	TotalMatched         int64            `json:"total_matched"`
+	TotalSent            int64            `json:"total_sent"`
+	TotalErrors          int64            `json:"total_errors"`
+	TotalRateLimited     int64            `json:"total_rate_limited"`
+	ByRule               map[string]int64 `json:"by_rule"`
+	ByRuleErrors         map[string]int64 `json:"by_rule_errors"`
+	ByRuleRateLimited    map[string]int64 `json:"by_rule_rate_limited"`
+	ByChannel            map[string]int64 `json:"by_channel"`
+	ByChannelErrors      map[string]int64 `json:"by_channel_errors"`
+	ByChannelRateLimited map[string]int64 `json:"by_channel_rate_limited"`
+	LastSentAt           *time.Time       `json:"last_sent_at,omitempty"`
+	LastError            string           `json:"last_error,omitempty"`
+	LastErrorAt          *time.Time       `json:"last_error_at,omitempty"`
 }
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
@@ -114,8 +118,12 @@ func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, err
 		tmpls:    make(map[string]*template.Template),
 		rl:       newNotifRateLimiter(),
 		stats: NotificationStats{
-			ByRule:    make(map[string]int64),
-			ByChannel: make(map[string]int64),
+			ByRule:               make(map[string]int64),
+			ByRuleErrors:         make(map[string]int64),
+			ByRuleRateLimited:    make(map[string]int64),
+			ByChannel:            make(map[string]int64),
+			ByChannelErrors:      make(map[string]int64),
+			ByChannelRateLimited: make(map[string]int64),
 		},
 	}
 
@@ -309,6 +317,8 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 			if !m.rl.allow(rlKey, chCfg.RateLimitMinutes) {
 				m.mu.Lock()
 				m.stats.TotalRateLimited++
+				m.stats.ByRuleRateLimited[key]++
+				m.stats.ByChannelRateLimited[chName]++
 				m.mu.Unlock()
 				if DebugMode {
 					log.Printf("[Notifications] Rule %q → channel %q: rate limited (subject: %s)", key, chName, subject)
@@ -320,6 +330,8 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				log.Printf("[Notifications] Rule %q → channel %q: send error: %v", key, chName, err)
 				m.mu.Lock()
 				m.stats.TotalErrors++
+				m.stats.ByRuleErrors[key]++
+				m.stats.ByChannelErrors[chName]++
 				m.stats.LastError = fmt.Sprintf("channel %s: %v", chName, err)
 				now := time.Now()
 				m.stats.LastErrorAt = &now
@@ -883,9 +895,25 @@ func (m *NotificationManager) GetStats() NotificationStats {
 	for k, v := range m.stats.ByRule {
 		s.ByRule[k] = v
 	}
+	s.ByRuleErrors = make(map[string]int64, len(m.stats.ByRuleErrors))
+	for k, v := range m.stats.ByRuleErrors {
+		s.ByRuleErrors[k] = v
+	}
+	s.ByRuleRateLimited = make(map[string]int64, len(m.stats.ByRuleRateLimited))
+	for k, v := range m.stats.ByRuleRateLimited {
+		s.ByRuleRateLimited[k] = v
+	}
 	s.ByChannel = make(map[string]int64, len(m.stats.ByChannel))
 	for k, v := range m.stats.ByChannel {
 		s.ByChannel[k] = v
+	}
+	s.ByChannelErrors = make(map[string]int64, len(m.stats.ByChannelErrors))
+	for k, v := range m.stats.ByChannelErrors {
+		s.ByChannelErrors[k] = v
+	}
+	s.ByChannelRateLimited = make(map[string]int64, len(m.stats.ByChannelRateLimited))
+	for k, v := range m.stats.ByChannelRateLimited {
+		s.ByChannelRateLimited[k] = v
 	}
 	return s
 }

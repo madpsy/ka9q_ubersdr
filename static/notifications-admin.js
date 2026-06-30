@@ -89,6 +89,23 @@ const FILTER_FIELDS = {
 
 const EVENT_TYPES = Object.keys(FILTER_FIELDS);
 
+const EVENT_TYPE_LABELS = {
+    cw_spot:        'CW Spot',
+    dx_spot:        'DX Spot',
+    digital_decode: 'Digital Decode',
+    space_weather:  'Space Weather',
+    antenna_switch: 'Antenna Switch',
+    rotator:        'Rotator',
+    system_monitor: 'System Monitor',
+    user_session:   'User Session',
+    voice_activity: 'Voice Activity',
+    server_startup: 'Server Startup',
+};
+
+function eventLabel(et) {
+    return EVENT_TYPE_LABELS[et] || et;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — template field definitions per event type
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -243,6 +260,8 @@ let localConfig = {
     rules: [],
 };
 
+let lastStats = {};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -304,6 +323,9 @@ function initTabs() {
             document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
             tab.classList.add('active');
             el('tab-' + tab.dataset.tab).classList.add('active');
+            // Refresh data on every tab click (same as pressing Refresh)
+            loadHealth().catch(function() {});
+            loadConfig().catch(function() {});
         });
     });
 }
@@ -325,6 +347,7 @@ async function loadHealth() {
         el('masterEnable').checked = !!data.enabled;
 
         const stats = data.stats || {};
+        lastStats = stats;
         const statsGrid = el('statsGrid');
         const statItems = [
             { label: 'Published',    value: stats.total_published    != null ? stats.total_published    : 0 },
@@ -610,6 +633,10 @@ function renderChannels() {
         return;
     }
 
+    const byCh     = lastStats.by_channel          || {};
+    const byChErr  = lastStats.by_channel_errors    || {};
+    const byChRL   = lastStats.by_channel_rate_limited || {};
+
     list.innerHTML = names.map(function(name) {
         const ch = channels[name];
         let tokenBadge;
@@ -620,6 +647,13 @@ function renderChannels() {
         } else {
             tokenBadge = '<span class="badge badge-red">No token</span>';
         }
+        const sent      = byCh[name]    || 0;
+        const errors    = byChErr[name]  || 0;
+        const rateLim   = byChRL[name]   || 0;
+        const statsBadges =
+            '<span class="badge badge-green" title="Messages sent">&#x2709; ' + sent + ' sent</span>' +
+            (errors  > 0 ? '<span class="badge badge-red"   title="Send errors">&#x26A0; '    + errors  + ' err</span>'   : '') +
+            (rateLim > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>'    : '');
         return '<div class="item-card" data-channel="' + escHtml(name) + '">' +
             '<div class="item-card-header">' +
                 '<div>' +
@@ -630,6 +664,7 @@ function renderChannels() {
                         (ch.chat_id ? '<span class="badge badge-grey">chat: ' + escHtml(ch.chat_id) + '</span>' : '') +
                         '<span class="badge badge-grey">' + escHtml(ch.parse_mode || 'HTML') + '</span>' +
                         '<span class="badge badge-grey">rate: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10) + ' min</span>' +
+                        statsBadges +
                     '</div>' +
                 '</div>' +
                 '<div class="item-card-actions">' +
@@ -694,6 +729,30 @@ async function testChannel(name) {
     }
 }
 
+function renderChannelTypeInfo(type) {
+    const panel = el('chTypeInfo');
+    if (!panel) return;
+    if (type === 'telegram') {
+        panel.innerHTML =
+            '<div class="config-section" style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
+                    '<span style="font-size:1.3rem">&#x1F916;</span>' +
+                    '<strong style="color:#1565c0">Setting up a Telegram Bot</strong>' +
+                '</div>' +
+                '<ol style="margin:0;padding-left:20px;color:#1a237e;font-size:0.875rem;line-height:1.8">' +
+                    '<li>Open Telegram and search for <strong>@BotFather</strong>.</li>' +
+                    '<li>Send <code>/newbot</code> and follow the prompts to choose a name and username.</li>' +
+                    '<li>BotFather will give you a <strong>Bot Token</strong> — paste it in the field below.</li>' +
+                    '<li>Open a chat with your new bot (or add it to a group/channel) and <strong>send it at least one message</strong> so Telegram registers the chat.</li>' +
+                    '<li>Click <strong>Discover Chats</strong> to find the Chat ID automatically, or paste it manually.</li>' +
+                '</ol>' +
+                '<p style="margin:10px 0 0;font-size:0.8rem;color:#555">&#x26A0;&#xFE0F; For group/channel notifications, add the bot as an <strong>administrator</strong> with permission to post messages.</p>' +
+            '</div>';
+    } else {
+        panel.innerHTML = '';
+    }
+}
+
 function showChannelForm(editName) {
     const container = el('channelFormContainer');
     const isEdit = editName !== null && editName !== undefined;
@@ -723,9 +782,10 @@ function showChannelForm(editName) {
                 '</div>' +
                 '<div class="form-group">' +
                     '<label>Type *</label>' +
-                    '<select id="chType"><option value="telegram" selected>telegram</option></select>' +
+                    '<select id="chType"><option value="telegram" selected>Telegram</option></select>' +
                 '</div>' +
             '</div>' +
+            '<div id="chTypeInfo"></div>' +
             '<div class="form-group">' +
                 '<label>Bot Token' + (isEdit && ch.bot_token === '********' ? ' (currently set)' : ' *') + '</label>' +
                 '<div class="input-group">' +
@@ -756,6 +816,12 @@ function showChannelForm(editName) {
                 '<button type="button" class="btn btn-secondary" id="btnCancelChannel">Cancel</button>' +
             '</div>' +
         '</div>';
+
+    // Show type-specific setup instructions
+    renderChannelTypeInfo(ch.type || 'telegram');
+    el('chType').addEventListener('change', function() {
+        renderChannelTypeInfo(el('chType').value);
+    });
 
     // Wire up discover chats
     el('btnDiscoverChats').addEventListener('click', function() { discoverChats(editName); });
@@ -878,6 +944,10 @@ function renderRules() {
         return;
     }
 
+    const byRule    = lastStats.by_rule             || {};
+    const byRuleErr = lastStats.by_rule_errors       || {};
+    const byRuleRL  = lastStats.by_rule_rate_limited || {};
+
     list.innerHTML = rules.map(function(rule, idx) {
         const enabledBadge = rule.enabled
             ? '<span class="badge badge-green">Enabled</span>'
@@ -892,6 +962,14 @@ function renderRules() {
         const templateBadge = rule.template
             ? '<span class="badge badge-yellow">custom template</span>'
             : '';
+        const rKey    = rule.name;
+        const sent    = byRule[rKey]    || 0;
+        const errors  = byRuleErr[rKey]  || 0;
+        const rateLim = byRuleRL[rKey]   || 0;
+        const statsBadges =
+            '<span class="badge badge-green" title="Messages sent">&#x2709; ' + sent + ' sent</span>' +
+            (errors  > 0 ? '<span class="badge badge-red"    title="Send errors">&#x26A0; '   + errors  + ' err</span>'  : '') +
+            (rateLim > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>'   : '');
 
         return '<div class="item-card" data-rule-idx="' + idx + '">' +
             '<div class="item-card-header">' +
@@ -899,10 +977,11 @@ function renderRules() {
                     '<div class="item-card-title">&#x1F4CB; ' + escHtml(rule.name) + '</div>' +
                     '<div class="item-card-meta">' +
                         enabledBadge +
-                        '<span class="badge badge-grey">' + escHtml(rule.event) + '</span>' +
+                        '<span class="badge badge-grey">' + escHtml(eventLabel(rule.event)) + '</span>' +
                         channelBadges +
                         filterBadge +
                         templateBadge +
+                        statsBadges +
                     '</div>' +
                 '</div>' +
                 '<div class="item-card-actions">' +
@@ -950,7 +1029,7 @@ function showRuleForm(editIdx) {
     };
 
     const eventOptions = EVENT_TYPES.map(function(et) {
-        return '<option value="' + et + '"' + (rule.event === et ? ' selected' : '') + '>' + et + '</option>';
+        return '<option value="' + et + '"' + (rule.event === et ? ' selected' : '') + '>' + eventLabel(et) + '</option>';
     }).join('');
 
     const channelCheckboxes = Object.keys(localConfig.channels).map(function(name) {
@@ -1111,7 +1190,7 @@ function renderTemplateFields(eventType) {
     const fields = TEMPLATE_FIELDS[eventType] || [];
 
     let html = '<details class="template-ref" open>' +
-        '<summary class="template-ref-summary">Available fields for <strong>' + escHtml(eventType) + '</strong></summary>' +
+        '<summary class="template-ref-summary">Available fields for <strong>' + escHtml(eventLabel(eventType)) + '</strong></summary>' +
         '<div class="template-ref-body">';
 
     if (fields.length === 0) {

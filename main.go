@@ -2608,6 +2608,9 @@ func main() {
 	http.HandleFunc("/admin/notifications/schema", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsSchema(w, r)
 	}))
+	http.HandleFunc("/admin/notifications/telegram-updates", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleTelegramGetUpdates(w, r)
+	}))
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)
 	}))

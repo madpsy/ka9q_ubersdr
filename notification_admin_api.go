@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -599,4 +601,166 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+// handleTelegramGetUpdates calls the Telegram Bot API getUpdates method with the
+// supplied bot token and returns a deduplicated list of chats that have messaged
+// the bot. This lets a UI discover the chat_id without the user having to use
+// external tools.
+//
+// POST /admin/notifications/telegram-updates
+//
+//	{"bot_token": "123:ABC…"}
+//
+// Response:
+//
+//	{
+//	  "ok": true,
+//	  "bot_username": "MyUberSDRBot",
+//	  "chats": [
+//	    {"id": -100123456789, "type": "group",   "title": "My Ham Radio Group"},
+//	    {"id": 987654321,     "type": "private", "first_name": "Nathan"}
+//	  ]
+//	}
+func handleTelegramGetUpdates(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "POST required"}) //nolint:errcheck
+		return
+	}
+
+	var req struct {
+		BotToken string `json:"bot_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BotToken == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "bot_token is required"}) //nolint:errcheck
+		return
+	}
+
+	apiBase := fmt.Sprintf("https://api.telegram.org/bot%s", req.BotToken)
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// ── getMe — validate token and get bot username ───────────────────────────
+	meResp, err := client.Get(apiBase + "/getMe")
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": "telegram API unreachable: " + err.Error()}) //nolint:errcheck
+		return
+	}
+	defer meResp.Body.Close()
+	meBody, _ := io.ReadAll(meResp.Body)
+
+	var meResult struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Username string `json:"username"`
+		} `json:"result"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(meBody, &meResult); err != nil || !meResult.OK {
+		desc := meResult.Description
+		if desc == "" {
+			desc = "invalid bot token or unexpected response"
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": desc}) //nolint:errcheck
+		return
+	}
+
+	// ── getUpdates — fetch recent messages to discover chats ─────────────────
+	// offset=-1 fetches only the most recent update; we use limit=100 to get
+	// a broader history so more chats are discoverable.
+	updatesURL := apiBase + "/getUpdates?limit=100&timeout=0"
+	updResp, err := client.Get(updatesURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": "getUpdates failed: " + err.Error()}) //nolint:errcheck
+		return
+	}
+	defer updResp.Body.Close()
+	updBody, _ := io.ReadAll(updResp.Body)
+
+	// Minimal struct — we only need the chat fields from each update.
+	var updResult struct {
+		OK     bool `json:"ok"`
+		Result []struct {
+			Message *struct {
+				Chat struct {
+					ID        int64  `json:"id"`
+					Type      string `json:"type"`
+					Title     string `json:"title,omitempty"`
+					Username  string `json:"username,omitempty"`
+					FirstName string `json:"first_name,omitempty"`
+					LastName  string `json:"last_name,omitempty"`
+				} `json:"chat"`
+			} `json:"message,omitempty"`
+			ChannelPost *struct {
+				Chat struct {
+					ID        int64  `json:"id"`
+					Type      string `json:"type"`
+					Title     string `json:"title,omitempty"`
+					Username  string `json:"username,omitempty"`
+					FirstName string `json:"first_name,omitempty"`
+					LastName  string `json:"last_name,omitempty"`
+				} `json:"chat"`
+			} `json:"channel_post,omitempty"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(updBody, &updResult) // best-effort; empty result is fine
+
+	// Deduplicate chats by ID.
+	type chatInfo struct {
+		ID        int64  `json:"id"`
+		Type      string `json:"type"`
+		Title     string `json:"title,omitempty"`
+		Username  string `json:"username,omitempty"`
+		FirstName string `json:"first_name,omitempty"`
+		LastName  string `json:"last_name,omitempty"`
+	}
+	seen := make(map[int64]bool)
+	var chats []chatInfo
+
+	addChat := func(id int64, typ, title, username, first, last string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		chats = append(chats, chatInfo{
+			ID: id, Type: typ, Title: title,
+			Username: username, FirstName: first, LastName: last,
+		})
+	}
+
+	for _, upd := range updResult.Result {
+		if upd.Message != nil {
+			c := upd.Message.Chat
+			addChat(c.ID, c.Type, c.Title, c.Username, c.FirstName, c.LastName)
+		}
+		if upd.ChannelPost != nil {
+			c := upd.ChannelPost.Chat
+			addChat(c.ID, c.Type, c.Title, c.Username, c.FirstName, c.LastName)
+		}
+	}
+
+	// ── Respond ───────────────────────────────────────────────────────────────
+	type response struct {
+		OK          bool       `json:"ok"`
+		BotUsername string     `json:"bot_username"`
+		Chats       []chatInfo `json:"chats"`
+		Hint        string     `json:"hint,omitempty"`
+	}
+	out := response{
+		OK:          true,
+		BotUsername: meResult.Result.Username,
+		Chats:       chats,
+	}
+	if len(chats) == 0 {
+		out.Hint = "No chats found. Send a message to your bot (or add it to a group) then try again."
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(out) //nolint:errcheck
 }

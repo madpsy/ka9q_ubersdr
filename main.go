@@ -2074,7 +2074,7 @@ func main() {
 			log.Printf("Warning: Failed to initialize antenna switch API: %v", err)
 			antSwitchHandler = nil
 		} else {
-			log.Printf("Antenna switch API initialized (host: %s:%d)", config.AntSwitch.Host, config.AntSwitch.Port)
+			log.Printf("Antenna switch API initialized (backend: %s url: %s)", config.AntSwitch.BackendType, config.AntSwitch.DeviceURL)
 
 			// Register notification callback for antenna switch changes
 			antSwitchHandler.OnChange(func(entry AntSwitchLogEntry) {
@@ -2293,7 +2293,7 @@ func main() {
 	// Register antenna switch API routes
 	if antSwitchHandler != nil {
 		RegisterAntSwitchRoutes(http.DefaultServeMux, antSwitchHandler)
-		log.Printf("Antenna switch API enabled at /api/ant-switch/* (host: %s:%d)", config.AntSwitch.Host, config.AntSwitch.Port)
+		log.Printf("Antenna switch API enabled at /api/ant-switch/* (backend: %s url: %s)", config.AntSwitch.BackendType, config.AntSwitch.DeviceURL)
 	} else {
 		RegisterAntSwitchRoutesDisabled(http.DefaultServeMux)
 		if config.AntSwitch.Enabled {

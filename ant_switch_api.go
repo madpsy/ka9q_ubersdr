@@ -2,15 +2,15 @@ package main
 
 // Antenna Switch Control
 //
-// Talks directly to the switch device over HTTP, mirroring what the KiwiSDR
-// ant-switch-frontend bash scripts do with curl.
+// Talks directly to the switch device over HTTP,
 //
 // Supported backend types (set via BackendType in config):
 //
 //   ms-s7-web   — MS-S7-WEB (7-port, mixing)
 //                   GET  /io.cgi          → 7-digit bit string "0100000"
+//                                           bit 0 = relay energised (antenna active)
+//                                           bit 1 = relay off (grounded)
 //                   POST /dout.cgi        → pin=N&val=0 (select) / val=1 (deselect)
-//                   GET  /widget.cgi      → connectivity check
 //
 //   ms-sNa-web  — MS-S3A/S4A/S5A/S6A/S7A-WEB (rotary, no mixing)
 //                   GET  /               → HTML containing selected antenna number
@@ -175,7 +175,7 @@ type antSwitchBackend interface {
 	ToggleAntenna(n int) (AntSwitchState, error)
 }
 
-// ─── HTTP helper ──────────────────────────────────────────────────────────────
+// ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 // httpGet performs a GET request and returns the response body as a string.
 func httpGet(client *http.Client, rawURL string) (string, error) {
@@ -205,15 +205,22 @@ func httpPost(client *http.Client, rawURL string, data url.Values) (string, erro
 	return string(body), nil
 }
 
+// stripNonBinary removes all characters that are not '0' or '1'.
+var stripNonBinaryRe = regexp.MustCompile(`[^01]`)
+
+func stripNonBinary(s string) string {
+	return stripNonBinaryRe.ReplaceAllString(s, "")
+}
+
 // ─── ms-s7-web backend ────────────────────────────────────────────────────────
 //
 // MS-S7-WEB: 7-port relay board with mixing support.
 //
-//   GET  /io.cgi          → "0100000" (7 bits, 0=selected/active, 1=grounded)
-//   POST /dout.cgi        → pin=N&val=0 (select/activate), pin=N&val=1 (deselect/ground)
+//   GET  /io.cgi          → "0100000" (N bits, 0=relay energised/antenna active,
+//                           1=relay off/grounded)
+//   POST /dout.cgi        → pin=N&val=0 (activate), pin=N&val=1 (deactivate)
 //
-// Note: the bit polarity is inverted — 0 means the relay is energised (antenna
-// connected), 1 means grounded.  Antenna N maps to pin N-1 (0-indexed).
+// Antenna N maps to pin N-1 (0-indexed).
 
 type msS7WebBackend struct {
 	client  *http.Client
@@ -229,15 +236,12 @@ func newMsS7WebBackend(deviceURL string, nCh int, timeout time.Duration) *msS7We
 	}
 }
 
-// readBits fetches /io.cgi and returns the raw bit string.
 func (b *msS7WebBackend) readBits() (string, error) {
 	body, err := httpGet(b.client, b.baseURL+"/io.cgi")
 	if err != nil {
 		return "", err
 	}
-	// Strip non-digit characters; keep only 0 and 1
-	re := regexp.MustCompile(`[^01]`)
-	digits := re.ReplaceAllString(body, "")
+	digits := stripNonBinary(body)
 	if len(digits) < b.nCh {
 		return "", fmt.Errorf("ms-s7-web: unexpected /io.cgi response (got %q)", body)
 	}
@@ -276,8 +280,10 @@ func (b *msS7WebBackend) setPin(pin int, val int) error {
 
 func (b *msS7WebBackend) SelectAntenna(n int) (AntSwitchState, error) {
 	// Ground all first (set all pins to 1), then activate the chosen one (pin=0)
-	if _, err := b.GroundAll(); err != nil {
-		return AntSwitchState{LastError: err.Error()}, err
+	for i := 0; i < b.nCh; i++ {
+		if err := b.setPin(i, 1); err != nil {
+			return AntSwitchState{LastError: err.Error()}, err
+		}
 	}
 	if err := b.setPin(n-1, 0); err != nil {
 		return AntSwitchState{LastError: err.Error()}, err
@@ -315,8 +321,8 @@ func (b *msS7WebBackend) ToggleAntenna(n int) (AntSwitchState, error) {
 	}
 	pin := n - 1
 	if pin >= len(bits) {
-		return AntSwitchState{LastError: fmt.Sprintf("antenna %d out of range", n)},
-			fmt.Errorf("antenna %d out of range for %d-channel device", n, b.nCh)
+		err := fmt.Errorf("antenna %d out of range for %d-channel device", n, b.nCh)
+		return AntSwitchState{LastError: err.Error()}, err
 	}
 	// bit '0' = active; toggle: 0→1 (deactivate), 1→0 (activate)
 	if bits[pin] == '0' {
@@ -335,6 +341,7 @@ func (b *msS7WebBackend) ToggleAntenna(n int) (AntSwitchState, error) {
 //
 // The switch is a rotary selector — to reach antenna N from the current
 // position we step CW or CCW by the shortest path.
+// Position 0 = ground, positions 1..nCh = antennas.
 
 type msSNaWebBackend struct {
 	client  *http.Client
@@ -350,10 +357,11 @@ func newMsSNaWebBackend(deviceURL string, nCh int, timeout time.Duration) *msSNa
 	}
 }
 
-// readSelected fetches the root page and parses the currently selected antenna.
-// Returns 0 for ground/unknown.
+// msSNaSelectedRe matches "N<p>" (antenna number) or "GROUND" in the HTML response.
 var msSNaSelectedRe = regexp.MustCompile(`(?i)([1-9][0-9]?)<p>|GROUND`)
 
+// readSelected fetches the root page and parses the currently selected antenna.
+// Returns 0 for ground/unknown.
 func (b *msSNaWebBackend) readSelected() (int, error) {
 	body, err := httpGet(b.client, b.baseURL+"/")
 	if err != nil {
@@ -405,7 +413,6 @@ func (b *msSNaWebBackend) stepTo(target int) (AntSwitchState, error) {
 	}
 
 	// Calculate shortest-path steps on a ring of size nCh+1 (positions 0..nCh)
-	// Position 0 = ground, positions 1..nCh = antennas
 	ringSize := b.nCh + 1
 	steps := target - current
 	if steps > ringSize/2 {
@@ -440,19 +447,18 @@ func (b *msSNaWebBackend) GroundAll() (AntSwitchState, error) {
 	return b.stepTo(0)
 }
 
-// AddAntenna, RemoveAntenna, ToggleAntenna: rotary switch has no mixing.
-// We treat AddAntenna as SelectAntenna (exclusive), and Remove/Toggle as no-ops
-// that return the current state.
+// AddAntenna: rotary switch has no mixing — treat as SelectAntenna.
 func (b *msSNaWebBackend) AddAntenna(n int) (AntSwitchState, error) {
 	return b.SelectAntenna(n)
 }
 
+// RemoveAntenna: rotary switch has no mixing — return current state unchanged.
 func (b *msSNaWebBackend) RemoveAntenna(_ int) (AntSwitchState, error) {
 	return b.GetState()
 }
 
+// ToggleAntenna: if n is currently selected, ground; otherwise select it.
 func (b *msSNaWebBackend) ToggleAntenna(n int) (AntSwitchState, error) {
-	// If n is currently selected, ground; otherwise select it.
 	sel, err := b.readSelected()
 	if err != nil {
 		return AntSwitchState{LastError: err.Error()}, err
@@ -470,7 +476,7 @@ func (b *msSNaWebBackend) ToggleAntenna(n int) (AntSwitchState, error) {
 //   GET /status.xml          → XML: <relay0>0</relay0>…<relay8>0</relay8>
 //                              relay0 is a heartbeat; relay1-8 are antennas.
 //   GET /FFE000               → ground all (all relays off)
-//   GET /FF0N01               → turn relay N on  (N = 1-8, zero-padded to 1 digit)
+//   GET /FF0N01               → turn relay N on  (N = 1-8)
 //   GET /FF0N00               → turn relay N off
 //   GET /relays.cgi?relay=N   → toggle relay N
 
@@ -488,7 +494,7 @@ func newKmtronicBackend(deviceURL string, nCh int, timeout time.Duration) *kmtro
 	}
 }
 
-var kmtronicRelayRe = regexp.MustCompile(`relay[0-8]`)
+var kmtronicRelayTagRe = regexp.MustCompile(`relay[0-8]`)
 
 func (b *kmtronicBackend) GetState() (AntSwitchState, error) {
 	body, err := httpGet(b.client, b.baseURL+"/status.xml")
@@ -496,9 +502,7 @@ func (b *kmtronicBackend) GetState() (AntSwitchState, error) {
 		return AntSwitchState{LastError: err.Error()}, err
 	}
 	// Strip relay tag names, keep only 0/1 digits
-	digits := kmtronicRelayRe.ReplaceAllString(body, "")
-	re := regexp.MustCompile(`[^01]`)
-	digits = re.ReplaceAllString(digits, "")
+	digits := stripNonBinary(kmtronicRelayTagRe.ReplaceAllString(body, ""))
 	if len(digits) < 9 {
 		digits = "000000000"
 	}
@@ -579,7 +583,7 @@ func newSnaptekkBackend(deviceURL string, nCh int, timeout time.Duration) *snapt
 	}
 }
 
-var snaptekkStatusRe = regexp.MustCompile(`\{[^}]*"Status"\s*:\s*\[([01,\s]+)\]`)
+var snaptekkStatusRe = regexp.MustCompile(`"Status"\s*:\s*\[([01,\s]+)\]`)
 
 func (b *snaptekkBackend) GetState() (AntSwitchState, error) {
 	body, err := httpGet(b.client, b.baseURL+"/status")
@@ -587,18 +591,14 @@ func (b *snaptekkBackend) GetState() (AntSwitchState, error) {
 		return AntSwitchState{LastError: err.Error()}, err
 	}
 
-	// Try to parse {"Status":[0,0,...]} from the HTML
-	m := snaptekkStatusRe.FindStringSubmatch(body)
 	var bits []int
-	if m != nil {
-		// Parse the comma-separated list inside the brackets
+	if m := snaptekkStatusRe.FindStringSubmatch(body); m != nil {
 		for _, part := range strings.Split(m[1], ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
 				continue
 			}
-			v, err := strconv.Atoi(part)
-			if err == nil {
+			if v, err := strconv.Atoi(part); err == nil {
 				bits = append(bits, v)
 			}
 		}
@@ -606,9 +606,7 @@ func (b *snaptekkBackend) GetState() (AntSwitchState, error) {
 
 	// Fallback: strip non-0/1 chars
 	if len(bits) == 0 {
-		re := regexp.MustCompile(`[^01]`)
-		digits := re.ReplaceAllString(body, "")
-		for _, ch := range digits {
+		for _, ch := range stripNonBinary(body) {
 			if ch == '0' {
 				bits = append(bits, 0)
 			} else {
@@ -675,3 +673,635 @@ func (b *snaptekkBackend) ToggleAntenna(n int) (AntSwitchState, error) {
 type AntSwitchRateLimiter struct {
 	limiters map[string]map[string]*RateLimiter
 	mu       sync.RWMutex
+}
+
+// NewAntSwitchRateLimiter creates a new rate limiter for ant-switch endpoints.
+func NewAntSwitchRateLimiter() *AntSwitchRateLimiter {
+	return &AntSwitchRateLimiter{
+		limiters: make(map[string]map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if a request is allowed for the given IP and endpoint.
+func (rl *AntSwitchRateLimiter) AllowRequest(ip, endpoint string) bool {
+	rl.mu.Lock()
+	ipLimiters, exists := rl.limiters[ip]
+	if !exists {
+		ipLimiters = make(map[string]*RateLimiter)
+		rl.limiters[ip] = ipLimiters
+	}
+	endpointLimiter, exists := ipLimiters[endpoint]
+	if !exists {
+		var refillRate, maxTokens float64
+		if endpoint == "status" {
+			refillRate = 5.0
+			maxTokens = 5.0
+		} else {
+			refillRate = 1.0
+			maxTokens = 1.0
+		}
+		endpointLimiter = &RateLimiter{
+			tokens:     maxTokens,
+			maxTokens:  maxTokens,
+			refillRate: refillRate,
+			lastRefill: time.Now(),
+		}
+		ipLimiters[endpoint] = endpointLimiter
+	}
+	rl.mu.Unlock()
+	return endpointLimiter.Allow()
+}
+
+// ─── Handler ──────────────────────────────────────────────────────────────────
+
+// AntSwitchHandler manages the antenna switch HTTP backend and HTTP API.
+type AntSwitchHandler struct {
+	config      *AntSwitchConfig
+	backend     antSwitchBackend
+	mu          sync.RWMutex
+	state       AntSwitchState
+	rateLimiter *AntSwitchRateLimiter
+	changeLog   *AntSwitchChangeLog
+
+	// Change callbacks — called after each antenna switch change is logged.
+	changeHandlers []func(AntSwitchLogEntry)
+	handlerMu      sync.RWMutex
+}
+
+// OnChange registers a callback that is called after each antenna switch change.
+// Safe to call before the handler is started.
+func (h *AntSwitchHandler) OnChange(fn func(AntSwitchLogEntry)) {
+	if h == nil || fn == nil {
+		return
+	}
+	h.handlerMu.Lock()
+	h.changeHandlers = append(h.changeHandlers, fn)
+	h.handlerMu.Unlock()
+}
+
+// logChange adds an entry to the change log and fires all registered callbacks.
+func (h *AntSwitchHandler) logChange(entry AntSwitchLogEntry) {
+	h.changeLog.Add(entry)
+	h.handlerMu.RLock()
+	handlers := make([]func(AntSwitchLogEntry), len(h.changeHandlers))
+	copy(handlers, h.changeHandlers)
+	h.handlerMu.RUnlock()
+	if len(handlers) > 0 {
+		go func() {
+			for _, fn := range handlers {
+				fn(entry)
+			}
+		}()
+	}
+}
+
+// antSwitchMaxRetries is kept for API compatibility with admin.go callers.
+// Since every HTTP command returns state directly, we always succeed in one
+// attempt — this constant is passed through to buildCommandResult for display.
+const antSwitchMaxRetries = 1
+
+// NewAntSwitchHandler creates and initialises a new AntSwitchHandler.
+func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
+	if !config.Enabled {
+		return nil, fmt.Errorf("antenna switch is not enabled in configuration")
+	}
+	if config.DeviceURL == "" {
+		return nil, fmt.Errorf("antenna switch device_url is required")
+	}
+	if config.BackendType == "" {
+		return nil, fmt.Errorf("antenna switch backend_type is required (ms-s7-web, ms-sNa-web, kmtronic, snaptekk)")
+	}
+	if config.TimeoutMs <= 0 {
+		config.TimeoutMs = 2000
+	}
+	if config.NumAntennas < 0 || config.NumAntennas > 10 {
+		return nil, fmt.Errorf("antenna switch num_antennas must be 1-10 (got %d)", config.NumAntennas)
+	}
+	if config.NumAntennas == 0 {
+		config.NumAntennas = 8
+		log.Printf("AntSwitch: num_antennas not set, defaulting to 8")
+	}
+
+	timeout := time.Duration(config.TimeoutMs) * time.Millisecond
+
+	var backend antSwitchBackend
+	switch strings.ToLower(config.BackendType) {
+	case "ms-s7-web":
+		backend = newMsS7WebBackend(config.DeviceURL, config.NumAntennas, timeout)
+	case "ms-sna-web":
+		backend = newMsSNaWebBackend(config.DeviceURL, config.NumAntennas, timeout)
+	case "kmtronic":
+		backend = newKmtronicBackend(config.DeviceURL, config.NumAntennas, timeout)
+	case "snaptekk":
+		backend = newSnaptekkBackend(config.DeviceURL, config.NumAntennas, timeout)
+	default:
+		return nil, fmt.Errorf("unknown antenna switch backend_type %q (valid: ms-s7-web, ms-sNa-web, kmtronic, snaptekk)", config.BackendType)
+	}
+
+	h := &AntSwitchHandler{
+		config:      config,
+		backend:     backend,
+		rateLimiter: NewAntSwitchRateLimiter(),
+		changeLog:   newAntSwitchChangeLog(100),
+	}
+
+	// Initial state query
+	if state, err := h.queryState(); err != nil {
+		log.Printf("AntSwitch: Warning: initial state query failed: %v", err)
+	} else {
+		h.mu.Lock()
+		h.state = state
+		h.mu.Unlock()
+		log.Printf("AntSwitch: Initial state: selected=%v grounded=%v", state.Selected, state.Grounded)
+
+		var startLabel string
+		if state.Grounded {
+			startLabel = "Startup: Grounded"
+		} else if len(state.Selected) > 0 {
+			names := make([]string, 0, len(state.Selected))
+			for _, n := range state.Selected {
+				names = append(names, h.antennaLabel(n))
+			}
+			startLabel = "Startup: " + strings.Join(names, ", ")
+		} else {
+			startLabel = "Startup: Unknown"
+		}
+		h.logChange(AntSwitchLogEntry{
+			Time:     time.Now(),
+			Action:   "startup",
+			Antenna:  0,
+			Label:    startLabel,
+			Selected: state.Selected,
+			Grounded: state.Grounded,
+			Source:   "startup",
+		})
+	}
+
+	// Select default antenna on startup if configured
+	if config.DefaultAntenna > 0 {
+		if config.DefaultAntenna > config.NumAntennas {
+			log.Printf("AntSwitch: Warning: default_antenna %d exceeds num_antennas %d, ignoring",
+				config.DefaultAntenna, config.NumAntennas)
+		} else {
+			log.Printf("AntSwitch: Selecting default antenna %d on startup", config.DefaultAntenna)
+			if state, verified, err := h.selectAntenna(config.DefaultAntenna); err != nil {
+				log.Printf("AntSwitch: Warning: failed to select default antenna %d: %v",
+					config.DefaultAntenna, err)
+			} else if verified {
+				h.logChange(AntSwitchLogEntry{
+					Time:     time.Now(),
+					Action:   "default",
+					Antenna:  config.DefaultAntenna,
+					Label:    h.antennaLabel(config.DefaultAntenna),
+					Selected: state.Selected,
+					Grounded: state.Grounded,
+					Source:   "startup",
+				})
+			}
+		}
+	}
+
+	go h.backgroundPoller()
+
+	return h, nil
+}
+
+// ─── State query ──────────────────────────────────────────────────────────────
+
+// queryState queries the device for its current state.
+func (h *AntSwitchHandler) queryState() (AntSwitchState, error) {
+	return h.backend.GetState()
+}
+
+// ─── Background poller ────────────────────────────────────────────────────────
+
+// backgroundPoller polls the device every 5 seconds to keep the state cache fresh.
+func (h *AntSwitchHandler) backgroundPoller() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		state, err := h.backend.GetState()
+		if err != nil {
+			h.mu.Lock()
+			h.state.LastError = err.Error()
+			h.mu.Unlock()
+			continue
+		}
+		h.mu.Lock()
+		h.state = state
+		h.mu.Unlock()
+	}
+}
+
+// ─── Command methods ──────────────────────────────────────────────────────────
+//
+// These return (AntSwitchState, bool, error) where the bool is "verified"
+// (always true on HTTP success, false on error) to maintain API compatibility
+// with admin.go callers that were written for the old TCP protocol.
+
+// selectAntenna selects antenna n using the configured mixing mode.
+func (h *AntSwitchHandler) selectAntenna(n int) (AntSwitchState, bool, error) {
+	var (
+		state AntSwitchState
+		err   error
+	)
+	if h.config.AllowMixing {
+		state, err = h.backend.ToggleAntenna(n)
+	} else {
+		state, err = h.backend.SelectAntenna(n)
+	}
+	if err != nil {
+		log.Printf("AntSwitch: selectAntenna(%d): %v", n, err)
+		return state, false, err
+	}
+	h.mu.Lock()
+	h.state = state
+	h.mu.Unlock()
+	log.Printf("AntSwitch: selectAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
+	return state, true, nil
+}
+
+// groundAll grounds all antennas.
+func (h *AntSwitchHandler) groundAll() (AntSwitchState, bool, error) {
+	state, err := h.backend.GroundAll()
+	if err != nil {
+		log.Printf("AntSwitch: groundAll: %v", err)
+		return state, false, err
+	}
+	h.mu.Lock()
+	h.state = state
+	h.mu.Unlock()
+	log.Printf("AntSwitch: groundAll ok, selected=%v grounded=%v", state.Selected, state.Grounded)
+	return state, true, nil
+}
+
+// addAntenna adds antenna n without grounding others — admin only.
+func (h *AntSwitchHandler) addAntenna(n int) (AntSwitchState, bool, error) {
+	state, err := h.backend.AddAntenna(n)
+	if err != nil {
+		log.Printf("AntSwitch: addAntenna(%d): %v", n, err)
+		return state, false, err
+	}
+	h.mu.Lock()
+	h.state = state
+	h.mu.Unlock()
+	log.Printf("AntSwitch: addAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
+	return state, true, nil
+}
+
+// removeAntenna removes antenna n without grounding others — admin only.
+func (h *AntSwitchHandler) removeAntenna(n int) (AntSwitchState, bool, error) {
+	state, err := h.backend.RemoveAntenna(n)
+	if err != nil {
+		log.Printf("AntSwitch: removeAntenna(%d): %v", n, err)
+		return state, false, err
+	}
+	h.mu.Lock()
+	h.state = state
+	h.mu.Unlock()
+	log.Printf("AntSwitch: removeAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
+	return state, true, nil
+}
+
+// getState returns the current cached state (thread-safe).
+func (h *AntSwitchHandler) getState() AntSwitchState {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.state
+}
+
+// GetInfo returns a compact summary suitable for /api/description and instance reporting.
+func (h *AntSwitchHandler) GetInfo() map[string]interface{} {
+	state := h.getState()
+
+	info := map[string]interface{}{
+		"enabled":  true,
+		"grounded": state.Grounded,
+	}
+
+	selected := state.Selected
+	if selected == nil {
+		selected = []int{}
+	}
+	info["selected"] = selected
+
+	activeLabels := make([]string, 0, len(selected))
+	for _, n := range selected {
+		activeLabels = append(activeLabels, h.antennaLabel(n))
+	}
+	info["active_labels"] = activeLabels
+
+	return info
+}
+
+// antennaLabel returns the label for antenna n (1-based), or "Antenna N" if not configured.
+func (h *AntSwitchHandler) antennaLabel(n int) string {
+	if n >= 1 && n <= len(h.config.AntennaLabels) {
+		if label := h.config.AntennaLabels[n-1]; label != "" {
+			return label
+		}
+	}
+	return fmt.Sprintf("Antenna %d", n)
+}
+
+// buildLabels returns the full label slice (always NumAntennas entries).
+func (h *AntSwitchHandler) buildLabels() []string {
+	labels := make([]string, h.config.NumAntennas)
+	for i := 0; i < h.config.NumAntennas; i++ {
+		labels[i] = h.antennaLabel(i + 1)
+	}
+	return labels
+}
+
+// ─── HTTP response helpers ────────────────────────────────────────────────────
+
+// antSwitchCommandResult is the JSON response for control commands.
+type antSwitchCommandResult struct {
+	Success       bool     `json:"success"`
+	Verified      bool     `json:"verified"`
+	Attempts      int      `json:"attempts,omitempty"`
+	Selected      []int    `json:"selected"`
+	Grounded      bool     `json:"grounded"`
+	AntennaLabels []string `json:"antenna_labels"`
+	NumAntennas   int      `json:"num_antennas"`
+	AllowMixing   bool     `json:"allow_mixing"`
+	Thunderstorm  bool     `json:"thunderstorm"`
+	Message       string   `json:"message,omitempty"`
+	Error         string   `json:"error,omitempty"`
+}
+
+// writeAntSwitchResult writes a command result as JSON with the appropriate HTTP status:
+//
+//	200 = verified success
+//	202 = command sent but hardware unverified
+//	503 = HTTP connection failure
+func writeAntSwitchResult(w http.ResponseWriter, result antSwitchCommandResult, httpErr bool) {
+	w.Header().Set("Content-Type", "application/json")
+	if httpErr {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	} else if !result.Verified {
+		w.WriteHeader(http.StatusAccepted)
+	}
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("AntSwitch: error encoding command result: %v", err)
+	}
+}
+
+// buildCommandResult builds a result struct from a completed command execution.
+func (h *AntSwitchHandler) buildCommandResult(state AntSwitchState, verified bool, attempts int, err error, message string) antSwitchCommandResult {
+	result := antSwitchCommandResult{
+		Success:       verified,
+		Verified:      verified,
+		Attempts:      attempts,
+		Selected:      state.Selected,
+		Grounded:      state.Grounded,
+		AntennaLabels: h.buildLabels(),
+		NumAntennas:   h.config.NumAntennas,
+		AllowMixing:   h.config.AllowMixing,
+		Thunderstorm:  h.config.Thunderstorm,
+		Message:       message,
+	}
+	if result.Selected == nil {
+		result.Selected = []int{}
+	}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	if !verified && err == nil {
+		result.Error = "command sent but hardware did not respond as expected"
+	}
+	return result
+}
+
+// ─── Public HTTP endpoints ────────────────────────────────────────────────────
+
+// HandleGetStatus handles GET /api/ant-switch/status
+func (h *AntSwitchHandler) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "status") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Rate limit exceeded"})
+		return
+	}
+
+	state := h.getState()
+
+	w.Header().Set("Content-Type", "application/json")
+	resp := map[string]interface{}{
+		"enabled":        true,
+		"selected":       state.Selected,
+		"grounded":       state.Grounded,
+		"allow_mixing":   h.config.AllowMixing,
+		"num_antennas":   h.config.NumAntennas,
+		"antenna_labels": h.buildLabels(),
+		"thunderstorm":   h.config.Thunderstorm,
+		"last_update":    state.LastUpdate,
+	}
+	if state.Selected == nil {
+		resp["selected"] = []int{}
+	}
+	if state.LastError != "" {
+		resp["last_error"] = state.LastError
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("AntSwitch: error encoding status: %v", err)
+	}
+}
+
+// HandleGetStatusDisabled handles GET /api/ant-switch/status when disabled.
+func HandleGetStatusDisabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":  false,
+		"error":    "Antenna switch is not enabled",
+		"selected": []int{},
+		"grounded": false,
+	})
+}
+
+// antSwitchPublicCommandRequest is the JSON body for POST /api/ant-switch/command.
+type antSwitchPublicCommandRequest struct {
+	Password string `json:"password"`
+	Command  string `json:"command"`
+	Antenna  int    `json:"antenna,omitempty"`
+}
+
+// HandlePublicCommand handles POST /api/ant-switch/command
+func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "command") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Rate limit exceeded",
+		})
+		return
+	}
+
+	if h.config.Thunderstorm {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Thunderstorm mode active — antenna switching is disabled",
+		})
+		return
+	}
+
+	var req antSwitchPublicCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if h.config.Password == "" || req.Password != h.config.Password {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Unauthorized — password required",
+		})
+		return
+	}
+
+	switch req.Command {
+	case "select":
+		if req.Antenna < 1 || req.Antenna > h.config.NumAntennas {
+			http.Error(w, fmt.Sprintf("antenna must be 1-%d", h.config.NumAntennas), http.StatusBadRequest)
+			return
+		}
+		state, verified, err := h.selectAntenna(req.Antenna)
+		httpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.logChange(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "select",
+				Antenna:  req.Antenna,
+				Label:    h.antennaLabel(req.Antenna),
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "public",
+			})
+		}
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err,
+			fmt.Sprintf("Selected antenna %d (%s)", req.Antenna, h.antennaLabel(req.Antenna)))
+		writeAntSwitchResult(w, result, httpErr)
+
+	case "ground":
+		state, verified, err := h.groundAll()
+		httpErr := err != nil && !verified && state.LastUpdate.IsZero()
+		if verified {
+			h.logChange(AntSwitchLogEntry{
+				Time:     time.Now(),
+				Action:   "ground",
+				Antenna:  0,
+				Label:    "Ground all",
+				Selected: state.Selected,
+				Grounded: state.Grounded,
+				Source:   "public",
+			})
+		}
+		result := h.buildCommandResult(state, verified, antSwitchMaxRetries, err, "Grounded all antennas")
+		writeAntSwitchResult(w, result, httpErr)
+
+	default:
+		http.Error(w, fmt.Sprintf("Unknown command %q (valid: select, ground)", req.Command), http.StatusBadRequest)
+	}
+}
+
+// HandleGetHistory handles GET /api/ant-switch/history
+func (h *AntSwitchHandler) HandleGetHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	entries := h.changeLog.Snapshot()
+	if entries == nil {
+		entries = []AntSwitchLogEntry{}
+	}
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": entries,
+		"count":   len(entries),
+	}); err != nil {
+		log.Printf("AntSwitch: error encoding history: %v", err)
+	}
+}
+
+// HandleGetHistoryDisabled handles GET /api/ant-switch/history when disabled.
+func HandleGetHistoryDisabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled": false,
+		"history": []interface{}{},
+		"count":   0,
+	})
+}
+
+// HandlePublicCommandDisabled handles POST /api/ant-switch/command when disabled.
+func HandlePublicCommandDisabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   "Antenna switch is not enabled",
+	})
+}
+
+// ─── Route registration ───────────────────────────────────────────────────────
+
+// RegisterAntSwitchRoutes registers antenna switch API routes with the HTTP server.
+func RegisterAntSwitchRoutes(mux *http.ServeMux, handler *AntSwitchHandler) {
+	mux.HandleFunc("/api/ant-switch/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			handler.HandleGetStatus(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/ant-switch/command", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handler.HandlePublicCommand(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/ant-switch/history", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			handler.HandleGetHistory(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+}
+
+// RegisterAntSwitchRoutesDisabled registers ant-switch API routes that return "not enabled" responses.
+func RegisterAntSwitchRoutesDisabled(mux *http.ServeMux) {
+	mux.HandleFunc("/api/ant-switch/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			HandleGetStatusDisabled(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/ant-switch/command", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			HandlePublicCommandDisabled(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/ant-switch/history", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			HandleGetHistoryDisabled(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+}

@@ -1472,37 +1472,45 @@ rotctl:
 #
 # HTTP response codes for control commands:
 #   200 = command sent and hardware state verified
-#   202 = command sent but hardware did not confirm within 3 retries
-#   503 = could not reach ant-switch-daemon
+#   200 = verified success
+#   202 = command sent but hardware state could not be confirmed
+#   503 = could not reach the switch device
 #
 ant_switch:
   # Enable antenna switch integration (default: false)
   enabled: false
 
-  # Hostname or IP address of the machine running ant-switch-daemon
-  host: "localhost"
+  # Backend type — selects the HTTP driver for your switch hardware.
+  # Valid values:
+  #   ms-sNa-web  — MS-S3A/S4A/S5A/S6A/S7A-WEB (rotary switch, no mixing)
+  #   ms-s7-web   — MS-S7-WEB (7-port relay board, supports mixing)
+  #   kmtronic    — KMTronic 8-ch relay board (supports mixing)
+  #   snaptekk    — Snaptekk 8-ch relay board (supports mixing)
+  backend_type: "ms-sNa-web"
 
-  # TCP port of the ant-switch-daemon xinetd service (default: 65000)
-  port: 65000
+  # Base URL of the switch device on your local network.
+  # Do not include a trailing slash.
+  # Examples:
+  #   http://192.168.1.234   (MS-S5A-WEB default)
+  #   http://192.168.11.100  (MS-S7-WEB default)
+  device_url: "http://192.168.1.234"
 
-  # TCP operation timeout in milliseconds (default: 2000)
-  # How long to wait for the antenna switch daemon to respond.
-  # This covers the entire operation: connect + send command + read response.
+  # HTTP request timeout in milliseconds (default: 2000)
+  # How long to wait for the switch device to respond to each HTTP request.
   # For a device on the local network, 500-1000ms is usually sufficient.
   # Increase if your switch is on a slow or unreliable WiFi connection.
-  # With 3 retry attempts, the worst-case total wait is: 3 × timeout_ms
-  # e.g. 2000ms timeout → up to 6 seconds before a command fails
-  #      500ms timeout  → up to 1.5 seconds before a command fails
   timeout_ms: 2000
 
-  # Number of antennas supported by your switch (1-10, default: 8)
-  # Note: the standard daemon wrapper supports antennas 1-8.
-  # Values 9-10 require a custom daemon wrapper extended to support them.
-  num_antennas: 8
+  # Number of antennas supported by your switch (1-10)
+  # For ms-sNa-web this must match the N in the model name:
+  #   MS-S3A-WEB → 3,  MS-S4A-WEB → 4,  MS-S5A-WEB → 5,
+  #   MS-S6A-WEB → 6,  MS-S7A-WEB → 7
+  num_antennas: 5
 
   # Antenna switching mode
   # false = exclusive mode: selecting an antenna grounds all others first (safer for most setups)
   # true  = mixing mode: antennas are toggled on/off independently
+  # Note: ms-sNa-web (rotary switch) does not support mixing — this setting is ignored for that backend.
   allow_mixing: false
 
   # Password for the public POST /api/ant-switch/command endpoint.

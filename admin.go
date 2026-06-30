@@ -8140,8 +8140,8 @@ func (ah *AdminHandler) HandleAntSwitchHealth(w http.ResponseWriter, r *http.Req
 	h := ah.antSwitchHandler
 	state := h.getState()
 
-	status["host"] = ah.config.AntSwitch.Host
-	status["port"] = ah.config.AntSwitch.Port
+	status["device_url"] = ah.config.AntSwitch.DeviceURL
+	status["backend_type"] = ah.config.AntSwitch.BackendType
 	status["timeout_ms"] = ah.config.AntSwitch.TimeoutMs
 	status["num_antennas"] = ah.config.AntSwitch.NumAntennas
 	status["allow_mixing"] = ah.config.AntSwitch.AllowMixing
@@ -8306,7 +8306,7 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 			state, verified, err = h.groundAll()
 		} else {
 			// Just query current state when leaving thunderstorm mode
-			state, err = h.queryState()
+			state, err = h.backend.GetState()
 			verified = err == nil
 			if err == nil {
 				h.mu.Lock()
@@ -8369,11 +8369,11 @@ func (ah *AdminHandler) HandleAntSwitchTest(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":     false,
-			"error":       err.Error(),
-			"duration_ms": durationMs,
-			"host":        ah.config.AntSwitch.Host,
-			"port":        ah.config.AntSwitch.Port,
+			"success":      false,
+			"error":        err.Error(),
+			"duration_ms":  durationMs,
+			"device_url":   ah.config.AntSwitch.DeviceURL,
+			"backend_type": ah.config.AntSwitch.BackendType,
 		})
 		return
 	}
@@ -8392,8 +8392,8 @@ func (ah *AdminHandler) HandleAntSwitchTest(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":              true,
 		"duration_ms":          durationMs,
-		"host":                 ah.config.AntSwitch.Host,
-		"port":                 ah.config.AntSwitch.Port,
+		"device_url":           ah.config.AntSwitch.DeviceURL,
+		"backend_type":         ah.config.AntSwitch.BackendType,
 		"grounded":             state.Grounded,
 		"selected":             state.Selected,
 		"selected_with_labels": selectedWithLabels,

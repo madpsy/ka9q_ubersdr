@@ -42,7 +42,7 @@ func handleNotificationsHealth(w http.ResponseWriter, r *http.Request, nm *Notif
 //  2. Ad-hoc credentials (no config required — useful during initial setup):
 //     {"type": "telegram", "bot_token": "7123…", "chat_id": "-100123…"}
 //     {"type": "telegram", "bot_token": "7123…", "chat_id": "-100123…",
-//      "parse_mode": "HTML", "message": "custom text"}
+//     "parse_mode": "HTML", "message": "custom text"}
 //
 // Response (always JSON):
 //
@@ -186,16 +186,18 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 // handleNotificationsConfig handles GET and PUT for the notification config.
 //
 // GET /admin/notifications/config
-//   Returns the active configuration with sensitive fields redacted and a list
-//   of validation issues.
+//
+//	Returns the active configuration with sensitive fields redacted and a list
+//	of validation issues.
 //
 // PUT /admin/notifications/config
-//   Accepts a full NotificationsConfig JSON body, validates it, writes it to
-//   the notifications.yaml file, and hot-reloads the notification manager —
-//   no server restart required.
 //
-//   Bot tokens that are sent as the placeholder "********" are preserved from
-//   the existing config so the UI can round-trip without exposing secrets.
+//	Accepts a full NotificationsConfig JSON body, validates it, writes it to
+//	the notifications.yaml file, and hot-reloads the notification manager —
+//	no server restart required.
+//
+//	Bot tokens that are sent as the placeholder "********" are preserved from
+//	the existing config so the UI can round-trip without exposing secrets.
 func handleNotificationsConfig(w http.ResponseWriter, r *http.Request, nm *NotificationManager, cfg *NotificationsConfig, configFile string) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -236,22 +238,25 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		}
 	}
 
-	// Build rule summary (no sensitive data in rules, but omit raw template for brevity)
-	type ruleSummary struct {
-		Name        string                `json:"name"`
-		Enabled     bool                  `json:"enabled"`
-		Event       NotificationEventType `json:"event"`
-		Channels    []string              `json:"channels"`
-		HasTemplate bool                  `json:"has_template"`
+	// Build rule list — include filters and template so the UI can round-trip
+	// them without loss. No sensitive data in rules.
+	type ruleView struct {
+		Name     string                `json:"name"`
+		Enabled  bool                  `json:"enabled"`
+		Event    NotificationEventType `json:"event"`
+		Channels []string              `json:"channels"`
+		Filters  NotificationFilter    `json:"filters"`
+		Template string                `json:"template"`
 	}
-	rules := make([]ruleSummary, 0, len(cfg.Rules))
+	rules := make([]ruleView, 0, len(cfg.Rules))
 	for _, r := range cfg.Rules {
-		rules = append(rules, ruleSummary{
-			Name:        r.Name,
-			Enabled:     r.IsEnabled(),
-			Event:       r.Event,
-			Channels:    r.Channels,
-			HasTemplate: r.Template != "",
+		rules = append(rules, ruleView{
+			Name:     r.Name,
+			Enabled:  r.IsEnabled(),
+			Event:    r.Event,
+			Channels: r.Channels,
+			Filters:  r.Filter,
+			Template: r.Template,
 		})
 	}
 
@@ -338,11 +343,11 @@ func handleNotificationsConfigPut(w http.ResponseWriter, r *http.Request, nm *No
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
-		"ok":      true,
-		"message": "notifications config saved and reloaded",
-		"enabled": newCfg.Enabled,
+		"ok":       true,
+		"message":  "notifications config saved and reloaded",
+		"enabled":  newCfg.Enabled,
 		"channels": len(newCfg.Channels),
-		"rules":   len(newCfg.Rules),
+		"rules":    len(newCfg.Rules),
 	})
 }
 
@@ -611,8 +616,8 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
-			Type:        "server_startup",
-			Description: "Server finished initialising. Fires once per start. Useful for crash/restart detection.",
+			Type:         "server_startup",
+			Description:  "Server finished initialising. Fires once per start. Useful for crash/restart detection.",
 			FilterFields: []filterField{
 				// No filter fields — always fires on startup
 			},
@@ -681,15 +686,15 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 	// ── Assemble response ────────────────────────────────────────────────────
 
 	resp := map[string]interface{}{
-		"channel_types":    channelTypes,
-		"event_types":      eventTypes,
-		"template_funcs":   templateFuncs,
-		"continents":       []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"},
-		"session_actions":  []string{"connected", "disconnected"},
-		"ant_actions":      []string{"select", "ground", "add", "remove", "default"},
-		"ant_sources":      []string{"public", "admin", "startup", "scheduler"},
-		"digital_modes":    []string{"FT8", "FT4", "WSPR", "JS8"},
-		"cw_modes":         []string{"CW", "RTTY"},
+		"channel_types":   channelTypes,
+		"event_types":     eventTypes,
+		"template_funcs":  templateFuncs,
+		"continents":      []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"},
+		"session_actions": []string{"connected", "disconnected"},
+		"ant_actions":     []string{"select", "ground", "add", "remove", "default"},
+		"ant_sources":     []string{"public", "admin", "startup", "scheduler"},
+		"digital_modes":   []string{"FT8", "FT4", "WSPR", "JS8"},
+		"cw_modes":        []string{"CW", "RTTY"},
 		"monitor_components": []string{
 			"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt",
 			"rotator", "ant_switch", "frequency_reference", "instance_reporter",

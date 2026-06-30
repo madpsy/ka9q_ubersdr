@@ -251,18 +251,14 @@ async function loadConfig() {
         localConfig.channels = merged;
 
         const serverRules = data.rules || [];
-        const existingByName = {};
-        localConfig.rules.forEach(function(r) { existingByName[r.name] = r; });
-
         localConfig.rules = serverRules.map(function(sr) {
-            const ex = existingByName[sr.name];
             return {
                 name:     sr.name,
                 enabled:  sr.enabled,
                 event:    sr.event,
                 channels: sr.channels || [],
-                filters:  ex ? ex.filters : {},
-                template: ex ? ex.template : '',
+                filters:  sr.filters  || {},
+                template: sr.template || '',
             };
         });
 

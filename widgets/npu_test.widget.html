@@ -30,7 +30,7 @@
        backend cannot build fp16.)
     2. A tiny/short job finishes in <1 frame; Task Manager samples the NPU
        at ~1s, so it never registers. (This widget runs a 1024x1024 matmul
-       in a sustained ~1.5s loop, so a real NPU run is visible in Task Manager.)
+       in a sustained ~3s loop, so a real NPU run is visible in Task Manager.)
 
   Note: the NPU is a low-power inference part -- it will normally report LOWER
   GFLOPS than the GPU. That is expected and does NOT mean it fell back; confirm
@@ -483,7 +483,7 @@
   //     sampling to register utilisation IF the work really lands on the NPU.
 
   var N            = 1024;             // matrix dimension
-  var BENCH_MS     = 1500;             // sustained run duration per device
+  var BENCH_MS     = 3000;             // sustained run duration per device
   var flopsPerRun  = 2 * N * N * N;    // FLOPs for one NxN * NxN matmul
 
   // float32 -> float16 bit pattern (Three.js DataUtils.toHalfFloat algorithm)

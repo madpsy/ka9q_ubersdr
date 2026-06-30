@@ -1889,8 +1889,8 @@ dsp:
   # disconnects.  A filter *change* by a user who already has DSP active does
   # not count against the limit.
   # 0 = unlimited.
-  # Default: 5
-  max_users: 5
+  # Default: 25
+  max_users: 25
 
   # Per-filter enable/disable.
   # Only filters listed as true here can be requested by clients.

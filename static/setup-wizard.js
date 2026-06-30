@@ -230,8 +230,42 @@
         const stepElement = document.querySelector(`.wizard-step[data-step="${step}"]`);
         const requiredFields = stepElement.querySelectorAll('[required]');
         
-        // Step 3: block Next if lookup is enabled but test has not passed
+        // Step 3 validations
         if (step === 3) {
+            // Validate DX cluster host and port if enabled
+            const dxEnabled = document.getElementById('dxclusterEnabled').checked;
+            if (dxEnabled) {
+                const hostField = document.getElementById('dxclusterHost');
+                const portField = document.getElementById('dxclusterPort');
+                const host = hostField.value.trim();
+                const port = parseInt(portField.value, 10);
+
+                // Must not be empty and must not look like a URL (no scheme or path)
+                if (!host) {
+                    showError('Please enter a DX cluster host.');
+                    hostField.focus();
+                    return false;
+                }
+                if (/^https?:\/\//i.test(host) || host.includes('/')) {
+                    showError('DX cluster host should be a hostname or IP address only — not a URL (e.g. dxspider.co.uk, not https://dxspider.co.uk).');
+                    hostField.focus();
+                    return false;
+                }
+                // Basic hostname/IP pattern: labels of letters, digits, hyphens separated by dots
+                if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(host)) {
+                    showError('DX cluster host does not look like a valid hostname or IP address.');
+                    hostField.focus();
+                    return false;
+                }
+
+                if (isNaN(port) || port < 1 || port > 65535) {
+                    showError('DX cluster port must be a number between 1 and 65535.');
+                    portField.focus();
+                    return false;
+                }
+            }
+
+            // Block Next if lookup is enabled but test has not passed
             const lookupEnabled = document.getElementById('lookupEnabled').value === 'true';
             if (lookupEnabled && !lookupTestPassed) {
                 showError('Please test the lookup service connection before continuing, or set Lookup Service to Disabled.');

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifications Admin - UberSDR</title>
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <link rel="stylesheet" href="notifications-admin.css">
+</head>
+<body>
+<div class="container">
+
+    <!-- Header -->
+    <div class="header">
+        <div class="header-content">
+            <h1>🔔 Notifications Admin</h1>
+            <p>Manage notification channels, rules, and delivery settings</p>
+        </div>
+        <a href="/admin.html" class="back-link">← Back to Admin</a>
+    </div>
+
+    <!-- Global alert area -->
+    <div id="globalAlerts"></div>
+
+    <!-- Tabs -->
+    <div class="editor-tabs">
+        <div class="tab-bar">
+            <div class="tab active" data-tab="overview">📊 Overview</div>
+            <div class="tab" data-tab="channels">📡 Channels</div>
+            <div class="tab" data-tab="rules">📋 Rules</div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             TAB 1: OVERVIEW / HEALTH
+             ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content active" id="tab-overview">
+
+            <div id="overviewAlerts"></div>
+
+            <!-- Master toggle -->
+            <div class="config-section" style="margin-bottom:20px">
+                <div class="toggle-row">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="masterEnable">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="toggle-label">Notifications Enabled</span>
+                    <button class="btn btn-sm" id="btnSaveEnable" style="margin-left:auto">Save</button>
+                </div>
+                <p class="form-hint" style="margin-top:6px">
+                    Disabling stops all notification delivery without removing your configuration.
+                </p>
+            </div>
+
+            <!-- Health loading -->
+            <div id="healthLoading" class="loading-overlay">
+                <div class="spinner"></div> Loading health status…
+            </div>
+
+            <!-- Health content -->
+            <div id="healthContent" style="display:none">
+                <div class="stats-grid" id="statsGrid"></div>
+
+                <div class="config-section">
+                    <div class="config-section-title">System Status</div>
+                    <div id="statusDetails"></div>
+                </div>
+
+                <div id="issuesSection" style="display:none">
+                    <div class="config-section">
+                        <div class="config-section-title">⚠️ Configuration Issues</div>
+                        <ul class="issues-list" id="issuesList"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:10px;margin-top:8px">
+                <button class="btn btn-secondary" id="btnRefreshHealth">🔄 Refresh</button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             TAB 2: CHANNELS
+             ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content" id="tab-channels">
+
+            <div id="channelsAlerts"></div>
+
+            <div id="channelFormContainer" style="display:none"></div>
+
+            <div class="item-list" id="channelList">
+                <div class="loading-overlay"><div class="spinner"></div> Loading channels…</div>
+            </div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+                <button class="btn" id="btnAddChannel">+ Add Channel</button>
+                <button class="btn btn-secondary" id="btnSaveChannels">💾 Save All Changes</button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             TAB 3: RULES
+             ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content" id="tab-rules">
+
+            <div id="rulesAlerts"></div>
+
+            <div id="ruleFormContainer" style="display:none"></div>
+
+            <div class="item-list" id="ruleList">
+                <div class="loading-overlay"><div class="spinner"></div> Loading rules…</div>
+            </div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+                <button class="btn" id="btnAddRule">+ Add Rule</button>
+                <button class="btn btn-secondary" id="btnSaveRules">💾 Save All Changes</button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /container -->
+
+<script src="notifications-admin.js"></script>
+</body>
+</html>

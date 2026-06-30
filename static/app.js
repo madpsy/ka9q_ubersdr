@@ -11768,20 +11768,30 @@ function spectrumZoomSlider(position, sliderEl) {
             ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
         const currentStep = curBwSteps + curBinCountSteps;
 
-        // zoomIn()/zoomOut() call clearZoomSliderSource() + updateZoomSlider() internally
-        // (designed for scroll/pinch/keyboard). When called from the slider itself we must
-        // preserve _zoomSource='slider' so the optimistic updateZoomSlider() inside those
-        // functions does not snap the thumb back to the server-computed position.
-        // Call zoomIn()/zoomOut() the correct number of times to reach the target step,
-        // not just once — otherwise tapping far from the current position only moves one step.
-        const _savedZoomSource = _zoomSource;
-        const steps = Math.abs(position - currentStep);
-        if (position > currentStep) {
-            for (let i = 0; i < steps; i++) spectrumDisplay.zoomIn();
+        // In the deep zoom zone the server controls zoom via bin_count reduction.
+        // Compute the target binBandwidth by applying the required number of halvings
+        // from the current value, then send it in a single message.
+        // (Calling zoomIn() N times in a loop doesn't work because zoomIn() reads
+        // this.binBandwidth which hasn't changed between calls — all N sends would
+        // carry the same value.)
+        const stepsNeeded = position - currentStep; // positive = zoom in, negative = zoom out
+        let deepTargetBW = spectrumDisplay.binBandwidth;
+        if (stepsNeeded > 0) {
+            deepTargetBW = deepTargetBW / Math.pow(2, stepsNeeded);
+            deepTargetBW = Math.max(spectrumDisplay.minBinBandwidth || 10, deepTargetBW);
         } else {
-            for (let i = 0; i < steps; i++) spectrumDisplay.zoomOut();
+            deepTargetBW = deepTargetBW * Math.pow(2, -stepsNeeded);
+            deepTargetBW = Math.min(initial, deepTargetBW);
         }
-        _zoomSource = _savedZoomSource; // restore 'slider' ownership after the calls
+        const freqInputDeep = document.getElementById('frequency');
+        const frequencyDeep = parseInt(freqInputDeep.getAttribute('data-hz-value') || freqInputDeep.value);
+        if (!isNaN(frequencyDeep) && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+            spectrumDisplay.ws.send(JSON.stringify({
+                type: 'zoom',
+                frequency: frequencyDeep,
+                binBandwidth: deepTargetBW
+            }));
+        }
         updateURL();
         return;
     }

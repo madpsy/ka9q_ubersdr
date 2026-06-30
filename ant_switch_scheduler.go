@@ -428,7 +428,7 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 		if err != nil {
 			triggerLog.Error = err.Error()
 			as.addTriggerLog(triggerLog)
-			as.handler.changeLog.Add(AntSwitchLogEntry{
+			as.handler.logChange(AntSwitchLogEntry{
 				Time:     triggerLog.Timestamp,
 				Action:   "ground",
 				Antenna:  0,
@@ -442,7 +442,7 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 		}
 		triggerLog.Success = true
 		as.addTriggerLog(triggerLog)
-		as.handler.changeLog.Add(AntSwitchLogEntry{
+		as.handler.logChange(AntSwitchLogEntry{
 			Time:     triggerLog.Timestamp,
 			Action:   "ground",
 			Antenna:  0,
@@ -467,7 +467,7 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 		if err != nil {
 			triggerLog.Error = err.Error()
 			as.addTriggerLog(triggerLog)
-			as.handler.changeLog.Add(AntSwitchLogEntry{
+			as.handler.logChange(AntSwitchLogEntry{
 				Time:     triggerLog.Timestamp,
 				Action:   "select",
 				Antenna:  entry.Antenna,
@@ -481,7 +481,7 @@ func (as *AntSwitchScheduler) executeScheduledEntry(entry *AntSwitchScheduleEntr
 		}
 		triggerLog.Success = true
 		as.addTriggerLog(triggerLog)
-		as.handler.changeLog.Add(AntSwitchLogEntry{
+		as.handler.logChange(AntSwitchLogEntry{
 			Time:     triggerLog.Timestamp,
 			Action:   "select",
 			Antenna:  entry.Antenna,

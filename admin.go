@@ -8217,7 +8217,7 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		state, verified, err := h.selectAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		if verified {
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   "select",
 				Antenna:  req.Antenna,
@@ -8235,7 +8235,7 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		state, verified, err := h.groundAll()
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		if verified {
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   "ground",
 				Antenna:  0,
@@ -8256,7 +8256,7 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		state, verified, err := h.addAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		if verified {
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   "add",
 				Antenna:  req.Antenna,
@@ -8278,7 +8278,7 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		state, verified, err := h.removeAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		if verified {
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   "remove",
 				Antenna:  req.Antenna,
@@ -8321,7 +8321,7 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 				action = "thunderstorm_off"
 				label = "Thunderstorm OFF"
 			}
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   action,
 				Antenna:  0,

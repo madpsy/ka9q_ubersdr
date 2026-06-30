@@ -216,11 +216,13 @@ func stripNonBinary(s string) string {
 //
 // MS-S7-WEB: 7-port relay board with mixing support.
 //
-//   GET  /io.cgi          → "0100000" (N bits, 0=relay energised/antenna active,
-//                           1=relay off/grounded)
+//   GET  /io.cgi          → "0100000" (N bits, 1=relay energised/antenna active,
+//                           0=relay off/grounded)
 //   POST /dout.cgi        → pin=N&val=0 (activate), pin=N&val=1 (deactivate)
 //
 // Antenna N maps to pin N-1 (0-indexed).
+// NOTE: bit '1' = antenna active (relay energised), bit '0' = grounded.
+// This matches the KiwiSDR bash backend which checks `thisbit == "1"` for active.
 
 type msS7WebBackend struct {
 	client  *http.Client
@@ -251,8 +253,9 @@ func (b *msS7WebBackend) readBits() (string, error) {
 func (b *msS7WebBackend) bitsToState(bits string) AntSwitchState {
 	state := AntSwitchState{LastUpdate: time.Now()}
 	for i := 0; i < len(bits) && i < b.nCh; i++ {
-		// bit '0' means relay energised = antenna active
-		if bits[i] == '0' {
+		// bit '1' means relay energised = antenna active
+		// (matches KiwiSDR bash: `if [ "x$thisbit" == "x1" ]` → antenna selected)
+		if bits[i] == '1' {
 			state.Selected = append(state.Selected, i+1)
 		}
 	}
@@ -324,24 +327,39 @@ func (b *msS7WebBackend) ToggleAntenna(n int) (AntSwitchState, error) {
 		err := fmt.Errorf("antenna %d out of range for %d-channel device", n, b.nCh)
 		return AntSwitchState{LastError: err.Error()}, err
 	}
-	// bit '0' = active; toggle: 0→1 (deactivate), 1→0 (activate)
+	// bit '0' = inactive → add it; bit '1' = active → remove it
+	// (matches KiwiSDR bash: `if [ "x$thisbits" == "x0" ]` → AntSW_AddAntenna)
 	if bits[pin] == '0' {
-		return b.RemoveAntenna(n)
+		return b.AddAntenna(n)
 	}
-	return b.AddAntenna(n)
+	return b.RemoveAntenna(n)
 }
 
 // ─── ms-sNa-web backend ───────────────────────────────────────────────────────
 //
 // MS-S3A/S4A/S5A/S6A/S7A-WEB: rotary switch, no mixing.
 //
-//   GET /          → HTML page containing the selected antenna number (1-N) or "GROUND"
-//   GET /4/on      → step clockwise (increment antenna number)
-//   GET /5/on      → step counter-clockwise (decrement antenna number)
+// Actual device HTML (from GET /):
+//
+//   <p><a href="/5/on"><button>Up</button></a></p>
+//   <p>ANTENNA:</p>
+//   <h1>2<p><a href="/4/on"><button>Dn</button></a></p>
+//
+//   GET /5/on  → step Up   (increment antenna number, e.g. 2→3)
+//   GET /4/on  → step Down (decrement antenna number, e.g. 2→1)
 //
 // The switch is a rotary selector — to reach antenna N from the current
-// position we step CW or CCW by the shortest path.
+// position we step Up or Down by the shortest path.
 // Position 0 = ground, positions 1..nCh = antennas.
+//
+// Direction convention (matches KiwiSDR bash):
+//   steps = current - target
+//   steps < 0  → need to go Up   → GET /5/on
+//   steps > 0  → need to go Down → GET /4/on
+//
+// After each step we parse the response HTML to get the new position and
+// recalculate — this handles the case where someone presses the hardware
+// button mid-sequence.
 
 type msSNaWebBackend struct {
 	client  *http.Client
@@ -357,30 +375,37 @@ func newMsSNaWebBackend(deviceURL string, nCh int, timeout time.Duration) *msSNa
 	}
 }
 
-// msSNaSelectedRe matches "N<p>" (antenna number) or "GROUND" in the HTML response.
+// msSNaSelectedRe matches the antenna number immediately before "<p>" in the
+// device HTML, e.g. "2<p>" → 2.  Matches the KiwiSDR bash pattern [1-9](?=<p>).
+// Also matches "GROUND" for the grounded state.
 var msSNaSelectedRe = regexp.MustCompile(`(?i)([1-9][0-9]?)<p>|GROUND`)
 
-// readSelected fetches the root page and parses the currently selected antenna.
+// parseSelected extracts the current antenna position from the device HTML body.
 // Returns 0 for ground/unknown.
+func (b *msSNaWebBackend) parseSelected(body string) int {
+	m := msSNaSelectedRe.FindString(body)
+	if m == "" {
+		return 0
+	}
+	if strings.EqualFold(m, "GROUND") {
+		return 0
+	}
+	// m is like "3<p>" — TrimRight strips trailing chars in the set {<,p,>}
+	numStr := strings.TrimRight(m, "<p>")
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// readSelected fetches GET / and returns the current antenna position (0=ground).
 func (b *msSNaWebBackend) readSelected() (int, error) {
 	body, err := httpGet(b.client, b.baseURL+"/")
 	if err != nil {
 		return 0, err
 	}
-	m := msSNaSelectedRe.FindString(body)
-	if m == "" {
-		return 0, nil // treat as ground
-	}
-	if strings.EqualFold(m, "GROUND") {
-		return 0, nil
-	}
-	// m is like "3<p>" — extract the leading number
-	numStr := strings.TrimRight(m, "<p>")
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, nil
-	}
-	return n, nil
+	return b.parseSelected(body), nil
 }
 
 func (b *msSNaWebBackend) selectedToState(selected int) AntSwitchState {
@@ -401,42 +426,66 @@ func (b *msSNaWebBackend) GetState() (AntSwitchState, error) {
 	return b.selectedToState(sel), nil
 }
 
-// stepTo steps the rotary switch from current to target by the shortest path.
-// target=0 means ground (position 0).
+// msSNaShortestPath returns the signed number of steps to reach target from
+// current on a ring of size nCh+1 (positions 0..nCh), using the same formula
+// as the KiwiSDR bash backend:
+//
+//	steps = current - target
+//	if steps >  nCh/2  → steps -= nCh+1
+//	if steps < -nCh/2  → steps += nCh+1
+//
+// Positive steps → Down (/4/on), negative steps → Up (/5/on).
+func msSNaShortestPath(current, target, nCh int) int {
+	steps := current - target
+	if steps > nCh/2 {
+		steps -= nCh + 1
+	}
+	if steps < -(nCh / 2) {
+		steps += nCh + 1
+	}
+	return steps
+}
+
+// stepTo moves the rotary switch to target position by the shortest path.
+// target=0 means ground. After each individual step the response HTML is
+// parsed to get the new position, so hardware button presses mid-sequence
+// are detected and the remaining steps are recalculated.
 func (b *msSNaWebBackend) stepTo(target int) (AntSwitchState, error) {
+	const maxSteps = 20 // safety limit — no switch has more than 10 positions
+
 	current, err := b.readSelected()
 	if err != nil {
 		return AntSwitchState{LastError: err.Error()}, err
 	}
-	if current == target {
-		return b.selectedToState(current), nil
-	}
 
-	// Calculate shortest-path steps on a ring of size nCh+1 (positions 0..nCh)
-	ringSize := b.nCh + 1
-	steps := target - current
-	if steps > ringSize/2 {
-		steps -= ringSize
-	}
-	if steps < -(ringSize / 2) {
-		steps += ringSize
-	}
+	for attempt := 0; attempt < maxSteps; attempt++ {
+		if current == target {
+			return b.selectedToState(current), nil
+		}
 
-	var stepURL string
-	if steps < 0 {
-		stepURL = b.baseURL + "/5/on" // CCW
-		steps = -steps
-	} else {
-		stepURL = b.baseURL + "/4/on" // CW
-	}
+		steps := msSNaShortestPath(current, target, b.nCh)
 
-	for i := 0; i < steps; i++ {
-		if _, err := httpGet(b.client, stepURL); err != nil {
+		// Choose direction:
+		//   steps < 0 → need to go Up   → GET /5/on
+		//   steps > 0 → need to go Down → GET /4/on
+		var stepURL string
+		if steps < 0 {
+			stepURL = b.baseURL + "/5/on" // Up
+		} else {
+			stepURL = b.baseURL + "/4/on" // Down
+		}
+
+		// Send one step and parse the response to get the new position.
+		// The device returns the same HTML page after each step command.
+		body, err := httpGet(b.client, stepURL)
+		if err != nil {
 			return AntSwitchState{LastError: err.Error()}, err
 		}
+		current = b.parseSelected(body)
 	}
 
-	return b.GetState()
+	// Reached maxSteps — return whatever position we're at now
+	return b.selectedToState(current), nil
 }
 
 func (b *msSNaWebBackend) SelectAntenna(n int) (AntSwitchState, error) {
@@ -562,12 +611,18 @@ func (b *kmtronicBackend) ToggleAntenna(n int) (AntSwitchState, error) {
 //
 // Snaptekk 8-ch relay board.
 //
-//   GET /status      → HTML containing {"Status":[0,0,0,0,0,0,0,0]}
-//                      1 = relay energised (antenna active)
+//   GET /status      → HTML: <h1>{"Status":[0,0,0,0,0,0,0,0]}</h1>
+//                      Array has exactly 8 elements, one per antenna (1-indexed).
+//                      1 = relay energised (antenna active), 0 = grounded.
 //   GET /switch/g    → ground all
 //   GET /switch/+N   → add antenna N
 //   GET /switch/-N   → remove antenna N
 //   GET /switch/tN   → toggle antenna N
+//
+// NOTE on index mapping: the KiwiSDR bash strips the entire HTML to 0/1 chars
+// and iterates `for s in 1..8` (skipping index 0 due to HTML noise before the
+// array). We parse the JSON array directly, so Status[0] = antenna 1,
+// Status[1] = antenna 2, etc. — we iterate from index 0.
 
 type snaptekkBackend struct {
 	client  *http.Client
@@ -616,10 +671,12 @@ func (b *snaptekkBackend) GetState() (AntSwitchState, error) {
 	}
 
 	state := AntSwitchState{LastUpdate: time.Now()}
-	// bits[0] is a status/heartbeat byte; antennas start at bits[1]
-	for i := 1; i <= b.nCh && i < len(bits); i++ {
+	// Status[0] = antenna 1, Status[1] = antenna 2, etc.
+	// (We parse the JSON array directly, so no index-0 skip needed unlike the
+	// KiwiSDR bash which skips index 0 due to HTML noise before the array.)
+	for i := 0; i < b.nCh && i < len(bits); i++ {
 		if bits[i] == 1 {
-			state.Selected = append(state.Selected, i)
+			state.Selected = append(state.Selected, i+1)
 		}
 	}
 	if len(state.Selected) == 0 {
@@ -768,6 +825,9 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 	if config.DeviceURL == "" {
 		return nil, fmt.Errorf("antenna switch device_url is required")
 	}
+	if !strings.HasPrefix(config.DeviceURL, "http://") && !strings.HasPrefix(config.DeviceURL, "https://") {
+		return nil, fmt.Errorf("antenna switch device_url must start with http:// or https:// (got %q)", config.DeviceURL)
+	}
 	if config.BackendType == "" {
 		return nil, fmt.Errorf("antenna switch backend_type is required (ms-s7-web, ms-sNa-web, kmtronic, snaptekk)")
 	}
@@ -876,6 +936,8 @@ func (h *AntSwitchHandler) queryState() (AntSwitchState, error) {
 // ─── Background poller ────────────────────────────────────────────────────────
 
 // backgroundPoller polls the device every 5 seconds to keep the state cache fresh.
+// If thunderstorm mode is active and the device reports a non-grounded state
+// (e.g. someone pressed the hardware button), it re-grounds the switch.
 func (h *AntSwitchHandler) backgroundPoller() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -888,6 +950,23 @@ func (h *AntSwitchHandler) backgroundPoller() {
 			h.mu.Unlock()
 			continue
 		}
+
+		// Re-ground if thunderstorm is active but the device is not grounded.
+		// This handles the case where someone physically pressed the hardware
+		// button while thunderstorm mode was active.
+		h.mu.RLock()
+		thunderstorm := h.config.Thunderstorm
+		h.mu.RUnlock()
+
+		if thunderstorm && !state.Grounded {
+			log.Printf("AntSwitch: thunderstorm mode active but device not grounded (selected=%v) — re-grounding", state.Selected)
+			if groundedState, err := h.backend.GroundAll(); err != nil {
+				log.Printf("AntSwitch: re-ground during thunderstorm failed: %v", err)
+			} else {
+				state = groundedState
+			}
+		}
+
 		h.mu.Lock()
 		h.state = state
 		h.mu.Unlock()

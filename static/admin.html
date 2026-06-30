@@ -21015,7 +21015,9 @@ const tooltipLine2 = timeStr;
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px;">
                     <div>
                         <label style="${LS}">Device URL</label>
-                        <input type="text" id="antCfgDeviceURL" style="${IS}" value="${escapeHtml(cfg.device_url || '')}" placeholder="http://192.168.1.234">
+                        <input type="text" id="antCfgDeviceURL" style="${IS}" value="${escapeHtml(cfg.device_url || '')}" placeholder="http://192.168.1.234"
+                            oninput="antSwitchValidateDeviceURL(this)">
+                        <div id="antCfgDeviceURLError" style="font-size:11px;color:#dc3545;margin-top:3px;display:none;">Must start with http:// or https://</div>
                     </div>
                     <div>
                         <label style="${LS}">Backend Type</label>
@@ -21124,7 +21126,22 @@ const tooltipLine2 = timeStr;
             }
         }
 
+        function antSwitchValidateDeviceURL(input) {
+            const val = (input.value || '').trim();
+            const errEl = document.getElementById('antCfgDeviceURLError');
+            const valid = val === '' || val.startsWith('http://') || val.startsWith('https://');
+            if (errEl) errEl.style.display = valid ? 'none' : 'block';
+            input.style.borderColor = valid ? '' : '#dc3545';
+            return valid;
+        }
+
         async function saveAntSwitchConfig(restart = false) {
+            // Validate device URL before saving
+            const urlInput = document.getElementById('antCfgDeviceURL');
+            if (urlInput && !antSwitchValidateDeviceURL(urlInput)) {
+                showAlert('Device URL must start with http:// or https://', 'error');
+                return;
+            }
             if (restart && !confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure?')) {
                 return;
             }

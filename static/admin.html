@@ -2487,9 +2487,12 @@
 
                         <!-- My Widgets sub-tab -->
                         <div id="widgetSubTabMy" style="display: none;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                                 <span style="font-size: 13px; color: #555;">Widgets you have created on this instance.</span>
-                                <div style="display:flex;align-items:center;gap:14px;">
+                                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                    <input type="text" id="myWidgetSearchInput" placeholder="Search…"
+                                        oninput="filterMyWidgets()"
+                                        style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 160px;">
                                     <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:#555;cursor:pointer;">
                                         <input type="checkbox" id="myWidgetFilterPublic" checked onchange="filterMyWidgets()"> 🌐 Public
                                     </label>
@@ -9716,7 +9719,14 @@ function resetStationIdColor() {
             const container   = document.getElementById('myWidgetsList');
             const showPublic  = document.getElementById('myWidgetFilterPublic')?.checked ?? true;
             const showPrivate = document.getElementById('myWidgetFilterPrivate')?.checked ?? true;
-            const widgets     = _myWidgetsCache.filter(w => w.is_public ? showPublic : showPrivate);
+            const q           = (document.getElementById('myWidgetSearchInput')?.value || '').toLowerCase();
+            let widgets       = _myWidgetsCache.filter(w => w.is_public ? showPublic : showPrivate);
+            if (q) {
+                widgets = widgets.filter(w =>
+                    (w.name || '').toLowerCase().includes(q) ||
+                    (w.description || '').toLowerCase().includes(q) ||
+                    (w.widget_id || '').toLowerCase().includes(q));
+            }
             if (_myWidgetsCache.length === 0) {
                 container.innerHTML = '<em style="color:#aaa;font-size:13px;">No widgets yet. Click \u201c+ New Widget\u201d to create one.</em>';
                 return;

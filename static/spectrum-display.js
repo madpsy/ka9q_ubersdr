@@ -849,7 +849,7 @@ class SpectrumDisplay {
         this.dragStartX = 0;
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
-        this.panThrottleMs = 50; // Throttle pan requests (50ms = 20 requests/sec max)
+        this.panThrottleMs = 25; // Throttle pan requests (25ms = 40 requests/sec max)
         this.lastDragX = -1; // Track last drag position to detect actual movement
         this.lastDragY = -1;
 
@@ -2951,7 +2951,7 @@ class SpectrumDisplay {
                 const timeSinceLastPan = now - this.lastPanTime;
 
                 // Only pan if we've moved significantly and enough time has passed
-                if (lineGraphDragDidMove && Math.abs(newCenterFreq - this.centerFreq) > 1000 && timeSinceLastPan >= this.panThrottleMs) {
+                if (lineGraphDragDidMove && timeSinceLastPan >= this.panThrottleMs) {
                     this.panTo(newCenterFreq);
                     this.lastPanTime = now;
                     // Don't update lineGraphDragStartX/lineGraphDragStartFreq here - keep original drag start point
@@ -4383,7 +4383,7 @@ class SpectrumDisplay {
                 const timeSinceLastPan = now - this.lastPanTime;
 
                 // Only pan if we've moved significantly and enough time has passed
-                if (this.dragDidMove && Math.abs(newCenterFreq - this.centerFreq) > 1000 && timeSinceLastPan >= this.panThrottleMs) {
+                if (this.dragDidMove && timeSinceLastPan >= this.panThrottleMs) {
                     this.panTo(newCenterFreq);
                     this.lastPanTime = now;
                     // Don't update dragStartX/dragStartFreq here - keep original drag start point

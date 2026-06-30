@@ -751,8 +751,8 @@ func LoadConfig(filename string) (*Config, error) {
 	// The default is only applied if the field is not present in the YAML at all
 	// Since YAML unmarshaling will set it to 0 if not specified, we can't distinguish
 	// between "not specified" and "explicitly set to 0", so we leave it as-is
-	if config.Server.CmdRateLimit == 0 {
-		config.Server.CmdRateLimit = 10 // Default 10 commands/sec per channel
+	if config.Server.CmdRateLimit < 50 {
+		config.Server.CmdRateLimit = 50 // Minimum 50 commands/sec per channel (required for smooth spectrum dragging)
 	}
 	if config.Server.ConnRateLimit == 0 {
 		config.Server.ConnRateLimit = 2 // Default 2 connections/sec per IP

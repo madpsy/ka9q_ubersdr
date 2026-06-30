@@ -2172,6 +2172,11 @@ func main() {
 			prometheusMetrics.mqttPublisher.SetMultiDecoder(multiDecoder)
 		}
 	}
+
+	// Wire rotator notifications — fires RotatorEvent on moving-state transitions.
+	if rotctlHandler != nil {
+		rotctlHandler.SetNotificationManager(notifManager)
+	}
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()
 

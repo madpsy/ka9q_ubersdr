@@ -146,7 +146,7 @@ func (h *AntSwitchHandler) OnChange(fn func(AntSwitchLogEntry)) {
 
 // logChange adds an entry to the change log and fires all registered callbacks.
 func (h *AntSwitchHandler) logChange(entry AntSwitchLogEntry) {
-	h.logChange(entry)
+	h.changeLog.Add(entry)
 	h.handlerMu.RLock()
 	handlers := make([]func(AntSwitchLogEntry), len(h.changeHandlers))
 	copy(handlers, h.changeHandlers)

@@ -37,6 +37,10 @@ type RotctlAPIHandler struct {
 	lastPublishedAz     int
 	lastPublishedEl     int
 	lastPublishedMoving bool
+
+	// Notification publishing — fire RotatorEvent on moving-state transitions
+	notifManager    *NotificationManager
+	lastNotifMoving bool
 }
 
 // NewRotctlAPIHandler creates a new rotctl API handler
@@ -122,9 +126,10 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 			h.lastUpdate = time.Now()
 			h.mu.Unlock()
 
+			state := h.controller.GetState()
+
 			// Publish to MQTT if position or moving state changed
 			if h.mqttPublisher != nil {
-				state := h.controller.GetState()
 				az := int(state.Position.Azimuth + 0.5)
 				el := int(state.Position.Elevation + 0.5)
 				moving := state.Moving
@@ -135,6 +140,19 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 					go h.mqttPublisher.PublishRotatorStatus(h)
 				}
 			}
+
+			// Publish RotatorEvent notification on moving-state transitions.
+			// Fire when: stopped→moving (rotator starts turning) or moving→stopped (arrived).
+			if h.notifManager != nil && state.Moving != h.lastNotifMoving {
+				h.lastNotifMoving = state.Moving
+				evt := RotatorEvent{
+					Azimuth:   state.Position.Azimuth,
+					Elevation: state.Position.Elevation,
+					Moving:    state.Moving,
+					Time:      time.Now(),
+				}
+				go h.notifManager.Publish(evt)
+			}
 		}
 	}
 }
@@ -143,6 +161,12 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 // to MQTT whenever the position or moving state changes.
 func (h *RotctlAPIHandler) SetMQTTPublisher(mp *MQTTPublisher) {
 	h.mqttPublisher = mp
+}
+
+// SetNotificationManager attaches a NotificationManager so that a RotatorEvent
+// is published whenever the rotator transitions between moving and stopped.
+func (h *RotctlAPIHandler) SetNotificationManager(nm *NotificationManager) {
+	h.notifManager = nm
 }
 
 // Close closes the rotctl connection

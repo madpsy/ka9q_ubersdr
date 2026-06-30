@@ -85,6 +85,9 @@
         document.getElementById('dxclusterPort').addEventListener('input', validateDXClusterPort);
         document.getElementById('dxclusterPort').addEventListener('blur', validateDXClusterPort);
 
+        // Test DX cluster connection button
+        document.getElementById('testDXClusterBtn').addEventListener('click', testDXClusterConnection);
+
         // Password generator
         document.getElementById('generatePassword').addEventListener('click', generatePassword);
 
@@ -184,6 +187,61 @@
         updateUI();
         if (currentStep === totalSteps) {
             loadWizardFeaturedWidgets();
+        }
+    }
+
+    async function testDXClusterConnection() {
+        const host      = document.getElementById('dxclusterHost').value.trim();
+        const port      = parseInt(document.getElementById('dxclusterPort').value, 10);
+        const callsign  = document.getElementById('dxclusterCallsign').value.trim().toUpperCase();
+        const resultEl  = document.getElementById('dxclusterTestResult');
+        const transcript= document.getElementById('dxclusterTranscript');
+        const btn       = document.getElementById('testDXClusterBtn');
+
+        // Run inline validation first
+        if (!validateDXClusterHost() || !validateDXClusterPort()) {
+            resultEl.style.color = '#c33';
+            resultEl.textContent = '✗ Fix the errors above first';
+            return;
+        }
+        if (!callsign) {
+            resultEl.style.color = '#c33';
+            resultEl.textContent = '✗ Enter your callsign first';
+            document.getElementById('dxclusterCallsign').focus();
+            return;
+        }
+
+        btn.disabled = true;
+        resultEl.style.color = '#718096';
+        resultEl.textContent = 'Connecting…';
+        transcript.style.display = 'none';
+        transcript.textContent = '';
+
+        try {
+            const resp = await fetch('/admin/dxcluster/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host, port, callsign })
+            });
+            const data = await resp.json();
+
+            if (data.transcript && data.transcript.length > 0) {
+                transcript.textContent = data.transcript.join('\n');
+                transcript.style.display = 'block';
+            }
+
+            if (data.ok) {
+                resultEl.style.color = '#155724';
+                resultEl.textContent = '✓ ' + data.message;
+            } else {
+                resultEl.style.color = '#c33';
+                resultEl.textContent = '✗ ' + (data.message || 'Test failed');
+            }
+        } catch (err) {
+            resultEl.style.color = '#c33';
+            resultEl.textContent = '✗ Request failed: ' + err.message;
+        } finally {
+            btn.disabled = false;
         }
     }
 

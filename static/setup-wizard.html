@@ -632,6 +632,14 @@
                         <input type="text" id="dxclusterCallsign" name="dxclusterCallsign" placeholder="e.g., W1ABC">
                         <div class="help-text">Your callsign for DX cluster login</div>
                     </div>
+
+                    <div style="display: flex; align-items: center; gap: 12px; margin-top: 5px;">
+                        <button type="button" class="btn btn-secondary" id="testDXClusterBtn" style="padding: 10px 20px; font-size: 13px;">
+                            Test Connection
+                        </button>
+                        <span id="dxclusterTestResult" style="font-size: 13px;"></span>
+                    </div>
+                    <pre id="dxclusterTranscript" style="display:none; margin-top: 12px; padding: 12px; background: #1e1e2e; color: #cdd6f4; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; word-break: break-word;"></pre>
                 </div>
 
                 <div style="margin-top: 30px; padding-top: 25px; border-top: 1px solid #e9ecef;">

@@ -2546,6 +2546,7 @@ func main() {
 	http.HandleFunc("/admin/wspr-rank", adminHandler.AuthMiddleware(adminHandler.HandleWSPRRank))
 	http.HandleFunc("/admin/psk-rank", adminHandler.AuthMiddleware(adminHandler.HandlePSKRank))
 	http.HandleFunc("/admin/lookup/test", adminHandler.AuthMiddleware(adminHandler.HandleLookupTest))
+	http.HandleFunc("/admin/dxcluster/test", adminHandler.AuthMiddleware(adminHandler.HandleDXClusterTest))
 
 	// Real-time SSE feeds (admin only)
 	http.HandleFunc("/admin/decoder/stream", adminHandler.AuthMiddleware(HandleDecoderStream(decoderSSEHub)))

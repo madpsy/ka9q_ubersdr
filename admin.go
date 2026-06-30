@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -7976,6 +7977,135 @@ func (ah *AdminHandler) HandleLookupTest(w http.ResponseWriter, r *http.Request)
 			Message:  fmt.Sprintf("unknown provider %q; supported: qrz", provider),
 		})
 	}
+}
+
+// HandleDXClusterTest handles POST /admin/dxcluster/test
+// Tests connectivity to a DX cluster by dialling, reading the login banner, sending the
+// callsign, waiting for the prompt, then sending "bye" to disconnect cleanly.
+// This is an admin-only endpoint (wrapped by AuthMiddleware).
+//
+// Request body (JSON):
+//
+//	{
+//	  "host":     "dxspider.co.uk",  // required
+//	  "port":     7300,              // required, 1-65535
+//	  "callsign": "G0ABC"            // required
+//	}
+//
+// Response (JSON):
+//
+//	{"ok": true,  "message": "...", "transcript": ["line1", "line2", ...]}
+//	{"ok": false, "message": "...", "transcript": [...]}
+func (ah *AdminHandler) HandleDXClusterTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Callsign string `json:"callsign"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.Host = strings.TrimSpace(req.Host)
+	req.Callsign = strings.TrimSpace(strings.ToUpper(req.Callsign))
+
+	type testResult struct {
+		OK         bool     `json:"ok"`
+		Message    string   `json:"message"`
+		Transcript []string `json:"transcript"`
+	}
+
+	respond := func(ok bool, msg string, transcript []string) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(testResult{OK: ok, Message: msg, Transcript: transcript})
+	}
+
+	if req.Host == "" {
+		respond(false, `"host" is required`, nil)
+		return
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		respond(false, `"port" must be between 1 and 65535`, nil)
+		return
+	}
+	if req.Callsign == "" {
+		respond(false, `"callsign" is required`, nil)
+		return
+	}
+
+	var transcript []string
+
+	addr := fmt.Sprintf("%s:%d", req.Host, req.Port)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		respond(false, fmt.Sprintf("Connection failed: %v", err), transcript)
+		return
+	}
+	defer conn.Close()
+
+	// Read banner — must arrive within 5 s and contain "login:"
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		respond(false, fmt.Sprintf("Failed to read banner: %v", err), transcript)
+		return
+	}
+	banner := strings.TrimSpace(string(buf[:n]))
+	transcript = append(transcript, banner)
+
+	if !strings.Contains(strings.ToLower(banner), "login:") {
+		respond(false, "Login prompt not found in banner", transcript)
+		return
+	}
+
+	// Send callsign
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if _, err := fmt.Fprintf(conn, "%s\r\n", req.Callsign); err != nil {
+		respond(false, fmt.Sprintf("Failed to send callsign: %v", err), transcript)
+		return
+	}
+
+	// Read welcome lines until we see the prompt (callsign + " de " + ... + ">")
+	// Give the server up to 15 s total.
+	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+	reader := bufio.NewReader(conn)
+	callsignLower := strings.ToLower(req.Callsign)
+	loginOK := false
+
+	for {
+		line, err := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line != "" {
+			transcript = append(transcript, line)
+		}
+		if err != nil {
+			// Timeout or EOF — check if we already got the prompt
+			if loginOK {
+				break
+			}
+			respond(false, fmt.Sprintf("Connection lost waiting for login prompt: %v", err), transcript)
+			return
+		}
+
+		lineLower := strings.ToLower(line)
+		if strings.Contains(lineLower, callsignLower+" de ") && strings.HasSuffix(line, ">") {
+			loginOK = true
+			break
+		}
+	}
+
+	// Send "bye" to log off cleanly before the deferred conn.Close() fires
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, _ = fmt.Fprintf(conn, "bye\r\n")
+
+	respond(true, fmt.Sprintf("Connected and logged in to %s", addr), transcript)
 }
 
 // HandleAntSwitchHealth handles GET /admin/ant-switch-health

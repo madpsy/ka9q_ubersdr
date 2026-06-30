@@ -203,9 +203,9 @@ func handleNotificationsConfig(w http.ResponseWriter, r *http.Request, nm *Notif
 
 	switch r.Method {
 	case http.MethodGet:
-		handleNotificationsConfigGet(w, r, cfg)
+		handleNotificationsConfigGet(w, r, nm.Config())
 	case http.MethodPut, http.MethodPost:
-		handleNotificationsConfigPut(w, r, nm, cfg, configFile)
+		handleNotificationsConfigPut(w, r, nm, nm.Config(), configFile)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

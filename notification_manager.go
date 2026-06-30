@@ -237,6 +237,14 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 // ─── Publish ──────────────────────────────────────────────────────────────────
 
 // Publish evaluates all rules against the event and dispatches matching ones.
+// Config returns the manager's current live configuration under the read lock.
+// The returned pointer is valid until the next Reload call.
+func (m *NotificationManager) Config() *NotificationsConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.cfg
+}
+
 // It is safe to call from multiple goroutines concurrently.
 // If the manager is disabled it returns immediately.
 func (m *NotificationManager) Publish(evt NotificationEvent) {
@@ -908,4 +916,3 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 		"stats":         stats,
 	}
 }
-

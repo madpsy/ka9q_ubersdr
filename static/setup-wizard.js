@@ -421,6 +421,8 @@
                 // Pre-fill DX cluster fields
                 if (config.dxcluster) {
                     setCheckboxValue('dxclusterEnabled', config.dxcluster.enabled);
+                    setFieldValue('dxclusterHost', config.dxcluster.host);
+                    setFieldValue('dxclusterPort', config.dxcluster.port);
                     setFieldValue('dxclusterCallsign', config.dxcluster.callsign);
                     toggleConditionalSection('dxclusterEnabled', 'dxclusterSettings');
                 }
@@ -543,6 +545,8 @@
                 dxcluster: {
                     ...existingConfig.dxcluster,
                     enabled: formData.dxclusterEnabled,
+                    host: formData.dxclusterHost || 'dxspider.co.uk',
+                    port: parseInt(formData.dxclusterPort) || 7300,
                     callsign: formData.dxclusterEnabled ? formData.dxclusterCallsign.toUpperCase() : ''
                 },
                 eibi: {

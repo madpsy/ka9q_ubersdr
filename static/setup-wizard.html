@@ -608,6 +608,18 @@
                 </div>
 
                 <div id="dxclusterSettings" class="conditional-section">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="dxclusterHost">DX Cluster Host *</label>
+                            <input type="text" id="dxclusterHost" name="dxclusterHost" placeholder="e.g., dxspider.co.uk" value="dxspider.co.uk">
+                            <div class="help-text">Hostname or IP address of the DX cluster server</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="dxclusterPort">Port *</label>
+                            <input type="number" id="dxclusterPort" name="dxclusterPort" placeholder="7300" value="7300" min="1" max="65535">
+                            <div class="help-text">Telnet port (usually 7300 or 23)</div>
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label for="dxclusterCallsign">DX Cluster Callsign *</label>
                         <input type="text" id="dxclusterCallsign" name="dxclusterCallsign" placeholder="e.g., W1ABC">

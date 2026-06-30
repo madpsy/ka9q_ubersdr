@@ -7,6 +7,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SaveNotificationsConfig marshals cfg to YAML and writes it atomically to
+// filename (write to a temp file then rename so a crash mid-write never
+// leaves a truncated file).
+func SaveNotificationsConfig(filename string, cfg *NotificationsConfig) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal notifications config: %w", err)
+	}
+
+	// Write to a sibling temp file then rename for atomicity.
+	tmp := filename + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("failed to write notifications config: %w", err)
+	}
+	if err := os.Rename(tmp, filename); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("failed to rename notifications config: %w", err)
+	}
+	return nil
+}
+
 // NotificationsConfig is the top-level structure loaded from notifications.yaml.
 type NotificationsConfig struct {
 	// Enabled is a master switch. When false the manager is a no-op.

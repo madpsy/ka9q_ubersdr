@@ -2603,7 +2603,7 @@ func main() {
 		handleNotificationsTest(w, r, notifManager)
 	}))
 	http.HandleFunc("/admin/notifications/config", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		handleNotificationsConfig(w, r, notifManager, notifConfig)
+		handleNotificationsConfig(w, r, notifManager, notifConfig, notificationsPath)
 	}))
 	http.HandleFunc("/admin/notifications/schema", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsSchema(w, r)

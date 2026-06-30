@@ -183,13 +183,34 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
-// handleNotificationsConfig returns the active notification configuration
-// (with sensitive fields redacted) and a list of validation issues.
+// handleNotificationsConfig handles GET and PUT for the notification config.
 //
 // GET /admin/notifications/config
-func handleNotificationsConfig(w http.ResponseWriter, r *http.Request, nm *NotificationManager, cfg *NotificationsConfig) {
+//   Returns the active configuration with sensitive fields redacted and a list
+//   of validation issues.
+//
+// PUT /admin/notifications/config
+//   Accepts a full NotificationsConfig JSON body, validates it, writes it to
+//   the notifications.yaml file, and hot-reloads the notification manager —
+//   no server restart required.
+//
+//   Bot tokens that are sent as the placeholder "********" are preserved from
+//   the existing config so the UI can round-trip without exposing secrets.
+func handleNotificationsConfig(w http.ResponseWriter, r *http.Request, nm *NotificationManager, cfg *NotificationsConfig, configFile string) {
 	w.Header().Set("Content-Type", "application/json")
 
+	switch r.Method {
+	case http.MethodGet:
+		handleNotificationsConfigGet(w, r, cfg)
+	case http.MethodPut, http.MethodPost:
+		handleNotificationsConfigPut(w, r, nm, cfg, configFile)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleNotificationsConfigGet is the GET branch of handleNotificationsConfig.
+func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *NotificationsConfig) {
 	if cfg == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{"enabled": false}) //nolint:errcheck
@@ -246,6 +267,83 @@ func handleNotificationsConfig(w http.ResponseWriter, r *http.Request, nm *Notif
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+// handleNotificationsConfigPut is the PUT/POST branch of handleNotificationsConfig.
+func handleNotificationsConfigPut(w http.ResponseWriter, r *http.Request, nm *NotificationManager, existingCfg *NotificationsConfig, configFile string) {
+	if nm == nil {
+		http.Error(w, "notification manager not initialised", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Decode the incoming JSON body into a full NotificationsConfig.
+	var newCfg NotificationsConfig
+	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Preserve masked bot tokens — the UI sends "********" when it doesn't
+	// want to change the token (it never receives the real value from GET).
+	if existingCfg != nil {
+		for name, ch := range newCfg.Channels {
+			if ch.BotToken == "********" {
+				if existing, ok := existingCfg.Channels[name]; ok {
+					ch.BotToken = existing.BotToken
+					newCfg.Channels[name] = ch
+				}
+			}
+		}
+	}
+
+	// Apply the same defaults that LoadNotificationsConfig applies.
+	for name, ch := range newCfg.Channels {
+		if ch.ParseMode == "" {
+			ch.ParseMode = "HTML"
+		}
+		if ch.RateLimitMinutes == 0 {
+			ch.RateLimitMinutes = 10
+		}
+		newCfg.Channels[name] = ch
+	}
+
+	// Validate before writing anything.
+	if issues := newCfg.Validate(); len(issues) > 0 {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ok":     false,
+			"error":  "validation failed",
+			"issues": issues,
+		})
+		return
+	}
+
+	// Persist to disk.
+	if err := SaveNotificationsConfig(configFile, &newCfg); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Hot-reload the notification manager — no restart required.
+	if err := nm.Reload(&newCfg); err != nil {
+		// Config is already saved; reload failed (e.g. bad template). Report
+		// the error but don't roll back the file — the admin can fix and retry.
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ok":    false,
+			"error": fmt.Sprintf("config saved but reload failed: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"ok":      true,
+		"message": "notifications config saved and reloaded",
+		"enabled": newCfg.Enabled,
+		"channels": len(newCfg.Channels),
+		"rules":   len(newCfg.Rules),
+	})
 }
 
 // handleNotificationsSchema returns the static system capabilities of the
@@ -671,9 +769,11 @@ func handleTelegramGetUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── getUpdates — fetch recent messages to discover chats ─────────────────
-	// offset=-1 fetches only the most recent update; we use limit=100 to get
-	// a broader history so more chats are discoverable.
-	updatesURL := apiBase + "/getUpdates?limit=100&timeout=0"
+	// offset=-1 tells Telegram to re-deliver the most recent update even if it
+	// was previously consumed by another getUpdates call. Without this, the
+	// queue appears empty after the first poll. We fetch up to 100 updates so
+	// that multiple chats (groups, channels, DMs) are all discoverable.
+	updatesURL := apiBase + "/getUpdates?offset=-1&limit=100&timeout=0"
 	updResp, err := client.Get(updatesURL)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)

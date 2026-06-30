@@ -188,13 +188,67 @@ func ruleKey(idx int, r NotificationRule) string {
 	return fmt.Sprintf("rule[%d]", idx)
 }
 
+// Reload replaces the manager's configuration with newCfg and rebuilds all
+// channels and templates. In-flight Publish calls complete against the old
+// config; subsequent calls use the new one. Rate-limiter state is preserved.
+func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
+	newChannels := make(map[string]NotificationChannel)
+	newTmpls := make(map[string]*template.Template)
+
+	if newCfg.Enabled {
+		// Build channels
+		for name, chCfg := range newCfg.Channels {
+			var ch NotificationChannel
+			switch chCfg.Type {
+			case "telegram":
+				ch = NewTelegramChannel(name, chCfg)
+			default:
+				return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
+			}
+			newChannels[name] = ch
+			log.Printf("[Notifications] Reload: channel %q (%s) registered", name, chCfg.Type)
+		}
+
+		// Compile templates
+		for i, rule := range newCfg.Rules {
+			if rule.Template == "" {
+				continue
+			}
+			key := ruleKey(i, rule)
+			t, err := template.New(key).Funcs(m.funcMap).Parse(rule.Template)
+			if err != nil {
+				return fmt.Errorf("notification rule %q: invalid template: %w", key, err)
+			}
+			newTmpls[key] = t
+		}
+	}
+
+	m.mu.Lock()
+	m.cfg = newCfg
+	m.channels = newChannels
+	m.tmpls = newTmpls
+	m.mu.Unlock()
+
+	log.Printf("[Notifications] Reloaded: enabled=%v channels=%d rules=%d",
+		newCfg.Enabled, len(newChannels), len(newCfg.Rules))
+	return nil
+}
+
 // ─── Publish ──────────────────────────────────────────────────────────────────
 
 // Publish evaluates all rules against the event and dispatches matching ones.
 // It is safe to call from multiple goroutines concurrently.
 // If the manager is disabled it returns immediately.
 func (m *NotificationManager) Publish(evt NotificationEvent) {
-	if !m.cfg.Enabled {
+	// Snapshot config, channels, and compiled templates under read lock so a
+	// concurrent Reload cannot race with our iteration.
+	m.mu.RLock()
+	cfg := m.cfg
+	channels := m.channels
+	tmpls := m.tmpls
+	m.mu.RUnlock()
+
+	if !cfg.Enabled {
 		return
 	}
 
@@ -202,7 +256,7 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 	m.stats.TotalPublished++
 	m.mu.Unlock()
 
-	for i, rule := range m.cfg.Rules {
+	for i, rule := range cfg.Rules {
 		if !rule.IsEnabled() {
 			continue
 		}
@@ -221,7 +275,7 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 		subject := m.rateSubject(evt)
 
 		// Render message
-		msg, err := m.render(key, rule.Template, evt)
+		msg, err := m.renderWithTmpls(key, rule.Template, evt, tmpls)
 		if err != nil {
 			log.Printf("[Notifications] Rule %q: template error: %v", key, err)
 			m.mu.Lock()
@@ -235,14 +289,14 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 
 		// Dispatch to each channel
 		for _, chName := range rule.Channels {
-			ch, ok := m.channels[chName]
+			ch, ok := channels[chName]
 			if !ok {
 				log.Printf("[Notifications] Rule %q: unknown channel %q", key, chName)
 				continue
 			}
 
 			// Per-channel rate limit
-			chCfg := m.cfg.Channels[chName]
+			chCfg := cfg.Channels[chName]
 			rlKey := rateLimitKey{ruleName: key, subject: chName + ":" + subject}
 			if !m.rl.allow(rlKey, chCfg.RateLimitMinutes) {
 				m.mu.Lock()
@@ -622,10 +676,12 @@ func containsAny(s string, subs []string) bool {
 // ─── Template engine ──────────────────────────────────────────────────────────
 
 // render renders the template for a rule against the event data.
-// If no custom template is set, a built-in default is used.
-func (m *NotificationManager) render(key, tmplStr string, evt NotificationEvent) (string, error) {
+// renderWithTmpls renders the message for a rule using the provided compiled
+// template map (a snapshot taken at the start of Publish). If no custom
+// template is set, a built-in default is used.
+func (m *NotificationManager) renderWithTmpls(key, tmplStr string, evt NotificationEvent, tmpls map[string]*template.Template) (string, error) {
 	// Use pre-compiled template if available
-	if t, ok := m.tmpls[key]; ok {
+	if t, ok := tmpls[key]; ok {
 		var buf bytes.Buffer
 		if err := t.Execute(&buf, evt); err != nil {
 			return "", err
@@ -635,6 +691,15 @@ func (m *NotificationManager) render(key, tmplStr string, evt NotificationEvent)
 
 	// No custom template — use built-in default
 	return m.defaultMessage(evt), nil
+}
+
+// render is kept for callers outside Publish (e.g. the test handler) that do
+// not hold a snapshot. It acquires a read lock to safely access m.tmpls.
+func (m *NotificationManager) render(key, tmplStr string, evt NotificationEvent) (string, error) {
+	m.mu.RLock()
+	tmpls := m.tmpls
+	m.mu.RUnlock()
+	return m.renderWithTmpls(key, tmplStr, evt, tmpls)
 }
 
 // defaultMessage returns a sensible default notification text for each event type.

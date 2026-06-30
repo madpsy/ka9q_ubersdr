@@ -79,6 +79,12 @@
             document.getElementById('decoderSettings').style.display = 'block';
         }
 
+        // Real-time validation for DX cluster host and port
+        document.getElementById('dxclusterHost').addEventListener('input', validateDXClusterHost);
+        document.getElementById('dxclusterHost').addEventListener('blur', validateDXClusterHost);
+        document.getElementById('dxclusterPort').addEventListener('input', validateDXClusterPort);
+        document.getElementById('dxclusterPort').addEventListener('blur', validateDXClusterPort);
+
         // Password generator
         document.getElementById('generatePassword').addEventListener('click', generatePassword);
 
@@ -235,32 +241,16 @@
             // Validate DX cluster host and port if enabled
             const dxEnabled = document.getElementById('dxclusterEnabled').checked;
             if (dxEnabled) {
-                const hostField = document.getElementById('dxclusterHost');
-                const portField = document.getElementById('dxclusterPort');
-                const host = hostField.value.trim();
-                const port = parseInt(portField.value, 10);
-
-                // Must not be empty and must not look like a URL (no scheme or path)
-                if (!host) {
-                    showError('Please enter a DX cluster host.');
-                    hostField.focus();
+                const hostOk = validateDXClusterHost();
+                const portOk = validateDXClusterPort();
+                if (!hostOk) {
+                    showError('DX cluster host is invalid — check the field below.');
+                    document.getElementById('dxclusterHost').focus();
                     return false;
                 }
-                if (/^https?:\/\//i.test(host) || host.includes('/')) {
-                    showError('DX cluster host should be a hostname or IP address only — not a URL (e.g. dxspider.co.uk, not https://dxspider.co.uk).');
-                    hostField.focus();
-                    return false;
-                }
-                // Basic hostname/IP pattern: labels of letters, digits, hyphens separated by dots
-                if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(host)) {
-                    showError('DX cluster host does not look like a valid hostname or IP address.');
-                    hostField.focus();
-                    return false;
-                }
-
-                if (isNaN(port) || port < 1 || port > 65535) {
+                if (!portOk) {
                     showError('DX cluster port must be a number between 1 and 65535.');
-                    portField.focus();
+                    document.getElementById('dxclusterPort').focus();
                     return false;
                 }
             }
@@ -728,6 +718,62 @@
             showError(`Failed to save configuration: ${error.message}`);
             console.error('Configuration save error:', error);
         }
+    }
+
+    // ── Real-time DX cluster field validation ────────────────────────────────
+
+    function setFieldHint(fieldId, message, isError) {
+        const field = document.getElementById(fieldId);
+        if (!field) return;
+        let hint = field.parentNode.querySelector('.field-hint-inline');
+        if (!hint) {
+            hint = document.createElement('div');
+            hint.className = 'field-hint-inline';
+            hint.style.cssText = 'font-size:12px;margin-top:4px;';
+            field.parentNode.appendChild(hint);
+        }
+        if (message) {
+            hint.textContent = message;
+            hint.style.color = isError ? '#c0392b' : '#27ae60';
+            field.style.borderColor = isError ? '#e74c3c' : '';
+        } else {
+            hint.textContent = '';
+            field.style.borderColor = '';
+        }
+    }
+
+    function validateDXClusterHost() {
+        const field = document.getElementById('dxclusterHost');
+        if (!field) return true;
+        const host = field.value.trim();
+
+        if (!host) {
+            setFieldHint('dxclusterHost', 'Host is required.', true);
+            return false;
+        }
+        if (/^https?:\/\//i.test(host) || host.includes('/')) {
+            setFieldHint('dxclusterHost', 'Enter a hostname only, not a URL (e.g. dxspider.co.uk).', true);
+            return false;
+        }
+        if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(host)) {
+            setFieldHint('dxclusterHost', 'Not a valid hostname or IP address.', true);
+            return false;
+        }
+        setFieldHint('dxclusterHost', '', false);
+        return true;
+    }
+
+    function validateDXClusterPort() {
+        const field = document.getElementById('dxclusterPort');
+        if (!field) return true;
+        const port = parseInt(field.value, 10);
+
+        if (isNaN(port) || port < 1 || port > 65535) {
+            setFieldHint('dxclusterPort', 'Port must be between 1 and 65535.', true);
+            return false;
+        }
+        setFieldHint('dxclusterPort', '', false);
+        return true;
     }
 
     function generatePassword() {

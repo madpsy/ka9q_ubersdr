@@ -1,0 +1,661 @@
+<!--
+  Intel AI Boost NPU Test Widget
+  ================================
+  Probes the browser for WebNN support and attempts to create a context
+  targeting the NPU (deviceType: 'npu'), GPU, and CPU in sequence.
+  Runs a matrix-multiply benchmark on each available backend and reports
+  throughput (GFLOPS) so you can see whether the NPU is actually being
+  used and how fast it is relative to GPU/CPU fallbacks.
+
+  Console debug output is prefixed with [npu-test]. If the basic WebNN
+  check fails (navigator.ml absent) the widget hides itself completely and
+  logs the reason + the enable instructions to the console.
+
+  Uses the current WebNN tensor-based dispatch API:
+    ctx.createTensor() / ctx.writeTensor() / ctx.dispatch() / ctx.readTensor()
+
+  No external dependencies -- uses only the WebNN API built into the browser.
+  Drag to reposition; position saved in localStorage.
+
+
+  WHY THE NPU OFTEN SHOWS NO UTILISATION
+  --------------------------------------
+  deviceType:'npu' is only a *hint* in the WebNN spec -- the implementation
+  may ignore it and run wherever it can. On Windows the default backend is
+  DirectML, which targets the GPU. So createContext({deviceType:'npu'})
+  can SUCCEED yet silently run the work on the GPU (Task Manager's NPU graph
+  never moves). Two things work against a naive NPU benchmark, both fixed here:
+    1. fp32 matmul is bounced to the GPU -- the NPU accelerates fp16/int8.
+       (This widget builds an fp16 graph, falling back to fp32 only if the
+       backend cannot build fp16.)
+    2. A tiny/short job finishes in <1 frame; Task Manager samples the NPU
+       at ~1s, so it never registers. (This widget runs a 1024x1024 matmul
+       in a sustained ~1.5s loop, so a real NPU run is visible in Task Manager.)
+
+  Note: the NPU is a low-power inference part -- it will normally report LOWER
+  GFLOPS than the GPU. That is expected and does NOT mean it fell back; confirm
+  a real NPU run via Task Manager's NPU graph during the sustained loop.
+
+
+  HOW TO ACTUALLY ENABLE THE INTEL NPU PATH (Chrome / Edge on Windows)
+  -------------------------------------------------------------------
+  Enabling the WebNN flag alone only turns WebNN *on* (via the DirectML/GPU
+  backend). Reaching the NPU needs the ONNX Runtime backend AND a default-off
+  safety switch that disables the NPU device. If you see a console line like
+  "npu device is disabled to create onnx runtime context", this is the cause.
+
+  Requirements:
+    - Windows 11 24H2 or newer (required for the WebNN ONNX Runtime path).
+    - Intel "AI Boost" NPU driver installed and current (Device Manager).
+    - Chrome / Edge recent enough to ship the ORT WebNN backend (may be
+      Canary/Dev/Beta depending on channel).
+
+  1. chrome://flags  (or edge://flags) -- enable, then restart:
+       #web-machine-learning-neural-network   ("Enables WebNN API")
+
+  2. Fully quit the browser, then relaunch from the command line with the
+     ORT backend enabled AND the NPU re-enabled (NPU is disabled by default):
+
+       chrome.exe  --enable-features=WebMachineLearningNeuralNetwork,WebNNOnnxRuntime --disable_webnn_for_npu=0
+       msedge.exe  --enable-features=WebMachineLearningNeuralNetwork,WebNNOnnxRuntime --disable_webnn_for_npu=0
+
+     --disable_webnn_for_npu=0  turns the NPU device back ON (0 = "not
+     disabled"); without it the ORT backend refuses to create an NPU context.
+     These are launch switches, not live flags -- a running instance ignores
+     them, so close all windows first.
+
+  3. Verify:
+       - chrome://gpu -- search "WebNN" to see the active backend. If it says
+         DirectML/DML the NPU is unreachable; you want the ONNX Runtime path.
+       - The console should no longer log "npu device is disabled ...".
+       - Watch Task Manager's NPU graph during the sustained loop -- it should
+         move while the NPU benchmark runs.
+
+  Works best on Windows 11 24H2+ with Chrome/Edge shipping the ORT WebNN
+  backend and current Intel Core Ultra NPU drivers.
+
+  References:
+    https://webnn.io/en/api-reference/browser-compatibility/chrome-flags
+    https://onnxruntime.ai/docs/tutorials/web/ep-webnn.html
+    https://learn.microsoft.com/en-us/windows/ai/directml/webnn-overview
+    https://webnn.io/en/learn/get-started/debug
+-->
+
+<style>
+  #npu-widget {
+    position: fixed;
+    top: 520px;
+    right: 44px;
+    left: auto;
+    z-index: 9500;
+    pointer-events: auto;
+    background: rgba(52, 73, 94, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    font-weight: bold;
+    line-height: 1.4;
+    white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border-left: 3px solid rgba(100, 180, 255, 0.6);
+    cursor: grab;
+    user-select: none;
+    min-width: 260px;
+  }
+
+  #npu-widget.npu-dragging {
+    cursor: grabbing;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  }
+
+  #npu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px 4px 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+  }
+
+  #npu-title {
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+  }
+
+  #npu-close {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  #npu-close:hover { color: #fff; background: rgba(0,0,0,0.3); }
+
+  #npu-body {
+    padding: 7px 10px 8px;
+  }
+
+  .npu-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .npu-row:last-child { border-bottom: none; }
+
+  .npu-label {
+    color: rgba(255,255,255,0.6);
+    font-size: 10px;
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+
+  .npu-value {
+    color: #fff;
+    font-size: 11px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .npu-value[title] {
+    cursor: help;
+    text-decoration: underline dotted rgba(255,255,255,0.4);
+    text-underline-offset: 2px;
+  }
+
+  .npu-ok   { color: #4ade80; }
+  .npu-warn { color: #facc15; }
+  .npu-err  { color: #f87171; }
+
+  #npu-bench-section {
+    margin-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    padding-top: 5px;
+  }
+
+  #npu-bench-title {
+    font-size: 9px;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  .npu-bench-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 1px 0;
+  }
+
+  .npu-bench-device {
+    font-size: 10px;
+    color: rgba(255,255,255,0.7);
+    min-width: 36px;
+  }
+
+  .npu-bench-bar-wrap {
+    flex: 1;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .npu-bench-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+    background: rgba(100, 180, 255, 0.7);
+  }
+  .npu-bench-bar.npu-bar-npu { background: rgba(100, 255, 180, 0.8); }
+  .npu-bench-bar.npu-bar-gpu { background: rgba(255, 200, 80, 0.8); }
+  .npu-bench-bar.npu-bar-cpu { background: rgba(180, 140, 255, 0.7); }
+
+  .npu-bench-gflops {
+    font-size: 10px;
+    color: rgba(255,255,255,0.85);
+    min-width: 60px;
+    text-align: right;
+  }
+
+  #npu-run-btn {
+    margin-top: 7px;
+    width: 100%;
+    padding: 4px 0;
+    background: rgba(100, 180, 255, 0.2);
+    border: 1px solid rgba(100, 180, 255, 0.4);
+    border-radius: 4px;
+    color: rgba(255,255,255,0.9);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #npu-run-btn:hover { background: rgba(100, 180, 255, 0.35); }
+  #npu-run-btn:disabled { opacity: 0.4; cursor: default; }
+
+  @media (max-width: 768px) {
+    #npu-widget { display: none !important; }
+  }
+  html.is-mobile #npu-widget { display: none !important; }
+</style>
+
+<div id="npu-widget" style="display:none;">
+  <div id="npu-header">
+    <span id="npu-title">&#x1F9E0; NPU Test</span>
+    <span id="npu-close" title="Dismiss">&#x2715;</span>
+  </div>
+  <div id="npu-body">
+    <div class="npu-row">
+      <span class="npu-label">WebNN</span>
+      <span class="npu-value" id="npu-webnn-status">checking...</span>
+    </div>
+    <div class="npu-row">
+      <span class="npu-label">NPU ctx</span>
+      <span class="npu-value" id="npu-npu-status">-</span>
+    </div>
+    <div class="npu-row">
+      <span class="npu-label">GPU ctx</span>
+      <span class="npu-value" id="npu-gpu-status">-</span>
+    </div>
+    <div class="npu-row">
+      <span class="npu-label">CPU ctx</span>
+      <span class="npu-value" id="npu-cpu-status">-</span>
+    </div>
+
+    <div id="npu-bench-section" style="display:none;">
+      <div id="npu-bench-title">Benchmark</div>
+      <div class="npu-bench-row" id="npu-bench-npu" style="display:none;">
+        <span class="npu-bench-device">NPU</span>
+        <div class="npu-bench-bar-wrap"><div class="npu-bench-bar npu-bar-npu" id="npu-bar-npu" style="width:0%"></div></div>
+        <span class="npu-bench-gflops" id="npu-gflops-npu">-</span>
+      </div>
+      <div class="npu-bench-row" id="npu-bench-gpu" style="display:none;">
+        <span class="npu-bench-device">GPU</span>
+        <div class="npu-bench-bar-wrap"><div class="npu-bench-bar npu-bar-gpu" id="npu-bar-gpu" style="width:0%"></div></div>
+        <span class="npu-bench-gflops" id="npu-gflops-gpu">-</span>
+      </div>
+      <div class="npu-bench-row" id="npu-bench-cpu" style="display:none;">
+        <span class="npu-bench-device">CPU</span>
+        <div class="npu-bench-bar-wrap"><div class="npu-bench-bar npu-bar-cpu" id="npu-bar-cpu" style="width:0%"></div></div>
+        <span class="npu-bench-gflops" id="npu-gflops-cpu">-</span>
+      </div>
+    </div>
+
+    <button id="npu-run-btn" disabled>Run Benchmark</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window._isMobile || window.innerWidth <= 768) return;
+
+  var LOG            = '[npu-test]';
+  var LS_POS_KEY     = 'npu_test_widget_pos';
+  var DRAG_THRESHOLD = 5;
+
+  var widget    = document.getElementById('npu-widget');
+  var closeEl   = document.getElementById('npu-close');
+  var runBtn    = document.getElementById('npu-run-btn');
+  var dragState  = null;
+  var wasDragged = false;
+  var dismissed  = false;
+
+  // Position restore
+  (function restorePosition() {
+    try {
+      var saved = localStorage.getItem(LS_POS_KEY);
+      if (saved) {
+        var pos = JSON.parse(saved);
+        if (typeof pos.top === 'number' && typeof pos.left === 'number') {
+          widget.style.top   = pos.top  + 'px';
+          widget.style.left  = pos.left + 'px';
+          widget.style.right = 'auto';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })();
+
+  // Drag
+  widget.addEventListener('mousedown', function (e) {
+    if (e.target === closeEl || closeEl.contains(e.target)) return;
+    if (e.target === runBtn  || runBtn.contains(e.target))  return;
+    if (e.button !== 0) return;
+    var rect = widget.getBoundingClientRect();
+    widget.style.left  = rect.left + 'px';
+    widget.style.top   = rect.top  + 'px';
+    widget.style.right = 'auto';
+    dragState = { startX: e.clientX, startY: e.clientY,
+                  origTop: rect.top, origLeft: rect.left };
+    wasDragged = false;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!wasDragged && Math.sqrt(dx*dx + dy*dy) > DRAG_THRESHOLD) {
+      wasDragged = true;
+      widget.classList.add('npu-dragging');
+    }
+    if (wasDragged) {
+      var newTop  = Math.max(0, Math.min(dragState.origTop  + dy,
+                                         window.innerHeight - widget.offsetHeight));
+      var newLeft = Math.max(0, Math.min(dragState.origLeft + dx,
+                                         window.innerWidth  - widget.offsetWidth));
+      widget.style.top  = newTop  + 'px';
+      widget.style.left = newLeft + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragState) return;
+    widget.classList.remove('npu-dragging');
+    if (wasDragged) {
+      try {
+        localStorage.setItem(LS_POS_KEY, JSON.stringify({
+          top:  parseInt(widget.style.top,  10),
+          left: parseInt(widget.style.left, 10)
+        }));
+      } catch (e) { /* ignore */ }
+    }
+    dragState = null;
+    setTimeout(function () { wasDragged = false; }, 0);
+  });
+
+  // Close
+  closeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    dismissed = true;
+    widget.style.display = 'none';
+  });
+
+  // Helpers
+  function setStatus(id, text, cls, tooltip) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'npu-value ' + (cls || '');
+    if (tooltip) {
+      el.title = tooltip;
+    } else {
+      el.removeAttribute('title');
+    }
+  }
+
+  function getBrowserHint() {
+    var ua = navigator.userAgent || '';
+    if (/Edg\//.test(ua)) {
+      return 'WebNN is disabled. To enable:\n1. Open a new tab\n2. Go to: edge://flags/#web-machine-learning-neural-network\n3. Set to "Enabled"\n4. Click "Restart"';
+    }
+    if (/Chrome\//.test(ua)) {
+      return 'WebNN is disabled. To enable:\n1. Open a new tab\n2. Go to: chrome://flags/#web-machine-learning-neural-network\n3. Set to "Enabled"\n4. Click "Relaunch"';
+    }
+    if (/Firefox\//.test(ua)) {
+      return 'Firefox does not support WebNN.\nUse Microsoft Edge or Google Chrome on Windows instead.';
+    }
+    return 'WebNN is not available.\nTry Microsoft Edge or Google Chrome on Windows\nand enable the WebNN flag in browser flags.';
+  }
+
+  // WebNN probe
+  var contexts = {};
+
+  async function probeWebNN() {
+    if (typeof navigator === 'undefined' || !navigator.ml) {
+      console.log(LOG, 'navigator.ml not present -- WebNN not enabled; hiding widget');
+      console.log(LOG, 'User-Agent:', navigator.userAgent);
+      console.log(LOG, getBrowserHint());
+      widget.style.display = 'none';
+      return;
+    }
+
+    console.log(LOG, 'navigator.ml present:', navigator.ml);
+    widget.style.display = '';
+    setStatus('npu-webnn-status', 'Present OK', 'npu-ok');
+
+    var devices = [
+      { type: 'npu', statusId: 'npu-npu-status' },
+      { type: 'gpu', statusId: 'npu-gpu-status' },
+      { type: 'cpu', statusId: 'npu-cpu-status' }
+    ];
+
+    var anyOk = false;
+
+    for (var i = 0; i < devices.length; i++) {
+      var d = devices[i];
+      setStatus(d.statusId, 'probing...', '');
+      console.log(LOG, 'createContext({ deviceType: "' + d.type + '" }) ...');
+      try {
+        var ctx = await navigator.ml.createContext({ deviceType: d.type });
+        if (ctx) {
+          contexts[d.type] = ctx;
+          console.log(LOG, 'createContext(' + d.type + ') OK');
+          setStatus(d.statusId, 'OK', 'npu-ok');
+          anyOk = true;
+        } else {
+          console.warn(LOG, 'createContext(' + d.type + ') returned null/undefined');
+          setStatus(d.statusId, 'null ctx', 'npu-warn');
+        }
+      } catch (err) {
+        console.warn(LOG, 'createContext(' + d.type + ') threw:', err);
+        var msg = (err && err.message) ? err.message.slice(0, 30) : String(err).slice(0, 30);
+        setStatus(d.statusId, msg, 'npu-err');
+      }
+    }
+
+    if (anyOk) {
+      document.getElementById('npu-bench-section').style.display = '';
+      runBtn.disabled = false;
+    }
+  }
+
+  // Benchmark using the current WebNN tensor-based dispatch API:
+  //   ctx.createTensor(descriptor, initData?)  -> MLTensor
+  //   ctx.writeTensor(tensor, data)
+  //   ctx.dispatch(graph, inputMap, outputMap) -- inputMap/outputMap values are MLTensors
+  //   ctx.readTensor(tensor)                   -> Promise<ArrayBuffer>
+  //
+  // The older buffer-based compute() was removed; dispatch() is the current API.
+  //
+  // We deliberately use fp16 + a large matrix + a *sustained* (multi-second) loop:
+  //   - fp16 is the data type the Intel NPU actually accelerates (fp32 matmul is
+  //     usually bounced back to GPU/CPU by the driver).
+  //   - A sustained loop is long enough for Windows Task Manager's ~1s NPU
+  //     sampling to register utilisation IF the work really lands on the NPU.
+
+  var N            = 1024;             // matrix dimension
+  var BENCH_MS     = 1500;             // sustained run duration per device
+  var flopsPerRun  = 2 * N * N * N;    // FLOPs for one NxN * NxN matmul
+
+  // float32 -> float16 bit pattern (Three.js DataUtils.toHalfFloat algorithm)
+  var _f32 = new Float32Array(1);
+  var _i32 = new Int32Array(_f32.buffer);
+  function toHalf(val) {
+    _f32[0] = val;
+    var x = _i32[0];
+    var bits = (x >> 16) & 0x8000;
+    var m = (x >> 12) & 0x07ff;
+    var e = (x >> 23) & 0xff;
+    if (e < 103) return bits;
+    if (e > 142) { bits |= 0x7c00; bits |= ((e === 255) ? 0 : 1) && (x & 0x007fffff); return bits; }
+    if (e < 113) { m |= 0x0800; bits |= (m >> (114 - e)) + ((m >> (113 - e)) & 1); return bits; }
+    bits |= ((e - 112) << 10) | (m >> 1);
+    bits += m & 1;
+    return bits;
+  }
+
+  // Build the matmul graph + I/O tensors for one device, trying fp16 first and
+  // falling back to fp32 if the backend can't build an fp16 graph. Returns a
+  // "prep" object reused for both the timed run and the concurrency test.
+  async function prepareDevice(deviceType) {
+    var ctx = contexts[deviceType];
+    if (!ctx) {
+      console.warn(LOG, 'prepareDevice(' + deviceType + '): no context -- skipping');
+      return null;
+    }
+
+    var dtypes = ['float16', 'float32'];
+    for (var di = 0; di < dtypes.length; di++) {
+      var dtype = dtypes[di];
+      try {
+        console.log(LOG, 'prepareDevice(' + deviceType + '): building ' + N + 'x' + N +
+          ' matmul graph (' + dtype + ') ...');
+        var builder = new MLGraphBuilder(ctx);
+
+        // Constant weight matrix B
+        var bData;
+        if (dtype === 'float16') {
+          bData = new Uint16Array(N * N);
+          for (var i = 0; i < bData.length; i++) bData[i] = toHalf((Math.random() - 0.5) * 0.1);
+        } else {
+          bData = new Float32Array(N * N);
+          for (var i2 = 0; i2 < bData.length; i2++) bData[i2] = (Math.random() - 0.5) * 0.1;
+        }
+        var B = builder.constant({ dataType: dtype, shape: [N, N] }, bData);
+        var A = builder.input('A', { dataType: dtype, shape: [N, N] });
+        var C = builder.matmul(A, B);
+        var graph = await builder.build({ C: C });
+
+        // Input tensor A
+        var aData;
+        if (dtype === 'float16') {
+          aData = new Uint16Array(N * N);
+          for (var j = 0; j < aData.length; j++) aData[j] = toHalf(Math.random());
+        } else {
+          aData = new Float32Array(N * N);
+          for (var j2 = 0; j2 < aData.length; j2++) aData[j2] = Math.random();
+        }
+        var tensorA = await ctx.createTensor({ dataType: dtype, shape: [N, N], writable: true, readable: false });
+        await ctx.writeTensor(tensorA, aData);
+
+        // Output tensor C
+        var tensorC = await ctx.createTensor({ dataType: dtype, shape: [N, N], writable: false, readable: true });
+
+        console.log(LOG, 'prepareDevice(' + deviceType + '): ready (' + dtype + ')');
+        return { ctx: ctx, graph: graph, tensorA: tensorA, tensorC: tensorC, dtype: dtype };
+      } catch (err) {
+        console.warn(LOG, 'prepareDevice(' + deviceType + ') build failed for ' + dtype + ':', err);
+        // try next dtype
+      }
+    }
+    console.error(LOG, 'prepareDevice(' + deviceType + '): all dtypes failed');
+    return null;
+  }
+
+  // Dispatch `runs` matmuls into the device queue, then await one read to drain.
+  async function drain(prep, runs) {
+    for (var r = 0; r < runs; r++) {
+      prep.ctx.dispatch(prep.graph, { A: prep.tensorA }, { C: prep.tensorC });
+    }
+    await prep.ctx.readTensor(prep.tensorC);
+  }
+
+  // Sustained timed run: keep the device busy for ~BENCH_MS, return GFLOPS.
+  async function timedRun(prep, deviceType) {
+    // warm-up
+    await drain(prep, 1);
+
+    var runs = 0;
+    var t0 = performance.now();
+    while (performance.now() - t0 < BENCH_MS) {
+      await drain(prep, 10);   // batch of 10 keeps the queue bounded
+      runs += 10;
+    }
+    var elapsed = performance.now() - t0;
+    var gflops = (flopsPerRun * runs / (elapsed / 1000)) / 1e9;
+    console.log(LOG, 'timedRun(' + deviceType + '/' + prep.dtype + '): ' + runs +
+      ' runs in ' + elapsed.toFixed(0) + ' ms => ' + gflops.toFixed(2) + ' GFLOPS');
+    return { gflops: gflops };
+  }
+
+  async function runBenchmark() {
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running...';
+    console.log(LOG, 'runBenchmark: contexts available:', Object.keys(contexts));
+
+    var titleEl = document.getElementById('npu-bench-title');
+    if (titleEl) titleEl.textContent = 'Benchmark (' + N + 'x' + N + ' matmul, ' +
+      (BENCH_MS / 1000) + 's sustained)';
+
+    var deviceTypes = Object.keys(contexts);
+    var preps   = {};
+    var results = {};
+
+    for (var i = 0; i < deviceTypes.length; i++) {
+      var dt = deviceTypes[i];
+      var rowEl    = document.getElementById('npu-bench-' + dt);
+      var gflopsEl = document.getElementById('npu-gflops-' + dt);
+      if (rowEl) rowEl.style.display = '';
+      if (gflopsEl) gflopsEl.textContent = 'running...';
+
+      var prep = await prepareDevice(dt);
+      if (!prep) {
+        results[dt] = null;
+        if (gflopsEl) gflopsEl.textContent = 'failed';
+        continue;
+      }
+      preps[dt] = prep;
+
+      var run = await timedRun(prep, dt);
+      results[dt] = run.gflops;
+      if (gflopsEl) gflopsEl.textContent = run.gflops.toFixed(1) + ' GF (' + prep.dtype + ')';
+    }
+
+    console.log(LOG, 'runBenchmark timed results:', results);
+
+    // Bars
+    var maxGflops = 0;
+    var dts = Object.keys(results);
+    for (var j = 0; j < dts.length; j++) {
+      if (results[dts[j]] !== null && results[dts[j]] > maxGflops) maxGflops = results[dts[j]];
+    }
+    if (maxGflops > 0) {
+      for (var k = 0; k < dts.length; k++) {
+        var dt2 = dts[k];
+        var bar = document.getElementById('npu-bar-' + dt2);
+        if (bar && results[dt2] !== null) {
+          bar.style.width = Math.round((results[dt2] / maxGflops) * 100) + '%';
+        }
+      }
+    }
+
+    // Clean up tensors
+    var pkeys = Object.keys(preps);
+    for (var p = 0; p < pkeys.length; p++) {
+      try { preps[pkeys[p]].tensorA.destroy(); preps[pkeys[p]].tensorC.destroy(); } catch (e) {}
+    }
+
+    console.log(LOG, 'runBenchmark complete');
+    runBtn.textContent = 'Run Again';
+    runBtn.disabled = false;
+  }
+
+  runBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (!dismissed) runBenchmark();
+  });
+
+  // Init -- widget stays hidden until probeWebNN confirms navigator.ml exists
+  probeWebNN();
+
+})();
+</script>

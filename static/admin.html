@@ -1000,11 +1000,8 @@
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
                                 <input type="checkbox" id="proxyFormEnabled" style="width:auto; margin:0; cursor:pointer;">
                                 Enabled
+                                <button type="button" onclick="showProxyEnabledInfoModal()" style="background:none;border:none;padding:0;margin:0;cursor:pointer;color:#2196f3;font-size:15px;line-height:1;" title="What does Enabled do?">ℹ️</button>
                             </label>
-                            <div style="margin-top:8px; padding:10px; background:#e3f2fd; border:1px solid #2196f3; border-radius:4px; color:#0d47a1; font-size:13px;">
-                                ℹ️ <strong>Note:</strong> This controls whether the proxy route is active and forwards requests to the addon backend.
-                                It does <strong>not</strong> start or stop the addon container itself — use the <strong>Manage Addons</strong> button for that.
-                            </div>
                         </div>
 
                         <div style="margin-bottom: 15px;">
@@ -3356,6 +3353,25 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;">
                     <button class="btn btn-secondary" onclick="closeWidgetDeleteWarningModal(false)" style="margin-left:0;">Cancel</button>
                     <button class="btn btn-danger" onclick="closeWidgetDeleteWarningModal(true)">Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Addon Proxy Enabled Info Modal -->
+        <div id="proxyEnabledInfoModal" class="modal">
+            <div class="modal-content" style="max-width:480px;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;font-size:16px;">ℹ️ About "Enabled"</h3>
+                    <button onclick="closeProxyEnabledInfoModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <p style="margin:0;font-size:14px;color:#444;line-height:1.7;">
+                        <strong>Enabled</strong> controls whether the proxy route is active and forwards requests to the addon backend.<br><br>
+                        It does <strong>not</strong> start or stop the addon container itself — use the <strong>Manage Addons</strong> button for that.
+                    </p>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;flex-shrink:0;">
+                    <button class="btn" onclick="closeProxyEnabledInfoModal()" style="margin-left:0;">I Understand</button>
                 </div>
             </div>
         </div>
@@ -26298,6 +26314,14 @@ Referer: ${log.referer}`;
             clearProxyFormErrors();
             document.getElementById('proxyForm').style.display = 'block';
             document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showProxyEnabledInfoModal() {
+            document.getElementById('proxyEnabledInfoModal').style.display = 'block';
+        }
+
+        function closeProxyEnabledInfoModal() {
+            document.getElementById('proxyEnabledInfoModal').style.display = 'none';
         }
 
         function cancelProxyForm() {

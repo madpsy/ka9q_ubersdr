@@ -11878,6 +11878,71 @@ window.spectrumZoomSlider = spectrumZoomSlider;
 // that updateZoomSlider() resumes tracking the server's reported zoom level.
 window.clearZoomSliderSource = function() { _zoomSource = null; };
 
+/**
+ * Attach custom touch handlers to the vertical zoom slider.
+ * The slider is a horizontal <input type="range"> rotated -90deg with CSS.
+ * On touch, browsers map the touch X coordinate to the slider value — but
+ * after rotation the user's finger moves vertically, so X is wrong.
+ * We intercept all touch events, prevent the browser's default handling,
+ * and compute the correct value from the touch Y coordinate relative to
+ * the slider's on-screen bounding rect (which reflects the rotation).
+ *
+ * Visual mapping (slider rotated -90deg, top = max zoom, bottom = min zoom):
+ *   touchY near rect.top    → high value (zoomed in)
+ *   touchY near rect.bottom → low value  (zoomed out)
+ */
+function initVzoomSliderTouch() {
+    const slider = document.getElementById('spectrum-vzoom-slider');
+    if (!slider) return;
+
+    function valueFromTouchY(touch) {
+        const rect = slider.getBoundingClientRect(); // screen coords after CSS rotation
+        const min = parseInt(slider.min) || 0;
+        const max = parseInt(slider.max) || 14;
+        // Clamp touch Y within the rect
+        const y = Math.max(rect.top, Math.min(rect.bottom, touch.clientY));
+        // Fraction 0 = top (max zoom), 1 = bottom (min zoom)
+        const fraction = (y - rect.top) / rect.height;
+        // Invert: top → max, bottom → min
+        const raw = min + (1 - fraction) * (max - min);
+        return Math.round(Math.max(min, Math.min(max, raw)));
+    }
+
+    slider.addEventListener('touchstart', function(e) {
+        e.preventDefault(); // stop browser's incorrect horizontal mapping
+        spectrumZoomSliderDragStart();
+    }, { passive: false });
+
+    slider.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        if (!e.touches.length) return;
+        const val = valueFromTouchY(e.touches[0]);
+        if (parseInt(slider.value) !== val) {
+            slider.value = val;
+            spectrumZoomSlider(val, slider);
+        }
+    }, { passive: false });
+
+    slider.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        // Use changedTouches for the final position
+        const touch = e.changedTouches && e.changedTouches[0];
+        if (touch) {
+            const val = valueFromTouchY(touch);
+            slider.value = val;
+            spectrumZoomSlider(val, slider);
+        }
+        spectrumZoomSliderDragEnd(slider);
+    }, { passive: false });
+}
+
+// Run after DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initVzoomSliderTouch);
+} else {
+    initVzoomSliderTouch();
+}
+
 function spectrumCenterFrequency() {
     if (!spectrumDisplay) return;
 

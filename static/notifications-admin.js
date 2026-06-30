@@ -484,8 +484,8 @@ function uploadConfig(file) {
 function initOverview() {
     el('btnRefreshHealth').addEventListener('click', loadHealth);
 
-    el('btnSaveEnable').addEventListener('click', async function() {
-        localConfig.enabled = el('masterEnable').checked;
+    el('masterEnable').addEventListener('change', async function() {
+        localConfig.enabled = this.checked;
         const ok = await saveConfig(el('overviewAlerts'));
         if (ok) await loadHealth();
     });
@@ -652,7 +652,7 @@ function renderChannels() {
     });
 }
 
-function deleteChannel(name) {
+async function deleteChannel(name) {
     if (!confirm('Delete channel "' + name + '"? It will also be removed from any rules that reference it.')) return;
     delete localConfig.channels[name];
     localConfig.rules.forEach(function(rule) {
@@ -660,7 +660,7 @@ function deleteChannel(name) {
     });
     renderChannels();
     renderRules();
-    showAlert(el('channelsAlerts'), 'warning', 'Channel "' + name + '" removed. Click "Save All Changes" to persist.');
+    await saveConfig(el('channelsAlerts'));
 }
 
 async function testChannel(name) {
@@ -765,7 +765,7 @@ function showChannelForm(editName) {
         container.innerHTML = '';
     });
 
-    el('btnSaveChannel').addEventListener('click', function() {
+    el('btnSaveChannel').addEventListener('click', async function() {
         const name = el('chName').value.trim();
         if (!name) { showAlert(el('channelsAlerts'), 'error', 'Channel name is required.', false); return; }
         if (!/^[a-zA-Z0-9_]+$/.test(name)) { showAlert(el('channelsAlerts'), 'error', 'Channel name must be letters, numbers, underscores only.', false); return; }
@@ -794,7 +794,7 @@ function showChannelForm(editName) {
         container.style.display = 'none';
         container.innerHTML = '';
         renderChannels();
-        showAlert(el('channelsAlerts'), 'success', 'Channel "' + name + '" ' + (isEdit ? 'updated' : 'added') + '. Click "Save All Changes" to persist.');
+        await saveConfig(el('channelsAlerts'));
     });
 }
 
@@ -858,9 +858,6 @@ async function discoverChats(editName) {
 
 function initChannels() {
     el('btnAddChannel').addEventListener('click', function() { showChannelForm(null); });
-    el('btnSaveChannels').addEventListener('click', async function() {
-        await saveConfig(el('channelsAlerts'));
-    });
 }
 
 // =============================================================================
@@ -921,11 +918,11 @@ function renderRules() {
     }).join('');
 
     list.querySelectorAll('.rule-toggle').forEach(function(chk) {
-        chk.addEventListener('change', function() {
+        chk.addEventListener('change', async function() {
             const idx = parseInt(chk.dataset.idx, 10);
             localConfig.rules[idx].enabled = chk.checked;
             renderRules();
-            showAlert(el('rulesAlerts'), 'info', 'Rule "' + localConfig.rules[idx].name + '" ' + (chk.checked ? 'enabled' : 'disabled') + '. Click "Save All Changes" to persist.');
+            await saveConfig(el('rulesAlerts'));
         });
     });
     list.querySelectorAll('.btn-edit-rule').forEach(function(btn) {
@@ -936,13 +933,13 @@ function renderRules() {
     });
 }
 
-function deleteRule(idx) {
+async function deleteRule(idx) {
     const rule = localConfig.rules[idx];
     if (!rule) return;
     if (!confirm('Delete rule "' + rule.name + '"?')) return;
     localConfig.rules.splice(idx, 1);
     renderRules();
-    showAlert(el('rulesAlerts'), 'warning', 'Rule "' + rule.name + '" removed. Click "Save All Changes" to persist.');
+    await saveConfig(el('rulesAlerts'));
 }
 
 function showRuleForm(editIdx) {
@@ -1021,7 +1018,7 @@ function showRuleForm(editIdx) {
         container.innerHTML = '';
     });
 
-    el('btnSaveRule').addEventListener('click', function() {
+    el('btnSaveRule').addEventListener('click', async function() {
         const name = el('ruleName').value.trim();
         if (!name) { showAlert(el('rulesAlerts'), 'error', 'Rule name is required.', false); return; }
 
@@ -1052,7 +1049,7 @@ function showRuleForm(editIdx) {
         container.style.display = 'none';
         container.innerHTML = '';
         renderRules();
-        showAlert(el('rulesAlerts'), 'success', 'Rule "' + name + '" ' + (isEdit ? 'updated' : 'added') + '. Click "Save All Changes" to persist.');
+        await saveConfig(el('rulesAlerts'));
     });
 }
 
@@ -1192,9 +1189,6 @@ function readFilterFields(eventType) {
 
 function initRules() {
     el('btnAddRule').addEventListener('click', function() { showRuleForm(null); });
-    el('btnSaveRules').addEventListener('click', async function() {
-        await saveConfig(el('rulesAlerts'));
-    });
 }
 
 // =============================================================================

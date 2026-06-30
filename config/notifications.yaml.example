@@ -1,0 +1,311 @@
+# UberSDR Notification Configuration
+# Copy this file to notifications.yaml and edit to suit your setup.
+#
+# The notification system is a self-contained hub:
+#   - Sources (CW Skimmer, DX Cluster, decoder, etc.) publish typed events.
+#   - The manager evaluates every rule against each event.
+#   - All matching rules fire independently (multiple rules can match one event).
+#   - Each rule renders its own template and dispatches to its own channel list.
+#
+# Supported event types:
+#   cw_spot        — CW Skimmer spot received
+#   dx_spot        — DX Cluster spot received
+#   digital_decode — FT8 / FT4 / WSPR / JS8 decoded
+#   space_weather  — K-index / A-index / SFI threshold crossed
+#   antenna_switch — Antenna switch changed state
+#   rotator        — Rotator moved or stopped
+#   system_monitor — A subsystem became unhealthy or recovered
+#   user_session   — A user connected or disconnected
+#   server_startup — Server finished initialising (useful for crash detection)
+#   voice_activity — New voice signal detected on a band
+
+# ── Master switch ─────────────────────────────────────────────────────────────
+# Set to true after configuring your channels and rules below.
+enabled: false
+
+# ── Channels ──────────────────────────────────────────────────────────────────
+# Define one or more named output destinations.
+# Rules reference channels by name.
+channels:
+
+  # ── Telegram ─────────────────────────────────────────────────────────────────
+  # To set up a Telegram bot:
+  #   1. Message @BotFather on Telegram → /newbot → copy the token.
+  #   2. Add the bot to a group, or message it directly.
+  #   3. GET https://api.telegram.org/bot<TOKEN>/getUpdates
+  #      and find "chat":{"id":...} in the response.
+  #
+  # telegram_main:
+  #   type: telegram
+  #   bot_token: "7123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  #   chat_id: "-1001234567890"   # group/channel (negative) or personal chat (positive)
+  #   parse_mode: "HTML"          # HTML (default), Markdown, MarkdownV2, or "" for plain text
+  #   rate_limit_minutes: 10      # suppress duplicate (rule+subject) alerts within this window
+  #                               # 0 = no rate limiting
+
+  # You can define multiple channels — e.g. a personal chat and a group:
+  # telegram_personal:
+  #   type: telegram
+  #   bot_token: "7123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  #   chat_id: "123456789"        # your personal chat ID
+  #   rate_limit_minutes: 0       # no rate limiting for personal alerts
+
+# ── Rules ─────────────────────────────────────────────────────────────────────
+# Rules are evaluated in order. All matching rules fire (no break-on-first-match).
+# Omitting a filter field means "match anything" for that field.
+# Within a list field, any element matching is sufficient (OR within field, AND between fields).
+rules:
+
+  # ── Server startup ────────────────────────────────────────────────────────────
+  # Fires once when the server finishes initialising. Useful for detecting restarts.
+  # - name: "Server started"
+  #   event: server_startup
+  #   template: "🚀 <b>UberSDR {{.Version}} started</b>\n{{.Callsign}} — {{.Name}}"
+  #   channels: [telegram_main]
+
+  # ── System monitor: any subsystem goes unhealthy ──────────────────────────────
+  # Available components: noise_floor, space_weather, decoder, cw_skimmer, mqtt,
+  #   rotator, ant_switch, frequency_reference, instance_reporter, sdr_frontend,
+  #   gpsdo, system_load, cpu_temperature
+  # Fires only on state transitions (healthy→unhealthy or unhealthy→healthy).
+  # - name: "System unhealthy"
+  #   event: system_monitor
+  #   filter:
+  #     on_unhealthy: true
+  #     # components: ["decoder", "cw_skimmer", "mqtt"]  # empty = all components
+  #   template: "❌ <b>{{.Component}} unhealthy</b>\n{{range .Issues}}• {{.}}\n{{end}}"
+  #   channels: [telegram_main]
+
+  # - name: "System recovered"
+  #   event: system_monitor
+  #   filter:
+  #     on_recovery: true
+  #   template: "✅ <b>{{.Component}} recovered</b>"
+  #   channels: [telegram_main]
+
+  # ── System monitor: specific components ──────────────────────────────────────
+  # - name: "CW Skimmer unhealthy"
+  #   event: system_monitor
+  #   filter:
+  #     components: ["cw_skimmer"]
+  #     on_unhealthy: true
+  #   template: "❌ <b>CW Skimmer unhealthy</b>\n{{range .Issues}}• {{.}}\n{{end}}"
+  #   channels: [telegram_main]
+
+  # - name: "High CPU temperature"
+  #   event: system_monitor
+  #   filter:
+  #     components: ["cpu_temperature"]
+  #     on_unhealthy: true
+  #   template: "🌡️ <b>CPU temperature alert</b>\n{{range .Issues}}• {{.}}\n{{end}}"
+  #   channels: [telegram_main]
+
+  # - name: "High system load"
+  #   event: system_monitor
+  #   filter:
+  #     components: ["system_load"]
+  #     on_unhealthy: true
+  #   template: "⚠️ <b>High system load</b>\n{{range .Issues}}• {{.}}\n{{end}}"
+  #   channels: [telegram_main]
+
+  # - name: "GPSDO lost lock"
+  #   event: system_monitor
+  #   filter:
+  #     components: ["gpsdo"]
+  #     on_unhealthy: true
+  #   template: "🛰️ <b>GPSDO unhealthy</b>\n{{range .Issues}}• {{.}}\n{{end}}"
+  #   channels: [telegram_main]
+
+  # ── Space weather: geomagnetic storm ─────────────────────────────────────────
+  # - name: "K-index storm alert"
+  #   event: space_weather
+  #   filter:
+  #     k_min: 5          # K ≥ 5 = storm conditions
+  #   channels: [telegram_main]
+
+  # - name: "Good HF conditions"
+  #   event: space_weather
+  #   filter:
+  #     sfi_min: 150      # SFI ≥ 150 = excellent propagation
+  #     k_max: 2          # AND K ≤ 2 = quiet geomagnetic conditions
+  #   template: "☀️ <b>Excellent HF conditions</b>\nSFI={{printf \"%.0f\" .SFI}}, K={{.KIndex}}, A={{.AIndex}} — {{.PropagationQuality}}"
+  #   channels: [telegram_main]
+
+  # ── DX Cluster: rare DXCC ────────────────────────────────────────────────────
+  # - name: "Rare DX spotted"
+  #   event: dx_spot
+  #   filter:
+  #     callsign_prefixes: ["3Y", "JD1", "VK0", "FT5", "ZL9", "VP8"]
+  #     # continents: ["AN"]   # Antarctica only
+  #   template: "📡 <b>Rare DX: {{.DXCall}}</b> {{flag .CountryCode}}\n{{.Country}} on <b>{{.Band}}</b> @ {{khz .Frequency}} kHz\nvia {{.Spotter}}{{if .Comment}} — {{.Comment}}{{end}}"
+  #   channels: [telegram_main]
+
+  # ── DX Cluster: watch for a specific callsign ─────────────────────────────────
+  # - name: "Friend on DX cluster"
+  #   event: dx_spot
+  #   filter:
+  #     callsigns: ["G3XYZ", "M0ABC"]
+  #   template: "👋 <b>{{.DXCall}}</b> spotted on {{.Band}} @ {{khz .Frequency}} kHz\nvia {{.Spotter}}{{if .Comment}} — {{.Comment}}{{end}}"
+  #   channels: [telegram_main]
+
+  # ── CW Skimmer: rare DX ───────────────────────────────────────────────────────
+  # - name: "Rare CW DX"
+  #   event: cw_spot
+  #   filter:
+  #     continents: ["OC", "AN"]
+  #     min_distance_km: 5000
+  #     min_snr: 5
+  #   template: "📻 <b>CW: {{.DXCall}}</b> {{flag .CountryCode}}\n{{.Country}} on <b>{{.Band}}</b> @ {{khz .Frequency}} kHz\n{{.WPM}} WPM, SNR {{.SNR}} dB{{if .DistanceKm}}, {{printf \"%.0f\" (deref .DistanceKm)}} km {{bearing .BearingDeg}}{{end}}"
+  #   channels: [telegram_main]
+
+  # ── CW Skimmer: Australia on 40m ─────────────────────────────────────────────
+  # - name: "Australia CW on 40m"
+  #   event: cw_spot
+  #   filter:
+  #     country_codes: ["AU"]
+  #     bands: ["40m"]
+  #   template: "📻 <b>CW: {{.DXCall}}</b> 🇦🇺 on 40m @ {{khz .Frequency}} kHz, {{.WPM}} WPM"
+  #   channels: [telegram_main]
+
+  # ── CW Skimmer: watch for a specific callsign ─────────────────────────────────
+  # - name: "Friend on CW"
+  #   event: cw_spot
+  #   filter:
+  #     callsigns: ["G3XYZ"]
+  #   channels: [telegram_main]
+
+  # ── Digital decode: WSPR from rare continent ──────────────────────────────────
+  # - name: "WSPR from Oceania or Antarctica"
+  #   event: digital_decode
+  #   filter:
+  #     digital_modes: ["WSPR"]
+  #     continents: ["OC", "AN"]
+  #     min_distance_km: 8000
+  #   template: "📡 <b>WSPR: {{.Callsign}}</b> {{flag .CountryCode}}\n{{.Country}} on <b>{{.Band}}</b>, SNR {{.SNR}} dB{{if .DistanceKm}}, {{printf \"%.0f\" (deref .DistanceKm)}} km {{bearing .BearingDeg}}{{end}}\nPower: {{.DBm}} dBm"
+  #   channels: [telegram_main]
+
+  # ── Digital decode: watch for a specific callsign on FT8/FT4 ─────────────────
+  # - name: "Friend on FT8"
+  #   event: digital_decode
+  #   filter:
+  #     digital_modes: ["FT8", "FT4"]
+  #     callsigns: ["G3XYZ", "M0ABC"]
+  #   template: "👋 <b>{{.Callsign}}</b> on {{.Band}} {{.Mode}}, SNR {{.SNR}} dB\n<code>{{.Message}}</code>"
+  #   channels: [telegram_main]
+
+  # ── Antenna switch: grounded (thunderstorm mode) ──────────────────────────────
+  # - name: "Antenna grounded"
+  #   event: antenna_switch
+  #   filter:
+  #     ant_actions: ["ground"]
+  #   template: "⚡ <b>Antenna grounded</b> (source: {{.Source}})"
+  #   channels: [telegram_main]
+
+  # ── Rotator: reached target ───────────────────────────────────────────────────
+  # - name: "Rotator stopped"
+  #   event: rotator
+  #   filter:
+  #     rotator_moving: false
+  #   template: "🧭 Rotator stopped at <b>{{printf \"%.0f\" .Azimuth}}°</b> el {{printf \"%.0f\" .Elevation}}°"
+  #   channels: [telegram_main]
+
+  # ── Voice activity: Japan on 20m ─────────────────────────────────────────────
+  # Fires when a new voice signal is detected on 20m enriched by the DX cluster
+  # with a Japanese callsign. Requires: noise_floor monitor + DX cluster enabled.
+  # - name: "Japan voice on 20m"
+  #   event: voice_activity
+  #   filter:
+  #     voice_bands: ["20m"]
+  #     voice_country_codes: ["JP"]
+  #     voice_min_snr: 5.0
+  #     voice_min_confidence: 0.6
+  #   template: "🎙️ <b>Voice on 20m from Japan</b>\n{{.DXCallsign}} ({{.DXCountry}}) @ {{mhz .EstimatedDialFreq}} MHz\nSNR {{printf \"%.0f\" (f32 .SNR)}} dB, conf {{printf \"%.0f\" (mulf (f32 .Confidence) 100)}}%"
+  #   channels: [telegram_main]
+
+  # ── User session: new connection from outside Europe ─────────────────────────
+  # - name: "Non-European user connected"
+  #   event: user_session
+  #   filter:
+  #     session_actions: ["connected"]
+  #     session_continents: ["NA", "SA", "AS", "OC", "AF", "AN"]
+  #   template: "👤 New user from <b>{{.Country}}</b> {{flag .CountryCode}} ({{.ClientIP}})"
+  #   channels: [telegram_main]
+
+# ── Template reference ────────────────────────────────────────────────────────
+#
+# Templates use Go text/template syntax. The template data is the event struct.
+# Available custom functions:
+#
+#   flag "JP"                        → 🇯🇵  (ISO 3166-1 alpha-2 → flag emoji)
+#   bearing .BearingDeg              → "NE"  (*float64 → compass direction, handles nil)
+#   deref .DistanceKm                → 0.0   (*float64 → float64, nil-safe)
+#   divf 14074000.0 1000000.0        → 14.074 (float64 division)
+#   mulf (f32 .Confidence) 100       → 60.0  (float64 multiplication; use with f32 for float32 fields)
+#   f32 .SNR                         → float64 (converts float32 field to float64 for printf/mulf)
+#   mhz .EstimatedDialFreq           → "14.074"  (uint64 Hz → MHz string, 3 decimal places)
+#   khz .Frequency                   → "14074.0" (float64 Hz → kHz string, 1 decimal place)
+#   join ", " .Issues                → "issue1, issue2"
+#   upper .Mode                      → "FT8"
+#   lower .Band                      → "20m"
+#
+# IMPORTANT type notes:
+#   • mhz takes uint64  — use for: .EstimatedDialFreq, .CenterFreq, .Frequency (digital_decode)
+#   • khz takes float64 — use for: .Frequency (cw_spot, dx_spot only)
+#   • .SNR and .Confidence in voice_activity are float32 — wrap with f32 before printf/mulf
+#   • .DistanceKm and .BearingDeg are *float64 — use {{if .DistanceKm}} before deref/bearing
+#   • .Selected in antenna_switch is []int — renders as Go slice literal; use join or range
+#   • % in templates is a literal percent sign — no escaping needed (unlike fmt.Sprintf)
+#
+# HTML formatting (when parse_mode is "HTML"):
+#   <b>bold</b>   <i>italic</i>   <code>monospace</code>   <pre>block</pre>
+#
+# Event struct fields by type:
+#
+# cw_spot:
+#   .DXCall .Spotter .Frequency (float64 Hz) .Band .SNR (int) .WPM (int)
+#   .Mode .Comment .Time
+#   .Country .CountryCode (ISO alpha-2) .CQZone .ITUZone .Continent
+#   .DistanceKm (*float64) .BearingDeg (*float64)
+#   .Name .Grid
+#
+# dx_spot:
+#   .DXCall .Spotter .Frequency (float64 Hz) .Band .Comment .Time
+#   .Country .CountryCode (ISO alpha-2) .Continent .TimeOffset (float64)
+#
+# digital_decode:
+#   .Callsign .Locator .Country .CountryCode (ISO alpha-2) .CQZone .ITUZone .Continent
+#   .SNR (int) .Frequency (uint64 Hz) .DialFrequency (uint64 Hz) .Timestamp .Mode .Message .Band
+#   .DistanceKm (*float64) .BearingDeg (*float64)
+#   .DBm (int) .TxFrequency (uint64 Hz)  — WSPR-specific; use mhz for frequency display
+#
+# space_weather:
+#   .SFI (float64) .KIndex (int) .KIndexStatus .AIndex (int)
+#   .SolarWindBz (float64) .PropagationQuality
+#   .PreviousKIndex (int) .PreviousSFI (float64)
+#
+# antenna_switch:
+#   .Action .Antenna (int) .Label .Selected ([]int) .Grounded (bool) .Source .Time
+#
+# rotator:
+#   .Azimuth (float64) .Elevation (float64) .Moving (bool)
+#   .TargetAzimuth (float64) .TargetElevation (float64) .Time
+#
+# system_monitor:
+#   .Component .Healthy (bool) .PreviouslyHealthy (bool) .Issues ([]string) .Status .Time
+#   Components: noise_floor, space_weather, decoder, cw_skimmer, mqtt,
+#               rotator, ant_switch, frequency_reference, instance_reporter,
+#               sdr_frontend, gpsdo, system_load, cpu_temperature
+#
+# user_session:
+#   .Action ("connected"/"disconnected") .ClientIP .Country .CountryCode (ISO alpha-2)
+#   .Continent .UserAgent .UserSessionID .Frequency (uint64 Hz) .Mode .Time
+#
+# server_startup:
+#   .Version .Callsign .Name .StartTime (time.Time)
+#
+# voice_activity:
+#   .Band .CenterFreq (uint64 Hz) .EstimatedDialFreq (uint64 Hz)
+#   .StartFreq (uint64 Hz) .EndFreq (uint64 Hz) .Bandwidth (uint64 Hz)
+#   .Mode .SNR (float32 dB) .Confidence (float32, 0.0–1.0) .Time
+#   .DXCallsign .DXCountry .DXCountryCode (ISO alpha-2) .DXContinent
+#   (DX cluster enrichment fields — may be empty if no nearby spot found)

@@ -505,6 +505,30 @@ func main() {
 		log.Printf("No decoder.yaml found or error loading: %v", err)
 	}
 
+	// Load notifications configuration from notifications.yaml if it exists
+	notificationsPath := "notifications.yaml"
+	if *configDir != "." {
+		notificationsPath = *configDir + "/notifications.yaml"
+	}
+	notifConfig, err := LoadNotificationsConfig(notificationsPath)
+	if err != nil {
+		log.Fatalf("Failed to load notifications config: %v", err)
+	}
+	if notifConfig.Enabled {
+		log.Printf("Notifications enabled (%d channel(s), %d rule(s))", len(notifConfig.Channels), len(notifConfig.Rules))
+		if issues := notifConfig.Validate(); len(issues) > 0 {
+			for _, issue := range issues {
+				log.Printf("Warning: notifications config: %s", issue)
+			}
+		}
+	} else {
+		log.Printf("Notifications disabled (no notifications.yaml or enabled: false)")
+	}
+	notifManager, err := NewNotificationManager(notifConfig)
+	if err != nil {
+		log.Fatalf("Failed to initialise notification manager: %v", err)
+	}
+
 	// Load UI configuration from ui.yaml if it exists
 	uiConfigPath := "ui.yaml"
 	if *configDir != "." {
@@ -615,6 +639,11 @@ func main() {
 
 	// Initialize session manager (with GeoIP service for automatic country lookups)
 	sessions := NewSessionManager(config, radiod, geoIPService)
+
+	// Register session event callback for notifications
+	sessions.OnSessionEvent(func(evt UserSessionEvent) {
+		notifManager.Publish(evt)
+	})
 
 	// Make session activity log directory relative to config directory if it's a relative path
 	if config.Server.SessionActivityLogEnabled && !strings.HasPrefix(config.Server.SessionActivityLogDir, "/") {
@@ -1681,12 +1710,18 @@ func main() {
 
 			// Broadcast to SSE clients
 			cwSkimmerSSEHub.Broadcast(spot)
+
+			// Publish to notification manager
+			notifManager.Publish(newCWSpotEvent(spot))
 		})
 	}
 
 	// Register DX spot handler for logging
 	dxCluster.OnSpot(func(spot DXSpot) {
 		// Spot logging removed
+
+		// Publish to notification manager
+		notifManager.Publish(newDXSpotEvent(spot))
 	})
 
 	// Initialize WSJT-X UDP broadcaster if enabled
@@ -1740,6 +1775,9 @@ func main() {
 
 				// Broadcast to SSE clients
 				decoderSSEHub.Broadcast(decode)
+
+				// Publish to notification manager
+				notifManager.Publish(newDigitalDecodeEvent(decode))
 			})
 			defer multiDecoder.Stop()
 		}
@@ -1938,6 +1976,37 @@ func main() {
 	// This must be called after sessions is initialized but before HTTP server starts
 	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor, addonsConfig, frontendHistory)
 
+	// Publish server startup notification (non-blocking)
+	go notifManager.Publish(ServerStartupEvent{
+		Version:   Version,
+		Callsign:  config.Admin.Callsign,
+		Name:      config.Admin.Name,
+		StartTime: StartTime,
+	})
+
+	// Register space weather update callback for notifications
+	spaceWeatherMonitor.OnUpdate(func(newData, prevData *SpaceWeatherData) {
+		if newData == nil {
+			return
+		}
+		prevKIndex := 0
+		prevSFI := 0.0
+		if prevData != nil {
+			prevKIndex = prevData.KIndex
+			prevSFI = prevData.SolarFlux
+		}
+		notifManager.Publish(SpaceWeatherEvent{
+			SFI:                newData.SolarFlux,
+			KIndex:             newData.KIndex,
+			KIndexStatus:       newData.KIndexStatus,
+			AIndex:             newData.AIndex,
+			SolarWindBz:        newData.SolarWindBz,
+			PropagationQuality: newData.PropagationQuality,
+			PreviousKIndex:     prevKIndex,
+			PreviousSFI:        prevSFI,
+		})
+	})
+
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
 	if config.InstanceReporting.Enabled {
@@ -2006,6 +2075,11 @@ func main() {
 			antSwitchHandler = nil
 		} else {
 			log.Printf("Antenna switch API initialized (host: %s:%d)", config.AntSwitch.Host, config.AntSwitch.Port)
+
+			// Register notification callback for antenna switch changes
+			antSwitchHandler.OnChange(func(entry AntSwitchLogEntry) {
+				notifManager.Publish(newAntennaSwitchEvent(entry))
+			})
 
 			// Initialize ant switch scheduler
 			antSwitchSchedulerPath := "ant_switch_schedule.yaml"
@@ -2126,6 +2200,33 @@ func main() {
 		instanceReporter.SetFrontendHistory(frontendHistory)
 	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler)
+
+	// Start system monitor health notifier — polls subsystems every 30s and fires
+	// SystemMonitorEvent notifications on healthy↔unhealthy transitions.
+	{
+		var mqttPub *MQTTPublisher
+		if prometheusMetrics != nil {
+			mqttPub = prometheusMetrics.mqttPublisher
+		}
+		sysProbes := BuildSystemHealthProbes(
+			noiseFloorMonitor,
+			spaceWeatherMonitor,
+			multiDecoder,
+			cwSkimmer,
+			mqttPub,
+			rotctlHandler,
+			antSwitchHandler,
+			freqRefMonitor,
+			gpsdoMonitor,
+			instanceReporter,
+			config,
+			sessions,
+		)
+		StartSystemMonitorNotifier(mainCtx, notifManager, 30*time.Second, sysProbes)
+	}
+
+	// Start voice activity notifier — polls for new voice signals every 10s
+	StartVoiceActivityNotifier(mainCtx, notifManager, noiseFloorMonitor, 10*time.Second)
 
 	// Widget manager: in-memory cache + collector proxy.
 	// Must be created after adminHandler so configPath is resolved.
@@ -2489,6 +2590,18 @@ func main() {
 	http.HandleFunc("/admin/system-stats", adminHandler.AuthMiddleware(adminHandler.HandleSystemStats))
 	http.HandleFunc("/admin/noisefloor-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHealth(w, r, noiseFloorMonitor)
+	}))
+	http.HandleFunc("/admin/notifications/health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsHealth(w, r, notifManager)
+	}))
+	http.HandleFunc("/admin/notifications/test", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsTest(w, r, notifManager)
+	}))
+	http.HandleFunc("/admin/notifications/config", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsConfig(w, r, notifManager, notifConfig)
+	}))
+	http.HandleFunc("/admin/notifications/schema", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsSchema(w, r)
 	}))
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)

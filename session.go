@@ -222,6 +222,39 @@ type SessionManager struct {
 	geoIPService       *GeoIPService          // GeoIP service for country lookups (optional)
 	dxClusterWsHandler interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
 	dailyTracker       *IPDailyTimeTracker    // Rolling 24-hour per-IP time budget tracker
+
+	// Session event callbacks — called when a user connects or disconnects.
+	// Only fires for real user sessions (non-internal, non-background).
+	sessionEventHandlers []func(UserSessionEvent)
+	sessionEventMu       sync.RWMutex
+}
+
+// OnSessionEvent registers a callback that fires when a user connects or disconnects.
+// Safe to call before any sessions are created.
+func (sm *SessionManager) OnSessionEvent(fn func(UserSessionEvent)) {
+	if sm == nil || fn == nil {
+		return
+	}
+	sm.sessionEventMu.Lock()
+	sm.sessionEventHandlers = append(sm.sessionEventHandlers, fn)
+	sm.sessionEventMu.Unlock()
+}
+
+// fireSessionEvent dispatches a UserSessionEvent to all registered handlers
+// in a separate goroutine to avoid blocking the session lock.
+func (sm *SessionManager) fireSessionEvent(evt UserSessionEvent) {
+	sm.sessionEventMu.RLock()
+	handlers := make([]func(UserSessionEvent), len(sm.sessionEventHandlers))
+	copy(handlers, sm.sessionEventHandlers)
+	sm.sessionEventMu.RUnlock()
+	if len(handlers) == 0 {
+		return
+	}
+	go func() {
+		for _, fn := range handlers {
+			fn(evt)
+		}
+	}()
 }
 
 // NewSessionManager creates a new session manager
@@ -586,6 +619,23 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		if err := sm.activityLogger.LogSessionCreated(); err != nil {
 			log.Printf("Warning: failed to log session creation: %v", err)
 		}
+	}
+
+	// Fire session connect notification for real user sessions (skip internal/background)
+	if clientIP != "" && (isNewUUID || !hadAudioBefore) {
+		country := session.Country
+		countryCode := session.CountryCode
+		sm.fireSessionEvent(UserSessionEvent{
+			Action:        UserSessionConnected,
+			ClientIP:      clientIP,
+			Country:       country,
+			CountryCode:   countryCode,
+			UserAgent:     session.UserAgent,
+			UserSessionID: userSessionID,
+			Frequency:     frequency,
+			Mode:          mode,
+			Time:          session.CreatedAt,
+		})
 	}
 
 	return session, nil
@@ -1633,6 +1683,21 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 
 	sm.mu.Unlock()
+
+	// Fire session disconnect notification for real user sessions (skip internal/background)
+	if session.ClientIP != "" && !session.IsBackground {
+		sm.fireSessionEvent(UserSessionEvent{
+			Action:        UserSessionDisconnected,
+			ClientIP:      session.ClientIP,
+			Country:       session.Country,
+			CountryCode:   session.CountryCode,
+			UserAgent:     session.UserAgent,
+			UserSessionID: session.UserSessionID,
+			Frequency:     session.Frequency,
+			Mode:          session.Mode,
+			Time:          time.Now(),
+		})
+	}
 
 	// Close WebSocket connection if present (forces immediate disconnect)
 	if session.WSConn != nil {

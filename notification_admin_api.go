@@ -1,0 +1,602 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+)
+
+// handleNotificationsHealth returns the current health and statistics of the
+// notification manager.
+//
+// GET /admin/notifications/health
+func handleNotificationsHealth(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"enabled": false,
+			"error":   "notification manager not initialised",
+		})
+		return
+	}
+
+	health := nm.GetHealth()
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(health) //nolint:errcheck
+}
+
+// handleNotificationsTest sends a test message and returns detailed feedback.
+//
+// POST /admin/notifications/test
+//
+// Two modes:
+//
+//  1. Named channel (channel must exist in notifications.yaml):
+//     {"channel": "telegram_main"}
+//     {"channel": "telegram_main", "message": "custom text"}
+//
+//  2. Ad-hoc credentials (no config required — useful during initial setup):
+//     {"type": "telegram", "bot_token": "7123…", "chat_id": "-100123…"}
+//     {"type": "telegram", "bot_token": "7123…", "chat_id": "-100123…",
+//      "parse_mode": "HTML", "message": "custom text"}
+//
+// Response (always JSON):
+//
+//	{
+//	  "ok":           true | false,
+//	  "channel":      "telegram_main" | "<ad-hoc>",
+//	  "type":         "telegram",
+//	  "message_sent": "🔔 UberSDR notification test…",
+//	  "duration_ms":  142,
+//	  "error":        "telegram API error: chat not found"   // omitted on success
+//	}
+func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "POST required"}) //nolint:errcheck
+		return
+	}
+
+	// ── Parse request ────────────────────────────────────────────────────────
+	var req struct {
+		// Mode 1: named channel
+		Channel string `json:"channel"`
+		// Mode 2: ad-hoc credentials
+		Type      string `json:"type"`
+		BotToken  string `json:"bot_token"`
+		ChatID    string `json:"chat_id"`
+		ParseMode string `json:"parse_mode"`
+		// Optional in both modes
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON body"}) //nolint:errcheck
+		return
+	}
+
+	// ── Determine mode ───────────────────────────────────────────────────────
+	isAdHoc := req.Channel == "" && req.Type != ""
+	isNamed := req.Channel != ""
+
+	if !isAdHoc && !isNamed {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error": `provide either "channel" (named) or "type"+"bot_token"+"chat_id" (ad-hoc)`,
+		})
+		return
+	}
+
+	// ── Build the channel to test ────────────────────────────────────────────
+	var (
+		ch          NotificationChannel
+		channelName string
+		channelType string
+	)
+
+	if isNamed {
+		// Named channel — must exist in config
+		if nm == nil || !nm.cfg.Enabled {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "notification manager disabled — use ad-hoc mode (type+bot_token+chat_id) to test without config"}) //nolint:errcheck
+			return
+		}
+		existing, ok := nm.channels[req.Channel]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+				"error": "channel not found: " + req.Channel,
+			})
+			return
+		}
+		ch = existing
+		channelName = req.Channel
+		channelType = existing.Type()
+	} else {
+		// Ad-hoc — construct a temporary channel from the supplied credentials
+		switch req.Type {
+		case "telegram":
+			if req.BotToken == "" || req.ChatID == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "bot_token and chat_id are required for telegram"}) //nolint:errcheck
+				return
+			}
+			parseMode := req.ParseMode
+			if parseMode == "" {
+				parseMode = "HTML"
+			}
+			ch = NewTelegramChannel("<ad-hoc>", NotificationChannelConfig{
+				Type:      "telegram",
+				BotToken:  req.BotToken,
+				ChatID:    req.ChatID,
+				ParseMode: parseMode,
+			})
+			channelName = "<ad-hoc>"
+			channelType = "telegram"
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unsupported channel type: " + req.Type}) //nolint:errcheck
+			return
+		}
+	}
+
+	// ── Build message ────────────────────────────────────────────────────────
+	msg := req.Message
+	if msg == "" {
+		msg = "🔔 UberSDR notification test — this channel is working correctly."
+	}
+
+	// ── Send and time it ─────────────────────────────────────────────────────
+	start := time.Now()
+	sendErr := ch.Send(msg)
+	durationMs := time.Since(start).Milliseconds()
+
+	// ── Build response ───────────────────────────────────────────────────────
+	type testResponse struct {
+		OK          bool   `json:"ok"`
+		Channel     string `json:"channel"`
+		Type        string `json:"type"`
+		MessageSent string `json:"message_sent"`
+		DurationMs  int64  `json:"duration_ms"`
+		Error       string `json:"error,omitempty"`
+	}
+
+	resp := testResponse{
+		OK:          sendErr == nil,
+		Channel:     channelName,
+		Type:        channelType,
+		MessageSent: msg,
+		DurationMs:  durationMs,
+	}
+	if sendErr != nil {
+		resp.Error = sendErr.Error()
+		w.WriteHeader(http.StatusBadGateway)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+// handleNotificationsConfig returns the active notification configuration
+// (with sensitive fields redacted) and a list of validation issues.
+//
+// GET /admin/notifications/config
+func handleNotificationsConfig(w http.ResponseWriter, r *http.Request, nm *NotificationManager, cfg *NotificationsConfig) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if cfg == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{"enabled": false}) //nolint:errcheck
+		return
+	}
+
+	// Build a redacted view of channels (hide bot tokens)
+	type redactedChannel struct {
+		Type             string `json:"type"`
+		ChatID           string `json:"chat_id"`
+		ParseMode        string `json:"parse_mode"`
+		RateLimitMinutes int    `json:"rate_limit_minutes"`
+		BotTokenSet      bool   `json:"bot_token_set"`
+	}
+	channels := make(map[string]redactedChannel, len(cfg.Channels))
+	for name, ch := range cfg.Channels {
+		channels[name] = redactedChannel{
+			Type:             ch.Type,
+			ChatID:           ch.ChatID,
+			ParseMode:        ch.ParseMode,
+			RateLimitMinutes: ch.RateLimitMinutes,
+			BotTokenSet:      ch.BotToken != "",
+		}
+	}
+
+	// Build rule summary (no sensitive data in rules, but omit raw template for brevity)
+	type ruleSummary struct {
+		Name        string                `json:"name"`
+		Enabled     bool                  `json:"enabled"`
+		Event       NotificationEventType `json:"event"`
+		Channels    []string              `json:"channels"`
+		HasTemplate bool                  `json:"has_template"`
+	}
+	rules := make([]ruleSummary, 0, len(cfg.Rules))
+	for _, r := range cfg.Rules {
+		rules = append(rules, ruleSummary{
+			Name:        r.Name,
+			Enabled:     r.IsEnabled(),
+			Event:       r.Event,
+			Channels:    r.Channels,
+			HasTemplate: r.Template != "",
+		})
+	}
+
+	issues := cfg.Validate()
+
+	resp := map[string]interface{}{
+		"enabled":  cfg.Enabled,
+		"channels": channels,
+		"rules":    rules,
+		"issues":   issues,
+		"healthy":  len(issues) == 0,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+// handleNotificationsSchema returns the static system capabilities of the
+// notification system: supported channel types, event types with their filter
+// fields, and available template functions.
+//
+// This endpoint is intended for UI consumption — it never changes at runtime
+// and requires no configuration to be present.
+//
+// GET /admin/notifications/schema
+func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// ── Channel types ────────────────────────────────────────────────────────
+
+	type channelField struct {
+		Name        string   `json:"name"`
+		Type        string   `json:"type"`
+		Required    bool     `json:"required"`
+		Description string   `json:"description"`
+		ValidValues []string `json:"valid_values,omitempty"`
+		Example     string   `json:"example,omitempty"`
+	}
+	type channelType struct {
+		Type        string         `json:"type"`
+		Description string         `json:"description"`
+		Fields      []channelField `json:"fields"`
+	}
+
+	channelTypes := []channelType{
+		{
+			Type:        "telegram",
+			Description: "Telegram Bot API — sends messages to a personal chat, group, or channel.",
+			Fields: []channelField{
+				{Name: "bot_token", Type: "string", Required: true, Description: "Token from @BotFather.", Example: "7123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+				{Name: "chat_id", Type: "string", Required: true, Description: "Target chat ID. Negative for groups/channels, positive for personal chats.", Example: "-1001234567890"},
+				{Name: "parse_mode", Type: "string", Required: false, Description: "Message formatting. Default: HTML.", ValidValues: []string{"HTML", "Markdown", "MarkdownV2", ""}, Example: "HTML"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
+			},
+		},
+	}
+
+	// ── Filter fields per event type ─────────────────────────────────────────
+
+	type filterField struct {
+		Name        string   `json:"name"`
+		Type        string   `json:"type"`
+		Description string   `json:"description"`
+		ValidValues []string `json:"valid_values,omitempty"`
+		Example     string   `json:"example,omitempty"`
+	}
+	type templateField struct {
+		Name        string `json:"name"`
+		GoType      string `json:"go_type"`
+		Description string `json:"description"`
+	}
+	type eventType struct {
+		Type           string          `json:"type"`
+		Description    string          `json:"description"`
+		FilterFields   []filterField   `json:"filter_fields"`
+		TemplateFields []templateField `json:"template_fields"`
+	}
+
+	eventTypes := []eventType{
+		{
+			Type:        "cw_spot",
+			Description: "CW Skimmer spot received.",
+			FilterFields: []filterField{
+				{Name: "callsigns", Type: "[]string", Description: "Exact callsign match (case-insensitive).", Example: `["G3XYZ","M0ABC"]`},
+				{Name: "callsign_prefixes", Type: "[]string", Description: "Callsign prefix match (e.g. DXCC prefixes).", Example: `["3Y","JD1","VK0"]`},
+				{Name: "countries", Type: "[]string", Description: "CTY country name.", Example: `["Japan","Australia"]`},
+				{Name: "country_codes", Type: "[]string", Description: "ISO 3166-1 alpha-2 country code.", Example: `["JP","AU"]`},
+				{Name: "continents", Type: "[]string", Description: "Continent code.", ValidValues: []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"}, Example: `["OC","AN"]`},
+				{Name: "cq_zones", Type: "[]int", Description: "CQ zone numbers.", Example: `[3,4]`},
+				{Name: "itu_zones", Type: "[]int", Description: "ITU zone numbers.", Example: `[6,7]`},
+				{Name: "bands", Type: "[]string", Description: "Band name.", Example: `["40m","20m"]`},
+				{Name: "modes", Type: "[]string", Description: "CW mode string.", ValidValues: []string{"CW", "RTTY"}, Example: `["CW"]`},
+				{Name: "min_snr", Type: "int", Description: "Minimum SNR in dB (inclusive).", Example: "5"},
+				{Name: "max_snr", Type: "int", Description: "Maximum SNR in dB (inclusive).", Example: "30"},
+				{Name: "min_wpm", Type: "int", Description: "Minimum speed in WPM (inclusive).", Example: "20"},
+				{Name: "min_distance_km", Type: "float64", Description: "Minimum distance in km (requires locator data).", Example: "5000"},
+				{Name: "max_distance_km", Type: "float64", Description: "Maximum distance in km.", Example: "1000"},
+			},
+			TemplateFields: []templateField{
+				{Name: ".DXCall", GoType: "string", Description: "Spotted callsign."},
+				{Name: ".Spotter", GoType: "string", Description: "Spotter callsign."},
+				{Name: ".Frequency", GoType: "float64", Description: "Frequency in Hz. Use khz for display."},
+				{Name: ".Band", GoType: "string", Description: "Band name, e.g. \"40m\"."},
+				{Name: ".SNR", GoType: "int", Description: "Signal-to-noise ratio in dB."},
+				{Name: ".WPM", GoType: "int", Description: "Speed in words per minute."},
+				{Name: ".Mode", GoType: "string", Description: "Mode string: \"CW\" or \"RTTY\"."},
+				{Name: ".Comment", GoType: "string", Description: "Spot comment (may be empty)."},
+				{Name: ".Country", GoType: "string", Description: "CTY country name."},
+				{Name: ".CountryCode", GoType: "string", Description: "ISO 3166-1 alpha-2 code."},
+				{Name: ".CQZone", GoType: "int", Description: "CQ zone."},
+				{Name: ".ITUZone", GoType: "int", Description: "ITU zone."},
+				{Name: ".Continent", GoType: "string", Description: "Continent code."},
+				{Name: ".DistanceKm", GoType: "*float64", Description: "Distance in km (nil if unknown). Guard with {{if .DistanceKm}}."},
+				{Name: ".BearingDeg", GoType: "*float64", Description: "Bearing in degrees (nil if unknown). Use bearing function."},
+				{Name: ".Latitude", GoType: "float64", Description: "Station latitude in decimal degrees (0 if unknown)."},
+				{Name: ".Longitude", GoType: "float64", Description: "Station longitude in decimal degrees (0 if unknown)."},
+				{Name: ".Name", GoType: "string", Description: "Operator name (may be empty)."},
+				{Name: ".Grid", GoType: "string", Description: "Maidenhead locator (may be empty)."},
+				{Name: ".Time", GoType: "time.Time", Description: "Spot timestamp."},
+			},
+		},
+		{
+			Type:        "dx_spot",
+			Description: "DX Cluster spot received.",
+			FilterFields: []filterField{
+				{Name: "callsigns", Type: "[]string", Description: "Exact callsign match.", Example: `["G3XYZ"]`},
+				{Name: "callsign_prefixes", Type: "[]string", Description: "Callsign prefix match.", Example: `["3Y","JD1"]`},
+				{Name: "countries", Type: "[]string", Description: "CTY country name.", Example: `["Japan"]`},
+				{Name: "country_codes", Type: "[]string", Description: "ISO 3166-1 alpha-2 code.", Example: `["JP"]`},
+				{Name: "continents", Type: "[]string", Description: "Continent code.", ValidValues: []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"}, Example: `["OC"]`},
+				{Name: "bands", Type: "[]string", Description: "Band name.", Example: `["20m"]`},
+				{Name: "spotters", Type: "[]string", Description: "Spotter callsign (exact match).", Example: `["G3XYZ"]`},
+				{Name: "comment_contains", Type: "[]string", Description: "Spot comment contains any of these substrings (case-insensitive).", Example: `["FT8","digi"]`},
+			},
+			TemplateFields: []templateField{
+				{Name: ".DXCall", GoType: "string", Description: "Spotted callsign."},
+				{Name: ".Spotter", GoType: "string", Description: "Spotter callsign."},
+				{Name: ".Frequency", GoType: "float64", Description: "Frequency in Hz. Use khz for display."},
+				{Name: ".Band", GoType: "string", Description: "Band name."},
+				{Name: ".Comment", GoType: "string", Description: "Spot comment (may be empty)."},
+				{Name: ".Country", GoType: "string", Description: "CTY country name."},
+				{Name: ".CountryCode", GoType: "string", Description: "ISO 3166-1 alpha-2 code."},
+				{Name: ".Continent", GoType: "string", Description: "Continent code."},
+				{Name: ".TimeOffset", GoType: "float64", Description: "Time offset in minutes from spot time."},
+				{Name: ".Time", GoType: "time.Time", Description: "Spot timestamp."},
+			},
+		},
+		{
+			Type:        "digital_decode",
+			Description: "FT8 / FT4 / WSPR / JS8 decode from the built-in decoder.",
+			FilterFields: []filterField{
+				{Name: "callsigns", Type: "[]string", Description: "Exact callsign match.", Example: `["G3XYZ"]`},
+				{Name: "callsign_prefixes", Type: "[]string", Description: "Callsign prefix match.", Example: `["VK","ZL"]`},
+				{Name: "countries", Type: "[]string", Description: "CTY country name.", Example: `["Australia"]`},
+				{Name: "country_codes", Type: "[]string", Description: "ISO 3166-1 alpha-2 code.", Example: `["AU"]`},
+				{Name: "continents", Type: "[]string", Description: "Continent code.", ValidValues: []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"}, Example: `["OC","AN"]`},
+				{Name: "cq_zones", Type: "[]int", Description: "CQ zone numbers.", Example: `[29,30]`},
+				{Name: "itu_zones", Type: "[]int", Description: "ITU zone numbers.", Example: `[55,58]`},
+				{Name: "bands", Type: "[]string", Description: "Band name.", Example: `["20m","40m"]`},
+				{Name: "digital_modes", Type: "[]string", Description: "Decode mode.", ValidValues: []string{"FT8", "FT4", "WSPR", "JS8"}, Example: `["FT8","FT4"]`},
+				{Name: "min_snr", Type: "int", Description: "Minimum SNR in dB.", Example: "-10"},
+				{Name: "max_snr", Type: "int", Description: "Maximum SNR in dB.", Example: "10"},
+				{Name: "min_distance_km", Type: "float64", Description: "Minimum distance in km.", Example: "8000"},
+				{Name: "max_distance_km", Type: "float64", Description: "Maximum distance in km.", Example: "500"},
+				{Name: "message_contains", Type: "[]string", Description: "Decoded message contains any of these substrings.", Example: `["CQ","73"]`},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Callsign", GoType: "string", Description: "Decoded callsign."},
+				{Name: ".Locator", GoType: "string", Description: "Maidenhead locator (may be empty)."},
+				{Name: ".Country", GoType: "string", Description: "CTY country name."},
+				{Name: ".CountryCode", GoType: "string", Description: "ISO 3166-1 alpha-2 code."},
+				{Name: ".CQZone", GoType: "int", Description: "CQ zone."},
+				{Name: ".ITUZone", GoType: "int", Description: "ITU zone."},
+				{Name: ".Continent", GoType: "string", Description: "Continent code."},
+				{Name: ".SNR", GoType: "int", Description: "SNR in dB."},
+				{Name: ".Frequency", GoType: "uint64", Description: "Signal frequency in Hz. Use mhz for display."},
+				{Name: ".DialFrequency", GoType: "uint64", Description: "Dial frequency in Hz. Use mhz for display."},
+				{Name: ".Mode", GoType: "string", Description: "Decode mode: FT8, FT4, WSPR, JS8."},
+				{Name: ".Message", GoType: "string", Description: "Full decoded message text."},
+				{Name: ".Band", GoType: "string", Description: "Band name."},
+				{Name: ".DistanceKm", GoType: "*float64", Description: "Distance in km (nil if unknown)."},
+				{Name: ".BearingDeg", GoType: "*float64", Description: "Bearing in degrees (nil if unknown)."},
+				{Name: ".DBm", GoType: "int", Description: "Transmit power in dBm (WSPR only)."},
+				{Name: ".TxFrequency", GoType: "uint64", Description: "Transmit frequency in Hz (WSPR only). Use mhz for display."},
+				{Name: ".Timestamp", GoType: "time.Time", Description: "Decode timestamp."},
+			},
+		},
+		{
+			Type:        "space_weather",
+			Description: "Space weather update — fires when K-index, A-index, or SFI crosses a threshold.",
+			FilterFields: []filterField{
+				{Name: "k_min", Type: "int", Description: "Fire when K-index >= this value.", Example: "5"},
+				{Name: "k_max", Type: "int", Description: "Fire when K-index <= this value.", Example: "2"},
+				{Name: "a_min", Type: "int", Description: "Fire when A-index >= this value.", Example: "20"},
+				{Name: "sfi_min", Type: "float64", Description: "Fire when SFI >= this value.", Example: "150"},
+				{Name: "sfi_max", Type: "float64", Description: "Fire when SFI <= this value.", Example: "70"},
+			},
+			TemplateFields: []templateField{
+				{Name: ".SFI", GoType: "float64", Description: "Solar Flux Index."},
+				{Name: ".KIndex", GoType: "int", Description: "Current K-index (0–9)."},
+				{Name: ".KIndexStatus", GoType: "string", Description: "K-index status description."},
+				{Name: ".AIndex", GoType: "int", Description: "Current A-index."},
+				{Name: ".SolarWindBz", GoType: "float64", Description: "Solar wind Bz component in nT."},
+				{Name: ".PropagationQuality", GoType: "string", Description: "Human-readable propagation quality string."},
+				{Name: ".PreviousKIndex", GoType: "int", Description: "K-index from previous update (for trend arrows)."},
+				{Name: ".PreviousSFI", GoType: "float64", Description: "SFI from previous update."},
+			},
+		},
+		{
+			Type:        "antenna_switch",
+			Description: "Antenna switch changed state.",
+			FilterFields: []filterField{
+				{Name: "ant_actions", Type: "[]string", Description: "Action that triggered the change.", ValidValues: []string{"select", "ground", "add", "remove", "default"}, Example: `["ground"]`},
+				{Name: "ant_numbers", Type: "[]int", Description: "Specific antenna port numbers.", Example: `[1,2]`},
+				{Name: "ant_sources", Type: "[]string", Description: "Source of the command.", ValidValues: []string{"public", "admin", "startup", "scheduler"}, Example: `["scheduler"]`},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Action", GoType: "string", Description: "Action: select, ground, add, remove, default."},
+				{Name: ".Antenna", GoType: "int", Description: "Antenna port number (0 for ground/default)."},
+				{Name: ".Label", GoType: "string", Description: "Human-readable antenna name."},
+				{Name: ".Selected", GoType: "[]int", Description: "Resulting selected antenna ports. Use {{range .Selected}} or join."},
+				{Name: ".Grounded", GoType: "bool", Description: "True when all antennas are grounded."},
+				{Name: ".Source", GoType: "string", Description: "Command source: public, admin, startup, scheduler."},
+				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
+			},
+		},
+		{
+			Type:        "rotator",
+			Description: "Rotator position or moving state changed.",
+			FilterFields: []filterField{
+				{Name: "rotator_moving", Type: "bool", Description: "true = fire only when movement starts; false = fire only when movement stops. Omit to fire on any change.", Example: "false"},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Azimuth", GoType: "float64", Description: "Current azimuth in degrees."},
+				{Name: ".Elevation", GoType: "float64", Description: "Current elevation in degrees."},
+				{Name: ".Moving", GoType: "bool", Description: "True while the rotator is moving."},
+				{Name: ".TargetAzimuth", GoType: "float64", Description: "Target azimuth in degrees."},
+				{Name: ".TargetElevation", GoType: "float64", Description: "Target elevation in degrees."},
+				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
+			},
+		},
+		{
+			Type:        "system_monitor",
+			Description: "A subsystem transitioned between healthy and unhealthy states.",
+			FilterFields: []filterField{
+				{Name: "components", Type: "[]string", Description: "Subsystem names to watch. Empty = all components.", ValidValues: []string{"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt", "rotator", "ant_switch", "frequency_reference", "instance_reporter", "sdr_frontend", "gpsdo", "system_load", "cpu_temperature"}, Example: `["decoder","cw_skimmer"]`},
+				{Name: "on_unhealthy", Type: "bool", Description: "Fire only on healthy→unhealthy transition.", Example: "true"},
+				{Name: "on_recovery", Type: "bool", Description: "Fire only on unhealthy→healthy transition.", Example: "true"},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Component", GoType: "string", Description: "Subsystem name."},
+				{Name: ".Healthy", GoType: "bool", Description: "Current health state."},
+				{Name: ".PreviouslyHealthy", GoType: "bool", Description: "Health state before this event."},
+				{Name: ".Issues", GoType: "[]string", Description: "List of issue descriptions. Use {{range .Issues}} or join."},
+				{Name: ".Status", GoType: "string", Description: "Status string: degraded, recovered, or unknown."},
+				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
+			},
+		},
+		{
+			Type:        "user_session",
+			Description: "A user connected or disconnected.",
+			FilterFields: []filterField{
+				{Name: "session_actions", Type: "[]string", Description: "Session event type.", ValidValues: []string{"connected", "disconnected"}, Example: `["connected"]`},
+				{Name: "session_country_codes", Type: "[]string", Description: "User's country (ISO alpha-2).", Example: `["US","CA"]`},
+				{Name: "session_continents", Type: "[]string", Description: "User's continent code.", ValidValues: []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"}, Example: `["NA","SA","AS","OC","AF","AN"]`},
+				{Name: "user_agent_contains", Type: "[]string", Description: "User-agent string contains any of these substrings.", Example: `["bot","curl"]`},
+				{Name: "client_ips", Type: "[]string", Description: "Specific client IP addresses.", Example: `["1.2.3.4"]`},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Action", GoType: "string", Description: "\"connected\" or \"disconnected\"."},
+				{Name: ".ClientIP", GoType: "string", Description: "Client IP address."},
+				{Name: ".Country", GoType: "string", Description: "CTY/GeoIP country name."},
+				{Name: ".CountryCode", GoType: "string", Description: "ISO 3166-1 alpha-2 code."},
+				{Name: ".Continent", GoType: "string", Description: "Continent code."},
+				{Name: ".UserAgent", GoType: "string", Description: "HTTP User-Agent string."},
+				{Name: ".UserSessionID", GoType: "string", Description: "Internal session UUID."},
+				{Name: ".Frequency", GoType: "uint64", Description: "Tuned frequency in Hz at connect time."},
+				{Name: ".Mode", GoType: "string", Description: "Mode at connect time."},
+				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
+			},
+		},
+		{
+			Type:        "server_startup",
+			Description: "Server finished initialising. Fires once per start. Useful for crash/restart detection.",
+			FilterFields: []filterField{
+				// No filter fields — always fires on startup
+			},
+			TemplateFields: []templateField{
+				{Name: ".Version", GoType: "string", Description: "UberSDR version string."},
+				{Name: ".Callsign", GoType: "string", Description: "Configured station callsign."},
+				{Name: ".Name", GoType: "string", Description: "Configured station name."},
+				{Name: ".StartTime", GoType: "time.Time", Description: "Server start timestamp."},
+			},
+		},
+		{
+			Type:        "voice_activity",
+			Description: "New voice signal detected on a band (requires noise floor monitor). Optionally enriched with DX cluster callsign data.",
+			FilterFields: []filterField{
+				{Name: "voice_bands", Type: "[]string", Description: "Band names to watch. Empty = all bands.", Example: `["20m","40m"]`},
+				{Name: "voice_country_codes", Type: "[]string", Description: "DX cluster enriched country code (ISO alpha-2). Only fires when a callsign has been spotted nearby.", Example: `["JP","VK"]`},
+				{Name: "voice_continents", Type: "[]string", Description: "DX cluster enriched continent code.", ValidValues: []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"}, Example: `["AS","OC"]`},
+				{Name: "voice_callsigns", Type: "[]string", Description: "DX cluster enriched callsign (exact match).", Example: `["JA1XYZ"]`},
+				{Name: "voice_min_snr", Type: "float32", Description: "Minimum detected SNR in dB.", Example: "5.0"},
+				{Name: "voice_min_confidence", Type: "float32", Description: "Minimum detection confidence (0.0–1.0).", Example: "0.6"},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Band", GoType: "string", Description: "Band name."},
+				{Name: ".CenterFreq", GoType: "uint64", Description: "Signal centre frequency in Hz. Use mhz for display."},
+				{Name: ".EstimatedDialFreq", GoType: "uint64", Description: "Estimated dial frequency in Hz. Use mhz for display."},
+				{Name: ".StartFreq", GoType: "uint64", Description: "Signal start frequency in Hz."},
+				{Name: ".EndFreq", GoType: "uint64", Description: "Signal end frequency in Hz."},
+				{Name: ".Bandwidth", GoType: "uint64", Description: "Signal bandwidth in Hz."},
+				{Name: ".Mode", GoType: "string", Description: "Estimated mode (USB, LSB, AM, etc.)."},
+				{Name: ".SNR", GoType: "float32", Description: "Detected SNR in dB. Wrap with f32 before printf/mulf."},
+				{Name: ".Confidence", GoType: "float32", Description: "Detection confidence 0.0–1.0. Wrap with f32 before printf/mulf."},
+				{Name: ".DXCallsign", GoType: "string", Description: "DX cluster enriched callsign (may be empty)."},
+				{Name: ".DXCountry", GoType: "string", Description: "DX cluster enriched country name (may be empty)."},
+				{Name: ".DXCountryCode", GoType: "string", Description: "DX cluster enriched ISO alpha-2 code (may be empty)."},
+				{Name: ".DXContinent", GoType: "string", Description: "DX cluster enriched continent code (may be empty)."},
+				{Name: ".Time", GoType: "time.Time", Description: "Detection timestamp."},
+			},
+		},
+	}
+
+	// ── Template functions ───────────────────────────────────────────────────
+
+	type templateFunc struct {
+		Name       string `json:"name"`
+		Signature  string `json:"signature"`
+		Returns    string `json:"returns"`
+		InputTypes string `json:"input_types"`
+		Example    string `json:"example"`
+		Notes      string `json:"notes,omitempty"`
+	}
+
+	templateFuncs := []templateFunc{
+		{Name: "flag", Signature: "flag code", Returns: "string", InputTypes: "string", Example: `{{flag .CountryCode}}`, Notes: "ISO 3166-1 alpha-2 → flag emoji. e.g. \"JP\" → 🇯🇵"},
+		{Name: "bearing", Signature: "bearing deg", Returns: "string", InputTypes: "*float64 or float64", Example: `{{bearing .BearingDeg}}`, Notes: "Compass direction string (N, NE, ENE…). Handles nil *float64 → \"?\"."},
+		{Name: "deref", Signature: "deref ptr", Returns: "float64", InputTypes: "*float64", Example: `{{printf \"%.0f\" (deref .DistanceKm)}}`, Notes: "Nil-safe dereference. Returns 0.0 for nil. Guard with {{if .DistanceKm}} first."},
+		{Name: "divf", Signature: "divf a b", Returns: "float64", InputTypes: "float64 float64", Example: `{{printf \"%.3f\" (divf .Frequency 1000000.0)}}`, Notes: "Float division. Returns 0 if b is 0."},
+		{Name: "mulf", Signature: "mulf a b", Returns: "float64", InputTypes: "float64 float64", Example: `{{printf \"%.0f\" (mulf (f32 .Confidence) 100)}}`, Notes: "Float multiplication. Use with f32 for float32 fields."},
+		{Name: "f32", Signature: "f32 v", Returns: "float64", InputTypes: "float32", Example: `{{printf \"%.1f\" (f32 .SNR)}}`, Notes: "Converts float32 to float64 for use with printf, mulf, divf."},
+		{Name: "mhz", Signature: "mhz hz", Returns: "string", InputTypes: "uint64", Example: `{{mhz .EstimatedDialFreq}}`, Notes: "uint64 Hz → MHz string with 3 decimal places. Use for digital_decode and voice_activity frequencies."},
+		{Name: "khz", Signature: "khz hz", Returns: "string", InputTypes: "float64", Example: `{{khz .Frequency}}`, Notes: "float64 Hz → kHz string with 1 decimal place. Use for cw_spot and dx_spot .Frequency only."},
+		{Name: "join", Signature: "join sep items", Returns: "string", InputTypes: "string []string", Example: `{{join \", \" .Issues}}`, Notes: "Joins a string slice with a separator."},
+		{Name: "upper", Signature: "upper s", Returns: "string", InputTypes: "string", Example: `{{upper .Mode}}`, Notes: "Converts string to upper case."},
+		{Name: "lower", Signature: "lower s", Returns: "string", InputTypes: "string", Example: `{{lower .Band}}`, Notes: "Converts string to lower case."},
+	}
+
+	// ── Assemble response ────────────────────────────────────────────────────
+
+	resp := map[string]interface{}{
+		"channel_types":    channelTypes,
+		"event_types":      eventTypes,
+		"template_funcs":   templateFuncs,
+		"continents":       []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"},
+		"session_actions":  []string{"connected", "disconnected"},
+		"ant_actions":      []string{"select", "ground", "add", "remove", "default"},
+		"ant_sources":      []string{"public", "admin", "startup", "scheduler"},
+		"digital_modes":    []string{"FT8", "FT4", "WSPR", "JS8"},
+		"cw_modes":         []string{"CW", "RTTY"},
+		"monitor_components": []string{
+			"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt",
+			"rotator", "ant_switch", "frequency_reference", "instance_reporter",
+			"sdr_frontend", "gpsdo", "system_load", "cpu_temperature",
+		},
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}

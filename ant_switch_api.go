@@ -127,6 +127,37 @@ type AntSwitchHandler struct {
 	state       AntSwitchState
 	rateLimiter *AntSwitchRateLimiter
 	changeLog   *AntSwitchChangeLog
+
+	// Change callbacks — called after each antenna switch change is logged.
+	changeHandlers []func(AntSwitchLogEntry)
+	handlerMu      sync.RWMutex
+}
+
+// OnChange registers a callback that is called after each antenna switch change.
+// Safe to call before the handler is started.
+func (h *AntSwitchHandler) OnChange(fn func(AntSwitchLogEntry)) {
+	if h == nil || fn == nil {
+		return
+	}
+	h.handlerMu.Lock()
+	h.changeHandlers = append(h.changeHandlers, fn)
+	h.handlerMu.Unlock()
+}
+
+// logChange adds an entry to the change log and fires all registered callbacks.
+func (h *AntSwitchHandler) logChange(entry AntSwitchLogEntry) {
+	h.logChange(entry)
+	h.handlerMu.RLock()
+	handlers := make([]func(AntSwitchLogEntry), len(h.changeHandlers))
+	copy(handlers, h.changeHandlers)
+	h.handlerMu.RUnlock()
+	if len(handlers) > 0 {
+		go func() {
+			for _, fn := range handlers {
+				fn(entry)
+			}
+		}()
+	}
 }
 
 // AntSwitchRateLimiter is a per-IP rate limiter for ant-switch endpoints.
@@ -231,7 +262,7 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		} else {
 			startLabel = "Startup: Unknown"
 		}
-		h.changeLog.Add(AntSwitchLogEntry{
+		h.logChange(AntSwitchLogEntry{
 			Time:     time.Now(),
 			Action:   "startup",
 			Antenna:  0,
@@ -253,7 +284,7 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 				log.Printf("AntSwitch: Warning: failed to select default antenna %d: %v",
 					config.DefaultAntenna, err)
 			} else if verified {
-				h.changeLog.Add(AntSwitchLogEntry{
+				h.logChange(AntSwitchLogEntry{
 					Time:     time.Now(),
 					Action:   "default",
 					Antenna:  config.DefaultAntenna,
@@ -730,7 +761,7 @@ func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Re
 		state, verified, err := h.selectAntenna(req.Antenna)
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		if verified {
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   "select",
 				Antenna:  req.Antenna,
@@ -748,7 +779,7 @@ func (h *AntSwitchHandler) HandlePublicCommand(w http.ResponseWriter, r *http.Re
 		state, verified, err := h.groundAll()
 		tcpErr := err != nil && !verified && state.LastUpdate.IsZero()
 		if verified {
-			h.changeLog.Add(AntSwitchLogEntry{
+			h.logChange(AntSwitchLogEntry{
 				Time:     time.Now(),
 				Action:   "ground",
 				Antenna:  0,

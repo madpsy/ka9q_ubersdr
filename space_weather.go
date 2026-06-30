@@ -25,11 +25,28 @@ type SpaceWeatherMonitor struct {
 	cancel            context.CancelFunc
 	prometheusMetrics *PrometheusMetrics
 
+	// Update callbacks — called after each successful data fetch.
+	// Handlers receive the new data and the previous data (nil on first fetch).
+	updateHandlers []func(newData, prevData *SpaceWeatherData)
+	handlerMu      sync.RWMutex
+
 	// CSV logging
 	currentFile *os.File
 	csvWriter   *csv.Writer
 	currentDate string
 	fileMu      sync.Mutex
+}
+
+// OnUpdate registers a callback that is called after each successful space
+// weather data fetch. The callback receives the new data and the previous
+// data (nil on the first fetch). Safe to call before Start().
+func (swm *SpaceWeatherMonitor) OnUpdate(fn func(newData, prevData *SpaceWeatherData)) {
+	if swm == nil || fn == nil {
+		return
+	}
+	swm.handlerMu.Lock()
+	swm.updateHandlers = append(swm.updateHandlers, fn)
+	swm.handlerMu.Unlock()
 }
 
 // SpaceWeatherData contains aggregated space weather information
@@ -243,13 +260,27 @@ func (swm *SpaceWeatherMonitor) fetchData() error {
 	data.BandConditionsDay = calculateBandConditions(data.SolarFlux, data.KIndex, true, data.Forecast)
 	data.BandConditionsNight = calculateBandConditions(data.SolarFlux, data.KIndex, false, data.Forecast)
 
-	// Update cached data
+	// Update cached data, capturing previous for callbacks
 	swm.mu.Lock()
+	prevData := swm.data
 	swm.data = data
 	swm.mu.Unlock()
 
 	log.Printf("Space weather updated: SFI=%.1f, K=%d (%s), Quality=%s",
 		data.SolarFlux, data.KIndex, data.KIndexStatus, data.PropagationQuality)
+
+	// Fire update callbacks (non-blocking, in a goroutine to avoid blocking the poll loop)
+	swm.handlerMu.RLock()
+	handlers := make([]func(*SpaceWeatherData, *SpaceWeatherData), len(swm.updateHandlers))
+	copy(handlers, swm.updateHandlers)
+	swm.handlerMu.RUnlock()
+	if len(handlers) > 0 {
+		go func() {
+			for _, fn := range handlers {
+				fn(data, prevData)
+			}
+		}()
+	}
 
 	// Update Prometheus metrics if available
 	if swm.prometheusMetrics != nil {

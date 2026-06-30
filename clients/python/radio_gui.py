@@ -8187,12 +8187,12 @@ class RadioGUI:
         mode_defaults = {
             'usb': (50, 2700),
             'lsb': (-2700, -50),
-            'am': (-5000, 5000),
-            'sam': (-5000, 5000),
+            'am': (-6000, 6000),
+            'sam': (-6000, 6000),
             'cwu': (-200, 200),
             'cwl': (-200, 200),
-            'fm': (-8000, 8000),
-            'nfm': (-5000, 5000),
+            'fm': (-12000, 12000),
+            'nfm': (-6000, 6000),
             'iq': (-6000, 6000),
             'iq48': (-5000, 5000),
             'iq96': (-5000, 5000),
@@ -8247,13 +8247,16 @@ class RadioGUI:
             mode: Current mode (e.g., 'usb', 'lsb', 'am', etc.)
         """
         # Mode-specific slider bounds (low_min, low_max, high_min, high_max)
+        # AM/SAM/FM use 24 kHz sample rate → Nyquist = ±12 kHz max
+        # NFM uses 24 kHz sample rate → Nyquist = ±12 kHz, but typically ±6 kHz
+        # USB/LSB use 12 kHz sample rate → Nyquist = ±6 kHz max
         mode_bounds = {
-            'am': (-10000, -200, 200, 10000),
-            'sam': (-10000, -200, 200, 10000),
+            'am': (-12000, -200, 200, 12000),
+            'sam': (-12000, -200, 200, 12000),
             'usb': (0, 200, 400, 6000),
             'lsb': (-400, -6000, 0, -200),
-            'fm': (-10000, -200, 200, 10000),
-            'nfm': (-5000, -200, 200, 5000),
+            'fm': (-12000, -200, 200, 12000),
+            'nfm': (-6000, -200, 200, 6000),
             'cwu': (-100, -500, 100, 500),
             'cwl': (-100, -500, 100, 500),
         }
@@ -8323,13 +8326,13 @@ class RadioGUI:
             ],
             'am': [
                 ("Narrow", -3000, 3000),
-                ("Medium", -5000, 5000),
-                ("Wide", -6000, 6000),
+                ("Medium", -6000, 6000),
+                ("Wide", -12000, 12000),
             ],
             'sam': [
                 ("Narrow", -3000, 3000),
-                ("Medium", -5000, 5000),
-                ("Wide", -6000, 6000),
+                ("Medium", -6000, 6000),
+                ("Wide", -12000, 12000),
             ],
             'cwu': [
                 ("Narrow", -100, 100),
@@ -8344,7 +8347,7 @@ class RadioGUI:
             'fm': [
                 ("Narrow", -6000, 6000),
                 ("Medium", -8000, 8000),
-                ("Wide", -10000, 10000),
+                ("Wide", -12000, 12000),
             ],
             'nfm': [
                 ("Narrow", -3000, 3000),

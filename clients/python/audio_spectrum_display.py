@@ -169,7 +169,7 @@ class AudioSpectrumDisplay:
             self.display_freq_min = max(0, cw_offset - bandwidth_span // 2 - 100)
             self.display_freq_max = cw_offset + bandwidth_span // 2 + 100
         elif (low < 0 and high > 0):
-            # Symmetric bandwidth (e.g., AM: -5000 to +5000, FM: -8000 to +8000)
+            # Symmetric bandwidth (e.g., AM: -6000 to +6000, FM: -12000 to +12000)
             max_freq = bandwidth_span / 2
             self.display_freq_min = 0
             self.display_freq_max = max_freq

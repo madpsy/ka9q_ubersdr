@@ -2991,12 +2991,12 @@ il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
         mode_defaults = {
             'usb': (50, 2700),
             'lsb': (-2700, -50),
-            'am': (-5000, 5000),
-            'sam': (-5000, 5000),
+            'am': (-6000, 6000),   # 24 kHz samprate → Nyquist = ±12 kHz
+            'sam': (-6000, 6000),  # 24 kHz samprate → Nyquist = ±12 kHz
             'cwu': (-200, 200),
             'cwl': (-200, 200),
-            'fm': (-8000, 8000),
-            'nfm': (-5000, 5000),
+            'fm': (-12000, 12000), # 24 kHz samprate → Nyquist = ±12 kHz
+            'nfm': (-6000, 6000),  # 24 kHz samprate → Nyquist = ±12 kHz
             'iq': (-5000, 5000),
             'iq48': (-5000, 5000),
             'iq96': (-5000, 5000),

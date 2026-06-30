@@ -431,8 +431,8 @@ class UberSDRChat {
         if (!Number.isInteger(bw)) {
             return { valid: false, error: `${name} must be a whole number (integer)` };
         }
-        if (bw < -10000 || bw > 10000) {
-            return { valid: false, error: `${name} must be between -10000 and 10000 Hz` };
+        if (bw < -12000 || bw > 12000) {
+            return { valid: false, error: `${name} must be between -12000 and 12000 Hz` };
         }
         return { valid: true };
     }
@@ -441,8 +441,8 @@ class UberSDRChat {
      * Set frequency and mode (optional)
      * @param {number} frequency - Frequency in Hz (0 to 30000000)
      * @param {string} mode - Mode: usb, lsb, am, fm, cwu, cwl, sam, nfm
-     * @param {number} bwHigh - High bandwidth cutoff in Hz (-10000 to 10000), optional
-     * @param {number} bwLow - Low bandwidth cutoff in Hz (-10000 to 10000), optional
+     * @param {number} bwHigh - High bandwidth cutoff in Hz (-12000 to 12000), optional
+     * @param {number} bwLow - Low bandwidth cutoff in Hz (-12000 to 12000), optional
      * @param {number} zoomBW - Spectrum zoom bandwidth in Hz, optional
      */
     setFrequencyAndMode(frequency, mode, bwHigh = 0, bwLow = 0, zoomBW = 0) {
@@ -546,8 +546,8 @@ class UberSDRChat {
 
     /**
      * Update bandwidth with debouncing
-     * @param {number} bwHigh - High bandwidth cutoff in Hz (-10000 to 10000)
-     * @param {number} bwLow - Low bandwidth cutoff in Hz (-10000 to 10000)
+     * @param {number} bwHigh - High bandwidth cutoff in Hz (-12000 to 12000)
+     * @param {number} bwLow - Low bandwidth cutoff in Hz (-12000 to 12000)
      */
     updateBandwidth(bwHigh, bwLow) {
         // Validate bandwidth high

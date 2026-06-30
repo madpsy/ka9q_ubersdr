@@ -4313,7 +4313,15 @@ async function handleBinaryMessage(data) {
             // Recreate MediaSession bridge with new AudioContext.
             // The mediaElement was already started from a user gesture, so we can
             // just update its srcObject to point to the new MediaStreamDestination.
-            if (mediaElement && 'mediaSession' in navigator) {
+            //
+            // IMPORTANT: Only do this on the bridge path (Apple/Firefox).
+            // On Android Chrome, mediaElement IS the HTTP stream <audio src="...">
+            // element — assigning srcObject to it tears down the HTTP connection
+            // and causes stutter when the AudioContext is recreated on a mode
+            // switch (e.g. LSB → AM changes the sample rate from 12 kHz to 24 kHz).
+            // _useMediaSessionBridge is false on Android Chrome, so we skip this
+            // block entirely and leave the HTTP stream undisturbed.
+            if (mediaElement && _useMediaSessionBridge) {
                 try {
                     const dest = audioContext.createMediaStreamDestination();
                     audioContext._mediaStreamDest = dest;
@@ -5116,7 +5124,15 @@ async function handlePCMAudio(msg) {
         // Recreate MediaSession bridge with new AudioContext.
         // The mediaElement was already started from a user gesture, so we can
         // just update its srcObject to point to the new MediaStreamDestination.
-        if (mediaElement && 'mediaSession' in navigator) {
+        //
+        // IMPORTANT: Only do this on the bridge path (Apple/Firefox).
+        // On Android Chrome, mediaElement IS the HTTP stream <audio src="...">
+        // element — assigning srcObject to it tears down the HTTP connection
+        // and causes stutter when the AudioContext is recreated on a mode
+        // switch (e.g. LSB → AM changes the sample rate from 12 kHz to 24 kHz).
+        // _useMediaSessionBridge is false on Android Chrome, so we skip this
+        // block entirely and leave the HTTP stream undisturbed.
+        if (mediaElement && _useMediaSessionBridge) {
             try {
                 const dest = audioContext.createMediaStreamDestination();
                 audioContext._mediaStreamDest = dest;

@@ -375,28 +375,30 @@ func newMsSNaWebBackend(deviceURL string, nCh int, timeout time.Duration) *msSNa
 	}
 }
 
-// msSNaSelectedRe matches the antenna number immediately before "<p>" in the
-// device HTML, e.g. "2<p>" → 2.  Matches the KiwiSDR bash pattern [1-9](?=<p>).
-// Also matches "GROUND" for the grounded state.
-var msSNaSelectedRe = regexp.MustCompile(`(?i)([1-9][0-9]?)<p>|GROUND`)
+// msSNaGroundRe matches the GROUND state indicator: <p>GROUND</p>
+// Using the literal tag avoids false-matching "background-color" in CSS.
+var msSNaGroundRe = regexp.MustCompile(`<p>GROUND</p>`)
+
+// msSNaAntennaRe matches the active antenna number: N<p><a href="/4/on">
+// The number is always immediately followed by <p><a to distinguish it from
+// other <p> tags in the page.
+var msSNaAntennaRe = regexp.MustCompile(`([1-9][0-9]?)<p><a`)
 
 // parseSelected extracts the current antenna position from the device HTML body.
 // Returns 0 for ground/unknown.
 func (b *msSNaWebBackend) parseSelected(body string) int {
-	m := msSNaSelectedRe.FindString(body)
-	if m == "" {
+	// Check for antenna number first (more specific match)
+	if sub := msSNaAntennaRe.FindStringSubmatch(body); sub != nil {
+		n, err := strconv.Atoi(sub[1])
+		if err == nil {
+			return n
+		}
+	}
+	// Check for GROUND state
+	if msSNaGroundRe.MatchString(body) {
 		return 0
 	}
-	if strings.EqualFold(m, "GROUND") {
-		return 0
-	}
-	// m is like "3<p>" — TrimRight strips trailing chars in the set {<,p,>}
-	numStr := strings.TrimRight(m, "<p>")
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0
-	}
-	return n
+	return 0
 }
 
 // readSelected fetches GET / and returns the current antenna position (0=ground).
@@ -455,7 +457,7 @@ func msSNaShortestPath(current, target, nCh int) int {
 //   - GET /4/on → step Down (decrements position, GROUND→5→4→…→1→GROUND)
 //   - Every command returns the full HTML page with the new position
 //   - GROUND is shown as <p>GROUND</p> in the HTML
-//   - Antenna N is shown as N<p> in the HTML
+//   - Antenna N is shown as N<p><a href="/4/on"> in the HTML
 //
 // Algorithm: send one step, parse the response HTML for the new position,
 // recalculate and repeat. No separate GET / needed — the step response is

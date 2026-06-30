@@ -532,6 +532,13 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
     // Modes supported by UberSDR's demodulator pipeline
     const SUPPORTED_MODES = new Set(['usb', 'lsb', 'am', 'sam', 'cwu', 'cwl', 'fm', 'nfm']);
 
+    // Track whether setMode() was called — it calls autoTune() internally, so we must
+    // NOT call autoTune() again at the end of this function.  Sending two tune messages
+    // in rapid succession causes the server to restart the audio stream twice, producing
+    // an audible stutter gap (especially noticeable on Android when switching between
+    // modes with different sample rates, e.g. LSB → AM).
+    let setModeCalled = false;
+
     // Set mode with proper bandwidth handling for CW modes
     if (setMode && bookmarkMode) {
         if (!SUPPORTED_MODES.has(bookmarkMode)) {
@@ -556,6 +563,7 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
                 // Fallback if radioAPI not available
                 setMode(bookmarkMode);
             }
+            setModeCalled = true;
         } else {
             // For non-CW modes: if the bookmark carries custom bandwidth, apply it
             // using the same pattern as the CW path above:
@@ -573,6 +581,7 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
                 // No custom bandwidth — let setMode reset to mode defaults as normal.
                 setMode(bookmarkMode);
             }
+            setModeCalled = true;
         }
     }
 
@@ -587,13 +596,19 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
         spectrumDisplay.skipNextPan = true;
     }
 
-    // Connect if not connected, otherwise tune
+    // Connect if not connected, otherwise tune.
+    // IMPORTANT: setMode() already calls autoTune() internally (which sends a tune
+    // message to the server).  Only call autoTune() here if setMode was NOT called —
+    // sending two tune messages in rapid succession causes the server to restart the
+    // audio stream twice, producing an audible stutter gap on mode switches.
     if (wsManager && connect && autoTune) {
         if (!wsManager.isConnected()) {
             connect();
-        } else {
+        } else if (!setModeCalled) {
+            // setMode() was not called (no mode, unsupported mode) — send tune manually
             autoTune();
         }
+        // else: setMode() already sent the tune — no second message needed
     }
 
     // Only zoom/center spectrum if Shift or Ctrl key was held

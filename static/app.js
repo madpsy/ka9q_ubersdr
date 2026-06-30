@@ -4129,30 +4129,29 @@ function displayActiveChannels(channels) {
 }
 
 // Tune to a channel from the active channels list.
-// Mirrors the DX cluster's tuneToSpot() exactly:
-//   setFrequency() → sets input + calls autoTune() with current (old) bandwidth
-//   setMode()      → resets bandwidth to mode defaults + calls autoTune() again (wins)
-// No setBandwidth() call — that would fire a third autoTune() with wrong intermediate state.
+// Sends a SINGLE tune message: update frequency input first (no tune), then
+// setMode() sends the combined freq+mode+bandwidth tune in one shot.
+// Previously this called setFrequency() + setMode() which sent two tune messages
+// in rapid succession, causing the server to restart the audio stream twice and
+// producing an audible stutter gap on mode switches (e.g. LSB → AM).
 function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     // Disable edge detection before tuning (same as DX cluster tuneToSpot)
     if (window.spectrumDisplay) {
         window.spectrumDisplay.skipEdgeDetectionTemporary = true;
     }
 
-    // Decide whether to re-centre the spectrum (only if frequency is not already visible)
-    let centerSpectrum = true;
-    if (window.spectrumDisplay && window.spectrumDisplay.centerFreq && window.spectrumDisplay.totalBandwidth) {
-        const minVisible = window.spectrumDisplay.centerFreq - (window.spectrumDisplay.totalBandwidth / 2);
-        const maxVisible = window.spectrumDisplay.centerFreq + (window.spectrumDisplay.totalBandwidth / 2);
-        centerSpectrum = !(frequency >= minVisible && frequency <= maxVisible);
-    }
-
     if (window.radioAPI) {
-        // 1. Set frequency — updates input, calls autoTune(), notifies extensions
-        window.radioAPI.setFrequency(frequency, centerSpectrum);
+        // Update frequency input only — no tune message yet.
+        // radioAPI.setFrequency() would call autoTune() immediately; instead we
+        // replicate just the input-update side-effects so setMode() can send the
+        // single correct tune with the right freq+mode+bandwidth.
+        setFrequencyInputValue(frequency);
+        updateBandButtons(frequency);
+        updateURL();
+        window.radioAPI.notifyFrequencyChange(frequency);
 
-        // 2. Set mode — sets slider constraints, resets bandwidth to mode defaults,
-        //    calls autoTune() again (this is the final, correct tune command)
+        // setMode() resets bandwidth to mode defaults and calls autoTune() —
+        // this is the one and only tune message sent for this channel change.
         window.radioAPI.setMode(mode, false);
     } else {
         // Fallback if radioAPI is not yet available
@@ -15609,15 +15608,27 @@ window.updateChannelsMapPopup = updateChannelsMapPopup;
     // mode with its bandwidth defaults.
     function tuneToMarker(marker) {
         if (!marker || typeof marker.freq !== 'number') return;
-        setFrequency(marker.freq);
-        if (marker.mode) setMode(marker.mode, false);
 
-        // setFrequency()/setMode() retune the receiver but don't move the spectrum
-        // view — setFrequency() actually suppresses edge detection for 2s, so the
-        // waterfall stays put. Mirror how a bookmark-dropdown selection recentres:
-        // send an explicit pan request to the spectrum WebSocket (works regardless
-        // of zoom level / edge-tune state) and keep edge detection suppressed so it
-        // doesn't fight the pan.
+        if (marker.mode) {
+            // When a mode is present: update frequency input only (no tune yet),
+            // then call setMode() which sends a single combined tune message.
+            // Calling setFrequency() + setMode() would send two tune messages in
+            // rapid succession, causing the server to restart the audio stream
+            // twice and producing an audible stutter gap on mode switches
+            // (e.g. LSB → AM changes the sample rate from 12 kHz to 24 kHz).
+            setFrequencyInputValue(marker.freq);
+            updateBandButtons(marker.freq);
+            updateBandSelector();
+            updateURL();
+            if (window.radioAPI) window.radioAPI.notifyFrequencyChange(marker.freq);
+            setMode(marker.mode, false); // sends the single tune with correct freq+mode
+        } else {
+            // No mode — setFrequency() sends the tune on its own.
+            setFrequency(marker.freq);
+        }
+
+        // Retune doesn't move the spectrum view — send an explicit pan request so
+        // the waterfall recentres on the new frequency regardless of zoom/edge state.
         const sd = window.spectrumDisplay;
         if (sd && sd.connected && sd.ws) {
             sd.skipEdgeDetectionTemporary = true;

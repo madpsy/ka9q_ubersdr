@@ -11768,11 +11768,17 @@ function spectrumZoomSlider(position, sliderEl) {
             ? Math.round(Math.log2(maxSeen / spectrumDisplay.binCount)) : 0;
         const currentStep = curBwSteps + curBinCountSteps;
 
+        // zoomIn()/zoomOut() call clearZoomSliderSource() + updateZoomSlider() internally
+        // (designed for scroll/pinch/keyboard). When called from the slider itself we must
+        // preserve _zoomSource='slider' so the optimistic updateZoomSlider() inside those
+        // functions does not snap the thumb back to the server-computed position.
+        const _savedZoomSource = _zoomSource;
         if (position > currentStep) {
             spectrumDisplay.zoomIn();
         } else {
             spectrumDisplay.zoomOut();
         }
+        _zoomSource = _savedZoomSource; // restore 'slider' ownership after the call
         updateURL();
         return;
     }

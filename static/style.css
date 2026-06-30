@@ -3800,48 +3800,42 @@ input[type="range"]::-moz-range-thumb {
     opacity: 1;
 }
 
-/* Track — thin white line with tick marks */
+/* Track — wide groove */
 #spectrum-vzoom-slider::-webkit-slider-runnable-track {
-    height: 3px;
-    background: repeating-linear-gradient(
-        to right,
-        #fff 0px, #fff 2px,
-        rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
-    );
-    border-radius: 2px;
+    height: 8px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.4);
 }
 
 #spectrum-vzoom-slider::-moz-range-track {
-    height: 3px;
-    background: repeating-linear-gradient(
-        to right,
-        #fff 0px, #fff 2px,
-        rgba(255,255,255,0.25) 2px, rgba(255,255,255,0.25) calc((100% - 2px) / 14)
-    );
-    border-radius: 2px;
+    height: 8px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.4);
 }
 
-/* Thumb — small white circle */
+/* Thumb — large finger-friendly circle */
 #spectrum-vzoom-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: #fff;
-    border: none;
-    margin-top: -7px;   /* centre 18px thumb on 3px track: -(18/2 - 3/2) = -7.5px */
-    box-shadow: 0 0 6px rgba(0,0,0,0.8);
+    border: 2px solid rgba(0,0,0,0.3);
+    margin-top: -10px;  /* centre 26px thumb on 8px track: -(26/2 - 8/2) = -9px */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
     cursor: pointer;
 }
 
 #spectrum-vzoom-slider::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: #fff;
-    border: none;
-    box-shadow: 0 0 6px rgba(0,0,0,0.8);
+    border: 2px solid rgba(0,0,0,0.3);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
     cursor: pointer;
 }
 

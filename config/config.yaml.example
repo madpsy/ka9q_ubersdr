@@ -509,6 +509,14 @@ server:
   #
   custom_ads_txt: ""
 
+  # CPU temperature threshold in °C for the cpu_temperature system-health probe.
+  # When the host's thermal sensor reports a temperature at or above this value,
+  # the cpu_temperature component is marked unhealthy and any matching
+  # system_health notification rule fires (see config/notifications.yaml).
+  # On systems with no readable thermal sensor the probe is silently skipped.
+  # Default: 80
+  cpu_temp_threshold_c: 80
+
 # Audio settings
 audio:
   # Audio buffer size in samples

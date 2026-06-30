@@ -233,8 +233,15 @@ type SystemMonitorEvent struct {
 	Healthy           bool      `json:"healthy"`
 	PreviouslyHealthy bool      `json:"previously_healthy"`
 	Issues            []string  `json:"issues"`
-	Status            string    `json:"status"` // "degraded" | "recovered" | "unknown"
+	Status            string    `json:"status"` // "degraded" | "recovered" | "flapping" | "stabilized" | "unknown"
+	Flapping          bool      `json:"flapping"`
 	Time              time.Time `json:"time"`
+}
+
+// isFlapAlert reports whether the event is a flap-detection notification
+// (activation or stabilisation) rather than an ordinary health transition.
+func (e SystemMonitorEvent) isFlapAlert() bool {
+	return e.Status == "flapping" || e.Status == "stabilized"
 }
 
 func (e SystemMonitorEvent) EventType() NotificationEventType { return EventTypeSystemMonitor }

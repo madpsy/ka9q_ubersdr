@@ -68,6 +68,10 @@ const FILTER_FIELDS = {
         { name: 'components',   type: 'enum_list', label: 'Components',    values: ['noise_floor','space_weather','decoder','cw_skimmer','mqtt','rotator','ant_switch','frequency_reference','instance_reporter','sdr_frontend','gpsdo','system_load','cpu_temperature'] },
         { name: 'on_unhealthy', type: 'bool',      label: 'On Unhealthy',  hint: 'Fire only on healthy to unhealthy transition' },
         { name: 'on_recovery',  type: 'bool',      label: 'On Recovery',   hint: 'Fire only on unhealthy to healthy transition' },
+        { name: 'flap_detection',      type: 'toggle_on', label: 'Flap Detection', hint: 'Suppress repeated alerts when a component oscillates (e.g. system load). Sends one "flap detected" alert, then resumes once stable. Default: on' },
+        { name: 'flap_threshold',      type: 'int', default: 6,  min: 2, max: 1000,  label: 'Flap: changes',        hint: 'Health changes needed to trigger flap detection (default 6, min 2)' },
+        { name: 'flap_window_minutes', type: 'int', default: 10, min: 1, max: 10080, label: 'Flap: within minutes', hint: 'Rolling window for counting changes (default 10)' },
+        { name: 'flap_clear_minutes',  type: 'int', default: 15, min: 1, max: 10080, label: 'Flap: resume after',   hint: 'Stable minutes before alerts resume — stops it suppressing forever (default 15)' },
     ],
     user_session: [
         { name: 'session_actions',       type: 'enum_list',   label: 'Actions',             values: ['connected','disconnected'] },
@@ -104,6 +108,52 @@ const EVENT_TYPE_LABELS = {
 
 function eventLabel(et) {
     return EVENT_TYPE_LABELS[et] || et;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS — deduplication keys per high-volume spot event
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// cw_spot / dx_spot / digital_decode fire hundreds of times per minute. A rule
+// for one of these MUST either set a selective filter or "notify once per" one
+// or more of these keys, which collapses the firehose into one alert per new
+// value (e.g. once the first time each country is decoded). Keys must mirror
+// dedupKeysForEvent() in notification_config.go.
+const DEDUP_FIELDS = {
+    cw_spot: [
+        { name: 'callsign',     label: 'Callsign' },
+        { name: 'country',      label: 'Country' },
+        { name: 'country_code', label: 'Country Code' },
+        { name: 'continent',    label: 'Continent' },
+        { name: 'cq_zone',      label: 'CQ Zone' },
+        { name: 'itu_zone',     label: 'ITU Zone' },
+        { name: 'band',         label: 'Band' },
+        { name: 'mode',         label: 'Mode' },
+    ],
+    dx_spot: [
+        { name: 'callsign',     label: 'Callsign' },
+        { name: 'country',      label: 'Country' },
+        { name: 'country_code', label: 'Country Code' },
+        { name: 'continent',    label: 'Continent' },
+        { name: 'band',         label: 'Band' },
+    ],
+    digital_decode: [
+        { name: 'callsign',     label: 'Callsign' },
+        { name: 'country',      label: 'Country' },
+        { name: 'country_code', label: 'Country Code' },
+        { name: 'continent',    label: 'Continent' },
+        { name: 'cq_zone',      label: 'CQ Zone' },
+        { name: 'itu_zone',     label: 'ITU Zone' },
+        { name: 'band',         label: 'Band' },
+        { name: 'mode',         label: 'Mode' },
+    ],
+};
+
+// Events for which a selective filter or dedup is mandatory.
+const HIGH_VOLUME_EVENTS = Object.keys(DEDUP_FIELDS);
+
+function isHighVolumeEvent(et) {
+    return HIGH_VOLUME_EVENTS.indexOf(et) >= 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -197,7 +247,8 @@ const TEMPLATE_FIELDS = {
         { name: '.Healthy',           goType: 'bool',     desc: 'Current health state.' },
         { name: '.PreviouslyHealthy', goType: 'bool',     desc: 'Health state before this event.' },
         { name: '.Issues',            goType: '[]string', desc: 'List of issue descriptions. Use <code>{{join ", " .Issues}}</code>.' },
-        { name: '.Status',            goType: 'string',   desc: 'Status string: degraded, recovered, or unknown.' },
+        { name: '.Status',            goType: 'string',   desc: 'Status string: degraded, recovered, flapping, stabilized, or unknown.' },
+        { name: '.Flapping',          goType: 'bool',     desc: 'True on a "flap detection activated" alert (component oscillating).' },
         { name: '.Time',              goType: 'time.Time',desc: 'Event timestamp.' },
     ],
     user_session: [
@@ -413,6 +464,17 @@ async function loadConfig() {
                 chat_id:            ch.chat_id            || '',
                 parse_mode:         ch.parse_mode         || 'HTML',
                 rate_limit_minutes: ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10,
+                // Email (SMTP) — password redacted like the bot token.
+                smtp_host:          ch.smtp_host          || '',
+                smtp_port:          ch.smtp_port          || 587,
+                smtp_security:      ch.smtp_security       || 'starttls',
+                smtp_username:      ch.smtp_username       || '',
+                smtp_password:      (existing && existing.smtp_password && existing.smtp_password !== '********')
+                                        ? existing.smtp_password
+                                        : (ch.smtp_password_set ? '********' : ''),
+                email_from:         ch.email_from          || '',
+                email_to:           Array.isArray(ch.email_to) ? ch.email_to : [],
+                subject_prefix:     ch.subject_prefix      || '[UberSDR]',
             };
         }
         localConfig.channels = merged;
@@ -420,12 +482,15 @@ async function loadConfig() {
         const serverRules = data.rules || [];
         localConfig.rules = serverRules.map(function(sr) {
             return {
-                name:     sr.name,
-                enabled:  sr.enabled,
-                event:    sr.event,
-                channels: sr.channels || [],
-                filters:  sr.filters  || {},
-                template: sr.template || '',
+                name:                 sr.name,
+                enabled:              sr.enabled,
+                event:                sr.event,
+                channels:             sr.channels || [],
+                filters:              sr.filters  || {},
+                dedup_by:             sr.dedup_by || [],
+                dedup_window_minutes: sr.dedup_window_minutes || 0,
+                template:             sr.template || '',
+                templates:            sr.templates || {},
             };
         });
 
@@ -540,13 +605,30 @@ async function saveConfig(alertContainer) {
 
     for (const name in localConfig.channels) {
         const ch = localConfig.channels[name];
-        payload.channels[name] = {
-            type:               ch.type,
-            bot_token:          ch.bot_token || '********',
-            chat_id:            ch.chat_id,
-            parse_mode:         ch.parse_mode || 'HTML',
-            rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
-        };
+        if (ch.type === 'email') {
+            payload.channels[name] = {
+                type:               'email',
+                smtp_host:          ch.smtp_host || '',
+                smtp_port:          Number(ch.smtp_port) || 587,
+                smtp_security:      ch.smtp_security || 'starttls',
+                smtp_username:      ch.smtp_username || '',
+                // Empty password = unauthenticated relay (legitimate); only the
+                // masked placeholder means "keep existing".
+                smtp_password:      ch.smtp_password || '',
+                email_from:         ch.email_from || '',
+                email_to:           Array.isArray(ch.email_to) ? ch.email_to : parseCSV(String(ch.email_to || '')),
+                subject_prefix:     ch.subject_prefix || '[UberSDR]',
+                rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
+            };
+        } else {
+            payload.channels[name] = {
+                type:               ch.type,
+                bot_token:          ch.bot_token || '********',
+                chat_id:            ch.chat_id,
+                parse_mode:         ch.parse_mode || 'HTML',
+                rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
+            };
+        }
     }
 
     localConfig.rules.forEach(function(rule) {
@@ -557,7 +639,19 @@ async function saveConfig(alertContainer) {
             channels: rule.channels,
             filters:  buildFiltersPayload(rule.event, rule.filters),
         };
+        if (Array.isArray(rule.dedup_by) && rule.dedup_by.length > 0) {
+            r.dedup_by = rule.dedup_by;
+            r.dedup_window_minutes = Number(rule.dedup_window_minutes) || 0;
+        }
         if (rule.template) r.template = rule.template;
+        if (rule.templates && Object.keys(rule.templates).length > 0) {
+            // Only keep overrides for channels the rule actually targets.
+            const t = {};
+            (rule.channels || []).forEach(function(c) {
+                if (rule.templates[c]) t[c] = rule.templates[c];
+            });
+            if (Object.keys(t).length > 0) r.templates = t;
+        }
         payload.rules.push(r);
     });
 
@@ -605,7 +699,7 @@ function buildFiltersPayload(eventType, filters) {
             if (!isNaN(n)) out[fd.name] = n;
         } else if (fd.type === 'bool') {
             if (val !== '' && val !== undefined) out[fd.name] = (val === true || val === 'true');
-        } else if (fd.type === 'bool_optional') {
+        } else if (fd.type === 'bool_optional' || fd.type === 'toggle_on') {
             if (val !== '' && val !== undefined && val !== null) {
                 out[fd.name] = (val === true || val === 'true');
             }
@@ -617,6 +711,31 @@ function buildFiltersPayload(eventType, filters) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 2 — CHANNELS
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// EMAIL_PRESETS prefill host/port/security when a provider is chosen from the
+// dropdown. They are pure UI convenience — only the resolved SMTP values are
+// stored, never the provider name. "custom" leaves the fields editable.
+const EMAIL_PRESETS = {
+    gmail:    { label: 'Gmail',                   host: 'smtp.gmail.com',         port: 587, security: 'starttls' },
+    outlook:  { label: 'Outlook / Microsoft 365', host: 'smtp-mail.outlook.com',  port: 587, security: 'starttls' },
+    fastmail: { label: 'Fastmail',                host: 'smtp.fastmail.com',      port: 465, security: 'tls' },
+    yahoo:    { label: 'Yahoo',                   host: 'smtp.mail.yahoo.com',    port: 465, security: 'tls' },
+    icloud:   { label: 'iCloud',                  host: 'smtp.mail.me.com',       port: 587, security: 'starttls' },
+    sendgrid: { label: 'SendGrid',                host: 'smtp.sendgrid.net',      port: 587, security: 'starttls' },
+    mailgun:  { label: 'Mailgun',                 host: 'smtp.mailgun.org',       port: 587, security: 'starttls' },
+    ses:      { label: 'Amazon SES',              host: '',                       port: 587, security: 'starttls' },
+    custom:   { label: 'Custom',                  host: '',                       port: 587, security: 'starttls' },
+};
+
+// detectEmailProvider returns the preset key whose host matches, else 'custom'.
+function detectEmailProvider(host) {
+    host = (host || '').toLowerCase().trim();
+    for (const key in EMAIL_PRESETS) {
+        if (key === 'custom') continue;
+        if (EMAIL_PRESETS[key].host && EMAIL_PRESETS[key].host.toLowerCase() === host) return key;
+    }
+    return 'custom';
+}
 
 function renderChannels() {
     const list = el('channelList');
@@ -639,13 +758,34 @@ function renderChannels() {
 
     list.innerHTML = names.map(function(name) {
         const ch = channels[name];
-        let tokenBadge;
-        if (ch.bot_token && ch.bot_token !== '********') {
-            tokenBadge = '<span class="badge badge-green">Token entered</span>';
-        } else if (ch.bot_token === '********') {
-            tokenBadge = '<span class="badge badge-yellow">Token set (hidden)</span>';
+        // Type-specific meta badges (secret status + key destination fields).
+        let metaBadges;
+        if (ch.type === 'email') {
+            let pwBadge;
+            if (ch.smtp_password && ch.smtp_password !== '********') {
+                pwBadge = '<span class="badge badge-green">Password entered</span>';
+            } else if (ch.smtp_password === '********') {
+                pwBadge = '<span class="badge badge-yellow">Password set (hidden)</span>';
+            } else {
+                pwBadge = '<span class="badge badge-grey">No auth</span>';
+            }
+            const toList = Array.isArray(ch.email_to) ? ch.email_to.join(', ') : (ch.email_to || '');
+            metaBadges = pwBadge +
+                (ch.smtp_host ? '<span class="badge badge-grey">' + escHtml(ch.smtp_host) + ':' + (ch.smtp_port || 587) + '</span>' : '<span class="badge badge-red">No host</span>') +
+                '<span class="badge badge-grey">' + escHtml(ch.smtp_security || 'starttls') + '</span>' +
+                (toList ? '<span class="badge badge-grey">to: ' + escHtml(toList) + '</span>' : '');
         } else {
-            tokenBadge = '<span class="badge badge-red">No token</span>';
+            let tokenBadge;
+            if (ch.bot_token && ch.bot_token !== '********') {
+                tokenBadge = '<span class="badge badge-green">Token entered</span>';
+            } else if (ch.bot_token === '********') {
+                tokenBadge = '<span class="badge badge-yellow">Token set (hidden)</span>';
+            } else {
+                tokenBadge = '<span class="badge badge-red">No token</span>';
+            }
+            metaBadges = tokenBadge +
+                (ch.chat_id ? '<span class="badge badge-grey">chat: ' + escHtml(ch.chat_id) + '</span>' : '') +
+                '<span class="badge badge-grey">' + escHtml(ch.parse_mode || 'HTML') + '</span>';
         }
         const sent      = byCh[name]    || 0;
         const errors    = byChErr[name]  || 0;
@@ -660,9 +800,7 @@ function renderChannels() {
                     '<div class="item-card-title">&#x1F4E1; ' + escHtml(name) + '</div>' +
                     '<div class="item-card-meta">' +
                         '<span class="badge badge-blue">' + escHtml(ch.type) + '</span>' +
-                        tokenBadge +
-                        (ch.chat_id ? '<span class="badge badge-grey">chat: ' + escHtml(ch.chat_id) + '</span>' : '') +
-                        '<span class="badge badge-grey">' + escHtml(ch.parse_mode || 'HTML') + '</span>' +
+                        metaBadges +
                         '<span class="badge badge-grey">rate: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10) + ' min</span>' +
                         statsBadges +
                     '</div>' +
@@ -704,7 +842,24 @@ async function testChannel(name) {
     if (!ch) return;
 
     let body;
-    if (ch.bot_token && ch.bot_token !== '********') {
+    if (ch.type === 'email') {
+        if (ch.smtp_password === '********') {
+            // Real password only lives on the server — test the saved channel.
+            body = { channel: name };
+        } else {
+            body = {
+                type:           'email',
+                smtp_host:      ch.smtp_host,
+                smtp_port:      Number(ch.smtp_port) || 587,
+                smtp_security:  ch.smtp_security || 'starttls',
+                smtp_username:  ch.smtp_username || '',
+                smtp_password:  ch.smtp_password || '',
+                email_from:     ch.email_from,
+                email_to:       Array.isArray(ch.email_to) ? ch.email_to : parseCSV(String(ch.email_to || '')),
+                subject_prefix: ch.subject_prefix || '[UberSDR]',
+            };
+        }
+    } else if (ch.bot_token && ch.bot_token !== '********') {
         body = { type: ch.type, bot_token: ch.bot_token, chat_id: ch.chat_id, parse_mode: ch.parse_mode || 'HTML' };
     } else {
         body = { channel: name };
@@ -729,7 +884,7 @@ async function testChannel(name) {
     }
 }
 
-function renderChannelTypeInfo(type) {
+function renderChannelTypeInfo(type, provider) {
     const panel = el('chTypeInfo');
     if (!panel) return;
     if (type === 'telegram') {
@@ -748,9 +903,132 @@ function renderChannelTypeInfo(type) {
                 '</ol>' +
                 '<p style="margin:10px 0 0;font-size:0.8rem;color:#555">&#x26A0;&#xFE0F; For group/channel notifications, add the bot as an <strong>administrator</strong> with permission to post messages.</p>' +
             '</div>';
+    } else if (type === 'email') {
+        // Providers that require an app password (basic-auth SMTP) rather than the
+        // account password. Gmail/Yahoo/iCloud all need 2FA + an app password.
+        const appPwProviders = { gmail: 'Google', yahoo: 'Yahoo', icloud: 'iCloud' };
+        let appPwNote = '';
+        if (appPwProviders[provider]) {
+            appPwNote =
+                '<p style="margin:10px 0 0;font-size:0.85rem;color:#7a4f01;background:#fff3cd;border:1px solid #ffe08a;border-radius:5px;padding:8px 10px">' +
+                    '&#x1F511; <strong>' + escHtml(appPwProviders[provider]) + ' requires an App Password.</strong> ' +
+                    'Turn on <strong>2-Step Verification</strong>, then generate a 16-character App Password and paste it in the ' +
+                    '<strong>Password</strong> field — your normal account password will not work.' +
+                    (provider === 'gmail' ? ' Create one at <code>myaccount.google.com → Security → App passwords</code>.' : '') +
+                '</p>';
+        }
+        panel.innerHTML =
+            '<div class="config-section" style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+                    '<span style="font-size:1.3rem">&#x2709;&#xFE0F;</span>' +
+                    '<strong style="color:#1565c0">Email (SMTP)</strong>' +
+                '</div>' +
+                '<p style="margin:0;font-size:0.875rem;color:#1a237e;line-height:1.6">' +
+                    'Works with any provider. Pick one from <strong>Provider</strong> to prefill the server settings, ' +
+                    'then enter your username and password. Choose <strong>Custom</strong> for a self-hosted server.' +
+                '</p>' +
+                appPwNote +
+            '</div>';
     } else {
         panel.innerHTML = '';
     }
+}
+
+// telegramFieldsHTML / emailFieldsHTML render the type-specific portion of the
+// channel form into #chTypeFields.
+function telegramFieldsHTML(ch, isEdit) {
+    const parseModes = ['HTML','Markdown','MarkdownV2',''];
+    const parseModeOptions = parseModes.map(function(m) {
+        return '<option value="' + m + '"' + (ch.parse_mode === m ? ' selected' : '') + '>' + (m || 'plain') + '</option>';
+    }).join('');
+    const tokenPlaceholder = (isEdit && ch.bot_token === '********')
+        ? 'Leave blank to keep existing token'
+        : 'e.g. 7123456789:AAFxxxxxxxxxxxxxxxx';
+    return '' +
+        '<div class="form-group">' +
+            '<label>Bot Token' + (isEdit && ch.bot_token === '********' ? ' (currently set)' : ' *') + '</label>' +
+            '<div class="input-group">' +
+                '<input type="password" id="chBotToken" value="" placeholder="' + tokenPlaceholder + '" autocomplete="new-password">' +
+                '<button type="button" class="btn btn-secondary btn-sm" id="btnDiscoverChats">Discover Chats</button>' +
+            '</div>' +
+            '<div class="form-hint">From @BotFather. Leave blank to keep existing token when editing.</div>' +
+        '</div>' +
+        '<div id="chatDiscoveryResult"></div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Chat ID *</label>' +
+                '<input type="text" id="chChatId" value="' + escHtml(ch.chat_id || '') + '" placeholder="e.g. -1001234567890">' +
+                '<div class="form-hint">Negative for groups/channels, positive for personal chats.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Parse Mode</label>' +
+                '<select id="chParseMode">' + parseModeOptions + '</select>' +
+            '</div>' +
+        '</div>';
+}
+
+function emailFieldsHTML(ch, isEdit) {
+    const provider = detectEmailProvider(ch.smtp_host);
+    const providerOptions = Object.keys(EMAIL_PRESETS).map(function(k) {
+        return '<option value="' + k + '"' + (provider === k ? ' selected' : '') + '>' + escHtml(EMAIL_PRESETS[k].label) + '</option>';
+    }).join('');
+    const securities = [['starttls','STARTTLS (587)'],['tls','TLS / SSL (465)'],['none','None (insecure)']];
+    const sec = ch.smtp_security || 'starttls';
+    const securityOptions = securities.map(function(s) {
+        return '<option value="' + s[0] + '"' + (sec === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
+    }).join('');
+    const pwSet = isEdit && ch.smtp_password === '********';
+    const pwPlaceholder = pwSet ? 'Leave blank to keep existing password' : 'App Password / SMTP password (blank = no auth)';
+    const toVal = Array.isArray(ch.email_to) ? ch.email_to.join(', ') : (ch.email_to || '');
+    return '' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Provider</label>' +
+                '<select id="chEmailProvider">' + providerOptions + '</select>' +
+                '<div class="form-hint">Prefills server settings. Pick Custom for anything else.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Security</label>' +
+                '<select id="chSmtpSecurity">' + securityOptions + '</select>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group" style="flex:2">' +
+                '<label>SMTP Host *</label>' +
+                '<input type="text" id="chSmtpHost" value="' + escHtml(ch.smtp_host || '') + '" placeholder="e.g. smtp.gmail.com">' +
+            '</div>' +
+            '<div class="form-group" style="max-width:120px">' +
+                '<label>Port</label>' +
+                '<input type="number" id="chSmtpPort" value="' + (ch.smtp_port || 587) + '" min="1" max="65535">' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Username</label>' +
+                '<input type="text" id="chSmtpUsername" value="' + escHtml(ch.smtp_username || '') + '" placeholder="usually your full email address" autocomplete="off">' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Password' + (pwSet ? ' (currently set)' : '') + '</label>' +
+                '<input type="password" id="chSmtpPassword" value="" placeholder="' + pwPlaceholder + '" autocomplete="new-password">' +
+                '<div class="form-hint">Leave blank to keep existing (when editing) or for an unauthenticated relay.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>From *</label>' +
+                '<input type="text" id="chEmailFrom" value="' + escHtml(ch.email_from || '') + '" placeholder="UberSDR &lt;me@example.com&gt;">' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>To *</label>' +
+                '<input type="text" id="chEmailTo" value="' + escHtml(toVal) + '" placeholder="you@example.com, other@example.com">' +
+                '<div class="form-hint">Comma-separated for multiple recipients.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-group" style="max-width:320px">' +
+            '<label>Subject Prefix</label>' +
+            '<input type="text" id="chSubjectPrefix" value="' + escHtml(ch.subject_prefix || '[UberSDR]') + '" placeholder="[UberSDR]">' +
+            '<div class="form-hint">Subject = prefix + first line of the message.</div>' +
+        '</div>';
 }
 
 function showChannelForm(editName) {
@@ -761,14 +1039,10 @@ function showChannelForm(editName) {
     };
 
     const nameReadonly = isEdit ? 'readonly style="background:#f0f0f0"' : '';
-    const parseModes = ['HTML','Markdown','MarkdownV2',''];
-    const parseModeOptions = parseModes.map(function(m) {
-        return '<option value="' + m + '"' + (ch.parse_mode === m ? ' selected' : '') + '>' + (m || 'plain') + '</option>';
+    const types = [['telegram','Telegram'],['email','Email (SMTP)']];
+    const typeOptions = types.map(function(t) {
+        return '<option value="' + t[0] + '"' + ((ch.type || 'telegram') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
     }).join('');
-
-    const tokenPlaceholder = (isEdit && ch.bot_token === '********')
-        ? 'Leave blank to keep existing token'
-        : 'e.g. 7123456789:AAFxxxxxxxxxxxxxxxx';
 
     container.style.display = 'block';
     container.innerHTML =
@@ -782,30 +1056,12 @@ function showChannelForm(editName) {
                 '</div>' +
                 '<div class="form-group">' +
                     '<label>Type *</label>' +
-                    '<select id="chType"><option value="telegram" selected>Telegram</option></select>' +
+                    '<select id="chType"' + (isEdit ? ' disabled' : '') + '>' + typeOptions + '</select>' +
+                    (isEdit ? '<div class="form-hint">Type cannot be changed after creation.</div>' : '') +
                 '</div>' +
             '</div>' +
             '<div id="chTypeInfo"></div>' +
-            '<div class="form-group">' +
-                '<label>Bot Token' + (isEdit && ch.bot_token === '********' ? ' (currently set)' : ' *') + '</label>' +
-                '<div class="input-group">' +
-                    '<input type="password" id="chBotToken" value="" placeholder="' + tokenPlaceholder + '" autocomplete="new-password">' +
-                    '<button type="button" class="btn btn-secondary btn-sm" id="btnDiscoverChats">Discover Chats</button>' +
-                '</div>' +
-                '<div class="form-hint">From @BotFather. Leave blank to keep existing token when editing.</div>' +
-            '</div>' +
-            '<div id="chatDiscoveryResult"></div>' +
-            '<div class="form-row">' +
-                '<div class="form-group">' +
-                    '<label>Chat ID *</label>' +
-                    '<input type="text" id="chChatId" value="' + escHtml(ch.chat_id) + '" placeholder="e.g. -1001234567890">' +
-                    '<div class="form-hint">Negative for groups/channels, positive for personal chats.</div>' +
-                '</div>' +
-                '<div class="form-group">' +
-                    '<label>Parse Mode</label>' +
-                    '<select id="chParseMode">' + parseModeOptions + '</select>' +
-                '</div>' +
-            '</div>' +
+            '<div id="chTypeFields"></div>' +
             '<div class="form-group" style="max-width:200px">' +
                 '<label>Rate Limit (minutes)</label>' +
                 '<input type="number" id="chRateLimit" value="' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10) + '" min="0" max="1440">' +
@@ -817,14 +1073,36 @@ function showChannelForm(editName) {
             '</div>' +
         '</div>';
 
-    // Show type-specific setup instructions
-    renderChannelTypeInfo(ch.type || 'telegram');
-    el('chType').addEventListener('change', function() {
-        renderChannelTypeInfo(el('chType').value);
-    });
-
-    // Wire up discover chats
-    el('btnDiscoverChats').addEventListener('click', function() { discoverChats(editName); });
+    // Render the fields for the currently-selected type, plus its info panel.
+    function renderTypeFields() {
+        const type = el('chType').value;
+        if (type === 'email') {
+            el('chTypeFields').innerHTML = emailFieldsHTML(ch, isEdit);
+            renderChannelTypeInfo('email', detectEmailProvider(ch.smtp_host));
+            // Provider preset prefills host/port/security and refreshes the hint.
+            el('chEmailProvider').addEventListener('change', function() {
+                const preset = EMAIL_PRESETS[this.value];
+                if (preset) {
+                    if (preset.host) el('chSmtpHost').value = preset.host;
+                    el('chSmtpPort').value = preset.port;
+                    el('chSmtpSecurity').value = preset.security;
+                }
+                renderChannelTypeInfo('email', this.value);
+            });
+            // Keep the app-password hint in sync if the host is typed manually.
+            el('chSmtpHost').addEventListener('change', function() {
+                const p = detectEmailProvider(this.value);
+                el('chEmailProvider').value = p;
+                renderChannelTypeInfo('email', p);
+            });
+        } else {
+            el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
+            renderChannelTypeInfo('telegram');
+            el('btnDiscoverChats').addEventListener('click', function() { discoverChats(editName); });
+        }
+    }
+    renderTypeFields();
+    el('chType').addEventListener('change', renderTypeFields);
 
     el('btnCancelChannel').addEventListener('click', function() {
         container.style.display = 'none';
@@ -836,26 +1114,64 @@ function showChannelForm(editName) {
         if (!name) { showAlert(el('channelsAlerts'), 'error', 'Channel name is required.', false); return; }
         if (!/^[a-zA-Z0-9_]+$/.test(name)) { showAlert(el('channelsAlerts'), 'error', 'Channel name must be letters, numbers, underscores only.', false); return; }
 
-        const newToken = el('chBotToken').value.trim();
-        let finalToken;
-        if (newToken) {
-            finalToken = newToken;
-        } else if (isEdit && ch.bot_token === '********') {
-            finalToken = '********';
+        const type = el('chType').value;
+        const rate = parseInt(el('chRateLimit').value, 10) || 0;
+        let channel;
+
+        if (type === 'email') {
+            const host = el('chSmtpHost').value.trim();
+            if (!host) { showAlert(el('channelsAlerts'), 'error', 'SMTP host is required.', false); return; }
+            const from = el('chEmailFrom').value.trim();
+            if (!from) { showAlert(el('channelsAlerts'), 'error', 'From address is required.', false); return; }
+            const to = parseCSV(el('chEmailTo').value);
+            if (to.length === 0) { showAlert(el('channelsAlerts'), 'error', 'At least one recipient is required.', false); return; }
+
+            const newPw = el('chSmtpPassword').value.trim();
+            let finalPw;
+            if (newPw) {
+                finalPw = newPw;
+            } else if (isEdit && ch.smtp_password === '********') {
+                finalPw = '********';
+            } else {
+                finalPw = '';
+            }
+
+            channel = {
+                type:               'email',
+                smtp_host:          host,
+                smtp_port:          parseInt(el('chSmtpPort').value, 10) || 587,
+                smtp_security:      el('chSmtpSecurity').value,
+                smtp_username:      el('chSmtpUsername').value.trim(),
+                smtp_password:      finalPw,
+                email_from:         from,
+                email_to:           to,
+                subject_prefix:     el('chSubjectPrefix').value.trim() || '[UberSDR]',
+                rate_limit_minutes: rate,
+            };
         } else {
-            finalToken = '';
+            const newToken = el('chBotToken').value.trim();
+            let finalToken;
+            if (newToken) {
+                finalToken = newToken;
+            } else if (isEdit && ch.bot_token === '********') {
+                finalToken = '********';
+            } else {
+                finalToken = '';
+            }
+
+            const chatId = el('chChatId').value.trim();
+            if (!chatId) { showAlert(el('channelsAlerts'), 'error', 'Chat ID is required.', false); return; }
+
+            channel = {
+                type:               'telegram',
+                bot_token:          finalToken,
+                chat_id:            chatId,
+                parse_mode:         el('chParseMode').value,
+                rate_limit_minutes: rate,
+            };
         }
 
-        const chatId = el('chChatId').value.trim();
-        if (!chatId) { showAlert(el('channelsAlerts'), 'error', 'Chat ID is required.', false); return; }
-
-        localConfig.channels[name] = {
-            type:               'telegram',
-            bot_token:          finalToken,
-            chat_id:            chatId,
-            parse_mode:         el('chParseMode').value,
-            rate_limit_minutes: parseInt(el('chRateLimit').value, 10) || 0,
-        };
+        localConfig.channels[name] = channel;
 
         container.style.display = 'none';
         container.innerHTML = '';
@@ -962,6 +1278,15 @@ function renderRules() {
         const templateBadge = rule.template
             ? '<span class="badge badge-yellow">custom template</span>'
             : '';
+        const overrideCount = rule.templates ? Object.keys(rule.templates).length : 0;
+        const overrideBadge = overrideCount > 0
+            ? '<span class="badge badge-yellow" title="Per-channel template overrides">' + overrideCount + ' channel template' + (overrideCount !== 1 ? 's' : '') + '</span>'
+            : '';
+        const dedupBadge = (Array.isArray(rule.dedup_by) && rule.dedup_by.length > 0)
+            ? '<span class="badge badge-purple" title="Notify once per ' + escHtml(rule.dedup_by.join(', ')) +
+                (rule.dedup_window_minutes ? ' every ' + rule.dedup_window_minutes + ' min' : ' (until restart)') + '">' +
+                '&#x1F501; once per ' + escHtml(rule.dedup_by.join('+')) + '</span>'
+            : '';
         const rKey    = rule.name;
         const sent    = byRule[rKey]    || 0;
         const errors  = byRuleErr[rKey]  || 0;
@@ -980,7 +1305,9 @@ function renderRules() {
                         '<span class="badge badge-grey">' + escHtml(eventLabel(rule.event)) + '</span>' +
                         channelBadges +
                         filterBadge +
+                        dedupBadge +
                         templateBadge +
+                        overrideBadge +
                         statsBadges +
                     '</div>' +
                 '</div>' +
@@ -1026,7 +1353,10 @@ function showRuleForm(editIdx) {
     const isEdit = editIdx !== null && editIdx !== undefined && editIdx >= 0;
     const rule = isEdit ? Object.assign({}, localConfig.rules[editIdx], { filters: Object.assign({}, localConfig.rules[editIdx].filters) }) : {
         name: '', enabled: true, event: 'dx_spot', channels: [], filters: {}, template: '',
+        dedup_by: [], dedup_window_minutes: 0, templates: {},
     };
+    // Working copy of per-channel template overrides, preserved across re-renders.
+    const workingTemplates = Object.assign({}, rule.templates || {});
 
     const eventOptions = EVENT_TYPES.map(function(et) {
         return '<option value="' + et + '"' + (rule.event === et ? ' selected' : '') + '>' + eventLabel(et) + '</option>';
@@ -1068,12 +1398,17 @@ function showRuleForm(editIdx) {
                 '<div class="config-section-title">Filters <span style="font-weight:400;font-size:0.8rem;color:#888">(all optional — leave blank to match everything)</span></div>' +
                 '<div class="filter-fields-container" id="filterFields"></div>' +
             '</div>' +
+            '<div class="config-section" id="dedupSection" style="display:none">' +
+                '<div class="config-section-title">Deduplication <span style="font-weight:400;font-size:0.8rem;color:#888">(notify once per new value)</span></div>' +
+                '<div id="dedupFields"></div>' +
+            '</div>' +
             '<div class="config-section">' +
-                '<div class="config-section-title">Template <span style="font-weight:400;font-size:0.8rem;color:#888">(optional — leave blank to use default)</span></div>' +
+                '<div class="config-section-title">Default Template <span style="font-weight:400;font-size:0.8rem;color:#888">(optional — leave blank to use built-in default)</span></div>' +
                 '<div class="form-group">' +
                     '<textarea id="ruleTemplate" rows="4" placeholder="Go template, e.g. DX: {{.DXCall}} on {{khz .Frequency}} kHz">' + escHtml(rule.template || '') + '</textarea>' +
-                    '<div class="form-hint">Uses Go <code>text/template</code> syntax. See available fields below.</div>' +
+                    '<div class="form-hint">Used for any selected channel without its own override below. Uses Go <code>text/template</code> syntax — see fields below.</div>' +
                 '</div>' +
+                '<div id="channelTemplateOverrides"></div>' +
                 '<div id="templateFieldsRef"></div>' +
             '</div>' +
             '<div class="form-actions">' +
@@ -1082,14 +1417,26 @@ function showRuleForm(editIdx) {
             '</div>' +
         '</div>';
 
-    // Render filter fields and template reference for current event
+    // Render filter fields, dedup fields and template reference for current event
     renderFilterFields(rule.event, rule.filters);
+    renderDedupFields(rule.event, rule.dedup_by, rule.dedup_window_minutes);
     renderTemplateFields(rule.event);
+    renderChannelTemplateOverrides(workingTemplates);
 
-    // Re-render filters and template reference when event type changes
+    // Re-render filters, dedup and template reference when event type changes
     el('ruleEvent').addEventListener('change', function() {
         renderFilterFields(el('ruleEvent').value, {});
+        renderDedupFields(el('ruleEvent').value, [], 0);
         renderTemplateFields(el('ruleEvent').value);
+    });
+
+    // When the selected channels change, refresh the per-channel override boxes,
+    // preserving anything already typed.
+    container.querySelectorAll('.rule-channel-cb').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            captureChannelTemplateOverrides(workingTemplates);
+            renderChannelTemplateOverrides(workingTemplates);
+        });
     });
 
     el('btnCancelRule').addEventListener('click', function() {
@@ -1108,15 +1455,26 @@ function showRuleForm(editIdx) {
 
         const eventType = el('ruleEvent').value;
         const filters = readFilterFields(eventType);
+        const dedup = readDedupFields(eventType);
         const template = el('ruleTemplate').value.trim();
 
+        // Collect per-channel overrides for the channels still selected.
+        captureChannelTemplateOverrides(workingTemplates);
+        const templates = {};
+        selectedChannels.forEach(function(c) {
+            if (workingTemplates[c]) templates[c] = workingTemplates[c];
+        });
+
         const newRule = {
-            name:     name,
-            enabled:  el('ruleEnabled').checked,
-            event:    eventType,
-            channels: selectedChannels,
-            filters:  filters,
-            template: template,
+            name:                 name,
+            enabled:              el('ruleEnabled').checked,
+            event:                eventType,
+            channels:             selectedChannels,
+            filters:              filters,
+            dedup_by:             dedup.dedup_by,
+            dedup_window_minutes: dedup.dedup_window_minutes,
+            template:             template,
+            templates:            templates,
         };
 
         if (isEdit) {
@@ -1130,6 +1488,51 @@ function showRuleForm(editIdx) {
         renderRules();
         await saveConfig(el('rulesAlerts'));
     });
+}
+
+// captureChannelTemplateOverrides reads the currently-rendered override
+// textareas into the working map so their content survives a re-render.
+function captureChannelTemplateOverrides(workingTemplates) {
+    document.querySelectorAll('.ch-tmpl-override').forEach(function(ta) {
+        const name = ta.dataset.channel;
+        const val = ta.value.trim();
+        if (val) {
+            workingTemplates[name] = val;
+        } else {
+            delete workingTemplates[name];
+        }
+    });
+}
+
+// renderChannelTemplateOverrides draws one collapsible override box per
+// currently-selected channel. Empty boxes mean "use the default template".
+function renderChannelTemplateOverrides(workingTemplates) {
+    const container = el('channelTemplateOverrides');
+    if (!container) return;
+
+    const selected = [];
+    document.querySelectorAll('.rule-channel-cb:checked').forEach(function(cb) { selected.push(cb.value); });
+
+    if (selected.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '<div class="config-section-title" style="margin-top:14px">Per-channel Templates ' +
+        '<span style="font-weight:400;font-size:0.8rem;color:#888">(optional — overrides the default above for that channel)</span></div>';
+    selected.forEach(function(name) {
+        const val = workingTemplates[name] || '';
+        const open = val ? ' open' : '';
+        html += '<details class="template-ref"' + open + ' style="margin-bottom:8px">' +
+            '<summary class="template-ref-summary">' + escHtml(name) +
+                (val ? ' <span class="badge badge-yellow">override</span>' : '') + '</summary>' +
+            '<div class="form-group" style="margin-top:8px">' +
+                '<textarea class="ch-tmpl-override" data-channel="' + escHtml(name) + '" rows="3" ' +
+                    'placeholder="Leave blank to use the default template above">' + escHtml(val) + '</textarea>' +
+            '</div>' +
+        '</details>';
+    });
+    container.innerHTML = html;
 }
 
 function renderFilterFields(eventType, currentFilters) {
@@ -1167,10 +1570,27 @@ function renderFilterFields(eventType, currentFilters) {
                 '<option value="true"' + (boolVal === 'true' ? ' selected' : '') + '>true (moving)</option>' +
                 '<option value="false"' + (boolVal === 'false' ? ' selected' : '') + '>false (stopped)</option>' +
             '</select>';
+        } else if (fd.type === 'toggle_on') {
+            // Single checkbox, ON by default — unchecked only when explicitly false.
+            const checked = (val === false || val === 'false') ? '' : ' checked';
+            inputHtml = '<label class="checkbox-item"><input type="checkbox" class="filter-toggle" data-field="' + fd.name + '"' + checked + '> Enabled</label>';
         } else {
-            const displayVal = Array.isArray(val) ? val.join(', ') : (val !== null && val !== undefined ? String(val) : '');
+            // text / int / float. Pre-fill a configured default when unset.
+            let effVal = val;
+            if ((effVal === '' || effVal === null || effVal === undefined) && fd.default !== undefined) {
+                effVal = fd.default;
+            }
+            const displayVal = Array.isArray(effVal) ? effVal.join(', ') : (effVal !== null && effVal !== undefined ? String(effVal) : '');
             const placeholder = fd.hint || '';
-            inputHtml = '<input type="text" class="filter-input" data-field="' + fd.name + '" data-type="' + fd.type + '" value="' + escHtml(displayVal) + '" placeholder="' + escHtml(placeholder) + '">';
+            if (fd.type === 'int' || fd.type === 'float') {
+                // Numeric input with browser-enforced bounds.
+                const minAttr  = fd.min !== undefined ? ' min="' + fd.min + '"' : '';
+                const maxAttr  = fd.max !== undefined ? ' max="' + fd.max + '"' : '';
+                const stepAttr = fd.type === 'int' ? ' step="1"' : ' step="any"';
+                inputHtml = '<input type="number" class="filter-input" data-field="' + fd.name + '" data-type="' + fd.type + '"' + minAttr + maxAttr + stepAttr + ' value="' + escHtml(displayVal) + '" placeholder="' + escHtml(placeholder) + '">';
+            } else {
+                inputHtml = '<input type="text" class="filter-input" data-field="' + fd.name + '" data-type="' + fd.type + '" value="' + escHtml(displayVal) + '" placeholder="' + escHtml(placeholder) + '">';
+            }
         }
 
         return '<div class="filter-field-row">' +
@@ -1181,6 +1601,64 @@ function renderFilterFields(eventType, currentFilters) {
             '<div>' + inputHtml + '</div>' +
         '</div>';
     }).join('');
+}
+
+function renderDedupFields(eventType, currentDedupBy, currentWindow) {
+    const section = document.getElementById('dedupSection');
+    const container = document.getElementById('dedupFields');
+    if (!section || !container) return;
+
+    const fields = DEDUP_FIELDS[eventType] || [];
+    if (!isHighVolumeEvent(eventType) || fields.length === 0) {
+        // Dedup only applies to high-volume spot events.
+        section.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    section.style.display = 'block';
+
+    const selected = Array.isArray(currentDedupBy) ? currentDedupBy : [];
+    const windowVal = (currentWindow === null || currentWindow === undefined) ? '' : currentWindow;
+
+    const checkboxes = fields.map(function(fd) {
+        const checked = selected.indexOf(fd.name) >= 0 ? ' checked' : '';
+        return '<label class="checkbox-item"><input type="checkbox" class="dedup-key" data-key="' + fd.name + '" value="' + fd.name + '"' + checked + '> ' + escHtml(fd.label) + '</label>';
+    }).join('');
+
+    container.innerHTML =
+        '<div class="form-hint" style="margin-bottom:10px">' +
+            'These events fire <strong>hundreds of times per minute</strong>. ' +
+            'Pick one or more keys below to notify <strong>only the first time each distinct value is seen</strong> ' +
+            '(e.g. tick <em>Country</em> to be alerted once per new country, not on every spot). ' +
+            'Leave all unticked only if you have set a selective filter above — otherwise the rule will be rejected.' +
+        '</div>' +
+        '<div class="filter-field-label">Notify once per</div>' +
+        '<div class="checkbox-group" style="margin-bottom:12px">' + checkboxes + '</div>' +
+        '<div class="filter-field-row">' +
+            '<div>' +
+                '<div class="filter-field-label">Re-arm after (minutes)</div>' +
+                '<div class="filter-field-hint">How long before the same value can alert again. ' +
+                    '<strong>0 = once until the server restarts.</strong> ' +
+                    'e.g. 1440 = at most once per day per value.</div>' +
+            '</div>' +
+            '<div><input type="number" id="dedupWindow" min="0" max="525600" value="' + escHtml(String(windowVal === '' ? 0 : windowVal)) + '"></div>' +
+        '</div>';
+}
+
+function readDedupFields(eventType) {
+    const out = { dedup_by: [], dedup_window_minutes: 0 };
+    if (!isHighVolumeEvent(eventType)) return out;
+    const container = document.getElementById('dedupFields');
+    if (!container) return out;
+    container.querySelectorAll('.dedup-key:checked').forEach(function(cb) {
+        out.dedup_by.push(cb.value);
+    });
+    const win = container.querySelector('#dedupWindow');
+    if (win) {
+        const n = parseInt(win.value, 10);
+        if (!isNaN(n) && n > 0) out.dedup_window_minutes = n;
+    }
+    return out;
 }
 
 function renderTemplateFields(eventType) {
@@ -1240,11 +1718,21 @@ function readFilterFields(eventType) {
                 checked.push(cb.value);
             });
             if (checked.length > 0) out[fd.name] = checked;
+        } else if (fd.type === 'toggle_on') {
+            const cb = container.querySelector('.filter-toggle[data-field="' + fd.name + '"]');
+            if (cb) out[fd.name] = cb.checked; // always explicit boolean
         } else {
             const input = container.querySelector('.filter-input[data-field="' + fd.name + '"]');
             if (!input) return;
             const raw = input.value.trim();
-            if (!raw) return;
+            if (!raw) {
+                // Empty numeric field with a configured default → emit the default
+                // so an enabled feature (e.g. flap detection) always has a value.
+                if ((fd.type === 'int' || fd.type === 'float') && fd.default !== undefined) {
+                    out[fd.name] = fd.default;
+                }
+                return;
+            }
             if (fd.type === 'string_list') {
                 const arr = parseCSV(raw);
                 if (arr.length > 0) out[fd.name] = arr;
@@ -1252,11 +1740,17 @@ function readFilterFields(eventType) {
                 const arr = parseIntCSV(raw);
                 if (arr.length > 0) out[fd.name] = arr;
             } else if (fd.type === 'int') {
-                const n = parseInt(raw, 10);
-                if (!isNaN(n)) out[fd.name] = n;
+                let n = parseInt(raw, 10);
+                if (isNaN(n)) { if (fd.default !== undefined) out[fd.name] = fd.default; return; }
+                if (fd.min !== undefined && n < fd.min) n = fd.min;
+                if (fd.max !== undefined && n > fd.max) n = fd.max;
+                out[fd.name] = n;
             } else if (fd.type === 'float') {
-                const n = parseFloat(raw);
-                if (!isNaN(n)) out[fd.name] = n;
+                let n = parseFloat(raw);
+                if (isNaN(n)) { if (fd.default !== undefined) out[fd.name] = fd.default; return; }
+                if (fd.min !== undefined && n < fd.min) n = fd.min;
+                if (fd.max !== undefined && n > fd.max) n = fd.max;
+                out[fd.name] = n;
             } else if (fd.type === 'bool' || fd.type === 'bool_optional') {
                 if (raw === 'true') out[fd.name] = true;
                 else if (raw === 'false') out[fd.name] = false;

@@ -47,8 +47,8 @@ type NotificationsConfig struct {
 // type-specific and ignored when not relevant.
 type NotificationChannelConfig struct {
 	// Type selects the channel implementation.
-	// Currently supported: "telegram"
-	// Future: "email", "matrix", "ntfy", "webhook"
+	// Currently supported: "telegram", "email"
+	// Future: "matrix", "ntfy", "webhook"
 	Type string `yaml:"type" json:"type"`
 
 	// ── Telegram ────────────────────────────────────────────────────────────
@@ -60,6 +60,37 @@ type NotificationChannelConfig struct {
 	// ParseMode controls Telegram message formatting.
 	// Valid values: "HTML" (default), "Markdown", "MarkdownV2", or "" (plain text).
 	ParseMode string `yaml:"parse_mode" json:"parse_mode"`
+
+	// ── Email (SMTP) ─────────────────────────────────────────────────────────
+	// One generic SMTP channel covers every provider; only the host/port/
+	// security/credentials differ. Gmail works with an App Password (the
+	// account must have 2-Step Verification enabled) as SMTPPassword against
+	// smtp.gmail.com:587 — no OAuth required.
+	//
+	// SMTPHost is the mail server hostname, e.g. "smtp.gmail.com".
+	SMTPHost string `yaml:"smtp_host" json:"smtp_host"`
+	// SMTPPort is the mail server port. Default: 587 (STARTTLS).
+	SMTPPort int `yaml:"smtp_port" json:"smtp_port"`
+	// SMTPSecurity selects the transport security:
+	//   "starttls" (default) — connect plain then upgrade (port 587)
+	//   "tls"                 — implicit TLS from the start (port 465)
+	//   "none"                — no encryption (test/relay only; not recommended)
+	SMTPSecurity string `yaml:"smtp_security" json:"smtp_security"`
+	// SMTPUsername is the SMTP auth username (usually the full email address).
+	// Leave empty for an unauthenticated relay.
+	SMTPUsername string `yaml:"smtp_username" json:"smtp_username"`
+	// SMTPPassword is the SMTP auth password. For Gmail this is the 16-character
+	// App Password, not the account password.
+	SMTPPassword string `yaml:"smtp_password" json:"smtp_password"`
+	// EmailFrom is the From address. May be "Name <addr@example.com>" or a bare
+	// address; the envelope sender is derived from it.
+	EmailFrom string `yaml:"email_from" json:"email_from"`
+	// EmailTo is the list of recipient addresses.
+	EmailTo []string `yaml:"email_to" json:"email_to"`
+	// SubjectPrefix is prepended to the dynamic subject line. The subject of each
+	// notification is "<prefix> <first line of the rendered message>".
+	// Default: "[UberSDR]".
+	SubjectPrefix string `yaml:"subject_prefix" json:"subject_prefix"`
 
 	// ── Rate limiting ────────────────────────────────────────────────────────
 	// RateLimitMinutes suppresses duplicate alerts for the same
@@ -94,11 +125,81 @@ type NotificationRule struct {
 	// Available template functions: flag, bearing, deref, divf, mulf, f32,
 	// mhz, khz, join, upper, lower.
 	// Leave empty to use the built-in default template for the event type.
+	// It is the default body for every channel; Templates can override it
+	// per channel (e.g. HTML markup for Telegram vs. plain wording for email).
 	Template string `yaml:"template" json:"template"`
+
+	// Templates holds optional per-channel template overrides, keyed by channel
+	// name. When a channel listed in Channels has an entry here, that template is
+	// rendered for it instead of Template; channels without an entry fall back to
+	// Template (and then to the built-in default). This lets one rule format its
+	// message differently for each transport rather than sharing a single body.
+	Templates map[string]string `yaml:"templates,omitempty" json:"templates,omitempty"`
 
 	// Channels is a list of channel names (keys in NotificationsConfig.Channels)
 	// that receive the rendered message when this rule fires.
 	Channels []string `yaml:"channels" json:"channels"`
+
+	// DedupBy turns a high-volume spot rule into a "notify once per new X" rule.
+	// Each entry names a dimension of the event (see dedupKeysForEvent); the rule
+	// fires only the first time a given combination of those values is seen within
+	// DedupWindowMinutes. For example DedupBy ["country_code"] on a digital_decode
+	// rule fires once the first time each DXCC is decoded instead of on every
+	// decode. Empty = no deduplication (every matching event fires).
+	DedupBy []string `yaml:"dedup_by,omitempty" json:"dedup_by,omitempty"`
+
+	// DedupWindowMinutes is how long a value stays "seen" before it can notify
+	// again. 0 (with a non-empty DedupBy) means once per value until the server
+	// restarts. Ignored when DedupBy is empty.
+	DedupWindowMinutes int `yaml:"dedup_window_minutes,omitempty" json:"dedup_window_minutes,omitempty"`
+}
+
+// highVolumeSpotEvents are the event types that fire many times per minute, for
+// which a rule must narrow its volume via a selective filter or DedupBy.
+var highVolumeSpotEvents = map[NotificationEventType]bool{
+	EventTypeCWSpot:        true,
+	EventTypeDXSpot:        true,
+	EventTypeDigitalDecode: true,
+}
+
+// dedupKeysForEvent returns the set of valid DedupBy keys for an event type.
+// Keys correspond to fields actually present on the event struct.
+func dedupKeysForEvent(evt NotificationEventType) map[string]bool {
+	switch evt {
+	case EventTypeCWSpot, EventTypeDigitalDecode:
+		return map[string]bool{
+			"callsign": true, "country": true, "country_code": true,
+			"continent": true, "cq_zone": true, "itu_zone": true,
+			"band": true, "mode": true,
+		}
+	case EventTypeDXSpot:
+		// DX cluster spots carry no zone or mode information.
+		return map[string]bool{
+			"callsign": true, "country": true, "country_code": true,
+			"continent": true, "band": true,
+		}
+	default:
+		return nil
+	}
+}
+
+// filterNarrowsHighVolume reports whether f contains at least one criterion
+// selective enough to keep a high-volume spot rule from firing on essentially
+// every event. Band, mode and SNR/WPM thresholds deliberately do NOT count — a
+// whole band of FT8 is still hundreds of decodes per minute.
+func filterNarrowsHighVolume(f NotificationFilter) bool {
+	return len(f.Callsigns) > 0 ||
+		len(f.CallsignPrefixes) > 0 ||
+		len(f.Countries) > 0 ||
+		len(f.CountryCodes) > 0 ||
+		len(f.Continents) > 0 ||
+		len(f.CQZones) > 0 ||
+		len(f.ITUZones) > 0 ||
+		f.MinDistanceKm != nil ||
+		f.MaxDistanceKm != nil ||
+		len(f.MessageContains) > 0 ||
+		len(f.CommentContains) > 0 ||
+		len(f.Spotters) > 0
 }
 
 // IsEnabled returns true if the rule is enabled (nil pointer defaults to true).
@@ -196,6 +297,23 @@ type NotificationFilter struct {
 	OnUnhealthy *bool `yaml:"on_unhealthy,omitempty" json:"on_unhealthy,omitempty"`
 	// OnRecovery fires when a component transitions back to healthy.
 	OnRecovery *bool `yaml:"on_recovery,omitempty" json:"on_recovery,omitempty"`
+	// FlapDetection suppresses repeated transition alerts for a component that is
+	// oscillating between healthy and unhealthy (e.g. system load near a
+	// threshold). nil = enabled (the default); set false to disable. When a
+	// component flaps, one "flap detection activated" alert is sent and further
+	// transition alerts are held until it stabilises; a "stabilised" alert is
+	// then sent and normal alerting resumes.
+	FlapDetection *bool `yaml:"flap_detection,omitempty" json:"flap_detection,omitempty"`
+	// FlapThreshold is the number of healthy↔unhealthy transitions within
+	// FlapWindowMinutes that marks a component as flapping. nil = default (6).
+	FlapThreshold *int `yaml:"flap_threshold,omitempty" json:"flap_threshold,omitempty"`
+	// FlapWindowMinutes is the rolling look-back window for counting transitions.
+	// nil = default (10).
+	FlapWindowMinutes *int `yaml:"flap_window_minutes,omitempty" json:"flap_window_minutes,omitempty"`
+	// FlapClearMinutes is how long a flapping component must stay stable (no
+	// transitions) before it clears and normal alerting resumes. nil = default
+	// (15). This is what stops flap detection from suppressing alerts forever.
+	FlapClearMinutes *int `yaml:"flap_clear_minutes,omitempty" json:"flap_clear_minutes,omitempty"`
 
 	// ── Voice activity (voice_activity) ──────────────────────────────────────
 	// VoiceBands matches band names (e.g. "20m", "40m"). Empty = all bands.
@@ -244,16 +362,34 @@ func LoadNotificationsConfig(filename string) (*NotificationsConfig, error) {
 
 	// Apply defaults
 	for name, ch := range cfg.Channels {
-		if ch.ParseMode == "" {
-			ch.ParseMode = "HTML"
-		}
-		if ch.RateLimitMinutes == 0 {
-			ch.RateLimitMinutes = 10
-		}
+		applyChannelDefaults(&ch)
 		cfg.Channels[name] = ch
 	}
 
 	return &cfg, nil
+}
+
+// applyChannelDefaults fills in the conventional defaults for a channel config.
+// It is shared by LoadNotificationsConfig and the admin API PUT handler so a
+// hand-edited file and an admin-UI save behave identically.
+func applyChannelDefaults(ch *NotificationChannelConfig) {
+	if ch.ParseMode == "" {
+		ch.ParseMode = "HTML"
+	}
+	if ch.RateLimitMinutes == 0 {
+		ch.RateLimitMinutes = 10
+	}
+	if ch.Type == "email" {
+		if ch.SMTPPort == 0 {
+			ch.SMTPPort = 587
+		}
+		if ch.SMTPSecurity == "" {
+			ch.SMTPSecurity = "starttls"
+		}
+		if ch.SubjectPrefix == "" {
+			ch.SubjectPrefix = "[UberSDR]"
+		}
+	}
 }
 
 // Validate checks the config for obvious errors and returns a list of issues.
@@ -271,6 +407,25 @@ func (cfg *NotificationsConfig) Validate() []string {
 			}
 			if ch.ChatID == "" {
 				issues = append(issues, fmt.Sprintf("channel %q: telegram chat_id is required", name))
+			}
+		case "email":
+			if ch.SMTPHost == "" {
+				issues = append(issues, fmt.Sprintf("channel %q: email smtp_host is required", name))
+			}
+			if ch.EmailFrom == "" {
+				issues = append(issues, fmt.Sprintf("channel %q: email email_from is required", name))
+			}
+			if len(ch.EmailTo) == 0 {
+				issues = append(issues, fmt.Sprintf("channel %q: email needs at least one email_to recipient", name))
+			}
+			switch ch.SMTPSecurity {
+			case "", "starttls", "tls", "none":
+			default:
+				issues = append(issues, fmt.Sprintf("channel %q: email smtp_security must be starttls, tls, or none (got %q)", name, ch.SMTPSecurity))
+			}
+			// A username with no password (or vice-versa) is almost always a mistake.
+			if (ch.SMTPUsername == "") != (ch.SMTPPassword == "") {
+				issues = append(issues, fmt.Sprintf("channel %q: email smtp_username and smtp_password must be set together", name))
 			}
 		case "":
 			issues = append(issues, fmt.Sprintf("channel %q: type is required", name))
@@ -308,7 +463,81 @@ func (cfg *NotificationsConfig) Validate() []string {
 		if len(rule.Channels) == 0 {
 			issues = append(issues, fmt.Sprintf("%s: no channels specified", label))
 		}
+		// Per-channel template overrides must target a channel the rule sends to,
+		// otherwise the override is dead config.
+		for chName := range rule.Templates {
+			inRule := false
+			for _, c := range rule.Channels {
+				if c == chName {
+					inRule = true
+					break
+				}
+			}
+			if !inRule {
+				issues = append(issues, fmt.Sprintf("%s: template override for channel %q which is not in the rule's channels", label, chName))
+			}
+		}
+
+		// High-volume spot events (cw_spot, dx_spot, digital_decode) fire many
+		// times per minute. A rule with no selective filter and no deduplication
+		// would notify on every spot — hundreds per minute. Require one or the
+		// other.
+		if highVolumeSpotEvents[rule.Event] {
+			validKeys := dedupKeysForEvent(rule.Event)
+			for _, k := range rule.DedupBy {
+				if !validKeys[k] {
+					issues = append(issues, fmt.Sprintf("%s: invalid dedup_by key %q for event %q", label, k, rule.Event))
+				}
+			}
+			if rule.DedupWindowMinutes < 0 {
+				issues = append(issues, fmt.Sprintf("%s: dedup_window_minutes cannot be negative", label))
+			}
+			if len(rule.DedupBy) == 0 && !filterNarrowsHighVolume(rule.Filter) {
+				issues = append(issues, fmt.Sprintf(
+					"%s: %q rules fire on every spot (hundreds per minute) — add a selective filter "+
+						"(callsign, country, continent, CQ/ITU zone, distance, or message/comment text) "+
+						"or set 'notify once per' (dedup_by) to limit volume",
+					label, rule.Event))
+			}
+		}
+
+		// System monitor flap-detection parameters must be sensible when present.
+		// A missing value is fine (the notifier substitutes a default); a present
+		// value that is out of range is rejected so the admin sees the mistake.
+		if rule.Event == EventTypeSystemMonitor {
+			issues = append(issues, validateFlapParams(label, rule.Filter)...)
+		}
 	}
 
+	return issues
+}
+
+// flap parameter bounds. Minimums guard correctness; the generous maximums catch
+// fat-finger errors (e.g. a window of 100000) without constraining real use.
+const (
+	minFlapThreshold     = 2     // a flap needs at least an up+down pair
+	maxFlapThreshold     = 1000  //
+	minFlapWindowMinutes = 1     //
+	maxFlapWindowMinutes = 10080 // one week
+	minFlapClearMinutes  = 1     //
+	maxFlapClearMinutes  = 10080 // one week
+)
+
+// validateFlapParams checks that any explicitly-set flap-detection values are in
+// range. nil values are intentionally allowed (defaults apply at runtime).
+func validateFlapParams(label string, f NotificationFilter) []string {
+	var issues []string
+	if v := f.FlapThreshold; v != nil && (*v < minFlapThreshold || *v > maxFlapThreshold) {
+		issues = append(issues, fmt.Sprintf("%s: flap_threshold must be between %d and %d (got %d)",
+			label, minFlapThreshold, maxFlapThreshold, *v))
+	}
+	if v := f.FlapWindowMinutes; v != nil && (*v < minFlapWindowMinutes || *v > maxFlapWindowMinutes) {
+		issues = append(issues, fmt.Sprintf("%s: flap_window_minutes must be between %d and %d (got %d)",
+			label, minFlapWindowMinutes, maxFlapWindowMinutes, *v))
+	}
+	if v := f.FlapClearMinutes; v != nil && (*v < minFlapClearMinutes || *v > maxFlapClearMinutes) {
+		issues = append(issues, fmt.Sprintf("%s: flap_clear_minutes must be between %d and %d (got %d)",
+			label, minFlapClearMinutes, maxFlapClearMinutes, *v))
+	}
 	return issues
 }

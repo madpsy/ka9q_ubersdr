@@ -72,6 +72,15 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 		BotToken  string `json:"bot_token"`
 		ChatID    string `json:"chat_id"`
 		ParseMode string `json:"parse_mode"`
+		// Ad-hoc email
+		SMTPHost      string   `json:"smtp_host"`
+		SMTPPort      int      `json:"smtp_port"`
+		SMTPSecurity  string   `json:"smtp_security"`
+		SMTPUsername  string   `json:"smtp_username"`
+		SMTPPassword  string   `json:"smtp_password"`
+		EmailFrom     string   `json:"email_from"`
+		EmailTo       []string `json:"email_to"`
+		SubjectPrefix string   `json:"subject_prefix"`
 		// Optional in both modes
 		Message string `json:"message"`
 	}
@@ -139,6 +148,35 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 			})
 			channelName = "<ad-hoc>"
 			channelType = "telegram"
+		case "email":
+			if req.SMTPHost == "" || req.EmailFrom == "" || len(req.EmailTo) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "smtp_host, email_from and at least one email_to are required for email"}) //nolint:errcheck
+				return
+			}
+			// If the password came through masked, reuse the saved channel's value
+			// so the user can test an existing channel after editing other fields.
+			password := req.SMTPPassword
+			if password == "********" && nm != nil && nm.cfg != nil {
+				if existing, ok := nm.cfg.Channels[req.Channel]; ok {
+					password = existing.SMTPPassword
+				} else {
+					password = ""
+				}
+			}
+			ch = NewEmailChannel("<ad-hoc>", NotificationChannelConfig{
+				Type:          "email",
+				SMTPHost:      req.SMTPHost,
+				SMTPPort:      req.SMTPPort,
+				SMTPSecurity:  req.SMTPSecurity,
+				SMTPUsername:  req.SMTPUsername,
+				SMTPPassword:  password,
+				EmailFrom:     req.EmailFrom,
+				EmailTo:       req.EmailTo,
+				SubjectPrefix: req.SubjectPrefix,
+			})
+			channelName = "<ad-hoc>"
+			channelType = "email"
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "unsupported channel type: " + req.Type}) //nolint:errcheck
@@ -219,13 +257,22 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		return
 	}
 
-	// Build a redacted view of channels (hide bot tokens)
+	// Build a redacted view of channels (hide bot tokens and SMTP passwords)
 	type redactedChannel struct {
 		Type             string `json:"type"`
 		ChatID           string `json:"chat_id"`
 		ParseMode        string `json:"parse_mode"`
 		RateLimitMinutes int    `json:"rate_limit_minutes"`
 		BotTokenSet      bool   `json:"bot_token_set"`
+		// Email (SMTP) — password is never returned, only whether it is set.
+		SMTPHost        string   `json:"smtp_host,omitempty"`
+		SMTPPort        int      `json:"smtp_port,omitempty"`
+		SMTPSecurity    string   `json:"smtp_security,omitempty"`
+		SMTPUsername    string   `json:"smtp_username,omitempty"`
+		SMTPPasswordSet bool     `json:"smtp_password_set,omitempty"`
+		EmailFrom       string   `json:"email_from,omitempty"`
+		EmailTo         []string `json:"email_to,omitempty"`
+		SubjectPrefix   string   `json:"subject_prefix,omitempty"`
 	}
 	channels := make(map[string]redactedChannel, len(cfg.Channels))
 	for name, ch := range cfg.Channels {
@@ -235,28 +282,42 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			ParseMode:        ch.ParseMode,
 			RateLimitMinutes: ch.RateLimitMinutes,
 			BotTokenSet:      ch.BotToken != "",
+			SMTPHost:         ch.SMTPHost,
+			SMTPPort:         ch.SMTPPort,
+			SMTPSecurity:     ch.SMTPSecurity,
+			SMTPUsername:     ch.SMTPUsername,
+			SMTPPasswordSet:  ch.SMTPPassword != "",
+			EmailFrom:        ch.EmailFrom,
+			EmailTo:          ch.EmailTo,
+			SubjectPrefix:    ch.SubjectPrefix,
 		}
 	}
 
 	// Build rule list — include filters and template so the UI can round-trip
 	// them without loss. No sensitive data in rules.
 	type ruleView struct {
-		Name     string                `json:"name"`
-		Enabled  bool                  `json:"enabled"`
-		Event    NotificationEventType `json:"event"`
-		Channels []string              `json:"channels"`
-		Filters  NotificationFilter    `json:"filters"`
-		Template string                `json:"template"`
+		Name               string                `json:"name"`
+		Enabled            bool                  `json:"enabled"`
+		Event              NotificationEventType `json:"event"`
+		Channels           []string              `json:"channels"`
+		Filters            NotificationFilter    `json:"filters"`
+		DedupBy            []string              `json:"dedup_by,omitempty"`
+		DedupWindowMinutes int                   `json:"dedup_window_minutes,omitempty"`
+		Template           string                `json:"template"`
+		Templates          map[string]string     `json:"templates,omitempty"`
 	}
 	rules := make([]ruleView, 0, len(cfg.Rules))
 	for _, r := range cfg.Rules {
 		rules = append(rules, ruleView{
-			Name:     r.Name,
-			Enabled:  r.IsEnabled(),
-			Event:    r.Event,
-			Channels: r.Channels,
-			Filters:  r.Filter,
-			Template: r.Template,
+			Name:               r.Name,
+			Enabled:            r.IsEnabled(),
+			Event:              r.Event,
+			Channels:           r.Channels,
+			Filters:            r.Filter,
+			DedupBy:            r.DedupBy,
+			DedupWindowMinutes: r.DedupWindowMinutes,
+			Template:           r.Template,
+			Templates:          r.Templates,
 		})
 	}
 
@@ -288,27 +349,28 @@ func handleNotificationsConfigPut(w http.ResponseWriter, r *http.Request, nm *No
 		return
 	}
 
-	// Preserve masked bot tokens — the UI sends "********" when it doesn't
-	// want to change the token (it never receives the real value from GET).
+	// Preserve masked secrets — the UI sends "********" when it doesn't want to
+	// change a secret (it never receives the real value from GET). This applies
+	// to both the Telegram bot token and the SMTP password.
 	if existingCfg != nil {
 		for name, ch := range newCfg.Channels {
-			if ch.BotToken == "********" {
-				if existing, ok := existingCfg.Channels[name]; ok {
-					ch.BotToken = existing.BotToken
-					newCfg.Channels[name] = ch
-				}
+			existing, ok := existingCfg.Channels[name]
+			if !ok {
+				continue
 			}
+			if ch.BotToken == "********" {
+				ch.BotToken = existing.BotToken
+			}
+			if ch.SMTPPassword == "********" {
+				ch.SMTPPassword = existing.SMTPPassword
+			}
+			newCfg.Channels[name] = ch
 		}
 	}
 
 	// Apply the same defaults that LoadNotificationsConfig applies.
 	for name, ch := range newCfg.Channels {
-		if ch.ParseMode == "" {
-			ch.ParseMode = "HTML"
-		}
-		if ch.RateLimitMinutes == 0 {
-			ch.RateLimitMinutes = 10
-		}
+		applyChannelDefaults(&ch)
 		newCfg.Channels[name] = ch
 	}
 
@@ -389,6 +451,21 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
 			},
 		},
+		{
+			Type:        "email",
+			Description: "SMTP email — works with any provider. Gmail requires 2-Step Verification + a 16-character App Password (used as smtp_password); no OAuth needed.",
+			Fields: []channelField{
+				{Name: "smtp_host", Type: "string", Required: true, Description: "Mail server hostname.", Example: "smtp.gmail.com"},
+				{Name: "smtp_port", Type: "int", Required: false, Description: "Mail server port. Default: 587.", Example: "587"},
+				{Name: "smtp_security", Type: "string", Required: false, Description: "Transport security. Default: starttls.", ValidValues: []string{"starttls", "tls", "none"}, Example: "starttls"},
+				{Name: "smtp_username", Type: "string", Required: false, Description: "SMTP auth username (usually the full email address). Blank = unauthenticated relay.", Example: "me@gmail.com"},
+				{Name: "smtp_password", Type: "string", Required: false, Description: "SMTP auth password. For Gmail this is the App Password, not the account password.", Example: "abcd efgh ijkl mnop"},
+				{Name: "email_from", Type: "string", Required: true, Description: "From address. May be 'Name <addr@example.com>' or a bare address.", Example: "UberSDR <me@gmail.com>"},
+				{Name: "email_to", Type: "[]string", Required: true, Description: "Recipient address(es).", Example: `["you@example.com"]`},
+				{Name: "subject_prefix", Type: "string", Required: false, Description: "Prepended to the dynamic subject (prefix + first line of the message). Default: [UberSDR].", Example: "[UberSDR]"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
+			},
+		},
 	}
 
 	// ── Filter fields per event type ─────────────────────────────────────────
@@ -410,12 +487,17 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 		Description    string          `json:"description"`
 		FilterFields   []filterField   `json:"filter_fields"`
 		TemplateFields []templateField `json:"template_fields"`
+		// DedupKeys lists the valid dedup_by keys for high-volume spot events
+		// (empty for all other event types). A rule for one of these events must
+		// set a selective filter or dedup_by, else it is rejected on save.
+		DedupKeys []string `json:"dedup_keys,omitempty"`
 	}
 
 	eventTypes := []eventType{
 		{
 			Type:        "cw_spot",
 			Description: "CW Skimmer spot received.",
+			DedupKeys:   []string{"callsign", "country", "country_code", "continent", "cq_zone", "itu_zone", "band", "mode"},
 			FilterFields: []filterField{
 				{Name: "callsigns", Type: "[]string", Description: "Exact callsign match (case-insensitive).", Example: `["G3XYZ","M0ABC"]`},
 				{Name: "callsign_prefixes", Type: "[]string", Description: "Callsign prefix match (e.g. DXCC prefixes).", Example: `["3Y","JD1","VK0"]`},
@@ -458,6 +540,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 		{
 			Type:        "dx_spot",
 			Description: "DX Cluster spot received.",
+			DedupKeys:   []string{"callsign", "country", "country_code", "continent", "band"},
 			FilterFields: []filterField{
 				{Name: "callsigns", Type: "[]string", Description: "Exact callsign match.", Example: `["G3XYZ"]`},
 				{Name: "callsign_prefixes", Type: "[]string", Description: "Callsign prefix match.", Example: `["3Y","JD1"]`},
@@ -484,6 +567,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 		{
 			Type:        "digital_decode",
 			Description: "FT8 / FT4 / WSPR / JS8 decode from the built-in decoder.",
+			DedupKeys:   []string{"callsign", "country", "country_code", "continent", "cq_zone", "itu_zone", "band", "mode"},
 			FilterFields: []filterField{
 				{Name: "callsigns", Type: "[]string", Description: "Exact callsign match.", Example: `["G3XYZ"]`},
 				{Name: "callsign_prefixes", Type: "[]string", Description: "Callsign prefix match.", Example: `["VK","ZL"]`},
@@ -582,13 +666,18 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "components", Type: "[]string", Description: "Subsystem names to watch. Empty = all components.", ValidValues: []string{"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt", "rotator", "ant_switch", "frequency_reference", "instance_reporter", "sdr_frontend", "gpsdo", "system_load", "cpu_temperature"}, Example: `["decoder","cw_skimmer"]`},
 				{Name: "on_unhealthy", Type: "bool", Description: "Fire only on healthy→unhealthy transition.", Example: "true"},
 				{Name: "on_recovery", Type: "bool", Description: "Fire only on unhealthy→healthy transition.", Example: "true"},
+				{Name: "flap_detection", Type: "bool", Description: "Suppress repeated alerts when a component oscillates; sends one flap alert then resumes once stable. Default: on.", Example: "true"},
+				{Name: "flap_threshold", Type: "int", Description: "Health changes within flap_window_minutes to trigger flap detection (default 6).", Example: "6"},
+				{Name: "flap_window_minutes", Type: "int", Description: "Rolling window for counting changes (default 10).", Example: "10"},
+				{Name: "flap_clear_minutes", Type: "int", Description: "Stable minutes before alerts resume — prevents suppressing forever (default 15).", Example: "15"},
 			},
 			TemplateFields: []templateField{
 				{Name: ".Component", GoType: "string", Description: "Subsystem name."},
 				{Name: ".Healthy", GoType: "bool", Description: "Current health state."},
 				{Name: ".PreviouslyHealthy", GoType: "bool", Description: "Health state before this event."},
 				{Name: ".Issues", GoType: "[]string", Description: "List of issue descriptions. Use {{range .Issues}} or join."},
-				{Name: ".Status", GoType: "string", Description: "Status string: degraded, recovered, or unknown."},
+				{Name: ".Status", GoType: "string", Description: "Status string: degraded, recovered, flapping, stabilized, or unknown."},
+				{Name: ".Flapping", GoType: "bool", Description: "True on a flap-detection activation alert."},
 				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
 			},
 		},

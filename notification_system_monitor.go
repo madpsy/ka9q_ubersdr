@@ -13,6 +13,141 @@ import (
 // probe reports unhealthy. Override by passing a custom probe to BuildSystemHealthProbes.
 const DefaultCPUTempThresholdC = 80.0
 
+// Default flap-detection parameters (overridable per system_monitor rule).
+const (
+	defaultFlapThreshold = 6  // transitions within the window to start flapping
+	defaultFlapWindowMin = 10 // rolling look-back window, minutes
+	defaultFlapClearMin  = 15 // stable minutes before a flapping component clears
+)
+
+// clampInt constrains v to the inclusive range [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// flapConfig is the effective, resolved flap-detection configuration.
+type flapConfig struct {
+	enabled    bool
+	threshold  int
+	window     time.Duration
+	clearAfter time.Duration
+}
+
+// systemMonitorFlapConfig derives the effective flap configuration from the
+// enabled system_monitor rules. Flap detection is on unless every enabled
+// system_monitor rule explicitly disables it; parameters come from the first
+// enabled rule that has flap detection on (falling back to defaults).
+func systemMonitorFlapConfig(cfg *NotificationsConfig) flapConfig {
+	fc := flapConfig{
+		enabled:    false,
+		threshold:  defaultFlapThreshold,
+		window:     time.Duration(defaultFlapWindowMin) * time.Minute,
+		clearAfter: time.Duration(defaultFlapClearMin) * time.Minute,
+	}
+	for _, r := range cfg.Rules {
+		if !r.IsEnabled() || r.Event != EventTypeSystemMonitor {
+			continue
+		}
+		f := r.Filter
+		if f.FlapDetection != nil && !*f.FlapDetection {
+			continue // this rule disables flap detection
+		}
+		// This rule has flap detection on (nil = default on). Adopt its params,
+		// clamping to the valid range so even a hand-edited config stays sane.
+		fc.enabled = true
+		if f.FlapThreshold != nil {
+			fc.threshold = clampInt(*f.FlapThreshold, minFlapThreshold, maxFlapThreshold)
+		}
+		if f.FlapWindowMinutes != nil {
+			fc.window = time.Duration(clampInt(*f.FlapWindowMinutes, minFlapWindowMinutes, maxFlapWindowMinutes)) * time.Minute
+		}
+		if f.FlapClearMinutes != nil {
+			fc.clearAfter = time.Duration(clampInt(*f.FlapClearMinutes, minFlapClearMinutes, maxFlapClearMinutes)) * time.Minute
+		}
+		return fc
+	}
+	return fc
+}
+
+// flapComponentState tracks recent transitions and flapping status for one
+// component.
+type flapComponentState struct {
+	transitions    []time.Time // transition timestamps within the window
+	flapping       bool
+	lastTransition time.Time
+}
+
+// flapDetector implements per-component flap detection. It is not safe for
+// concurrent use; the system monitor goroutine owns the single instance.
+type flapDetector struct {
+	states map[string]*flapComponentState
+}
+
+func newFlapDetector() *flapDetector {
+	return &flapDetector{states: make(map[string]*flapComponentState)}
+}
+
+func (d *flapDetector) state(component string) *flapComponentState {
+	st := d.states[component]
+	if st == nil {
+		st = &flapComponentState{}
+		d.states[component] = st
+	}
+	return st
+}
+
+// recordTransition registers a health transition for the component at time now
+// using the supplied config, and reports whether this transition starts a new
+// flapping episode, plus the current transition count within the window.
+func (d *flapDetector) recordTransition(component string, now time.Time, fc flapConfig) (startedFlapping bool, count int) {
+	st := d.state(component)
+	st.lastTransition = now
+
+	// Append and prune to the rolling window.
+	st.transitions = append(st.transitions, now)
+	cutoff := now.Add(-fc.window)
+	pruned := st.transitions[:0]
+	for _, t := range st.transitions {
+		if !t.Before(cutoff) {
+			pruned = append(pruned, t)
+		}
+	}
+	st.transitions = pruned
+	count = len(st.transitions)
+
+	if !st.flapping && count >= fc.threshold {
+		st.flapping = true
+		return true, count
+	}
+	return false, count
+}
+
+// shouldClear reports whether a flapping component has been stable long enough
+// to clear, and clears its state if so.
+func (d *flapDetector) shouldClear(component string, now time.Time, fc flapConfig) bool {
+	st := d.states[component]
+	if st == nil || !st.flapping {
+		return false
+	}
+	if now.Sub(st.lastTransition) >= fc.clearAfter {
+		st.flapping = false
+		st.transitions = nil
+		return true
+	}
+	return false
+}
+
+func (d *flapDetector) isFlapping(component string) bool {
+	st := d.states[component]
+	return st != nil && st.flapping
+}
+
 // systemHealthProbe is a named function that returns (healthy bool, issues []string).
 type systemHealthProbe struct {
 	component string
@@ -51,6 +186,7 @@ func StartSystemMonitorNotifier(
 		// Track previous health state per component.
 		// nil = unknown (first poll), true/false = last known state.
 		prevHealthy := make(map[string]*bool, len(probes))
+		flap := newFlapDetector()
 
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
@@ -60,10 +196,29 @@ func StartSystemMonitorNotifier(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				// Re-read flap config each tick so it tracks hot reloads.
+				fc := systemMonitorFlapConfig(nm.Config())
+				now := time.Now()
+
 				for _, p := range probes {
 					healthy, issues := p.probe()
-
 					prev := prevHealthy[p.component]
+
+					// Flap clear check runs every poll (even with no transition):
+					// a flapping component that has been stable long enough
+					// clears and resumes normal alerting.
+					if fc.enabled && flap.shouldClear(p.component, now, fc) {
+						log.Printf("[SystemMonitor] %s: flap cleared (stable for %s)", p.component, fc.clearAfter)
+						nm.Publish(SystemMonitorEvent{
+							Component:         p.component,
+							Healthy:           healthy,
+							PreviouslyHealthy: prev != nil && *prev,
+							Issues:            []string{fmt.Sprintf("Component stabilised after no state changes for %s — alerts resumed", fc.clearAfter)},
+							Status:            "stabilized",
+							Flapping:          false,
+							Time:              now,
+						})
+					}
 
 					// First poll: record state but don't fire (no transition yet).
 					if prev == nil {
@@ -77,26 +232,53 @@ func StartSystemMonitorNotifier(
 						continue
 					}
 
-					// Transition detected — update state and fire event.
+					// Transition detected — always update the tracked real state.
+					h := healthy
+					prevHealthy[p.component] = &h
+
+					// Flap detection: count the transition. While a component is
+					// flapping, suppress ordinary transition alerts; fire a single
+					// "flap detection activated" alert when it first starts.
+					if fc.enabled {
+						started, count := flap.recordTransition(p.component, now, fc)
+						if started {
+							log.Printf("[SystemMonitor] %s: flap detected (%d changes within %s) — suppressing alerts", p.component, count, fc.window)
+							flapIssues := []string{fmt.Sprintf(
+								"Flap detection activated: %d health changes within %s — suppressing transition alerts until stable for %s",
+								count, fc.window, fc.clearAfter)}
+							flapIssues = append(flapIssues, issues...)
+							nm.Publish(SystemMonitorEvent{
+								Component:         p.component,
+								Healthy:           healthy,
+								PreviouslyHealthy: *prev,
+								Issues:            flapIssues,
+								Status:            "flapping",
+								Flapping:          true,
+								Time:              now,
+							})
+							continue
+						}
+						if flap.isFlapping(p.component) {
+							// Already flapping — stay quiet.
+							continue
+						}
+					}
+
+					// Normal transition — fire event.
 					status := "degraded"
 					if healthy {
 						status = "recovered"
 					}
-
 					log.Printf("[SystemMonitor] %s: %s (was healthy=%v, now healthy=%v)",
 						p.component, status, *prev, healthy)
-
 					nm.Publish(SystemMonitorEvent{
 						Component:         p.component,
 						Healthy:           healthy,
 						PreviouslyHealthy: *prev,
 						Issues:            issues,
 						Status:            status,
-						Time:              time.Now(),
+						Time:              now,
 					})
-
-					h := healthy
-					prevHealthy[p.component] = &h
 				}
 			}
 		}
@@ -368,8 +550,13 @@ func BuildSystemHealthProbes(
 	}
 
 	// CPU temperature probe — uses the same getCPUTemperature() function as the
-	// admin system-stats endpoint. Fires when temperature exceeds DefaultCPUTempThresholdC.
+	// admin system-stats endpoint. Fires when temperature exceeds the configured
+	// threshold (server.cpu_temp_threshold_c, default DefaultCPUTempThresholdC).
 	// Silently skipped on systems where no thermal sensor is found.
+	cpuTempThreshold := DefaultCPUTempThresholdC
+	if config != nil && config.Server.CPUTempThresholdC > 0 {
+		cpuTempThreshold = config.Server.CPUTempThresholdC
+	}
 	probes = append(probes, systemHealthProbe{
 		component: "cpu_temperature",
 		probe: func() (bool, []string) {
@@ -377,8 +564,8 @@ func BuildSystemHealthProbes(
 			if err != nil {
 				return true, nil // no sensor — skip
 			}
-			if tempC >= DefaultCPUTempThresholdC {
-				return false, []string{fmt.Sprintf("CPU temperature %.1f°C exceeds threshold %.0f°C", tempC, DefaultCPUTempThresholdC)}
+			if tempC >= cpuTempThreshold {
+				return false, []string{fmt.Sprintf("CPU temperature %.1f°C exceeds threshold %.0f°C", tempC, cpuTempThreshold)}
 			}
 			return true, nil
 		},

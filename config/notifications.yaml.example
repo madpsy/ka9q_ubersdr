@@ -50,10 +50,61 @@ channels:
   #   chat_id: "123456789"        # your personal chat ID
   #   rate_limit_minutes: 0       # no rate limiting for personal alerts
 
+  # ── Email (SMTP) ─────────────────────────────────────────────────────────────
+  # One generic SMTP channel works with any provider — only host/port/security/
+  # credentials differ. No OAuth or "Sign in with Google" is involved.
+  #
+  # Gmail: regular account passwords no longer work over SMTP. You must either use
+  # OAuth2 or — much simpler — a 16-character App Password:
+  #   1. Enable 2-Step Verification on the Google account.
+  #   2. myaccount.google.com → Security → App passwords → generate one.
+  #   3. Use that App Password as smtp_password below (not your normal password).
+  # Other providers (Outlook, Fastmail, iCloud, SendGrid, Mailgun, SES, a
+  # self-hosted MTA, …) just take their normal SMTP host/port/credentials.
+  #
+  # The subject of each email is: "<subject_prefix> <first line of the message>".
+  #
+  # email_main:
+  #   type: email
+  #   smtp_host: "smtp.gmail.com"
+  #   smtp_port: 587              # 587 = STARTTLS (default), 465 = implicit TLS
+  #   smtp_security: "starttls"   # starttls (default), tls, or none
+  #   smtp_username: "you@gmail.com"
+  #   smtp_password: "abcdefghijklmnop"   # Gmail App Password (16 chars, no spaces)
+  #   email_from: "UberSDR <you@gmail.com>"
+  #   email_to:
+  #     - "you@example.com"
+  #     - "someone-else@example.com"
+  #   subject_prefix: "[UberSDR]"  # default: [UberSDR]
+  #   rate_limit_minutes: 10
+
 # ── Rules ─────────────────────────────────────────────────────────────────────
 # Rules are evaluated in order. All matching rules fire (no break-on-first-match).
 # Omitting a filter field means "match anything" for that field.
 # Within a list field, any element matching is sufficient (OR within field, AND between fields).
+#
+# ⚠ HIGH-VOLUME EVENTS — cw_spot, dx_spot and digital_decode fire HUNDREDS of
+# times per minute (a single busy FT8 band alone is 100+ decodes every 15 s).
+# A rule for one of these is REJECTED at load/save time unless it either:
+#   (a) has a selective filter — one of: callsigns, callsign_prefixes, countries,
+#       country_codes, continents, cq_zones, itu_zones, min_distance_km,
+#       max_distance_km, message_contains, comment_contains, spotters; or
+#   (b) sets dedup_by (see below). Band, mode and SNR/WPM filters do NOT count —
+#       a whole band of FT8 is still a flood.
+#
+# ── Deduplication: "notify once per new X" ────────────────────────────────────
+# dedup_by collapses the firehose into one alert per distinct value, which is
+# what makes these events useful — e.g. "tell me the first time each new country
+# (or continent) appears" rather than on every spot.
+#   dedup_by: a list of keys. Valid keys:
+#     cw_spot / digital_decode: callsign, country, country_code, continent,
+#                               cq_zone, itu_zone, band, mode
+#     dx_spot:                  callsign, country, country_code, continent, band
+#     (Listing several keys dedups on the combination, e.g. [country_code, band]
+#      = once per country per band.)
+#   dedup_window_minutes: how long a value stays "seen" before it can alert
+#     again. 0 = once per value until the server restarts. 1440 = at most once
+#     per day per value. Omit (or 0) for once-until-restart.
 rules:
 
   # ── Server startup ────────────────────────────────────────────────────────────
@@ -62,6 +113,18 @@ rules:
   #   event: server_startup
   #   template: "🚀 <b>UberSDR {{.Version}} started</b>\n{{.Callsign}} — {{.Name}}"
   #   channels: [telegram_main]
+
+  # ── Per-channel templates ─────────────────────────────────────────────────────
+  # `template` is the default body for every channel. `templates` overrides it for
+  # specific channels, so one rule can format itself differently per transport —
+  # e.g. HTML markup for Telegram and plainer wording for email. A channel not
+  # listed in `templates` uses `template` (and then the built-in default).
+  # - name: "Server started (multi-channel)"
+  #   event: server_startup
+  #   channels: [telegram_main, email_main]
+  #   template: "🚀 <b>UberSDR {{.Version}} started</b>\n{{.Callsign}} — {{.Name}}"
+  #   templates:
+  #     email_main: "UberSDR {{.Version}} started\nStation: {{.Callsign}} ({{.Name}})"
 
   # ── System monitor: any subsystem goes unhealthy ──────────────────────────────
   # Available components: noise_floor, space_weather, decoder, cw_skimmer, mqtt,
@@ -106,6 +169,27 @@ rules:
   #     components: ["system_load"]
   #     on_unhealthy: true
   #   template: "⚠️ <b>High system load</b>\n{{range .Issues}}• {{.}}\n{{end}}"
+  #   channels: [telegram_main]
+
+  # ── Flap detection ───────────────────────────────────────────────────────────
+  # Some components (e.g. system_load near its threshold) oscillate rapidly
+  # between healthy and unhealthy, which would otherwise spam a degraded/recovered
+  # pair on every poll. Flap detection is ON BY DEFAULT for system_monitor rules.
+  # When a component changes state flap_threshold times within flap_window_minutes
+  # it is marked "flapping": ONE alert is sent (.Status == "flapping") and further
+  # transition alerts are suppressed until it stays stable for flap_clear_minutes,
+  # at which point a "stabilized" alert is sent and normal alerting resumes.
+  # Flap and stabilized alerts ignore on_unhealthy/on_recovery so they always
+  # arrive. Defaults: flap_threshold 6, flap_window_minutes 10, flap_clear_minutes 15.
+  # - name: "System monitor with flap control"
+  #   event: system_monitor
+  #   filter:
+  #     on_unhealthy: true
+  #     flap_detection: true          # default on; set false to disable
+  #     flap_threshold: 6             # 6 changes...
+  #     flap_window_minutes: 10       # ...within 10 minutes = flapping
+  #     flap_clear_minutes: 15        # resume alerts after 15 min stable
+  #   template: "{{if .Flapping}}🔁 <b>{{.Component}} is flapping</b>\n{{join \"\\n\" .Issues}}{{else if eq .Status \"stabilized\"}}🟢 <b>{{.Component}} stabilised</b> — alerts resumed{{else}}{{if .Healthy}}✅{{else}}❌{{end}} <b>{{.Component}} {{.Status}}</b>\n{{range .Issues}}• {{.}}\n{{end}}{{end}}"
   #   channels: [telegram_main]
 
   # - name: "GPSDO lost lock"
@@ -191,6 +275,36 @@ rules:
   #     digital_modes: ["FT8", "FT4"]
   #     callsigns: ["G3XYZ", "M0ABC"]
   #   template: "👋 <b>{{.Callsign}}</b> on {{.Band}} {{.Mode}}, SNR {{.SNR}} dB\n<code>{{.Message}}</code>"
+  #   channels: [telegram_main]
+
+  # ── Digital decode: new country seen (deduplicated) ──────────────────────────
+  # No callsign/geo filter, so this would normally fire on every decode. dedup_by
+  # collapses it to ONE alert the first time each new DXCC is decoded. With
+  # dedup_window_minutes: 0 it fires once per country until the server restarts.
+  # - name: "New country on FT8"
+  #   event: digital_decode
+  #   filter:
+  #     digital_modes: ["FT8"]
+  #   dedup_by: ["country_code"]
+  #   dedup_window_minutes: 0
+  #   template: "🆕 <b>New country: {{.Country}}</b> {{flag .CountryCode}}\n{{.Callsign}} on <b>{{.Band}}</b> {{.Mode}}, SNR {{.SNR}} dB"
+  #   channels: [telegram_main]
+
+  # ── Digital decode: new continent, at most once per hour ─────────────────────
+  # - name: "New continent on digital"
+  #   event: digital_decode
+  #   dedup_by: ["continent"]
+  #   dedup_window_minutes: 60
+  #   template: "🌍 <b>Continent {{.Continent}}</b> active — {{.Callsign}} {{flag .CountryCode}} on {{.Band}} {{.Mode}}"
+  #   channels: [telegram_main]
+
+  # ── DX Cluster: first spot per country per band, once a day ──────────────────
+  # dedup_by lists two keys, so it dedups on the combination (country + band).
+  # - name: "New DXCC per band"
+  #   event: dx_spot
+  #   dedup_by: ["country_code", "band"]
+  #   dedup_window_minutes: 1440
+  #   template: "📡 <b>{{.Country}}</b> {{flag .CountryCode}} active on <b>{{.Band}}</b> — {{.DXCall}} @ {{khz .Frequency}} kHz"
   #   channels: [telegram_main]
 
   # ── Antenna switch: grounded (thunderstorm mode) ──────────────────────────────
@@ -292,6 +406,8 @@ rules:
 #
 # system_monitor:
 #   .Component .Healthy (bool) .PreviouslyHealthy (bool) .Issues ([]string) .Status .Time
+#   .Flapping (bool) — true on a flap-detection activation alert
+#   .Status values: degraded, recovered, flapping, stabilized, unknown
 #   Components: noise_floor, space_weather, decoder, cw_skimmer, mqtt,
 #               rotator, ant_switch, frequency_reference, instance_reporter,
 #               sdr_frontend, gpsdo, system_load, cpu_temperature

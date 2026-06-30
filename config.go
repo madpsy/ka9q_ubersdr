@@ -294,6 +294,7 @@ type ServerConfig struct {
 	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in index.html (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
 	EnabledWidgets                  []string             `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
+	CPUTempThresholdC               float64              `yaml:"cpu_temp_threshold_c"`                // CPU temperature (°C) above which the cpu_temperature health probe fires (default: 80)
 	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
 	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
 	containerProxyIPs               []string             // Dynamically resolved container IPs (internal use)
@@ -691,6 +692,11 @@ func LoadConfig(filename string) (*Config, error) {
 	// TEMPORARY: Force enforce_session_ip_match to false regardless of config setting
 	// This overrides any value set in config.yaml
 	config.Server.EnforceSessionIPMatch = false
+
+	// Default the CPU temperature health-probe threshold when unset.
+	if config.Server.CPUTempThresholdC <= 0 {
+		config.Server.CPUTempThresholdC = DefaultCPUTempThresholdC
+	}
 
 	// Parse admin allowed IPs/CIDRs
 	if err := config.Admin.parseAllowedIPs(); err != nil {

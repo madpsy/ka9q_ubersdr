@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -73,6 +74,53 @@ func (rl *notifRateLimiter) cleanup(maxAge time.Duration) {
 	}
 }
 
+// dedupEntry records when a dedup subject last fired and its configured window.
+type dedupEntry struct {
+	lastSent      time.Time
+	windowMinutes int
+}
+
+// notifDedupTracker implements per-rule "notify once per new X" gating. Unlike
+// notifRateLimiter it treats a window of 0 as "once until restart" and keeps
+// such entries for the life of the process; positive-window entries re-arm and
+// are pruned by cleanup once expired.
+type notifDedupTracker struct {
+	mu      sync.Mutex
+	entries map[rateLimitKey]dedupEntry
+}
+
+func newNotifDedupTracker() *notifDedupTracker {
+	return &notifDedupTracker{entries: make(map[rateLimitKey]dedupEntry)}
+}
+
+// allow reports whether a dedup subject may fire now and records the time when
+// it does. windowMinutes <= 0 means the subject fires once and never again
+// while the process runs; a positive window re-arms it after that many minutes.
+func (d *notifDedupTracker) allow(key rateLimitKey, windowMinutes int) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if entry, seen := d.entries[key]; seen {
+		if windowMinutes <= 0 || time.Since(entry.lastSent) < time.Duration(windowMinutes)*time.Minute {
+			return false
+		}
+	}
+	d.entries[key] = dedupEntry{lastSent: time.Now(), windowMinutes: windowMinutes}
+	return true
+}
+
+// cleanup removes expired positive-window entries. "Once until restart" entries
+// (windowMinutes <= 0) are kept for the life of the process.
+func (d *notifDedupTracker) cleanup() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := time.Now()
+	for k, e := range d.entries {
+		if e.windowMinutes > 0 && now.Sub(e.lastSent) >= time.Duration(e.windowMinutes)*time.Minute {
+			delete(d.entries, k)
+		}
+	}
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 // NotificationStats holds runtime counters for the admin API.
@@ -102,7 +150,9 @@ type NotificationManager struct {
 	cfg      *NotificationsConfig
 	channels map[string]NotificationChannel // keyed by channel name
 	tmpls    map[string]*template.Template  // keyed by rule name
+	blocked  map[string]bool                // rule keys disabled at runtime by the high-volume guardrail
 	rl       *notifRateLimiter
+	dedup    *notifDedupTracker
 	funcMap  template.FuncMap
 
 	mu    sync.RWMutex
@@ -116,7 +166,9 @@ func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, err
 		cfg:      cfg,
 		channels: make(map[string]NotificationChannel),
 		tmpls:    make(map[string]*template.Template),
+		blocked:  make(map[string]bool),
 		rl:       newNotifRateLimiter(),
+		dedup:    newNotifDedupTracker(),
 		stats: NotificationStats{
 			ByRule:               make(map[string]int64),
 			ByRuleErrors:         make(map[string]int64),
@@ -143,12 +195,16 @@ func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, err
 		return nil, err
 	}
 
+	// Determine which high-volume rules must be disabled at runtime.
+	m.blocked = computeBlockedRules(cfg)
+
 	// Start periodic rate-limiter cleanup (every 30 minutes)
 	go func() {
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			m.rl.cleanup(2 * time.Hour)
+			m.dedup.cleanup()
 		}
 	}()
 
@@ -162,6 +218,8 @@ func (m *NotificationManager) buildChannels() error {
 		switch chCfg.Type {
 		case "telegram":
 			ch = NewTelegramChannel(name, chCfg)
+		case "email":
+			ch = NewEmailChannel(name, chCfg)
 		default:
 			return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 		}
@@ -172,20 +230,43 @@ func (m *NotificationManager) buildChannels() error {
 }
 
 // compileTemplates pre-compiles the Go text/template for every rule that
-// specifies a custom template string.
+// specifies a custom template string (default and per-channel overrides).
 func (m *NotificationManager) compileTemplates() error {
-	for i, rule := range m.cfg.Rules {
-		if rule.Template == "" {
-			continue
-		}
-		key := ruleKey(i, rule)
-		t, err := template.New(key).Funcs(m.funcMap).Parse(rule.Template)
-		if err != nil {
-			return fmt.Errorf("notification rule %q: invalid template: %w", key, err)
-		}
-		m.tmpls[key] = t
+	tmpls, err := compileRuleTemplates(m.cfg.Rules, m.funcMap)
+	if err != nil {
+		return err
 	}
+	m.tmpls = tmpls
 	return nil
+}
+
+// compileRuleTemplates pre-compiles the default template for each rule (keyed by
+// ruleKey) and any per-channel overrides (keyed by ruleChannelKey). It is shared
+// by initial load and Reload so both paths behave identically.
+func compileRuleTemplates(rules []NotificationRule, funcMap template.FuncMap) (map[string]*template.Template, error) {
+	tmpls := make(map[string]*template.Template)
+	for i, rule := range rules {
+		key := ruleKey(i, rule)
+		if rule.Template != "" {
+			t, err := template.New(key).Funcs(funcMap).Parse(rule.Template)
+			if err != nil {
+				return nil, fmt.Errorf("notification rule %q: invalid template: %w", key, err)
+			}
+			tmpls[key] = t
+		}
+		for chName, tmplStr := range rule.Templates {
+			if tmplStr == "" {
+				continue
+			}
+			ckey := ruleChannelKey(key, chName)
+			t, err := template.New(ckey).Funcs(funcMap).Parse(tmplStr)
+			if err != nil {
+				return nil, fmt.Errorf("notification rule %q channel %q: invalid template: %w", key, chName, err)
+			}
+			tmpls[ckey] = t
+		}
+	}
+	return tmpls, nil
 }
 
 // ruleKey returns a stable string key for a rule (used for template map and stats).
@@ -194,6 +275,39 @@ func ruleKey(idx int, r NotificationRule) string {
 		return r.Name
 	}
 	return fmt.Sprintf("rule[%d]", idx)
+}
+
+// ruleChannelKey returns the template-map key for a rule's per-channel override.
+// The NUL separator cannot occur in a rule name or channel name, so keys never
+// collide with the plain ruleKey.
+func ruleChannelKey(rKey, chName string) string {
+	return rKey + "\x00" + chName
+}
+
+// ruleBlockedAtRuntime reports whether a rule must be disabled at runtime
+// because it would fire on every spot. This mirrors the high-volume guardrail
+// enforced by NotificationsConfig.Validate at save time, so a config that was
+// hand-edited to bypass the admin UI still cannot flood the channels.
+func ruleBlockedAtRuntime(r NotificationRule) bool {
+	return highVolumeSpotEvents[r.Event] &&
+		len(r.DedupBy) == 0 &&
+		!filterNarrowsHighVolume(r.Filter)
+}
+
+// computeBlockedRules returns the set of rule keys that the high-volume
+// guardrail disables, logging a one-time warning for each.
+func computeBlockedRules(cfg *NotificationsConfig) map[string]bool {
+	blocked := make(map[string]bool)
+	for i, rule := range cfg.Rules {
+		if ruleBlockedAtRuntime(rule) {
+			key := ruleKey(i, rule)
+			blocked[key] = true
+			log.Printf("[Notifications] Rule %q DISABLED at runtime: a %q rule with no selective "+
+				"filter and no dedup_by would fire on every spot (hundreds per minute). Add a "+
+				"selective filter or dedup_by to enable it.", key, rule.Event)
+		}
+	}
+	return blocked
 }
 
 // Reload replaces the manager's configuration with newCfg and rebuilds all
@@ -210,6 +324,8 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 			switch chCfg.Type {
 			case "telegram":
 				ch = NewTelegramChannel(name, chCfg)
+			case "email":
+				ch = NewEmailChannel(name, chCfg)
 			default:
 				return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 			}
@@ -217,24 +333,22 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 			log.Printf("[Notifications] Reload: channel %q (%s) registered", name, chCfg.Type)
 		}
 
-		// Compile templates
-		for i, rule := range newCfg.Rules {
-			if rule.Template == "" {
-				continue
-			}
-			key := ruleKey(i, rule)
-			t, err := template.New(key).Funcs(m.funcMap).Parse(rule.Template)
-			if err != nil {
-				return fmt.Errorf("notification rule %q: invalid template: %w", key, err)
-			}
-			newTmpls[key] = t
+		// Compile templates (default + per-channel overrides)
+		var err error
+		newTmpls, err = compileRuleTemplates(newCfg.Rules, m.funcMap)
+		if err != nil {
+			return err
 		}
 	}
+
+	// Recompute the runtime guardrail block-list for the new rule set.
+	newBlocked := computeBlockedRules(newCfg)
 
 	m.mu.Lock()
 	m.cfg = newCfg
 	m.channels = newChannels
 	m.tmpls = newTmpls
+	m.blocked = newBlocked
 	m.mu.Unlock()
 
 	log.Printf("[Notifications] Reloaded: enabled=%v channels=%d rules=%d",
@@ -262,6 +376,7 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 	cfg := m.cfg
 	channels := m.channels
 	tmpls := m.tmpls
+	blocked := m.blocked
 	m.mu.RUnlock()
 
 	if !cfg.Enabled {
@@ -279,6 +394,16 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 		if rule.Event != evt.EventType() {
 			continue
 		}
+
+		key := ruleKey(i, rule)
+
+		// Runtime guardrail: skip high-volume rules that lack a selective filter
+		// or dedup_by. These are flagged once at load/reload (computeBlockedRules)
+		// and would otherwise fire on every spot.
+		if blocked[key] {
+			continue
+		}
+
 		if !m.matchFilter(evt, rule.Filter) {
 			continue
 		}
@@ -287,23 +412,33 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 		m.stats.TotalMatched++
 		m.mu.Unlock()
 
-		key := ruleKey(i, rule)
-		subject := m.rateSubject(evt)
-
-		// Render message
-		msg, err := m.renderWithTmpls(key, rule.Template, evt, tmpls)
-		if err != nil {
-			log.Printf("[Notifications] Rule %q: template error: %v", key, err)
-			m.mu.Lock()
-			m.stats.TotalErrors++
-			m.stats.LastError = err.Error()
-			now := time.Now()
-			m.stats.LastErrorAt = &now
-			m.mu.Unlock()
-			continue
+		// Per-rule deduplication: for "notify once per new X" rules, fire only
+		// the first time a given combination of dedup_by values is seen within
+		// the configured window. This is what makes a high-volume spot rule
+		// (e.g. every FT8 decode) usable as a "new country/continent" alert.
+		if len(rule.DedupBy) > 0 {
+			parts := make([]string, len(rule.DedupBy))
+			for j, dk := range rule.DedupBy {
+				parts[j] = dedupValue(evt, dk)
+			}
+			dkey := rateLimitKey{ruleName: "dedup:" + key, subject: strings.Join(parts, "|")}
+			if !m.dedup.allow(dkey, rule.DedupWindowMinutes) {
+				m.mu.Lock()
+				m.stats.TotalRateLimited++
+				m.stats.ByRuleRateLimited[key]++
+				m.mu.Unlock()
+				if DebugMode {
+					log.Printf("[Notifications] Rule %q: deduplicated (subject: %s)", key, strings.Join(parts, "|"))
+				}
+				continue
+			}
 		}
 
-		// Dispatch to each channel
+		subject := m.rateSubject(evt)
+
+		// Dispatch to each channel. The message is rendered per channel so a rule
+		// can format its body differently for each transport (e.g. HTML for
+		// Telegram, plain wording for email) via per-channel template overrides.
 		for _, chName := range rule.Channels {
 			ch, ok := channels[chName]
 			if !ok {
@@ -323,6 +458,21 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				if DebugMode {
 					log.Printf("[Notifications] Rule %q → channel %q: rate limited (subject: %s)", key, chName, subject)
 				}
+				continue
+			}
+
+			// Render this channel's body (override → rule default → built-in).
+			msg, err := m.renderForChannel(key, chName, evt, tmpls)
+			if err != nil {
+				log.Printf("[Notifications] Rule %q → channel %q: template error: %v", key, chName, err)
+				m.mu.Lock()
+				m.stats.TotalErrors++
+				m.stats.ByRuleErrors[key]++
+				m.stats.ByChannelErrors[chName]++
+				m.stats.LastError = err.Error()
+				now := time.Now()
+				m.stats.LastErrorAt = &now
+				m.mu.Unlock()
 				continue
 			}
 
@@ -382,6 +532,66 @@ func (m *NotificationManager) rateSubject(evt NotificationEvent) string {
 	default:
 		return "unknown"
 	}
+}
+
+// dedupValue extracts the value of a single dedup_by key from a spot event.
+// Unknown keys (or keys not applicable to the event type) yield "". Keys must
+// match those declared in dedupKeysForEvent.
+func dedupValue(evt NotificationEvent, key string) string {
+	switch e := evt.(type) {
+	case CWSpotEvent:
+		switch key {
+		case "callsign":
+			return e.DXCall
+		case "country":
+			return e.Country
+		case "country_code":
+			return e.CountryCode
+		case "continent":
+			return e.Continent
+		case "cq_zone":
+			return strconv.Itoa(e.CQZone)
+		case "itu_zone":
+			return strconv.Itoa(e.ITUZone)
+		case "band":
+			return e.Band
+		case "mode":
+			return e.Mode
+		}
+	case DXSpotEvent:
+		switch key {
+		case "callsign":
+			return e.DXCall
+		case "country":
+			return e.Country
+		case "country_code":
+			return e.CountryCode
+		case "continent":
+			return e.Continent
+		case "band":
+			return e.Band
+		}
+	case DigitalDecodeEvent:
+		switch key {
+		case "callsign":
+			return e.Callsign
+		case "country":
+			return e.Country
+		case "country_code":
+			return e.CountryCode
+		case "continent":
+			return e.Continent
+		case "cq_zone":
+			return strconv.Itoa(e.CQZone)
+		case "itu_zone":
+			return strconv.Itoa(e.ITUZone)
+		case "band":
+			return e.Band
+		case "mode":
+			return e.Mode
+		}
+	}
+	return ""
 }
 
 // ─── Filter engine ────────────────────────────────────────────────────────────
@@ -575,6 +785,11 @@ func (m *NotificationManager) matchSystemMonitor(e SystemMonitorEvent, f Notific
 	if !matchStringSlice(e.Component, f.Components) {
 		return false
 	}
+	// Flap-detection alerts (activation / stabilisation) always deliver to any
+	// rule watching the component, regardless of on_unhealthy/on_recovery.
+	if e.isFlapAlert() {
+		return true
+	}
 	// OnUnhealthy: fire only when transitioning healthy→unhealthy.
 	// e.PreviouslyHealthy==true && e.Healthy==false means we just became unhealthy.
 	if f.OnUnhealthy != nil && *f.OnUnhealthy {
@@ -720,6 +935,21 @@ func (m *NotificationManager) render(key, tmplStr string, evt NotificationEvent)
 	tmpls := m.tmpls
 	m.mu.RUnlock()
 	return m.renderWithTmpls(key, tmplStr, evt, tmpls)
+}
+
+// renderForChannel renders the body for one (rule, channel) pair, preferring a
+// per-channel override, then the rule's default template, then the built-in
+// default message. tmpls is the snapshot taken at the start of Publish.
+func (m *NotificationManager) renderForChannel(rKey, chName string, evt NotificationEvent, tmpls map[string]*template.Template) (string, error) {
+	if t, ok := tmpls[ruleChannelKey(rKey, chName)]; ok {
+		var buf bytes.Buffer
+		if err := t.Execute(&buf, evt); err != nil {
+			return "", err
+		}
+		return buf.String(), nil
+	}
+	// Fall back to the rule default (or built-in) via the existing helper.
+	return m.renderWithTmpls(rKey, "", evt, tmpls)
 }
 
 // defaultMessage returns a sensible default notification text for each event type.

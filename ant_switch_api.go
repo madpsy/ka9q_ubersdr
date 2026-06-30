@@ -447,16 +447,28 @@ func msSNaShortestPath(current, target, nCh int) int {
 }
 
 // stepTo moves the rotary switch to target position by the shortest path.
-// target=0 means ground. After each individual step the response HTML is
-// parsed to get the new position, so hardware button presses mid-sequence
-// are detected and the remaining steps are recalculated.
+// target=0 means ground (GROUND position on the ring).
+//
+// Device behaviour (confirmed by curl testing):
+//   - Ring: GROUND(0) ↔ 1 ↔ 2 ↔ 3 ↔ 4 ↔ 5 ↔ GROUND(0)
+//   - GET /5/on → step Up   (increments position, GROUND→1→2→…→5→GROUND)
+//   - GET /4/on → step Down (decrements position, GROUND→5→4→…→1→GROUND)
+//   - Every command returns the full HTML page with the new position
+//   - GROUND is shown as <p>GROUND</p> in the HTML
+//   - Antenna N is shown as N<p> in the HTML
+//
+// Algorithm: send one step, parse the response HTML for the new position,
+// recalculate and repeat. No separate GET / needed — the step response is
+// authoritative. Stall detection aborts if position doesn't change.
 func (b *msSNaWebBackend) stepTo(target int) (AntSwitchState, error) {
-	const maxSteps = 20 // safety limit — no switch has more than 10 positions
+	maxSteps := 2*b.nCh + 2 // enough for any ring traversal with margin
 
-	current, err := b.readSelected()
+	// Read initial position
+	body, err := httpGet(b.client, b.baseURL+"/")
 	if err != nil {
 		return AntSwitchState{LastError: err.Error()}, err
 	}
+	current := b.parseSelected(body)
 
 	for attempt := 0; attempt < maxSteps; attempt++ {
 		if current == target {
@@ -475,17 +487,28 @@ func (b *msSNaWebBackend) stepTo(target int) (AntSwitchState, error) {
 			stepURL = b.baseURL + "/4/on" // Down
 		}
 
-		// Send one step and parse the response to get the new position.
-		// The device returns the same HTML page after each step command.
-		body, err := httpGet(b.client, stepURL)
+		// Send one step — the response contains the new position HTML.
+		body, err = httpGet(b.client, stepURL)
 		if err != nil {
 			return AntSwitchState{LastError: err.Error()}, err
 		}
+
+		prev := current
 		current = b.parseSelected(body)
+
+		// Stall detection: if the position didn't change after a step, the
+		// device is not responding as expected. Abort to avoid hammering it.
+		if current == prev {
+			log.Printf("AntSwitch ms-sNa-web: position stuck at %d after step toward %d — aborting", current, target)
+			e := fmt.Errorf("ms-sNa-web: position stuck at %d after step toward %d", current, target)
+			return AntSwitchState{LastError: e.Error(), LastUpdate: time.Now()}, e
+		}
 	}
 
-	// Reached maxSteps — return whatever position we're at now
-	return b.selectedToState(current), nil
+	// Reached maxSteps without reaching target
+	e := fmt.Errorf("ms-sNa-web: reached step limit (%d) without reaching target %d (at %d)", maxSteps, target, current)
+	log.Printf("AntSwitch: %v", e)
+	return AntSwitchState{LastError: e.Error(), LastUpdate: time.Now()}, e
 }
 
 func (b *msSNaWebBackend) SelectAntenna(n int) (AntSwitchState, error) {

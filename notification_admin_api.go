@@ -1389,13 +1389,15 @@ func handleTelegramAvailableCommands(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type cmdInfo struct {
-		Name string `json:"name"`
-		Desc string `json:"desc"`
+		Name     string `json:"name"`
+		Desc     string `json:"desc"`
+		ReadOnly bool   `json:"read_only"`
 	}
 	names := sortedBotCommandNames()
 	cmds := make([]cmdInfo, 0, len(names))
 	for _, name := range names {
-		cmds = append(cmds, cmdInfo{Name: name, Desc: botCommands[name].desc})
+		bc := botCommands[name]
+		cmds = append(cmds, cmdInfo{Name: name, Desc: bc.desc, ReadOnly: bc.readOnly})
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 		"ok":       true,

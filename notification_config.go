@@ -53,10 +53,13 @@ type TelegramBotCommandsConfig struct {
 	// Enabled turns the command listener on or off.
 	Enabled bool `yaml:"enabled" json:"enabled"`
 	// Commands is the list of built-in command names to activate.
-	// Supported values: "stats", "help"
 	// Unknown names are silently ignored so future commands can be added
 	// without breaking existing configs.
 	Commands []string `yaml:"commands,omitempty" json:"commands,omitempty"`
+	// RWCommands is the subset of Commands for which write access is also
+	// permitted (e.g. "/rotator 180" to move the rotator). Commands not in
+	// this list are read-only even if they support write arguments.
+	RWCommands []string `yaml:"rw_commands,omitempty" json:"rw_commands,omitempty"`
 }
 
 // NotificationChannelConfig describes a single output channel.

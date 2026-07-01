@@ -668,8 +668,9 @@ async function saveConfig(alertContainer) {
             };
             if (ch.bot_commands) {
                 tgCh.bot_commands = {
-                    enabled:  !!ch.bot_commands.enabled,
-                    commands: Array.isArray(ch.bot_commands.commands) ? ch.bot_commands.commands : [],
+                    enabled:     !!ch.bot_commands.enabled,
+                    commands:    Array.isArray(ch.bot_commands.commands)    ? ch.bot_commands.commands    : [],
+                    rw_commands: Array.isArray(ch.bot_commands.rw_commands) ? ch.bot_commands.rw_commands : [],
                 };
             }
             payload.channels[name] = tgCh;
@@ -1228,7 +1229,7 @@ function renderTelegramManagePanel(name, panel) {
                         '<span id="tgMgr-listenerStatus-' + escHtml(name) + '" style="font-size:0.8rem;margin-left:4px"></span>' +
                     '</div>' +
                     '<div style="font-size:0.85rem;color:#555;margin-bottom:6px;font-weight:500">Active commands:</div>' +
-                    '<div id="tgMgr-cmdCheckboxes-' + escHtml(name) + '" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
+                    '<div id="tgMgr-cmdCheckboxes-' + escHtml(name) + '" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">' +
                         '<span style="color:#888;font-size:0.8rem">Loading\u2026</span>' +
                     '</div>' +
                     '<p style="font-size:0.78rem;color:#888;margin:0 0 8px">&#x2139;&#xFE0F; <code>/help</code> is always enabled and cannot be disabled.</p>' +
@@ -1364,6 +1365,7 @@ function renderTelegramManagePanel(name, panel) {
         var bc = (ch && ch.bot_commands) || {};
         el('tgMgr-listenerEnabled-' + name).checked = !!bc.enabled;
         var enabledCmds = Array.isArray(bc.commands) ? bc.commands : [];
+        var rwCmds = Array.isArray(bc.rw_commands) ? bc.rw_commands : [];
 
         apiFetch('/admin/notifications/telegram-available-commands').then(function(r) {
             return r.json();
@@ -1377,10 +1379,24 @@ function renderTelegramManagePanel(name, panel) {
             }
             container.innerHTML = cmds.map(function(c) {
                 var checked = enabledCmds.indexOf(c.name) >= 0 ? ' checked' : '';
-                return '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
-                    '<input type="checkbox" class="tgMgr-cmdCheck-' + escHtml(name) + '" value="' + escHtml(c.name) + '"' + checked + '> ' +
-                    '<code>/' + escHtml(c.name) + '</code> \u2014 ' + escHtml(c.desc) +
-                    '</label>';
+                var rwChecked = rwCmds.indexOf(c.name) >= 0 ? ' checked' : '';
+                // For read-write capable commands show a secondary "allow write" toggle.
+                var rwToggle = '';
+                if (!c.read_only) {
+                    rwToggle =
+                        '<label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;color:#555;cursor:pointer;margin-left:18px">' +
+                            '<input type="checkbox" class="tgMgr-cmdRW-' + escHtml(name) + '" value="' + escHtml(c.name) + '"' + rwChecked + '> ' +
+                            'Allow write (e.g. <code>/' + escHtml(c.name) + ' &hellip;</code>)' +
+                        '</label>';
+                }
+                return '<div style="display:flex;flex-direction:column;gap:2px">' +
+                    '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
+                        '<input type="checkbox" class="tgMgr-cmdCheck-' + escHtml(name) + '" value="' + escHtml(c.name) + '"' + checked + '> ' +
+                        '<code>/' + escHtml(c.name) + '</code> \u2014 ' + escHtml(c.desc) +
+                        (c.read_only ? ' <span style="font-size:0.75rem;color:#888">(read-only)</span>' : '') +
+                    '</label>' +
+                    rwToggle +
+                '</div>';
             }).join('');
         }).catch(function() {
             var container = el('tgMgr-cmdCheckboxes-' + name);
@@ -1543,11 +1559,19 @@ function renderTelegramManagePanel(name, panel) {
         document.querySelectorAll('.tgMgr-cmdCheck-' + name + ':checked').forEach(function(cb) {
             commands.push(cb.value);
         });
+        // Collect write-enabled commands (subset of commands).
+        var rwCommands = [];
+        document.querySelectorAll('.tgMgr-cmdRW-' + name + ':checked').forEach(function(cb) {
+            // Only include if the command itself is also enabled.
+            if (commands.indexOf(cb.value) >= 0) {
+                rwCommands.push(cb.value);
+            }
+        });
         var enabled = el('tgMgr-listenerEnabled-' + name).checked;
 
         // Update localConfig so saveConfig() picks it up.
         if (!localConfig.channels[name]) return;
-        localConfig.channels[name].bot_commands = { enabled: enabled, commands: commands };
+        localConfig.channels[name].bot_commands = { enabled: enabled, commands: commands, rw_commands: rwCommands };
 
         // Save the full config (which includes bot_commands via the updated saveConfig branch).
         await saveConfig(el('tgMgr-alert-' + name));

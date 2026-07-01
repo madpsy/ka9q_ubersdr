@@ -77,6 +77,11 @@ type TelegramBotListener struct {
 	mu      sync.RWMutex
 	status  listenerStatus
 	history []commandHistoryEntry // ring buffer, capped at maxCommandHistory
+
+	// rotatorMoveMu guards rotatorMovePending so only one async move
+	// confirmation goroutine runs at a time per listener.
+	rotatorMoveMu      sync.Mutex
+	rotatorMovePending bool
 }
 
 // listenerStatus is the runtime state reported to the admin UI.
@@ -377,7 +382,9 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 		return
 	}
 
-	// Extract command (strip bot username suffix, e.g. /sessions@MyBot → /sessions).
+	// Extract command and optional arguments.
+	// e.g. "/rotator 180" → cmd="rotator", args="180"
+	//      "/sessions@MyBot" → cmd="sessions", args=""
 	text := strings.TrimSpace(msg.Text)
 	if !strings.HasPrefix(text, "/") {
 		return
@@ -389,8 +396,10 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 		rawCmd = rawCmd[:idx]
 	}
 	cmd := strings.ToLower(strings.TrimPrefix(rawCmd, "/"))
+	// Everything after the command token is the argument string.
+	args := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, parts[0]), " "))
 
-	log.Printf("[TelegramListener:%s] received command /%s from chat %s", l.channelName, cmd, chatIDStr)
+	log.Printf("[TelegramListener:%s] received command /%s (args=%q) from chat %s", l.channelName, cmd, args, chatIDStr)
 
 	// Build a base history entry for this command.
 	var userID int64
@@ -411,7 +420,7 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	// /help is always handled regardless of the enabled commands list so admins
 	// can always discover what is available and what is disabled.
 	if cmd == "help" {
-		resp, apiResp, apiOK := l.handleHelp(msg.Chat.ID)
+		resp, apiResp, apiOK := l.handleHelp(msg.Chat.ID, args)
 		if apiOK {
 			baseEntry.Result = "ok"
 		} else {
@@ -432,8 +441,9 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	}
 
 	// Dispatch to the registered handler (defined in telegram_bot_commands.go).
+	// Pass args and whether write access is permitted for this command.
 	if bc, ok := botCommands[cmd]; ok {
-		resp, apiResp, apiOK := bc.handler(l, msg.Chat.ID)
+		resp, apiResp, apiOK := bc.handler(l, msg.Chat.ID, args)
 		if apiOK {
 			baseEntry.Result = "ok"
 		} else {
@@ -474,6 +484,18 @@ func truncateResponse(s string) string {
 // commandEnabled reports whether cmd is in the configured commands list.
 func (l *TelegramBotListener) commandEnabled(cmd string) bool {
 	for _, c := range l.cfg.BotCommands.Commands {
+		if strings.ToLower(c) == cmd {
+			return true
+		}
+	}
+	return false
+}
+
+// commandWriteEnabled reports whether write access (i.e. arguments that change
+// hardware state) is permitted for cmd. A command must be both enabled and in
+// the RWCommands list for write access to be granted.
+func (l *TelegramBotListener) commandWriteEnabled(cmd string) bool {
+	for _, c := range l.cfg.BotCommands.RWCommands {
 		if strings.ToLower(c) == cmd {
 			return true
 		}
@@ -692,12 +714,12 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		if ch.Type != "telegram" || !ch.BotCommands.Enabled || ch.BotToken == "" {
 			continue
 		}
-		// Stop existing listener if config changed (token or commands list).
+		// Stop existing listener if config changed (token, chat, commands, or rw_commands).
 		if existing, ok := r.listeners[name]; ok {
 			oldCfg := existing.cfg
 			if oldCfg.BotToken == ch.BotToken &&
 				oldCfg.ChatID == ch.ChatID &&
-				commandListsEqual(oldCfg.BotCommands.Commands, ch.BotCommands.Commands) {
+				botCommandConfigEqual(oldCfg.BotCommands, ch.BotCommands) {
 				continue // unchanged — keep running
 			}
 			existing.Stop()
@@ -760,4 +782,12 @@ func commandListsEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// botCommandConfigEqual reports whether two TelegramBotCommandsConfig values
+// are equivalent (same enabled state, same commands, same rw_commands).
+func botCommandConfigEqual(a, b TelegramBotCommandsConfig) bool {
+	return a.Enabled == b.Enabled &&
+		commandListsEqual(a.Commands, b.Commands) &&
+		commandListsEqual(a.RWCommands, b.RWCommands)
 }

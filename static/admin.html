@@ -21129,9 +21129,8 @@ const tooltipLine2 = timeStr;
                 if (!healthResp) return;
 
                 const health = (healthResp.ok || healthResp.status === 503) ? await healthResp.json() : null;
-                const test   = null; // only populated by the explicit "Test Connection" button
 
-                renderAntSwitchTab(body, health, test);
+                renderAntSwitchTab(body, health);
                 antSwitchTabBuilt = true;
             } catch (e) {
                 body.innerHTML = `<div class="alert" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:5px;padding:15px;">❌ Failed to load antenna switch status: ${e.message}</div>`;
@@ -21139,7 +21138,7 @@ const tooltipLine2 = timeStr;
             }
         }
 
-        function renderAntSwitchTab(container, health, test) {
+        function renderAntSwitchTab(container, health) {
             if (!health) {
                 container.innerHTML = '<div class="alert" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:5px;padding:15px;">❌ Could not load antenna switch data.</div>';
                 return;
@@ -21165,13 +21164,6 @@ const tooltipLine2 = timeStr;
             const LS  = 'display:block;margin-bottom:4px;font-weight:500;color:#555;font-size:12px;';
 
             // ── Connection banner ─────────────────────────────────────────────────
-            const connOK     = test && test.success;
-            const connColor  = connOK ? '#d4edda' : '#f8d7da';
-            const connBorder = connOK ? '#c3e6cb' : '#f5c6cb';
-            const connText   = connOK
-                ? `✅ Connected — ${test.duration_ms}ms`
-                : (test ? `❌ Connection failed: ${test.error || 'unknown error'}` : '❌ Connection test unavailable');
-
             // Format last_update as a human-readable local time
             let lastUpdateStr = '';
             if (health.last_update) {
@@ -21179,9 +21171,8 @@ const tooltipLine2 = timeStr;
                 lastUpdateStr = ` · Updated ${lu.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}`;
             }
 
-            let html = `<div style="padding:10px 14px;background:${connColor};border:1px solid ${connBorder};border-radius:5px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-                <span style="font-weight:bold;">${connText}</span>
-                <span style="font-size:12px;color:#555;">${health.device_url || ''} · ${health.backend_type || ''} · ${health.timeout_ms}ms · ${allowMixing ? 'Mixing' : 'Exclusive'} mode${lastUpdateStr}</span>
+            let html = `<div style="padding:8px 14px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:5px;margin-bottom:16px;font-size:12px;color:#555;">
+                ${health.device_url || ''} · ${health.backend_type || ''} · ${health.timeout_ms}ms · ${allowMixing ? 'Mixing' : 'Exclusive'} mode${lastUpdateStr}
             </div>`;
 
             // Link to public antenna switch control page

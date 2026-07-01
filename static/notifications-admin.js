@@ -364,6 +364,15 @@ function fmtDate(str) {
 
 function el(id) { return document.getElementById(id); }
 
+function fmtCount(n) {
+    n = Number(n) || 0;
+    var abs = Math.abs(n);
+    if (abs >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (abs >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (abs >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(n);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB SYSTEM
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -408,7 +417,7 @@ async function loadHealth() {
             { label: 'Rate-Limited', value: stats.total_rate_limited != null ? stats.total_rate_limited : 0 },
         ];
         statsGrid.innerHTML = statItems.map(function(s) {
-            return '<div class="stat-card"><div class="stat-value">' + s.value + '</div><div class="stat-label">' + s.label + '</div></div>';
+            return '<div class="stat-card"><div class="stat-value">' + fmtCount(s.value) + '</div><div class="stat-label">' + s.label + '</div></div>';
         }).join('');
 
         const dotClass = data.enabled ? 'green' : 'grey';

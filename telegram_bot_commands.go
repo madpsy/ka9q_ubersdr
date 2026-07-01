@@ -117,6 +117,10 @@ func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, stri
 	if len(reportRanks) == 0 && len(countryRanks) == 0 {
 		sb.WriteString("<i>Callsign not found in current leaderboard.</i>\n")
 	} else {
+		// Extract the cross-band "All" totals so they can be shown at the end.
+		reportAll, hasReportAll := reportRanks["All"]
+		countryAll, hasCountryAll := countryRanks["All"]
+
 		if len(reportRanks) > 0 {
 			sb.WriteString("<b>Reports (24h / 7d):</b>\n")
 			for _, band := range hfBandOrder {
@@ -126,7 +130,7 @@ func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, stri
 				}
 			}
 			for band, r := range reportRanks {
-				if !hfBandKnown(band) {
+				if !hfBandKnown(band) && band != "All" {
 					fmt.Fprintf(&sb, "  %s: #%d — %s reports (7d: %s)\n",
 						html.EscapeString(band), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
 				}
@@ -141,10 +145,22 @@ func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, stri
 				}
 			}
 			for band, r := range countryRanks {
-				if !hfBandKnown(band) {
+				if !hfBandKnown(band) && band != "All" {
 					fmt.Fprintf(&sb, "  %s: #%d — %s countries (7d: %s)\n",
 						html.EscapeString(band), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
 				}
+			}
+		}
+		// Totals section — "All" band shown last with a blank line separator.
+		if hasReportAll || hasCountryAll {
+			sb.WriteString("\n<b>Totals (all bands):</b>\n")
+			if hasReportAll {
+				fmt.Fprintf(&sb, "  Reports: #%d — %s (7d: %s)\n",
+					reportAll.Rank, fmtCount(reportAll.Day), fmtCount(reportAll.Week))
+			}
+			if hasCountryAll {
+				fmt.Fprintf(&sb, "  Countries: #%d — %s (7d: %s)\n",
+					countryAll.Rank, fmtCount(countryAll.Day), fmtCount(countryAll.Week))
 			}
 		}
 	}

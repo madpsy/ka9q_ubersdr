@@ -14457,10 +14457,10 @@ function updateCATSyncState() {
 window.toggleFrequencyUnit = toggleFrequencyUnit;
 
 // Colour helpers matching the S-meter needle colours
-// dBFS: red at -115 dBFS (S1) → green at -73 dBFS (S9)
+// ITU standard: S1 = -121 dBFS, S9 = -73 dBFS (6 dB/S-unit)
 function sMeterColourForDbfs(dbfs) {
-    const clamped = Math.max(-115, Math.min(-73, dbfs));
-    const hue = Math.round(((clamped + 115) / 42) * 120);
+    const clamped = Math.max(-121, Math.min(-73, dbfs));
+    const hue = Math.round(((clamped + 121) / 48) * 120);
     return `hsl(${hue}, 90%, 55%)`;
 }
 

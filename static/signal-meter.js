@@ -272,10 +272,10 @@ class SignalMeter {
         const SNR_MAX  = 60;
 
         // ── Colour helpers matching s-meter-needle.js ────────────────────────
-        // sMeterColour: red at -115 → yellow at -91 → green at -73 (HSL 0→120)
+        // sMeterColour: red at S1/−121 dBFS → yellow at S5/−97 dBFS → green at S9/−73 dBFS (HSL 0→120)
         const sMeterColour = (dbfs) => {
-            const clamped = Math.max(-115, Math.min(-73, dbfs));
-            const hue = Math.round(((clamped + 115) / 42) * 120);
+            const clamped = Math.max(-121, Math.min(-73, dbfs));
+            const hue = Math.round(((clamped + 121) / 48) * 120);
             return `hsl(${hue}, 90%, 55%)`;
         };
         // snrColour: red at 30 → green at 50 (HSL 0→120)

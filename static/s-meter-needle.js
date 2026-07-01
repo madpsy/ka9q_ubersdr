@@ -57,7 +57,7 @@ class SMeterNeedle {
         this.animationSpeed = 0.6;
 
         // S-meter scale configuration
-        // S1 = -115 dBFS, S9 = -73 dBFS (6 dB per S-unit)
+        // ITU standard: S9 = -73 dBFS, 6 dB per S-unit → S1 = -121 dBFS
         // S9+10 = -63, S9+20 = -53, S9+30 = -43, S9+40 = -33
         this.minDb = -127;
         this.maxDb = -33;
@@ -115,10 +115,11 @@ class SMeterNeedle {
     }
 
     // Convert dBFS to S-units for display
+    // ITU standard: S9 = -73 dBFS, 6 dB/S-unit → S1 = -121 dBFS
     dbfsToSUnits(dbfs) {
-        if (dbfs < -115) return 0;
+        if (dbfs < -121) return 0;
         if (dbfs < -73) {
-            return 1 + (dbfs + 115) / 6;
+            return 1 + (dbfs + 121) / 6;
         }
         return 9 + (dbfs + 73) / 10;
     }
@@ -172,10 +173,10 @@ class SMeterNeedle {
         return `hsl(${hue}, 90%, 55%)`;
     }
 
-    // Graduated S-meter colour (red at S1/−115 dBFS → yellow at S5/−91 dBFS → green at S9/−73 dBFS)
+    // Graduated S-meter colour (red at S1/−121 dBFS → yellow at S5/−97 dBFS → green at S9/−73 dBFS)
     sMeterColour(dbfs) {
-        const clamped = Math.max(-115, Math.min(-73, dbfs));
-        const hue = Math.round(((clamped + 115) / 42) * 120);
+        const clamped = Math.max(-121, Math.min(-73, dbfs));
+        const hue = Math.round(((clamped + 121) / 48) * 120);
         return `hsl(${hue}, 90%, 55%)`;
     }
 
@@ -215,9 +216,9 @@ class SMeterNeedle {
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
-        // S-unit markers S1–S9
+        // S-unit markers S1–S9 (ITU: S1=−121 dBFS, S9=−73 dBFS, 6 dB/step)
         for (let s = 1; s <= 9; s++) {
-            const dbfs = -115 + (s - 1) * 6;
+            const dbfs = -121 + (s - 1) * 6;
             const angle = this.getScaleLabelAngle(dbfs);
             const col = dynamic ? this.sMeterColour(dbfs) : '#ecf0f1';
 

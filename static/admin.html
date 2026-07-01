@@ -7027,6 +7027,33 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             wrap.style.display = '';
         }
 
+        // ── Client-type helpers ───────────────────────────────────────────────────
+        // Derive the client type from the user_session_id prefix and user-agent string.
+        // Returns one of: 'kiwi' | 'websdr' | 'ubersdr-app' | 'native'
+        function getClientType(userSessionID, userAgent) {
+            if (userSessionID && userSessionID.startsWith('kiwi-'))   return 'kiwi';
+            if (userSessionID && userSessionID.startsWith('websdr-')) return 'websdr';
+            if (userAgent && userAgent.startsWith('UberSDR'))         return 'ubersdr-app';
+            return 'native';
+        }
+
+        const CLIENT_TYPE_BADGE = {
+            'kiwi':        { bg: '#ff9800', label: 'KiwiSDR' },
+            'websdr':      { bg: '#9c27b0', label: 'WebSDR'  },
+            'ubersdr-app': { bg: '#667eea', label: 'App'     },
+            'native':      { bg: '#1976d2', label: 'Browser' },
+        };
+
+        // Render the User Agent table cell: coloured badge + truncated UA text.
+        function renderClientTypeCell(clientType, userAgent) {
+            const { bg, label } = CLIENT_TYPE_BADGE[clientType] || { bg: '#999', label: '?' };
+            const badge = `<span style="display:inline-block;background:${bg};color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;margin-right:4px;white-space:nowrap;">${label}</span>`;
+            if (!userAgent || userAgent === 'N/A') return badge;
+            const display = userAgent.length > 28 ? userAgent.substring(0, 28) + '…' : userAgent;
+            return `${badge}<span style="color:#555;">${display}</span>`;
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
         function renderSessions(filterType = currentSessionFilter, systemLoad = null) {
             currentSessionFilter = filterType;
             if (systemLoad !== null) sessionsLastSystemLoad = systemLoad;
@@ -7112,6 +7139,17 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     <tbody id="sessionsTableBody"></tbody>`;
                 container.appendChild(table);
 
+                // ── Client-type legend (horizontal, between table and summary panels) ──
+                const legendDiv = document.createElement('div');
+                legendDiv.style.cssText = 'margin-top:12px;padding:8px 12px;background:#f8f9fa;border-radius:5px;border:1px solid #dee2e6;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;';
+                legendDiv.innerHTML = `
+                    <span style="font-weight:600;color:#555;">Client type:</span>
+                    <span><span style="display:inline-block;background:#1976d2;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">Browser</span>Native UberSDR web UI</span>
+                    <span><span style="display:inline-block;background:#667eea;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">App</span>ubersdr-audio desktop app</span>
+                    <span><span style="display:inline-block;background:#ff9800;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">KiwiSDR</span>KiwiSDR emulation client</span>
+                    <span><span style="display:inline-block;background:#9c27b0;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">WebSDR</span>WebSDR emulation client</span>`;
+                container.appendChild(legendDiv);
+
                 // Placeholder summary panels (updated below alongside rows)
                 const summariesContainer = document.createElement('div');
                 summariesContainer.id = 'sessionsSummariesContainer';
@@ -7146,6 +7184,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const sourceIP        = audioSession?.source_ip    || spectrumSession?.source_ip    || 'N/A';
                 const userSessionID   = sessions.hasUUID ? key : 'N/A';
                 const userAgent       = audioSession?.user_agent   || spectrumSession?.user_agent   || 'N/A';
+                const clientType      = getClientType(userSessionID, userAgent);
                 const chatUsername    = audioSession?.chat_username || spectrumSession?.chat_username || '—';
 
                 const firstSeen = audioSession?.user_session_first_seen || spectrumSession?.user_session_first_seen;
@@ -7223,7 +7262,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (sessions.isBypassed) row.style.background = '#e8f5e9';
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: -apple-system, BlinkMacSystemFont, monospace, 'Twemoji Flags'; font-size: 12px; max-width: 140px; word-wrap: break-word; line-height: 1.4;">${ipDisplay}</td>
-                    <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : (userAgent.length > 32 ? userAgent.substring(0, 32) + '…' : userAgent)}</td>
+                    <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${userAgent}">${renderClientTypeCell(clientType, userAgent)}</td>
                     <td style="padding: 12px; font-size: 12px;">${chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>'}</td>
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>

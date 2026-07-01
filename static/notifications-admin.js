@@ -1025,11 +1025,12 @@ function addTgCmdRowReadOnly(name, cmd, desc) {
     if (!container) return;
     var row = document.createElement('div');
     row.className = 'webhook-header-row tg-cmd-managed';
-    row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;align-items:center;opacity:0.75';
+    row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;align-items:center';
+    var disabledStyle = 'flex:1;min-width:0;background:#f0f0f0;color:#999;border-color:#ddd;cursor:not-allowed;';
     row.innerHTML =
-        '<input type="text" class="tg-cmd-name" value="' + escHtml(cmd) + '" style="flex:1;min-width:0" maxlength="32" readonly tabindex="-1">' +
-        '<input type="text" class="tg-cmd-desc" value="' + escHtml(desc) + '" style="flex:2;min-width:0" maxlength="256" readonly tabindex="-1">' +
-        '<span title="Managed by Interactive Command Listener \u2014 edit in the section below" style="font-size:0.9rem;cursor:default;padding:0 4px">&#x1F512;</span>';
+        '<input type="text" class="tg-cmd-name" value="' + escHtml(cmd) + '" style="' + disabledStyle + '" maxlength="32" readonly tabindex="-1">' +
+        '<input type="text" class="tg-cmd-desc" value="' + escHtml(desc) + '" style="' + disabledStyle.replace('flex:1', 'flex:2') + '" maxlength="256" readonly tabindex="-1">' +
+        '<span title="Managed by Interactive Command Listener \u2014 edit in the section below" style="font-size:0.9rem;cursor:default;padding:0 4px;color:#aaa">&#x1F512;</span>';
     container.appendChild(row);
 }
 

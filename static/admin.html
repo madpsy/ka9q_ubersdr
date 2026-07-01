@@ -21412,6 +21412,13 @@ const tooltipLine2 = timeStr;
             const newVal = (cur === n) ? 0 : n;
             currentConfig.ant_switch.default_antenna = newVal;
 
+            // Also sync apply_favourite_on_startup from the checkbox so it is not
+            // lost when this quick-save overwrites the config file.
+            const applyChk = document.getElementById('antCfgApplyFavouriteOnStartup');
+            if (applyChk) {
+                currentConfig.ant_switch.apply_favourite_on_startup = applyChk.checked;
+            }
+
             // Optimistically update the star buttons immediately
             const numAntennas = currentConfig.ant_switch.num_antennas || 8;
             for (let i = 1; i <= numAntennas; i++) {
@@ -21420,7 +21427,7 @@ const tooltipLine2 = timeStr;
                 const isDefault = newVal === i;
                 btn.textContent = isDefault ? '⭐' : '☆';
                 btn.style.opacity = isDefault ? '1' : '0.3';
-                btn.title = isDefault ? 'Default on startup (click to clear)' : 'Set as default on startup';
+                btn.title = isDefault ? 'Favourite (click to clear)' : 'Set as favourite';
             }
 
             // Persist via PUT (same mechanism as label auto-save — no restart needed)
@@ -21432,7 +21439,7 @@ const tooltipLine2 = timeStr;
                 });
                 if (!resp || !resp.ok) throw new Error('Save failed');
             } catch (e) {
-                showAlert('Failed to save default antenna: ' + e.message, 'error');
+                showAlert('Failed to save favourite antenna: ' + e.message, 'error');
                 // Revert in-memory value on failure
                 currentConfig.ant_switch.default_antenna = cur;
             }
@@ -21491,6 +21498,13 @@ const tooltipLine2 = timeStr;
                 labels.push(document.getElementById(`antCfgLabel_${i}`)?.value || '');
             }
             c.antenna_labels = labels;
+
+            // Sync apply_favourite_on_startup from the checkbox so it is not lost
+            // when this quick-save overwrites the config file.
+            const applyChk = document.getElementById('antCfgApplyFavouriteOnStartup');
+            if (applyChk) {
+                c.apply_favourite_on_startup = applyChk.checked;
+            }
 
             try {
                 const resp = await authenticatedFetch('/admin/config', {

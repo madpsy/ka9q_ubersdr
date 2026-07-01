@@ -147,16 +147,29 @@ type NotificationStats struct {
 // event; the manager evaluates all rules, renders templates, applies rate
 // limiting, and dispatches to the configured channels.
 type NotificationManager struct {
-	cfg      *NotificationsConfig
-	channels map[string]NotificationChannel // keyed by channel name
-	tmpls    map[string]*template.Template  // keyed by rule name
-	blocked  map[string]bool                // rule keys disabled at runtime by the high-volume guardrail
-	rl       *notifRateLimiter
-	dedup    *notifDedupTracker
-	funcMap  template.FuncMap
+	cfg       *NotificationsConfig
+	channels  map[string]NotificationChannel // keyed by channel name
+	tmpls     map[string]*template.Template  // keyed by rule name
+	blocked   map[string]bool                // rule keys disabled at runtime by the high-volume guardrail
+	rl        *notifRateLimiter
+	dedup     *notifDedupTracker
+	funcMap   template.FuncMap
+	listeners *TelegramListenerRegistry
 
 	mu    sync.RWMutex
 	stats NotificationStats
+}
+
+// SetSessionManager wires the SessionManager into the listener registry so
+// that bot commands (e.g. /stats) can query active sessions.
+// Must be called before the first Reload or immediately after
+// NewNotificationManager if the config is already enabled.
+func (m *NotificationManager) SetSessionManager(sm *SessionManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listeners = NewTelegramListenerRegistry(sm)
+	// Sync immediately with the current config so listeners start right away.
+	m.listeners.Sync(m.cfg)
 }
 
 // NewNotificationManager creates and initialises a NotificationManager.
@@ -355,6 +368,11 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 	m.blocked = newBlocked
 	m.mu.Unlock()
 
+	// Sync bot command listeners with the new config (start/stop as needed).
+	if m.listeners != nil {
+		m.listeners.Sync(newCfg)
+	}
+
 	log.Printf("[Notifications] Reloaded: enabled=%v channels=%d rules=%d",
 		newCfg.Enabled, len(newChannels), len(newCfg.Rules))
 	return nil
@@ -369,6 +387,15 @@ func (m *NotificationManager) Config() *NotificationsConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.cfg
+}
+
+// ListenerStatus returns the runtime status of all active Telegram bot command
+// listeners, keyed by channel name. Returns nil if no listeners are running.
+func (m *NotificationManager) ListenerStatus() map[string]listenerStatus {
+	if m.listeners == nil {
+		return nil
+	}
+	return m.listeners.GetStatus()
 }
 
 // It is safe to call from multiple goroutines concurrently.

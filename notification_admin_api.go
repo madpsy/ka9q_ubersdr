@@ -1343,3 +1343,31 @@ func handleTelegramBotManageWithManager(w http.ResponseWriter, r *http.Request, 
 		fail("unknown action: " + req.Action)
 	}
 }
+
+// handleTelegramListenerStatus returns the runtime status of all active
+// Telegram bot command listeners (one per channel with bot_commands.enabled=true).
+// GET /admin/notifications/telegram-listener-status
+func handleTelegramListenerStatus(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "GET required"}) //nolint:errcheck
+		return
+	}
+
+	if nm == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "listeners": map[string]interface{}{}}) //nolint:errcheck
+		return
+	}
+
+	statuses := nm.ListenerStatus()
+	if statuses == nil {
+		statuses = map[string]listenerStatus{}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"ok":        true,
+		"listeners": statuses,
+	})
+}

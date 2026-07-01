@@ -46,6 +46,19 @@ type NotificationsConfig struct {
 	Rules []NotificationRule `yaml:"rules" json:"rules"`
 }
 
+// TelegramBotCommandsConfig configures the interactive bot command listener.
+// When Enabled is true, a long-polling goroutine runs for the channel and
+// responds to /commands sent by chat admins.
+type TelegramBotCommandsConfig struct {
+	// Enabled turns the command listener on or off.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Commands is the list of built-in command names to activate.
+	// Supported values: "stats", "help"
+	// Unknown names are silently ignored so future commands can be added
+	// without breaking existing configs.
+	Commands []string `yaml:"commands,omitempty" json:"commands,omitempty"`
+}
+
 // NotificationChannelConfig describes a single output channel.
 // The Type field selects the implementation; remaining fields are
 // type-specific and ignored when not relevant.
@@ -64,6 +77,9 @@ type NotificationChannelConfig struct {
 	// ParseMode controls Telegram message formatting.
 	// Valid values: "HTML" (default), "Markdown", "MarkdownV2", or "" (plain text).
 	ParseMode string `yaml:"parse_mode" json:"parse_mode"`
+	// BotCommands configures the interactive command listener for this channel.
+	// Only relevant when Type is "telegram".
+	BotCommands TelegramBotCommandsConfig `yaml:"bot_commands,omitempty" json:"bot_commands,omitempty"`
 
 	// ── Email (SMTP) ─────────────────────────────────────────────────────────
 	// One generic SMTP channel covers every provider; only the host/port/

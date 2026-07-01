@@ -656,13 +656,21 @@ async function saveConfig(alertContainer) {
                 rate_limit_minutes:         Number(ch.rate_limit_minutes) || 10,
             };
         } else {
-            payload.channels[name] = {
+            // Telegram channel — include bot_commands config if present.
+            var tgCh = {
                 type:               ch.type,
                 bot_token:          ch.bot_token || '********',
                 chat_id:            ch.chat_id,
                 parse_mode:         ch.parse_mode || 'HTML',
                 rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
             };
+            if (ch.bot_commands) {
+                tgCh.bot_commands = {
+                    enabled:  !!ch.bot_commands.enabled,
+                    commands: Array.isArray(ch.bot_commands.commands) ? ch.bot_commands.commands : [],
+                };
+            }
+            payload.channels[name] = tgCh;
         }
     }
 
@@ -1147,6 +1155,32 @@ function renderTelegramManagePanel(name, panel) {
                         '<button class="btn btn-sm btn-secondary" id="tgMgr-clearCmd-' + escHtml(name) + '">&#x1F5D1; Clear All</button>' +
                     '</div>' +
                 '</div>' +
+                '<div style="margin-top:16px;border-top:1px solid #e8e8e8;padding-top:14px">' +
+                    '<div style="font-weight:600;font-size:0.85rem;color:#333;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">&#x1F4AC; Interactive Command Listener' +
+                        '<span style="font-weight:400;color:#888;font-size:0.8rem;margin-left:6px">(long-polling \u2014 admins only)</span>' +
+                    '</div>' +
+                    '<p style="font-size:0.8rem;color:#666;margin:0 0 10px">When enabled, the bot listens for commands sent by chat admins and responds automatically. No public URL required.</p>' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">' +
+                        '<label class="toggle-switch" style="margin:0">' +
+                            '<input type="checkbox" id="tgMgr-listenerEnabled-' + escHtml(name) + '">' +
+                            '<span class="toggle-slider"></span>' +
+                        '</label>' +
+                        '<span style="font-size:0.85rem;color:#333">Enable command listener</span>' +
+                        '<span id="tgMgr-listenerStatus-' + escHtml(name) + '" style="font-size:0.8rem;margin-left:4px"></span>' +
+                    '</div>' +
+                    '<div style="font-size:0.85rem;color:#555;margin-bottom:6px;font-weight:500">Active commands:</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' +
+                        '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
+                            '<input type="checkbox" id="tgMgr-cmd-stats-' + escHtml(name) + '" value="stats"> ' +
+                            '<code>/stats</code> \u2014 show active listener sessions' +
+                        '</label>' +
+                        '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
+                            '<input type="checkbox" id="tgMgr-cmd-help-' + escHtml(name) + '" value="help"> ' +
+                            '<code>/help</code> \u2014 list available commands' +
+                        '</label>' +
+                    '</div>' +
+                    '<button class="btn btn-sm" id="tgMgr-saveListener-' + escHtml(name) + '">&#x1F4BE; Save Listener Config</button>' +
+                '</div>' +
             '</div>' +
             '<div id="tgMgr-alert-' + escHtml(name) + '" style="margin-top:10px"></div>' +
         '</div>';
@@ -1258,6 +1292,69 @@ function renderTelegramManagePanel(name, panel) {
         } else {
             tgMgrAlert(name, 'error', (res && res.error) || 'Failed.');
         }
+    });
+
+    // ── Listener config section ───────────────────────────────────────────────
+    // Pre-populate from localConfig.
+    (function() {
+        var ch = localConfig.channels && localConfig.channels[name];
+        var bc = (ch && ch.bot_commands) || {};
+        el('tgMgr-listenerEnabled-' + name).checked = !!bc.enabled;
+        var cmds = Array.isArray(bc.commands) ? bc.commands : [];
+        el('tgMgr-cmd-stats-' + name).checked = cmds.indexOf('stats') >= 0;
+        el('tgMgr-cmd-help-' + name).checked  = cmds.indexOf('help')  >= 0;
+    })();
+
+    // Poll listener status and update the indicator.
+    (function refreshListenerStatus() {
+        apiFetch('/admin/notifications/telegram-listener-status').then(function(r) {
+            return r.json();
+        }).then(function(data) {
+            var statusEl = el('tgMgr-listenerStatus-' + name);
+            if (!statusEl) return;
+            var ls = data && data.listeners && data.listeners[name];
+            if (ls && ls.running) {
+                statusEl.innerHTML = '<span style="color:#2e7d32;font-weight:600">\u25CF Running</span>';
+            } else if (ls) {
+                statusEl.innerHTML = '<span style="color:#c62828;font-weight:600">\u25CF Stopped</span>';
+            } else {
+                statusEl.innerHTML = '<span style="color:#888">\u25CB Inactive</span>';
+            }
+        }).catch(function() {});
+    })();
+
+    el('tgMgr-saveListener-' + name).addEventListener('click', async function() {
+        // Collect enabled commands from checkboxes.
+        var commands = [];
+        ['stats', 'help'].forEach(function(cmd) {
+            if (el('tgMgr-cmd-' + cmd + '-' + name).checked) commands.push(cmd);
+        });
+        var enabled = el('tgMgr-listenerEnabled-' + name).checked;
+
+        // Update localConfig so saveConfig() picks it up.
+        if (!localConfig.channels[name]) return;
+        localConfig.channels[name].bot_commands = { enabled: enabled, commands: commands };
+
+        // Save the full config (which includes bot_commands via the updated saveConfig branch).
+        await saveConfig(el('tgMgr-alert-' + name));
+
+        // Refresh status indicator after a short delay to let the server start/stop the listener.
+        setTimeout(function() {
+            apiFetch('/admin/notifications/telegram-listener-status').then(function(r) {
+                return r.json();
+            }).then(function(data) {
+                var statusEl = el('tgMgr-listenerStatus-' + name);
+                if (!statusEl) return;
+                var ls = data && data.listeners && data.listeners[name];
+                if (ls && ls.running) {
+                    statusEl.innerHTML = '<span style="color:#2e7d32;font-weight:600">\u25CF Running</span>';
+                } else if (enabled) {
+                    statusEl.innerHTML = '<span style="color:#c62828;font-weight:600">\u25CF Stopped</span>';
+                } else {
+                    statusEl.innerHTML = '<span style="color:#888">\u25CB Inactive</span>';
+                }
+            }).catch(function() {});
+        }, 800);
     });
 }
 

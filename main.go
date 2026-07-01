@@ -645,6 +645,10 @@ func main() {
 		notifManager.Publish(evt)
 	})
 
+	// Wire the session manager into the notification manager so that Telegram
+	// bot command listeners (e.g. /stats) can query active sessions.
+	notifManager.SetSessionManager(sessions)
+
 	// Make session activity log directory relative to config directory if it's a relative path
 	if config.Server.SessionActivityLogEnabled && !strings.HasPrefix(config.Server.SessionActivityLogDir, "/") {
 		// If relative path, make it relative to config directory
@@ -2613,6 +2617,9 @@ func main() {
 	}))
 	http.HandleFunc("/admin/notifications/telegram-manage", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleTelegramBotManageWithManager(w, r, notifManager)
+	}))
+	http.HandleFunc("/admin/notifications/telegram-listener-status", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleTelegramListenerStatus(w, r, notifManager)
 	}))
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)

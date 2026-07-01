@@ -1537,8 +1537,16 @@ ant_switch:
   # powers up in after an outage.
   force_sync: true
 
-  # Antenna to select on startup (0 = no automatic selection)
+  # Favourite antenna — used as a visual marker in the admin UI (⭐).
+  # Set to 0 to clear the favourite.
   default_antenna: 0
+
+  # Switch to the favourite antenna automatically on startup (default: false)
+  # When false (default), the switch is left on whatever port it is currently
+  # set to when the server starts — the favourite is only a visual marker.
+  # When true, the favourite antenna (default_antenna) is selected every time
+  # the server starts up.
+  apply_favourite_on_startup: false
 
   # Human-readable labels for each antenna (optional)
   # Used in API responses. Number of entries should match num_antennas.

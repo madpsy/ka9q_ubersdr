@@ -90,8 +90,15 @@ type AntSwitchConfig struct {
 	// state (selected antennas or grounded). Default: true.
 	ForceSync bool `yaml:"force_sync"`
 
-	// DefaultAntenna is selected on startup (0 = no automatic selection).
+	// DefaultAntenna is the favourite antenna (0 = none set).
+	// It is only switched to on startup when ApplyFavouriteOnStartup is true.
 	DefaultAntenna int `yaml:"default_antenna"`
+
+	// ApplyFavouriteOnStartup controls whether the favourite antenna (DefaultAntenna)
+	// is automatically selected when the server starts. Default: false.
+	// When false the favourite is only a visual marker in the UI; the switch is
+	// left on whatever port it is currently set to.
+	ApplyFavouriteOnStartup bool `yaml:"apply_favourite_on_startup"`
 
 	// AntennaLabels are optional human-readable names for each antenna.
 	AntennaLabels []string `yaml:"antenna_labels"`
@@ -939,15 +946,16 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		})
 	}
 
-	// Select default antenna on startup if configured
-	if config.DefaultAntenna > 0 {
+	// Select favourite antenna on startup only when explicitly enabled.
+	// Default is false — leave the switch on whatever port it is currently set to.
+	if config.ApplyFavouriteOnStartup && config.DefaultAntenna > 0 {
 		if config.DefaultAntenna > config.NumAntennas {
 			log.Printf("AntSwitch: Warning: default_antenna %d exceeds num_antennas %d, ignoring",
 				config.DefaultAntenna, config.NumAntennas)
 		} else {
-			log.Printf("AntSwitch: Selecting default antenna %d on startup", config.DefaultAntenna)
+			log.Printf("AntSwitch: Selecting favourite antenna %d on startup (apply_favourite_on_startup=true)", config.DefaultAntenna)
 			if state, verified, err := h.selectAntenna(config.DefaultAntenna); err != nil {
-				log.Printf("AntSwitch: Warning: failed to select default antenna %d: %v",
+				log.Printf("AntSwitch: Warning: failed to select favourite antenna %d: %v",
 					config.DefaultAntenna, err)
 			} else if verified {
 				h.logChange(AntSwitchLogEntry{

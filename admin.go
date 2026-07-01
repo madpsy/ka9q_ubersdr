@@ -1139,6 +1139,9 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		if v, ok := antSwitch["default_antenna"].(float64); ok {
 			ah.config.AntSwitch.DefaultAntenna = int(v)
 		}
+		if v, ok := antSwitch["apply_favourite_on_startup"].(bool); ok {
+			ah.config.AntSwitch.ApplyFavouriteOnStartup = v
+		}
 		if v, ok := antSwitch["force_sync"].(bool); ok {
 			ah.config.AntSwitch.ForceSync = v
 		}

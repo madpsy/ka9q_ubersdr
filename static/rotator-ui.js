@@ -116,6 +116,7 @@ class RotatorUI {
                         <div id="cp-ant-banner" class="cp-ant-banner" style="display:none;"></div>
                         <div id="cp-ant-buttons" class="cp-ant-buttons"></div>
                         <div class="cp-ant-ground-row">
+                            <button class="cp-ant-controls-button" onclick="rotatorUI.openSwitchControls()">Controls</button>
                             <button id="cp-ant-ground-btn" class="cp-ant-ground-btn"
                                     onclick="rotatorUI.onGroundClick()">⏚ Ground all</button>
                         </div>
@@ -143,7 +144,6 @@ class RotatorUI {
                             </div>
                             <div id="cp-ant-history-list" class="cp-ant-history-list"></div>
                         </div>
-                        <button class="cp-ant-controls-button" onclick="rotatorUI.openSwitchControls()">Controls</button>
                     </div>
                 </div>` : '';
 
@@ -450,7 +450,7 @@ class RotatorUI {
                 color: #c8e6c9;
             }
             .cp-ant-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-            .cp-ant-ground-row { display: flex; justify-content: center; }
+            .cp-ant-ground-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
             .cp-ant-ground-btn {
                 -webkit-appearance: none;
                 appearance: none;
@@ -686,11 +686,8 @@ class RotatorUI {
                 transform: translateY(0);
             }
 
-            /* Controls button for ant-switch pane */
+            /* Controls button for ant-switch pane — sits left of Ground All */
             .cp-ant-controls-button {
-                display: block;
-                width: 100%;
-                margin-top: 10px;
                 padding: 8px 16px;
                 background: rgba(76, 175, 80, 0.9);
                 color: white;
@@ -701,6 +698,8 @@ class RotatorUI {
                 cursor: pointer;
                 transition: all 0.2s;
                 box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                white-space: nowrap;
+                flex-shrink: 0;
             }
 
             .cp-ant-controls-button:hover {

@@ -7042,13 +7042,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             'native': { bg: '#1976d2', label: 'Native'  },
         };
 
-        // Render the User Agent table cell: coloured badge + truncated UA text.
+        // Render the User Agent table cell: coloured badge on its own line, UA text below.
         function renderClientTypeCell(clientType, userAgent) {
             const { bg, label } = CLIENT_TYPE_BADGE[clientType] || { bg: '#999', label: '?' };
-            const badge = `<span style="display:inline-block;background:${bg};color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;margin-right:4px;white-space:nowrap;">${label}</span>`;
+            const badge = `<span style="display:inline-block;background:${bg};color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;white-space:nowrap;">${label}</span>`;
             if (!userAgent || userAgent === 'N/A') return badge;
-            const display = userAgent.length > 28 ? userAgent.substring(0, 28) + '…' : userAgent;
-            return `${badge}<span style="color:#555;">${display}</span>`;
+            const display = userAgent.length > 30 ? userAgent.substring(0, 30) + '…' : userAgent;
+            return `${badge}<br><span style="color:#555;font-size:10px;">${display}</span>`;
         }
         // ─────────────────────────────────────────────────────────────────────────
 

@@ -509,6 +509,9 @@ func (l *TelegramBotListener) handleBands(chatID int64, args string) (string, st
 }
 
 // handleSessions sends a summary of active sessions to the chat.
+// Mirrors the admin panel Sessions tab: one row per unique user (grouped by
+// user_session_id), showing audio frequency/mode plus emoji indicators for
+// which connection types are active (🔊 audio, 📊 spectrum, 🌐 DX cluster).
 // args is ignored — sessions is always read-only.
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string, string, bool) {
@@ -520,91 +523,151 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 
 	allSessions := l.sessions.GetAllSessionsInfo()
 
-	// Filter to real audio sessions only (exclude spectrum-only and internal).
-	type sessionRow struct {
-		freq       uint64
-		mode       string
-		clientIP   string
-		country    string
-		countryCC  string
-		isBypassed bool
-		createdAt  time.Time
+	// Group non-internal sessions by user_session_id (falling back to client_ip
+	// then source_ip), exactly as the admin panel does.
+	type userGroup struct {
+		audioFreq   uint64
+		audioMode   string
+		hasAudio    bool
+		hasSpectrum bool
+		hasDX       bool
+		clientIP    string
+		country     string
+		countryCC   string
+		isBypassed  bool
+		createdAt   time.Time
+		key         string
 	}
-	var rows []sessionRow
+	groupMap := make(map[string]*userGroup)
+	var groupOrder []string // preserve insertion order for stable output
+
 	for _, s := range allSessions {
-		isSpectrum, _ := s["is_spectrum"].(bool)
 		isInternal, _ := s["is_internal"].(bool)
-		if isSpectrum || isInternal {
+		if isInternal {
 			continue
 		}
-		freq, _ := s["frequency"].(uint64)
-		mode, _ := s["mode"].(string)
+		isSpectrum, _ := s["is_spectrum"].(bool)
+
+		userSessionID, _ := s["user_session_id"].(string)
 		clientIP, _ := s["client_ip"].(string)
-		country, _ := s["country"].(string)
-		cc, _ := s["country_code"].(string)
-		bypassed, _ := s["is_bypassed"].(bool)
-		var createdAt time.Time
-		if ts, ok := s["created_at"].(string); ok {
-			createdAt, _ = time.Parse(time.RFC3339, ts)
+		sourceIP, _ := s["source_ip"].(string)
+
+		key := userSessionID
+		if key == "" {
+			key = clientIP
 		}
-		rows = append(rows, sessionRow{
-			freq:       freq,
-			mode:       mode,
-			clientIP:   clientIP,
-			country:    country,
-			countryCC:  cc,
-			isBypassed: bypassed,
-			createdAt:  createdAt,
-		})
+		if key == "" {
+			key = sourceIP
+		}
+		if key == "" {
+			continue // no usable key — skip
+		}
+
+		g, exists := groupMap[key]
+		if !exists {
+			country, _ := s["country"].(string)
+			cc, _ := s["country_code"].(string)
+			bypassed, _ := s["is_bypassed"].(bool)
+			var createdAt time.Time
+			if ts, ok := s["created_at"].(string); ok {
+				createdAt, _ = time.Parse(time.RFC3339, ts)
+			}
+			g = &userGroup{
+				clientIP:   clientIP,
+				country:    country,
+				countryCC:  cc,
+				isBypassed: bypassed,
+				createdAt:  createdAt,
+				key:        key,
+			}
+			groupMap[key] = g
+			groupOrder = append(groupOrder, key)
+		}
+
+		if isSpectrum {
+			g.hasSpectrum = true
+		} else {
+			// Audio session — capture frequency and mode.
+			g.hasAudio = true
+			freq, _ := s["frequency"].(uint64)
+			mode, _ := s["mode"].(string)
+			g.audioFreq = freq
+			g.audioMode = strings.ToUpper(mode)
+		}
+
+		// DX cluster: present when dxcluster_kbps key exists in the map.
+		if _, hasDXKey := s["dxcluster_kbps"]; hasDXKey {
+			g.hasDX = true
+		}
 	}
 
-	if len(rows) == 0 {
-		msg := "📡 No active listeners right now."
+	if len(groupOrder) == 0 {
+		msg := "📡 No active sessions right now."
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
 
-	// Count regular (non-bypassed) and bypassed sessions separately.
+	// Count regular (non-bypassed) and bypassed unique users.
 	regularCount := l.sessions.GetNonBypassedUserCount()
 	bypassedCount := 0
-	for _, r := range rows {
-		if r.isBypassed {
+	for _, key := range groupOrder {
+		if groupMap[key].isBypassed {
 			bypassedCount++
 		}
 	}
 	maxSessions := l.sessions.config.Server.MaxSessions
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(rows))
-	for i, r := range rows {
-		freqMHz := float64(r.freq) / 1_000_000.0
+	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(groupOrder))
+	for i, key := range groupOrder {
+		g := groupMap[key]
+		freqMHz := float64(g.audioFreq) / 1_000_000.0
+
+		// Build the connection-type emoji string (no spaces between emojis).
+		var icons strings.Builder
+		if g.hasAudio {
+			icons.WriteString("🔊")
+		}
+		if g.hasSpectrum {
+			icons.WriteString("📊")
+		}
+		if g.hasDX {
+			icons.WriteString("🌐")
+		}
+
+		// Build the main frequency+mode part (only when audio is present).
+		var freqPart string
+		if g.hasAudio {
+			freqPart = fmt.Sprintf("%.3f MHz | %s | ", freqMHz, html.EscapeString(g.audioMode))
+		}
+
 		// Build suffix: IP, optional flag+country, optional bypassed tag, duration.
 		// All user-supplied strings are HTML-escaped to avoid breaking Telegram's
 		// HTML parser (e.g. country names like "Bosnia & Herzegovina").
 		var suffix strings.Builder
-		if r.clientIP != "" {
-			suffix.WriteString(" | ")
-			suffix.WriteString(html.EscapeString(r.clientIP))
+		if g.clientIP != "" {
+			suffix.WriteString(html.EscapeString(g.clientIP))
 		}
-		if r.country != "" {
-			flag := countryCodeToFlag(r.countryCC)
+		if g.country != "" {
+			flag := countryCodeToFlag(g.countryCC)
 			suffix.WriteString(" ")
 			if flag != "" {
 				suffix.WriteString(flag)
 				suffix.WriteString(" ")
 			}
-			suffix.WriteString(html.EscapeString(r.country))
+			suffix.WriteString(html.EscapeString(g.country))
 		}
-		if r.isBypassed {
-			suffix.WriteString(" [bypassed]")
+		if g.isBypassed {
+			suffix.WriteString(" 🔓")
 		}
-		if !r.createdAt.IsZero() {
+		if !g.createdAt.IsZero() {
 			suffix.WriteString(" | ")
 			// HTML-escape the duration: fmtSessionDuration can return "<1m" which
 			// would be interpreted as an HTML tag by Telegram's HTML parser.
-			suffix.WriteString(html.EscapeString(fmtSessionDuration(time.Since(r.createdAt))))
+			suffix.WriteString(html.EscapeString(fmtSessionDuration(time.Since(g.createdAt))))
 		}
-		fmt.Fprintf(&sb, "%d. %.3f MHz | %s%s\n", i+1, freqMHz, html.EscapeString(r.mode), suffix.String())
+
+		fmt.Fprintf(&sb, "%d. %s%s | %s\n", i+1, freqPart, icons.String(), suffix.String())
 	}
 
 	// Summary footer — user counts, load averages, CPU temperature.

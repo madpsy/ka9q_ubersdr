@@ -82,7 +82,7 @@ var botCommands = map[string]botCommand{
 	"version": {
 		desc:      "Show current and latest software version",
 		readOnly:  false,
-		writeHint: "Use <code>/version update</code> to trigger an update.",
+		writeHint: "Use <code>/version update</code> to trigger an update when one is available, or <code>/version update force</code> to force a reinstall.",
 		handler:   (*TelegramBotListener).handleVersion,
 	},
 	"wspr": {
@@ -95,32 +95,37 @@ var botCommands = map[string]botCommand{
 // ─── Command handlers ─────────────────────────────────────────────────────────
 
 // handleVersion reports the current and latest software version.
-// With argument "update" (and write access enabled) it triggers an update by
-// writing the version file — the same action as the "Force Update" button in
-// the admin UI.
+// With argument "update" (and write access enabled) it triggers an update only
+// when a newer version is available. With "update force" it always triggers,
+// matching the "Update" button in the admin UI footer.
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, string, bool) {
 	currentVersion := Version
 	latestVersion := GetLatestVersion()
 
-	// ── Update mode: /version update ─────────────────────────────────────────
-	if strings.TrimSpace(strings.ToLower(args)) == "update" {
+	// ── Update mode: /version update [force] ─────────────────────────────────
+	argNorm := strings.TrimSpace(strings.ToLower(args))
+	if argNorm == "update" || argNorm == "update force" {
 		if !l.commandWriteEnabled("version") {
 			msg := "⚠️ Write access is not enabled for /version. Enable it in the bot listener config."
 			apiResp, apiOK := l.sendMessage(chatID, msg)
 			return msg, apiResp, apiOK
 		}
 
-		versionToWrite := latestVersion
-		if versionToWrite == "" {
-			versionToWrite = currentVersion
-		}
+		force := argNorm == "update force"
 
-		if latestVersion == "" || latestVersion == currentVersion {
-			msg := fmt.Sprintf("🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\n\n<i>No update available — already on the latest version.</i>",
+		// Without force, only proceed if an update is actually available.
+		if !force && (latestVersion == "" || latestVersion == currentVersion) {
+			msg := fmt.Sprintf("🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\n\n<i>No update available — already on the latest version.</i>\n\nUse <code>/version update force</code> to force a reinstall.",
 				html.EscapeString(currentVersion))
 			apiResp, apiOK := l.sendMessage(chatID, msg)
 			return msg, apiResp, apiOK
+		}
+
+		// Determine what to write: prefer latest, fall back to current (force case).
+		versionToWrite := latestVersion
+		if versionToWrite == "" {
+			versionToWrite = currentVersion
 		}
 
 		if err := WriteVersionFile(versionToWrite); err != nil {
@@ -129,8 +134,17 @@ func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, 
 			return msg, apiResp, apiOK
 		}
 
-		msg := fmt.Sprintf("🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\nLatest:  <code>%s</code>\n\n✅ Update triggered. The server will update within 1 minute (when no users are connected).",
-			html.EscapeString(currentVersion), html.EscapeString(versionToWrite))
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\n", html.EscapeString(currentVersion))
+		if latestVersion != "" && latestVersion != currentVersion {
+			fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n", html.EscapeString(latestVersion))
+		}
+		if force {
+			sb.WriteString("\n✅ Force update triggered. The server will reinstall within 1 minute (when no users are connected).")
+		} else {
+			sb.WriteString("\n✅ Update triggered. The server will update within 1 minute (when no users are connected).")
+		}
+		msg := sb.String()
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}

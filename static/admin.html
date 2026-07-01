@@ -7028,20 +7028,18 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         }
 
         // ── Client-type helpers ───────────────────────────────────────────────────
-        // Derive the client type from the user_session_id prefix and user-agent string.
-        // Returns one of: 'kiwi' | 'websdr' | 'ubersdr-app' | 'native'
-        function getClientType(userSessionID, userAgent) {
+        // Derive the client type from the user_session_id prefix.
+        // Returns one of: 'kiwi' | 'websdr' | 'native'
+        function getClientType(userSessionID) {
             if (userSessionID && userSessionID.startsWith('kiwi-'))   return 'kiwi';
             if (userSessionID && userSessionID.startsWith('websdr-')) return 'websdr';
-            if (userAgent && userAgent.startsWith('UberSDR'))         return 'ubersdr-app';
             return 'native';
         }
 
         const CLIENT_TYPE_BADGE = {
-            'kiwi':        { bg: '#ff9800', label: 'KiwiSDR' },
-            'websdr':      { bg: '#9c27b0', label: 'WebSDR'  },
-            'ubersdr-app': { bg: '#667eea', label: 'App'     },
-            'native':      { bg: '#1976d2', label: 'Browser' },
+            'kiwi':   { bg: '#ff9800', label: 'KiwiSDR' },
+            'websdr': { bg: '#9c27b0', label: 'WebSDR'  },
+            'native': { bg: '#1976d2', label: 'Native'  },
         };
 
         // Render the User Agent table cell: coloured badge + truncated UA text.
@@ -7144,8 +7142,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 legendDiv.style.cssText = 'margin-top:12px;padding:8px 12px;background:#f8f9fa;border-radius:5px;border:1px solid #dee2e6;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;';
                 legendDiv.innerHTML = `
                     <span style="font-weight:600;color:#555;">Client type:</span>
-                    <span><span style="display:inline-block;background:#1976d2;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">Browser</span>Native UberSDR web UI</span>
-                    <span><span style="display:inline-block;background:#667eea;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">App</span>ubersdr-audio desktop app</span>
+                    <span><span style="display:inline-block;background:#1976d2;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">Native</span>UberSDR web UI / desktop app</span>
                     <span><span style="display:inline-block;background:#ff9800;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">KiwiSDR</span>KiwiSDR emulation client</span>
                     <span><span style="display:inline-block;background:#9c27b0;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:bold;margin-right:4px;">WebSDR</span>WebSDR emulation client</span>`;
                 container.appendChild(legendDiv);
@@ -7184,7 +7181,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const sourceIP        = audioSession?.source_ip    || spectrumSession?.source_ip    || 'N/A';
                 const userSessionID   = sessions.hasUUID ? key : 'N/A';
                 const userAgent       = audioSession?.user_agent   || spectrumSession?.user_agent   || 'N/A';
-                const clientType      = getClientType(userSessionID, userAgent);
+                const clientType      = getClientType(userSessionID);
                 const chatUsername    = audioSession?.chat_username || spectrumSession?.chat_username || '—';
 
                 const firstSeen = audioSession?.user_session_first_seen || spectrumSession?.user_session_first_seen;

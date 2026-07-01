@@ -1528,6 +1528,15 @@ ant_switch:
   # Admin control via /admin/ant-switch-command never requires this password.
   password: ""
 
+  # Force Sync: when true (default), if the switch device becomes unreachable
+  # and then reconnects (e.g. after a power cut or network outage), the handler
+  # automatically re-applies the last commanded state (selected antenna or
+  # grounded). This does NOT override manual hardware changes made while the
+  # device is reachable — it only fires when a comms failure is detected and
+  # then recovers. Set to false to leave the switch in whatever state it
+  # powers up in after an outage.
+  force_sync: true
+
   # Antenna to select on startup (0 = no automatic selection)
   default_antenna: 0
 

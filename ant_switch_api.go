@@ -85,6 +85,11 @@ type AntSwitchConfig struct {
 	// public switching. Admin can still override via admin endpoint.
 	Thunderstorm bool `yaml:"thunderstorm"`
 
+	// ForceSync: when true, if the switch device becomes unreachable and then
+	// reconnects, the handler will automatically re-apply the last known desired
+	// state (selected antennas or grounded). Default: true.
+	ForceSync bool `yaml:"force_sync"`
+
 	// DefaultAntenna is selected on startup (0 = no automatic selection).
 	DefaultAntenna int `yaml:"default_antenna"`
 
@@ -805,6 +810,12 @@ type AntSwitchHandler struct {
 	rateLimiter *AntSwitchRateLimiter
 	changeLog   *AntSwitchChangeLog
 
+	// desired tracks the last successfully applied state so it can be
+	// re-applied when force_sync is enabled and the device reconnects.
+	desiredSelected []int
+	desiredGrounded bool
+	lastPollOK      bool // true when the previous background poll succeeded
+
 	// Change callbacks — called after each antenna switch change is logged.
 	changeHandlers []func(AntSwitchLogEntry)
 	handlerMu      sync.RWMutex
@@ -888,14 +899,19 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		backend:     backend,
 		rateLimiter: NewAntSwitchRateLimiter(),
 		changeLog:   newAntSwitchChangeLog(100),
+		lastPollOK:  true, // assume up until first poll fails
 	}
 
 	// Initial state query
 	if state, err := h.queryState(); err != nil {
 		log.Printf("AntSwitch: Warning: initial state query failed: %v", err)
+		h.lastPollOK = false
 	} else {
 		h.mu.Lock()
 		h.state = state
+		// Seed desired state from the device's current state on startup.
+		h.desiredSelected = append([]int(nil), state.Selected...)
+		h.desiredGrounded = state.Grounded
 		h.mu.Unlock()
 		log.Printf("AntSwitch: Initial state: selected=%v grounded=%v", state.Selected, state.Grounded)
 
@@ -963,6 +979,10 @@ func (h *AntSwitchHandler) queryState() (AntSwitchState, error) {
 // backgroundPoller polls the device every 5 seconds to keep the state cache fresh.
 // If thunderstorm mode is active and the device reports a non-grounded state
 // (e.g. someone pressed the hardware button), it re-grounds the switch.
+// If force_sync is enabled and the device was previously unreachable but has
+// now reconnected, the last desired state is re-applied automatically.
+// If the polled state differs from the last known desired state while the device
+// is reachable, a "hardware" change log entry is emitted (physical button press).
 func (h *AntSwitchHandler) backgroundPoller() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -972,17 +992,24 @@ func (h *AntSwitchHandler) backgroundPoller() {
 		if err != nil {
 			h.mu.Lock()
 			h.state.LastError = err.Error()
+			h.lastPollOK = false
 			h.mu.Unlock()
 			continue
 		}
 
+		// Snapshot config fields and desired state under read lock.
+		h.mu.RLock()
+		thunderstorm := h.config.Thunderstorm
+		forceSync := h.config.ForceSync
+		wasDown := !h.lastPollOK
+		desiredSelected := append([]int(nil), h.desiredSelected...)
+		desiredGrounded := h.desiredGrounded
+		prevState := h.state
+		h.mu.RUnlock()
+
 		// Re-ground if thunderstorm is active but the device is not grounded.
 		// This handles the case where someone physically pressed the hardware
 		// button while thunderstorm mode was active.
-		h.mu.RLock()
-		thunderstorm := h.config.Thunderstorm
-		h.mu.RUnlock()
-
 		if thunderstorm && !state.Grounded {
 			log.Printf("AntSwitch: thunderstorm mode active but device not grounded (selected=%v) — re-grounding", state.Selected)
 			if groundedState, err := h.backend.GroundAll(); err != nil {
@@ -990,10 +1017,98 @@ func (h *AntSwitchHandler) backgroundPoller() {
 			} else {
 				state = groundedState
 			}
+		} else if forceSync && wasDown && len(desiredSelected) > 0 {
+			// Device just came back online and we have a desired state to restore.
+			// Re-apply the desired antennas (exclusive: select first in list).
+			target := desiredSelected[0]
+			log.Printf("AntSwitch: device reconnected — force-syncing to desired antenna %d (selected=%v)", target, desiredSelected)
+			if syncedState, _, syncErr := h.selectAntenna(target); syncErr != nil {
+				log.Printf("AntSwitch: force-sync selectAntenna(%d) failed: %v", target, syncErr)
+			} else {
+				state = syncedState
+				h.logChange(AntSwitchLogEntry{
+					Time:     time.Now(),
+					Action:   "select",
+					Antenna:  target,
+					Label:    h.antennaLabel(target),
+					Selected: state.Selected,
+					Grounded: state.Grounded,
+					Source:   "startup",
+				})
+			}
+		} else if forceSync && wasDown && desiredGrounded {
+			// Device just came back online and desired state is grounded.
+			log.Printf("AntSwitch: device reconnected — force-syncing to grounded state")
+			if syncedState, _, syncErr := h.groundAll(); syncErr != nil {
+				log.Printf("AntSwitch: force-sync groundAll failed: %v", syncErr)
+			} else {
+				state = syncedState
+				h.logChange(AntSwitchLogEntry{
+					Time:     time.Now(),
+					Action:   "ground",
+					Antenna:  0,
+					Label:    "Ground all",
+					Selected: state.Selected,
+					Grounded: state.Grounded,
+					Source:   "startup",
+				})
+			}
+		} else if !wasDown && prevState.LastUpdate != (AntSwitchState{}).LastUpdate {
+			// Device is reachable and was reachable last poll — check for
+			// hardware-initiated changes (physical button press on the device).
+			// Compare the polled state against the last desired state.
+			hardwareChanged := false
+			if state.Grounded != desiredGrounded {
+				hardwareChanged = true
+			} else if !state.Grounded {
+				// Compare selected antenna lists (order-insensitive)
+				if len(state.Selected) != len(desiredSelected) {
+					hardwareChanged = true
+				} else {
+					have := make(map[int]bool, len(desiredSelected))
+					for _, n := range desiredSelected {
+						have[n] = true
+					}
+					for _, n := range state.Selected {
+						if !have[n] {
+							hardwareChanged = true
+							break
+						}
+					}
+				}
+			}
+			if hardwareChanged {
+				action := "select"
+				antenna := 0
+				label := ""
+				if state.Grounded {
+					action = "ground"
+					label = "Ground all"
+				} else if len(state.Selected) > 0 {
+					antenna = state.Selected[0]
+					label = h.antennaLabel(antenna)
+				}
+				log.Printf("AntSwitch: hardware change detected — selected=%v grounded=%v", state.Selected, state.Grounded)
+				// Update desired state to match what the hardware now reports.
+				h.mu.Lock()
+				h.desiredSelected = append([]int(nil), state.Selected...)
+				h.desiredGrounded = state.Grounded
+				h.mu.Unlock()
+				h.logChange(AntSwitchLogEntry{
+					Time:     time.Now(),
+					Action:   action,
+					Antenna:  antenna,
+					Label:    label,
+					Selected: state.Selected,
+					Grounded: state.Grounded,
+					Source:   "hardware",
+				})
+			}
 		}
 
 		h.mu.Lock()
 		h.state = state
+		h.lastPollOK = true
 		h.mu.Unlock()
 	}
 }
@@ -1021,6 +1136,8 @@ func (h *AntSwitchHandler) selectAntenna(n int) (AntSwitchState, bool, error) {
 	}
 	h.mu.Lock()
 	h.state = state
+	h.desiredSelected = append([]int(nil), state.Selected...)
+	h.desiredGrounded = state.Grounded
 	h.mu.Unlock()
 	log.Printf("AntSwitch: selectAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
 	return state, true, nil
@@ -1035,6 +1152,8 @@ func (h *AntSwitchHandler) groundAll() (AntSwitchState, bool, error) {
 	}
 	h.mu.Lock()
 	h.state = state
+	h.desiredSelected = nil
+	h.desiredGrounded = true
 	h.mu.Unlock()
 	log.Printf("AntSwitch: groundAll ok, selected=%v grounded=%v", state.Selected, state.Grounded)
 	return state, true, nil
@@ -1049,6 +1168,8 @@ func (h *AntSwitchHandler) addAntenna(n int) (AntSwitchState, bool, error) {
 	}
 	h.mu.Lock()
 	h.state = state
+	h.desiredSelected = append([]int(nil), state.Selected...)
+	h.desiredGrounded = state.Grounded
 	h.mu.Unlock()
 	log.Printf("AntSwitch: addAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
 	return state, true, nil
@@ -1063,6 +1184,8 @@ func (h *AntSwitchHandler) removeAntenna(n int) (AntSwitchState, bool, error) {
 	}
 	h.mu.Lock()
 	h.state = state
+	h.desiredSelected = append([]int(nil), state.Selected...)
+	h.desiredGrounded = state.Grounded
 	h.mu.Unlock()
 	log.Printf("AntSwitch: removeAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
 	return state, true, nil

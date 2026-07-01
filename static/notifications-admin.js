@@ -59,7 +59,7 @@ const FILTER_FIELDS = {
     antenna_switch: [
         { name: 'ant_actions', type: 'enum_list', label: 'Actions',      values: ['select','ground','add','remove','default'] },
         { name: 'ant_numbers', type: 'int_list',  label: 'Ant Numbers',  hint: 'Specific antenna port numbers' },
-        { name: 'ant_sources', type: 'enum_list', label: 'Sources',      values: ['public','admin','startup','scheduler'] },
+        { name: 'ant_sources', type: 'enum_list', label: 'Sources',      values: ['public','admin','startup','scheduler','hardware'] },
     ],
     rotator: [
         { name: 'rotator_moving', type: 'bool_optional', label: 'Moving State', hint: 'true=only when starts moving; false=only when stops; blank=any change' },
@@ -79,6 +79,7 @@ const FILTER_FIELDS = {
         { name: 'session_continents',    type: 'enum_list',   label: 'Continents',          values: ['NA','SA','EU','AF','AS','OC','AN'] },
         { name: 'user_agent_contains',   type: 'string_list', label: 'User-Agent Contains', hint: 'e.g. bot, curl' },
         { name: 'client_ips',            type: 'string_list', label: 'Client IPs',          hint: 'Specific IP addresses' },
+        { name: 'exclude_bypassed',      type: 'toggle_on',   label: 'Exclude Bypassed',    hint: 'When enabled, bypassed users (bypass password or IP allowlist) do not trigger notifications. Default: on' },
     ],
     voice_activity: [
         { name: 'voice_bands',          type: 'string_list', label: 'Bands',           hint: 'e.g. 20m, 40m; empty = all' },
@@ -231,7 +232,7 @@ const TEMPLATE_FIELDS = {
         { name: '.Label',    goType: 'string',   desc: 'Human-readable antenna name.' },
         { name: '.Selected', goType: '[]int',    desc: 'Resulting selected antenna ports. Use <code>{{range .Selected}}</code> or <code>{{join ", " .Selected}}</code>.' },
         { name: '.Grounded', goType: 'bool',     desc: 'True when all antennas are grounded.' },
-        { name: '.Source',   goType: 'string',   desc: 'Command source: public, admin, startup, scheduler.' },
+        { name: '.Source',   goType: 'string',   desc: 'Command source: public, admin, startup, scheduler, hardware.' },
         { name: '.Time',     goType: 'time.Time',desc: 'Event timestamp.' },
     ],
     rotator: [

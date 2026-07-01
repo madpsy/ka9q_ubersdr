@@ -341,6 +341,11 @@ type NotificationFilter struct {
 	UserAgentContains []string `yaml:"user_agent_contains,omitempty" json:"user_agent_contains,omitempty"`
 	// ClientIPs matches specific client IP addresses.
 	ClientIPs []string `yaml:"client_ips,omitempty" json:"client_ips,omitempty"`
+	// ExcludeBypassed suppresses notifications for users who authenticated via a
+	// bypass password or whose IP is in the timeout_bypass_ips list.
+	// nil (omitted) and true both mean "exclude bypassed users" (the default).
+	// Set to false to also receive notifications for bypassed users.
+	ExcludeBypassed *bool `yaml:"exclude_bypassed,omitempty" json:"exclude_bypassed,omitempty"`
 }
 
 // LoadNotificationsConfig loads the notifications configuration from a YAML file.

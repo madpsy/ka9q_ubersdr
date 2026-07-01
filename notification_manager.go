@@ -825,6 +825,12 @@ func (m *NotificationManager) matchUserSession(e UserSessionEvent, f Notificatio
 	if len(f.UserAgentContains) > 0 && !containsAny(e.UserAgent, f.UserAgentContains) {
 		return false
 	}
+	// ExcludeBypassed: nil or true means suppress notifications for bypassed users.
+	// Only pass through when explicitly set to false.
+	excludeBypassed := f.ExcludeBypassed == nil || *f.ExcludeBypassed
+	if excludeBypassed && e.Bypassed {
+		return false
+	}
 	return true
 }
 

@@ -1124,9 +1124,9 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Hot-update antenna labels and default antenna — these are purely cosmetic/
-	// startup-selection values that the handler reads from the config pointer on
-	// every request, so they take effect immediately without a restart.
+	// Hot-update antenna labels, default antenna, and force_sync — these are
+	// values that the handler reads from the config pointer on every request,
+	// so they take effect immediately without a restart.
 	if antSwitch, ok := newConfig["ant_switch"].(map[string]interface{}); ok {
 		if labelsRaw, ok := antSwitch["antenna_labels"].([]interface{}); ok {
 			labels := make([]string, len(labelsRaw))
@@ -1139,6 +1139,9 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 		if v, ok := antSwitch["default_antenna"].(float64); ok {
 			ah.config.AntSwitch.DefaultAntenna = int(v)
+		}
+		if v, ok := antSwitch["force_sync"].(bool); ok {
+			ah.config.AntSwitch.ForceSync = v
 		}
 	}
 

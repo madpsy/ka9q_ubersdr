@@ -268,6 +268,9 @@ type UserSessionEvent struct {
 	Frequency     uint64            `json:"frequency"`
 	Mode          string            `json:"mode"`
 	Time          time.Time         `json:"time"`
+	// Bypassed is true when the user authenticated via a bypass password or
+	// their IP is in the timeout_bypass_ips list.
+	Bypassed bool `json:"bypassed"`
 }
 
 func (e UserSessionEvent) EventType() NotificationEventType { return EventTypeUserSession }

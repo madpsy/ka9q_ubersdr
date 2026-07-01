@@ -635,6 +635,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 			Frequency:     frequency,
 			Mode:          mode,
 			Time:          session.CreatedAt,
+			Bypassed:      sm.config.Server.IsIPTimeoutBypassed(clientIP, password),
 		})
 	}
 
@@ -1696,6 +1697,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			Frequency:     session.Frequency,
 			Mode:          session.Mode,
 			Time:          time.Now(),
+			Bypassed:      sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword),
 		})
 	}
 

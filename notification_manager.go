@@ -648,7 +648,11 @@ func (m *NotificationManager) rateSubject(evt NotificationEvent) string {
 		}
 		return "stopped"
 	case SystemMonitorEvent:
-		return e.Component
+		// Include the status so degraded and recovered events for the same
+		// component use different rate-limit buckets. Without this, a recovery
+		// alert fired within rate_limit_minutes of the preceding degraded alert
+		// would be silently dropped — the user would never see the recovery.
+		return e.Component + ":" + e.Status
 	case UserSessionEvent:
 		return string(e.Action) + ":" + e.ClientIP
 	case VoiceActivityEvent:

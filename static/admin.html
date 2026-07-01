@@ -21125,14 +21125,11 @@ const tooltipLine2 = timeStr;
             }
 
             try {
-                const [healthResp, testResp] = await Promise.all([
-                    authenticatedFetch('/admin/ant-switch-health'),
-                    authenticatedFetch('/admin/ant-switch-test')
-                ]);
-                if (!healthResp || !testResp) return;
+                const healthResp = await authenticatedFetch('/admin/ant-switch-health');
+                if (!healthResp) return;
 
                 const health = (healthResp.ok || healthResp.status === 503) ? await healthResp.json() : null;
-                const test   = (testResp.ok   || testResp.status === 502 || testResp.status === 503) ? await testResp.json() : null;
+                const test   = null; // only populated by the explicit "Test Connection" button
 
                 renderAntSwitchTab(body, health, test);
                 antSwitchTabBuilt = true;

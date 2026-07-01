@@ -1392,6 +1392,7 @@ function renderTelegramManagePanel(name, panel) {
     (function() {
         var resultCols = {
             'ok':              { label: 'OK',          color: '#2e7d32' },
+            'error':           { label: 'API error',   color: '#c62828' },
             'not_enabled':     { label: 'Not enabled', color: '#e65100' },
             'not_admin':       { label: 'Not admin',   color: '#c62828' },
             'unknown_command': { label: 'Unknown',     color: '#888'    },
@@ -1444,9 +1445,10 @@ function renderTelegramManagePanel(name, panel) {
                         '<td style="padding:2px 6px;color:#555">' + escHtml(user) + '</td>' +
                         '<td style="padding:2px 6px;color:#888;font-size:0.75rem">' + escHtml(e.chat_type) + '</td>' +
                         '<td style="padding:2px 6px;font-weight:600;color:' + rc.color + '">' + escHtml(rc.label) + '</td>' +
-                        '<td style="padding:2px 6px">' +
+                        '<td style="padding:2px 6px;white-space:nowrap">' +
                             (apiRaw
-                                ? '<button class="btn btn-xs btn-secondary" data-target="' + rowId + '" data-at="' + escHtml(e.at) + '" style="font-size:0.72rem;padding:1px 6px">' + (isExpanded ? 'Hide' : 'View') + '</button>'
+                                ? '<button class="btn btn-xs btn-secondary" data-target="' + rowId + '" data-at="' + escHtml(e.at) + '" style="font-size:0.72rem;padding:1px 6px">' + (isExpanded ? 'Hide' : 'View') + '</button>' +
+                                  ' <button class="btn btn-xs btn-secondary tgHist-copy" data-copy="' + escHtml(apiPretty) + '" title="Copy to clipboard" style="font-size:0.72rem;padding:1px 5px">\uD83D\uDCCB</button>'
                                 : '<span style="color:#bbb">\u2014</span>') +
                         '</td>';
                     tbody.appendChild(tr);
@@ -1492,6 +1494,20 @@ function renderTelegramManagePanel(name, panel) {
                         target.style.display = visible ? 'none' : 'table-row';
                         btn.textContent = visible ? 'View' : 'Hide';
                         if (visible) { expandedAts.delete(at); } else { expandedAts.add(at); }
+                    });
+                });
+
+                // Copy-to-clipboard buttons.
+                container2.querySelectorAll('button.tgHist-copy').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var text = btn.getAttribute('data-copy');
+                        navigator.clipboard.writeText(text).then(function() {
+                            btn.textContent = '\u2705';
+                            setTimeout(function() { btn.textContent = '\uD83D\uDCCB'; }, 1500);
+                        }).catch(function() {
+                            btn.textContent = '\u274C';
+                            setTimeout(function() { btn.textContent = '\uD83D\uDCCB'; }, 1500);
+                        });
                     });
                 });
             }).catch(function() {});

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antenna Switch Control - UberSDR</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 5px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .status-bar {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .status-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .status-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        .status-indicator.connected {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        .status-indicator.disconnected {
+            background: #f44336;
+            box-shadow: 0 0 10px #f44336;
+        }
+
+        .status-indicator.thunderstorm {
+            background: #ffc107;
+            box-shadow: 0 0 10px #ffc107;
+        }
+
+        /* ── Main card ─────────────────────────────────────────────────────── */
+        .main-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        /* ── Thunderstorm banner ────────────────────────────────────────────── */
+        .thunderstorm-banner {
+            background: rgba(255,193,7,0.2);
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .thunderstorm-banner.show {
+            display: flex;
+        }
+
+        /* ── Antenna grid ───────────────────────────────────────────────────── */
+        .antenna-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .antenna-card {
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.08);
+            overflow: hidden;
+            transition: transform 0.15s, box-shadow 0.15s;
+            cursor: pointer;
+        }
+
+        .antenna-card:hover:not(.disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .antenna-card.active {
+            border-color: #4CAF50;
+            background: rgba(76,175,80,0.2);
+        }
+
+        .antenna-card.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .antenna-card-top {
+            padding: 14px 12px 10px;
+            text-align: center;
+        }
+
+        .antenna-icon {
+            font-size: 24px;
+            margin-bottom: 4px;
+        }
+
+        .antenna-state {
+            font-size: 12px;
+            font-weight: bold;
+            opacity: 0.9;
+        }
+
+        .antenna-card-bottom {
+            padding: 8px 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+            opacity: 0.9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ── Action buttons ─────────────────────────────────────────────────── */
+        .action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .hint-text {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        /* ── Password overlay ───────────────────────────────────────────────── */
+        .password-section {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .password-section label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .password-section input {
+            width: 220px;
+        }
+
+        /* ── Change log ─────────────────────────────────────────────────────── */
+        .log-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .log-card h3 {
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .log-table-wrap {
+            overflow-x: auto;
+            overflow-y: auto;
+            max-height: 300px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .log-table thead tr {
+            background: rgba(0,0,0,0.2);
+            text-align: left;
+        }
+
+        .log-table th {
+            padding: 7px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            white-space: nowrap;
+        }
+
+        .log-table td {
+            padding: 5px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.85);
+        }
+
+        .log-table td.ts {
+            color: rgba(255,255,255,0.55);
+            white-space: nowrap;
+        }
+
+        .log-empty {
+            color: rgba(255,255,255,0.5);
+            font-size: 13px;
+            font-style: italic;
+        }
+
+        /* ── Buttons ────────────────────────────────────────────────────────── */
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: #4CAF50;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76,175,80,0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        button.danger {
+            background: #f44336;
+        }
+
+        button.danger:hover {
+            background: #da190b;
+            box-shadow: 0 4px 12px rgba(244,67,54,0.4);
+        }
+
+        button.secondary {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        button.secondary:hover {
+            background: rgba(255,255,255,0.25);
+            box-shadow: none;
+        }
+
+        /* ── Inputs ─────────────────────────────────────────────────────────── */
+        input[type="password"] {
+            padding: 10px 12px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 14px;
+        }
+
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        input[type="password"]::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+
+        /* ── Message ────────────────────────────────────────────────────────── */
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .message.success {
+            background: rgba(76,175,80,0.2);
+            border: 1px solid #4CAF50;
+        }
+
+        .message.error {
+            background: rgba(244,67,54,0.2);
+            border: 1px solid #f44336;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        /* ── Error banner ───────────────────────────────────────────────────── */
+        .error-banner {
+            background: rgba(244,67,54,0.2);
+            border: 2px solid #f44336;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-banner.show {
+            display: block;
+        }
+
+        .error-banner h3 {
+            margin: 0 0 8px 0;
+            font-size: 1.1em;
+            color: #ff6b6b;
+        }
+
+        .error-banner p {
+            margin: 0;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        /* ── Responsive ─────────────────────────────────────────────────────── */
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+
+            h1 { font-size: 1.8em; }
+
+            .subtitle { font-size: 1em; }
+
+            .status-bar { padding: 10px; gap: 8px; }
+
+            .status-label { font-size: 0.75em; }
+
+            .status-value { font-size: 1.2em; }
+
+            .antenna-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 8px;
+            }
+
+            button { font-size: 14px; padding: 10px 18px; }
+
+            input[type="password"] { font-size: 16px; }
+
+            .password-section input { width: 100%; max-width: 300px; }
+        }
+
+        @media (max-width: 400px) {
+            h1 { font-size: 1.5em; }
+
+            .status-bar { flex-direction: column; align-items: stretch; }
+
+            .status-item {
+                flex-direction: column;
+                align-items: center;
+                padding: 8px 0;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .status-item:last-child { border-bottom: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📡 Antenna Switch</h1>
+        <div class="subtitle" id="subtitle">Loading...</div>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">Status</div>
+                <div class="status-value">
+                    <span id="connection-status">Connecting...</span>
+                    <span class="status-indicator disconnected" id="status-indicator"></span>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Mode</div>
+                <div class="status-value" id="mode-status">—</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Active</div>
+                <div class="status-value" id="active-status">—</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Last Update</div>
+                <div class="status-value" style="font-size: 1em;" id="last-update">—</div>
+            </div>
+        </div>
+
+        <div class="error-banner" id="error-banner">
+            <h3>⚠️ Error</h3>
+            <p id="error-message"></p>
+        </div>
+
+        <div class="main-card">
+            <div class="thunderstorm-banner" id="thunderstorm-banner">
+                ⚡ <span>Thunderstorm mode active — all antennas grounded, switching disabled.</span>
+            </div>
+
+            <div class="antenna-grid" id="antenna-grid">
+                <!-- Populated by JS -->
+            </div>
+
+            <div class="action-row">
+                <button class="danger" id="btn-ground" onclick="sendCommand('ground')" disabled>⏚ Ground All</button>
+                <button class="secondary" onclick="refreshStatus()">🔄 Refresh</button>
+            </div>
+            <div class="hint-text" id="hint-text"></div>
+
+            <div class="password-section">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter switch password">
+            </div>
+        </div>
+
+        <div class="log-card">
+            <h3>📋 Change Log</h3>
+            <div id="log-container">
+                <p class="log-empty">Loading...</p>
+            </div>
+        </div>
+
+        <div class="message" id="message"></div>
+    </div>
+
+    <script>
+        // ── Password storage — shared key with admin tab overlay ──────────────
+        const PASSWORD_KEY = 'ant_switch_password';
+
+        let statusData = null;
+        let updateInterval = null;
+
+        // ── Init ──────────────────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', async () => {
+            const saved = localStorage.getItem(PASSWORD_KEY);
+            if (saved) {
+                document.getElementById('password').value = saved;
+            }
+
+            document.getElementById('password').addEventListener('input', () => {
+                const pw = document.getElementById('password').value;
+                if (pw) {
+                    localStorage.setItem(PASSWORD_KEY, pw);
+                } else {
+                    localStorage.removeItem(PASSWORD_KEY);
+                }
+                updateButtonStates();
+            });
+
+            await fetchDescription();
+            await refreshStatus();
+            await refreshHistory();
+
+            // Poll every 3 seconds
+            updateInterval = setInterval(async () => {
+                await refreshStatus();
+                await refreshHistory();
+            }, 3000);
+        });
+
+        // ── Description (callsign / name) ─────────────────────────────────────
+        async function fetchDescription() {
+            try {
+                const resp = await fetch('/api/description');
+                const data = await resp.json();
+                if (data.receiver) {
+                    const cs   = data.receiver.callsign || '';
+                    const name = data.receiver.name     || '';
+                    if (cs && name)      document.getElementById('subtitle').textContent = `${cs} — ${name}`;
+                    else if (cs)         document.getElementById('subtitle').textContent = cs;
+                    else if (name)       document.getElementById('subtitle').textContent = name;
+                    else                 document.getElementById('subtitle').textContent = '';
+                } else {
+                    document.getElementById('subtitle').textContent = '';
+                }
+            } catch (_) {
+                document.getElementById('subtitle').textContent = '';
+            }
+        }
+
+        // ── Status ────────────────────────────────────────────────────────────
+        async function refreshStatus() {
+            try {
+                const resp = await fetch('/api/ant-switch/status');
+                const data = await resp.json();
+
+                if (data.enabled === false) {
+                    document.getElementById('connection-status').textContent = 'Disabled';
+                    document.getElementById('status-indicator').className = 'status-indicator disconnected';
+                    showError('Antenna switch is not enabled on this server.');
+                    return;
+                }
+
+                hideError();
+                statusData = data;
+                renderStatus(data);
+                renderAntennaGrid(data);
+                updateButtonStates();
+
+            } catch (e) {
+                document.getElementById('connection-status').textContent = 'Error';
+                document.getElementById('status-indicator').className = 'status-indicator disconnected';
+                showError('Could not reach the antenna switch API: ' + e.message);
+            }
+        }
+
+        function renderStatus(data) {
+            const thunderstorm = !!data.thunderstorm;
+            const grounded     = !!data.grounded;
+            const selected     = data.selected || [];
+
+            // Status indicator
+            if (thunderstorm) {
+                document.getElementById('connection-status').textContent = 'Thunderstorm';
+                document.getElementById('status-indicator').className = 'status-indicator thunderstorm';
+            } else {
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('status-indicator').className = 'status-indicator connected';
+            }
+
+            // Mode
+            document.getElementById('mode-status').textContent =
+                data.allow_mixing ? 'Mixing' : 'Exclusive';
+
+            // Active
+            if (grounded) {
+                document.getElementById('active-status').textContent = '⏚ Grounded';
+            } else if (selected.length === 0) {
+                document.getElementById('active-status').textContent = 'None';
+            } else {
+                const labels = data.antenna_labels || [];
+                const names  = selected.map(n => labels[n-1] || `Ant ${n}`);
+                document.getElementById('active-status').textContent = names.join(', ');
+            }
+
+            // Last update
+            if (data.last_update) {
+                const lu = new Date(data.last_update);
+                document.getElementById('last-update').textContent =
+                    lu.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            } else {
+                document.getElementById('last-update').textContent = '—';
+            }
+
+            // Thunderstorm banner
+            const banner = document.getElementById('thunderstorm-banner');
+            if (thunderstorm) {
+                banner.classList.add('show');
+            } else {
+                banner.classList.remove('show');
+            }
+
+            // Hint text
+            const hint = document.getElementById('hint-text');
+            if (thunderstorm) {
+                hint.textContent = '';
+            } else if (data.allow_mixing) {
+                hint.textContent = 'Click an antenna card to toggle it on or off.';
+            } else {
+                hint.textContent = 'Click an antenna card to select it (grounds all others).';
+            }
+        }
+
+        function renderAntennaGrid(data) {
+            const grid       = document.getElementById('antenna-grid');
+            const labels     = data.antenna_labels || [];
+            const numAnt     = data.num_antennas   || labels.length || 8;
+            const selected   = new Set(data.selected || []);
+            const grounded   = !!data.grounded;
+            const thunderstorm = !!data.thunderstorm;
+            const hasPassword  = !!document.getElementById('password').value;
+
+            let html = '';
+            for (let i = 1; i <= numAnt; i++) {
+                const isActive   = !grounded && selected.has(i);
+                const label      = labels[i-1] || `Antenna ${i}`;
+                const clickable  = hasPassword && !thunderstorm;
+                const disabledCls = clickable ? '' : ' disabled';
+                const activeCls   = isActive  ? ' active' : '';
+                const icon        = isActive  ? '🟢' : '⚫';
+                const stateText   = isActive  ? 'Active' : 'Inactive';
+                const clickFn     = clickable ? `sendCommand('select', ${i})` : '';
+
+                html += `<div class="antenna-card${activeCls}${disabledCls}" onclick="${clickFn}" title="${label}">
+                    <div class="antenna-card-top">
+                        <div class="antenna-icon">${icon}</div>
+                        <div class="antenna-state">${stateText}</div>
+                    </div>
+                    <div class="antenna-card-bottom">${escapeHtml(label)}</div>
+                </div>`;
+            }
+            grid.innerHTML = html;
+        }
+
+        function updateButtonStates() {
+            const hasPassword  = !!document.getElementById('password').value;
+            const thunderstorm = statusData && !!statusData.thunderstorm;
+            const canControl   = hasPassword && !thunderstorm;
+
+            document.getElementById('btn-ground').disabled = !canControl;
+
+            // Re-render grid to reflect clickability
+            if (statusData) {
+                renderAntennaGrid(statusData);
+            }
+        }
+
+        // ── History / change log ──────────────────────────────────────────────
+        async function refreshHistory() {
+            try {
+                const resp = await fetch('/api/ant-switch/history');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                renderHistory(data.history || []);
+            } catch (_) {
+                // silent — history is non-critical
+            }
+        }
+
+        function renderHistory(entries) {
+            const container = document.getElementById('log-container');
+            if (!entries || entries.length === 0) {
+                container.innerHTML = '<p class="log-empty">No antenna changes recorded yet.</p>';
+                return;
+            }
+
+            const actionIcon = {
+                select: '📡', ground: '⏚', add: '➕', remove: '➖',
+                default: '⭐', thunderstorm_on: '⚡', thunderstorm_off: '✅'
+            };
+            const srcColour = {
+                admin: '#ffb74d', startup: '#81c784', scheduler: '#ce93d8',
+                hardware: '#ef9a9a', public: '#90caf9'
+            };
+
+            let html = `<div class="log-table-wrap"><table class="log-table">
+                <thead><tr>
+                    <th>Time</th>
+                    <th>Action</th>
+                    <th>Antenna</th>
+                    <th>Result</th>
+                    <th>Source</th>
+                </tr></thead><tbody>`;
+
+            entries.forEach(e => {
+                const t   = new Date(e.time);
+                const ts  = t.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                const icon = actionIcon[e.action] || '•';
+                const result = e.grounded
+                    ? 'Grounded'
+                    : (e.selected && e.selected.length > 0 ? 'Ant ' + e.selected.join(', ') : '—');
+                const colour = srcColour[e.source] || '#90caf9';
+
+                html += `<tr>
+                    <td class="ts">${escapeHtml(ts)}</td>
+                    <td>${icon} ${escapeHtml(e.action)}</td>
+                    <td>${escapeHtml(e.label || '—')}</td>
+                    <td>${escapeHtml(result)}</td>
+                    <td><span style="color:${colour};font-size:11px;font-weight:600;">${escapeHtml(e.source || '—')}</span></td>
+                </tr>`;
+            });
+
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        // ── Commands ──────────────────────────────────────────────────────────
+        async function sendCommand(command, antenna) {
+            const password = document.getElementById('password').value;
+            if (!password) {
+                showMessage('Please enter the switch password.', 'error');
+                return;
+            }
+
+            const payload = { password, command };
+            if (command === 'select' && antenna !== undefined) {
+                payload.antenna = antenna;
+            }
+
+            try {
+                const resp = await fetch('/api/ant-switch/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await resp.json();
+
+                if (resp.status === 401) {
+                    showMessage('Incorrect password.', 'error');
+                    return;
+                }
+
+                if (resp.status === 403) {
+                    showMessage('Thunderstorm mode active — switching disabled.', 'error');
+                    return;
+                }
+
+                if (data.success || data.verified) {
+                    const label = (statusData && statusData.antenna_labels && antenna)
+                        ? (statusData.antenna_labels[antenna-1] || `Antenna ${antenna}`)
+                        : null;
+                    if (command === 'select' && label) {
+                        showMessage(`Selected ${label}`, 'success');
+                    } else if (command === 'ground') {
+                        showMessage('All antennas grounded.', 'success');
+                    } else {
+                        showMessage('Command sent.', 'success');
+                    }
+                } else {
+                    showMessage('Command failed: ' + (data.error || JSON.stringify(data)), 'error');
+                }
+
+                // Refresh immediately after command
+                await refreshStatus();
+                await refreshHistory();
+
+            } catch (e) {
+                showMessage('Network error: ' + e.message, 'error');
+            }
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        function showMessage(text, type) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = `message ${type} show`;
+            clearTimeout(el._timer);
+            el._timer = setTimeout(() => el.classList.remove('show'), 5000);
+        }
+
+        function showError(text) {
+            const banner = document.getElementById('error-banner');
+            document.getElementById('error-message').textContent = text;
+            banner.classList.add('show');
+        }
+
+        function hideError() {
+            document.getElementById('error-banner').classList.remove('show');
+        }
+
+        function escapeHtml(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>

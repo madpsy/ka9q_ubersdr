@@ -21427,6 +21427,12 @@ const tooltipLine2 = timeStr;
             container.innerHTML = '';
             container.classList.remove('loading');
 
+            // Link to public antenna switch control page
+            const switchLinkDiv = document.createElement('div');
+            switchLinkDiv.style.marginBottom = '10px';
+            switchLinkDiv.innerHTML = '<button class="btn" onclick="window.open(\'/switch.html\', \'_blank\')" style="background: #667eea;">📡 Switch Controls</button>';
+            container.appendChild(switchLinkDiv);
+
             const cfg = currentAntSwitchSchedulerConfig || {};
             const entries = cfg.entries || [];
             const enabled = cfg.enabled === true;

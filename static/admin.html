@@ -21056,6 +21056,9 @@ const tooltipLine2 = timeStr;
                 <span style="font-size:12px;color:#555;">${health.device_url || ''} · ${health.backend_type || ''} · ${health.timeout_ms}ms · ${allowMixing ? 'Mixing' : 'Exclusive'} mode${lastUpdateStr}</span>
             </div>`;
 
+            // Link to public antenna switch control page
+            html += `<div style="margin-bottom:16px;"><button class="btn" onclick="window.open('/switch.html', '_blank')" style="background:#667eea;">📡 Switch Controls</button></div>`;
+
             // ── Thunderstorm warning ──────────────────────────────────────────────
             if (thunderstorm) {
                 html += `<div style="padding:10px 14px;background:#fff3cd;border:2px solid #ffc107;border-radius:5px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -21426,12 +21429,6 @@ const tooltipLine2 = timeStr;
             if (!container) return;
             container.innerHTML = '';
             container.classList.remove('loading');
-
-            // Link to public antenna switch control page
-            const switchLinkDiv = document.createElement('div');
-            switchLinkDiv.style.marginBottom = '10px';
-            switchLinkDiv.innerHTML = '<button class="btn" onclick="window.open(\'/switch.html\', \'_blank\')" style="background: #667eea;">📡 Switch Controls</button>';
-            container.appendChild(switchLinkDiv);
 
             const cfg = currentAntSwitchSchedulerConfig || {};
             const entries = cfg.entries || [];

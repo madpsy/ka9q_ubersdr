@@ -220,6 +220,8 @@ func (m *NotificationManager) buildChannels() error {
 			ch = NewTelegramChannel(name, chCfg)
 		case "email":
 			ch = NewEmailChannel(name, chCfg)
+		case "webhook":
+			ch = NewWebhookChannel(name, chCfg)
 		default:
 			return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 		}
@@ -326,6 +328,8 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 				ch = NewTelegramChannel(name, chCfg)
 			case "email":
 				ch = NewEmailChannel(name, chCfg)
+			case "webhook":
+				ch = NewWebhookChannel(name, chCfg)
 			default:
 				return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 			}

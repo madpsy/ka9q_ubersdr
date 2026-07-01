@@ -81,6 +81,15 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 		EmailFrom     string   `json:"email_from"`
 		EmailTo       []string `json:"email_to"`
 		SubjectPrefix string   `json:"subject_prefix"`
+		// Ad-hoc webhook
+		WebhookURL                string            `json:"webhook_url"`
+		WebhookMethod             string            `json:"webhook_method"`
+		WebhookFormat             string            `json:"webhook_format"`
+		WebhookHeaders            map[string]string `json:"webhook_headers"`
+		WebhookSecret             string            `json:"webhook_secret"`
+		WebhookTimeoutSeconds     int               `json:"webhook_timeout_seconds"`
+		WebhookInsecureSkipVerify bool              `json:"webhook_insecure_skip_verify"`
+		WebhookBodyTemplate       string            `json:"webhook_body_template"`
 		// Optional in both modes
 		Message string `json:"message"`
 	}
@@ -177,6 +186,34 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 			})
 			channelName = "<ad-hoc>"
 			channelType = "email"
+		case "webhook":
+			if req.WebhookURL == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "webhook_url is required for webhook"}) //nolint:errcheck
+				return
+			}
+			// Resolve masked secret — if the UI sent "********" it means "keep the
+			// existing secret". For ad-hoc tests there is no saved channel, so we
+			// clear it. This branch is only reached when req.Channel == "" (ad-hoc).
+			secret := req.WebhookSecret
+			if secret == "********" {
+				secret = "" // no saved channel to retrieve from in ad-hoc mode
+			}
+			cfg := NotificationChannelConfig{
+				Type:                      "webhook",
+				WebhookURL:                req.WebhookURL,
+				WebhookMethod:             req.WebhookMethod,
+				WebhookFormat:             req.WebhookFormat,
+				WebhookHeaders:            req.WebhookHeaders,
+				WebhookSecret:             secret,
+				WebhookTimeoutSeconds:     req.WebhookTimeoutSeconds,
+				WebhookInsecureSkipVerify: req.WebhookInsecureSkipVerify,
+				WebhookBodyTemplate:       req.WebhookBodyTemplate,
+			}
+			applyChannelDefaults(&cfg)
+			ch = NewWebhookChannel("<ad-hoc>", cfg)
+			channelName = "<ad-hoc>"
+			channelType = "webhook"
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "unsupported channel type: " + req.Type}) //nolint:errcheck
@@ -257,7 +294,7 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		return
 	}
 
-	// Build a redacted view of channels (hide bot tokens and SMTP passwords)
+	// Build a redacted view of channels (hide bot tokens, SMTP passwords, and webhook secrets)
 	type redactedChannel struct {
 		Type             string `json:"type"`
 		ChatID           string `json:"chat_id"`
@@ -273,6 +310,15 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		EmailFrom       string   `json:"email_from,omitempty"`
 		EmailTo         []string `json:"email_to,omitempty"`
 		SubjectPrefix   string   `json:"subject_prefix,omitempty"`
+		// Webhook — secret is never returned, only whether it is set.
+		WebhookURL                string            `json:"webhook_url,omitempty"`
+		WebhookMethod             string            `json:"webhook_method,omitempty"`
+		WebhookFormat             string            `json:"webhook_format,omitempty"`
+		WebhookHeaders            map[string]string `json:"webhook_headers,omitempty"`
+		WebhookSecretSet          bool              `json:"webhook_secret_set,omitempty"`
+		WebhookTimeoutSeconds     int               `json:"webhook_timeout_seconds,omitempty"`
+		WebhookInsecureSkipVerify bool              `json:"webhook_insecure_skip_verify,omitempty"`
+		WebhookBodyTemplate       string            `json:"webhook_body_template,omitempty"`
 	}
 	channels := make(map[string]redactedChannel, len(cfg.Channels))
 	for name, ch := range cfg.Channels {
@@ -290,6 +336,15 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			EmailFrom:        ch.EmailFrom,
 			EmailTo:          ch.EmailTo,
 			SubjectPrefix:    ch.SubjectPrefix,
+			// Webhook fields — secret replaced by a boolean flag; body template returned as-is.
+			WebhookURL:                ch.WebhookURL,
+			WebhookMethod:             ch.WebhookMethod,
+			WebhookFormat:             ch.WebhookFormat,
+			WebhookHeaders:            ch.WebhookHeaders,
+			WebhookSecretSet:          ch.WebhookSecret != "",
+			WebhookTimeoutSeconds:     ch.WebhookTimeoutSeconds,
+			WebhookInsecureSkipVerify: ch.WebhookInsecureSkipVerify,
+			WebhookBodyTemplate:       ch.WebhookBodyTemplate,
 		}
 	}
 
@@ -363,6 +418,9 @@ func handleNotificationsConfigPut(w http.ResponseWriter, r *http.Request, nm *No
 			}
 			if ch.SMTPPassword == "********" {
 				ch.SMTPPassword = existing.SMTPPassword
+			}
+			if ch.WebhookSecret == "********" {
+				ch.WebhookSecret = existing.WebhookSecret
 			}
 			newCfg.Channels[name] = ch
 		}
@@ -463,6 +521,21 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "email_from", Type: "string", Required: true, Description: "From address. May be 'Name <addr@example.com>' or a bare address.", Example: "UberSDR <me@gmail.com>"},
 				{Name: "email_to", Type: "[]string", Required: true, Description: "Recipient address(es).", Example: `["you@example.com"]`},
 				{Name: "subject_prefix", Type: "string", Required: false, Description: "Prepended to the dynamic subject (prefix + first line of the message). Default: [UberSDR].", Example: "[UberSDR]"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
+			},
+		},
+		{
+			Type:        "webhook",
+			Description: "HTTP webhook — POSTs a notification to any URL. Works with ntfy, Slack, Discord, Zapier, Home Assistant, n8n, and custom endpoints. Supports HMAC-SHA256 request signing.",
+			Fields: []channelField{
+				{Name: "webhook_url", Type: "string", Required: true, Description: "Destination URL. Must be http:// or https://. Plain http:// is only allowed for private/LAN addresses.", Example: "https://ntfy.sh/my-topic"},
+				{Name: "webhook_method", Type: "string", Required: false, Description: "HTTP method. Default: POST.", ValidValues: []string{"POST", "PUT"}, Example: "POST"},
+				{Name: "webhook_format", Type: "string", Required: false, Description: `Payload format. "text" = text/plain body; "json" = JSON envelope {channel,message,timestamp}; "slack" = {"text":"…"}; "discord" = {"content":"…"}. Default: text.`, ValidValues: []string{"text", "json", "slack", "discord"}, Example: "text"},
+				{Name: "webhook_secret", Type: "string", Required: false, Description: "HMAC-SHA256 signing secret. When set, every request includes X-Hub-Signature-256: sha256=<hmac>.", Example: "my-secret-key"},
+				{Name: "webhook_headers", Type: "map[string]string", Required: false, Description: "Extra HTTP headers sent with every request.", Example: `{"Authorization":"Bearer token123"}`},
+				{Name: "webhook_timeout_seconds", Type: "int", Required: false, Description: "Per-request timeout in seconds. Range: 1–60. Default: 10.", Example: "10"},
+				{Name: "webhook_insecure_skip_verify", Type: "bool", Required: false, Description: "Skip TLS certificate verification. Only for self-signed certs on private LANs.", Example: "false"},
+				{Name: "webhook_body_template", Type: "string", Required: false, Description: `Go text/template string rendered as the full request body. Overrides webhook_format when set. Template data: .Message (string), .Channel (string), .Timestamp (RFC3339 string). Content-Type defaults to application/json; override via webhook_headers.`, Example: `{"message":"{{.Message}}","title":"UberSDR","priority":5}`},
 				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
 			},
 		},

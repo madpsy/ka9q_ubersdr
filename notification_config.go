@@ -2,7 +2,11 @@ package main
 
 import (
 	"fmt"
+	"html/template"
+	"net"
 	"os"
+	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -98,6 +102,42 @@ type NotificationChannelConfig struct {
 	// 0 = no rate limiting (every matching event fires).
 	// Default: 10 minutes.
 	RateLimitMinutes int `yaml:"rate_limit_minutes" json:"rate_limit_minutes"`
+
+	// ── Webhook (HTTP POST) ───────────────────────────────────────────────────
+	// WebhookURL is the endpoint to POST to. Must be http:// or https://.
+	// Required when Type is "webhook".
+	WebhookURL string `yaml:"webhook_url,omitempty" json:"webhook_url,omitempty"`
+	// WebhookMethod is the HTTP method. "POST" (default) or "PUT".
+	WebhookMethod string `yaml:"webhook_method,omitempty" json:"webhook_method,omitempty"`
+	// WebhookFormat controls the Content-Type and body shape:
+	//   "text"    (default) — text/plain, body = rendered message (ntfy, custom)
+	//   "json"              — application/json structured envelope (n8n, Zapier, HA)
+	//   "slack"             — application/json {"text":"…"} (Slack incoming webhooks)
+	//   "discord"           — application/json {"content":"…"} (Discord webhooks)
+	WebhookFormat string `yaml:"webhook_format,omitempty" json:"webhook_format,omitempty"`
+	// WebhookSecret is an optional HMAC-SHA256 signing secret. When set, every
+	// request carries X-Hub-Signature-256: sha256=<hmac> so the receiver can
+	// verify authenticity. Never returned by the GET config endpoint.
+	WebhookSecret string `yaml:"webhook_secret,omitempty" json:"webhook_secret,omitempty"`
+	// WebhookHeaders holds extra HTTP headers sent with every request, e.g.
+	// {"Authorization": "Bearer <token>", "X-Gotify-Key": "<token>"}.
+	// Header names and values are validated for printable ASCII on save.
+	WebhookHeaders map[string]string `yaml:"webhook_headers,omitempty" json:"webhook_headers,omitempty"`
+	// WebhookTimeoutSeconds is the per-request timeout. Default: 10. Range: 1–60.
+	WebhookTimeoutSeconds int `yaml:"webhook_timeout_seconds,omitempty" json:"webhook_timeout_seconds,omitempty"`
+	// WebhookInsecureSkipVerify disables TLS certificate verification.
+	// Only for self-signed certificates on private LANs — never use on public endpoints.
+	WebhookInsecureSkipVerify bool `yaml:"webhook_insecure_skip_verify,omitempty" json:"webhook_insecure_skip_verify,omitempty"`
+	// WebhookBodyTemplate is an optional Go text/template string that, when set,
+	// overrides WebhookFormat entirely and renders the full request body.
+	// The template receives a WebhookTemplateData struct with fields:
+	//   .Message   string    — the rendered notification text
+	//   .Channel   string    — the channel name
+	//   .Timestamp string    — UTC time in RFC3339 format
+	// The Content-Type defaults to application/json when the template is set;
+	// override it by setting a "Content-Type" entry in WebhookHeaders.
+	// Example (Gotify): {"message":"{{.Message}}","title":"UberSDR","priority":5}
+	WebhookBodyTemplate string `yaml:"webhook_body_template,omitempty" json:"webhook_body_template,omitempty"`
 }
 
 // NotificationRule maps an event type to a filter, a template, and one or
@@ -395,6 +435,17 @@ func applyChannelDefaults(ch *NotificationChannelConfig) {
 			ch.SubjectPrefix = "[UberSDR]"
 		}
 	}
+	if ch.Type == "webhook" {
+		if ch.WebhookMethod == "" {
+			ch.WebhookMethod = "POST"
+		}
+		if ch.WebhookFormat == "" {
+			ch.WebhookFormat = "text"
+		}
+		if ch.WebhookTimeoutSeconds == 0 {
+			ch.WebhookTimeoutSeconds = 10
+		}
+	}
 }
 
 // Validate checks the config for obvious errors and returns a list of issues.
@@ -432,6 +483,8 @@ func (cfg *NotificationsConfig) Validate() []string {
 			if (ch.SMTPUsername == "") != (ch.SMTPPassword == "") {
 				issues = append(issues, fmt.Sprintf("channel %q: email smtp_username and smtp_password must be set together", name))
 			}
+		case "webhook":
+			issues = append(issues, validateWebhookChannel(name, ch)...)
 		case "":
 			issues = append(issues, fmt.Sprintf("channel %q: type is required", name))
 		default:
@@ -545,4 +598,154 @@ func validateFlapParams(label string, f NotificationFilter) []string {
 			label, minFlapClearMinutes, maxFlapClearMinutes, *v))
 	}
 	return issues
+}
+
+// ── Webhook validation helpers ────────────────────────────────────────────────
+
+// validateWebhookChannel checks all webhook-specific fields for a channel.
+func validateWebhookChannel(name string, ch NotificationChannelConfig) []string {
+	var issues []string
+
+	// URL — required, must be http:// or https://, max 2048 chars, must have a host.
+	if ch.WebhookURL == "" {
+		issues = append(issues, fmt.Sprintf("channel %q: webhook_url is required", name))
+	} else if len(ch.WebhookURL) > 2048 {
+		issues = append(issues, fmt.Sprintf("channel %q: webhook_url exceeds 2048 characters", name))
+	} else {
+		// Use net/url via strings — avoid importing net/url just for this; parse manually.
+		// We need the scheme and host, so do a minimal parse.
+		lower := strings.ToLower(ch.WebhookURL)
+		var scheme, rest string
+		if idx := strings.Index(ch.WebhookURL, "://"); idx >= 0 {
+			scheme = lower[:idx]
+			rest = ch.WebhookURL[idx+3:]
+		}
+		if scheme != "http" && scheme != "https" {
+			issues = append(issues, fmt.Sprintf("channel %q: webhook_url must start with http:// or https://", name))
+		} else {
+			// Extract host (everything before the first / or end of string).
+			host := rest
+			if i := strings.IndexByte(rest, '/'); i >= 0 {
+				host = rest[:i]
+			}
+			// Strip port for loopback check.
+			if host == "" {
+				issues = append(issues, fmt.Sprintf("channel %q: webhook_url has no host", name))
+			} else if scheme == "http" && !webhookIsPrivateHost(host) {
+				// Plain http to a clearly public host — block it. LAN addresses
+				// (loopback, RFC-1918, .local) are allowed without https.
+				issues = append(issues, fmt.Sprintf("channel %q: webhook_url uses plain http:// to a public host — use https:// to protect credentials and payloads", name))
+			}
+		}
+	}
+
+	// Method — POST or PUT only.
+	switch strings.ToUpper(ch.WebhookMethod) {
+	case "", "POST", "PUT":
+	default:
+		issues = append(issues, fmt.Sprintf("channel %q: webhook_method must be POST or PUT (got %q)", name, ch.WebhookMethod))
+	}
+
+	// Format — known values only.
+	switch ch.WebhookFormat {
+	case "", "text", "json", "slack", "discord":
+	default:
+		issues = append(issues, fmt.Sprintf("channel %q: webhook_format must be text, json, slack, or discord (got %q)", name, ch.WebhookFormat))
+	}
+
+	// Timeout — 0 means "use default" (applied by applyChannelDefaults); explicit values must be 1–60.
+	if ch.WebhookTimeoutSeconds != 0 && (ch.WebhookTimeoutSeconds < 1 || ch.WebhookTimeoutSeconds > 60) {
+		issues = append(issues, fmt.Sprintf("channel %q: webhook_timeout_seconds must be 1–60 (got %d)", name, ch.WebhookTimeoutSeconds))
+	}
+
+	// Headers — validate names (RFC 7230 token) and values (printable ASCII, no CR/LF).
+	for k, v := range ch.WebhookHeaders {
+		if !webhookValidHeaderName(k) {
+			issues = append(issues, fmt.Sprintf("channel %q: webhook header name %q is not a valid HTTP header name", name, k))
+		}
+		if !webhookValidHeaderValue(v) {
+			issues = append(issues, fmt.Sprintf("channel %q: webhook header %q has an invalid value (must be printable ASCII, no CR or LF)", name, k))
+		}
+	}
+
+	// InsecureSkipVerify only makes sense with https — flag it as a useless setting.
+	// (It's not a security risk to have it set with http://, just pointless.)
+	if ch.WebhookInsecureSkipVerify {
+		lower := strings.ToLower(ch.WebhookURL)
+		if !strings.HasPrefix(lower, "https://") {
+			issues = append(issues, fmt.Sprintf("channel %q: webhook_insecure_skip_verify has no effect without https://", name))
+		}
+	}
+
+	// Body template — compile-check it at save time so errors surface immediately.
+	// Use the same FuncMap as the runtime so template functions like jsonEscape
+	// are recognised during validation.
+	if ch.WebhookBodyTemplate != "" {
+		if _, err := template.New("webhook_body").Funcs(webhookTemplateFuncs).Parse(ch.WebhookBodyTemplate); err != nil {
+			issues = append(issues, fmt.Sprintf("channel %q: webhook_body_template is not a valid Go template: %v", name, err))
+		}
+	}
+
+	return issues
+}
+
+// WebhookTemplateData is the data passed to WebhookBodyTemplate when rendering
+// the request body. All fields are safe to use in JSON templates directly.
+type WebhookTemplateData struct {
+	// Message is the fully-rendered notification text (from the rule template or
+	// the built-in default). May contain newlines.
+	Message string
+	// Channel is the webhook channel name as configured in notifications.yaml.
+	Channel string
+	// Timestamp is the current UTC time in RFC3339 format (e.g. "2026-07-01T11:00:00Z").
+	Timestamp string
+}
+
+// webhookIsPrivateHost reports whether host (with or without port) is a
+// private/LAN address where plain http:// is acceptable:
+//   - loopback: localhost, 127.x.x.x, ::1
+//   - RFC-1918: 10.x, 172.16-31.x, 192.168.x
+//   - link-local: 169.254.x, fe80::
+//   - mDNS .local names (e.g. homeassistant.local)
+func webhookIsPrivateHost(host string) bool {
+	h := host
+	// Strip port if present.
+	if strings.Contains(h, ":") {
+		if stripped, _, err := net.SplitHostPort(h); err == nil {
+			h = stripped
+		}
+	}
+	// mDNS / .local hostnames.
+	if strings.HasSuffix(strings.ToLower(h), ".local") || strings.ToLower(h) == "local" {
+		return true
+	}
+	// Named loopback.
+	if strings.ToLower(h) == "localhost" {
+		return true
+	}
+	// Parse as IP.
+	ip := net.ParseIP(h)
+	if ip == nil {
+		return false // unknown hostname — treat as public
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// webhookHeaderNameRe matches a valid RFC 7230 header field name (token).
+var webhookHeaderNameRe = regexp.MustCompile(`^[!#$%&'*+\-.0-9A-Z^_` + "`" + `a-z|~]+$`)
+
+// webhookValidHeaderName reports whether s is a valid HTTP header field name.
+func webhookValidHeaderName(s string) bool {
+	return s != "" && webhookHeaderNameRe.MatchString(s)
+}
+
+// webhookValidHeaderValue reports whether s is a valid HTTP header field value:
+// printable ASCII (0x20–0x7E) plus horizontal tab (0x09), no CR or LF.
+func webhookValidHeaderValue(s string) bool {
+	for _, c := range s {
+		if c == '\r' || c == '\n' || (c < 0x20 && c != '\t') || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }

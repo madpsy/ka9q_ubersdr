@@ -485,6 +485,17 @@ async function loadConfig() {
                 email_from:         ch.email_from          || '',
                 email_to:           Array.isArray(ch.email_to) ? ch.email_to : [],
                 subject_prefix:     ch.subject_prefix      || '[UberSDR]',
+                // Webhook — secret is never returned by the server; only webhook_secret_set is.
+                webhook_url:                ch.webhook_url                || '',
+                webhook_method:             ch.webhook_method             || 'POST',
+                webhook_format:             ch.webhook_format             || 'text',
+                webhook_secret:             (existing && existing.webhook_secret && existing.webhook_secret !== '********')
+                                                ? existing.webhook_secret
+                                                : (ch.webhook_secret_set ? '********' : ''),
+                webhook_headers:            ch.webhook_headers            || {},
+                webhook_timeout_seconds:    ch.webhook_timeout_seconds    || 10,
+                webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
+                webhook_body_template:      ch.webhook_body_template      || '',
             };
         }
         localConfig.channels = merged;
@@ -630,6 +641,20 @@ async function saveConfig(alertContainer) {
                 subject_prefix:     ch.subject_prefix || '[UberSDR]',
                 rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
             };
+        } else if (ch.type === 'webhook') {
+            payload.channels[name] = {
+                type:                       'webhook',
+                webhook_url:                ch.webhook_url || '',
+                webhook_method:             ch.webhook_method || 'POST',
+                webhook_format:             ch.webhook_format || 'text',
+                // Empty secret = no signing; masked placeholder means "keep existing".
+                webhook_secret:             ch.webhook_secret || '',
+                webhook_headers:            ch.webhook_headers || {},
+                webhook_timeout_seconds:    Number(ch.webhook_timeout_seconds) || 10,
+                webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
+                webhook_body_template:      ch.webhook_body_template || '',
+                rate_limit_minutes:         Number(ch.rate_limit_minutes) || 10,
+            };
         } else {
             payload.channels[name] = {
                 type:               ch.type,
@@ -747,6 +772,66 @@ function detectEmailProvider(host) {
     return 'custom';
 }
 
+// WEBHOOK_PRESETS prefill the URL template, method, and format when a service
+// is chosen from the dropdown. Only the resolved values are stored, never the
+// preset key. "custom" leaves all fields editable.
+const WEBHOOK_PRESETS = {
+    ntfy:       {
+        label: 'ntfy',
+        urlTemplate: 'https://ntfy.sh/YOUR_TOPIC',
+        method: 'POST', format: 'text',
+        hint: 'Replace YOUR_TOPIC with your topic name. For private topics add an Authorization header: <code>Bearer &lt;token&gt;</code>.',
+    },
+    slack:      {
+        label: 'Slack',
+        urlTemplate: 'https://hooks.slack.com/services/T.../B.../...',
+        method: 'POST', format: 'slack',
+        hint: 'Paste the Incoming Webhook URL from your Slack app settings. The URL is the secret — no extra auth needed.',
+    },
+    discord:    {
+        label: 'Discord',
+        urlTemplate: 'https://discord.com/api/webhooks/ID/TOKEN',
+        method: 'POST', format: 'discord',
+        hint: 'Paste the Webhook URL from your Discord channel settings. The URL is the secret — no extra auth needed.',
+    },
+    zapier:     {
+        label: 'Zapier',
+        urlTemplate: 'https://hooks.zapier.com/hooks/catch/USER/HOOK/',
+        method: 'POST', format: 'json',
+        hint: 'Paste the Catch Hook URL from your Zap. Fields in the JSON body are available as variables in Zapier.',
+    },
+    homeassist: {
+        label: 'Home Assistant',
+        urlTemplate: 'http://homeassistant.local:8123/api/webhook/YOUR_ID',
+        method: 'POST', format: 'json',
+        hint: 'Create a Webhook trigger automation in HA and paste its ID here. For remote access use https:// and add an <code>Authorization: Bearer &lt;token&gt;</code> header.',
+    },
+    n8n:        {
+        label: 'n8n',
+        urlTemplate: 'https://YOUR_N8N/webhook/YOUR_PATH',
+        method: 'POST', format: 'json',
+        hint: 'Use the Webhook node URL from your n8n workflow. Add header auth in n8n and mirror it in the Extra Headers below.',
+    },
+    custom:     {
+        label: 'Custom',
+        urlTemplate: '',
+        method: 'POST', format: 'text',
+        hint: '',
+    },
+};
+
+// detectWebhookPreset returns the preset key that best matches a URL, else 'custom'.
+function detectWebhookPreset(url) {
+    url = (url || '').toLowerCase();
+    if (url.indexOf('ntfy.sh') >= 0)                   return 'ntfy';
+    if (url.indexOf('hooks.slack.com') >= 0)           return 'slack';
+    if (url.indexOf('discord.com/api/webhooks') >= 0)  return 'discord';
+    if (url.indexOf('hooks.zapier.com') >= 0)          return 'zapier';
+    if (url.indexOf('n8n') >= 0)                       return 'n8n';
+    if (url.indexOf('/api/webhook') >= 0)              return 'homeassist';
+    return 'custom';
+}
+
 function renderChannels() {
     const list = el('channelList');
     const channels = localConfig.channels;
@@ -784,6 +869,24 @@ function renderChannels() {
                 (ch.smtp_host ? '<span class="badge badge-grey">' + escHtml(ch.smtp_host) + ':' + (ch.smtp_port || 587) + '</span>' : '<span class="badge badge-red">No host</span>') +
                 '<span class="badge badge-grey">' + escHtml(ch.smtp_security || 'starttls') + '</span>' +
                 (toList ? '<span class="badge badge-grey">to: ' + escHtml(toList) + '</span>' : '');
+        } else if (ch.type === 'webhook') {
+            let secretBadge;
+            if (ch.webhook_secret && ch.webhook_secret !== '********') {
+                secretBadge = '<span class="badge badge-green">Secret entered</span>';
+            } else if (ch.webhook_secret === '********') {
+                secretBadge = '<span class="badge badge-yellow">Secret set (hidden)</span>';
+            } else {
+                secretBadge = '<span class="badge badge-grey">No secret</span>';
+            }
+            // Show a truncated URL (strip scheme, cap at 45 chars).
+            const urlDisplay = ch.webhook_url
+                ? ch.webhook_url.replace(/^https?:\/\//, '').substring(0, 45) +
+                  (ch.webhook_url.replace(/^https?:\/\//, '').length > 45 ? '…' : '')
+                : '';
+            metaBadges = secretBadge +
+                (urlDisplay ? '<span class="badge badge-grey" title="' + escHtml(ch.webhook_url) + '">' + escHtml(urlDisplay) + '</span>' : '<span class="badge badge-red">No URL</span>') +
+                '<span class="badge badge-grey">' + escHtml(ch.webhook_method || 'POST') + '</span>' +
+                '<span class="badge badge-grey">' + escHtml(ch.webhook_format || 'text') + '</span>';
         } else {
             let tokenBadge;
             if (ch.bot_token && ch.bot_token !== '********') {
@@ -869,6 +972,23 @@ async function testChannel(name) {
                 subject_prefix: ch.subject_prefix || '[UberSDR]',
             };
         }
+    } else if (ch.type === 'webhook') {
+        if (ch.webhook_secret === '********') {
+            // Real secret only lives on the server — test the saved channel.
+            body = { channel: name };
+        } else {
+            body = {
+                type:                       'webhook',
+                webhook_url:                ch.webhook_url,
+                webhook_method:             ch.webhook_method || 'POST',
+                webhook_format:             ch.webhook_format || 'text',
+                webhook_secret:             ch.webhook_secret || '',
+                webhook_headers:            ch.webhook_headers || {},
+                webhook_timeout_seconds:    Number(ch.webhook_timeout_seconds) || 10,
+                webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
+                webhook_body_template:      ch.webhook_body_template || '',
+            };
+        }
     } else if (ch.bot_token && ch.bot_token !== '********') {
         body = { type: ch.type, bot_token: ch.bot_token, chat_id: ch.chat_id, parse_mode: ch.parse_mode || 'HTML' };
     } else {
@@ -938,6 +1058,24 @@ function renderChannelTypeInfo(type, provider) {
                     'then enter your username and password. Choose <strong>Custom</strong> for a self-hosted server.' +
                 '</p>' +
                 appPwNote +
+            '</div>';
+    } else if (type === 'webhook') {
+        var preset = WEBHOOK_PRESETS[provider] || WEBHOOK_PRESETS['custom'];
+        var hintHtml = preset.hint
+            ? '<p style="margin:8px 0 0;font-size:0.875rem;color:#1a237e;line-height:1.6">&#x1F4A1; ' + preset.hint + '</p>'
+            : '';
+        panel.innerHTML =
+            '<div class="config-section" style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+                    '<span style="font-size:1.3rem">&#x1F517;</span>' +
+                    '<strong style="color:#1565c0">Webhook (HTTP POST)</strong>' +
+                '</div>' +
+                '<p style="margin:0;font-size:0.875rem;color:#1a237e;line-height:1.6">' +
+                    'Sends an HTTP request to any URL when a notification fires. ' +
+                    'Works with ntfy, Slack, Discord, Home Assistant, n8n, Zapier, and any custom endpoint.' +
+                '</p>' +
+                hintHtml +
+                '<p style="margin:8px 0 0;font-size:0.8rem;color:#555">&#x1F512; Use <strong>https://</strong> and a <strong>Signing Secret</strong> so the receiver can verify requests came from UberSDR.</p>' +
             '</div>';
     } else {
         panel.innerHTML = '';
@@ -1041,6 +1179,157 @@ function emailFieldsHTML(ch, isEdit) {
         '</div>';
 }
 
+// ── Webhook channel form helpers ──────────────────────────────────────────────
+
+function webhookHeaderRow(name, value) {
+    return '<div class="webhook-header-row" style="display:flex;gap:8px;margin-bottom:6px;align-items:center">' +
+        '<input type="text" class="wh-name" placeholder="Header name" value="' + escHtml(name) + '" style="flex:1;min-width:0" maxlength="256">' +
+        '<input type="text" class="wh-value" placeholder="Value" value="' + escHtml(value) + '" style="flex:2;min-width:0" maxlength="1024">' +
+        '<button type="button" class="btn btn-sm btn-danger wh-remove" title="Remove header">&#x2715;</button>' +
+    '</div>';
+}
+
+function readWebhookHeaders() {
+    var out = {};
+    document.querySelectorAll('#chWebhookHeaders .webhook-header-row').forEach(function(row) {
+        var k = row.querySelector('.wh-name').value.trim();
+        var v = row.querySelector('.wh-value').value.trim();
+        if (k) out[k] = v;
+    });
+    return out;
+}
+
+function attachRemoveHeader(btn) {
+    btn.addEventListener('click', function() { btn.closest('.webhook-header-row').remove(); });
+}
+
+function webhookFieldsHTML(ch, isEdit) {
+    var preset = detectWebhookPreset(ch.webhook_url || '');
+    var presetOptions = Object.keys(WEBHOOK_PRESETS).map(function(k) {
+        return '<option value="' + k + '"' + (preset === k ? ' selected' : '') + '>' +
+               escHtml(WEBHOOK_PRESETS[k].label) + '</option>';
+    }).join('');
+    var methods = ['POST', 'PUT'];
+    var methodOptions = methods.map(function(m) {
+        return '<option value="' + m + '"' + ((ch.webhook_method || 'POST') === m ? ' selected' : '') + '>' + m + '</option>';
+    }).join('');
+    var formats = [
+        ['text',    'text/plain — raw message (ntfy, custom)'],
+        ['json',    'JSON envelope — {channel, message, timestamp}'],
+        ['slack',   'Slack JSON — {"text":"…"}'],
+        ['discord', 'Discord JSON — {"content":"…"}'],
+    ];
+    var formatOptions = formats.map(function(f) {
+        return '<option value="' + f[0] + '"' + ((ch.webhook_format || 'text') === f[0] ? ' selected' : '') + '>' + escHtml(f[1]) + '</option>';
+    }).join('');
+    var secretSet = isEdit && ch.webhook_secret === '********';
+    var secretPlaceholder = secretSet ? 'Leave blank to keep existing secret' : 'Optional HMAC-SHA256 signing secret';
+
+    // Build existing header rows
+    var headers = ch.webhook_headers || {};
+    var headerRows = Object.keys(headers).map(function(k) {
+        return webhookHeaderRow(k, headers[k]);
+    }).join('');
+
+    return '' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Service Preset</label>' +
+                '<select id="chWebhookPreset">' + presetOptions + '</select>' +
+                '<div class="form-hint">Prefills URL template and format. Pick Custom for anything else.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Method</label>' +
+                '<select id="chWebhookMethod">' + methodOptions + '</select>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>Webhook URL *</label>' +
+            '<input type="url" id="chWebhookURL" value="' + escHtml(ch.webhook_url || '') + '" placeholder="https://…" maxlength="2048">' +
+            '<div class="form-hint">Use <strong>https://</strong> for any public endpoint.</div>' +
+        '</div>' +
+        '<div id="chWebhookPresetHint"></div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Payload Format</label>' +
+                '<select id="chWebhookFormat">' + formatOptions + '</select>' +
+            '</div>' +
+            '<div class="form-group" style="max-width:130px">' +
+                '<label>Timeout (s)</label>' +
+                '<input type="number" id="chWebhookTimeout" value="' + (ch.webhook_timeout_seconds || 10) + '" min="1" max="60">' +
+                '<div class="form-hint">1–60 seconds.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>Signing Secret' + (secretSet ? ' (currently set)' : '') + '</label>' +
+            '<input type="password" id="chWebhookSecret" value="" placeholder="' + escHtml(secretPlaceholder) + '" autocomplete="new-password">' +
+            '<div class="form-hint">When set, every request includes <code>X-Hub-Signature-256: sha256=&lt;hmac&gt;</code> so the receiver can verify authenticity. Leave blank to keep existing when editing.</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>Extra Headers <span style="font-weight:400;font-size:0.8rem;color:#888">(optional)</span></label>' +
+            '<div id="chWebhookHeaders">' + headerRows + '</div>' +
+            '<button type="button" class="btn btn-sm btn-secondary" id="btnAddWebhookHeader" style="margin-top:6px">+ Add Header</button>' +
+            '<div class="form-hint">e.g. <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-Gotify-Key: &lt;token&gt;</code></div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label class="checkbox-item">' +
+                '<input type="checkbox" id="chWebhookInsecure"' + (ch.webhook_insecure_skip_verify ? ' checked' : '') + '> ' +
+                'Skip TLS certificate verification' +
+            '</label>' +
+            '<div class="form-hint">&#x26A0;&#xFE0F; Only for self-signed certificates on private LANs. Never use on public endpoints.</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>Body Template <span style="font-weight:400;font-size:0.8rem;color:#888">(optional — overrides Payload Format)</span></label>' +
+            '<textarea id="chWebhookBodyTemplate" rows="4" placeholder=\'{"message":"{{jsonEscape .Message}}","title":"UberSDR","priority":5}\'>' + escHtml(ch.webhook_body_template || '') + '</textarea>' +
+            '<div class="form-hint">When set, renders the full request body using Go <code>text/template</code> syntax. Overrides the Payload Format above. Leave blank to use the format instead.</div>' +
+        '</div>' +
+        '<details class="template-ref" style="margin-bottom:16px">' +
+            '<summary class="template-ref-summary">Body template reference</summary>' +
+            '<div class="template-ref-body">' +
+                '<p style="margin:0 0 8px;font-size:0.85rem;color:#555">The template is rendered once per notification. Content-Type defaults to <code>application/json</code>; override via Extra Headers if needed.</p>' +
+                '<table class="template-ref-table">' +
+                    '<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>' +
+                    '<tbody>' +
+                        '<tr><td><code>{{.Message}}</code></td><td><span class="template-ref-type">string</span></td><td>The fully-rendered notification text. May contain newlines.</td></tr>' +
+                        '<tr><td><code>{{.Channel}}</code></td><td><span class="template-ref-type">string</span></td><td>The webhook channel name as configured.</td></tr>' +
+                        '<tr><td><code>{{.Timestamp}}</code></td><td><span class="template-ref-type">string</span></td><td>Current UTC time in RFC3339 format, e.g. <code>2026-07-01T11:00:00Z</code>.</td></tr>' +
+                    '</tbody>' +
+                '</table>' +
+                '<p style="margin:10px 0 4px;font-size:0.85rem;font-weight:600;color:#333">Examples</p>' +
+                '<table class="template-ref-table">' +
+                    '<thead><tr><th>Service</th><th>Template</th></tr></thead>' +
+                    '<tbody>' +
+                        '<tr><td>Gotify</td><td><code>{"message":"{{jsonEscape .Message}}","title":"UberSDR","priority":5}</code></td></tr>' +
+                        '<tr><td>Slack (rich)</td><td><code>{"text":"{{jsonEscape .Message}}","username":"UberSDR"}</code></td></tr>' +
+                        '<tr><td>Custom JSON</td><td><code>{"alert":"{{jsonEscape .Message}}","source":"{{.Channel}}","ts":"{{.Timestamp}}"}</code></td></tr>' +
+                        '<tr><td>ntfy (JSON)</td><td><code>{"topic":"my-topic","message":"{{jsonEscape .Message}}","title":"UberSDR"}</code></td></tr>' +
+                    '</tbody>' +
+                '</table>' +
+                '<p style="margin:10px 0 4px;font-size:0.85rem;font-weight:600;color:#333">Template functions</p>' +
+                '<table class="template-ref-table">' +
+                    '<thead><tr><th>Function</th><th>Example</th><th>Description</th></tr></thead>' +
+                    '<tbody>' +
+                        '<tr><td><code>jsonEscape s</code></td><td><code>{"msg":"{{jsonEscape .Message}}"}</code></td><td>JSON-escapes a string (backslashes, quotes, control chars). Use when embedding <code>.Message</code> inside a JSON template.</td></tr>' +
+                        '<tr><td><code>upper s</code></td><td><code>{{upper .Channel}}</code></td><td>Converts string to upper case.</td></tr>' +
+                        '<tr><td><code>lower s</code></td><td><code>{{lower .Channel}}</code></td><td>Converts string to lower case.</td></tr>' +
+                    '</tbody>' +
+                '</table>' +
+                '<p style="margin:10px 0 0;font-size:0.8rem;color:#888">&#x26A0;&#xFE0F; Always use <code>{{jsonEscape .Message}}</code> (not <code>{{.Message}}</code>) when embedding the message inside a JSON template — otherwise a message containing <code>"</code> or <code>\\</code> will produce invalid JSON.</p>' +
+            '</div>' +
+        '</details>';
+}
+
+function renderWebhookPresetHint(presetKey) {
+    var panel = el('chWebhookPresetHint');
+    if (!panel) return;
+    var preset = WEBHOOK_PRESETS[presetKey];
+    if (!preset || !preset.hint) { panel.innerHTML = ''; return; }
+    panel.innerHTML =
+        '<div style="background:#e8f4fd;border:1px solid #90caf9;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:0.875rem;color:#1a237e;line-height:1.6">' +
+        '&#x1F4A1; ' + preset.hint +
+        '</div>';
+}
+
 function showChannelForm(editName) {
     const container = el('channelFormContainer');
     const isEdit = editName !== null && editName !== undefined;
@@ -1049,7 +1338,7 @@ function showChannelForm(editName) {
     };
 
     const nameReadonly = isEdit ? 'readonly style="background:#f0f0f0"' : '';
-    const types = [['telegram','Telegram'],['email','Email (SMTP)']];
+    const types = [['telegram','Telegram'],['email','Email (SMTP)'],['webhook','Webhook (HTTP)']];
     const typeOptions = types.map(function(t) {
         return '<option value="' + t[0] + '"' + ((ch.type || 'telegram') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
     }).join('');
@@ -1105,6 +1394,35 @@ function showChannelForm(editName) {
                 el('chEmailProvider').value = p;
                 renderChannelTypeInfo('email', p);
             });
+        } else if (type === 'webhook') {
+            const initialPreset = detectWebhookPreset(ch.webhook_url || '');
+            el('chTypeFields').innerHTML = webhookFieldsHTML(ch, isEdit);
+            renderChannelTypeInfo('webhook', initialPreset);
+            renderWebhookPresetHint(initialPreset);
+            // Preset selector prefills URL template, method, and format.
+            el('chWebhookPreset').addEventListener('change', function() {
+                const preset = WEBHOOK_PRESETS[this.value];
+                if (preset) {
+                    if (preset.urlTemplate) el('chWebhookURL').value = preset.urlTemplate;
+                    el('chWebhookMethod').value = preset.method;
+                    el('chWebhookFormat').value = preset.format;
+                }
+                renderChannelTypeInfo('webhook', this.value);
+                renderWebhookPresetHint(this.value);
+            });
+            // Keep preset selector in sync when URL is typed manually.
+            el('chWebhookURL').addEventListener('input', function() {
+                const p = detectWebhookPreset(this.value);
+                el('chWebhookPreset').value = p;
+                renderChannelTypeInfo('webhook', p);
+                renderWebhookPresetHint(p);
+            });
+            // Add/remove header rows.
+            el('btnAddWebhookHeader').addEventListener('click', function() {
+                el('chWebhookHeaders').insertAdjacentHTML('beforeend', webhookHeaderRow('', ''));
+                el('chWebhookHeaders').querySelectorAll('.wh-remove').forEach(attachRemoveHeader);
+            });
+            el('chWebhookHeaders').querySelectorAll('.wh-remove').forEach(attachRemoveHeader);
         } else {
             el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('telegram');
@@ -1157,6 +1475,51 @@ function showChannelForm(editName) {
                 email_to:           to,
                 subject_prefix:     el('chSubjectPrefix').value.trim() || '[UberSDR]',
                 rate_limit_minutes: rate,
+            };
+        } else if (type === 'webhook') {
+            const url = el('chWebhookURL').value.trim();
+            if (!url) { showAlert(el('channelsAlerts'), 'error', 'Webhook URL is required.', false); return; }
+            if (!/^https?:\/\/.+/.test(url)) { showAlert(el('channelsAlerts'), 'error', 'Webhook URL must start with http:// or https://', false); return; }
+            if (url.length > 2048) { showAlert(el('channelsAlerts'), 'error', 'Webhook URL must be 2048 characters or fewer.', false); return; }
+
+            const timeout = parseInt(el('chWebhookTimeout').value, 10);
+            if (isNaN(timeout) || timeout < 1 || timeout > 60) { showAlert(el('channelsAlerts'), 'error', 'Timeout must be between 1 and 60 seconds.', false); return; }
+
+            // Validate header names and values before saving.
+            const headers = readWebhookHeaders();
+            const headerNameRe = /^[!#$%&'*+\-.0-9A-Z^_`a-z|~]+$/;
+            for (const k in headers) {
+                if (!headerNameRe.test(k)) {
+                    showAlert(el('channelsAlerts'), 'error', 'Header name "' + k + '" contains invalid characters.', false);
+                    return;
+                }
+                if (/[\r\n\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(headers[k])) {
+                    showAlert(el('channelsAlerts'), 'error', 'Header "' + k + '" value contains invalid characters (no CR, LF, or control characters).', false);
+                    return;
+                }
+            }
+
+            const newSecret = el('chWebhookSecret').value.trim();
+            let finalSecret;
+            if (newSecret) {
+                finalSecret = newSecret;
+            } else if (isEdit && ch.webhook_secret === '********') {
+                finalSecret = '********';
+            } else {
+                finalSecret = '';
+            }
+
+            channel = {
+                type:                       'webhook',
+                webhook_url:                url,
+                webhook_method:             el('chWebhookMethod').value,
+                webhook_format:             el('chWebhookFormat').value,
+                webhook_secret:             finalSecret,
+                webhook_headers:            headers,
+                webhook_timeout_seconds:    timeout,
+                webhook_insecure_skip_verify: el('chWebhookInsecure').checked,
+                webhook_body_template:      el('chWebhookBodyTemplate').value.trim(),
+                rate_limit_minutes:         rate,
             };
         } else {
             const newToken = el('chBotToken').value.trim();

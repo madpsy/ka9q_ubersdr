@@ -530,10 +530,13 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 
 	// Filter to real audio sessions only (exclude spectrum-only and internal).
 	type sessionRow struct {
-		freq      uint64
-		mode      string
-		country   string
-		countryCC string
+		freq       uint64
+		mode       string
+		clientIP   string
+		country    string
+		countryCC  string
+		isBypassed bool
+		createdAt  time.Time
 	}
 	var rows []sessionRow
 	for _, s := range allSessions {
@@ -544,9 +547,15 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 		}
 		freq, _ := s["frequency"].(uint64)
 		mode, _ := s["mode"].(string)
+		clientIP, _ := s["client_ip"].(string)
 		country, _ := s["country"].(string)
 		cc, _ := s["country_code"].(string)
-		rows = append(rows, sessionRow{freq: freq, mode: mode, country: country, countryCC: cc})
+		bypassed, _ := s["is_bypassed"].(bool)
+		var createdAt time.Time
+		if ts, ok := s["created_at"].(string); ok {
+			createdAt, _ = time.Parse(time.RFC3339, ts)
+		}
+		rows = append(rows, sessionRow{freq: freq, mode: mode, clientIP: clientIP, country: country, countryCC: cc, isBypassed: bypassed, createdAt: createdAt})
 	}
 
 	if len(rows) == 0 {
@@ -558,9 +567,30 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(rows))
 	for i, r := range rows {
-		flag := countryCodeToFlag(r.countryCC)
-		freqMHz := float64(r.freq) / 1000.0
-		fmt.Fprintf(&sb, "%d. %.3f MHz | %s | %s %s\n", i+1, freqMHz, r.mode, flag, r.country)
+		freqMHz := float64(r.freq) / 1_000_000.0
+		// Build suffix: IP, optional flag+country, optional bypassed tag, duration.
+		var suffix strings.Builder
+		if r.clientIP != "" {
+			suffix.WriteString(" | ")
+			suffix.WriteString(r.clientIP)
+		}
+		if r.country != "" {
+			flag := countryCodeToFlag(r.countryCC)
+			suffix.WriteString(" ")
+			if flag != "" {
+				suffix.WriteString(flag)
+				suffix.WriteString(" ")
+			}
+			suffix.WriteString(r.country)
+		}
+		if r.isBypassed {
+			suffix.WriteString(" [bypassed]")
+		}
+		if !r.createdAt.IsZero() {
+			suffix.WriteString(" | ")
+			suffix.WriteString(fmtSessionDuration(time.Since(r.createdAt)))
+		}
+		fmt.Fprintf(&sb, "%d. %.3f MHz | %s%s\n", i+1, freqMHz, r.mode, suffix.String())
 	}
 
 	msg := sb.String()
@@ -636,6 +666,23 @@ func countryCodeToFlag(cc string) string {
 	r1 := rune(cc[0]) - 'A' + 0x1F1E6
 	r2 := rune(cc[1]) - 'A' + 0x1F1E6
 	return string([]rune{r1, r2})
+}
+
+// fmtSessionDuration formats a session duration as a human-friendly string.
+// Examples: "<1m", "45m", "1h15m", "3h".
+func fmtSessionDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "<1m"
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 // minDuration returns the smaller of two durations.

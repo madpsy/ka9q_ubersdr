@@ -21599,7 +21599,7 @@ const tooltipLine2 = timeStr;
                 statusHTML += `<strong>Scheduled Entries:</strong> ${entryCount}<br>`;
             }
             if (nextEntry) {
-                const actionLabel = nextEntry.action === 'ground' ? 'Ground All' : `Antenna ${nextEntry.antenna}`;
+                const actionLabel = nextEntry.action === 'ground' ? 'Ground All' : antSwitchGetAntennaLabel(nextEntry.antenna);
                 statusHTML += `<strong>Next:</strong> ${nextEntry.resolved_time || nextEntry.time} → ${actionLabel}`;
             } else if (entryCount > 0) {
                 statusHTML += `<strong>Next:</strong> <em style="color:#999;">None (all entries passed for today)</em>`;
@@ -22097,7 +22097,7 @@ const tooltipLine2 = timeStr;
                     const posId = hoveredEntry.offset ? `${hoveredEntry.time}_${hoveredEntry.offset}` : hoveredEntry.time;
                     drawAntSwitchTimeline(entries, posId);
 
-                    const actionLabel = hoveredEntry.action === 'ground' ? 'Ground All' : `Antenna ${hoveredEntry.antenna}`;
+                    const actionLabel = hoveredEntry.action === 'ground' ? 'Ground All' : antSwitchGetAntennaLabel(hoveredEntry.antenna);
                     const tooltipText = `${hoveredEntry.resolved_time || hoveredEntry.time} → ${actionLabel}`;
                     ctx.font = '12px sans-serif';
                     const textWidth = ctx.measureText(tooltipText).width;
@@ -22184,7 +22184,7 @@ const tooltipLine2 = timeStr;
                 const ts = new Date(log.timestamp).toLocaleString();
                 const statusIcon = log.success ? '✓' : '✗';
                 const statusColor = log.success ? '#28a745' : '#dc3545';
-                const actionLabel = log.action === 'ground' ? 'Ground All' : `Antenna ${log.antenna}`;
+                const actionLabel = log.action === 'ground' ? 'Ground All' : antSwitchGetAntennaLabel(log.antenna);
                 const errorDisplay = log.error ? `<span style="color:#dc3545;font-style:italic;">${log.error}</span>` : '<em style="color:#999;">—</em>';
                 row.innerHTML = `
                     <td style="padding:6px;white-space:nowrap;">${ts}</td>

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	goversion "github.com/hashicorp/go-version"
 )
 
 // DefaultCPUTempThresholdC is the temperature (°C) above which the cpu_temperature
@@ -592,6 +594,36 @@ func BuildSystemHealthProbes(
 			return true, nil
 		},
 	})
+
+	// Software version probe — fires when a newer version is available on GitHub.
+	// Only active when version checking is enabled in config.
+	// Uses the cached latest version from the background version checker (no outbound requests).
+	if config != nil && config.Admin.VersionCheckEnabled {
+		probes = append(probes, systemHealthProbe{
+			component: "software_version",
+			probe: func() (bool, []string) {
+				s := &VersionHealthStatus{}
+				latestVersion := GetLatestVersion()
+				if latestVersion == "" {
+					return true, nil // checker hasn't run yet — skip
+				}
+				s.CurrentVersion = Version
+				s.LatestVersion = latestVersion
+
+				currentVer, err1 := goversion.NewVersion(Version)
+				latestVer, err2 := goversion.NewVersion(latestVersion)
+				if err1 == nil && err2 == nil {
+					s.UpdateAvailable = latestVer.GreaterThan(currentVer)
+				} else {
+					s.UpdateAvailable = latestVersion != Version
+				}
+				if s.UpdateAvailable {
+					return false, []string{fmt.Sprintf("New version available: %s (current: %s)", latestVersion, Version)}
+				}
+				return true, nil
+			},
+		})
+	}
 
 	return probes
 }

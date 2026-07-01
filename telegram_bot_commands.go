@@ -29,6 +29,10 @@ type botCommand struct {
 	// arguments that change hardware. The UI uses this to decide whether to
 	// show a "allow write" toggle for the command.
 	readOnly bool
+	// writeHint is an optional extra line shown in /help when write access is
+	// enabled for this command. Use it to document the write argument(s).
+	// Example: "Use /version update to trigger an update."
+	writeHint string
 	// handler sends the reply and returns the bot text, raw Telegram API JSON,
 	// and whether the API call succeeded (ok:true in the response).
 	// args is the text after the command token (empty string for status-only calls).
@@ -59,9 +63,10 @@ var botCommands = map[string]botCommand{
 		handler:  (*TelegramBotListener).handleRBN,
 	},
 	"rotator": {
-		desc:     "Show (or set) rotator azimuth",
-		readOnly: false,
-		handler:  (*TelegramBotListener).handleRotator,
+		desc:      "Show rotator azimuth",
+		readOnly:  false,
+		writeHint: "Use <code>/rotator &lt;0–360&gt;</code> to move to an azimuth, e.g. <code>/rotator 180</code>",
+		handler:   (*TelegramBotListener).handleRotator,
 	},
 	"sessions": {
 		desc:     "Show active listener sessions",
@@ -69,9 +74,16 @@ var botCommands = map[string]botCommand{
 		handler:  (*TelegramBotListener).handleSessions,
 	},
 	"switch": {
-		desc:     "Show (or set) antenna switch port",
-		readOnly: false,
-		handler:  (*TelegramBotListener).handleSwitch,
+		desc:      "Show (or set) antenna switch port",
+		readOnly:  false,
+		writeHint: "Use <code>/switch &lt;1–N&gt;</code> to select a port, or <code>/switch ground</code> to ground all antennas.",
+		handler:   (*TelegramBotListener).handleSwitch,
+	},
+	"version": {
+		desc:      "Show current and latest software version",
+		readOnly:  false,
+		writeHint: "Use <code>/version update</code> to trigger an update.",
+		handler:   (*TelegramBotListener).handleVersion,
 	},
 	"wspr": {
 		desc:     "Show WSPR Live rank for this receiver",
@@ -81,6 +93,67 @@ var botCommands = map[string]botCommand{
 }
 
 // ─── Command handlers ─────────────────────────────────────────────────────────
+
+// handleVersion reports the current and latest software version.
+// With argument "update" (and write access enabled) it triggers an update by
+// writing the version file — the same action as the "Force Update" button in
+// the admin UI.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, string, bool) {
+	currentVersion := Version
+	latestVersion := GetLatestVersion()
+
+	// ── Update mode: /version update ─────────────────────────────────────────
+	if strings.TrimSpace(strings.ToLower(args)) == "update" {
+		if !l.commandWriteEnabled("version") {
+			msg := "⚠️ Write access is not enabled for /version. Enable it in the bot listener config."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		versionToWrite := latestVersion
+		if versionToWrite == "" {
+			versionToWrite = currentVersion
+		}
+
+		if latestVersion == "" || latestVersion == currentVersion {
+			msg := fmt.Sprintf("🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\n\n<i>No update available — already on the latest version.</i>",
+				html.EscapeString(currentVersion))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		if err := WriteVersionFile(versionToWrite); err != nil {
+			msg := fmt.Sprintf("⚠️ Failed to trigger update: %s", html.EscapeString(err.Error()))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		msg := fmt.Sprintf("🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\nLatest:  <code>%s</code>\n\n✅ Update triggered. The server will update within 1 minute (when no users are connected).",
+			html.EscapeString(currentVersion), html.EscapeString(versionToWrite))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// ── Status mode: /version ─────────────────────────────────────────────────
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\n", html.EscapeString(currentVersion))
+
+	if latestVersion == "" {
+		sb.WriteString("Latest:  <i>not yet checked</i>\n")
+	} else if latestVersion == currentVersion {
+		fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n\n✅ Up to date", html.EscapeString(latestVersion))
+	} else {
+		fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n\n⚠️ Update available!", html.EscapeString(latestVersion))
+		if l.commandWriteEnabled("version") {
+			sb.WriteString(" Use <code>/version update</code> to trigger the update.")
+		}
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
 
 // handlePSK reports the PSKReporter rank for the configured receiver callsign.
 // Returns (botText, telegramAPIResponse, apiOK).
@@ -779,6 +852,9 @@ func (l *TelegramBotListener) handleHelp(chatID int64, args string) (string, str
 			line = "✅ /" + name + " — " + bc.desc
 			if !bc.readOnly && l.commandWriteEnabled(name) {
 				line += " <i>(read/write)</i>"
+				if bc.writeHint != "" {
+					line += "\n    ↳ " + bc.writeHint
+				}
 			}
 		} else {
 			line = "❌ /" + name + " — " + bc.desc + " <i>(disabled)</i>"

@@ -526,7 +526,8 @@
         #monitor-cwskimmer,
         #monitor-mqtt,
         #monitor-rotctl,
-        #monitor-ant-switch {
+        #monitor-ant-switch,
+        #monitor-software-version {
             scroll-margin-top: 52px;
         }
 
@@ -1868,6 +1869,15 @@
                         </div>
                     </div>
 
+                    <!-- Software Version Section -->
+                    <div id="monitor-software-version" class="config-section" style="display: none;">
+                        <h3>🔄 Software Version</h3>
+                        <div id="softwareVersionDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <div class="spinner" style="margin: 20px auto;"></div>
+                            <p style="text-align: center; color: #666;">Checking version...</p>
+                        </div>
+                    </div>
+
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -2713,9 +2723,7 @@
                     <span id="latestVersion" class="version-badge version-latest">Checking...</span>
                 </div>
                 <div id="updateNotice" style="display: none;">
-                    <a href="https://ubersdr.org" target="_blank" class="version-link">
-                        🎉 New version available!
-                    </a>
+                    <span style="color: #f57c00; font-weight: 600;">🎉 New version available!</span>
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -3740,52 +3748,52 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
         // Check session on page load
         checkSession();
 
-        // Version checking functionality
+        // Version checking functionality — uses the auth-protected /admin/version-health endpoint
+        // so the footer is only shown when the user is logged in.
+        // Also fetches /api/description for site metadata (callsign, decoder links, etc.)
         async function checkVersions() {
             try {
-                // Fetch current version from /api/description
+                // Fetch site description for metadata (callsign, decoder links, etc.)
                 const descResponse = await fetch('/api/description');
-                let currentVersion = 'Unknown';
-
                 if (descResponse.ok) {
                     const descData = await descResponse.json();
-                    currentVersion = descData.version || 'Unknown';
-                    document.getElementById('currentVersion').textContent = currentVersion;
                     siteDescription = descData;
                     updateDecoderAnalyticsLinks();
                 }
 
-                // Fetch latest version from GitHub
-                let latestVersion = 'Unknown';
-                try {
-                    const githubResponse = await fetch('https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/version.go');
-                    if (githubResponse.ok) {
-                        const githubText = await githubResponse.text();
-                        // Parse version from: const Version = "0.1.5"
-                        const versionMatch = githubText.match(/const\s+Version\s*=\s*"([^"]+)"/);
-                        if (versionMatch && versionMatch[1]) {
-                            latestVersion = versionMatch[1];
-                            document.getElementById('latestVersion').textContent = latestVersion;
-                        }
-                    }
-                } catch (error) {
-                    console.log('Could not fetch latest version from GitHub:', error);
-                    document.getElementById('latestVersion').textContent = 'Check failed';
-                    document.getElementById('latestVersion').classList.remove('version-latest');
+                // Fetch version health from the auth-protected backend endpoint.
+                // This uses the cached latest version from the background version checker,
+                // so it never makes outbound requests itself.
+                const versionResponse = await authenticatedFetch('/admin/version-health');
+                if (!versionResponse || !versionResponse.ok) {
+                    // Not logged in yet — keep footer hidden
+                    return;
+                }
+
+                const versionData = await versionResponse.json();
+                const currentVersion = versionData.current_version || 'Unknown';
+                const latestVersion = versionData.latest_version || '';
+                const checkFailed = versionData.check_failed || false;
+                const updateAvailable = versionData.update_available || false;
+
+                document.getElementById('currentVersion').textContent = currentVersion;
+
+                if (!versionData.check_enabled || checkFailed || !latestVersion) {
+                    document.getElementById('latestVersion').textContent = checkFailed ? 'Check failed' : 'Disabled';
                     document.getElementById('latestVersion').style.background = '#f5f5f5';
                     document.getElementById('latestVersion').style.color = '#999';
+                } else {
+                    document.getElementById('latestVersion').textContent = latestVersion;
+                    if (updateAvailable) {
+                        document.getElementById('latestVersion').classList.remove('version-latest');
+                        document.getElementById('latestVersion').classList.add('version-update-available');
+                        document.getElementById('updateNotice').style.display = 'block';
+                    }
                 }
 
-                // Show footer
+                // Show footer now that we have data
                 document.getElementById('versionFooter').style.display = 'flex';
 
-                // Compare versions and show update notice if different
-                if (currentVersion !== 'Unknown' && latestVersion !== 'Unknown' &&
-                    latestVersion !== 'Check failed' && currentVersion !== latestVersion) {
-                    document.getElementById('updateNotice').style.display = 'block';
-                    document.getElementById('latestVersion').classList.remove('version-latest');
-                    document.getElementById('latestVersion').classList.add('version-update-available');
-                }
             } catch (error) {
                 console.error('Error checking versions:', error);
             }
@@ -18645,7 +18653,7 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch and DSP health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch, DSP and version health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
@@ -18659,7 +18667,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/ntp-health'),
                     authenticatedFetch('/admin/gpsdo-health'),
                     authenticatedFetch('/admin/ant-switch-health'),
-                    authenticatedFetch('/admin/dsp-health')
+                    authenticatedFetch('/admin/dsp-health'),
+                    authenticatedFetch('/admin/version-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -18668,9 +18677,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse, dspResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse, dspResponse, versionResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse || !versionResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -18689,17 +18698,18 @@ const tooltipLine2 = timeStr;
                 const gpsdoHealth = (gpsdoResponse.ok || gpsdoResponse.status === 503) ? await gpsdoResponse.json() : null;
                 const antSwitchHealth = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
                 const dspHealth = (dspResponse.ok || dspResponse.status === 503) ? await dspResponse.json() : null;
+                const versionHealth = versionResponse.ok ? await versionResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
                 lastGPSDOHealth = gpsdoHealth;
                 updateGPSDOTabVisibility();
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth, softwareVersion: versionHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false) && (versionHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -19358,6 +19368,12 @@ const tooltipLine2 = timeStr;
                 if (data.ntp) {
                     renderNTPHistorySection(data.ntp);
                 }
+
+                // Render software version health status
+                if (data.softwareVersion) {
+                    const sv = data.softwareVersion;
+                    renderSoftwareVersionHealth(sv.current_version, sv.latest_version, sv.check_failed);
+                }
             }
 
             // Update the monitor section navigation bar
@@ -19384,6 +19400,7 @@ const tooltipLine2 = timeStr;
                 { id: 'monitor-mqtt',              label: 'MQTT' },
                 { id: 'monitor-rotctl',            label: 'Rotator' },
                 { id: 'monitor-ant-switch',        label: 'Ant Switch' },
+                { id: 'monitor-software-version',  label: 'Software Version' },
             ];
 
             const visible = sections.filter(s => {
@@ -19405,6 +19422,95 @@ const tooltipLine2 = timeStr;
                    onmouseout="this.style.background='#f0f2ff';this.style.color='#667eea'"
                 >${s.label}</a>`
             ).join('');
+        }
+
+        function renderSoftwareVersionHealth(currentVersion, latestVersion, checkFailed) {
+            const section = document.getElementById('monitor-software-version');
+            const display = document.getElementById('softwareVersionDisplay');
+            if (!section || !display) return;
+
+            section.style.display = 'block';
+
+            const upToDate = !checkFailed && currentVersion !== 'Unknown' && latestVersion !== 'Unknown' && currentVersion === latestVersion;
+            const updateAvailable = !checkFailed && currentVersion !== 'Unknown' && latestVersion !== 'Unknown' && currentVersion !== latestVersion;
+
+            let statusIcon, statusText, statusColor, statusBg, statusBorder;
+            if (checkFailed) {
+                statusIcon = '⚠️';
+                statusText = 'Version check failed';
+                statusColor = '#856404';
+                statusBg = '#fff3cd';
+                statusBorder = '#ffc107';
+            } else if (updateAvailable) {
+                statusIcon = '⚠️';
+                statusText = 'Update available';
+                statusColor = '#856404';
+                statusBg = '#fff3cd';
+                statusBorder = '#ffc107';
+            } else if (upToDate) {
+                statusIcon = '✅';
+                statusText = 'Up to date';
+                statusColor = '#155724';
+                statusBg = '#d4edda';
+                statusBorder = '#c3e6cb';
+            } else {
+                statusIcon = '❓';
+                statusText = 'Unknown';
+                statusColor = '#666';
+                statusBg = '#f8f9fa';
+                statusBorder = '#dee2e6';
+            }
+
+            display.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 16px;
+                            background: ${statusBg}; border: 1px solid ${statusBorder}; border-radius: 6px; color: ${statusColor};">
+                    <span style="font-size: 20px;">${statusIcon}</span>
+                    <span style="font-weight: 600; font-size: 15px;">${statusText}</span>
+                    ${updateAvailable ? `<a href="https://github.com/madpsy/ka9q_ubersdr/releases" target="_blank"
+                        style="margin-left: auto; padding: 5px 14px; background: #f57c00; color: white;
+                               text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 600;
+                               white-space: nowrap;">🎉 View Release Notes</a>` : ''}
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                    <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Current Version</div>
+                        <div style="font-size: 18px; font-weight: bold; color: #1976d2; font-family: monospace;">${currentVersion}</div>
+                    </div>
+                    <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Latest Version</div>
+                        <div style="font-size: 18px; font-weight: bold; font-family: monospace;
+                                    color: ${checkFailed ? '#999' : updateAvailable ? '#f57c00' : '#388e3c'};">
+                            ${checkFailed ? 'Check failed' : latestVersion}
+                        </div>
+                    </div>
+                </div>
+                ${updateAvailable ? `
+                <div style="margin-top: 12px; padding: 10px 14px; background: #fff8e1; border: 1px solid #ffe082;
+                            border-radius: 5px; font-size: 13px; color: #5d4037;">
+                    💡 A new version of UberSDR is available. Updates are applied automatically when no users are connected,
+                    or you can trigger one manually from the <strong>System</strong> tab.
+                </div>` : ''}
+            `;
+
+            // Propagate warning to the system health warnings banner if update available
+            if (updateAvailable) {
+                const warnings = document.getElementById('systemHealthWarnings');
+                if (warnings) {
+                    // Only add if not already present
+                    if (!document.getElementById('swVersionWarning')) {
+                        const warn = document.createElement('div');
+                        warn.id = 'swVersionWarning';
+                        warn.className = 'alert alert-warning';
+                        warn.style.marginBottom = '10px';
+                        warn.innerHTML = `⚠️ <strong>Software Update Available:</strong> Current <code>${currentVersion}</code> → Latest <code>${latestVersion}</code>.
+                            <a href="#monitor-software-version" style="margin-left: 8px; color: #856404; font-weight: 600;">View details ↓</a>`;
+                        warnings.appendChild(warn);
+                        warnings.style.display = 'block';
+                    }
+                }
+            }
+
+            updateMonitorNav();
         }
 
         function renderDSPHealth(data) {

@@ -65,7 +65,7 @@ const FILTER_FIELDS = {
         { name: 'rotator_moving', type: 'bool_optional', label: 'Moving State', hint: 'true=only when starts moving; false=only when stops; blank=any change' },
     ],
     system_monitor: [
-        { name: 'components',   type: 'enum_list', label: 'Components',    values: ['noise_floor','space_weather','decoder','cw_skimmer','mqtt','rotator','ant_switch','frequency_reference','instance_reporter','sdr_frontend','gpsdo','system_load','cpu_temperature','dsp'] },
+        { name: 'components',   type: 'enum_list', label: 'Components',    values: ['noise_floor','space_weather','decoder','cw_skimmer','mqtt','rotator','ant_switch','frequency_reference','instance_reporter','sdr_frontend','gpsdo','system_load','cpu_temperature','dsp','software_version'] },
         { name: 'on_unhealthy', type: 'bool',      label: 'On Unhealthy',  hint: 'Fire only on healthy to unhealthy transition' },
         { name: 'on_recovery',  type: 'bool',      label: 'On Recovery',   hint: 'Fire only on unhealthy to healthy transition' },
         { name: 'flap_detection',      type: 'toggle_on', label: 'Flap Detection', hint: 'Suppress repeated alerts when a component oscillates (e.g. system load). Sends one "flap detected" alert, then resumes once stable. Default: on' },

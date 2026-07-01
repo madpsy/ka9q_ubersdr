@@ -740,7 +740,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			Type:        "system_monitor",
 			Description: "A subsystem transitioned between healthy and unhealthy states.",
 			FilterFields: []filterField{
-				{Name: "components", Type: "[]string", Description: "Subsystem names to watch. Empty = all components.", ValidValues: []string{"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt", "rotator", "ant_switch", "frequency_reference", "instance_reporter", "sdr_frontend", "gpsdo", "system_load", "cpu_temperature", "dsp"}, Example: `["decoder","cw_skimmer"]`},
+				{Name: "components", Type: "[]string", Description: "Subsystem names to watch. Empty = all components.", ValidValues: []string{"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt", "rotator", "ant_switch", "frequency_reference", "instance_reporter", "sdr_frontend", "gpsdo", "system_load", "cpu_temperature", "dsp", "software_version"}, Example: `["decoder","cw_skimmer"]`},
 				{Name: "on_unhealthy", Type: "bool", Description: "Fire only on healthy→unhealthy transition.", Example: "true"},
 				{Name: "on_recovery", Type: "bool", Description: "Fire only on unhealthy→healthy transition.", Example: "true"},
 				{Name: "flap_detection", Type: "bool", Description: "Suppress repeated alerts when a component oscillates; sends one flap alert then resumes once stable. Default: on.", Example: "true"},
@@ -865,6 +865,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt",
 			"rotator", "ant_switch", "frequency_reference", "instance_reporter",
 			"sdr_frontend", "gpsdo", "system_load", "cpu_temperature", "dsp",
+			"software_version",
 		},
 	}
 

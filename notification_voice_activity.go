@@ -21,19 +21,7 @@ func StartVoiceActivityNotifier(
 	nfm *NoiseFloorMonitor,
 	pollInterval time.Duration,
 ) {
-	if nm == nil || !nm.cfg.Enabled || nfm == nil {
-		return
-	}
-
-	// Check whether any voice_activity rules are enabled; skip if none.
-	hasRule := false
-	for _, r := range nm.cfg.Rules {
-		if r.IsEnabled() && r.Event == EventTypeVoiceActivity {
-			hasRule = true
-			break
-		}
-	}
-	if !hasRule {
+	if nm == nil || nfm == nil {
 		return
 	}
 
@@ -52,6 +40,25 @@ func StartVoiceActivityNotifier(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				cfg := nm.Config()
+				// Skip the tick if notifications are disabled or no
+				// voice_activity rules are currently enabled. Re-checked every
+				// tick so rules added via the admin UI take effect within one
+				// poll interval without a server restart.
+				if !cfg.Enabled {
+					continue
+				}
+				hasRule := false
+				for _, r := range cfg.Rules {
+					if r.IsEnabled() && r.Event == EventTypeVoiceActivity {
+						hasRule = true
+						break
+					}
+				}
+				if !hasRule {
+					continue
+				}
+
 				currentSeen := make(map[string]bool)
 
 				// Scan all configured noise-floor bands

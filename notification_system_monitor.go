@@ -168,19 +168,7 @@ func StartSystemMonitorNotifier(
 	pollInterval time.Duration,
 	probes []systemHealthProbe,
 ) {
-	if nm == nil || !nm.cfg.Enabled {
-		return
-	}
-
-	// Check whether any system_monitor rules are enabled; skip if none.
-	hasRule := false
-	for _, r := range nm.cfg.Rules {
-		if r.IsEnabled() && r.Event == EventTypeSystemMonitor {
-			hasRule = true
-			break
-		}
-	}
-	if !hasRule {
+	if nm == nil {
 		return
 	}
 
@@ -198,8 +186,27 @@ func StartSystemMonitorNotifier(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				cfg := nm.Config()
+				// Skip the tick entirely if notifications are disabled or no
+				// system_monitor rules are currently enabled. This is re-checked
+				// every tick so rules added via the admin UI take effect within
+				// one poll interval without requiring a server restart.
+				if !cfg.Enabled {
+					continue
+				}
+				hasRule := false
+				for _, r := range cfg.Rules {
+					if r.IsEnabled() && r.Event == EventTypeSystemMonitor {
+						hasRule = true
+						break
+					}
+				}
+				if !hasRule {
+					continue
+				}
+
 				// Re-read flap config each tick so it tracks hot reloads.
-				fc := systemMonitorFlapConfig(nm.Config())
+				fc := systemMonitorFlapConfig(cfg)
 				now := time.Now()
 
 				for _, p := range probes {

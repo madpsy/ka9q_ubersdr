@@ -1212,11 +1212,30 @@ func handleTelegramBotManageWithManager(w http.ResponseWriter, r *http.Request, 
 				memberCount = int(n)
 			}
 		}
+
+		// Fetch bot description and short description. These are separate API
+		// calls not included in getMe, so we fetch them best-effort (failures
+		// are non-fatal — the UI just shows an empty field).
+		botDescription := ""
+		if descRes, descErr := tgGet("/getMyDescription"); descErr == nil && tgOK(descRes) {
+			if result, ok := descRes["result"].(map[string]interface{}); ok {
+				botDescription, _ = result["description"].(string)
+			}
+		}
+		botShortDescription := ""
+		if sdRes, sdErr := tgGet("/getMyShortDescription"); sdErr == nil && tgOK(sdRes) {
+			if result, ok := sdRes["result"].(map[string]interface{}); ok {
+				botShortDescription, _ = result["short_description"].(string)
+			}
+		}
+
 		respond(map[string]interface{}{
-			"ok":           true,
-			"bot":          meRes["result"],
-			"chat":         chatRes["result"],
-			"member_count": memberCount,
+			"ok":                    true,
+			"bot":                   meRes["result"],
+			"chat":                  chatRes["result"],
+			"member_count":          memberCount,
+			"bot_description":       botDescription,
+			"bot_short_description": botShortDescription,
 		})
 
 	case "set_title":

@@ -1103,6 +1103,8 @@ async function loadTelegramInfo(name) {
     if (descInput && chat.description) descInput.value = chat.description;
     var botNameInput = el('tgMgr-botName-' + name);
     if (botNameInput && bot.first_name) botNameInput.value = bot.first_name;
+    var botAboutInput = el('tgMgr-botAbout-' + name);
+    if (botAboutInput) botAboutInput.value = res.bot_description || '';
 
     var cmdRes = await tgManageCall(name, 'get_commands', {});
     var cmdRows = el('tgMgr-cmdRows-' + name);

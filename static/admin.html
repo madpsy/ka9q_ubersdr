@@ -12788,6 +12788,12 @@ function resetStationIdColor() {
                 availableSolarEvents = currentRotatorSchedulerConfig.solar_events;
             }
 
+            // Link to public rotator control page
+            const rotatorLinkDiv = document.createElement('div');
+            rotatorLinkDiv.style.marginBottom = '10px';
+            rotatorLinkDiv.innerHTML = '<button class="btn" onclick="window.open(\'/rotator.html\', \'_blank\')" style="background: #667eea;">🧭 Rotator Controls</button>';
+            container.appendChild(rotatorLinkDiv);
+
             // Status Section
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';

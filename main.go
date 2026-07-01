@@ -2629,6 +2629,8 @@ func main() {
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
 	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))
+	http.HandleFunc("/admin/rotctl-position", adminHandler.AuthMiddleware(adminHandler.HandleAdminRotctlPosition))
+	http.HandleFunc("/admin/rotctl-command", adminHandler.AuthMiddleware(adminHandler.HandleAdminRotctlCommand))
 	http.HandleFunc("/admin/ant-switch-health", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchHealth))
 	http.HandleFunc("/admin/ant-switch-command", adminHandler.AuthMiddleware(adminHandler.HandleAdminAntSwitchCommand))
 	http.HandleFunc("/admin/ant-switch-test", adminHandler.AuthMiddleware(adminHandler.HandleAntSwitchTest))

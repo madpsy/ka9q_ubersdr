@@ -12888,6 +12888,54 @@ function resetStationIdColor() {
             statusSection.appendChild(statusDiv);
             container.appendChild(statusSection);
 
+            // Rotator Controls Section (above map)
+            const controlsSection = document.createElement('div');
+            controlsSection.className = 'config-section';
+            controlsSection.innerHTML = '<h3>🎮 Rotator Controls</h3>';
+
+            const controlsDiv = document.createElement('div');
+            controlsDiv.style.padding = '15px';
+            controlsDiv.style.background = '#f8f9fa';
+            controlsDiv.style.borderRadius = '5px';
+
+            controlsDiv.innerHTML = `
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;">
+                    <!-- Azimuth input + Go -->
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <label style="font-size: 12px; color: #555; white-space: nowrap;">Azimuth (°)</label>
+                        <input type="number" id="admin-rotator-azimuth" min="0" max="360" step="1"
+                            style="width: 80px; padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; text-align: center;"
+                            placeholder="0–360"
+                            onkeydown="if(event.key==='Enter') adminRotatorGo()">
+                        <button class="btn" style="padding: 6px 14px; font-size: 13px;" onclick="adminRotatorGo()">Go</button>
+                    </div>
+                    <!-- ±adjustment buttons -->
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" style="padding: 5px 9px; font-size: 12px;" onclick="adminRotatorAdjust(-30)">−30°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 9px; font-size: 12px;" onclick="adminRotatorAdjust(-10)">−10°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 9px; font-size: 12px;" onclick="adminRotatorAdjust(-5)">−5°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 9px; font-size: 12px;" onclick="adminRotatorAdjust(5)">+5°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 9px; font-size: 12px;" onclick="adminRotatorAdjust(10)">+10°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 9px; font-size: 12px;" onclick="adminRotatorAdjust(30)">+30°</button>
+                    </div>
+                    <!-- Cardinal presets -->
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="adminRotatorSet(0)">N 0°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="adminRotatorSet(90)">E 90°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="adminRotatorSet(180)">S 180°</button>
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="adminRotatorSet(270)">W 270°</button>
+                    </div>
+                    <!-- Stop / Park -->
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-danger" style="padding: 6px 14px; font-size: 13px;" onclick="adminRotatorStop()">⏹ Stop</button>
+                        <button class="btn" style="padding: 6px 14px; font-size: 13px; background: #2196f3;" onclick="adminRotatorPark()">🅿 Park</button>
+                    </div>
+                </div>
+                <div id="admin-rotator-controls-msg" style="margin-top: 8px; font-size: 12px; display: none;"></div>
+            `;
+            controlsSection.appendChild(controlsDiv);
+            container.appendChild(controlsSection);
+
             // Rotator Map Section with Stats Panel
             const mapSection = document.createElement('div');
             mapSection.className = 'config-section';
@@ -13065,6 +13113,16 @@ function resetStationIdColor() {
                     } catch (error) {
                         console.error('Failed to fetch countries data:', error);
                     }
+
+                    // Listen for map click events to move the rotator
+                    document.addEventListener('rotator-map-click', (event) => {
+                        const bearing = event.detail.bearing;
+                        // Update the azimuth input to reflect the clicked bearing
+                        const azInput = document.getElementById('admin-rotator-azimuth');
+                        if (azInput) azInput.value = bearing;
+                        // Move the rotator
+                        adminRotatorSet(bearing);
+                    });
 
                     // Fetch and display sun position after a short delay to ensure map is ready
                     setTimeout(() => {
@@ -13624,14 +13682,109 @@ function resetStationIdColor() {
             loadRotatorSchedulerLogs();
         }
 
+        // ── Admin Rotator Controls ────────────────────────────────────────────
+
+        function adminRotatorShowMsg(text, isError) {
+            const el = document.getElementById('admin-rotator-controls-msg');
+            if (!el) return;
+            el.textContent = text;
+            el.style.display = 'block';
+            el.style.color = isError ? '#dc3545' : '#28a745';
+            clearTimeout(el._hideTimer);
+            el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 5000);
+        }
+
+        async function adminRotatorSet(azimuth) {
+            azimuth = Math.round(azimuth);
+            try {
+                const resp = await authenticatedFetch('/admin/rotctl-position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ azimuth: azimuth })
+                });
+                if (!resp) return; // auth failed
+                const data = await resp.json();
+                if (data.success) {
+                    adminRotatorShowMsg('Moving to ' + azimuth + '\u00b0', false);
+                } else {
+                    adminRotatorShowMsg(data.error || 'Failed to set azimuth', true);
+                }
+            } catch (e) {
+                adminRotatorShowMsg('Network error: ' + e.message, true);
+            }
+        }
+
+        function adminRotatorGo() {
+            const input = document.getElementById('admin-rotator-azimuth');
+            if (!input) return;
+            const az = parseFloat(input.value);
+            if (isNaN(az) || az < 0 || az > 360) {
+                adminRotatorShowMsg('Azimuth must be 0\u2013360', true);
+                return;
+            }
+            adminRotatorSet(az);
+        }
+
+        function adminRotatorAdjust(delta) {
+            const input = document.getElementById('admin-rotator-azimuth');
+            // Use current displayed azimuth if input is empty
+            let base = parseFloat(input ? input.value : 0);
+            if (isNaN(base)) {
+                const azEl = document.getElementById('rotator-azimuth-stat');
+                base = azEl ? parseFloat(azEl.textContent) || 0 : 0;
+            }
+            let newAz = ((base + delta) % 360 + 360) % 360;
+            newAz = Math.round(newAz);
+            if (input) input.value = newAz;
+            adminRotatorSet(newAz);
+        }
+
+        async function adminRotatorStop() {
+            try {
+                const resp = await authenticatedFetch('/admin/rotctl-command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: 'stop' })
+                });
+                if (!resp) return;
+                const data = await resp.json();
+                adminRotatorShowMsg(data.success ? 'Rotator stopped' : (data.error || 'Failed to stop'), !data.success);
+            } catch (e) {
+                adminRotatorShowMsg('Network error: ' + e.message, true);
+            }
+        }
+
+        async function adminRotatorPark() {
+            try {
+                const resp = await authenticatedFetch('/admin/rotctl-command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: 'park' })
+                });
+                if (!resp) return;
+                const data = await resp.json();
+                adminRotatorShowMsg(data.success ? 'Rotator parking\u2026' : (data.error || 'Failed to park'), !data.success);
+            } catch (e) {
+                adminRotatorShowMsg('Network error: ' + e.message, true);
+            }
+        }
+
+        // ── End Admin Rotator Controls ────────────────────────────────────────
+
         // Update rotator stats panel
         function updateRotatorStats(statusData) {
             // Update rotator position
             if (statusData.position) {
                 const azimuthEl = document.getElementById('rotator-azimuth-stat');
                 const elevationEl = document.getElementById('rotator-elevation-stat');
-                if (azimuthEl) azimuthEl.textContent = Math.round(statusData.position.azimuth) + '°';
-                if (elevationEl) elevationEl.textContent = Math.round(statusData.position.elevation) + '°';
+                if (azimuthEl) azimuthEl.textContent = Math.round(statusData.position.azimuth) + '\u00b0';
+                if (elevationEl) elevationEl.textContent = Math.round(statusData.position.elevation) + '\u00b0';
+
+                // Keep the azimuth input in sync when not focused
+                const azInput = document.getElementById('admin-rotator-azimuth');
+                if (azInput && document.activeElement !== azInput) {
+                    azInput.value = Math.round(statusData.position.azimuth);
+                }
             }
 
             // Update next movement from scheduler status

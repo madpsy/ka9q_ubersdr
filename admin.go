@@ -8403,3 +8403,134 @@ func (ah *AdminHandler) HandleAntSwitchTest(w http.ResponseWriter, r *http.Reque
 		"last_update":          state.LastUpdate,
 	})
 }
+
+// rotctlAdminPositionRequest is the JSON body for POST /admin/rotctl-position.
+// No password required — admin session cookie is the authentication.
+type rotctlAdminPositionRequest struct {
+	Azimuth   *float64 `json:"azimuth,omitempty"`
+	Elevation *float64 `json:"elevation,omitempty"`
+}
+
+// rotctlAdminCommandRequest is the JSON body for POST /admin/rotctl-command.
+// No password required — admin session cookie is the authentication.
+type rotctlAdminCommandRequest struct {
+	Command string `json:"command"`
+}
+
+// HandleAdminRotctlPosition handles POST /admin/rotctl-position
+// Admin-only (wrapped by AuthMiddleware). No extra rotctl password required.
+func (ah *AdminHandler) HandleAdminRotctlPosition(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if !ah.config.Rotctl.Enabled || ah.rotctlHandler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Rotator control is not enabled or not initialized",
+		})
+		return
+	}
+
+	var req rotctlAdminPositionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.Azimuth == nil && req.Elevation == nil {
+		http.Error(w, "Either azimuth or elevation must be specified", http.StatusBadRequest)
+		return
+	}
+
+	var err error
+	var message string
+
+	if req.Azimuth != nil && req.Elevation != nil {
+		err = ah.rotctlHandler.controller.SetPosition(*req.Azimuth, *req.Elevation)
+		message = fmt.Sprintf("Setting position to azimuth=%.2f, elevation=%.2f", *req.Azimuth, *req.Elevation)
+	} else if req.Azimuth != nil {
+		err = ah.rotctlHandler.controller.SetAzimuth(*req.Azimuth)
+		message = fmt.Sprintf("Setting azimuth to %.2f", *req.Azimuth)
+	} else {
+		err = ah.rotctlHandler.controller.SetElevation(*req.Elevation)
+		message = fmt.Sprintf("Setting elevation to %.2f", *req.Elevation)
+	}
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"message": message,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": message,
+	})
+}
+
+// HandleAdminRotctlCommand handles POST /admin/rotctl-command
+// Admin-only (wrapped by AuthMiddleware). No extra rotctl password required.
+// Supports commands: stop, park
+func (ah *AdminHandler) HandleAdminRotctlCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if !ah.config.Rotctl.Enabled || ah.rotctlHandler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Rotator control is not enabled or not initialized",
+		})
+		return
+	}
+
+	var req rotctlAdminCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	var err error
+	var message string
+
+	switch req.Command {
+	case "stop":
+		err = ah.rotctlHandler.controller.Stop()
+		message = "Rotator stopped"
+	case "park":
+		parkAzimuth := ah.config.Rotctl.ParkAzimuth
+		err = ah.rotctlHandler.controller.SetAzimuth(parkAzimuth)
+		message = fmt.Sprintf("Parking rotator at %.1f", parkAzimuth)
+	default:
+		http.Error(w, fmt.Sprintf("Unknown command %q (valid: stop, park)", req.Command), http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"message": message,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": message,
+	})
+}

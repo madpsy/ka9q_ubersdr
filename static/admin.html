@@ -21474,7 +21474,9 @@ const tooltipLine2 = timeStr;
             c.allow_mixing  = document.getElementById('antCfgAllowMixing')?.checked || false;
             c.force_sync    = document.getElementById('antCfgForceSync')?.checked ?? true;
             c.apply_favourite_on_startup = document.getElementById('antCfgApplyFavouriteOnStartup')?.checked || false;
-            c.default_antenna = parseInt(document.getElementById('antCfgDefaultAntenna')?.value) || 0;
+            // default_antenna is set exclusively via the ⭐ star buttons (antSwitchSetDefault).
+            // There is no antCfgDefaultAntenna input element — preserve the existing value.
+            // c.default_antenna is already correct in currentConfig from the last ⭐ click.
             c.password      = document.getElementById('antCfgPassword')?.value || '';
             // Also collect labels from the cards
             const labels = [];

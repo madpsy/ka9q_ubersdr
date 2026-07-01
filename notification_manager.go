@@ -172,6 +172,28 @@ func (m *NotificationManager) SetSessionManager(sm *SessionManager) {
 	m.listeners.Sync(m.cfg)
 }
 
+// SetRotctlHandler wires the rotator handler into the listener registry so
+// that the /rotator bot command can report the current azimuth.
+func (m *NotificationManager) SetRotctlHandler(h *RotctlAPIHandler) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetRotctlHandler(h)
+	}
+}
+
+// SetAntSwitchHandler wires the antenna switch handler into the listener
+// registry so that the /switch bot command can report the active port.
+func (m *NotificationManager) SetAntSwitchHandler(h *AntSwitchHandler) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetAntSwitchHandler(h)
+	}
+}
+
 // NewNotificationManager creates and initialises a NotificationManager.
 // If cfg.Enabled is false the manager is a no-op but safe to call.
 func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, error) {

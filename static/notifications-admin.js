@@ -1228,11 +1228,8 @@ function renderTelegramManagePanel(name, panel) {
                         '<span id="tgMgr-listenerStatus-' + escHtml(name) + '" style="font-size:0.8rem;margin-left:4px"></span>' +
                     '</div>' +
                     '<div style="font-size:0.85rem;color:#555;margin-bottom:6px;font-weight:500">Active commands:</div>' +
-                    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
-                        '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
-                            '<input type="checkbox" id="tgMgr-cmd-sessions-' + escHtml(name) + '" value="sessions"> ' +
-                            '<code>/sessions</code> \u2014 show active listener sessions' +
-                        '</label>' +
+                    '<div id="tgMgr-cmdCheckboxes-' + escHtml(name) + '" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
+                        '<span style="color:#888;font-size:0.8rem">Loading\u2026</span>' +
                     '</div>' +
                     '<p style="font-size:0.78rem;color:#888;margin:0 0 8px">&#x2139;&#xFE0F; <code>/help</code> is always enabled and cannot be disabled.</p>' +
                     '<button class="btn btn-sm" id="tgMgr-saveListener-' + escHtml(name) + '">&#x1F4BE; Save Listener Config</button>' +
@@ -1359,14 +1356,36 @@ function renderTelegramManagePanel(name, panel) {
     });
 
     // ── Listener config section ───────────────────────────────────────────────
-    // Pre-populate from localConfig.
+    // Fetch available commands from the server and build checkboxes dynamically.
+    // This means adding a new command to telegram_bot_commands.go is sufficient —
+    // no JS changes needed.
     (function() {
         var ch = localConfig.channels && localConfig.channels[name];
         var bc = (ch && ch.bot_commands) || {};
         el('tgMgr-listenerEnabled-' + name).checked = !!bc.enabled;
-        var cmds = Array.isArray(bc.commands) ? bc.commands : [];
-        el('tgMgr-cmd-sessions-' + name).checked = cmds.indexOf('sessions') >= 0;
-        // /help is always enabled — no checkbox to populate.
+        var enabledCmds = Array.isArray(bc.commands) ? bc.commands : [];
+
+        apiFetch('/admin/notifications/telegram-available-commands').then(function(r) {
+            return r.json();
+        }).then(function(data) {
+            var container = el('tgMgr-cmdCheckboxes-' + name);
+            if (!container) return;
+            var cmds = (data && data.commands) || [];
+            if (cmds.length === 0) {
+                container.innerHTML = '<span style="color:#888;font-size:0.8rem">No optional commands available.</span>';
+                return;
+            }
+            container.innerHTML = cmds.map(function(c) {
+                var checked = enabledCmds.indexOf(c.name) >= 0 ? ' checked' : '';
+                return '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
+                    '<input type="checkbox" class="tgMgr-cmdCheck-' + escHtml(name) + '" value="' + escHtml(c.name) + '"' + checked + '> ' +
+                    '<code>/' + escHtml(c.name) + '</code> \u2014 ' + escHtml(c.desc) +
+                    '</label>';
+            }).join('');
+        }).catch(function() {
+            var container = el('tgMgr-cmdCheckboxes-' + name);
+            if (container) container.innerHTML = '<span style="color:#c62828;font-size:0.8rem">Failed to load commands.</span>';
+        });
     })();
 
     // Poll listener status and update the indicator.
@@ -1518,11 +1537,11 @@ function renderTelegramManagePanel(name, panel) {
     })();
 
     el('tgMgr-saveListener-' + name).addEventListener('click', async function() {
-        // Collect enabled optional commands from checkboxes.
+        // Collect enabled optional commands from dynamically-built checkboxes.
         // /help is always enabled implicitly — never stored in the commands list.
         var commands = [];
-        ['sessions'].forEach(function(cmd) {
-            if (el('tgMgr-cmd-' + cmd + '-' + name).checked) commands.push(cmd);
+        document.querySelectorAll('.tgMgr-cmdCheck-' + name + ':checked').forEach(function(cb) {
+            commands.push(cb.value);
         });
         var enabled = el('tgMgr-listenerEnabled-' + name).checked;
 

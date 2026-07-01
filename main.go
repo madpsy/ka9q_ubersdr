@@ -2123,6 +2123,15 @@ func main() {
 		instanceReporter.SetAntSwitchHandler(antSwitchHandler)
 	}
 
+	// Wire rotator and antenna switch handlers into the notification manager so
+	// that the /rotator and /switch Telegram bot commands can report their state.
+	if rotctlHandler != nil {
+		notifManager.SetRotctlHandler(rotctlHandler)
+	}
+	if antSwitchHandler != nil {
+		notifManager.SetAntSwitchHandler(antSwitchHandler)
+	}
+
 	// Set the frequency reference monitor in instance reporter for tracking information
 	// This must be done after both are initialized
 	if instanceReporter != nil && freqRefMonitor != nil {
@@ -2632,6 +2641,9 @@ func main() {
 	}))
 	http.HandleFunc("/admin/notifications/telegram-command-history", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleTelegramCommandHistory(w, r, notifManager)
+	}))
+	http.HandleFunc("/admin/notifications/telegram-available-commands", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleTelegramAvailableCommands(w, r)
 	}))
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)

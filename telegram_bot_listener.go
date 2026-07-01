@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"net/http"
@@ -66,6 +65,8 @@ type TelegramBotListener struct {
 	channelName string
 	cfg         NotificationChannelConfig
 	sessions    *SessionManager
+	rotctl      *RotctlAPIHandler // nil if rotator not enabled
+	antSwitch   *AntSwitchHandler // nil if antenna switch not enabled
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -207,12 +208,12 @@ func (l *TelegramBotListener) syncBotCommands(enabledCmds []string) {
 	// A non-nil slice (even empty) means the listener is active, so /help is
 	// always registered.
 	if enabledCmds != nil {
-		// Add optional commands that are enabled.
-		for _, kc := range allKnownCommands {
-			if enabled[kc.name] {
+		// Add optional commands that are enabled, in sorted order for determinism.
+		for _, name := range sortedBotCommandNames() {
+			if enabled[name] {
 				cmds = append(cmds, tgBotCommand{
-					Command:     kc.name,
-					Description: kc.desc,
+					Command:     name,
+					Description: botCommands[name].desc,
 				})
 			}
 		}
@@ -430,9 +431,9 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 		return
 	}
 
-	switch cmd {
-	case "sessions":
-		resp, apiResp, apiOK := l.handleSessions(msg.Chat.ID)
+	// Dispatch to the registered handler (defined in telegram_bot_commands.go).
+	if bc, ok := botCommands[cmd]; ok {
+		resp, apiResp, apiOK := bc.handler(l, msg.Chat.ID)
 		if apiOK {
 			baseEntry.Result = "ok"
 		} else {
@@ -440,7 +441,7 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 		}
 		baseEntry.Response = truncateResponse(resp)
 		baseEntry.TelegramAPIResponse = apiResp
-	default:
+	} else {
 		baseEntry.Result = "unknown_command"
 	}
 	l.recordCommand(baseEntry)
@@ -526,131 +527,6 @@ func (l *TelegramBotListener) isChatAdmin(chatID int64, chatType string, from *t
 	default:
 		return false
 	}
-}
-
-// ─── Command handlers ─────────────────────────────────────────────────────────
-
-// handleStats sends a summary of active sessions to the chat and returns the
-// plain-text summary that was sent (for history recording).
-// handleSessions sends a summary of active sessions to the chat.
-// Returns (botText, telegramAPIResponse).
-func (l *TelegramBotListener) handleSessions(chatID int64) (string, string, bool) {
-	if l.sessions == nil {
-		msg := "📡 Session data unavailable."
-		apiResp, apiOK := l.sendMessage(chatID, msg)
-		return msg, apiResp, apiOK
-	}
-
-	allSessions := l.sessions.GetAllSessionsInfo()
-
-	// Filter to real audio sessions only (exclude spectrum-only and internal).
-	type sessionRow struct {
-		freq       uint64
-		mode       string
-		clientIP   string
-		country    string
-		countryCC  string
-		isBypassed bool
-		createdAt  time.Time
-	}
-	var rows []sessionRow
-	for _, s := range allSessions {
-		isSpectrum, _ := s["is_spectrum"].(bool)
-		isInternal, _ := s["is_internal"].(bool)
-		if isSpectrum || isInternal {
-			continue
-		}
-		freq, _ := s["frequency"].(uint64)
-		mode, _ := s["mode"].(string)
-		clientIP, _ := s["client_ip"].(string)
-		country, _ := s["country"].(string)
-		cc, _ := s["country_code"].(string)
-		bypassed, _ := s["is_bypassed"].(bool)
-		var createdAt time.Time
-		if ts, ok := s["created_at"].(string); ok {
-			createdAt, _ = time.Parse(time.RFC3339, ts)
-		}
-		rows = append(rows, sessionRow{freq: freq, mode: mode, clientIP: clientIP, country: country, countryCC: cc, isBypassed: bypassed, createdAt: createdAt})
-	}
-
-	if len(rows) == 0 {
-		msg := "📡 No active listeners right now."
-		apiResp, apiOK := l.sendMessage(chatID, msg)
-		return msg, apiResp, apiOK
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(rows))
-	for i, r := range rows {
-		freqMHz := float64(r.freq) / 1_000_000.0
-		// Build suffix: IP, optional flag+country, optional bypassed tag, duration.
-		// All user-supplied strings are HTML-escaped to avoid breaking Telegram's
-		// HTML parser (e.g. country names like "Bosnia & Herzegovina").
-		var suffix strings.Builder
-		if r.clientIP != "" {
-			suffix.WriteString(" | ")
-			suffix.WriteString(html.EscapeString(r.clientIP))
-		}
-		if r.country != "" {
-			flag := countryCodeToFlag(r.countryCC)
-			suffix.WriteString(" ")
-			if flag != "" {
-				suffix.WriteString(flag)
-				suffix.WriteString(" ")
-			}
-			suffix.WriteString(html.EscapeString(r.country))
-		}
-		if r.isBypassed {
-			suffix.WriteString(" [bypassed]")
-		}
-		if !r.createdAt.IsZero() {
-			suffix.WriteString(" | ")
-			// HTML-escape the duration: fmtSessionDuration can return "<1m" which
-			// would be interpreted as an HTML tag by Telegram's HTML parser.
-			suffix.WriteString(html.EscapeString(fmtSessionDuration(time.Since(r.createdAt))))
-		}
-		fmt.Fprintf(&sb, "%d. %.3f MHz | %s%s\n", i+1, freqMHz, html.EscapeString(r.mode), suffix.String())
-	}
-
-	msg := sb.String()
-	apiResp, apiOK := l.sendMessage(chatID, msg)
-	return msg, apiResp, apiOK
-}
-
-// allKnownCommands is the list of optional built-in commands (excludes /help
-// which is always enabled). The order here determines the order shown in /help.
-var allKnownCommands = []struct {
-	name string
-	desc string
-}{
-	{"sessions", "Show active listener sessions"},
-}
-
-// handleHelp sends a list of all known commands, marking each as enabled or
-// disabled based on the current config.
-//
-// /help is always shown as enabled at the end — it cannot be disabled.
-// Returns the plain-text message sent (for history recording).
-// handleHelp sends a list of all known commands to the chat.
-// Returns (botText, telegramAPIResponse).
-func (l *TelegramBotListener) handleHelp(chatID int64) (string, string, bool) {
-	var sb strings.Builder
-	sb.WriteString("🤖 <b>Bot Commands</b>\n\n")
-
-	for _, kc := range allKnownCommands {
-		if l.commandEnabled(kc.name) {
-			sb.WriteString("✅ /" + kc.name + " — " + kc.desc + "\n")
-		} else {
-			sb.WriteString("❌ /" + kc.name + " — " + kc.desc + " <i>(disabled)</i>\n")
-		}
-	}
-	// /help is always available — show it last, always enabled.
-	sb.WriteString("✅ /help — Show this help message\n")
-
-	sb.WriteString("\n<i>Only chat admins can use these commands.</i>")
-	msg := sb.String()
-	apiResp, apiOK := l.sendMessage(chatID, msg)
-	return msg, apiResp, apiOK
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -739,35 +615,6 @@ func splitMessage(text string, maxRunes int) []string {
 	return chunks
 }
 
-// countryCodeToFlag converts an ISO 3166-1 alpha-2 country code to a flag emoji.
-// Returns an empty string for unknown/empty codes.
-func countryCodeToFlag(cc string) string {
-	if len(cc) != 2 {
-		return ""
-	}
-	cc = strings.ToUpper(cc)
-	r1 := rune(cc[0]) - 'A' + 0x1F1E6
-	r2 := rune(cc[1]) - 'A' + 0x1F1E6
-	return string([]rune{r1, r2})
-}
-
-// fmtSessionDuration formats a session duration as a human-friendly string.
-// Examples: "<1m", "45m", "1h15m", "3h".
-func fmtSessionDuration(d time.Duration) string {
-	if d < time.Minute {
-		return "<1m"
-	}
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	if h == 0 {
-		return fmt.Sprintf("%dm", m)
-	}
-	if m == 0 {
-		return fmt.Sprintf("%dh", h)
-	}
-	return fmt.Sprintf("%dh%dm", h, m)
-}
-
 // minDuration returns the smaller of two durations.
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
@@ -784,6 +631,8 @@ type TelegramListenerRegistry struct {
 	mu        sync.RWMutex
 	listeners map[string]*TelegramBotListener
 	sessions  *SessionManager
+	rotctl    *RotctlAPIHandler // nil if rotator not enabled
+	antSwitch *AntSwitchHandler // nil if antenna switch not enabled
 }
 
 // NewTelegramListenerRegistry creates an empty registry.
@@ -791,6 +640,26 @@ func NewTelegramListenerRegistry(sessions *SessionManager) *TelegramListenerRegi
 	return &TelegramListenerRegistry{
 		listeners: make(map[string]*TelegramBotListener),
 		sessions:  sessions,
+	}
+}
+
+// SetRotctlHandler wires the rotator handler into all current and future listeners.
+func (r *TelegramListenerRegistry) SetRotctlHandler(h *RotctlAPIHandler) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rotctl = h
+	for _, l := range r.listeners {
+		l.rotctl = h
+	}
+}
+
+// SetAntSwitchHandler wires the antenna switch handler into all current and future listeners.
+func (r *TelegramListenerRegistry) SetAntSwitchHandler(h *AntSwitchHandler) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.antSwitch = h
+	for _, l := range r.listeners {
+		l.antSwitch = h
 	}
 }
 
@@ -835,6 +704,8 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 			delete(r.listeners, name)
 		}
 		l := NewTelegramBotListener(name, ch, r.sessions)
+		l.rotctl = r.rotctl
+		l.antSwitch = r.antSwitch
 		l.Start()
 		r.listeners[name] = l
 	}

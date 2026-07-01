@@ -1375,6 +1375,34 @@ func handleTelegramListenerStatus(w http.ResponseWriter, r *http.Request, nm *No
 	})
 }
 
+// handleTelegramAvailableCommands returns the list of optional bot commands
+// registered in botCommands (telegram_bot_commands.go), sorted alphabetically.
+// The UI uses this to build the command checkboxes dynamically so adding a new
+// command to the Go file is sufficient — no JS changes required.
+// GET /admin/notifications/telegram-available-commands
+func handleTelegramAvailableCommands(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "GET required"}) //nolint:errcheck
+		return
+	}
+
+	type cmdInfo struct {
+		Name string `json:"name"`
+		Desc string `json:"desc"`
+	}
+	names := sortedBotCommandNames()
+	cmds := make([]cmdInfo, 0, len(names))
+	for _, name := range names {
+		cmds = append(cmds, cmdInfo{Name: name, Desc: botCommands[name].desc})
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"ok":       true,
+		"commands": cmds,
+	})
+}
+
 // handleTelegramCommandHistory returns the in-memory command history for all
 // active Telegram bot listeners (newest-first, up to 100 entries per channel).
 func handleTelegramCommandHistory(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {

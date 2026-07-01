@@ -143,6 +143,7 @@ class RotatorUI {
                             </div>
                             <div id="cp-ant-history-list" class="cp-ant-history-list"></div>
                         </div>
+                        <button class="cp-ant-controls-button" onclick="rotatorUI.openSwitchControls()">Controls</button>
                     </div>
                 </div>` : '';
 
@@ -684,6 +685,33 @@ class RotatorUI {
             .rotator-controls-button:active {
                 transform: translateY(0);
             }
+
+            /* Controls button for ant-switch pane */
+            .cp-ant-controls-button {
+                display: block;
+                width: 100%;
+                margin-top: 10px;
+                padding: 8px 16px;
+                background: rgba(76, 175, 80, 0.9);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            }
+
+            .cp-ant-controls-button:hover {
+                background: rgba(76, 175, 80, 1);
+                transform: translateY(-1px);
+                box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+            }
+
+            .cp-ant-controls-button:active {
+                transform: translateY(0);
+            }
             
             /* Mobile responsive styles */
             @media (max-width: 768px) {
@@ -1167,6 +1195,10 @@ class RotatorUI {
      */
     openControls() {
         window.open('/rotator.html', '_blank');
+    }
+
+    openSwitchControls() {
+        window.open('/switch.html', '_blank');
     }
 
     /**

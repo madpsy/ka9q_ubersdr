@@ -140,9 +140,9 @@ func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, 
 			fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n", html.EscapeString(latestVersion))
 		}
 		if force {
-			sb.WriteString("\n✅ Force update triggered. The server will reinstall within 1 minute (when no users are connected).")
+			sb.WriteString("\n✅ Force update triggered. The server will reinstall within 1 minute.")
 		} else {
-			sb.WriteString("\n✅ Update triggered. The server will update within 1 minute (when no users are connected).")
+			sb.WriteString("\n✅ Update triggered. The server will update within 1 minute.")
 		}
 		msg := sb.String()
 		apiResp, apiOK := l.sendMessage(chatID, msg)

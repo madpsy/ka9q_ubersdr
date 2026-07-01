@@ -2299,8 +2299,11 @@ function renderRules() {
     const byRuleRL  = lastStats.by_rule_rate_limited || {};
 
     list.innerHTML = rules.map(function(rule, idx) {
+        const hasChannels = Array.isArray(rule.channels) && rule.channels.length > 0;
         const enabledBadge = rule.enabled
-            ? '<span class="badge badge-green">Enabled</span>'
+            ? (hasChannels
+                ? '<span class="badge badge-green">Enabled</span>'
+                : '<span class="badge badge-red" title="Rule is enabled but has no channels — it will never deliver">⚠️ No channels</span>')
             : '<span class="badge badge-grey">Disabled</span>';
         const channelBadges = (rule.channels || []).map(function(c) {
             return '<span class="badge badge-blue">' + escHtml(c) + '</span>';
@@ -2486,6 +2489,11 @@ function showRuleForm(editIdx) {
         container.querySelectorAll('.rule-channel-cb:checked').forEach(function(cb) {
             selectedChannels.push(cb.value);
         });
+
+        if (selectedChannels.length === 0) {
+            showAlert(el('rulesAlerts'), 'error', 'At least one channel must be selected.', false);
+            return;
+        }
 
         const eventType = el('ruleEvent').value;
         const filters = readFilterFields(eventType);

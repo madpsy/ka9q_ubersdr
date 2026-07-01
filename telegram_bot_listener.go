@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -98,6 +99,8 @@ type commandHistoryEntry struct {
 	Result string `json:"result"`
 	// Response is the first 200 chars of the message the bot sent back (if any).
 	Response string `json:"response,omitempty"`
+	// TelegramAPIResponse is the raw JSON body returned by Telegram's sendMessage API.
+	TelegramAPIResponse string `json:"telegram_api_response,omitempty"`
 }
 
 const maxCommandHistory = 20
@@ -407,9 +410,10 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	// /help is always handled regardless of the enabled commands list so admins
 	// can always discover what is available and what is disabled.
 	if cmd == "help" {
-		resp := l.handleHelp(msg.Chat.ID)
+		resp, apiResp := l.handleHelp(msg.Chat.ID)
 		baseEntry.Result = "ok"
 		baseEntry.Response = truncateResponse(resp)
+		baseEntry.TelegramAPIResponse = apiResp
 		l.recordCommand(baseEntry)
 		return
 	}
@@ -424,9 +428,10 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 
 	switch cmd {
 	case "sessions":
-		resp := l.handleSessions(msg.Chat.ID)
+		resp, apiResp := l.handleSessions(msg.Chat.ID)
 		baseEntry.Result = "ok"
 		baseEntry.Response = truncateResponse(resp)
+		baseEntry.TelegramAPIResponse = apiResp
 	default:
 		baseEntry.Result = "unknown_command"
 	}
@@ -519,11 +524,13 @@ func (l *TelegramBotListener) isChatAdmin(chatID int64, chatType string, from *t
 
 // handleStats sends a summary of active sessions to the chat and returns the
 // plain-text summary that was sent (for history recording).
-func (l *TelegramBotListener) handleSessions(chatID int64) string {
+// handleSessions sends a summary of active sessions to the chat.
+// Returns (botText, telegramAPIResponse).
+func (l *TelegramBotListener) handleSessions(chatID int64) (string, string) {
 	if l.sessions == nil {
 		msg := "📡 Session data unavailable."
-		l.sendMessage(chatID, msg)
-		return msg
+		apiResp := l.sendMessage(chatID, msg)
+		return msg, apiResp
 	}
 
 	allSessions := l.sessions.GetAllSessionsInfo()
@@ -560,8 +567,8 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 
 	if len(rows) == 0 {
 		msg := "📡 No active listeners right now."
-		l.sendMessage(chatID, msg)
-		return msg
+		apiResp := l.sendMessage(chatID, msg)
+		return msg, apiResp
 	}
 
 	var sb strings.Builder
@@ -569,10 +576,12 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 	for i, r := range rows {
 		freqMHz := float64(r.freq) / 1_000_000.0
 		// Build suffix: IP, optional flag+country, optional bypassed tag, duration.
+		// All user-supplied strings are HTML-escaped to avoid breaking Telegram's
+		// HTML parser (e.g. country names like "Bosnia & Herzegovina").
 		var suffix strings.Builder
 		if r.clientIP != "" {
 			suffix.WriteString(" | ")
-			suffix.WriteString(r.clientIP)
+			suffix.WriteString(html.EscapeString(r.clientIP))
 		}
 		if r.country != "" {
 			flag := countryCodeToFlag(r.countryCC)
@@ -581,7 +590,7 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 				suffix.WriteString(flag)
 				suffix.WriteString(" ")
 			}
-			suffix.WriteString(r.country)
+			suffix.WriteString(html.EscapeString(r.country))
 		}
 		if r.isBypassed {
 			suffix.WriteString(" [bypassed]")
@@ -590,12 +599,12 @@ func (l *TelegramBotListener) handleSessions(chatID int64) string {
 			suffix.WriteString(" | ")
 			suffix.WriteString(fmtSessionDuration(time.Since(r.createdAt)))
 		}
-		fmt.Fprintf(&sb, "%d. %.3f MHz | %s%s\n", i+1, freqMHz, r.mode, suffix.String())
+		fmt.Fprintf(&sb, "%d. %.3f MHz | %s%s\n", i+1, freqMHz, html.EscapeString(r.mode), suffix.String())
 	}
 
 	msg := sb.String()
-	l.sendMessage(chatID, msg)
-	return msg
+	apiResp := l.sendMessage(chatID, msg)
+	return msg, apiResp
 }
 
 // allKnownCommands is the list of optional built-in commands (excludes /help
@@ -612,7 +621,9 @@ var allKnownCommands = []struct {
 //
 // /help is always shown as enabled at the end — it cannot be disabled.
 // Returns the plain-text message sent (for history recording).
-func (l *TelegramBotListener) handleHelp(chatID int64) string {
+// handleHelp sends a list of all known commands to the chat.
+// Returns (botText, telegramAPIResponse).
+func (l *TelegramBotListener) handleHelp(chatID int64) (string, string) {
 	var sb strings.Builder
 	sb.WriteString("🤖 <b>Bot Commands</b>\n\n")
 
@@ -628,8 +639,8 @@ func (l *TelegramBotListener) handleHelp(chatID int64) string {
 
 	sb.WriteString("\n<i>Only chat admins can use these commands.</i>")
 	msg := sb.String()
-	l.sendMessage(chatID, msg)
-	return msg
+	apiResp := l.sendMessage(chatID, msg)
+	return msg, apiResp
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -642,15 +653,19 @@ const tgMaxMessageRunes = 3800
 // sendMessage sends a plain HTML message to the given chat ID.
 // If the text exceeds tgMaxMessageRunes it is split on newline boundaries and
 // sent as multiple consecutive messages so nothing is silently dropped.
-func (l *TelegramBotListener) sendMessage(chatID int64, text string) {
+// Returns the raw Telegram API JSON response from the last chunk sent.
+func (l *TelegramBotListener) sendMessage(chatID int64, text string) string {
 	chunks := splitMessage(text, tgMaxMessageRunes)
+	var lastAPIResp string
 	for _, chunk := range chunks {
-		l.sendMessageChunk(chatID, chunk)
+		lastAPIResp = l.sendMessageChunk(chatID, chunk)
 	}
+	return lastAPIResp
 }
 
 // sendMessageChunk sends a single chunk (assumed to be within the size limit).
-func (l *TelegramBotListener) sendMessageChunk(chatID int64, text string) {
+// It returns the raw JSON response body from Telegram's API for logging/debugging.
+func (l *TelegramBotListener) sendMessageChunk(chatID int64, text string) string {
 	payload := map[string]interface{}{
 		"chat_id":                  chatID,
 		"text":                     text,
@@ -660,15 +675,19 @@ func (l *TelegramBotListener) sendMessageChunk(chatID int64, text string) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("[TelegramListener:%s] sendMessage marshal error: %v", l.channelName, err)
-		return
+		return ""
 	}
 	resp, err := l.client.Post(l.apiBase+"/sendMessage", "application/json", bytes.NewReader(body)) //nolint:noctx
 	if err != nil {
 		log.Printf("[TelegramListener:%s] sendMessage error: %v", l.channelName, err)
-		return
+		return ""
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	rawBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[TelegramListener:%s] sendMessage HTTP %d: %s", l.channelName, resp.StatusCode, string(rawBody))
+	}
+	return string(rawBody)
 }
 
 // splitMessage splits text into chunks of at most maxRunes runes, breaking on

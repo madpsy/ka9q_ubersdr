@@ -1397,6 +1397,10 @@ function renderTelegramManagePanel(name, panel) {
             'unknown_command': { label: 'Unknown',     color: '#888'    },
         };
 
+        // Unique prefix for toggle IDs within this panel instance.
+        var histPfx = 'tgHist-' + name + '-';
+        var histSeq = 0;
+
         function renderHistory() {
             var container = el('tgMgr-cmdHistory-' + name);
             if (!container) { clearInterval(historyTimer); return; }
@@ -1411,38 +1415,80 @@ function renderTelegramManagePanel(name, panel) {
                     container2.innerHTML = '<span style="color:#888">No commands recorded yet.</span>';
                     return;
                 }
-                var rows = entries.map(function(e) {
+
+                // Build table rows. Each row with an API response gets a "View" button
+                // that toggles a <pre> detail row below it.
+                var tbody = document.createElement('tbody');
+                entries.forEach(function(e) {
                     var d = new Date(e.at);
                     var ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     var user = e.username ? '@' + e.username : ('user ' + e.user_id);
                     var rc = resultCols[e.result] || { label: e.result, color: '#555' };
-                    // Response preview: first line only, truncated to 80 chars for display.
-                    var respRaw = (e.response || '').replace(/\n/g, ' ').trim();
-                    var respPreview = respRaw.length > 80 ? respRaw.slice(0, 80) + '…' : respRaw;
-                    var respCell = respPreview
-                        ? '<td style="padding:2px 6px;color:#555;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(respRaw) + '">' + escHtml(respPreview) + '</td>'
-                        : '<td style="padding:2px 6px;color:#bbb">\u2014</td>';
-                    return '<tr style="border-bottom:1px solid #f0f0f0">' +
+                    var apiRaw = (e.telegram_api_response || '').trim();
+
+                    // Try to pretty-print the JSON.
+                    var apiPretty = apiRaw;
+                    if (apiRaw) {
+                        try { apiPretty = JSON.stringify(JSON.parse(apiRaw), null, 2); } catch(ex) { apiPretty = apiRaw; }
+                    }
+
+                    var rowId = histPfx + (histSeq++);
+
+                    var tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid #f0f0f0';
+                    tr.innerHTML =
                         '<td style="padding:2px 6px;white-space:nowrap;color:#555">' + escHtml(ts) + '</td>' +
                         '<td style="padding:2px 6px;font-family:monospace;font-weight:600">' + escHtml(e.command) + '</td>' +
                         '<td style="padding:2px 6px;color:#555">' + escHtml(user) + '</td>' +
                         '<td style="padding:2px 6px;color:#888;font-size:0.75rem">' + escHtml(e.chat_type) + '</td>' +
                         '<td style="padding:2px 6px;font-weight:600;color:' + rc.color + '">' + escHtml(rc.label) + '</td>' +
-                        respCell +
-                    '</tr>';
-                }).join('');
-                container2.innerHTML =
-                    '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">' +
-                        '<thead><tr style="color:#888;font-size:0.75rem;border-bottom:1px solid #e0e0e0">' +
-                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Time</th>' +
-                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Command</th>' +
-                            '<th style="padding:2px 6px;text-align:left;font-weight:600">User</th>' +
-                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Chat</th>' +
-                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Result</th>' +
-                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Response</th>' +
-                        '</tr></thead>' +
-                        '<tbody>' + rows + '</tbody>' +
-                    '</table>';
+                        '<td style="padding:2px 6px">' +
+                            (apiRaw
+                                ? '<button class="btn btn-xs btn-secondary" data-target="' + rowId + '" style="font-size:0.72rem;padding:1px 6px">View</button>'
+                                : '<span style="color:#bbb">\u2014</span>') +
+                        '</td>';
+                    tbody.appendChild(tr);
+
+                    if (apiRaw) {
+                        var detailTr = document.createElement('tr');
+                        detailTr.id = rowId;
+                        detailTr.style.display = 'none';
+                        detailTr.innerHTML =
+                            '<td colspan="6" style="padding:4px 6px 8px">' +
+                                '<pre style="margin:0;font-size:0.72rem;background:#f8f8f8;border:1px solid #e0e0e0;border-radius:3px;padding:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
+                                escHtml(apiPretty) +
+                                '</pre>' +
+                            '</td>';
+                        tbody.appendChild(detailTr);
+                    }
+                });
+
+                // Wire up View buttons after DOM insertion.
+                var table = document.createElement('table');
+                table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.8rem';
+                table.innerHTML =
+                    '<thead><tr style="color:#888;font-size:0.75rem;border-bottom:1px solid #e0e0e0">' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Time</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Command</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">User</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Chat</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Result</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">API</th>' +
+                    '</thead>';
+                table.appendChild(tbody);
+                container2.innerHTML = '';
+                container2.appendChild(table);
+
+                // Toggle detail rows on View button click.
+                container2.querySelectorAll('button[data-target]').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var target = document.getElementById(btn.getAttribute('data-target'));
+                        if (!target) return;
+                        var visible = target.style.display !== 'none';
+                        target.style.display = visible ? 'none' : 'table-row';
+                        btn.textContent = visible ? 'View' : 'Hide';
+                    });
+                });
             }).catch(function() {});
         }
 

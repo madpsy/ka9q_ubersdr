@@ -116,9 +116,9 @@ class RotatorUI {
                         <div id="cp-ant-banner" class="cp-ant-banner" style="display:none;"></div>
                         <div id="cp-ant-buttons" class="cp-ant-buttons"></div>
                         <div class="cp-ant-ground-row">
-                            <button class="cp-ant-controls-button" onclick="rotatorUI.openSwitchControls()">Controls</button>
                             <button id="cp-ant-ground-btn" class="cp-ant-ground-btn"
                                     onclick="rotatorUI.onGroundClick()">⏚ Ground all</button>
+                            <button class="cp-ant-controls-button" onclick="rotatorUI.openSwitchControls()">Controls</button>
                         </div>
                         <div id="cp-ant-password-row" class="cp-ant-password-row" style="display:none;">
                             <input id="cp-ant-password-input" type="password" placeholder="Password…"
@@ -450,7 +450,7 @@ class RotatorUI {
                 color: #c8e6c9;
             }
             .cp-ant-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-            .cp-ant-ground-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+            .cp-ant-ground-row { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
             .cp-ant-ground-btn {
                 -webkit-appearance: none;
                 appearance: none;

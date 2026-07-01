@@ -100,7 +100,7 @@ type commandHistoryEntry struct {
 	Response string `json:"response,omitempty"`
 }
 
-const maxCommandHistory = 100
+const maxCommandHistory = 20
 
 // NewTelegramBotListener creates a listener but does not start it.
 func NewTelegramBotListener(name string, cfg NotificationChannelConfig, sessions *SessionManager) *TelegramBotListener {
@@ -634,8 +634,23 @@ func (l *TelegramBotListener) handleHelp(chatID int64) string {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// tgMaxMessageRunes is Telegram's sendMessage character limit (UTF-16 code units;
+// we use runes as a conservative proxy — emoji count as 1 rune but 2 UTF-16 units,
+// so we use a slightly lower limit to stay safely under the 4096 ceiling).
+const tgMaxMessageRunes = 3800
+
 // sendMessage sends a plain HTML message to the given chat ID.
+// If the text exceeds tgMaxMessageRunes it is split on newline boundaries and
+// sent as multiple consecutive messages so nothing is silently dropped.
 func (l *TelegramBotListener) sendMessage(chatID int64, text string) {
+	chunks := splitMessage(text, tgMaxMessageRunes)
+	for _, chunk := range chunks {
+		l.sendMessageChunk(chatID, chunk)
+	}
+}
+
+// sendMessageChunk sends a single chunk (assumed to be within the size limit).
+func (l *TelegramBotListener) sendMessageChunk(chatID int64, text string) {
 	payload := map[string]interface{}{
 		"chat_id":                  chatID,
 		"text":                     text,
@@ -654,6 +669,33 @@ func (l *TelegramBotListener) sendMessage(chatID int64, text string) {
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+}
+
+// splitMessage splits text into chunks of at most maxRunes runes, breaking on
+// newline boundaries where possible to avoid cutting mid-line.
+func splitMessage(text string, maxRunes int) []string {
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return []string{text}
+	}
+	var chunks []string
+	for len(runes) > 0 {
+		if len(runes) <= maxRunes {
+			chunks = append(chunks, string(runes))
+			break
+		}
+		// Find the last newline within the limit.
+		cut := maxRunes
+		for i := maxRunes - 1; i > 0; i-- {
+			if runes[i] == '\n' {
+				cut = i + 1 // include the newline in this chunk
+				break
+			}
+		}
+		chunks = append(chunks, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	return chunks
 }
 
 // countryCodeToFlag converts an ISO 3166-1 alpha-2 country code to a flag emoji.

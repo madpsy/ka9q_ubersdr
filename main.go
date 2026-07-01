@@ -62,16 +62,25 @@ var globalQRZService *QRZService
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
-	written    int64
+	statusCode  int
+	written     int64
+	wroteHeader bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(b []byte) (int, error) {
+	if !rw.wroteHeader {
+		rw.wroteHeader = true
+		rw.statusCode = http.StatusOK
+	}
 	n, err := rw.ResponseWriter.Write(b)
 	rw.written += int64(n)
 	return n, err
@@ -3387,8 +3396,12 @@ func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config, wm 
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := indexTemplate.Execute(w, data); err != nil {
-		log.Printf("Error executing index template: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		// Ignore client-side disconnects (broken pipe, connection reset) — these are normal
+		// and not indicative of a server-side problem.
+		errStr := err.Error()
+		if !strings.Contains(errStr, "broken pipe") && !strings.Contains(errStr, "connection reset by peer") {
+			log.Printf("Error executing index template: %v", err)
+		}
 		return
 	}
 }

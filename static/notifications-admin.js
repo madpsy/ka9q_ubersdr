@@ -1239,7 +1239,7 @@ function renderTelegramManagePanel(name, panel) {
                 '</div>' +
                 '<div style="margin-top:16px;border-top:1px solid #e8e8e8;padding-top:14px">' +
                     '<div style="font-weight:600;font-size:0.85rem;color:#333;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">&#x1F4DC; Command History' +
-                        '<span style="font-weight:400;color:#888;font-size:0.8rem;margin-left:6px">(last 100 \u2014 live)</span>' +
+                        '<span style="font-weight:400;color:#888;font-size:0.8rem;margin-left:6px">(last 20 \u2014 live)</span>' +
                     '</div>' +
                     '<div id="tgMgr-cmdHistory-' + escHtml(name) + '" style="font-size:0.8rem;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #e0e0e0;border-radius:4px;padding:6px 8px">' +
                         '<span style="color:#888">No commands recorded yet.</span>' +

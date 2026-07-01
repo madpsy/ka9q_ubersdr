@@ -398,6 +398,15 @@ func (m *NotificationManager) ListenerStatus() map[string]listenerStatus {
 	return m.listeners.GetStatus()
 }
 
+// CommandHistory returns the per-channel command history (newest-first, up to
+// maxCommandHistory entries each) for all active listeners.
+func (m *NotificationManager) CommandHistory() map[string][]commandHistoryEntry {
+	if m.listeners == nil {
+		return nil
+	}
+	return m.listeners.GetCommandHistory()
+}
+
 // It is safe to call from multiple goroutines concurrently.
 // If the manager is disabled it returns immediately.
 func (m *NotificationManager) Publish(evt NotificationEvent) {

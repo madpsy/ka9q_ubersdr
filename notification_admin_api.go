@@ -1371,3 +1371,29 @@ func handleTelegramListenerStatus(w http.ResponseWriter, r *http.Request, nm *No
 		"listeners": statuses,
 	})
 }
+
+// handleTelegramCommandHistory returns the in-memory command history for all
+// active Telegram bot listeners (newest-first, up to 100 entries per channel).
+func handleTelegramCommandHistory(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "GET required"}) //nolint:errcheck
+		return
+	}
+
+	if nm == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "history": map[string]interface{}{}}) //nolint:errcheck
+		return
+	}
+
+	history := nm.CommandHistory()
+	if history == nil {
+		history = map[string][]commandHistoryEntry{}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"ok":      true,
+		"history": history,
+	})
+}

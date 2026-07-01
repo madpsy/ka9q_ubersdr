@@ -1019,6 +1019,20 @@ function addTgCmdRow(name, cmd, desc) {
     container.appendChild(row);
 }
 
+// Renders a read-only command row for commands managed by the Interactive Command Listener.
+function addTgCmdRowReadOnly(name, cmd, desc) {
+    var container = el('tgMgr-cmdRows-' + name);
+    if (!container) return;
+    var row = document.createElement('div');
+    row.className = 'webhook-header-row tg-cmd-managed';
+    row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;align-items:center;opacity:0.75';
+    row.innerHTML =
+        '<input type="text" class="tg-cmd-name" value="' + escHtml(cmd) + '" style="flex:1;min-width:0" maxlength="32" readonly tabindex="-1">' +
+        '<input type="text" class="tg-cmd-desc" value="' + escHtml(desc) + '" style="flex:2;min-width:0" maxlength="256" readonly tabindex="-1">' +
+        '<span title="Managed by Interactive Command Listener \u2014 edit in the section below" style="font-size:0.9rem;cursor:default;padding:0 4px">&#x1F512;</span>';
+    container.appendChild(row);
+}
+
 function readTgCmdRows(name) {
     var container = el('tgMgr-cmdRows-' + name);
     if (!container) return [];
@@ -1088,11 +1102,53 @@ async function loadTelegramInfo(name) {
 
     var cmdRes = await tgManageCall(name, 'get_commands', {});
     var cmdRows = el('tgMgr-cmdRows-' + name);
+
+    // Determine which commands are managed by the Interactive Command Listener.
+    var ch = localConfig.channels && localConfig.channels[name];
+    var bc = (ch && ch.bot_commands) || {};
+    var listenerEnabled = !!bc.enabled;
+    var listenerCmds = listenerEnabled ? (Array.isArray(bc.commands) ? bc.commands.map(function(c) { return c.toLowerCase(); }) : []) : [];
+    // /help is always included when the listener is enabled.
+    if (listenerEnabled && listenerCmds.indexOf('help') < 0) listenerCmds.push('help');
+
     if (cmdRows) {
         cmdRows.innerHTML = '';
         if (cmdRes && cmdRes.ok && Array.isArray(cmdRes.commands)) {
-            cmdRes.commands.forEach(function(c) { addTgCmdRow(name, c.command, c.description); });
+            cmdRes.commands.forEach(function(c) {
+                var cmdName = (c.command || '').toLowerCase();
+                if (listenerCmds.indexOf(cmdName) >= 0) {
+                    // Managed by the listener — show as read-only.
+                    addTgCmdRowReadOnly(name, c.command, c.description);
+                } else {
+                    addTgCmdRow(name, c.command, c.description);
+                }
+            });
         }
+    }
+
+    // When the listener is enabled it owns the command menu.
+    // Hide the manual add/save/clear buttons and show an informational note instead.
+    var addCmdBtn   = el('tgMgr-addCmd-'   + name);
+    var saveCmdBtn  = el('tgMgr-saveCmd-'  + name);
+    var clearCmdBtn = el('tgMgr-clearCmd-' + name);
+    var managedNote = el('tgMgr-cmdManagedNote-' + name);
+    if (listenerEnabled) {
+        if (addCmdBtn)   addCmdBtn.style.display   = 'none';
+        if (saveCmdBtn)  saveCmdBtn.style.display  = 'none';
+        if (clearCmdBtn) clearCmdBtn.style.display = 'none';
+        if (!managedNote) {
+            var noteEl = document.createElement('p');
+            noteEl.id = 'tgMgr-cmdManagedNote-' + name;
+            noteEl.style.cssText = 'font-size:0.8rem;color:#1565c0;margin:6px 0 0;display:flex;align-items:center;gap:5px';
+            noteEl.innerHTML = '&#x1F512; Commands are managed automatically by the <strong>Interactive Command Listener</strong> below. Disable the listener to edit manually.';
+            var btnRow = addCmdBtn && addCmdBtn.parentNode;
+            if (btnRow) btnRow.parentNode.insertBefore(noteEl, btnRow.nextSibling);
+        }
+    } else {
+        if (addCmdBtn)   addCmdBtn.style.display   = '';
+        if (saveCmdBtn)  saveCmdBtn.style.display  = '';
+        if (clearCmdBtn) clearCmdBtn.style.display = '';
+        if (managedNote) managedNote.remove();
     }
 
     if (actionsEl) actionsEl.style.display = 'block';
@@ -1169,17 +1225,22 @@ function renderTelegramManagePanel(name, panel) {
                         '<span id="tgMgr-listenerStatus-' + escHtml(name) + '" style="font-size:0.8rem;margin-left:4px"></span>' +
                     '</div>' +
                     '<div style="font-size:0.85rem;color:#555;margin-bottom:6px;font-weight:500">Active commands:</div>' +
-                    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
                         '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
-                            '<input type="checkbox" id="tgMgr-cmd-stats-' + escHtml(name) + '" value="stats"> ' +
-                            '<code>/stats</code> \u2014 show active listener sessions' +
-                        '</label>' +
-                        '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
-                            '<input type="checkbox" id="tgMgr-cmd-help-' + escHtml(name) + '" value="help"> ' +
-                            '<code>/help</code> \u2014 list available commands' +
+                            '<input type="checkbox" id="tgMgr-cmd-sessions-' + escHtml(name) + '" value="sessions"> ' +
+                            '<code>/sessions</code> \u2014 show active listener sessions' +
                         '</label>' +
                     '</div>' +
+                    '<p style="font-size:0.78rem;color:#888;margin:0 0 8px">&#x2139;&#xFE0F; <code>/help</code> is always enabled and cannot be disabled.</p>' +
                     '<button class="btn btn-sm" id="tgMgr-saveListener-' + escHtml(name) + '">&#x1F4BE; Save Listener Config</button>' +
+                '</div>' +
+                '<div style="margin-top:16px;border-top:1px solid #e8e8e8;padding-top:14px">' +
+                    '<div style="font-weight:600;font-size:0.85rem;color:#333;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">&#x1F4DC; Command History' +
+                        '<span style="font-weight:400;color:#888;font-size:0.8rem;margin-left:6px">(last 100 \u2014 live)</span>' +
+                    '</div>' +
+                    '<div id="tgMgr-cmdHistory-' + escHtml(name) + '" style="font-size:0.8rem;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #e0e0e0;border-radius:4px;padding:6px 8px">' +
+                        '<span style="color:#888">No commands recorded yet.</span>' +
+                    '</div>' +
                 '</div>' +
             '</div>' +
             '<div id="tgMgr-alert-' + escHtml(name) + '" style="margin-top:10px"></div>' +
@@ -1301,8 +1362,8 @@ function renderTelegramManagePanel(name, panel) {
         var bc = (ch && ch.bot_commands) || {};
         el('tgMgr-listenerEnabled-' + name).checked = !!bc.enabled;
         var cmds = Array.isArray(bc.commands) ? bc.commands : [];
-        el('tgMgr-cmd-stats-' + name).checked = cmds.indexOf('stats') >= 0;
-        el('tgMgr-cmd-help-' + name).checked  = cmds.indexOf('help')  >= 0;
+        el('tgMgr-cmd-sessions-' + name).checked = cmds.indexOf('sessions') >= 0;
+        // /help is always enabled — no checkbox to populate.
     })();
 
     // Poll listener status and update the indicator.
@@ -1323,10 +1384,74 @@ function renderTelegramManagePanel(name, panel) {
         }).catch(function() {});
     })();
 
+    // Poll command history every second and render the table.
+    // The interval is cleared when the history container is removed from the DOM.
+    (function() {
+        var resultCols = {
+            'ok':              { label: 'OK',          color: '#2e7d32' },
+            'not_enabled':     { label: 'Not enabled', color: '#e65100' },
+            'not_admin':       { label: 'Not admin',   color: '#c62828' },
+            'unknown_command': { label: 'Unknown',     color: '#888'    },
+        };
+
+        function renderHistory() {
+            var container = el('tgMgr-cmdHistory-' + name);
+            if (!container) { clearInterval(historyTimer); return; }
+
+            apiFetch('/admin/notifications/telegram-command-history').then(function(r) {
+                return r.json();
+            }).then(function(data) {
+                var container2 = el('tgMgr-cmdHistory-' + name);
+                if (!container2) { clearInterval(historyTimer); return; }
+                var entries = (data && data.history && data.history[name]) || [];
+                if (entries.length === 0) {
+                    container2.innerHTML = '<span style="color:#888">No commands recorded yet.</span>';
+                    return;
+                }
+                var rows = entries.map(function(e) {
+                    var d = new Date(e.at);
+                    var ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    var user = e.username ? '@' + e.username : ('user ' + e.user_id);
+                    var rc = resultCols[e.result] || { label: e.result, color: '#555' };
+                    // Response preview: first line only, truncated to 80 chars for display.
+                    var respRaw = (e.response || '').replace(/\n/g, ' ').trim();
+                    var respPreview = respRaw.length > 80 ? respRaw.slice(0, 80) + '…' : respRaw;
+                    var respCell = respPreview
+                        ? '<td style="padding:2px 6px;color:#555;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(respRaw) + '">' + escHtml(respPreview) + '</td>'
+                        : '<td style="padding:2px 6px;color:#bbb">\u2014</td>';
+                    return '<tr style="border-bottom:1px solid #f0f0f0">' +
+                        '<td style="padding:2px 6px;white-space:nowrap;color:#555">' + escHtml(ts) + '</td>' +
+                        '<td style="padding:2px 6px;font-family:monospace;font-weight:600">' + escHtml(e.command) + '</td>' +
+                        '<td style="padding:2px 6px;color:#555">' + escHtml(user) + '</td>' +
+                        '<td style="padding:2px 6px;color:#888;font-size:0.75rem">' + escHtml(e.chat_type) + '</td>' +
+                        '<td style="padding:2px 6px;font-weight:600;color:' + rc.color + '">' + escHtml(rc.label) + '</td>' +
+                        respCell +
+                    '</tr>';
+                }).join('');
+                container2.innerHTML =
+                    '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">' +
+                        '<thead><tr style="color:#888;font-size:0.75rem;border-bottom:1px solid #e0e0e0">' +
+                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Time</th>' +
+                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Command</th>' +
+                            '<th style="padding:2px 6px;text-align:left;font-weight:600">User</th>' +
+                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Chat</th>' +
+                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Result</th>' +
+                            '<th style="padding:2px 6px;text-align:left;font-weight:600">Response</th>' +
+                        '</tr></thead>' +
+                        '<tbody>' + rows + '</tbody>' +
+                    '</table>';
+            }).catch(function() {});
+        }
+
+        renderHistory();
+        var historyTimer = setInterval(renderHistory, 1000);
+    })();
+
     el('tgMgr-saveListener-' + name).addEventListener('click', async function() {
-        // Collect enabled commands from checkboxes.
+        // Collect enabled optional commands from checkboxes.
+        // /help is always enabled implicitly — never stored in the commands list.
         var commands = [];
-        ['stats', 'help'].forEach(function(cmd) {
+        ['sessions'].forEach(function(cmd) {
             if (el('tgMgr-cmd-' + cmd + '-' + name).checked) commands.push(cmd);
         });
         var enabled = el('tgMgr-listenerEnabled-' + name).checked;
@@ -1338,7 +1463,8 @@ function renderTelegramManagePanel(name, panel) {
         // Save the full config (which includes bot_commands via the updated saveConfig branch).
         await saveConfig(el('tgMgr-alert-' + name));
 
-        // Refresh status indicator after a short delay to let the server start/stop the listener.
+        // Refresh status indicator and Bot Commands Menu after a short delay to let the
+        // server start/stop the listener and sync setMyCommands.
         setTimeout(function() {
             apiFetch('/admin/notifications/telegram-listener-status').then(function(r) {
                 return r.json();
@@ -1354,6 +1480,8 @@ function renderTelegramManagePanel(name, panel) {
                     statusEl.innerHTML = '<span style="color:#888">\u25CB Inactive</span>';
                 }
             }).catch(function() {});
+            // Reload the Bot Commands Menu so managed rows are shown correctly.
+            loadTelegramInfo(name);
         }, 800);
     });
 }

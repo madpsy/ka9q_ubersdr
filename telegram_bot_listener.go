@@ -72,8 +72,9 @@ type TelegramBotListener struct {
 	client  *http.Client
 	apiBase string
 
-	mu     sync.RWMutex
-	status listenerStatus
+	mu      sync.RWMutex
+	status  listenerStatus
+	history []commandHistoryEntry // ring buffer, capped at maxCommandHistory
 }
 
 // listenerStatus is the runtime state reported to the admin UI.
@@ -84,6 +85,22 @@ type listenerStatus struct {
 	LastError string    `json:"last_error,omitempty"`
 	Updates   int64     `json:"updates_processed"`
 }
+
+// commandHistoryEntry records a single command received by the bot.
+type commandHistoryEntry struct {
+	At       time.Time `json:"at"`
+	Command  string    `json:"command"`
+	ChatID   int64     `json:"chat_id"`
+	ChatType string    `json:"chat_type"`
+	UserID   int64     `json:"user_id"`
+	Username string    `json:"username,omitempty"`
+	// Result is "ok", "not_enabled", "not_admin", or an error string.
+	Result string `json:"result"`
+	// Response is the first 200 chars of the message the bot sent back (if any).
+	Response string `json:"response,omitempty"`
+}
+
+const maxCommandHistory = 100
 
 // NewTelegramBotListener creates a listener but does not start it.
 func NewTelegramBotListener(name string, cfg NotificationChannelConfig, sessions *SessionManager) *TelegramBotListener {
@@ -117,16 +134,126 @@ func (l *TelegramBotListener) Start() {
 		l.pollLoop(ctx)
 	}()
 
+	// Auto-register enabled commands with Telegram so they appear in the /
+	// autocomplete menu without the user having to configure them manually.
+	go l.syncBotCommands(l.cfg.BotCommands.Commands)
+
 	log.Printf("[TelegramListener:%s] Started (commands: %v)", l.channelName, l.cfg.BotCommands.Commands)
 }
 
 // Stop cancels the polling goroutine and waits for it to exit.
+// It also clears the bot command menu so stale commands are not shown after
+// the listener is disabled.
 func (l *TelegramBotListener) Stop() {
 	if l.cancel != nil {
 		l.cancel()
 	}
 	<-l.done
+	// Clear the Telegram command menu now that the listener is stopped.
+	go l.syncBotCommands(nil)
 	log.Printf("[TelegramListener:%s] Stopped", l.channelName)
+}
+
+// recordCommand appends an entry to the in-memory command history ring buffer.
+// The buffer is capped at maxCommandHistory; oldest entries are dropped first.
+func (l *TelegramBotListener) recordCommand(entry commandHistoryEntry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.history = append(l.history, entry)
+	if len(l.history) > maxCommandHistory {
+		l.history = l.history[len(l.history)-maxCommandHistory:]
+	}
+}
+
+// GetHistory returns a copy of the command history, newest-first.
+func (l *TelegramBotListener) GetHistory() []commandHistoryEntry {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if len(l.history) == 0 {
+		return nil
+	}
+	out := make([]commandHistoryEntry, len(l.history))
+	// Reverse so newest is first.
+	for i, e := range l.history {
+		out[len(l.history)-1-i] = e
+	}
+	return out
+}
+
+// syncBotCommands registers (or clears) the bot's command menu via
+// setMyCommands so that Telegram shows the / autocomplete list automatically.
+//
+// Pass a non-nil slice of command names to register; pass nil (or empty) to
+// clear all commands.
+//
+// /help is always included when registering because it is always handled.
+func (l *TelegramBotListener) syncBotCommands(enabledCmds []string) {
+	type tgBotCommand struct {
+		Command     string `json:"command"`
+		Description string `json:"description"`
+	}
+
+	// Build a set of enabled optional command names for fast lookup.
+	enabled := make(map[string]bool, len(enabledCmds))
+	for _, c := range enabledCmds {
+		enabled[strings.ToLower(c)] = true
+	}
+
+	var cmds []tgBotCommand
+	// nil enabledCmds signals "stop the listener — clear the menu".
+	// A non-nil slice (even empty) means the listener is active, so /help is
+	// always registered.
+	if enabledCmds != nil {
+		// Add optional commands that are enabled.
+		for _, kc := range allKnownCommands {
+			if enabled[kc.name] {
+				cmds = append(cmds, tgBotCommand{
+					Command:     kc.name,
+					Description: kc.desc,
+				})
+			}
+		}
+		// /help is always registered when the listener is active.
+		cmds = append(cmds, tgBotCommand{
+			Command:     "help",
+			Description: "Show available commands",
+		})
+	}
+	// nil enabledCmds → clear the menu (cmds stays empty).
+
+	payload := map[string]interface{}{
+		"commands": cmds,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[TelegramListener:%s] syncBotCommands marshal error: %v", l.channelName, err)
+		return
+	}
+	resp, err := l.client.Post(l.apiBase+"/setMyCommands", "application/json", bytes.NewReader(body)) //nolint:noctx
+	if err != nil {
+		log.Printf("[TelegramListener:%s] setMyCommands error: %v", l.channelName, err)
+		return
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil || !result.OK {
+		log.Printf("[TelegramListener:%s] setMyCommands failed: %s", l.channelName, string(respBody))
+		return
+	}
+	if len(cmds) == 0 {
+		log.Printf("[TelegramListener:%s] setMyCommands: cleared command menu", l.channelName)
+	} else {
+		names := make([]string, len(cmds))
+		for i, c := range cmds {
+			names[i] = "/" + c.Command
+		}
+		log.Printf("[TelegramListener:%s] setMyCommands: registered %v", l.channelName, names)
+	}
 }
 
 // Status returns a snapshot of the listener's runtime state.
@@ -230,15 +357,23 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	// Only respond to the configured chat.
 	chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
 	if chatIDStr != l.cfg.ChatID {
+		log.Printf("[TelegramListener:%s] ignoring message from chat %s (want %s)",
+			l.channelName, chatIDStr, l.cfg.ChatID)
 		return
 	}
 
 	// Only respond to admins/creators of the chat.
-	if !l.isChatAdmin(msg.Chat.ID, msg.From) {
+	if !l.isChatAdmin(msg.Chat.ID, msg.Chat.Type, msg.From) {
+		fromID := int64(0)
+		if msg.From != nil {
+			fromID = msg.From.ID
+		}
+		log.Printf("[TelegramListener:%s] user %d is not an admin in chat %s (%s) — ignoring",
+			l.channelName, fromID, chatIDStr, msg.Chat.Type)
 		return
 	}
 
-	// Extract command (strip bot username suffix, e.g. /stats@MyBot → /stats).
+	// Extract command (strip bot username suffix, e.g. /sessions@MyBot → /sessions).
 	text := strings.TrimSpace(msg.Text)
 	if !strings.HasPrefix(text, "/") {
 		return
@@ -251,22 +386,75 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	}
 	cmd := strings.ToLower(strings.TrimPrefix(rawCmd, "/"))
 
+	log.Printf("[TelegramListener:%s] received command /%s from chat %s", l.channelName, cmd, chatIDStr)
+
+	// Build a base history entry for this command.
+	var userID int64
+	var username string
+	if msg.From != nil {
+		userID = msg.From.ID
+		username = msg.From.Username
+	}
+	baseEntry := commandHistoryEntry{
+		At:       time.Now(),
+		Command:  "/" + cmd,
+		ChatID:   msg.Chat.ID,
+		ChatType: msg.Chat.Type,
+		UserID:   userID,
+		Username: username,
+	}
+
 	// /help is always handled regardless of the enabled commands list so admins
 	// can always discover what is available and what is disabled.
 	if cmd == "help" {
-		l.handleHelp(msg.Chat.ID)
+		resp := l.handleHelp(msg.Chat.ID)
+		baseEntry.Result = "ok"
+		baseEntry.Response = truncateResponse(resp)
+		l.recordCommand(baseEntry)
 		return
 	}
 
 	// All other commands require explicit enablement.
 	if !l.commandEnabled(cmd) {
+		log.Printf("[TelegramListener:%s] command /%s is not enabled — ignoring", l.channelName, cmd)
+		baseEntry.Result = "not_enabled"
+		l.recordCommand(baseEntry)
 		return
 	}
 
 	switch cmd {
-	case "stats":
-		l.handleStats(msg.Chat.ID)
+	case "sessions":
+		resp := l.handleSessions(msg.Chat.ID)
+		baseEntry.Result = "ok"
+		baseEntry.Response = truncateResponse(resp)
+	default:
+		baseEntry.Result = "unknown_command"
 	}
+	l.recordCommand(baseEntry)
+}
+
+// truncateResponse strips HTML tags and truncates the response to 200 runes
+// for compact storage in the command history.
+func truncateResponse(s string) string {
+	// Strip simple HTML tags (bold, italic, code) used in bot responses.
+	var out strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			out.WriteRune(r)
+		}
+	}
+	clean := strings.TrimSpace(out.String())
+	runes := []rune(clean)
+	if len(runes) > 200 {
+		return string(runes[:200]) + "…"
+	}
+	return clean
 }
 
 // commandEnabled reports whether cmd is in the configured commands list.
@@ -280,18 +468,24 @@ func (l *TelegramBotListener) commandEnabled(cmd string) bool {
 }
 
 // isChatAdmin returns true if the user is a creator or administrator of the chat.
-// For private chats (type "private") every message is from the chat owner, so
-// we always allow it.
-func (l *TelegramBotListener) isChatAdmin(chatID int64, from *tgUser) bool {
+//
+// For private chats (type "private") the only participant is the bot owner, so
+// we always allow it — getChatMember is not available for private chats and
+// would return an error.
+//
+// For groups/supergroups/channels we verify via getChatMember.
+func (l *TelegramBotListener) isChatAdmin(chatID int64, chatType string, from *tgUser) bool {
 	if from == nil {
 		return false
 	}
 
-	// Private chats have no concept of admins — the only participant is the owner.
-	// We allow all messages in private chats.
-	// (The chat ID check in dispatch already ensures it's the right chat.)
+	// Private chats: always allow (only the owner can DM the bot).
+	if chatType == "private" {
+		log.Printf("[TelegramListener:%s] private chat — allowing user %d", l.channelName, from.ID)
+		return true
+	}
 
-	// For groups/supergroups/channels, verify via getChatMember.
+	// Groups/supergroups/channels: verify admin status.
 	url := fmt.Sprintf("%s/getChatMember?chat_id=%d&user_id=%d", l.apiBase, chatID, from.ID)
 	resp, err := l.client.Get(url) //nolint:noctx
 	if err != nil {
@@ -306,8 +500,12 @@ func (l *TelegramBotListener) isChatAdmin(chatID int64, from *tgUser) bool {
 		Result tgChatMember `json:"result"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil || !result.OK {
+		log.Printf("[TelegramListener:%s] getChatMember parse error or ok=false: %s", l.channelName, string(body))
 		return false
 	}
+
+	log.Printf("[TelegramListener:%s] user %d status in chat %d: %s",
+		l.channelName, from.ID, chatID, result.Result.Status)
 
 	switch result.Result.Status {
 	case "creator", "administrator":
@@ -319,11 +517,13 @@ func (l *TelegramBotListener) isChatAdmin(chatID int64, from *tgUser) bool {
 
 // ─── Command handlers ─────────────────────────────────────────────────────────
 
-// handleStats sends a summary of active sessions to the chat.
-func (l *TelegramBotListener) handleStats(chatID int64) {
+// handleStats sends a summary of active sessions to the chat and returns the
+// plain-text summary that was sent (for history recording).
+func (l *TelegramBotListener) handleSessions(chatID int64) string {
 	if l.sessions == nil {
-		l.sendMessage(chatID, "📡 Session data unavailable.")
-		return
+		msg := "📡 Session data unavailable."
+		l.sendMessage(chatID, msg)
+		return msg
 	}
 
 	allSessions := l.sessions.GetAllSessionsInfo()
@@ -350,8 +550,9 @@ func (l *TelegramBotListener) handleStats(chatID int64) {
 	}
 
 	if len(rows) == 0 {
-		l.sendMessage(chatID, "📡 No active listeners right now.")
-		return
+		msg := "📡 No active listeners right now."
+		l.sendMessage(chatID, msg)
+		return msg
 	}
 
 	var sb strings.Builder
@@ -362,36 +563,43 @@ func (l *TelegramBotListener) handleStats(chatID int64) {
 		fmt.Fprintf(&sb, "%d. %.3f MHz | %s | %s %s\n", i+1, freqMHz, r.mode, flag, r.country)
 	}
 
-	l.sendMessage(chatID, sb.String())
+	msg := sb.String()
+	l.sendMessage(chatID, msg)
+	return msg
 }
 
-// allKnownCommands is the complete list of built-in commands with descriptions.
-// The order here determines the order shown in /help.
+// allKnownCommands is the list of optional built-in commands (excludes /help
+// which is always enabled). The order here determines the order shown in /help.
 var allKnownCommands = []struct {
 	name string
 	desc string
 }{
-	{"stats", "Show active listener sessions"},
-	{"help", "Show this help message"},
+	{"sessions", "Show active listener sessions"},
 }
 
 // handleHelp sends a list of all known commands, marking each as enabled or
-// disabled based on the current config. /help itself is always available.
-func (l *TelegramBotListener) handleHelp(chatID int64) {
+// disabled based on the current config.
+//
+// /help is always shown as enabled at the end — it cannot be disabled.
+// Returns the plain-text message sent (for history recording).
+func (l *TelegramBotListener) handleHelp(chatID int64) string {
 	var sb strings.Builder
 	sb.WriteString("🤖 <b>Bot Commands</b>\n\n")
 
 	for _, kc := range allKnownCommands {
-		enabled := kc.name == "help" || l.commandEnabled(kc.name)
-		if enabled {
+		if l.commandEnabled(kc.name) {
 			sb.WriteString("✅ /" + kc.name + " — " + kc.desc + "\n")
 		} else {
 			sb.WriteString("❌ /" + kc.name + " — " + kc.desc + " <i>(disabled)</i>\n")
 		}
 	}
+	// /help is always available — show it last, always enabled.
+	sb.WriteString("✅ /help — Show this help message\n")
 
 	sb.WriteString("\n<i>Only chat admins can use these commands.</i>")
-	l.sendMessage(chatID, sb.String())
+	msg := sb.String()
+	l.sendMessage(chatID, msg)
+	return msg
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -519,6 +727,18 @@ func (r *TelegramListenerRegistry) GetStatus() map[string]listenerStatus {
 	out := make(map[string]listenerStatus, len(r.listeners))
 	for name, l := range r.listeners {
 		out[name] = l.Status()
+	}
+	return out
+}
+
+// GetCommandHistory returns a map of channel name → command history (newest-first)
+// for all active listeners.
+func (r *TelegramListenerRegistry) GetCommandHistory() map[string][]commandHistoryEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string][]commandHistoryEntry, len(r.listeners))
+	for name, l := range r.listeners {
+		out[name] = l.GetHistory()
 	}
 	return out
 }

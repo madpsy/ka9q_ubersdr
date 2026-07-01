@@ -474,6 +474,8 @@ async function loadConfig() {
                 chat_id:            ch.chat_id            || '',
                 parse_mode:         ch.parse_mode         || 'HTML',
                 rate_limit_minutes: ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10,
+                // Bot command listener config — round-tripped as-is from server.
+                bot_commands:       ch.bot_commands || { enabled: false, commands: [] },
                 // Email (SMTP) — password redacted like the bot token.
                 smtp_host:          ch.smtp_host          || '',
                 smtp_port:          ch.smtp_port          || 587,

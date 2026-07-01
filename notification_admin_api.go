@@ -302,6 +302,8 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		ParseMode        string `json:"parse_mode"`
 		RateLimitMinutes int    `json:"rate_limit_minutes"`
 		BotTokenSet      bool   `json:"bot_token_set"`
+		// Bot command listener config — returned as-is (no secrets).
+		BotCommands TelegramBotCommandsConfig `json:"bot_commands,omitempty"`
 		// Email (SMTP) — password is never returned, only whether it is set.
 		SMTPHost        string   `json:"smtp_host,omitempty"`
 		SMTPPort        int      `json:"smtp_port,omitempty"`
@@ -329,6 +331,7 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			ParseMode:        ch.ParseMode,
 			RateLimitMinutes: ch.RateLimitMinutes,
 			BotTokenSet:      ch.BotToken != "",
+			BotCommands:      ch.BotCommands,
 			SMTPHost:         ch.SMTPHost,
 			SMTPPort:         ch.SMTPPort,
 			SMTPSecurity:     ch.SMTPSecurity,

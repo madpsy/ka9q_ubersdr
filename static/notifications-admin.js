@@ -1397,9 +1397,9 @@ function renderTelegramManagePanel(name, panel) {
             'unknown_command': { label: 'Unknown',     color: '#888'    },
         };
 
-        // Unique prefix for toggle IDs within this panel instance.
-        var histPfx = 'tgHist-' + name + '-';
-        var histSeq = 0;
+        // Track which entries (by ISO `at` timestamp) have their detail row expanded.
+        // This survives re-renders so the View/Hide state is preserved across polls.
+        var expandedAts = new Set();
 
         function renderHistory() {
             var container = el('tgMgr-cmdHistory-' + name);
@@ -1432,7 +1432,9 @@ function renderTelegramManagePanel(name, panel) {
                         try { apiPretty = JSON.stringify(JSON.parse(apiRaw), null, 2); } catch(ex) { apiPretty = apiRaw; }
                     }
 
-                    var rowId = histPfx + (histSeq++);
+                    // Use the ISO timestamp as a stable key for the detail row ID.
+                    var rowId = 'tgHistDetail-' + name + '-' + e.at.replace(/[^a-zA-Z0-9]/g, '_');
+                    var isExpanded = expandedAts.has(e.at);
 
                     var tr = document.createElement('tr');
                     tr.style.borderBottom = '1px solid #f0f0f0';
@@ -1444,7 +1446,7 @@ function renderTelegramManagePanel(name, panel) {
                         '<td style="padding:2px 6px;font-weight:600;color:' + rc.color + '">' + escHtml(rc.label) + '</td>' +
                         '<td style="padding:2px 6px">' +
                             (apiRaw
-                                ? '<button class="btn btn-xs btn-secondary" data-target="' + rowId + '" style="font-size:0.72rem;padding:1px 6px">View</button>'
+                                ? '<button class="btn btn-xs btn-secondary" data-target="' + rowId + '" data-at="' + escHtml(e.at) + '" style="font-size:0.72rem;padding:1px 6px">' + (isExpanded ? 'Hide' : 'View') + '</button>'
                                 : '<span style="color:#bbb">\u2014</span>') +
                         '</td>';
                     tbody.appendChild(tr);
@@ -1452,7 +1454,7 @@ function renderTelegramManagePanel(name, panel) {
                     if (apiRaw) {
                         var detailTr = document.createElement('tr');
                         detailTr.id = rowId;
-                        detailTr.style.display = 'none';
+                        detailTr.style.display = isExpanded ? 'table-row' : 'none';
                         detailTr.innerHTML =
                             '<td colspan="6" style="padding:4px 6px 8px">' +
                                 '<pre style="margin:0;font-size:0.72rem;background:#f8f8f8;border:1px solid #e0e0e0;border-radius:3px;padding:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
@@ -1479,14 +1481,17 @@ function renderTelegramManagePanel(name, panel) {
                 container2.innerHTML = '';
                 container2.appendChild(table);
 
-                // Toggle detail rows on View button click.
+                // Toggle detail rows on View button click; update expandedAts so state
+                // survives the next re-render.
                 container2.querySelectorAll('button[data-target]').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         var target = document.getElementById(btn.getAttribute('data-target'));
+                        var at = btn.getAttribute('data-at');
                         if (!target) return;
                         var visible = target.style.display !== 'none';
                         target.style.display = visible ? 'none' : 'table-row';
                         btn.textContent = visible ? 'View' : 'Hide';
+                        if (visible) { expandedAts.delete(at); } else { expandedAts.add(at); }
                     });
                 });
             }).catch(function() {});

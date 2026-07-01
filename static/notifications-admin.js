@@ -59,13 +59,13 @@ const FILTER_FIELDS = {
     antenna_switch: [
         { name: 'ant_actions', type: 'enum_list', label: 'Actions',      values: ['select','ground','add','remove','default'] },
         { name: 'ant_numbers', type: 'int_list',  label: 'Ant Numbers',  hint: 'Specific antenna port numbers' },
-        { name: 'ant_sources', type: 'enum_list', label: 'Sources',      values: ['public','admin','startup','scheduler','hardware'] },
+        { name: 'ant_sources', type: 'enum_list', label: 'Sources',      values: ['public','admin','startup','sync','scheduler','hardware'] },
     ],
     rotator: [
         { name: 'rotator_moving', type: 'bool_optional', label: 'Moving State', hint: 'true=only when starts moving; false=only when stops; blank=any change' },
     ],
     system_monitor: [
-        { name: 'components',   type: 'enum_list', label: 'Components',    values: ['noise_floor','space_weather','decoder','cw_skimmer','mqtt','rotator','ant_switch','frequency_reference','instance_reporter','sdr_frontend','gpsdo','system_load','cpu_temperature'] },
+        { name: 'components',   type: 'enum_list', label: 'Components',    values: ['noise_floor','space_weather','decoder','cw_skimmer','mqtt','rotator','ant_switch','frequency_reference','instance_reporter','sdr_frontend','gpsdo','system_load','cpu_temperature','dsp'] },
         { name: 'on_unhealthy', type: 'bool',      label: 'On Unhealthy',  hint: 'Fire only on healthy to unhealthy transition' },
         { name: 'on_recovery',  type: 'bool',      label: 'On Recovery',   hint: 'Fire only on unhealthy to healthy transition' },
         { name: 'flap_detection',      type: 'toggle_on', label: 'Flap Detection', hint: 'Suppress repeated alerts when a component oscillates (e.g. system load). Sends one "flap detected" alert, then resumes once stable. Default: on' },
@@ -232,7 +232,7 @@ const TEMPLATE_FIELDS = {
         { name: '.Label',    goType: 'string',   desc: 'Human-readable antenna name.' },
         { name: '.Selected', goType: '[]int',    desc: 'Resulting selected antenna ports. Use <code>{{range .Selected}}</code> or <code>{{join ", " .Selected}}</code>.' },
         { name: '.Grounded', goType: 'bool',     desc: 'True when all antennas are grounded.' },
-        { name: '.Source',   goType: 'string',   desc: 'Command source: public, admin, startup, scheduler, hardware.' },
+        { name: '.Source',   goType: 'string',   desc: 'Command source: public, admin, startup, sync, scheduler, hardware.' },
         { name: '.Time',     goType: 'time.Time',desc: 'Event timestamp.' },
     ],
     rotator: [

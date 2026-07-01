@@ -73,6 +73,55 @@ var (
 	dspFilterFetched bool
 )
 
+// DSP monitoring counters — all reset only on server restart.
+//
+//	dspRejectionCount  — number of set_dsp requests rejected because MaxUsers
+//	                     was reached.  Incremented atomically.
+//	dspPeakTotal       — highest concurrent DSP user count ever observed.
+//	                     Updated atomically via CAS loop.
+//	dspPeakFilterMu    — protects dspPeakFilterCounts.
+//	dspPeakFilterCounts — highest concurrent count ever seen per filter name.
+var (
+	dspRejectionCount int64 // atomic
+	dspPeakTotal      int64 // atomic
+
+	dspPeakFilterMu     sync.Mutex
+	dspPeakFilterCounts = map[string]int{}
+)
+
+// UpdateDSPPeaks is called after a new DSP insert is successfully activated.
+// It updates the total peak and per-filter peak counters.
+// sessions must be the live SessionManager so we can read the current counts.
+func UpdateDSPPeaks(sessions interface {
+	GetDSPUserCount() int
+	GetDSPFilterCount(filter string) int
+}, filterName string) {
+	// Update total peak atomically.
+	current := int64(sessions.GetDSPUserCount())
+	for {
+		old := atomic.LoadInt64(&dspPeakTotal)
+		if current <= old {
+			break
+		}
+		if atomic.CompareAndSwapInt64(&dspPeakTotal, old, current) {
+			break
+		}
+	}
+
+	// Update per-filter peak under mutex.
+	filterCurrent := sessions.GetDSPFilterCount(filterName)
+	dspPeakFilterMu.Lock()
+	if filterCurrent > dspPeakFilterCounts[filterName] {
+		dspPeakFilterCounts[filterName] = filterCurrent
+	}
+	dspPeakFilterMu.Unlock()
+}
+
+// IncrementDSPRejectionCount atomically increments the rejection counter.
+func IncrementDSPRejectionCount() {
+	atomic.AddInt64(&dspRejectionCount, 1)
+}
+
 // DSPGetFilters returns the cached filter list, fetching it from the server if
 // not yet available.  Returns nil if the server is unreachable.
 func DSPGetFilters(conn *grpc.ClientConn) *dspv1.GetFiltersResponse {

@@ -514,6 +514,7 @@
 
         /* Offset anchor targets so the sticky monitor nav doesn't obscure section headers */
         #frontendStatusSection,
+        #dspHealthSection,
         #frequencyReferenceSection,
         #systemLoadHistorySection,
         #ntpHistorySection,
@@ -1707,6 +1708,15 @@
                             <div style="height: 250px; position: relative;">
                                 <canvas id="frontendHourlyCanvas"></canvas>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- DSP Health Section (only shown when DSP is enabled) -->
+                    <div id="dspHealthSection" class="config-section" style="display: none;">
+                        <h3 id="dspHealthTitle">🎛️ DSP Noise Reduction</h3>
+                        <div id="dspHealthDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <div class="spinner" style="margin: 20px auto;"></div>
+                            <p style="text-align: center; color: #666;">Loading DSP status...</p>
                         </div>
                     </div>
 
@@ -18632,7 +18642,7 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO and ant-switch health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch and DSP health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
@@ -18645,7 +18655,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/rotctl-health'),
                     authenticatedFetch('/admin/ntp-health'),
                     authenticatedFetch('/admin/gpsdo-health'),
-                    authenticatedFetch('/admin/ant-switch-health')
+                    authenticatedFetch('/admin/ant-switch-health'),
+                    authenticatedFetch('/admin/dsp-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -18654,9 +18665,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse, dspResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -18674,17 +18685,18 @@ const tooltipLine2 = timeStr;
                 const ntpHealth = (ntpResponse.ok || ntpResponse.status === 503) ? await ntpResponse.json() : null;
                 const gpsdoHealth = (gpsdoResponse.ok || gpsdoResponse.status === 503) ? await gpsdoResponse.json() : null;
                 const antSwitchHealth = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
+                const dspHealth = (dspResponse.ok || dspResponse.status === 503) ? await dspResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
                 lastGPSDOHealth = gpsdoHealth;
                 updateGPSDOTabVisibility();
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -18860,6 +18872,33 @@ const tooltipLine2 = timeStr;
                 }
             }
 
+            // CPU temperature indicator
+            let cpuTempHTML = '';
+            if (systemLoad.cpu_temp_available) {
+                const tempC = systemLoad.cpu_temp_c || 0;
+                const threshold = systemLoad.cpu_temp_threshold_c || 80;
+                const tempStatus = systemLoad.cpu_temp_status || 'ok';
+                const tempColor = tempStatus === 'critical' ? '#dc3545' : tempStatus === 'warning' ? '#ff8c00' : '#28a745';
+                const tempIcon = tempStatus === 'critical' ? '🔴' : tempStatus === 'warning' ? '🟠' : '🟢';
+                const driver = systemLoad.cpu_temp_driver ? ` <span style="color:#999;font-size:11px;">(${systemLoad.cpu_temp_driver})</span>` : '';
+                const warnTemp = Math.round(threshold * 0.85);
+                cpuTempHTML = `
+                    <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:4px;flex-wrap:wrap;">
+                        <span style="font-size:14px;color:#555;">
+                            🌡️ CPU Temp: <strong style="font-size:18px;color:${tempColor};">${Math.round(tempC)}°C</strong>${driver}
+                        </span>
+                        <span style="font-size:13px;color:#888;">
+                            ${tempIcon} Threshold: <strong style="color:#555;">${Math.round(threshold)}°C</strong>
+                            ${tempStatus !== 'ok' ? `<span style="color:${tempColor};font-weight:bold;margin-left:6px;">— ${tempStatus.toUpperCase()}</span>` : ''}
+                        </span>
+                    </div>
+                    <div style="text-align:center;color:#999;font-size:12px;margin-bottom:10px;">
+                        <span style="color:#28a745;">●</span> OK (below ${warnTemp}°C)&nbsp;
+                        <span style="color:#ff8c00;">●</span> WARNING (${warnTemp}–${Math.round(threshold) - 1}°C)&nbsp;
+                        <span style="color:#dc3545;">●</span> CRITICAL (≥ ${Math.round(threshold)}°C)
+                    </div>`;
+            }
+
             displayHTML += `
                 <div style="margin-bottom: 15px;">
                     <strong style="font-size: 16px; color: ${statusColor};">Status: ${statusIcon} ${statusText}</strong>
@@ -18881,6 +18920,7 @@ const tooltipLine2 = timeStr;
                 <div style="text-align: center; color: #666; font-size: 14px; margin-bottom: 10px;">
                     ${systemLoad.cpu_cores > 0 ? `<strong>${systemLoad.cpu_cores}</strong> CPU core${systemLoad.cpu_cores !== 1 ? 's' : ''} available` : 'CPU core count unavailable'}
                 </div>
+                ${cpuTempHTML}
                 <div style="text-align: center; color: #999; font-size: 12px;">
                     <span style="color: #28a745;">●</span> OK (load &lt; cores)&nbsp;
                     <span style="color: #ff8c00;">●</span> WARNING (load ≥ cores)&nbsp;
@@ -19026,8 +19066,9 @@ const tooltipLine2 = timeStr;
                 const hasNTPIssues = data.ntp && !data.ntp.healthy;
                 const hasGPSDOIssues = data.gpsdo && data.gpsdo.enabled && !data.gpsdo.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
+                const hasDSPIssues = data.dsp && data.dsp.enabled && !data.dsp.healthy;
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues || hasDSPIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -19143,6 +19184,12 @@ const tooltipLine2 = timeStr;
                         issuesList.appendChild(li);
                     }
 
+                    if (hasDSPIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>DSP Noise Reduction:</strong> ' + (data.dsp.issues && data.dsp.issues.length > 0 ? data.dsp.issues.join(', ') : 'Capacity limit reached') + (data.dsp.suggestion ? ' — ' + data.dsp.suggestion : '');
+                        issuesList.appendChild(li);
+                    }
+
                     warningBanner.appendChild(issuesList);
                     warningsContainer.innerHTML = '';
                     warningsContainer.appendChild(warningBanner);
@@ -19161,6 +19208,15 @@ const tooltipLine2 = timeStr;
             // Display system load as the first section in monitorHealth (only in non-detailed view)
             if (!isDetailed && data.system_load) {
                 renderSystemLoadHealth(container, data.system_load);
+            }
+
+            // Render DSP health section (only when DSP is enabled; section is between SDR Frontend and Freq Reference)
+            if (!isDetailed && data.dsp && data.dsp.enabled) {
+                renderDSPHealth(data.dsp);
+            } else if (!isDetailed) {
+                // Hide the section if DSP is disabled
+                const dspSection = document.getElementById('dspHealthSection');
+                if (dspSection) dspSection.style.display = 'none';
             }
 
             if (isDetailed) {
@@ -19311,6 +19367,7 @@ const tooltipLine2 = timeStr;
 
             const sections = [
                 { id: 'frontendStatusSection',     label: 'SDR Frontend' },
+                { id: 'dspHealthSection',          label: 'DSP' },
                 { id: 'frequencyReferenceSection', label: 'Freq Reference' },
                 { id: 'systemLoadHistorySection',  label: 'System Load' },
                 { id: 'gpsdoHealthSection',        label: 'GPSDO' },
@@ -19345,6 +19402,80 @@ const tooltipLine2 = timeStr;
                    onmouseout="this.style.background='#f0f2ff';this.style.color='#667eea'"
                 >${s.label}</a>`
             ).join('');
+        }
+
+        function renderDSPHealth(data) {
+            const section = document.getElementById('dspHealthSection');
+            if (!section) return;
+            section.style.display = 'block';
+
+            const healthy = data.healthy;
+            const statusIcon = healthy ? '✅' : '⚠️';
+            const maxLabel = data.max_users === 0 ? '∞' : data.max_users;
+            const maxNum = data.max_users || 0;
+
+            // Only show rows for filters that are enabled in config
+            const enabledFilters = data.enabled_filters || [];
+            const filterCounts = data.filter_counts || {};
+            const peakFilterCounts = data.peak_filter_counts || {};
+
+            const filterRows = enabledFilters.map(f => {
+                const cur = filterCounts[f] || 0;
+                const peak = peakFilterCounts[f] || 0;
+                const barMax = Math.max(maxNum, peak, 1);
+                const barPct = Math.round((cur / barMax) * 100);
+                const dimmed = cur === 0 && peak === 0;
+                return `<tr style="opacity:${dimmed ? 0.45 : 1}">
+                    <td style="padding:4px 12px 4px 0;font-weight:600;font-size:13px;
+                               text-transform:uppercase;color:#555;white-space:nowrap;">${f}</td>
+                    <td style="padding:4px 8px;width:100px;">
+                        <div style="background:#e9ecef;border-radius:3px;height:8px;overflow:hidden;">
+                            <div style="background:#667eea;width:${barPct}%;height:100%;
+                                        border-radius:3px;transition:width 0.3s;"></div>
+                        </div>
+                    </td>
+                    <td style="padding:4px 14px 4px 4px;font-size:13px;color:#333;
+                               text-align:right;min-width:24px;">${cur}</td>
+                    <td style="padding:4px 0;font-size:12px;color:#888;white-space:nowrap;">
+                        peak: <strong style="color:#555;">${peak}</strong>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('dspHealthTitle').innerHTML =
+                `${statusIcon} DSP Noise Reduction`;
+
+            document.getElementById('dspHealthDisplay').innerHTML = `
+                <div style="display:flex;gap:28px;align-items:baseline;margin-bottom:14px;flex-wrap:wrap;">
+                    <span style="font-size:14px;color:#555;">
+                        Active: <strong style="font-size:20px;color:${data.active_clients > 0 ? '#667eea' : '#333'};">${data.active_clients}</strong>${maxNum > 0 ? `<span style="color:#999;font-size:13px;"> / ${maxLabel}</span>` : ''}
+                    </span>
+                    <span style="font-size:14px;color:#555;">
+                        Peak: <strong style="font-size:20px;color:#333;">${data.peak_total}</strong>
+                    </span>
+                    <span style="font-size:14px;color:#555;">
+                        Rejected: <strong style="font-size:20px;color:${data.rejected_count > 0 ? '#ffc107' : '#28a745'};">${data.rejected_count}</strong><span style="color:#999;font-size:12px;"> since restart</span>
+                    </span>
+                </div>
+                ${enabledFilters.length > 0 ? `
+                <table style="border-collapse:collapse;width:100%;max-width:400px;">
+                    <thead>
+                        <tr style="font-size:11px;color:#999;text-transform:uppercase;">
+                            <th style="text-align:left;padding:0 12px 4px 0;font-weight:500;">Filter</th>
+                            <th style="padding:0 8px 4px;"></th>
+                            <th style="text-align:right;padding:0 14px 4px 4px;font-weight:500;">Now</th>
+                            <th style="text-align:left;padding:0;font-weight:500;">Peak</th>
+                        </tr>
+                    </thead>
+                    <tbody>${filterRows}</tbody>
+                </table>` : '<span style="color:#888;font-size:13px;">No filters configured</span>'}
+                ${data.rejected_count > 0 ? `
+                <div style="margin-top:12px;padding:10px 12px;background:#fff3cd;
+                            border:1px solid #ffc107;border-radius:5px;color:#856404;font-size:13px;">
+                    ⚠️ ${data.issues && data.issues.length > 0 ? data.issues.join('; ') : 'Capacity limit was reached'}
+                    ${data.suggestion ? `<br><strong>💡</strong> ${data.suggestion}` : ''}
+                </div>` : ''}
+            `;
         }
 
         function renderGPSDOHealth(data) {
@@ -21160,7 +21291,12 @@ const tooltipLine2 = timeStr;
                     const ts = t.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
                     const actionIcon = {select:'📡',ground:'⏚',add:'➕',remove:'➖',default:'⭐',thunderstorm_on:'⚡',thunderstorm_off:'✅'}[e.action] || '•';
                     const result = e.grounded ? 'Grounded' : (e.selected && e.selected.length > 0 ? 'Ant ' + e.selected.join(', ') : '—');
-                    const srcColour = e.source === 'admin' ? '#ffb74d' : e.source === 'startup' ? '#81c784' : e.source === 'scheduler' ? '#ce93d8' : e.source === 'hardware' ? '#ef9a9a' : '#90caf9';
+                    const srcColour = e.source === 'admin'     ? '#ffb74d'
+                                    : e.source === 'startup'   ? '#81c784'
+                                    : e.source === 'scheduler' ? '#ce93d8'
+                                    : e.source === 'hardware'  ? '#ef9a9a'
+                                    : e.source === 'sync'      ? '#4dd0e1'
+                                    : '#90caf9';
                     html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
                         <td style="padding:5px 10px;color:#aaa;white-space:nowrap;">${escapeHtml(ts)}</td>
                         <td style="padding:5px 10px;">${actionIcon} ${escapeHtml(e.action)}</td>

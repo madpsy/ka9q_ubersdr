@@ -1263,6 +1263,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				if !alreadyActive {
 					current := wsh.sessions.GetDSPUserCount()
 					if current >= maxDSP {
+						IncrementDSPRejectionCount()
 						wsh.sendMessage(conn, ServerMessage{Type: "dsp_error", Info: map[string]interface{}{
 							"code":    "CAPACITY",
 							"message": fmt.Sprintf("DSP noise reduction is at capacity (%d/%d active); try again later", current, maxDSP),
@@ -1312,6 +1313,9 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			}
 			currentSession.dspActiveParams = activeParams
 			currentSession.dspInsertMu.Unlock()
+
+			// Update DSP peak counters (total and per-filter).
+			UpdateDSPPeaks(wsh.sessions, filterName)
 
 			// Record the successful start time for rate-limiting subsequent requests.
 			currentSession.dspLastStarted = time.Now()

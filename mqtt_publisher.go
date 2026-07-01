@@ -306,6 +306,11 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 		go mp.startVoiceActivityPublisher(ctx, appConfig)
 	}
 
+	// DSP health publisher — only when DSP is enabled and sessionManager is available.
+	if appConfig.DSP.Enabled && mp.sessionManager != nil {
+		go mp.startDSPHealthPublisher(ctx, appConfig)
+	}
+
 	// WSPR phone prediction publisher is started by SetMultiDecoder (called after StartPublisher).
 }
 
@@ -1886,4 +1891,97 @@ func (mp *MQTTPublisher) GetHealthStatus() map[string]interface{} {
 	}
 
 	return status
+}
+
+// startDSPHealthPublisher publishes DSP health status every 60 seconds.
+// The payload is identical to what GET /admin/dsp-health returns.
+// Only started when DSP is enabled (appConfig.DSP.Enabled == true).
+// Topic: {prefix}/dsp_health
+func (mp *MQTTPublisher) startDSPHealthPublisher(ctx context.Context, appConfig *Config) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	log.Println("MQTT: DSP health publisher started (60s interval)")
+
+	mp.publishDSPHealthOnce(appConfig)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: DSP health publisher stopped")
+			return
+		case <-ticker.C:
+			mp.publishDSPHealthOnce(appConfig)
+		}
+	}
+}
+
+// publishDSPHealthOnce performs a single DSP health publish.
+func (mp *MQTTPublisher) publishDSPHealthOnce(appConfig *Config) {
+	if !mp.isConnected() {
+		return
+	}
+	if mp.sessionManager == nil {
+		return
+	}
+
+	cfg := appConfig.DSP
+	stats := mp.sessionManager.GetDSPStats()
+	maxUsers := cfg.MaxUsers
+
+	var enabledFilters []string
+	for _, name := range []string{"nr2", "rn2", "nr4", "dfnr", "bnr"} {
+		if cfg.IsFilterAllowed(name) {
+			enabledFilters = append(enabledFilters, name)
+		}
+	}
+
+	healthy := stats.RejectedCount == 0
+	status := "ok"
+	var issues []string
+	var suggestion string
+	if stats.RejectedCount > 0 {
+		status = "warning"
+		issues = append(issues, fmt.Sprintf(
+			"DSP capacity limit reached %d time(s) since server start", stats.RejectedCount))
+		if maxUsers > 0 {
+			suggestion = fmt.Sprintf(
+				"Consider increasing dsp.max_users above the current limit of %d", maxUsers)
+		}
+	}
+
+	payload := map[string]interface{}{
+		"enabled":            true,
+		"healthy":            healthy,
+		"status":             status,
+		"active_clients":     stats.ActiveCount,
+		"max_users":          maxUsers,
+		"enabled_filters":    enabledFilters,
+		"filter_counts":      stats.FilterCounts,
+		"peak_total":         stats.PeakTotal,
+		"peak_filter_counts": stats.PeakFilterCounts,
+		"rejected_count":     stats.RejectedCount,
+		"issues":             issues,
+		"suggestion":         suggestion,
+	}
+
+	topic := fmt.Sprintf("%s/dsp_health", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal DSP health payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish DSP health to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
 }

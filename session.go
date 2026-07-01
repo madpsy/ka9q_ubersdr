@@ -2189,6 +2189,69 @@ func (sm *SessionManager) GetDSPUserCount() int {
 	return count
 }
 
+// GetDSPFilterCount returns the number of audio sessions that currently have
+// the DSP insert active with the given filter name.
+func (sm *SessionManager) GetDSPFilterCount(filter string) int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	count := 0
+	for _, s := range sm.sessions {
+		if s.IsSpectrum {
+			continue
+		}
+		s.dspInsertMu.RLock()
+		if s.dspInsert != nil && s.dspFilter == filter {
+			count++
+		}
+		s.dspInsertMu.RUnlock()
+	}
+	return count
+}
+
+// DSPStats holds a snapshot of DSP usage metrics for the /admin/dsp-health endpoint.
+type DSPStats struct {
+	ActiveCount      int            // current sessions with DSP active
+	FilterCounts     map[string]int // current active count per filter name
+	RejectedCount    int64          // lifetime rejection count (capacity limit hit)
+	PeakTotal        int64          // highest concurrent DSP user count ever seen
+	PeakFilterCounts map[string]int // highest concurrent count ever seen per filter
+}
+
+// GetDSPStats returns a snapshot of current and historical DSP usage metrics.
+func (sm *SessionManager) GetDSPStats() DSPStats {
+	sm.mu.RLock()
+	filterCounts := make(map[string]int)
+	activeCount := 0
+	for _, s := range sm.sessions {
+		if s.IsSpectrum {
+			continue
+		}
+		s.dspInsertMu.RLock()
+		if s.dspInsert != nil {
+			activeCount++
+			filterCounts[s.dspFilter]++
+		}
+		s.dspInsertMu.RUnlock()
+	}
+	sm.mu.RUnlock()
+
+	// Read peak counters (defined in audio_dsp_insert.go).
+	dspPeakFilterMu.Lock()
+	peakFilterCounts := make(map[string]int, len(dspPeakFilterCounts))
+	for k, v := range dspPeakFilterCounts {
+		peakFilterCounts[k] = v
+	}
+	dspPeakFilterMu.Unlock()
+
+	return DSPStats{
+		ActiveCount:      activeCount,
+		FilterCounts:     filterCounts,
+		RejectedCount:    atomic.LoadInt64(&dspRejectionCount),
+		PeakTotal:        atomic.LoadInt64(&dspPeakTotal),
+		PeakFilterCounts: peakFilterCounts,
+	}
+}
+
 // GetNonBypassedUserCount returns the current number of unique non-bypassed users
 // This counts users whose IPs are not in the timeout bypass list AND who did not
 // authenticate with a bypass password.

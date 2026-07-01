@@ -117,7 +117,7 @@ type AntSwitchLogEntry struct {
 	Label    string    `json:"label"`    // human-readable antenna name, or "Ground all"
 	Selected []int     `json:"selected"` // resulting selected antennas after the change
 	Grounded bool      `json:"grounded"` // resulting grounded state
-	Source   string    `json:"source"`   // "public", "admin", "startup"
+	Source   string    `json:"source"`   // "public", "admin", "startup", "sync", "hardware"
 }
 
 // AntSwitchChangeLog is a fixed-capacity ring buffer of antenna change events.
@@ -812,9 +812,10 @@ type AntSwitchHandler struct {
 
 	// desired tracks the last successfully applied state so it can be
 	// re-applied when force_sync is enabled and the device reconnects.
-	desiredSelected []int
-	desiredGrounded bool
-	lastPollOK      bool // true when the previous background poll succeeded
+	desiredSelected     []int
+	desiredGrounded     bool
+	lastPollOK          bool // true when the previous background poll succeeded
+	consecutiveFailures int  // reset on success; device marked down only after 3
 
 	// Change callbacks — called after each antenna switch change is logged.
 	changeHandlers []func(AntSwitchLogEntry)
@@ -992,7 +993,10 @@ func (h *AntSwitchHandler) backgroundPoller() {
 		if err != nil {
 			h.mu.Lock()
 			h.state.LastError = err.Error()
-			h.lastPollOK = false
+			h.consecutiveFailures++
+			if h.consecutiveFailures >= 3 {
+				h.lastPollOK = false
+			}
 			h.mu.Unlock()
 			continue
 		}
@@ -1033,7 +1037,7 @@ func (h *AntSwitchHandler) backgroundPoller() {
 					Label:    h.antennaLabel(target),
 					Selected: state.Selected,
 					Grounded: state.Grounded,
-					Source:   "startup",
+					Source:   "sync",
 				})
 			}
 		} else if forceSync && wasDown && desiredGrounded {
@@ -1050,7 +1054,7 @@ func (h *AntSwitchHandler) backgroundPoller() {
 					Label:    "Ground all",
 					Selected: state.Selected,
 					Grounded: state.Grounded,
-					Source:   "startup",
+					Source:   "sync",
 				})
 			}
 		} else if !wasDown && prevState.LastUpdate != (AntSwitchState{}).LastUpdate {
@@ -1109,6 +1113,7 @@ func (h *AntSwitchHandler) backgroundPoller() {
 		h.mu.Lock()
 		h.state = state
 		h.lastPollOK = true
+		h.consecutiveFailures = 0
 		h.mu.Unlock()
 	}
 }

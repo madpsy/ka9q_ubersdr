@@ -632,7 +632,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			FilterFields: []filterField{
 				{Name: "ant_actions", Type: "[]string", Description: "Action that triggered the change.", ValidValues: []string{"select", "ground", "add", "remove", "default"}, Example: `["ground"]`},
 				{Name: "ant_numbers", Type: "[]int", Description: "Specific antenna port numbers.", Example: `[1,2]`},
-				{Name: "ant_sources", Type: "[]string", Description: "Source of the command.", ValidValues: []string{"public", "admin", "startup", "scheduler"}, Example: `["scheduler"]`},
+				{Name: "ant_sources", Type: "[]string", Description: "Source of the command.", ValidValues: []string{"public", "admin", "startup", "sync", "scheduler"}, Example: `["scheduler"]`},
 			},
 			TemplateFields: []templateField{
 				{Name: ".Action", GoType: "string", Description: "Action: select, ground, add, remove, default."},
@@ -640,7 +640,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: ".Label", GoType: "string", Description: "Human-readable antenna name."},
 				{Name: ".Selected", GoType: "[]int", Description: "Resulting selected antenna ports. Use {{range .Selected}} or join."},
 				{Name: ".Grounded", GoType: "bool", Description: "True when all antennas are grounded."},
-				{Name: ".Source", GoType: "string", Description: "Command source: public, admin, startup, scheduler."},
+				{Name: ".Source", GoType: "string", Description: "Command source: public, admin, startup, sync, scheduler."},
 				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
 			},
 		},
@@ -663,7 +663,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			Type:        "system_monitor",
 			Description: "A subsystem transitioned between healthy and unhealthy states.",
 			FilterFields: []filterField{
-				{Name: "components", Type: "[]string", Description: "Subsystem names to watch. Empty = all components.", ValidValues: []string{"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt", "rotator", "ant_switch", "frequency_reference", "instance_reporter", "sdr_frontend", "gpsdo", "system_load", "cpu_temperature"}, Example: `["decoder","cw_skimmer"]`},
+				{Name: "components", Type: "[]string", Description: "Subsystem names to watch. Empty = all components.", ValidValues: []string{"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt", "rotator", "ant_switch", "frequency_reference", "instance_reporter", "sdr_frontend", "gpsdo", "system_load", "cpu_temperature", "dsp"}, Example: `["decoder","cw_skimmer"]`},
 				{Name: "on_unhealthy", Type: "bool", Description: "Fire only on healthy→unhealthy transition.", Example: "true"},
 				{Name: "on_recovery", Type: "bool", Description: "Fire only on unhealthy→healthy transition.", Example: "true"},
 				{Name: "flap_detection", Type: "bool", Description: "Suppress repeated alerts when a component oscillates; sends one flap alert then resumes once stable. Default: on.", Example: "true"},
@@ -781,13 +781,13 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 		"continents":      []string{"NA", "SA", "EU", "AF", "AS", "OC", "AN"},
 		"session_actions": []string{"connected", "disconnected"},
 		"ant_actions":     []string{"select", "ground", "add", "remove", "default"},
-		"ant_sources":     []string{"public", "admin", "startup", "scheduler"},
+		"ant_sources":     []string{"public", "admin", "startup", "sync", "scheduler"},
 		"digital_modes":   []string{"FT8", "FT4", "WSPR", "JS8"},
 		"cw_modes":        []string{"CW", "RTTY"},
 		"monitor_components": []string{
 			"noise_floor", "space_weather", "decoder", "cw_skimmer", "mqtt",
 			"rotator", "ant_switch", "frequency_reference", "instance_reporter",
-			"sdr_frontend", "gpsdo", "system_load", "cpu_temperature",
+			"sdr_frontend", "gpsdo", "system_load", "cpu_temperature", "dsp",
 		},
 	}
 

@@ -549,6 +549,28 @@ func BuildSystemHealthProbes(
 		})
 	}
 
+	// DSP noise reduction probe — fires when the capacity limit has been hit at
+	// least once since server start (rejected_count > 0).
+	// Only active when DSP is enabled and a session manager is available.
+	if config != nil && config.DSP.Enabled && sessions != nil {
+		probes = append(probes, systemHealthProbe{
+			component: "dsp",
+			probe: func() (bool, []string) {
+				stats := sessions.GetDSPStats()
+				if stats.RejectedCount > 0 {
+					issues := []string{fmt.Sprintf(
+						"DSP capacity limit reached %d time(s) since server start", stats.RejectedCount)}
+					if config.DSP.MaxUsers > 0 {
+						issues = append(issues, fmt.Sprintf(
+							"Consider increasing dsp.max_users above the current limit of %d", config.DSP.MaxUsers))
+					}
+					return false, issues
+				}
+				return true, nil
+			},
+		})
+	}
+
 	// CPU temperature probe — uses the same getCPUTemperature() function as the
 	// admin system-stats endpoint. Fires when temperature exceeds the configured
 	// threshold (server.cpu_temp_threshold_c, default DefaultCPUTempThresholdC).

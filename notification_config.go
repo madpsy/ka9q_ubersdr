@@ -280,7 +280,7 @@ type NotificationFilter struct {
 	AntActions []string `yaml:"ant_actions,omitempty" json:"ant_actions,omitempty"`
 	// AntNumbers matches specific antenna numbers.
 	AntNumbers []int `yaml:"ant_numbers,omitempty" json:"ant_numbers,omitempty"`
-	// AntSources matches source strings: "public", "admin", "startup", "scheduler".
+	// AntSources matches source strings: "public", "admin", "startup", "sync", "scheduler".
 	AntSources []string `yaml:"ant_sources,omitempty" json:"ant_sources,omitempty"`
 
 	// ── Rotator (rotator) ────────────────────────────────────────────────────

@@ -191,7 +191,7 @@ type AntennaSwitchEvent struct {
 	Label    string    `json:"label"`    // human-readable antenna name
 	Selected []int     `json:"selected"` // resulting selected antennas
 	Grounded bool      `json:"grounded"`
-	Source   string    `json:"source"` // "public", "admin", "startup", "scheduler"
+	Source   string    `json:"source"` // "public", "admin", "startup", "sync", "scheduler"
 	Time     time.Time `json:"time"`
 }
 

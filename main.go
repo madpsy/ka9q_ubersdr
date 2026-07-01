@@ -2626,6 +2626,7 @@ func main() {
 	http.HandleFunc("/admin/decoder-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderHealth(w, r, multiDecoder)
 	}))
+	http.HandleFunc("/admin/dsp-health", adminHandler.AuthMiddleware(adminHandler.HandleDSPHealth))
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
 	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))

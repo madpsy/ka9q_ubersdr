@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/cpu"
 	"gopkg.in/yaml.v3"
 )
 
@@ -2863,7 +2862,8 @@ func (ah *AdminHandler) HandleChannelStatus(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// HandleSystemLoad returns system load averages from /proc/loadavg and CPU core count
+// HandleSystemLoad returns system load averages from /proc/loadavg, CPU core count,
+// and current CPU temperature with the configured threshold.
 func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2872,60 +2872,28 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Use standard /proc/loadavg.
-	// NOTE: readCorrectedLoadAvg() (real-load-daemon.sh) is available but
-	// temporarily disabled — re-enable by wrapping the block below in:
-	//   if l1, l5, l15, ok := readCorrectedLoadAvg(); ok { ... } else { ... }
-	var load1Str, load5Str, load15Str string
-	var load15 float64
+	// Build the base payload (load averages + CPU temp with default threshold).
+	response := getSystemLoad()
 
-	{
-		// Read from /proc/loadavg
-		// Format: "0.52 0.58 0.59 1/1234 12345"
-		// We want the first three numbers (1, 5, 15 minute averages)
-		data, err := os.ReadFile("/proc/loadavg")
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to read /proc/loadavg: %v", err), http.StatusInternalServerError)
-			return
-		}
-		fields := strings.Fields(string(data))
-		if len(fields) < 3 {
-			http.Error(w, "Invalid /proc/loadavg format", http.StatusInternalServerError)
-			return
-		}
-		load1Str = fields[0]
-		load5Str = fields[1]
-		load15Str = fields[2]
-		load15, _ = strconv.ParseFloat(fields[2], 64)
+	// Override the CPU temp threshold with the configured value (getSystemLoad uses
+	// DefaultCPUTempThresholdC since it has no access to the live config).
+	configuredThreshold := ah.config.Server.CPUTempThresholdC
+	if configuredThreshold <= 0 {
+		configuredThreshold = DefaultCPUTempThresholdC
 	}
-
-	// Get CPU core count using gopsutil
-	cpuCores := 0
-	info, err := cpu.Info()
-	if err == nil && len(info) > 0 {
-		// Sum cores across all CPUs (for multi-socket systems)
-		for _, cpuInfo := range info {
-			cpuCores += int(cpuInfo.Cores)
+	if configuredThreshold != DefaultCPUTempThresholdC {
+		response["cpu_temp_threshold_c"] = configuredThreshold
+		// Recompute cpu_temp_status with the configured threshold.
+		if avail, _ := response["cpu_temp_available"].(bool); avail {
+			tempC, _ := response["cpu_temp_c"].(float64)
+			tempStatus := "ok"
+			if tempC >= configuredThreshold {
+				tempStatus = "critical"
+			} else if tempC >= configuredThreshold*0.85 {
+				tempStatus = "warning"
+			}
+			response["cpu_temp_status"] = tempStatus
 		}
-	}
-
-	// Determine status based on 15-minute load average vs CPU cores
-	// This provides the most stable indicator of sustained system load
-	status := "ok"
-	if cpuCores > 0 {
-		if load15 >= float64(cpuCores)*2.0 {
-			status = "critical"
-		} else if load15 >= float64(cpuCores) {
-			status = "warning"
-		}
-	}
-
-	response := map[string]interface{}{
-		"load_1min":  load1Str,
-		"load_5min":  load5Str,
-		"load_15min": load15Str,
-		"cpu_cores":  cpuCores,
-		"status":     status,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -8533,4 +8501,69 @@ func (ah *AdminHandler) HandleAdminRotctlCommand(w http.ResponseWriter, r *http.
 		"success": true,
 		"message": message,
 	})
+}
+
+// HandleDSPHealth handles GET /admin/dsp-health.
+// Returns DSP usage metrics: current active clients per filter, peak counts,
+// rejection count (capacity limit hits), and overall health status.
+// When DSP is disabled the response contains only {"enabled": false}.
+func (ah *AdminHandler) HandleDSPHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	cfg := ah.config.DSP
+	if !cfg.Enabled {
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled": false,
+		}); err != nil {
+			log.Printf("Error encoding DSP health response: %v", err)
+		}
+		return
+	}
+
+	stats := ah.sessions.GetDSPStats()
+	maxUsers := cfg.MaxUsers // 0 = unlimited
+
+	// Build the list of filters that are enabled in config (in canonical order).
+	var enabledFilters []string
+	for _, name := range []string{"nr2", "rn2", "nr4", "dfnr", "bnr"} {
+		if cfg.IsFilterAllowed(name) {
+			enabledFilters = append(enabledFilters, name)
+		}
+	}
+
+	// Health is warning if the capacity limit was ever hit since server start.
+	healthy := stats.RejectedCount == 0
+	status := "ok"
+	var issues []string
+	var suggestion string
+	if stats.RejectedCount > 0 {
+		status = "warning"
+		issues = append(issues, fmt.Sprintf(
+			"DSP capacity limit reached %d time(s) since server start", stats.RejectedCount))
+		if maxUsers > 0 {
+			suggestion = fmt.Sprintf(
+				"Consider increasing dsp.max_users above the current limit of %d", maxUsers)
+		}
+	}
+
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":            true,
+		"healthy":            healthy,
+		"status":             status,
+		"active_clients":     stats.ActiveCount,
+		"max_users":          maxUsers,
+		"enabled_filters":    enabledFilters,
+		"filter_counts":      stats.FilterCounts,
+		"peak_total":         stats.PeakTotal,
+		"peak_filter_counts": stats.PeakFilterCounts,
+		"rejected_count":     stats.RejectedCount,
+		"issues":             issues,
+		"suggestion":         suggestion,
+	}); err != nil {
+		log.Printf("Error encoding DSP health response: %v", err)
+	}
 }

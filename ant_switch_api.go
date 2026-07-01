@@ -824,10 +824,21 @@ type AntSwitchHandler struct {
 	lastPollOK          bool // true when the previous background poll succeeded
 	consecutiveFailures int  // reset on success; device marked down only after 3
 
+	// lastCommandAt is set whenever a software-initiated command (selectAntenna,
+	// groundAll) is issued. The background poller suppresses hardware-change
+	// notifications for antSwitchSettleWindow after a command to avoid false
+	// positives from intermediate states the switch passes through while moving
+	// (e.g. briefly grounding all ports when cycling from port 4 to port 1).
+	lastCommandAt time.Time
+
 	// Change callbacks — called after each antenna switch change is logged.
 	changeHandlers []func(AntSwitchLogEntry)
 	handlerMu      sync.RWMutex
 }
+
+// antSwitchSettleWindow is the duration after a software command during which
+// hardware-change notifications are suppressed.
+const antSwitchSettleWindow = 5 * time.Second
 
 // OnChange registers a callback that is called after each antenna switch change.
 // Safe to call before the handler is started.
@@ -1017,6 +1028,7 @@ func (h *AntSwitchHandler) backgroundPoller() {
 		desiredSelected := append([]int(nil), h.desiredSelected...)
 		desiredGrounded := h.desiredGrounded
 		prevState := h.state
+		settling := time.Since(h.lastCommandAt) < antSwitchSettleWindow
 		h.mu.RUnlock()
 
 		// Re-ground if thunderstorm is active but the device is not grounded.
@@ -1065,9 +1077,13 @@ func (h *AntSwitchHandler) backgroundPoller() {
 					Source:   "sync",
 				})
 			}
-		} else if !wasDown && prevState.LastUpdate != (AntSwitchState{}).LastUpdate {
+		} else if !wasDown && prevState.LastUpdate != (AntSwitchState{}).LastUpdate && !settling {
 			// Device is reachable and was reachable last poll — check for
 			// hardware-initiated changes (physical button press on the device).
+			// Skip this check during the settle window after a software command
+			// to avoid false positives from intermediate states the switch passes
+			// through while cycling between ports (e.g. briefly grounding all
+			// antennas when switching from port 4 to port 1).
 			// Compare the polled state against the last desired state.
 			hardwareChanged := false
 			if state.Grounded != desiredGrounded {
@@ -1151,6 +1167,7 @@ func (h *AntSwitchHandler) selectAntenna(n int) (AntSwitchState, bool, error) {
 	h.state = state
 	h.desiredSelected = append([]int(nil), state.Selected...)
 	h.desiredGrounded = state.Grounded
+	h.lastCommandAt = time.Now() // suppress hardware-change noise during settle
 	h.mu.Unlock()
 	log.Printf("AntSwitch: selectAntenna(%d) ok, selected=%v grounded=%v", n, state.Selected, state.Grounded)
 	return state, true, nil
@@ -1167,6 +1184,7 @@ func (h *AntSwitchHandler) groundAll() (AntSwitchState, bool, error) {
 	h.state = state
 	h.desiredSelected = nil
 	h.desiredGrounded = true
+	h.lastCommandAt = time.Now() // suppress hardware-change noise during settle
 	h.mu.Unlock()
 	log.Printf("AntSwitch: groundAll ok, selected=%v grounded=%v", state.Selected, state.Grounded)
 	return state, true, nil

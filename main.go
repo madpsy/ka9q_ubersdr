@@ -2131,6 +2131,11 @@ func main() {
 	if antSwitchHandler != nil {
 		notifManager.SetAntSwitchHandler(antSwitchHandler)
 	}
+	// Wire noise floor monitor so the /bands Telegram bot command can report
+	// per-band FT8 SNR and quality labels.
+	if noiseFloorMonitor != nil {
+		notifManager.SetNoiseFloorMonitor(noiseFloorMonitor)
+	}
 
 	// Set the frequency reference monitor in instance reporter for tracking information
 	// This must be done after both are initialized

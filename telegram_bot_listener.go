@@ -65,8 +65,9 @@ type TelegramBotListener struct {
 	channelName string
 	cfg         NotificationChannelConfig
 	sessions    *SessionManager
-	rotctl      *RotctlAPIHandler // nil if rotator not enabled
-	antSwitch   *AntSwitchHandler // nil if antenna switch not enabled
+	rotctl      *RotctlAPIHandler  // nil if rotator not enabled
+	antSwitch   *AntSwitchHandler  // nil if antenna switch not enabled
+	noiseFloor  *NoiseFloorMonitor // nil if noise floor monitoring not enabled
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -650,11 +651,12 @@ func minDuration(a, b time.Duration) time.Duration {
 // TelegramListenerRegistry manages the set of active TelegramBotListeners,
 // keyed by channel name. It is embedded in NotificationManager.
 type TelegramListenerRegistry struct {
-	mu        sync.RWMutex
-	listeners map[string]*TelegramBotListener
-	sessions  *SessionManager
-	rotctl    *RotctlAPIHandler // nil if rotator not enabled
-	antSwitch *AntSwitchHandler // nil if antenna switch not enabled
+	mu         sync.RWMutex
+	listeners  map[string]*TelegramBotListener
+	sessions   *SessionManager
+	rotctl     *RotctlAPIHandler  // nil if rotator not enabled
+	antSwitch  *AntSwitchHandler  // nil if antenna switch not enabled
+	noiseFloor *NoiseFloorMonitor // nil if noise floor monitoring not enabled
 }
 
 // NewTelegramListenerRegistry creates an empty registry.
@@ -682,6 +684,16 @@ func (r *TelegramListenerRegistry) SetAntSwitchHandler(h *AntSwitchHandler) {
 	r.antSwitch = h
 	for _, l := range r.listeners {
 		l.antSwitch = h
+	}
+}
+
+// SetNoiseFloorMonitor wires the noise floor monitor into all current and future listeners.
+func (r *TelegramListenerRegistry) SetNoiseFloorMonitor(h *NoiseFloorMonitor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.noiseFloor = h
+	for _, l := range r.listeners {
+		l.noiseFloor = h
 	}
 }
 
@@ -728,6 +740,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l := NewTelegramBotListener(name, ch, r.sessions)
 		l.rotctl = r.rotctl
 		l.antSwitch = r.antSwitch
+		l.noiseFloor = r.noiseFloor
 		l.Start()
 		r.listeners[name] = l
 	}

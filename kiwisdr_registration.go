@@ -40,7 +40,7 @@ const (
 
 	// Values captured from a live KiwiSDR v2 registration packet and hardcoded
 	// here so we appear as a compatible, up-to-date receiver to the directory.
-	kiwiSDRReportedVersion = "1.837" // KiwiSDR firmware version (major.minor)
+	kiwiSDRReportedVersion = "1.843" // KiwiSDR firmware version (major.minor)
 	kiwiSDRReportedDeb     = "11.8"  // BeagleBone Debian Bullseye version
 	kiwiSDRReportedModel   = "2"     // KiwiSDR v2 hardware model
 )

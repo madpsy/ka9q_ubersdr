@@ -11,6 +11,8 @@ package main
 import (
 	"fmt"
 	"html"
+	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,6 +43,11 @@ type botCommand struct {
 // sorted alphabetically when building the /help message and setMyCommands payload
 // so the output is deterministic.
 var botCommands = map[string]botCommand{
+	"bands": {
+		desc:     "Show band conditions (FT8 SNR per band)",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleBands,
+	},
 	"rotator": {
 		desc:     "Show (or set) rotator azimuth",
 		readOnly: false,
@@ -59,6 +66,91 @@ var botCommands = map[string]botCommand{
 }
 
 // ─── Command handlers ─────────────────────────────────────────────────────────
+
+// hfBandOrder lists HF amateur bands in frequency order (lowest first).
+// Bands not in this list are sorted alphabetically after the known ones.
+var hfBandOrder = []string{
+	"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m",
+}
+
+// bandSNRQuality returns a quality label matching the UI thresholds in bandconditions.js.
+// snr < 6 → POOR, 6–19 → FAIR, 20–29 → GOOD, ≥ 30 → EXCELLENT.
+func bandSNRQuality(snr float32) string {
+	switch {
+	case snr >= 30:
+		return "EXCELLENT"
+	case snr >= 20:
+		return "GOOD"
+	case snr >= 6:
+		return "FAIR"
+	default:
+		return "POOR"
+	}
+}
+
+// handleBands reports the FT8 SNR and quality label for each configured band.
+// Bands with no FT8 data (FT8SNR == 0) are skipped.
+// args is ignored — bands is always read-only.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleBands(chatID int64, args string) (string, string, bool) {
+	if l.noiseFloor == nil {
+		msg := "📻 Band conditions are not available (noise floor monitoring not enabled)."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	measurements := l.noiseFloor.GetLatestMeasurements()
+	if len(measurements) == 0 {
+		msg := "📻 No band data available yet."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Build ordered list: known HF bands first (in frequency order), then any
+	// remaining bands sorted alphabetically.
+	knownSet := make(map[string]bool, len(hfBandOrder))
+	for _, b := range hfBandOrder {
+		knownSet[b] = true
+	}
+	var ordered []string
+	for _, b := range hfBandOrder {
+		if _, ok := measurements[b]; ok {
+			ordered = append(ordered, b)
+		}
+	}
+	// Append any bands not in the known list, sorted alphabetically.
+	var extra []string
+	for b := range measurements {
+		if !knownSet[b] {
+			extra = append(extra, b)
+		}
+	}
+	sort.Strings(extra)
+	ordered = append(ordered, extra...)
+
+	var sb strings.Builder
+	sb.WriteString("📻 <b>Band Conditions</b>\n\n")
+
+	wrote := 0
+	for _, band := range ordered {
+		m := measurements[band]
+		if m == nil || m.FT8SNR <= 0 {
+			continue // skip bands with no FT8 data
+		}
+		quality := bandSNRQuality(m.FT8SNR)
+		fmt.Fprintf(&sb, "<b>%s</b>: %.1f dB — %s\n",
+			html.EscapeString(band), m.FT8SNR, quality)
+		wrote++
+	}
+
+	if wrote == 0 {
+		sb.WriteString("<i>No FT8 data available for any band.</i>\n")
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
 
 // handleSessions sends a summary of active sessions to the chat.
 // args is ignored — sessions is always read-only.
@@ -116,6 +208,16 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 		return msg, apiResp, apiOK
 	}
 
+	// Count regular (non-bypassed) and bypassed sessions separately.
+	regularCount := l.sessions.GetNonBypassedUserCount()
+	bypassedCount := 0
+	for _, r := range rows {
+		if r.isBypassed {
+			bypassedCount++
+		}
+	}
+	maxSessions := l.sessions.config.Server.MaxSessions
+
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(rows))
 	for i, r := range rows {
@@ -147,6 +249,41 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 			suffix.WriteString(html.EscapeString(fmtSessionDuration(time.Since(r.createdAt))))
 		}
 		fmt.Fprintf(&sb, "%d. %.3f MHz | %s%s\n", i+1, freqMHz, html.EscapeString(r.mode), suffix.String())
+	}
+
+	// Summary footer — user counts, load averages, CPU temperature.
+	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "• Regular users: %d of %d\n", regularCount, maxSessions)
+	if bypassedCount > 0 {
+		fmt.Fprintf(&sb, "• Bypassed users: %d\n", bypassedCount)
+	}
+
+	// Load averages from /proc/loadavg.
+	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) >= 3 {
+			var l1, l5, l15 float64
+			fmt.Sscanf(fields[0], "%f", &l1)
+			fmt.Sscanf(fields[1], "%f", &l5)
+			fmt.Sscanf(fields[2], "%f", &l15)
+			// Warning when 1-minute load exceeds 2× CPU core count.
+			cpuCount := runtime.NumCPU()
+			loadThreshold := float64(cpuCount) * 2.0
+			loadStatus := "OK"
+			if l1 > loadThreshold {
+				loadStatus = "⚠️ Warning"
+			}
+			fmt.Fprintf(&sb, "• Load 1m: %.2f 5m: %.2f 15m: %.2f (%s)\n", l1, l5, l15, loadStatus)
+		}
+	}
+
+	// CPU temperature (silently omitted if sensor unavailable).
+	if tempC, _, err := getCPUTemperature(); err == nil {
+		tempStatus := "OK"
+		if tempC >= DefaultCPUTempThresholdC {
+			tempStatus = "⚠️ Warning"
+		}
+		fmt.Fprintf(&sb, "• CPU: %.0f°C (%s)\n", tempC, tempStatus)
 	}
 
 	msg := sb.String()

@@ -527,8 +527,8 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 		status.WriteString(fmt.Sprintf("name=%s\n", strings.Join(nameParts, ", ")))
 	}
 
-	// Hardware info — verbatim copy of real KiwiSDR 2 v1.840 sdr_hw value
-	status.WriteString("sdr_hw=KiwiSDR 2 v1.840 ⁣ 📡 GPS ⁣ ⏳🚫 Limits\n")
+	// Hardware info — verbatim copy of real KiwiSDR 2 v1.843 sdr_hw value
+	status.WriteString("sdr_hw=KiwiSDR 2 v1.843 ⁣ 📡 GPS ⁣ ⏳🚫 Limits\n")
 
 	// Admin email (use kiwisdr_public_email if set, otherwise fall back to admin email)
 	publicEmail := kwsh.config.Server.KiwiSDRPublicEmail
@@ -586,7 +586,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	}
 
 	// Software version — must match KiwiSDR format for directory compatibility
-	status.WriteString("sw_version=KiwiSDR_v1.840\n")
+	status.WriteString("sw_version=KiwiSDR_v1.843\n")
 
 	// Antenna info
 	if kwsh.config.Admin.Antenna != "" {

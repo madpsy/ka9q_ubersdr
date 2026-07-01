@@ -194,6 +194,17 @@ func (m *NotificationManager) SetAntSwitchHandler(h *AntSwitchHandler) {
 	}
 }
 
+// SetNoiseFloorMonitor wires the noise floor monitor into the listener
+// registry so that the /bands bot command can report per-band FT8 SNR.
+func (m *NotificationManager) SetNoiseFloorMonitor(h *NoiseFloorMonitor) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetNoiseFloorMonitor(h)
+	}
+}
+
 // NewNotificationManager creates and initialises a NotificationManager.
 // If cfg.Enabled is false the manager is a no-op but safe to call.
 func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, error) {

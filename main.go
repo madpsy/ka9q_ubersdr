@@ -2231,6 +2231,15 @@ func main() {
 		instanceReporter.SetGPSDOMonitor(gpsdoMonitor)
 		instanceReporter.SetFrontendHistory(frontendHistory)
 	}
+	// Wire PSK/WSPR rank fetchers and RBN store for /psk, /wspr, /rbn bot commands.
+	notifManager.SetPSKRankFetcher(pskRankFetcher)
+	notifManager.SetWSPRRankFetcher(wsprRankFetcher)
+	notifManager.SetRBNStore(rbnStore)
+	// Set callsigns used for rank lookups.
+	notifManager.SetReceiverCallsign(config.Decoder.ReceiverCallsign)
+	if cwskimmerConfig != nil {
+		notifManager.SetCWSkimmerCallsign(cwskimmerConfig.Callsign)
+	}
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler)
 
 	// Start system monitor health notifier — polls subsystems every 30s and fires

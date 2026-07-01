@@ -48,6 +48,16 @@ var botCommands = map[string]botCommand{
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleBands,
 	},
+	"psk": {
+		desc:     "Show PSKReporter rank for this receiver",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handlePSK,
+	},
+	"rbn": {
+		desc:     "Show RBN skimmer rank and skew data",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleRBN,
+	},
 	"rotator": {
 		desc:     "Show (or set) rotator azimuth",
 		readOnly: false,
@@ -63,9 +73,252 @@ var botCommands = map[string]botCommand{
 		readOnly: false,
 		handler:  (*TelegramBotListener).handleSwitch,
 	},
+	"wspr": {
+		desc:     "Show WSPR Live rank for this receiver",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleWSPR,
+	},
 }
 
 // ─── Command handlers ─────────────────────────────────────────────────────────
+
+// handlePSK reports the PSKReporter rank for the configured receiver callsign.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, string, bool) {
+	if l.pskRank == nil {
+		msg := "📡 PSKReporter rank is not available (decoder not enabled)."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	cached := l.pskRank.Cached()
+	if cached == nil {
+		msg := "📡 PSKReporter data not yet fetched. Try again in a few minutes."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	if cached.Error != "" {
+		msg := "📡 PSKReporter fetch error: " + html.EscapeString(cached.Error)
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	cs := l.receiverCallsign
+	if cs == "" {
+		msg := "📡 No receiver callsign configured."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	reportRanks := computeCallsignRank(cached.ReportResult, cs)
+	countryRanks := computeCallsignRank(cached.CountryResult, cs)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📡 <b>PSKReporter Rank</b> — <code>%s</code>\n", html.EscapeString(cs))
+	fmt.Fprintf(&sb, "<i>Data from %s</i>\n\n", cached.FetchedAt.UTC().Format("02 Jan 15:04 UTC"))
+
+	if len(reportRanks) == 0 && len(countryRanks) == 0 {
+		sb.WriteString("<i>Callsign not found in current leaderboard.</i>\n")
+	} else {
+		if len(reportRanks) > 0 {
+			sb.WriteString("<b>Reports (24h / 7d):</b>\n")
+			for _, band := range hfBandOrder {
+				if r, ok := reportRanks[band]; ok {
+					fmt.Fprintf(&sb, "  %s: #%d — %s reports (7d: %s)\n",
+						band, r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+				}
+			}
+			for band, r := range reportRanks {
+				if !hfBandKnown(band) {
+					fmt.Fprintf(&sb, "  %s: #%d — %s reports (7d: %s)\n",
+						html.EscapeString(band), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+				}
+			}
+		}
+		if len(countryRanks) > 0 {
+			sb.WriteString("\n<b>Countries (24h / 7d):</b>\n")
+			for _, band := range hfBandOrder {
+				if r, ok := countryRanks[band]; ok {
+					fmt.Fprintf(&sb, "  %s: #%d — %s countries (7d: %s)\n",
+						band, r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+				}
+			}
+			for band, r := range countryRanks {
+				if !hfBandKnown(band) {
+					fmt.Fprintf(&sb, "  %s: #%d — %s countries (7d: %s)\n",
+						html.EscapeString(band), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+				}
+			}
+		}
+	}
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleWSPR reports the WSPR Live rank for the configured receiver callsign.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleWSPR(chatID int64, args string) (string, string, bool) {
+	if l.wsprRank == nil {
+		msg := "📻 WSPR rank is not available (WSPR decoder not enabled)."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	cached := l.wsprRank.Cached()
+	if cached == nil {
+		msg := "📻 WSPR rank data not yet fetched. Try again in a few minutes."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	cs := l.receiverCallsign
+	if cs == "" {
+		msg := "📻 No receiver callsign configured."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📻 <b>WSPR Live Rank</b> — <code>%s</code>\n\n", html.EscapeString(cs))
+
+	type windowResult struct {
+		label string
+		win   WSPRRankWindow
+	}
+	windows := []windowResult{
+		{"Rolling 24h", cached.Rolling24h},
+		{"Today", cached.Today},
+		{"Yesterday", cached.Yesterday},
+	}
+	found := false
+	for _, w := range windows {
+		if w.win.Error != "" {
+			fmt.Fprintf(&sb, "%s: <i>%s</i>\n", w.label, html.EscapeString(w.win.Error))
+			continue
+		}
+		filtered := filterWSPRRankWindowByCallsign(w.win, cs)
+		if len(filtered.Data) == 0 {
+			fmt.Fprintf(&sb, "%s: <i>not ranked</i>\n", w.label)
+			continue
+		}
+		found = true
+		row := filtered.Data[0]
+		rank := row.OriginalRank
+		if rank == 0 {
+			rank = 1
+		}
+		fmt.Fprintf(&sb, "%s: <b>#%d</b> — %s unique spots\n",
+			w.label, rank, fmtCount(int(row.Unique)))
+	}
+	if !found {
+		sb.WriteString("\n<i>Callsign not found in any WSPR Live window.</i>\n")
+	}
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleRBN reports the RBN skimmer rank and skew data for the configured callsign.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleRBN(chatID int64, args string) (string, string, bool) {
+	if l.rbnStore == nil {
+		msg := "📡 RBN data is not available (CW skimmer not enabled)."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	cs := strings.ToUpper(l.cwSkimmerCallsign)
+	if cs == "" {
+		cs = strings.ToUpper(l.receiverCallsign)
+	}
+	if cs == "" {
+		msg := "📡 No callsign configured for RBN lookup."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	l.rbnStore.mu.RLock()
+	skewEntry, hasSkew := l.rbnStore.skewData[cs]
+	statsEntry, hasStats := l.rbnStore.statsData[cs]
+	statsUpdatedAt := l.rbnStore.statsUpdatedAt
+	totalSkimmers := len(l.rbnStore.statsData)
+	type rankEntry struct {
+		callsign  string
+		spotCount int
+	}
+	var rank int
+	if hasStats && totalSkimmers > 0 {
+		all := make([]rankEntry, 0, totalSkimmers)
+		for k, v := range l.rbnStore.statsData {
+			all = append(all, rankEntry{k, v.SpotCount})
+		}
+		sort.Slice(all, func(i, j int) bool {
+			if all[i].spotCount != all[j].spotCount {
+				return all[i].spotCount > all[j].spotCount
+			}
+			return all[i].callsign < all[j].callsign
+		})
+		for idx, re := range all {
+			if re.callsign == cs {
+				rank = idx + 1
+				break
+			}
+		}
+	}
+	l.rbnStore.mu.RUnlock()
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📡 <b>RBN Skimmer</b> — <code>%s</code>\n", html.EscapeString(cs))
+	if statsUpdatedAt != nil {
+		fmt.Fprintf(&sb, "<i>Data from %s</i>\n", statsUpdatedAt.UTC().Format("02 Jan 15:04 UTC"))
+	}
+	sb.WriteString("\n")
+	if !hasSkew && !hasStats {
+		sb.WriteString("<i>Callsign not found in RBN data.</i>\n")
+	} else {
+		if hasStats {
+			if rank > 0 {
+				fmt.Fprintf(&sb, "Rank: <b>#%d</b> of %d skimmers\n", rank, totalSkimmers)
+			}
+			fmt.Fprintf(&sb, "Spot count: <b>%s</b>\n", fmtCount(statsEntry.SpotCount))
+		}
+		if hasSkew {
+			sign := "+"
+			if skewEntry.Skew < 0 {
+				sign = ""
+			}
+			fmt.Fprintf(&sb, "Frequency skew: <b>%s%.2f Hz</b> (from %s spots)\n",
+				sign, skewEntry.Skew, fmtCount(skewEntry.Spots))
+			if skewEntry.CorrectionFactor != 0 && skewEntry.CorrectionFactor != 1 {
+				fmt.Fprintf(&sb, "Correction factor: %.4f\n", skewEntry.CorrectionFactor)
+			}
+		}
+	}
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// hfBandKnown returns true if band is in the hfBandOrder list.
+func hfBandKnown(band string) bool {
+	for _, b := range hfBandOrder {
+		if b == band {
+			return true
+		}
+	}
+	return false
+}
+
+// fmtCount formats an integer with thousands separators for readability.
+func fmtCount(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	s := strconv.Itoa(n)
+	var out []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(c))
+	}
+	return string(out)
+}
 
 // hfBandOrder lists HF amateur bands in frequency order (lowest first).
 // Bands not in this list are sorted alphabetically after the known ones.

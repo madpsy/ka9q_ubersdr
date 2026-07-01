@@ -68,6 +68,15 @@ type TelegramBotListener struct {
 	rotctl      *RotctlAPIHandler  // nil if rotator not enabled
 	antSwitch   *AntSwitchHandler  // nil if antenna switch not enabled
 	noiseFloor  *NoiseFloorMonitor // nil if noise floor monitoring not enabled
+	pskRank     *PSKRankFetcher    // nil if PSK reporter not enabled
+	wsprRank    *WSPRRankFetcher   // nil if WSPR rank not enabled
+	rbnStore    *RBNDataStore      // nil if CW skimmer / RBN not enabled
+	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
+	// Set from config.Decoder.ReceiverCallsign at wiring time.
+	receiverCallsign string
+	// cwSkimmerCallsign is the callsign used for RBN skimmer lookups.
+	// Set from cwskimmerConfig.Callsign at wiring time.
+	cwSkimmerCallsign string
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -651,12 +660,17 @@ func minDuration(a, b time.Duration) time.Duration {
 // TelegramListenerRegistry manages the set of active TelegramBotListeners,
 // keyed by channel name. It is embedded in NotificationManager.
 type TelegramListenerRegistry struct {
-	mu         sync.RWMutex
-	listeners  map[string]*TelegramBotListener
-	sessions   *SessionManager
-	rotctl     *RotctlAPIHandler  // nil if rotator not enabled
-	antSwitch  *AntSwitchHandler  // nil if antenna switch not enabled
-	noiseFloor *NoiseFloorMonitor // nil if noise floor monitoring not enabled
+	mu                sync.RWMutex
+	listeners         map[string]*TelegramBotListener
+	sessions          *SessionManager
+	rotctl            *RotctlAPIHandler  // nil if rotator not enabled
+	antSwitch         *AntSwitchHandler  // nil if antenna switch not enabled
+	noiseFloor        *NoiseFloorMonitor // nil if noise floor monitoring not enabled
+	pskRank           *PSKRankFetcher    // nil if PSK reporter not enabled
+	wsprRank          *WSPRRankFetcher   // nil if WSPR rank not enabled
+	rbnStore          *RBNDataStore      // nil if CW skimmer / RBN not enabled
+	receiverCallsign  string             // from config.Decoder.ReceiverCallsign
+	cwSkimmerCallsign string             // from cwskimmerConfig.Callsign
 }
 
 // NewTelegramListenerRegistry creates an empty registry.
@@ -694,6 +708,56 @@ func (r *TelegramListenerRegistry) SetNoiseFloorMonitor(h *NoiseFloorMonitor) {
 	r.noiseFloor = h
 	for _, l := range r.listeners {
 		l.noiseFloor = h
+	}
+}
+
+// SetPSKRankFetcher wires the PSK rank fetcher into all current and future listeners.
+func (r *TelegramListenerRegistry) SetPSKRankFetcher(h *PSKRankFetcher) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pskRank = h
+	for _, l := range r.listeners {
+		l.pskRank = h
+	}
+}
+
+// SetWSPRRankFetcher wires the WSPR rank fetcher into all current and future listeners.
+func (r *TelegramListenerRegistry) SetWSPRRankFetcher(h *WSPRRankFetcher) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.wsprRank = h
+	for _, l := range r.listeners {
+		l.wsprRank = h
+	}
+}
+
+// SetRBNStore wires the RBN data store into all current and future listeners.
+func (r *TelegramListenerRegistry) SetRBNStore(h *RBNDataStore) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rbnStore = h
+	for _, l := range r.listeners {
+		l.rbnStore = h
+	}
+}
+
+// SetReceiverCallsign sets the receiver callsign used for PSK/WSPR lookups.
+func (r *TelegramListenerRegistry) SetReceiverCallsign(cs string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.receiverCallsign = cs
+	for _, l := range r.listeners {
+		l.receiverCallsign = cs
+	}
+}
+
+// SetCWSkimmerCallsign sets the CW skimmer callsign used for RBN lookups.
+func (r *TelegramListenerRegistry) SetCWSkimmerCallsign(cs string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cwSkimmerCallsign = cs
+	for _, l := range r.listeners {
+		l.cwSkimmerCallsign = cs
 	}
 }
 
@@ -741,6 +805,11 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.rotctl = r.rotctl
 		l.antSwitch = r.antSwitch
 		l.noiseFloor = r.noiseFloor
+		l.pskRank = r.pskRank
+		l.wsprRank = r.wsprRank
+		l.rbnStore = r.rbnStore
+		l.receiverCallsign = r.receiverCallsign
+		l.cwSkimmerCallsign = r.cwSkimmerCallsign
 		l.Start()
 		r.listeners[name] = l
 	}

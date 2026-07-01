@@ -205,6 +205,59 @@ func (m *NotificationManager) SetNoiseFloorMonitor(h *NoiseFloorMonitor) {
 	}
 }
 
+// SetPSKRankFetcher wires the PSK rank fetcher into the listener registry
+// so that the /psk bot command can report PSKReporter rank data.
+func (m *NotificationManager) SetPSKRankFetcher(h *PSKRankFetcher) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetPSKRankFetcher(h)
+	}
+}
+
+// SetWSPRRankFetcher wires the WSPR rank fetcher into the listener registry
+// so that the /wspr bot command can report WSPR Live rank data.
+func (m *NotificationManager) SetWSPRRankFetcher(h *WSPRRankFetcher) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetWSPRRankFetcher(h)
+	}
+}
+
+// SetRBNStore wires the RBN data store into the listener registry
+// so that the /rbn bot command can report RBN skimmer data.
+func (m *NotificationManager) SetRBNStore(h *RBNDataStore) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetRBNStore(h)
+	}
+}
+
+// SetReceiverCallsign sets the receiver callsign used for PSK/WSPR lookups.
+func (m *NotificationManager) SetReceiverCallsign(cs string) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetReceiverCallsign(cs)
+	}
+}
+
+// SetCWSkimmerCallsign sets the CW skimmer callsign used for RBN lookups.
+func (m *NotificationManager) SetCWSkimmerCallsign(cs string) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetCWSkimmerCallsign(cs)
+	}
+}
+
 // NewNotificationManager creates and initialises a NotificationManager.
 // If cfg.Enabled is false the manager is a no-op but safe to call.
 func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, error) {

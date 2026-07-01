@@ -755,7 +755,12 @@
                 const data = await resp.json();
 
                 if (resp.status === 401) {
-                    showMessage('Incorrect password.', 'error');
+                    // Clear the wrong password so the user knows to re-enter it
+                    document.getElementById('password').value = '';
+                    localStorage.removeItem(PASSWORD_KEY);
+                    updateButtonStates();
+                    showMessage('Incorrect password — please re-enter.', 'error');
+                    document.getElementById('password').focus();
                     return;
                 }
 

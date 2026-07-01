@@ -991,7 +991,10 @@ function tgMgrAlert(name, type, msg) {
     div.querySelector('.alert-dismiss').addEventListener('click', function() { div.remove(); });
     container.innerHTML = '';
     container.appendChild(div);
-    setTimeout(function() { if (div.parentNode) div.remove(); }, 5000);
+    // Errors stay until dismissed; success auto-dismisses after 5s
+    if (type !== 'error') {
+        setTimeout(function() { if (div.parentNode) div.remove(); }, 5000);
+    }
 }
 
 function addTgCmdRow(name, cmd, desc) {
@@ -1168,9 +1171,10 @@ function renderTelegramManagePanel(name, panel) {
     });
 
     el('tgMgr-inviteLink-' + name).addEventListener('click', async function() {
+        var span = el('tgMgr-inviteLinkResult-' + name);
+        span.innerHTML = '<span style="color:#888;font-size:0.85rem">Generating\u2026</span>';
         var res = await tgManageCall(name, 'export_invite_link', {});
         if (res && res.ok) {
-            var span = el('tgMgr-inviteLinkResult-' + name);
             var link = res.invite_link || '';
             var a = document.createElement('a');
             a.href = link;
@@ -1192,7 +1196,9 @@ function renderTelegramManagePanel(name, panel) {
             span.appendChild(a);
             span.appendChild(copyBtn);
         } else {
-            tgMgrAlert(name, 'error', (res && res.error) || 'Failed.');
+            var errMsg = (res && res.error) || 'Failed.';
+            // Show inline so it's visible immediately, not just in the dismissable alert
+            span.innerHTML = '<span style="color:#c62828;font-size:0.85rem">&#x26A0; ' + escHtml(errMsg) + '</span>';
         }
     });
 

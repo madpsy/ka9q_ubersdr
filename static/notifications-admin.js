@@ -907,6 +907,9 @@ function renderChannels() {
             '<span class="badge badge-green" title="Messages sent">&#x2709; ' + sent + ' sent</span>' +
             (errors  > 0 ? '<span class="badge badge-red"   title="Send errors">&#x26A0; '    + errors  + ' err</span>'   : '') +
             (rateLim > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>'    : '');
+        const manageBtn = (ch.type === 'telegram')
+            ? '<button class="btn btn-sm btn-secondary btn-manage-channel" data-name="' + escHtml(name) + '">&#x1F916; Manage</button>'
+            : '';
         return '<div class="item-card" data-channel="' + escHtml(name) + '">' +
             '<div class="item-card-header">' +
                 '<div>' +
@@ -920,21 +923,335 @@ function renderChannels() {
                 '</div>' +
                 '<div class="item-card-actions">' +
                     '<button class="btn btn-sm btn-secondary btn-test-channel" data-name="' + escHtml(name) + '">&#x1F9EA; Test</button>' +
+                    manageBtn +
                     '<button class="btn btn-sm btn-edit-channel" data-name="' + escHtml(name) + '">&#x270F;&#xFE0F; Edit</button>' +
                     '<button class="btn btn-sm btn-danger btn-delete-channel" data-name="' + escHtml(name) + '">&#x1F5D1;&#xFE0F; Delete</button>' +
                 '</div>' +
             '</div>' +
+            '<div class="tg-manage-panel" id="tgManage-' + escHtml(name) + '" style="display:none"></div>' +
         '</div>';
     }).join('');
 
     list.querySelectorAll('.btn-test-channel').forEach(function(btn) {
         btn.addEventListener('click', function() { testChannel(btn.dataset.name); });
     });
+    list.querySelectorAll('.btn-manage-channel').forEach(function(btn) {
+        btn.addEventListener('click', function() { toggleTelegramManagePanel(btn.dataset.name); });
+    });
     list.querySelectorAll('.btn-edit-channel').forEach(function(btn) {
         btn.addEventListener('click', function() { showChannelForm(btn.dataset.name); });
     });
     list.querySelectorAll('.btn-delete-channel').forEach(function(btn) {
         btn.addEventListener('click', function() { deleteChannel(btn.dataset.name); });
+    });
+}
+
+// ── Telegram Bot Management Panel ────────────────────────────────────────────
+
+function toggleTelegramManagePanel(name) {
+    var panel = el('tgManage-' + name);
+    if (!panel) return;
+    if (panel.style.display !== 'none') {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+        return;
+    }
+    panel.style.display = 'block';
+    renderTelegramManagePanel(name, panel);
+}
+
+async function tgManageCall(name, action, extra) {
+    var ch = localConfig.channels[name];
+    if (!ch) return null;
+    // If the token is masked (never sent back from server), we pass an empty
+    // string and let the backend use the saved channel by name instead.
+    // The backend endpoint accepts bot_token="" as "use saved channel config".
+    var token = (ch.bot_token && ch.bot_token !== '********') ? ch.bot_token : '';
+    var body = Object.assign({ bot_token: token, chat_id: ch.chat_id || '', action: action, channel: name }, extra || {});
+    try {
+        var resp = await apiFetch('/admin/notifications/telegram-manage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        return await resp.json();
+    } catch (err) {
+        if (err.message === 'Redirecting to login') return null;
+        return { ok: false, error: err.message };
+    }
+}
+
+function tgMgrAlert(name, type, msg) {
+    var container = el('tgMgr-alert-' + name);
+    if (!container) return;
+    var div = document.createElement('div');
+    div.className = 'alert alert-' + type;
+    div.style.marginTop = '6px';
+    div.innerHTML = '<span>' + escHtml(msg) + '</span><span class="alert-dismiss" title="Dismiss">&#x2715;</span>';
+    div.querySelector('.alert-dismiss').addEventListener('click', function() { div.remove(); });
+    container.innerHTML = '';
+    container.appendChild(div);
+    setTimeout(function() { if (div.parentNode) div.remove(); }, 5000);
+}
+
+function addTgCmdRow(name, cmd, desc) {
+    var container = el('tgMgr-cmdRows-' + name);
+    if (!container) return;
+    var row = document.createElement('div');
+    row.className = 'webhook-header-row';
+    row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;align-items:center';
+    row.innerHTML =
+        '<input type="text" class="tg-cmd-name" placeholder="/command" value="' + escHtml(cmd) + '" style="flex:1;min-width:0" maxlength="32">' +
+        '<input type="text" class="tg-cmd-desc" placeholder="Description shown in menu" value="' + escHtml(desc) + '" style="flex:2;min-width:0" maxlength="256">' +
+        '<button type="button" class="btn btn-sm btn-danger tg-cmd-remove" title="Remove">&#x2715;</button>';
+    row.querySelector('.tg-cmd-remove').addEventListener('click', function() { row.remove(); });
+    container.appendChild(row);
+}
+
+function readTgCmdRows(name) {
+    var container = el('tgMgr-cmdRows-' + name);
+    if (!container) return [];
+    var out = [];
+    container.querySelectorAll('.webhook-header-row').forEach(function(row) {
+        var cmd = row.querySelector('.tg-cmd-name').value.trim().replace(/^\//, '');
+        var desc = row.querySelector('.tg-cmd-desc').value.trim();
+        if (cmd && desc) out.push({ command: cmd, description: desc });
+    });
+    return out;
+}
+
+async function loadTelegramInfo(name) {
+    var infoEl = el('tgMgr-info-' + name);
+    var actionsEl = el('tgMgr-actions-' + name);
+    if (!infoEl) return;
+
+    infoEl.innerHTML = '<div class="loading-overlay" style="padding:8px 0"><div class="spinner"></div> Loading\u2026</div>';
+    if (actionsEl) actionsEl.style.display = 'none';
+
+    var res = await tgManageCall(name, 'get_info', {});
+    if (!res || !res.ok) {
+        infoEl.innerHTML = '<div class="alert alert-error" style="margin:0">' + escHtml((res && res.error) || 'Failed to load info.') + '</div>';
+        return;
+    }
+
+    var bot = res.bot || {};
+    var chat = res.chat || {};
+    var memberCount = res.member_count || 0;
+
+    var chatTypeBadge = chat.type ? '<span class="badge badge-blue">' + escHtml(chat.type) + '</span>' : '';
+    var chatTitle = chat.title || chat.first_name || ('Chat ' + (chat.id || ''));
+    var chatDesc = chat.description ? '<div style="font-size:0.8rem;color:#555;margin-top:3px">' + escHtml(chat.description) + '</div>' : '';
+    var memberBadge = memberCount > 0 ? '<span class="badge badge-grey">&#x1F465; ' + memberCount + ' member' + (memberCount !== 1 ? 's' : '') + '</span>' : '';
+    var inviteLink = chat.invite_link ? '<a href="' + escHtml(chat.invite_link) + '" target="_blank" rel="noopener" style="font-size:0.8rem">' + escHtml(chat.invite_link) + '</a>' : '';
+
+    var botName = bot.first_name || bot.username || 'Unknown';
+    var botUsername = bot.username ? '@' + bot.username : '';
+    var botCanJoin = bot.can_join_groups ? '\u2705 Can join groups' : '\u274C Cannot join groups';
+    var botCanRead = bot.can_read_all_group_messages ? '\u2705 Reads all messages' : '';
+    var botInline = bot.supports_inline_queries ? '\u2705 Inline queries' : '';
+
+    infoEl.innerHTML =
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px">' +
+            '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:10px 12px">' +
+                '<div style="font-size:0.75rem;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Chat</div>' +
+                '<div style="font-weight:600;font-size:0.95rem">' + escHtml(chatTitle) + ' ' + chatTypeBadge + ' ' + memberBadge + '</div>' +
+                chatDesc +
+                (inviteLink ? '<div style="margin-top:4px">' + inviteLink + '</div>' : '') +
+                '<div style="font-size:0.8rem;color:#888;margin-top:4px">ID: ' + escHtml(String(chat.id || '')) + '</div>' +
+            '</div>' +
+            '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:10px 12px">' +
+                '<div style="font-size:0.75rem;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Bot</div>' +
+                '<div style="font-weight:600;font-size:0.95rem">&#x1F916; ' + escHtml(botName) + ' <span style="font-weight:400;color:#888">' + escHtml(botUsername) + '</span></div>' +
+                '<div style="font-size:0.8rem;color:#555;margin-top:4px">' + botCanJoin + '</div>' +
+                (botCanRead ? '<div style="font-size:0.8rem;color:#555">' + botCanRead + '</div>' : '') +
+                (botInline ? '<div style="font-size:0.8rem;color:#555">' + botInline + '</div>' : '') +
+            '</div>' +
+        '</div>';
+
+    var titleInput = el('tgMgr-title-' + name);
+    if (titleInput && chat.title) titleInput.value = chat.title;
+    var descInput = el('tgMgr-desc-' + name);
+    if (descInput && chat.description) descInput.value = chat.description;
+    var botNameInput = el('tgMgr-botName-' + name);
+    if (botNameInput && bot.first_name) botNameInput.value = bot.first_name;
+
+    var cmdRes = await tgManageCall(name, 'get_commands', {});
+    var cmdRows = el('tgMgr-cmdRows-' + name);
+    if (cmdRows) {
+        cmdRows.innerHTML = '';
+        if (cmdRes && cmdRes.ok && Array.isArray(cmdRes.commands)) {
+            cmdRes.commands.forEach(function(c) { addTgCmdRow(name, c.command, c.description); });
+        }
+    }
+
+    if (actionsEl) actionsEl.style.display = 'block';
+}
+
+function renderTelegramManagePanel(name, panel) {
+    panel.innerHTML =
+        '<div style="border-top:1px solid #e0e0e0;padding:16px;background:#fafafa">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
+                '<span style="font-size:1.2rem">&#x1F916;</span>' +
+                '<strong style="color:#1565c0">Bot Management</strong>' +
+                '<span style="flex:1"></span>' +
+                '<button class="btn btn-sm btn-secondary" id="tgMgr-refresh-' + escHtml(name) + '">&#x1F504; Refresh</button>' +
+            '</div>' +
+            '<div id="tgMgr-info-' + escHtml(name) + '">' +
+                '<div class="loading-overlay" style="padding:8px 0"><div class="spinner"></div> Loading bot &amp; chat info\u2026</div>' +
+            '</div>' +
+            '<div id="tgMgr-actions-' + escHtml(name) + '" style="display:none">' +
+                '<div style="margin-top:14px">' +
+                    '<div style="font-weight:600;font-size:0.85rem;color:#333;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Chat Actions <span style="font-weight:400;color:#888;font-size:0.8rem">(bot must be admin)</span></div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">' +
+                        '<div style="flex:1;min-width:180px"><label style="font-size:0.8rem;color:#555;display:block;margin-bottom:3px">Rename chat</label>' +
+                        '<input type="text" id="tgMgr-title-' + escHtml(name) + '" placeholder="New chat title" style="width:100%"></div>' +
+                        '<button class="btn btn-sm" id="tgMgr-setTitle-' + escHtml(name) + '">Set Title</button>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">' +
+                        '<div style="flex:1;min-width:180px"><label style="font-size:0.8rem;color:#555;display:block;margin-bottom:3px">Chat description</label>' +
+                        '<input type="text" id="tgMgr-desc-' + escHtml(name) + '" placeholder="New description (blank to clear)" style="width:100%"></div>' +
+                        '<button class="btn btn-sm" id="tgMgr-setDesc-' + escHtml(name) + '">Set Description</button>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
+                        '<button class="btn btn-sm btn-secondary" id="tgMgr-inviteLink-' + escHtml(name) + '">&#x1F517; Generate Invite Link</button>' +
+                        '<span id="tgMgr-inviteLinkResult-' + escHtml(name) + '" style="font-size:0.85rem;color:#1565c0;word-break:break-all"></span>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+                        '<button class="btn btn-sm btn-secondary" id="tgMgr-admins-' + escHtml(name) + '">&#x1F464; Show Admins</button>' +
+                    '</div>' +
+                    '<div id="tgMgr-adminsResult-' + escHtml(name) + '" style="margin-top:6px"></div>' +
+                '</div>' +
+                '<div style="margin-top:16px;border-top:1px solid #e8e8e8;padding-top:14px">' +
+                    '<div style="font-weight:600;font-size:0.85rem;color:#333;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Bot Identity <span style="font-weight:400;color:#888;font-size:0.8rem">(global \u2014 affects all chats)</span></div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">' +
+                        '<div style="flex:1;min-width:180px"><label style="font-size:0.8rem;color:#555;display:block;margin-bottom:3px">Bot display name</label>' +
+                        '<input type="text" id="tgMgr-botName-' + escHtml(name) + '" placeholder="New bot name" style="width:100%"></div>' +
+                        '<button class="btn btn-sm" id="tgMgr-setBotName-' + escHtml(name) + '">Rename Bot</button>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">' +
+                        '<div style="flex:1;min-width:180px"><label style="font-size:0.8rem;color:#555;display:block;margin-bottom:3px">Bot about text</label>' +
+                        '<input type="text" id="tgMgr-botAbout-' + escHtml(name) + '" placeholder="Short description shown in bot profile" style="width:100%"></div>' +
+                        '<button class="btn btn-sm" id="tgMgr-setBotAbout-' + escHtml(name) + '">Set About</button>' +
+                    '</div>' +
+                '</div>' +
+                '<div style="margin-top:16px;border-top:1px solid #e8e8e8;padding-top:14px">' +
+                    '<div style="font-weight:600;font-size:0.85rem;color:#333;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em">Bot Commands Menu</div>' +
+                    '<p style="font-size:0.8rem;color:#666;margin:0 0 8px">These appear in Telegram\'s <code>/</code> command picker. Each command must be lowercase letters/numbers/underscores, max 32 chars.</p>' +
+                    '<div id="tgMgr-cmdRows-' + escHtml(name) + '"></div>' +
+                    '<div style="display:flex;gap:8px;margin-top:6px">' +
+                        '<button class="btn btn-sm btn-secondary" id="tgMgr-addCmd-' + escHtml(name) + '">+ Add Command</button>' +
+                        '<button class="btn btn-sm" id="tgMgr-saveCmd-' + escHtml(name) + '">&#x1F4BE; Save Commands</button>' +
+                        '<button class="btn btn-sm btn-secondary" id="tgMgr-clearCmd-' + escHtml(name) + '">&#x1F5D1; Clear All</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div id="tgMgr-alert-' + escHtml(name) + '" style="margin-top:10px"></div>' +
+        '</div>';
+
+    loadTelegramInfo(name);
+
+    el('tgMgr-refresh-' + name).addEventListener('click', function() { loadTelegramInfo(name); });
+
+    el('tgMgr-setTitle-' + name).addEventListener('click', async function() {
+        var title = el('tgMgr-title-' + name).value.trim();
+        if (!title) { tgMgrAlert(name, 'error', 'Enter a title first.'); return; }
+        var res = await tgManageCall(name, 'set_title', { title: title });
+        if (res && res.ok) { tgMgrAlert(name, 'success', res.message || 'Title updated.'); loadTelegramInfo(name); }
+        else { tgMgrAlert(name, 'error', (res && res.error) || 'Failed.'); }
+    });
+
+    el('tgMgr-setDesc-' + name).addEventListener('click', async function() {
+        var desc = el('tgMgr-desc-' + name).value;
+        var res = await tgManageCall(name, 'set_description', { description: desc });
+        if (res && res.ok) { tgMgrAlert(name, 'success', res.message || 'Description updated.'); loadTelegramInfo(name); }
+        else { tgMgrAlert(name, 'error', (res && res.error) || 'Failed.'); }
+    });
+
+    el('tgMgr-inviteLink-' + name).addEventListener('click', async function() {
+        var res = await tgManageCall(name, 'export_invite_link', {});
+        if (res && res.ok) {
+            var span = el('tgMgr-inviteLinkResult-' + name);
+            var link = res.invite_link || '';
+            var a = document.createElement('a');
+            a.href = link;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = link;
+            a.style.fontSize = '0.85rem';
+            var copyBtn = document.createElement('button');
+            copyBtn.className = 'btn btn-xs';
+            copyBtn.style.marginLeft = '6px';
+            copyBtn.textContent = 'Copy';
+            copyBtn.addEventListener('click', function() {
+                navigator.clipboard.writeText(link).then(function() {
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+                });
+            });
+            span.innerHTML = '';
+            span.appendChild(a);
+            span.appendChild(copyBtn);
+        } else {
+            tgMgrAlert(name, 'error', (res && res.error) || 'Failed.');
+        }
+    });
+
+    el('tgMgr-admins-' + name).addEventListener('click', async function() {
+        var res = await tgManageCall(name, 'get_admins', {});
+        var container = el('tgMgr-adminsResult-' + name);
+        if (!res || !res.ok) {
+            container.innerHTML = '<span style="color:#c62828;font-size:0.85rem">' + escHtml((res && res.error) || 'Failed.') + '</span>';
+            return;
+        }
+        var admins = Array.isArray(res.admins) ? res.admins : [];
+        if (admins.length === 0) {
+            container.innerHTML = '<span style="font-size:0.85rem;color:#888">No admins found.</span>';
+            return;
+        }
+        container.innerHTML = '<div style="font-size:0.85rem;display:flex;flex-wrap:wrap;gap:6px">' +
+            admins.map(function(a) {
+                var user = a.user || {};
+                var label = user.username ? '@' + user.username : (user.first_name || String(user.id));
+                var isBot = user.is_bot ? ' \uD83E\uDD16' : '';
+                var status = a.status === 'creator' ? ' \uD83D\uDC51' : '';
+                return '<span class="badge badge-grey">' + escHtml(label) + isBot + status + '</span>';
+            }).join('') +
+        '</div>';
+    });
+
+    el('tgMgr-setBotName-' + name).addEventListener('click', async function() {
+        var n = el('tgMgr-botName-' + name).value.trim();
+        if (!n) { tgMgrAlert(name, 'error', 'Enter a name first.'); return; }
+        var res = await tgManageCall(name, 'set_bot_name', { name: n });
+        if (res && res.ok) { tgMgrAlert(name, 'success', res.message || 'Bot name updated.'); loadTelegramInfo(name); }
+        else { tgMgrAlert(name, 'error', (res && res.error) || 'Failed.'); }
+    });
+
+    el('tgMgr-setBotAbout-' + name).addEventListener('click', async function() {
+        var desc = el('tgMgr-botAbout-' + name).value;
+        var res = await tgManageCall(name, 'set_bot_description', { description: desc });
+        if (res && res.ok) { tgMgrAlert(name, 'success', res.message || 'Bot about updated.'); loadTelegramInfo(name); }
+        else { tgMgrAlert(name, 'error', (res && res.error) || 'Failed.'); }
+    });
+
+    el('tgMgr-addCmd-' + name).addEventListener('click', function() { addTgCmdRow(name, '', ''); });
+
+    el('tgMgr-saveCmd-' + name).addEventListener('click', async function() {
+        var commands = readTgCmdRows(name);
+        var res = await tgManageCall(name, 'set_commands', { commands: commands });
+        if (res && res.ok) { tgMgrAlert(name, 'success', res.message || 'Commands saved.'); }
+        else { tgMgrAlert(name, 'error', (res && res.error) || 'Failed.'); }
+    });
+
+    el('tgMgr-clearCmd-' + name).addEventListener('click', async function() {
+        if (!confirm('Clear all bot commands? This removes the /command menu from Telegram.')) return;
+        var res = await tgManageCall(name, 'set_commands', { commands: [] });
+        if (res && res.ok) {
+            tgMgrAlert(name, 'success', 'Commands cleared.');
+            el('tgMgr-cmdRows-' + name).innerHTML = '';
+        } else {
+            tgMgrAlert(name, 'error', (res && res.error) || 'Failed.');
+        }
     });
 }
 

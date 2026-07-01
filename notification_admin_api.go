@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1030,4 +1031,315 @@ func handleTelegramGetUpdates(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out) //nolint:errcheck
+}
+
+// handleTelegramBotManage is a multi-action endpoint for managing a Telegram
+// bot and its target chat from the admin UI.
+//
+// POST /admin/notifications/telegram-manage
+//
+// Request body:
+//
+//	{
+//	  "bot_token":   "123:ABC…",   // required for all actions
+//	  "chat_id":     "-100123…",   // required for chat-scoped actions
+//	  "action":      "get_info" | "set_title" | "set_description" |
+//	                 "export_invite_link" | "get_admins" |
+//	                 "get_commands" | "set_commands" |
+//	                 "set_bot_name" | "set_bot_description",
+//	  "title":       "New title",          // set_title
+//	  "description": "New description",    // set_description, set_bot_description
+//	  "name":        "New bot name",       // set_bot_name
+//	  "commands": [                        // set_commands
+//	    {"command": "help", "description": "Show help"}
+//	  ]
+//	}
+//
+// Response always contains {"ok": true/false, "error": "…"} plus action-specific fields.
+func handleTelegramBotManage(w http.ResponseWriter, r *http.Request) {
+	handleTelegramBotManageWithManager(w, r, nil)
+}
+
+// handleTelegramBotManageWithManager is the real implementation; nm is used to
+// resolve a saved channel's bot_token when the UI sends an empty token (masked).
+func handleTelegramBotManageWithManager(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "POST required"}) //nolint:errcheck
+		return
+	}
+
+	type botCommand struct {
+		Command     string `json:"command"`
+		Description string `json:"description"`
+	}
+
+	var req struct {
+		// Channel is the named channel to look up when BotToken is empty.
+		Channel     string       `json:"channel"`
+		BotToken    string       `json:"bot_token"`
+		ChatID      string       `json:"chat_id"`
+		Action      string       `json:"action"`
+		Title       string       `json:"title"`
+		Description string       `json:"description"`
+		Name        string       `json:"name"`
+		Commands    []botCommand `json:"commands"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON: " + err.Error()}) //nolint:errcheck
+		return
+	}
+
+	// If the UI sent an empty token (masked channel), resolve from saved config.
+	if req.BotToken == "" && req.Channel != "" && nm != nil {
+		cfg := nm.Config()
+		if cfg != nil {
+			if ch, ok := cfg.Channels[req.Channel]; ok {
+				req.BotToken = ch.BotToken
+				if req.ChatID == "" {
+					req.ChatID = ch.ChatID
+				}
+			}
+		}
+	}
+
+	if req.BotToken == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "bot_token is required (or provide a saved channel name)"}) //nolint:errcheck
+		return
+	}
+	if req.Action == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "action is required"}) //nolint:errcheck
+		return
+	}
+
+	apiBase := fmt.Sprintf("https://api.telegram.org/bot%s", req.BotToken)
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	tgGet := func(endpoint string) (map[string]interface{}, error) {
+		resp, err := client.Get(apiBase + endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("telegram API unreachable: %w", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		var out map[string]interface{}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("unexpected response: %s", string(body))
+		}
+		return out, nil
+	}
+
+	tgPost := func(endpoint string, payload interface{}) (map[string]interface{}, error) {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshal error: %w", err)
+		}
+		resp, err := client.Post(apiBase+endpoint, "application/json", bytes.NewReader(b))
+		if err != nil {
+			return nil, fmt.Errorf("telegram API unreachable: %w", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		var out map[string]interface{}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("unexpected response: %s", string(body))
+		}
+		return out, nil
+	}
+
+	tgOK := func(res map[string]interface{}) bool {
+		ok, _ := res["ok"].(bool)
+		return ok
+	}
+	tgDesc := func(res map[string]interface{}) string {
+		if d, ok := res["description"].(string); ok && d != "" {
+			return d
+		}
+		return "unknown Telegram API error"
+	}
+
+	respond := func(payload interface{}) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(payload) //nolint:errcheck
+	}
+	fail := func(msg string) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": msg}) //nolint:errcheck
+	}
+
+	switch req.Action {
+
+	case "get_info":
+		if req.ChatID == "" {
+			fail("chat_id is required for get_info")
+			return
+		}
+		meRes, err := tgGet("/getMe")
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(meRes) {
+			fail("getMe: " + tgDesc(meRes))
+			return
+		}
+		chatRes, err := tgPost("/getChat", map[string]string{"chat_id": req.ChatID})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(chatRes) {
+			fail("getChat: " + tgDesc(chatRes))
+			return
+		}
+		countRes, err := tgPost("/getChatMemberCount", map[string]string{"chat_id": req.ChatID})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		memberCount := 0
+		if tgOK(countRes) {
+			if n, ok := countRes["result"].(float64); ok {
+				memberCount = int(n)
+			}
+		}
+		respond(map[string]interface{}{
+			"ok":           true,
+			"bot":          meRes["result"],
+			"chat":         chatRes["result"],
+			"member_count": memberCount,
+		})
+
+	case "set_title":
+		if req.ChatID == "" {
+			fail("chat_id is required")
+			return
+		}
+		if req.Title == "" {
+			fail("title is required")
+			return
+		}
+		res, err := tgPost("/setChatTitle", map[string]string{"chat_id": req.ChatID, "title": req.Title})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("setChatTitle: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "message": "Chat title updated."})
+
+	case "set_description":
+		if req.ChatID == "" {
+			fail("chat_id is required")
+			return
+		}
+		res, err := tgPost("/setChatDescription", map[string]string{"chat_id": req.ChatID, "description": req.Description})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("setChatDescription: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "message": "Chat description updated."})
+
+	case "export_invite_link":
+		if req.ChatID == "" {
+			fail("chat_id is required")
+			return
+		}
+		res, err := tgPost("/exportChatInviteLink", map[string]string{"chat_id": req.ChatID})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("exportChatInviteLink: " + tgDesc(res))
+			return
+		}
+		link, _ := res["result"].(string)
+		respond(map[string]interface{}{"ok": true, "invite_link": link})
+
+	case "get_admins":
+		if req.ChatID == "" {
+			fail("chat_id is required")
+			return
+		}
+		res, err := tgPost("/getChatAdministrators", map[string]string{"chat_id": req.ChatID})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("getChatAdministrators: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "admins": res["result"]})
+
+	case "get_commands":
+		res, err := tgGet("/getMyCommands")
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("getMyCommands: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "commands": res["result"]})
+
+	case "set_commands":
+		if req.Commands == nil {
+			req.Commands = []botCommand{}
+		}
+		res, err := tgPost("/setMyCommands", map[string]interface{}{"commands": req.Commands})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("setMyCommands: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "message": "Bot commands updated."})
+
+	case "set_bot_name":
+		if req.Name == "" {
+			fail("name is required")
+			return
+		}
+		res, err := tgPost("/setMyName", map[string]string{"name": req.Name})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("setMyName: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "message": "Bot name updated."})
+
+	case "set_bot_description":
+		res, err := tgPost("/setMyDescription", map[string]string{"description": req.Description})
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if !tgOK(res) {
+			fail("setMyDescription: " + tgDesc(res))
+			return
+		}
+		respond(map[string]interface{}{"ok": true, "message": "Bot description updated."})
+
+	default:
+		fail("unknown action: " + req.Action)
+	}
 }

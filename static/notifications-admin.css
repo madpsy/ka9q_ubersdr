@@ -375,6 +375,14 @@ body {
     border: 1px solid #e9ecef;
     border-radius: 8px;
     padding: 16px;
+    overflow: hidden;
+}
+
+/* Telegram bot management panel — bleeds to card edges */
+.tg-manage-panel {
+    margin: 12px -16px -16px;
+    border-radius: 0 0 8px 8px;
+    overflow: hidden;
 }
 
 .item-card-header {

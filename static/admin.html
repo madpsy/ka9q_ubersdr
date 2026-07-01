@@ -749,27 +749,27 @@
                 <div class="header-content">
                     <h1>Configuration Editor</h1>
                     <p id="configEditorSubtitle">Edit UberSDR configuration. Changes require server restart to take effect.</p>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-                        <p id="configCallsignName" style="font-size: 14px; font-weight: bold; margin: 0;"></p>
-                        <a href="notifications-admin.html" style="font-size: 13px; font-weight: 500; color: #667eea; text-decoration: none; white-space: nowrap; padding: 3px 10px; border: 1px solid #667eea; border-radius: 4px; transition: background 0.2s, color 0.2s;" onmouseover="this.style.background='#667eea';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#667eea'">🔔 Notifications</a>
-                    </div>
+                    <p id="configCallsignName" style="margin-top: 8px; font-size: 14px; font-weight: bold;"></p>
                 </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
-                        🔓 Enable Public Access
-                    </button>
-                    <a id="groupsIoBtn" href="https://groups.io/g/ubersdr/" target="_blank" class="btn" style="display: none; background: #0077b5; text-decoration: none;">
-                        💬 groups.io
-                    </a>
-                    <button id="supportSessionBtn" class="btn" onclick="openStartSupport()" style="display: none; background: #dc3545; color: white; font-weight: bold;" title="Start a remote support session">🆘 Support</button>
-                    <div id="terminalButtonGroup" style="display: none; position: relative; align-items: stretch;">
-                        <button class="btn" id="terminalButton" onclick="openTerminal()" style="border-radius: 5px 0 0 5px; border-right: none; margin: 0;">🖥️ Terminal</button>
-                        <button class="btn" id="terminalDropdownBtn" onclick="toggleTerminalDropdown()" style="border-radius: 0 5px 5px 0; padding: 8px 10px; min-width: auto; margin: 0; height: auto;">▼</button>
-                        <div id="terminalDropdown" class="terminal-dropdown" style="display: none;">
-                            <a href="#" onclick="openQuickTerminal(); return false;">Quick Terminal</a>
+                <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
+                            🔓 Enable Public Access
+                        </button>
+                        <a id="groupsIoBtn" href="https://groups.io/g/ubersdr/" target="_blank" class="btn" style="display: none; background: #0077b5; text-decoration: none;">
+                            💬 groups.io
+                        </a>
+                        <button id="supportSessionBtn" class="btn" onclick="openStartSupport()" style="display: none; background: #dc3545; color: white; font-weight: bold;" title="Start a remote support session">🆘 Support</button>
+                        <div id="terminalButtonGroup" style="display: none; position: relative; align-items: stretch;">
+                            <button class="btn" id="terminalButton" onclick="openTerminal()" style="border-radius: 5px 0 0 5px; border-right: none; margin: 0;">🖥️ Terminal</button>
+                            <button class="btn" id="terminalDropdownBtn" onclick="toggleTerminalDropdown()" style="border-radius: 0 5px 5px 0; padding: 8px 10px; min-width: auto; margin: 0; height: auto;">▼</button>
+                            <div id="terminalDropdown" class="terminal-dropdown" style="display: none;">
+                                <a href="#" onclick="openQuickTerminal(); return false;">Quick Terminal</a>
+                            </div>
                         </div>
+                        <button class="btn btn-secondary" onclick="logout()">Logout</button>
                     </div>
-                    <button class="btn btn-secondary" onclick="logout()">Logout</button>
+                    <a href="notifications-admin.html" style="font-size: 13px; font-weight: 500; color: #667eea; text-decoration: none; white-space: nowrap; padding: 3px 10px; border: 1px solid #667eea; border-radius: 4px; transition: background 0.2s, color 0.2s;" onmouseover="this.style.background='#667eea';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#667eea'">🔔 Notifications</a>
                 </div>
             </div>
 

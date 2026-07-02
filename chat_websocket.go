@@ -946,6 +946,7 @@ func (cm *ChatManager) InjectJoin(username, sessionID string) {
 		return // already present — no-op
 	}
 	cm.activeUsers[sessionID] = &ChatUser{
+		SessionID:        sessionID,
 		Username:         username,
 		LastSeen:         now,
 		LastActivityTime: now,

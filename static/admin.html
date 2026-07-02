@@ -21276,6 +21276,7 @@ const tooltipLine2 = timeStr;
                 const health = (healthResp.ok || healthResp.status === 503) ? await healthResp.json() : null;
 
                 renderAntSwitchTab(body, health);
+                body.classList.remove('loading');
                 antSwitchTabBuilt = true;
             } catch (e) {
                 body.innerHTML = `<div class="alert" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:5px;padding:15px;">❌ Failed to load antenna switch status: ${e.message}</div>`;

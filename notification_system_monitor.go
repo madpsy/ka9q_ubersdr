@@ -596,7 +596,7 @@ func BuildSystemHealthProbes(
 			if err != nil {
 				return true, nil // no sensor — skip
 			}
-			if tempC >= cpuTempThreshold {
+			if tempC > cpuTempThreshold {
 				return false, []string{fmt.Sprintf("CPU temperature %.1f°C exceeds threshold %.0f°C", tempC, cpuTempThreshold)}
 			}
 			return true, nil

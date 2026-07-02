@@ -1263,7 +1263,11 @@ function renderTelegramManagePanel(name, panel) {
                         '<span style="font-size:0.85rem;color:#333">Enable command listener</span>' +
                         '<span id="tgMgr-listenerStatus-' + escHtml(name) + '" style="font-size:0.8rem;margin-left:4px"></span>' +
                     '</div>' +
-                    '<div style="font-size:0.85rem;color:#555;margin-bottom:6px;font-weight:500">Active commands:</div>' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">' +
+                        '<span style="font-size:0.85rem;color:#555;font-weight:500">Active commands:</span>' +
+                        '<button type="button" id="tgMgr-checkAll-' + escHtml(name) + '" class="btn btn-xs" style="padding:1px 8px;font-size:0.78rem">Check all</button>' +
+                        '<button type="button" id="tgMgr-uncheckAll-' + escHtml(name) + '" class="btn btn-xs" style="padding:1px 8px;font-size:0.78rem">Uncheck all</button>' +
+                    '</div>' +
                     '<div id="tgMgr-cmdCheckboxes-' + escHtml(name) + '" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">' +
                         '<span style="color:#888;font-size:0.8rem">Loading\u2026</span>' +
                     '</div>' +
@@ -1443,6 +1447,25 @@ function renderTelegramManagePanel(name, panel) {
                     securityWarning +
                 '</div>';
             }).join('');
+
+            // Wire up Check all / Uncheck all buttons now that checkboxes exist.
+            // "Check all" checks all command checkboxes but NOT the "allow write" checkboxes.
+            var checkAllBtn = el('tgMgr-checkAll-' + name);
+            var uncheckAllBtn = el('tgMgr-uncheckAll-' + name);
+            if (checkAllBtn) {
+                checkAllBtn.addEventListener('click', function() {
+                    container.querySelectorAll('input.tgMgr-cmdCheck-' + name).forEach(function(cb) {
+                        cb.checked = true;
+                    });
+                });
+            }
+            if (uncheckAllBtn) {
+                uncheckAllBtn.addEventListener('click', function() {
+                    container.querySelectorAll('input.tgMgr-cmdCheck-' + name).forEach(function(cb) {
+                        cb.checked = false;
+                    });
+                });
+            }
         }).catch(function() {
             var container = el('tgMgr-cmdCheckboxes-' + name);
             if (container) container.innerHTML = '<span style="color:#c62828;font-size:0.8rem">Failed to load commands.</span>';

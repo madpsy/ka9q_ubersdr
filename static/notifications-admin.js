@@ -2970,6 +2970,15 @@ function initRules() {
     var ruleEventEl  = el('ruleFilterEvent');
     var ruleStatusEl = el('ruleFilterStatus');
     var ruleClearEl  = el('ruleFilterClear');
+    // Populate event dropdown using the same labels as the rule form.
+    if (ruleEventEl) {
+        EVENT_TYPES.forEach(function(et) {
+            var opt = document.createElement('option');
+            opt.value = et;
+            opt.textContent = eventLabel(et);
+            ruleEventEl.appendChild(opt);
+        });
+    }
     if (ruleNameEl)   ruleNameEl.addEventListener('input',   function() { renderRules(); });
     if (ruleEventEl)  ruleEventEl.addEventListener('change',  function() { renderRules(); });
     if (ruleStatusEl) ruleStatusEl.addEventListener('change', function() { renderRules(); });

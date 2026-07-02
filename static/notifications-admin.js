@@ -2075,9 +2075,13 @@ function webhookFieldsHTML(ch, isEdit) {
             '</label>' +
             '<div class="form-hint">&#x26A0;&#xFE0F; Only for self-signed certificates on private LANs. Never use on public endpoints.</div>' +
         '</div>' +
-        '<div class="form-group">' +
+        '<div class="form-group" style="position:relative">' +
             '<label>Body Template <span style="font-weight:400;font-size:0.8rem;color:#888">(optional — overrides Payload Format)</span></label>' +
             '<textarea id="chWebhookBodyTemplate" rows="4" placeholder=\'{"message":"{{jsonEscape .Message}}","title":"UberSDR","priority":5}\'>' + escHtml(ch.webhook_body_template || '') + '</textarea>' +
+            (!(ch.webhook_body_template) ? '<div id="webhookBodyTemplateOverlay" style="position:absolute;inset:0;top:24px;background:rgba(248,249,250,0.93);border:1px solid #dee2e6;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:default">' +
+                '<span style="font-size:0.85rem;color:#666">Using Payload Format (no custom body template)</span>' +
+                '<button type="button" class="btn btn-secondary btn-sm" id="btnCustomiseWebhookBody">&#x270F;&#xFE0F; Customise</button>' +
+            '</div>' : '') +
             '<div class="form-hint">When set, renders the full request body using Go <code>text/template</code> syntax. Overrides the Payload Format above. Leave blank to use the format instead.</div>' +
         '</div>' +
         '<details class="template-ref" style="margin-bottom:16px">' +
@@ -2256,6 +2260,16 @@ function showChannelForm(editName) {
                 el('chWebhookHeaders').querySelectorAll('.wh-remove').forEach(attachRemoveHeader);
             });
             el('chWebhookHeaders').querySelectorAll('.wh-remove').forEach(attachRemoveHeader);
+            // Wire up the "Customise" overlay button for body template if present
+            var btnCustomiseBody = el('btnCustomiseWebhookBody');
+            if (btnCustomiseBody) {
+                btnCustomiseBody.addEventListener('click', function() {
+                    var overlay = el('webhookBodyTemplateOverlay');
+                    if (overlay) overlay.remove();
+                    var ta = el('chWebhookBodyTemplate');
+                    if (ta) { ta.focus(); ta.setSelectionRange(0, 0); }
+                });
+            }
         } else {
             el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('telegram');

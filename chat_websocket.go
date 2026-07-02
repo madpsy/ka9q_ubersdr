@@ -52,6 +52,9 @@ type ChatManager struct {
 	messageBufferMu sync.RWMutex
 	maxMessages     int
 
+	// Welcome message appended to every new client's buffer replay (nil = disabled)
+	welcomeMessage *ChatMessage
+
 	// Reference to websocket handler for broadcasting
 	wsHandler *DXClusterWebSocketHandler
 
@@ -116,6 +119,19 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 		adminCallsign:                strings.ToUpper(adminConfig.Callsign),
 		ownerCallsignFromAdminIPOnly: chatConfig.OwnerCallsignFromAdminIPOnly,
 		adminConfig:                  adminConfig,
+	}
+
+	// Set welcome message if configured (sent last in buffer replay so it appears at the bottom)
+	if chatConfig.WelcomeMessage != "" {
+		username := cm.adminCallsign
+		if username == "" {
+			username = "System"
+		}
+		cm.welcomeMessage = &ChatMessage{
+			Username:  username,
+			Message:   chatConfig.WelcomeMessage,
+			Timestamp: time.Now().UTC(),
+		}
 	}
 
 	// Seed the message buffer from persistent logs on startup (up to 7 days back)
@@ -792,7 +808,8 @@ func (cm *ChatManager) addMessageToBuffer(msg ChatMessage) {
 	}
 }
 
-// GetBufferedMessages returns a copy of buffered messages
+// GetBufferedMessages returns a copy of buffered messages.
+// Does NOT include the welcome message — use SendBufferedMessages for new client replays.
 func (cm *ChatManager) GetBufferedMessages() []ChatMessage {
 	cm.messageBufferMu.RLock()
 	defer cm.messageBufferMu.RUnlock()
@@ -802,9 +819,18 @@ func (cm *ChatManager) GetBufferedMessages() []ChatMessage {
 	return messages
 }
 
-// SendBufferedMessages sends buffered messages to a newly connected client
+// SendBufferedMessages sends buffered messages to a newly connected client,
+// followed by the welcome message (if configured) so it appears at the bottom
+// of the replay window — the first thing a new user sees.
 func (cm *ChatManager) SendBufferedMessages(conn *websocket.Conn) {
 	messages := cm.GetBufferedMessages()
+
+	// Append welcome last so it lands at the bottom of the replay window.
+	// Only done here (not in GetBufferedMessages) so admin tools like the
+	// Telegram /chat command see only real messages.
+	if cm.welcomeMessage != nil {
+		messages = append(messages, *cm.welcomeMessage)
+	}
 
 	if len(messages) == 0 {
 		log.Printf("Chat: No buffered messages to send to new client")

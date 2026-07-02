@@ -422,6 +422,7 @@ type ChatConfig struct {
 	LogToCSV                     bool   `yaml:"log_to_csv"`                        // Enable CSV logging of chat messages (default: true)
 	DataDir                      string `yaml:"data_dir"`                          // Directory to store CSV chat log files (default: "chat")
 	OwnerCallsignFromAdminIPOnly bool   `yaml:"owner_callsign_from_admin_ip_only"` // Restrict owner callsign to admin IPs only (default: true)
+	WelcomeMessage               string `yaml:"welcome_message"`                   // Optional welcome message sent to new clients (empty = disabled)
 }
 
 // SpaceWeatherConfig contains space weather monitoring settings

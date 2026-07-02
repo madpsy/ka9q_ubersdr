@@ -810,6 +810,13 @@ chat:
   # Default: true
   owner_callsign_from_admin_ip_only: true
 
+  # Welcome message sent to new clients when they subscribe to chat
+  # Appears at the bottom of the buffered message history replay, so it is
+  # the first thing a new user sees — right before live messages start.
+  # Sent under the admin callsign (admin->callsign). Leave empty to disable.
+  # Default: "" (no welcome message)
+  welcome_message: "Welcome! Please keep chat friendly and on-topic. Enjoy the SDR!"
+
 # Space Weather settings
 spaceweather:
   # Enable space weather monitoring from NOAA SWPC

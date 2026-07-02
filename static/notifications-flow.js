@@ -127,8 +127,10 @@ function calcRuleNodeHeight(filterLines) {
     return NODE_PAD * 2 + LINE_H_TITLE + LINE_H_SUB + shown * LINE_H_DETAIL + (hasMore ? LINE_H_DETAIL : 0);
 }
 
-function calcChannelNodeHeight(hasRate) {
-    return NODE_PAD * 2 + LINE_H_TITLE + LINE_H_SUB + (hasRate ? LINE_H_DETAIL : 0);
+function calcChannelNodeHeight(hasRate, hasBotCmds) {
+    return NODE_PAD * 2 + LINE_H_TITLE + LINE_H_SUB +
+        (hasRate    ? LINE_H_DETAIL : 0) +
+        (hasBotCmds ? LINE_H_DETAIL : 0);
 }
 
 // ─── SVG element builders ─────────────────────────────────────────────────────
@@ -174,8 +176,14 @@ function renderFlowDiagram() {
     const rules    = localConfig.rules    || [];
     const channels = localConfig.channels || {};
 
-    if (rules.length === 0) {
-        container.innerHTML = '<p style="color:#888;font-style:italic;padding:12px 0">No rules configured yet. Add rules to see the flow diagram.</p>';
+    const hasChannels = Object.keys(channels).length > 0;
+    const hasRules    = rules.length > 0;
+
+    if (!hasChannels || !hasRules) {
+        container.innerHTML =
+            '<p style="color:#888;font-style:italic;padding:12px 0">' +
+            '📭 Add a Channel and Rule to get started…' +
+            '</p>';
         return;
     }
 
@@ -204,11 +212,14 @@ function renderFlowDiagram() {
         .filter(function(name) { return channels[name]; })
         .map(function(name) {
             const ch = channels[name];
+            const botCmdsEnabled = ch.type === 'telegram' &&
+                ch.bot_commands && ch.bot_commands.enabled;
             return {
-                name:  name,
-                type:  ch.type || 'telegram',
-                emoji: FLOW_CHANNEL_EMOJIS[ch.type] || '📤',
-                rate:  ch.rate_limit_minutes > 0 ? ch.rate_limit_minutes : 0,
+                name:       name,
+                type:       ch.type || 'telegram',
+                emoji:      FLOW_CHANNEL_EMOJIS[ch.type] || '📤',
+                rate:       ch.rate_limit_minutes > 0 ? ch.rate_limit_minutes : 0,
+                botCmds:    !!botCmdsEnabled,
             };
         });
 
@@ -313,7 +324,7 @@ function renderFlowDiagram() {
 
     // Channel column
     const channelHeights = channelNodes.map(function(ch) {
-        return calcChannelNodeHeight(ch.rate > 0);
+        return calcChannelNodeHeight(ch.rate > 0, ch.botCmds);
     });
     const channelYs = [];
     let cy = COL_PAD_TOP;
@@ -435,6 +446,7 @@ function renderFlowDiagram() {
         if (rule.channels && rule.channels.length > 0) {
             tooltipLines.push('Channels: ' + rule.channels.join(', '));
         }
+        tooltipLines.push('Click to edit');
         const tooltip = tooltipLines.join('\n');
 
         parts.push('<g class="flow-node flow-rule-node" data-rule="' + ri + '" style="cursor:pointer">');
@@ -471,14 +483,21 @@ function renderFlowDiagram() {
 
         const tooltipLines = [ch.emoji + ' ' + ch.name, ch.type];
         if (ch.rate > 0) tooltipLines.push('Rate limit: ' + ch.rate + ' min');
+        if (ch.botCmds) tooltipLines.push('🤖 Bot Commands enabled');
+        tooltipLines.push('Click to edit');
         const tooltip = tooltipLines.join('\n');
+
+        // Title shows bot-commands emoji badge next to name when enabled
+        const nameLabel = ch.botCmds
+            ? ch.emoji + ' ' + truncStr(ch.name, 20) + ' 🤖'
+            : ch.emoji + ' ' + truncStr(ch.name, 24);
 
         parts.push('<g class="flow-node flow-channel-node" data-channel="' + svgEsc(ch.name) + '" style="cursor:pointer">');
         parts.push('<title>' + svgEsc(tooltip) + '</title>');
         parts.push(svgRect(x, y, w, h, 6, C.channelFill, C.channelBorder, 1.5, ' class="flow-node-rect"'));
 
         let lineY = y + NODE_PAD + LINE_H_TITLE - 4;
-        parts.push(svgText(tx, lineY, ch.emoji + ' ' + truncStr(ch.name, 24), 13, C.titleColor, '600'));
+        parts.push(svgText(tx, lineY, nameLabel, 13, C.titleColor, '600'));
 
         lineY += LINE_H_SUB;
         parts.push(svgText(tx, lineY, ch.type, 11, C.subtitleColor, 'normal'));
@@ -486,6 +505,10 @@ function renderFlowDiagram() {
         if (ch.rate > 0) {
             lineY += LINE_H_DETAIL;
             parts.push(svgText(tx, lineY, 'Rate: ' + ch.rate + ' min', 10, C.detailColor, 'normal'));
+        }
+        if (ch.botCmds) {
+            lineY += LINE_H_DETAIL;
+            parts.push(svgText(tx, lineY, '🤖 Bot Commands on', 10, '#1976d2', 'normal'));
         }
 
         parts.push('</g>');
@@ -540,18 +563,30 @@ function renderFlowDiagram() {
             });
         });
 
-        // Click: navigate to Rules tab
+        // Click: switch to Rules tab and open the edit form for this rule
         ruleEl.addEventListener('click', function() {
+            const rule = ruleNodes[parseInt(ri, 10)];
+            if (!rule) return;
+            // Find the original index in localConfig.rules (showRuleForm takes that index)
+            const origIdx = (localConfig.rules || []).findIndex(function(r) { return r.name === rule.name; });
             const tabEl = document.querySelector('.tab[data-tab="rules"]');
             if (tabEl) tabEl.click();
+            if (origIdx >= 0 && typeof showRuleForm === 'function') {
+                // Small delay to let the tab render before opening the form
+                setTimeout(function() { showRuleForm(origIdx); }, 50);
+            }
         });
     });
 
-    // Channel node click: navigate to Channels tab
+    // Channel node click: switch to Channels tab and open the edit form
     svgEl.querySelectorAll('.flow-channel-node').forEach(function(chEl) {
         chEl.addEventListener('click', function() {
+            const chName = chEl.getAttribute('data-channel');
             const tabEl = document.querySelector('.tab[data-tab="channels"]');
             if (tabEl) tabEl.click();
+            if (chName && typeof showChannelForm === 'function') {
+                setTimeout(function() { showChannelForm(chName); }, 50);
+            }
         });
     });
 }

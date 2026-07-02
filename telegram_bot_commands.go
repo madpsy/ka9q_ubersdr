@@ -344,11 +344,12 @@ func (l *TelegramBotListener) handleBanned(chatID int64, args string) (string, s
 		if reason == "" {
 			reason = "no reason"
 		}
-		fmt.Fprintf(&sb, "%d. <code>%s</code> — %s (%s)\n",
+		fmt.Fprintf(&sb, "%d. %s — %s (%s)%s\n",
 			i+1,
-			html.EscapeString(b.IP),
+			l.ipLookupLink(b.IP),
 			html.EscapeString(reason),
 			html.EscapeString(expiry),
+			l.ipUnbanLink(b.IP),
 		)
 	}
 
@@ -614,14 +615,14 @@ func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, stri
 			sb.WriteString("<b>Reports (24h / 7d):</b>\n")
 			for _, band := range hfBandOrder {
 				if r, ok := reportRanks[band]; ok {
-					fmt.Fprintf(&sb, "  %s: #%d — %s reports (7d: %s)\n",
-						band, r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+					fmt.Fprintf(&sb, "  %s: %s#%d — %s reports (7d: %s)\n",
+						band, rankMedal(r.Rank), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
 				}
 			}
 			for band, r := range reportRanks {
 				if !hfBandKnown(band) && band != "All" {
-					fmt.Fprintf(&sb, "  %s: #%d — %s reports (7d: %s)\n",
-						html.EscapeString(band), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+					fmt.Fprintf(&sb, "  %s: %s#%d — %s reports (7d: %s)\n",
+						html.EscapeString(band), rankMedal(r.Rank), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
 				}
 			}
 		}
@@ -629,14 +630,14 @@ func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, stri
 			sb.WriteString("\n<b>Countries (24h / 7d):</b>\n")
 			for _, band := range hfBandOrder {
 				if r, ok := countryRanks[band]; ok {
-					fmt.Fprintf(&sb, "  %s: #%d — %s countries (7d: %s)\n",
-						band, r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+					fmt.Fprintf(&sb, "  %s: %s#%d — %s countries (7d: %s)\n",
+						band, rankMedal(r.Rank), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
 				}
 			}
 			for band, r := range countryRanks {
 				if !hfBandKnown(band) && band != "All" {
-					fmt.Fprintf(&sb, "  %s: #%d — %s countries (7d: %s)\n",
-						html.EscapeString(band), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
+					fmt.Fprintf(&sb, "  %s: %s#%d — %s countries (7d: %s)\n",
+						html.EscapeString(band), rankMedal(r.Rank), r.Rank, fmtCount(r.Day), fmtCount(r.Week))
 				}
 			}
 		}
@@ -644,12 +645,12 @@ func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, stri
 		if hasReportAll || hasCountryAll {
 			sb.WriteString("\n<b>Totals (all bands):</b>\n")
 			if hasReportAll {
-				fmt.Fprintf(&sb, "  Reports: #%d — %s (7d: %s)\n",
-					reportAll.Rank, fmtCount(reportAll.Day), fmtCount(reportAll.Week))
+				fmt.Fprintf(&sb, "  Reports: %s#%d — %s (7d: %s)\n",
+					rankMedal(reportAll.Rank), reportAll.Rank, fmtCount(reportAll.Day), fmtCount(reportAll.Week))
 			}
 			if hasCountryAll {
-				fmt.Fprintf(&sb, "  Countries: #%d — %s (7d: %s)\n",
-					countryAll.Rank, fmtCount(countryAll.Day), fmtCount(countryAll.Week))
+				fmt.Fprintf(&sb, "  Countries: %s#%d — %s (7d: %s)\n",
+					rankMedal(countryAll.Rank), countryAll.Rank, fmtCount(countryAll.Day), fmtCount(countryAll.Week))
 			}
 		}
 	}
@@ -708,8 +709,8 @@ func (l *TelegramBotListener) handleWSPR(chatID int64, args string) (string, str
 		if rank == 0 {
 			rank = 1
 		}
-		fmt.Fprintf(&sb, "%s: <b>#%d</b> — %s unique spots\n",
-			w.label, rank, fmtCount(int(row.Unique)))
+		fmt.Fprintf(&sb, "%s: %s<b>#%d</b> — %s unique spots\n",
+			w.label, rankMedal(rank), rank, fmtCount(int(row.Unique)))
 	}
 	if !found {
 		sb.WriteString("\n<i>Callsign not found in any WSPR Live window.</i>\n")
@@ -778,7 +779,7 @@ func (l *TelegramBotListener) handleRBN(chatID int64, args string) (string, stri
 	} else {
 		if hasStats {
 			if rank > 0 {
-				fmt.Fprintf(&sb, "Rank: <b>#%d</b> of %d skimmers\n", rank, totalSkimmers)
+				fmt.Fprintf(&sb, "Rank: %s<b>#%d</b> of %d skimmers\n", rankMedal(rank), rank, totalSkimmers)
 			}
 			fmt.Fprintf(&sb, "Spot count: <b>%s</b>\n", fmtCount(statsEntry.SpotCount))
 		}
@@ -846,6 +847,36 @@ func bandSNRQuality(snr float32) string {
 	}
 }
 
+// bandSNREmoji returns a traffic-light emoji for the given SNR quality label.
+// Telegram doesn't support colour text, so emoji are used as colour indicators.
+func bandSNREmoji(quality string) string {
+	switch quality {
+	case "EXCELLENT":
+		return "🟢"
+	case "GOOD":
+		return "🟡"
+	case "FAIR":
+		return "🟠"
+	default: // POOR
+		return "🔴"
+	}
+}
+
+// rankMedal returns a gold/silver/bronze medal emoji for ranks 1–3,
+// or an empty string for any other rank.
+func rankMedal(rank int) string {
+	switch rank {
+	case 1:
+		return "🥇"
+	case 2:
+		return "🥈"
+	case 3:
+		return "🥉"
+	default:
+		return ""
+	}
+}
+
 // handleBands reports the FT8 SNR and quality label for each configured band.
 // Bands with no FT8 data (FT8SNR == 0) are skipped.
 // args is ignored — bands is always read-only.
@@ -896,8 +927,8 @@ func (l *TelegramBotListener) handleBands(chatID int64, args string) (string, st
 			continue // skip bands with no FT8 data
 		}
 		quality := bandSNRQuality(m.FT8SNR)
-		fmt.Fprintf(&sb, "<b>%s</b>: %.1f dB — %s\n",
-			html.EscapeString(band), m.FT8SNR, quality)
+		fmt.Fprintf(&sb, "%s <b>%s</b>: %.1f dB — %s\n",
+			bandSNREmoji(quality), html.EscapeString(band), m.FT8SNR, quality)
 		wrote++
 	}
 
@@ -1058,7 +1089,8 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 		// HTML parser (e.g. country names like "Bosnia & Herzegovina").
 		var suffix strings.Builder
 		if g.clientIP != "" {
-			suffix.WriteString(html.EscapeString(g.clientIP))
+			suffix.WriteString(l.ipLookupLink(g.clientIP))
+			suffix.WriteString(l.ipBanLink(g.clientIP))
 		}
 		if g.country != "" {
 			flag := countryCodeToFlag(g.countryCC)
@@ -1548,8 +1580,8 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 				apiResp, apiOK := l.sendMessage(chatID, msg)
 				return msg, apiResp, apiOK
 			}
-			msg := fmt.Sprintf("✅ Banned <b>%s</b> (<code>%s</code>%s) — reason: %s\nKicked %d session(s), %d DX connection(s)",
-				html.EscapeString(username), html.EscapeString(ip), ipSource, html.EscapeString(reason),
+			msg := fmt.Sprintf("✅ Banned <b>%s</b> (%s%s) — reason: %s\nKicked %d session(s), %d DX connection(s)",
+				html.EscapeString(username), l.ipLookupLink(ip), ipSource, html.EscapeString(reason),
 				sessKicked, dxKicked)
 			if msgsRemoved > 0 {
 				msg += fmt.Sprintf(", removed %d chat message(s)", msgsRemoved)
@@ -1569,8 +1601,8 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 			apiResp, apiOK := l.sendMessage(chatID, msg)
 			return msg, apiResp, apiOK
 		}
-		msg := fmt.Sprintf("✅ Banned <b>%s</b> (<code>%s</code>%s) — reason: %s",
-			html.EscapeString(username), html.EscapeString(ip), ipSource, html.EscapeString(reason))
+		msg := fmt.Sprintf("✅ Banned <b>%s</b> (%s%s) — reason: %s",
+			html.EscapeString(username), l.ipLookupLink(ip), ipSource, html.EscapeString(reason))
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
@@ -1587,9 +1619,10 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 			if ip == "" {
 				ip = "unknown"
 			}
-			fmt.Fprintf(&sb, "• <b>%s</b> — <code>%s</code>\n",
+			fmt.Fprintf(&sb, "• <b>%s</b> — %s%s\n",
 				html.EscapeString(u.Username),
-				html.EscapeString(ip),
+				l.ipLookupLink(ip),
+				l.ipBanLink(ip),
 			)
 		}
 		sb.WriteString("\n")

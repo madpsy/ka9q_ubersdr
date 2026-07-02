@@ -238,6 +238,17 @@ func (m *NotificationManager) SetRBNStore(h *RBNDataStore) {
 	}
 }
 
+// SetDXClusterWSHandler wires the DX cluster WebSocket handler into the
+// listener registry so that the /cw bot command can read the live CW spot buffer.
+func (m *NotificationManager) SetDXClusterWSHandler(h *DXClusterWebSocketHandler) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetDXClusterWSHandler(h)
+	}
+}
+
 // SetSpaceWeatherMonitor wires the space weather monitor into the listener
 // registry so that the /space bot command can report current space weather.
 func (m *NotificationManager) SetSpaceWeatherMonitor(h *SpaceWeatherMonitor) {

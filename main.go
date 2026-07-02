@@ -2255,6 +2255,10 @@ func main() {
 	notifManager.SetPSKRankFetcher(pskRankFetcher)
 	notifManager.SetWSPRRankFetcher(wsprRankFetcher)
 	notifManager.SetRBNStore(rbnStore)
+	// Wire DX cluster WebSocket handler so /cw can read the live CW spot buffer.
+	if dxClusterWsHandler != nil {
+		notifManager.SetDXClusterWSHandler(dxClusterWsHandler)
+	}
 	// Set callsigns used for rank lookups.
 	notifManager.SetReceiverCallsign(config.Decoder.ReceiverCallsign)
 	if cwskimmerConfig != nil {

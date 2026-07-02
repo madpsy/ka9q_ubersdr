@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -894,6 +895,37 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 	h.addCWSpotToBuffer(data)
 
 	h.broadcast(message)
+}
+
+// GetRecentCWSpots returns the last n CW spots from the buffer, optionally
+// filtered to a specific band (empty string = all bands). The returned slice
+// is ordered oldest-first (same as the buffer), so callers that want
+// newest-first should reverse it.
+func (h *DXClusterWebSocketHandler) GetRecentCWSpots(n int, band string) []map[string]interface{} {
+	h.cwSpotBufferMu.RLock()
+	src := make([]map[string]interface{}, len(h.cwSpotBuffer))
+	copy(src, h.cwSpotBuffer)
+	h.cwSpotBufferMu.RUnlock()
+
+	bandLower := strings.ToLower(band)
+
+	// Filter by band if requested.
+	if bandLower != "" {
+		filtered := src[:0]
+		for _, s := range src {
+			b, _ := s["band"].(string)
+			if strings.ToLower(b) == bandLower {
+				filtered = append(filtered, s)
+			}
+		}
+		src = filtered
+	}
+
+	// Return the last n entries.
+	if n > 0 && len(src) > n {
+		src = src[len(src)-n:]
+	}
+	return src
 }
 
 // addCWSpotToBuffer adds a CW spot to the buffer, maintaining max size

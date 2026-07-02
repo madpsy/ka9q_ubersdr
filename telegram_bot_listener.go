@@ -66,19 +66,20 @@ type TelegramBotListener struct {
 	channelName      string
 	cfg              NotificationChannelConfig
 	sessions         *SessionManager
-	rotctl           *RotctlAPIHandler    // nil if rotator not enabled
-	antSwitch        *AntSwitchHandler    // nil if antenna switch not enabled
-	noiseFloor       *NoiseFloorMonitor   // nil if noise floor monitoring not enabled
-	pskRank          *PSKRankFetcher      // nil if PSK reporter not enabled
-	wsprRank         *WSPRRankFetcher     // nil if WSPR rank not enabled
-	rbnStore         *RBNDataStore        // nil if CW skimmer / RBN not enabled
-	spaceWeather     *SpaceWeatherMonitor // nil if space weather monitoring not enabled
-	chatManager      *ChatManager         // nil if chat not enabled
-	gpsdoMonitor     *GPSDOMonitor        // nil if GPSDO not enabled
-	adminHandler     *AdminHandler        // nil until wired; used by /monitor
-	config           *Config              // nil until wired; used by /info
-	instanceReporter *InstanceReporter    // nil until wired; used by /info (public URL)
-	ipBanManager     *IPBanManager        // nil until wired; used by /banned
+	rotctl           *RotctlAPIHandler          // nil if rotator not enabled
+	antSwitch        *AntSwitchHandler          // nil if antenna switch not enabled
+	noiseFloor       *NoiseFloorMonitor         // nil if noise floor monitoring not enabled
+	pskRank          *PSKRankFetcher            // nil if PSK reporter not enabled
+	wsprRank         *WSPRRankFetcher           // nil if WSPR rank not enabled
+	rbnStore         *RBNDataStore              // nil if CW skimmer / RBN not enabled
+	dxClusterWS      *DXClusterWebSocketHandler // nil if DX cluster not enabled; used by /cw
+	spaceWeather     *SpaceWeatherMonitor       // nil if space weather monitoring not enabled
+	chatManager      *ChatManager               // nil if chat not enabled
+	gpsdoMonitor     *GPSDOMonitor              // nil if GPSDO not enabled
+	adminHandler     *AdminHandler              // nil until wired; used by /monitor
+	config           *Config                    // nil until wired; used by /info
+	instanceReporter *InstanceReporter          // nil until wired; used by /info (public URL)
+	ipBanManager     *IPBanManager              // nil until wired; used by /banned
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -761,21 +762,22 @@ type TelegramListenerRegistry struct {
 	mu                sync.RWMutex
 	listeners         map[string]*TelegramBotListener
 	sessions          *SessionManager
-	rotctl            *RotctlAPIHandler    // nil if rotator not enabled
-	antSwitch         *AntSwitchHandler    // nil if antenna switch not enabled
-	noiseFloor        *NoiseFloorMonitor   // nil if noise floor monitoring not enabled
-	pskRank           *PSKRankFetcher      // nil if PSK reporter not enabled
-	wsprRank          *WSPRRankFetcher     // nil if WSPR rank not enabled
-	rbnStore          *RBNDataStore        // nil if CW skimmer / RBN not enabled
-	spaceWeather      *SpaceWeatherMonitor // nil if space weather monitoring not enabled
-	chatManager       *ChatManager         // nil if chat not enabled
-	gpsdoMonitor      *GPSDOMonitor        // nil if GPSDO not enabled
-	adminHandler      *AdminHandler        // nil until wired; used by /monitor
-	config            *Config              // nil until wired; used by /info
-	instanceReporter  *InstanceReporter    // nil until wired; used by /info (public URL)
-	ipBanManager      *IPBanManager        // nil until wired; used by /banned
-	receiverCallsign  string               // from config.Decoder.ReceiverCallsign
-	cwSkimmerCallsign string               // from cwskimmerConfig.Callsign
+	rotctl            *RotctlAPIHandler          // nil if rotator not enabled
+	antSwitch         *AntSwitchHandler          // nil if antenna switch not enabled
+	noiseFloor        *NoiseFloorMonitor         // nil if noise floor monitoring not enabled
+	pskRank           *PSKRankFetcher            // nil if PSK reporter not enabled
+	wsprRank          *WSPRRankFetcher           // nil if WSPR rank not enabled
+	rbnStore          *RBNDataStore              // nil if CW skimmer / RBN not enabled
+	dxClusterWS       *DXClusterWebSocketHandler // nil if DX cluster not enabled; used by /cw
+	spaceWeather      *SpaceWeatherMonitor       // nil if space weather monitoring not enabled
+	chatManager       *ChatManager               // nil if chat not enabled
+	gpsdoMonitor      *GPSDOMonitor              // nil if GPSDO not enabled
+	adminHandler      *AdminHandler              // nil until wired; used by /monitor
+	config            *Config                    // nil until wired; used by /info
+	instanceReporter  *InstanceReporter          // nil until wired; used by /info (public URL)
+	ipBanManager      *IPBanManager              // nil until wired; used by /banned
+	receiverCallsign  string                     // from config.Decoder.ReceiverCallsign
+	cwSkimmerCallsign string                     // from cwskimmerConfig.Callsign
 }
 
 // NewTelegramListenerRegistry creates an empty registry.
@@ -843,6 +845,17 @@ func (r *TelegramListenerRegistry) SetRBNStore(h *RBNDataStore) {
 	r.rbnStore = h
 	for _, l := range r.listeners {
 		l.rbnStore = h
+	}
+}
+
+// SetDXClusterWSHandler wires the DX cluster WebSocket handler into all current
+// and future listeners. Used by /cw to read the live CW spot buffer.
+func (r *TelegramListenerRegistry) SetDXClusterWSHandler(h *DXClusterWebSocketHandler) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.dxClusterWS = h
+	for _, l := range r.listeners {
+		l.dxClusterWS = h
 	}
 }
 
@@ -984,6 +997,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.pskRank = r.pskRank
 		l.wsprRank = r.wsprRank
 		l.rbnStore = r.rbnStore
+		l.dxClusterWS = r.dxClusterWS
 		l.spaceWeather = r.spaceWeather
 		l.chatManager = r.chatManager
 		l.gpsdoMonitor = r.gpsdoMonitor

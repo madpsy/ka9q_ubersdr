@@ -1523,8 +1523,68 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 		return msg, apiResp, apiOK
 	}
 
-	// ── ban subcommand: /chat ban <username> [reason] ─────────────────────────
 	argNorm := strings.TrimSpace(args)
+
+	// ── on/off subcommands: /chat on | /chat off ──────────────────────────────
+	// Requires write access. Toggles per-user Telegram→chat relay for the sender.
+	if argNorm == "on" || argNorm == "off" {
+		if !l.commandWriteEnabled("chat") {
+			msg := "⚠️ Write access is not enabled for /chat. Enable it in the bot listener config to use chat relay."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		if l.currentFrom == nil {
+			msg := "⚠️ Cannot determine sender — relay not changed."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		if l.chatManager == nil {
+			msg := "💬 Chat is not enabled on this receiver."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		userID := l.currentFrom.ID
+		displayName := l.currentFrom.Username
+		if displayName == "" {
+			displayName = l.currentFrom.FirstName
+		}
+		sessionID := fmt.Sprintf("telegram:%s:%d", l.channelName, userID)
+
+		if argNorm == "on" {
+			l.chatRelayUsersMu.Lock()
+			l.chatRelayUsers[userID] = displayName
+			l.chatRelayUsersMu.Unlock()
+
+			// Add relay user to the active users list so they appear in the web UI.
+			l.chatManager.InjectJoin(displayName, sessionID)
+
+			handle := displayName
+			if l.currentFrom.Username != "" {
+				handle = "@" + l.currentFrom.Username
+			}
+			msg := fmt.Sprintf(
+				"✅ <b>Chat relay ON</b>\n\nYour messages will appear in the SDR chat as <b>%s</b>.\n\nAny message you send here that doesn't start with <code>/</code> will be posted to the chat.\nUse <code>/chat off</code> to stop.",
+				html.EscapeString(handle),
+			)
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		// argNorm == "off"
+		l.chatRelayUsersMu.Lock()
+		delete(l.chatRelayUsers, userID)
+		l.chatRelayUsersMu.Unlock()
+
+		// Remove relay user from the active users list and broadcast leave.
+		l.chatManager.InjectLeave(displayName, sessionID)
+
+		msg := "🔴 <b>Chat relay OFF</b> — your messages will no longer be sent to the SDR chat."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// ── ban subcommand: /chat ban <username> [reason] ─────────────────────────
 	if strings.HasPrefix(argNorm, "ban ") || argNorm == "ban" {
 		if !l.commandWriteEnabled("chat") {
 			msg := "⚠️ Write access is not enabled for /chat. Enable it in the bot listener config."

@@ -101,6 +101,18 @@ type TelegramBotListener struct {
 	// confirmation goroutine runs at a time per listener.
 	rotatorMoveMu      sync.Mutex
 	rotatorMovePending bool
+
+	// chatRelayUsers tracks which Telegram user IDs have chat relay active.
+	// When a user has relay on, non-command messages they send are injected
+	// into the SDR chat as their Telegram display name.
+	// Requires commandWriteEnabled("chat") to activate.
+	chatRelayUsers   map[int64]string // userID → display name
+	chatRelayUsersMu sync.Mutex
+
+	// currentFrom holds the tgUser for the message currently being dispatched.
+	// Set before calling a command handler, cleared after. Allows handlers to
+	// access the sender without changing the handler function signature.
+	currentFrom *tgUser
 }
 
 // listenerStatus is the runtime state reported to the admin UI.
@@ -133,12 +145,13 @@ const maxCommandHistory = 20
 // NewTelegramBotListener creates a listener but does not start it.
 func NewTelegramBotListener(name string, cfg NotificationChannelConfig, sessions *SessionManager) *TelegramBotListener {
 	return &TelegramBotListener{
-		channelName: name,
-		cfg:         cfg,
-		sessions:    sessions,
-		done:        make(chan struct{}),
-		client:      &http.Client{Timeout: 40 * time.Second}, // must exceed long-poll timeout
-		apiBase:     fmt.Sprintf("https://api.telegram.org/bot%s", cfg.BotToken),
+		channelName:    name,
+		cfg:            cfg,
+		sessions:       sessions,
+		done:           make(chan struct{}),
+		client:         &http.Client{Timeout: 40 * time.Second}, // must exceed long-poll timeout
+		apiBase:        fmt.Sprintf("https://api.telegram.org/bot%s", cfg.BotToken),
+		chatRelayUsers: make(map[int64]string),
 	}
 }
 
@@ -160,6 +173,30 @@ func (l *TelegramBotListener) Start() {
 			l.mu.Unlock()
 		}()
 		l.pollLoop(ctx)
+	}()
+
+	// Keepalive ticker: refreshes LastSeen for all active relay users every
+	// 10 minutes so the chat cleanup goroutine does not evict them while relay
+	// is on. Stops when the listener context is cancelled.
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if l.chatManager == nil {
+					continue
+				}
+				l.chatRelayUsersMu.Lock()
+				for userID := range l.chatRelayUsers {
+					sessionID := fmt.Sprintf("telegram:%s:%d", l.channelName, userID)
+					l.chatManager.InjectKeepAlive(sessionID)
+				}
+				l.chatRelayUsersMu.Unlock()
+			}
+		}
 	}()
 
 	// Auto-register enabled commands with Telegram so they appear in the /
@@ -406,6 +443,18 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	//      "/sessions@MyBot" → cmd="sessions", args=""
 	text := strings.TrimSpace(msg.Text)
 	if !strings.HasPrefix(text, "/") {
+		// Non-command message: inject into SDR chat if this user has relay active
+		// and write access is still enabled for the chat command.
+		if msg.From != nil && l.chatManager != nil && l.commandWriteEnabled("chat") {
+			l.chatRelayUsersMu.Lock()
+			displayName, active := l.chatRelayUsers[msg.From.ID]
+			l.chatRelayUsersMu.Unlock()
+			if active {
+				source := "telegram:" + l.channelName
+				sessionID := fmt.Sprintf("telegram:%s:%d", l.channelName, msg.From.ID)
+				l.chatManager.InjectMessage(displayName, text, source, sessionID)
+			}
+		}
 		return
 	}
 	parts := strings.Fields(text)
@@ -462,6 +511,11 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 		l.recordCommand(baseEntry)
 		return
 	}
+
+	// Set currentFrom so command handlers can access the sender without a
+	// signature change. Cleared immediately after dispatch.
+	l.currentFrom = msg.From
+	defer func() { l.currentFrom = nil }()
 
 	// Dispatch to the registered handler (defined in telegram_bot_commands.go).
 	// Pass args and whether write access is permitted for this command.

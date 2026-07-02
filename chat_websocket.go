@@ -933,6 +933,143 @@ func (cm *ChatManager) SendBufferedMessages(conn *websocket.Conn) {
 	}
 }
 
+// InjectJoin adds a relay user to the active users list and broadcasts a join
+// notification to all connected WebSocket clients. sessionID must be unique and
+// stable for the relay user (e.g. "telegram:my-channel:12345678").
+// Safe to call multiple times — a second call for the same sessionID is a no-op.
+func (cm *ChatManager) InjectJoin(username, sessionID string) {
+	now := time.Now().UTC()
+
+	cm.activeUsersMu.Lock()
+	if _, exists := cm.activeUsers[sessionID]; exists {
+		cm.activeUsersMu.Unlock()
+		return // already present — no-op
+	}
+	cm.activeUsers[sessionID] = &ChatUser{
+		Username:         username,
+		LastSeen:         now,
+		LastActivityTime: now,
+		IsIdle:           false,
+	}
+	cm.activeUsersMu.Unlock()
+
+	cm.sessionUsernamesMu.Lock()
+	cm.sessionUsernames[sessionID] = username
+	cm.sessionUsernamesMu.Unlock()
+
+	log.Printf("Chat: Relay user '%s' joined (session %s)", username, sessionID)
+
+	// Broadcast join to all connected WebSocket clients.
+	cm.broadcastUserJoined(username, "", "")
+
+	// Fire notification event (Source is empty — join/left events always deliver).
+	cm.fireChatEvent(ChatEvent{
+		Action:   ChatActionJoined,
+		Username: username,
+		Time:     now,
+	})
+}
+
+// InjectLeave removes a relay user from the active users list and broadcasts a
+// leave notification. Safe to call when the user is not present — it is a no-op.
+func (cm *ChatManager) InjectLeave(username, sessionID string) {
+	cm.activeUsersMu.Lock()
+	_, exists := cm.activeUsers[sessionID]
+	if exists {
+		delete(cm.activeUsers, sessionID)
+	}
+	cm.activeUsersMu.Unlock()
+
+	if !exists {
+		return // not present — no-op
+	}
+
+	cm.sessionUsernamesMu.Lock()
+	delete(cm.sessionUsernames, sessionID)
+	cm.sessionUsernamesMu.Unlock()
+
+	log.Printf("Chat: Relay user '%s' left (session %s)", username, sessionID)
+
+	// Broadcast leave to all connected WebSocket clients.
+	cm.broadcastUserLeft(username)
+
+	// Fire notification event (Source is empty — join/left events always deliver).
+	cm.fireChatEvent(ChatEvent{
+		Action:   ChatActionLeft,
+		Username: username,
+		Time:     time.Now().UTC(),
+	})
+}
+
+// InjectKeepAlive refreshes the LastSeen timestamp for a relay session so the
+// cleanup goroutine does not evict the user while relay is active.
+// Safe to call when the session is not present — it is a no-op.
+func (cm *ChatManager) InjectKeepAlive(sessionID string) {
+	cm.activeUsersMu.Lock()
+	if user, exists := cm.activeUsers[sessionID]; exists {
+		user.LastSeen = time.Now()
+	}
+	cm.activeUsersMu.Unlock()
+}
+
+// InjectMessage injects a message from an external source (e.g. Telegram relay)
+// directly into the chat system, bypassing WebSocket session checks and rate limits.
+// The message is buffered, broadcast to all connected clients, logged, and fires
+// a ChatEvent notification. source identifies the origin (e.g. "telegram:my-channel")
+// and is used by the notification manager to suppress echo back to that channel.
+// sessionID is the stable relay session ID used to refresh the user's presence.
+func (cm *ChatManager) InjectMessage(username, text, source, sessionID string) {
+	now := time.Now().UTC()
+	chatMsg := ChatMessage{
+		Username:  username,
+		Message:   text,
+		Timestamp: now,
+		SessionID: sessionID,
+	}
+
+	// Refresh presence so the user is not evicted or marked idle while chatting.
+	cm.activeUsersMu.Lock()
+	if user, exists := cm.activeUsers[sessionID]; exists {
+		user.LastSeen = now
+		user.LastActivityTime = now
+		user.IsIdle = false
+	}
+	cm.activeUsersMu.Unlock()
+
+	// Add to replay buffer so new clients see the message on connect.
+	cm.addMessageToBuffer(chatMsg)
+
+	// Broadcast to all connected WebSocket clients.
+	cm.broadcastChatMessage(chatMsg)
+
+	// Log to persistent storage (non-blocking). IP is set to source for traceability.
+	if cm.chatLogger != nil {
+		go func() {
+			if err := cm.chatLogger.LogMessage(now, source, username, text, "", ""); err != nil {
+				log.Printf("Chat: Failed to log injected message from %s: %v", source, err)
+			}
+		}()
+	}
+
+	// Publish to MQTT (non-blocking).
+	if cm.mqttPublisher != nil {
+		go func() {
+			cm.mqttPublisher.PublishChatMessage(now, source, username, text)
+		}()
+	}
+
+	// Fire notification event. The Source field allows the notification manager
+	// to suppress echo back to the originating Telegram channel while still
+	// delivering to other channels. Joined/left events are unaffected.
+	cm.fireChatEvent(ChatEvent{
+		Action:   ChatActionMessage,
+		Username: username,
+		Message:  text,
+		Time:     now,
+		Source:   source,
+	})
+}
+
 // broadcastChatMessage broadcasts a chat message to all connected clients
 func (cm *ChatManager) broadcastChatMessage(msg ChatMessage) {
 	data := map[string]interface{}{

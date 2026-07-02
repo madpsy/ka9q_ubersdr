@@ -675,6 +675,19 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				continue
 			}
 
+			// Echo suppression: if this is a chat message injected from a Telegram
+			// relay, skip sending it back to the channel it came from. This prevents
+			// the relay user from seeing their own messages twice.
+			// Joined/left events (Source always empty) are never suppressed.
+			if chatEvt, ok := evt.(ChatEvent); ok {
+				if chatEvt.Action == ChatActionMessage && chatEvt.Source == "telegram:"+chName {
+					if DebugMode {
+						log.Printf("[Notifications] Rule %q → channel %q: suppressing relay echo (source: %s)", key, chName, chatEvt.Source)
+					}
+					continue
+				}
+			}
+
 			// Render this channel's body (override → rule default → built-in).
 			msg, err := m.renderForChannel(key, chName, evt, tmpls)
 			if err != nil {
@@ -1373,10 +1386,7 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 
 	case ServerStartupEvent:
 		if e.Component == "shutdown" {
-			if e.Reason == "restart" {
-				return fmt.Sprintf("🔄 UberSDR %s shutting down / restarting (%s)", e.Version, e.Callsign)
-			}
-			return fmt.Sprintf("🔴 UberSDR %s shutting down (%s)", e.Version, e.Callsign)
+			return fmt.Sprintf("🔄 UberSDR %s shutting down / restarting (%s)", e.Version, e.Callsign)
 		}
 		return fmt.Sprintf("🚀 UberSDR %s started (%s)", e.Version, e.Callsign)
 

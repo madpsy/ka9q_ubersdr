@@ -301,6 +301,12 @@ type ChatEvent struct {
 	// Message is set only for message events.
 	Message string    `json:"message,omitempty"`
 	Time    time.Time `json:"time"`
+	// Source identifies the origin of injected messages (e.g. "telegram:my-channel").
+	// Empty for messages originating from web chat clients.
+	// Used to suppress echo when a Telegram channel has a chat notification rule
+	// and the relay feature is active — only ChatActionMessage events with a
+	// matching source are suppressed; joined/left events always deliver.
+	Source string `json:"source,omitempty"`
 }
 
 func (e ChatEvent) EventType() NotificationEventType { return EventTypeChat }

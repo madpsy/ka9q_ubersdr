@@ -1066,6 +1066,12 @@ func (l *TelegramBotListener) handleQRZ(chatID int64, args string) (string, stri
 	fmt.Fprintf(&sb, "\n<a href=\"https://www.qrz.com/db/%s\">View on QRZ.com</a>",
 		html.EscapeString(result.Call))
 
+	// Google Maps link when coordinates are available.
+	if result.Lat != 0 || result.Lon != 0 {
+		fmt.Fprintf(&sb, " · <a href=\"https://maps.google.com/?q=%.6f,%.6f\">Map</a>",
+			result.Lat, result.Lon)
+	}
+
 	msg := sb.String()
 
 	// If a profile photo is available, send it with the text as caption.

@@ -405,6 +405,20 @@ type NotificationFilter struct {
 	// nil (omitted) and true both mean "exclude bypassed users" (the default).
 	// Set to false to also receive notifications for bypassed users.
 	ExcludeBypassed *bool `yaml:"exclude_bypassed,omitempty" json:"exclude_bypassed,omitempty"`
+
+	// ── Digital Rank (digital_rank) ───────────────────────────────────────────
+	// RankComponents selects which ranking systems to watch.
+	// Valid values: "psk", "wspr", "rbn". Empty = all enabled components.
+	RankComponents []string `yaml:"rank_components,omitempty" json:"rank_components,omitempty"`
+	// RankImproved fires only when rank improves (number decreases, or first appearance).
+	// nil (omitted) = fire on any rank change.
+	RankImproved *bool `yaml:"rank_improved,omitempty" json:"rank_improved,omitempty"`
+	// RankWorsened fires only when rank worsens (number increases or drops off leaderboard).
+	// nil (omitted) = fire on any rank change.
+	RankWorsened *bool `yaml:"rank_worsened,omitempty" json:"rank_worsened,omitempty"`
+	// RankThreshold fires only when the new rank is at or better than this value
+	// (e.g. 10 = only fire when in the top 10). 0 or nil = no threshold.
+	RankThreshold *int `yaml:"rank_threshold,omitempty" json:"rank_threshold,omitempty"`
 }
 
 // LoadNotificationsConfig loads the notifications configuration from a YAML file.
@@ -522,6 +536,7 @@ func (cfg *NotificationsConfig) Validate() []string {
 		EventTypeUserSession:   true,
 		EventTypeServerStartup: true,
 		EventTypeVoiceActivity: true,
+		EventTypeDigitalRank:   true,
 	}
 
 	for i, rule := range cfg.Rules {

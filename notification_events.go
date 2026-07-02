@@ -16,6 +16,7 @@ const (
 	EventTypeUserSession   NotificationEventType = "user_session"
 	EventTypeServerStartup NotificationEventType = "server_startup"
 	EventTypeVoiceActivity NotificationEventType = "voice_activity"
+	EventTypeDigitalRank   NotificationEventType = "digital_rank"
 )
 
 // NotificationEvent is the interface implemented by every event type.
@@ -271,6 +272,10 @@ type UserSessionEvent struct {
 	// Bypassed is true when the user authenticated via a bypass password or
 	// their IP is in the timeout_bypass_ips list.
 	Bypassed bool `json:"bypassed"`
+	// Session counts at the moment the event fired.
+	RegularUsers  int `json:"regular_users"`  // non-bypassed unique users
+	MaxSessions   int `json:"max_sessions"`   // configured max_sessions limit
+	BypassedUsers int `json:"bypassed_users"` // bypassed unique users
 }
 
 func (e UserSessionEvent) EventType() NotificationEventType { return EventTypeUserSession }
@@ -311,3 +316,30 @@ type VoiceActivityEvent struct {
 }
 
 func (e VoiceActivityEvent) EventType() NotificationEventType { return EventTypeVoiceActivity }
+
+// ─── Digital Rank ─────────────────────────────────────────────────────────────
+
+// DigitalRankEvent is published when our station's rank changes in one of the
+// three external leaderboard systems (PSK Reporter, WSPR Live, or RBN).
+//
+// Component identifies the system: "psk", "wspr", or "rbn".
+// Dimension identifies the sub-table:
+//   - PSK:  "reports" (spot count) or "countries" (distinct countries)
+//   - WSPR: "rolling_24h", "yesterday", or "today"
+//   - RBN:  "spots" (cumulative spot count)
+//
+// OldRank == 0 means the station was not previously ranked (first appearance).
+// NewRank == 0 means the station dropped off the leaderboard.
+type DigitalRankEvent struct {
+	Component   string    `json:"component"`              // "psk", "wspr", "rbn"
+	Dimension   string    `json:"dimension"`              // see above
+	Callsign    string    `json:"callsign"`               // station callsign
+	OldRank     int       `json:"old_rank"`               // 0 = was not ranked
+	NewRank     int       `json:"new_rank"`               // 0 = dropped off leaderboard
+	OldValue    int       `json:"old_value"`              // count at old rank
+	NewValue    int       `json:"new_value"`              // count at new rank
+	TotalRanked int       `json:"total_ranked,omitempty"` // total entries (RBN only)
+	Time        time.Time `json:"time"`
+}
+
+func (e DigitalRankEvent) EventType() NotificationEventType { return EventTypeDigitalRank }

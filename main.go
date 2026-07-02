@@ -2255,7 +2255,10 @@ func main() {
 	if cwskimmerConfig != nil {
 		notifManager.SetCWSkimmerCallsign(cwskimmerConfig.Callsign)
 	}
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler, freqRefMonitor)
+	// Wire admin handler so the /monitor Telegram bot command can report
+	// the health of all enabled subsystems (mirrors the admin monitor tab).
+	notifManager.SetAdminHandler(adminHandler)
 
 	// Start system monitor health notifier — polls subsystems every 30s and fires
 	// SystemMonitorEvent notifications on healthy↔unhealthy transitions.
@@ -2283,6 +2286,19 @@ func main() {
 
 	// Start voice activity notifier — polls for new voice signals every 10s
 	StartVoiceActivityNotifier(mainCtx, notifManager, noiseFloorMonitor, 10*time.Second)
+
+	// Start digital rank notifier — polls PSK/WSPR/RBN rank caches every 5 minutes
+	// and fires DigitalRankEvent when our station's rank changes. Always started
+	// unconditionally so adding a digital_rank rule via the admin UI takes effect
+	// within one poll interval without a server restart.
+	{
+		cwCallsign := ""
+		if cwskimmerConfig != nil {
+			cwCallsign = cwskimmerConfig.Callsign
+		}
+		StartDigitalRankNotifier(mainCtx, notifManager, pskRankFetcher, wsprRankFetcher, rbnStore,
+			config.Decoder.ReceiverCallsign, cwCallsign, 5*time.Minute)
+	}
 
 	// Widget manager: in-memory cache + collector proxy.
 	// Must be created after adminHandler so configPath is resolved.

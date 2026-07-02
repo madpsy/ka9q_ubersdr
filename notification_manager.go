@@ -260,6 +260,17 @@ func (m *NotificationManager) SetChatManager(h *ChatManager) {
 	}
 }
 
+// SetAdminHandler wires the admin handler into the listener registry
+// so that the /monitor bot command can report subsystem health.
+func (m *NotificationManager) SetAdminHandler(h *AdminHandler) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetAdminHandler(h)
+	}
+}
+
 // SetGPSDOMonitor wires the GPSDO monitor into the listener registry
 // so that the /gpsdo bot command can report GPSDO status.
 func (m *NotificationManager) SetGPSDOMonitor(h *GPSDOMonitor) {
@@ -690,6 +701,8 @@ func (m *NotificationManager) rateSubject(evt NotificationEvent) string {
 		return string(e.Action) + ":" + e.ClientIP
 	case VoiceActivityEvent:
 		return fmt.Sprintf("voice:%s:%d", e.Band, e.EstimatedDialFreq/500*500)
+	case DigitalRankEvent:
+		return fmt.Sprintf("rank:%s:%s", e.Component, e.Dimension)
 	case ServerStartupEvent:
 		return "startup"
 	default:
@@ -780,6 +793,8 @@ func (m *NotificationManager) matchFilter(evt NotificationEvent, f NotificationF
 		return m.matchUserSession(e, f)
 	case VoiceActivityEvent:
 		return m.matchVoiceActivity(e, f)
+	case DigitalRankEvent:
+		return m.matchDigitalRank(e, f)
 	case ServerStartupEvent:
 		return true // no filter fields for startup
 	}
@@ -1019,6 +1034,35 @@ func (m *NotificationManager) matchVoiceActivity(e VoiceActivityEvent, f Notific
 	return true
 }
 
+func (m *NotificationManager) matchDigitalRank(e DigitalRankEvent, f NotificationFilter) bool {
+	// Component filter: "psk", "wspr", "rbn". Empty = match all.
+	if !matchStringSlice(e.Component, f.RankComponents) {
+		return false
+	}
+	// Direction filters — only one should be set; if both are set, both must match.
+	if f.RankImproved != nil && *f.RankImproved {
+		// Improved = rank number decreased, or first appearance (OldRank was 0).
+		improved := (e.OldRank == 0 && e.NewRank > 0) || (e.OldRank > 0 && e.NewRank > 0 && e.NewRank < e.OldRank)
+		if !improved {
+			return false
+		}
+	}
+	if f.RankWorsened != nil && *f.RankWorsened {
+		// Worsened = rank number increased, or dropped off leaderboard (NewRank == 0).
+		worsened := e.NewRank == 0 || (e.OldRank > 0 && e.NewRank > e.OldRank)
+		if !worsened {
+			return false
+		}
+	}
+	// Threshold filter: only fire when new rank is at or better than N.
+	if f.RankThreshold != nil && *f.RankThreshold > 0 {
+		if e.NewRank == 0 || e.NewRank > *f.RankThreshold {
+			return false
+		}
+	}
+	return true
+}
+
 // ─── Filter helpers ───────────────────────────────────────────────────────────
 
 // matchStringSlice returns true if value is in the slice, or the slice is empty.
@@ -1177,7 +1221,12 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 		return fmt.Sprintf("❌ %s unhealthy: %s", e.Component, issues)
 
 	case UserSessionEvent:
-		return fmt.Sprintf("👤 User %s: %s (%s)", e.Action, e.ClientIP, e.Country)
+		base := fmt.Sprintf("👤 User %s: %s (%s)", e.Action, e.ClientIP, e.Country)
+		counts := fmt.Sprintf("\n• Regular users: %d of %d", e.RegularUsers, e.MaxSessions)
+		if e.BypassedUsers > 0 {
+			counts += fmt.Sprintf("\n• Bypassed users: %d", e.BypassedUsers)
+		}
+		return base + counts
 
 	case VoiceActivityEvent:
 		dx := ""
@@ -1186,6 +1235,54 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 		}
 		return fmt.Sprintf("🎙️ Voice on %s @ %.3f MHz%s (SNR %.0f dB, conf %.0f%%)",
 			e.Band, float64(e.EstimatedDialFreq)/1e6, dx, float64(e.SNR), float64(e.Confidence)*100)
+
+	case DigitalRankEvent:
+		oldStr := "unranked"
+		if e.OldRank > 0 {
+			oldStr = fmt.Sprintf("#%d", e.OldRank)
+		}
+		newStr := "unranked"
+		if e.NewRank > 0 {
+			newStr = fmt.Sprintf("#%d", e.NewRank)
+		}
+		switch e.Component {
+		case "psk":
+			dimLabel := "reports"
+			unit := "spots"
+			if e.Dimension == "countries" {
+				dimLabel = "countries"
+				unit = "countries"
+			}
+			if e.NewRank > 0 {
+				return fmt.Sprintf("📊 PSK %s rank: %s %s → %s (%d %s/24h)",
+					dimLabel, e.Callsign, oldStr, newStr, e.NewValue, unit)
+			}
+			return fmt.Sprintf("📊 PSK %s rank: %s %s → %s",
+				dimLabel, e.Callsign, oldStr, newStr)
+		case "wspr":
+			if e.NewRank > 0 {
+				return fmt.Sprintf("📻 WSPR %s rank: %s %s → %s (%d unique spots)",
+					e.Dimension, e.Callsign, oldStr, newStr, e.NewValue)
+			}
+			return fmt.Sprintf("📻 WSPR %s rank: %s %s → %s",
+				e.Dimension, e.Callsign, oldStr, newStr)
+		case "rbn":
+			if e.NewRank > 0 && e.TotalRanked > 0 {
+				return fmt.Sprintf("📡 RBN rank: %s %s → %s (%d spots, %d skimmers)",
+					e.Callsign, oldStr, newStr, e.NewValue, e.TotalRanked)
+			} else if e.NewRank > 0 {
+				return fmt.Sprintf("📡 RBN rank: %s %s → %s (%d spots)",
+					e.Callsign, oldStr, newStr, e.NewValue)
+			}
+			if e.TotalRanked > 0 {
+				return fmt.Sprintf("📡 RBN rank: %s %s → %s (%d skimmers)",
+					e.Callsign, oldStr, newStr, e.TotalRanked)
+			}
+			return fmt.Sprintf("📡 RBN rank: %s %s → %s", e.Callsign, oldStr, newStr)
+		default:
+			return fmt.Sprintf("📊 %s %s rank: %s %s → %s",
+				e.Component, e.Dimension, e.Callsign, oldStr, newStr)
+		}
 
 	case ServerStartupEvent:
 		return fmt.Sprintf("🚀 UberSDR %s started (%s)", e.Version, e.Callsign)

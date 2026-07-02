@@ -386,15 +386,16 @@ type AdminHandler struct {
 	loginHistory        *AdminLoginHistory
 	frontendHistory     *FrontendHistoryTracker
 	loadHistory         *LoadHistoryTracker
-	addonsConfig        *AddonProxiesConfig // addon proxy config (from addons.yaml)
-	addonsConfigPath    string              // path to addons.yaml for read/write
-	addonsMu            sync.RWMutex        // protects addonsConfig during live edits
-	addonRouter         *AddonProxyRouter   // live dynamic router for /addon/ routes
-	rbnStore            *RBNDataStore       // RBN skew and statistics data store
-	rbnFetcher          *RBNDataFetcher     // RBN fetcher (for manual refresh)
-	wsprRank            *WSPRRankFetcher    // WSPR Live receiver ranking fetcher
-	pskRank             *PSKRankFetcher     // PSKReporter top-monitor ranking fetcher
-	gpsdoProxy          *GPSDOProxy         // GPSDO reverse proxy (live-reloadable)
+	addonsConfig        *AddonProxiesConfig        // addon proxy config (from addons.yaml)
+	addonsConfigPath    string                     // path to addons.yaml for read/write
+	addonsMu            sync.RWMutex               // protects addonsConfig during live edits
+	addonRouter         *AddonProxyRouter          // live dynamic router for /addon/ routes
+	rbnStore            *RBNDataStore              // RBN skew and statistics data store
+	rbnFetcher          *RBNDataFetcher            // RBN fetcher (for manual refresh)
+	wsprRank            *WSPRRankFetcher           // WSPR Live receiver ranking fetcher
+	pskRank             *PSKRankFetcher            // PSKReporter top-monitor ranking fetcher
+	gpsdoProxy          *GPSDOProxy                // GPSDO reverse proxy (live-reloadable)
+	freqRefMonitor      *FrequencyReferenceMonitor // nil if frequency reference not enabled
 }
 
 // GetEnabledPublicAddonNames returns the names of currently enabled, non-admin-only
@@ -474,7 +475,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy, antSwitchHandler *AntSwitchHandler, antSwitchScheduler *AntSwitchScheduler) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, asnBanManager *ASNBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string, addonRouter *AddonProxyRouter, rbnStore *RBNDataStore, rbnFetcher *RBNDataFetcher, wsprRank *WSPRRankFetcher, pskRank *PSKRankFetcher, gpsdoProxy *GPSDOProxy, antSwitchHandler *AntSwitchHandler, antSwitchScheduler *AntSwitchScheduler, freqRefMonitor *FrequencyReferenceMonitor) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -513,6 +514,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		gpsdoProxy:          gpsdoProxy,
 		antSwitchHandler:    antSwitchHandler,
 		antSwitchScheduler:  antSwitchScheduler,
+		freqRefMonitor:      freqRefMonitor,
 	}
 }
 
@@ -6208,6 +6210,53 @@ func (ah *AdminHandler) HandleMQTTHealth(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// buildRotctlHealthPayload returns the rotctl health map used by both
+// HandleRotctlHealth and the /monitor Telegram bot command.
+func buildRotctlHealthPayload(cfg *Config, h *RotctlAPIHandler, sched *RotatorScheduler) map[string]interface{} {
+	status := map[string]interface{}{
+		"enabled": cfg.Rotctl.Enabled,
+		"healthy": false,
+		"issues":  []string{},
+	}
+	if !cfg.Rotctl.Enabled {
+		status["issues"] = []string{"Rotator control is not enabled"}
+		return status
+	}
+	if h == nil {
+		status["issues"] = []string{"Rotator control handler not initialized"}
+		return status
+	}
+	connected := h.controller.client.IsConnected()
+	status["connected"] = connected
+	state := h.controller.GetState()
+	status["azimuth"] = int(state.Position.Azimuth + 0.5)
+	status["elevation"] = int(state.Position.Elevation + 0.5)
+	status["host"] = cfg.Rotctl.Host
+	status["port"] = cfg.Rotctl.Port
+	status["update_interval"] = cfg.Rotctl.UpdateInterval
+	h.mu.RLock()
+	connectedSince := h.connectedSince
+	h.mu.RUnlock()
+	if connected && !connectedSince.IsZero() {
+		duration := time.Since(connectedSince)
+		status["connected_duration_seconds"] = int(duration.Seconds())
+		status["connected_since"] = connectedSince.Format(time.RFC3339)
+		status["connected_duration"] = formatDuration(duration)
+	}
+	if state.LastError != nil {
+		status["last_error"] = state.LastError.Error()
+	}
+	if sched != nil {
+		status["scheduler"] = sched.GetStatus()
+	}
+	if !connected {
+		status["issues"] = append(status["issues"].([]string), "Not connected to rotctld")
+	}
+	issues := status["issues"].([]string)
+	status["healthy"] = len(issues) == 0
+	return status
+}
+
 // HandleRotctlHealth serves the health status of the rotator control client
 // This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
 func (ah *AdminHandler) HandleRotctlHealth(w http.ResponseWriter, r *http.Request) {
@@ -8080,6 +8129,47 @@ func (ah *AdminHandler) HandleDXClusterTest(w http.ResponseWriter, r *http.Reque
 	_, _ = fmt.Fprintf(conn, "bye\r\n")
 
 	respond(true, fmt.Sprintf("Connected and logged in to %s", addr), transcript)
+}
+
+// buildAntSwitchHealthPayload returns the ant-switch health map used by both
+// HandleAntSwitchHealth and the /monitor Telegram bot command.
+func buildAntSwitchHealthPayload(cfg *Config, h *AntSwitchHandler) map[string]interface{} {
+	status := map[string]interface{}{
+		"enabled": cfg.AntSwitch.Enabled,
+		"healthy": false,
+		"issues":  []string{},
+	}
+	if !cfg.AntSwitch.Enabled {
+		status["issues"] = []string{"Antenna switch is not enabled"}
+		return status
+	}
+	if h == nil {
+		status["issues"] = []string{"Antenna switch handler not initialized"}
+		return status
+	}
+	state := h.getState()
+	status["device_url"] = cfg.AntSwitch.DeviceURL
+	status["backend_type"] = cfg.AntSwitch.BackendType
+	status["timeout_ms"] = cfg.AntSwitch.TimeoutMs
+	status["num_antennas"] = cfg.AntSwitch.NumAntennas
+	status["allow_mixing"] = cfg.AntSwitch.AllowMixing
+	status["thunderstorm"] = cfg.AntSwitch.Thunderstorm
+	status["default_antenna"] = cfg.AntSwitch.DefaultAntenna
+	status["selected"] = state.Selected
+	status["grounded"] = state.Grounded
+	status["last_update"] = state.LastUpdate
+	status["antenna_labels"] = h.buildLabels()
+	status["history"] = h.changeLog.Snapshot()
+	if state.Selected == nil {
+		status["selected"] = []int{}
+	}
+	if state.LastError != "" {
+		status["last_error"] = state.LastError
+		status["issues"] = append(status["issues"].([]string), state.LastError)
+	}
+	issues := status["issues"].([]string)
+	status["healthy"] = len(issues) == 0
+	return status
 }
 
 // HandleAntSwitchHealth handles GET /admin/ant-switch-health

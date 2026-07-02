@@ -795,6 +795,27 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			Type:        "digital_rank",
+			Description: "Our station's rank changed in PSK Reporter, WSPR Live, or RBN. Fires when the overall rank number changes between hourly (PSK/WSPR) or daily (RBN) fetches.",
+			FilterFields: []filterField{
+				{Name: "rank_components", Type: "[]string", Description: "Ranking systems to watch. Empty = all enabled components.", ValidValues: []string{"psk", "wspr", "rbn"}, Example: `["psk","wspr"]`},
+				{Name: "rank_improved", Type: "bool", Description: "Fire only when rank improves (number decreases, or first appearance on leaderboard).", Example: "true"},
+				{Name: "rank_worsened", Type: "bool", Description: "Fire only when rank worsens (number increases or drops off leaderboard).", Example: "true"},
+				{Name: "rank_threshold", Type: "int", Description: "Fire only when new rank is at or better than this value (e.g. 10 = top 10 only). 0 = no threshold.", Example: "10"},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Component", GoType: "string", Description: `Ranking system: "psk", "wspr", or "rbn".`},
+				{Name: ".Dimension", GoType: "string", Description: `Sub-table: "reports" or "countries" (PSK); "rolling_24h", "yesterday", or "today" (WSPR); "spots" (RBN).`},
+				{Name: ".Callsign", GoType: "string", Description: "Station callsign."},
+				{Name: ".OldRank", GoType: "int", Description: "Previous rank (0 = was not ranked / first observation)."},
+				{Name: ".NewRank", GoType: "int", Description: "New rank (0 = dropped off leaderboard)."},
+				{Name: ".OldValue", GoType: "int", Description: "Previous count (spots/countries/unique spots)."},
+				{Name: ".NewValue", GoType: "int", Description: "New count."},
+				{Name: ".TotalRanked", GoType: "int", Description: "Total entries in leaderboard (RBN only; 0 for PSK/WSPR)."},
+				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
+			},
+		},
+		{
 			Type:        "voice_activity",
 			Description: "New voice signal detected on a band (requires noise floor monitor). Optionally enriched with DX cluster callsign data.",
 			FilterFields: []filterField{

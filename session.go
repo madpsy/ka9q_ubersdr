@@ -625,6 +625,8 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	if clientIP != "" && (isNewUUID || !hadAudioBefore) {
 		country := session.Country
 		countryCode := session.CountryCode
+		regularUsers := sm.getNonBypassedUserCountLocked()
+		bypassedUsers := sm.getBypassedUserCountLocked()
 		sm.fireSessionEvent(UserSessionEvent{
 			Action:        UserSessionConnected,
 			ClientIP:      clientIP,
@@ -636,6 +638,9 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 			Mode:          mode,
 			Time:          session.CreatedAt,
 			Bypassed:      sm.config.Server.IsIPTimeoutBypassed(clientIP, password),
+			RegularUsers:  regularUsers,
+			MaxSessions:   sm.config.Server.MaxSessions,
+			BypassedUsers: bypassedUsers,
 		})
 	}
 
@@ -1698,6 +1703,9 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			Mode:          session.Mode,
 			Time:          time.Now(),
 			Bypassed:      sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword),
+			RegularUsers:  sm.GetNonBypassedUserCount(),
+			MaxSessions:   sm.config.Server.MaxSessions,
+			BypassedUsers: sm.GetBypassedUserCount(),
 		})
 	}
 
@@ -2258,20 +2266,42 @@ func (sm *SessionManager) GetDSPStats() DSPStats {
 func (sm *SessionManager) GetNonBypassedUserCount() int {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+	return sm.getNonBypassedUserCountLocked()
+}
 
-	// Track which UUIDs have at least one non-bypassed session
+// getNonBypassedUserCountLocked returns the non-bypassed unique user count.
+// MUST be called with sm.mu held (read or write).
+func (sm *SessionManager) getNonBypassedUserCountLocked() int {
 	nonBypassedUUIDs := make(map[string]bool)
-
 	for _, session := range sm.sessions {
 		if session.UserSessionID != "" {
-			// Check if this session's IP or bypass password grants bypass status
 			if !sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
 				nonBypassedUUIDs[session.UserSessionID] = true
 			}
 		}
 	}
-
 	return len(nonBypassedUUIDs)
+}
+
+// getBypassedUserCountLocked returns the bypassed unique user count.
+// MUST be called with sm.mu held (read or write).
+func (sm *SessionManager) getBypassedUserCountLocked() int {
+	bypassedUUIDs := make(map[string]bool)
+	for _, session := range sm.sessions {
+		if session.UserSessionID != "" {
+			if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+				bypassedUUIDs[session.UserSessionID] = true
+			}
+		}
+	}
+	return len(bypassedUUIDs)
+}
+
+// GetBypassedUserCount returns the current number of unique bypassed users.
+func (sm *SessionManager) GetBypassedUserCount() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.getBypassedUserCountLocked()
 }
 
 // UnifiedUserInfo is a protocol-agnostic view of a connected listener,

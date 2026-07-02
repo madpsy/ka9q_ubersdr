@@ -75,6 +75,7 @@ type TelegramBotListener struct {
 	spaceWeather *SpaceWeatherMonitor // nil if space weather monitoring not enabled
 	chatManager  *ChatManager         // nil if chat not enabled
 	gpsdoMonitor *GPSDOMonitor        // nil if GPSDO not enabled
+	adminHandler *AdminHandler        // nil until wired; used by /monitor
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -756,6 +757,7 @@ type TelegramListenerRegistry struct {
 	spaceWeather      *SpaceWeatherMonitor // nil if space weather monitoring not enabled
 	chatManager       *ChatManager         // nil if chat not enabled
 	gpsdoMonitor      *GPSDOMonitor        // nil if GPSDO not enabled
+	adminHandler      *AdminHandler        // nil until wired; used by /monitor
 	receiverCallsign  string               // from config.Decoder.ReceiverCallsign
 	cwSkimmerCallsign string               // from cwskimmerConfig.Callsign
 }
@@ -835,6 +837,17 @@ func (r *TelegramListenerRegistry) SetSpaceWeatherMonitor(h *SpaceWeatherMonitor
 	r.spaceWeather = h
 	for _, l := range r.listeners {
 		l.spaceWeather = h
+	}
+}
+
+// SetAdminHandler wires the admin handler into all current and future listeners.
+// The admin handler provides access to all subsystem health checks for /monitor.
+func (r *TelegramListenerRegistry) SetAdminHandler(h *AdminHandler) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.adminHandler = h
+	for _, l := range r.listeners {
+		l.adminHandler = h
 	}
 }
 
@@ -928,6 +941,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.spaceWeather = r.spaceWeather
 		l.chatManager = r.chatManager
 		l.gpsdoMonitor = r.gpsdoMonitor
+		l.adminHandler = r.adminHandler
 		l.receiverCallsign = r.receiverCallsign
 		l.cwSkimmerCallsign = r.cwSkimmerCallsign
 		l.Start()

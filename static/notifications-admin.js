@@ -90,6 +90,12 @@ const FILTER_FIELDS = {
         { name: 'voice_min_confidence', type: 'float',       label: 'Min Confidence',  hint: '0.0 to 1.0' },
     ],
     server_startup: [],
+    digital_rank: [
+        { name: 'rank_components', type: 'enum_list',   label: 'Components',    values: ['psk','wspr','rbn'], hint: 'Which ranking systems to watch. Empty = all enabled' },
+        { name: 'rank_improved',   type: 'bool',        label: 'Improved Only', hint: 'Fire only when rank number decreases (or first appearance on leaderboard)' },
+        { name: 'rank_worsened',   type: 'bool',        label: 'Worsened Only', hint: 'Fire only when rank number increases or drops off leaderboard' },
+        { name: 'rank_threshold',  type: 'int',         label: 'Top N Only',    hint: 'Fire only when new rank ≤ this value (e.g. 10 = top 10). 0 = no threshold' },
+    ],
 };
 
 const EVENT_TYPES = Object.keys(FILTER_FIELDS);
@@ -105,6 +111,7 @@ const EVENT_TYPE_LABELS = {
     user_session:   'User Session',
     voice_activity: 'Voice Activity',
     server_startup: 'Server Startup',
+    digital_rank:   'Digital Rank',
 };
 
 function eventLabel(et) {
@@ -269,6 +276,17 @@ const TEMPLATE_FIELDS = {
         { name: '.Callsign',  goType: 'string',   desc: 'Configured station callsign.' },
         { name: '.Name',      goType: 'string',   desc: 'Configured station name.' },
         { name: '.StartTime', goType: 'time.Time',desc: 'Server start timestamp.' },
+    ],
+    digital_rank: [
+        { name: '.Component',   goType: 'string',    desc: '"psk", "wspr", or "rbn".' },
+        { name: '.Dimension',   goType: 'string',    desc: '"reports" or "countries" (PSK); "rolling_24h", "yesterday", or "today" (WSPR); "spots" (RBN).' },
+        { name: '.Callsign',    goType: 'string',    desc: 'Station callsign.' },
+        { name: '.OldRank',     goType: 'int',       desc: 'Previous rank (0 = was not ranked / first appearance).' },
+        { name: '.NewRank',     goType: 'int',       desc: 'New rank (0 = dropped off leaderboard).' },
+        { name: '.OldValue',    goType: 'int',       desc: 'Previous count (spots/countries/unique spots).' },
+        { name: '.NewValue',    goType: 'int',       desc: 'New count.' },
+        { name: '.TotalRanked', goType: 'int',       desc: 'Total entries in leaderboard (RBN only; 0 for PSK/WSPR).' },
+        { name: '.Time',        goType: 'time.Time', desc: 'Event timestamp.' },
     ],
     voice_activity: [
         { name: '.Band',              goType: 'string',   desc: 'Band name.' },

@@ -879,15 +879,28 @@ function detectWebhookPreset(url) {
 function renderChannels() {
     const list = el('channelList');
     const channels = localConfig.channels;
-    const names = Object.keys(channels);
 
-    if (names.length === 0) {
+    // Apply filters
+    const chNameFilter  = (el('chFilterName')  ? el('chFilterName').value.trim().toLowerCase()  : '');
+    const chTypeFilter  = (el('chFilterType')  ? el('chFilterType').value                        : '');
+    const allNames = Object.keys(channels);
+    const names = allNames.filter(function(name) {
+        if (chNameFilter && name.toLowerCase().indexOf(chNameFilter) < 0) return false;
+        if (chTypeFilter && channels[name].type !== chTypeFilter) return false;
+        return true;
+    });
+
+    if (allNames.length === 0) {
         list.innerHTML =
             '<div class="empty-state">' +
                 '<div class="empty-state-icon">&#x1F4E1;</div>' +
                 '<p>No channels configured yet.</p>' +
                 '<p style="font-size:0.85rem;margin-top:4px">Click &ldquo;Add Channel&rdquo; to create one.</p>' +
             '</div>';
+        return;
+    }
+    if (names.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p style="color:#888">No channels match the current filter.</p></div>';
         return;
     }
 
@@ -2392,6 +2405,17 @@ async function discoverChats(editName) {
 
 function initChannels() {
     el('btnAddChannel').addEventListener('click', function() { showChannelForm(null); });
+    // Filter controls
+    var chNameEl  = el('chFilterName');
+    var chTypeEl  = el('chFilterType');
+    var chClearEl = el('chFilterClear');
+    if (chNameEl)  chNameEl.addEventListener('input',  function() { renderChannels(); });
+    if (chTypeEl)  chTypeEl.addEventListener('change', function() { renderChannels(); });
+    if (chClearEl) chClearEl.addEventListener('click', function() {
+        if (chNameEl) chNameEl.value = '';
+        if (chTypeEl) chTypeEl.value = '';
+        renderChannels();
+    });
 }
 
 // =============================================================================
@@ -2400,15 +2424,31 @@ function initChannels() {
 
 function renderRules() {
     const list = el('ruleList');
-    const rules = localConfig.rules;
+    const allRules = localConfig.rules;
 
-    if (rules.length === 0) {
+    // Apply filters
+    const ruleNameFilter   = (el('ruleFilterName')   ? el('ruleFilterName').value.trim().toLowerCase() : '');
+    const ruleEventFilter  = (el('ruleFilterEvent')  ? el('ruleFilterEvent').value                     : '');
+    const ruleStatusFilter = (el('ruleFilterStatus') ? el('ruleFilterStatus').value                    : '');
+    const rules = allRules.filter(function(r) {
+        if (ruleNameFilter  && (r.name || '').toLowerCase().indexOf(ruleNameFilter) < 0) return false;
+        if (ruleEventFilter && r.event !== ruleEventFilter) return false;
+        if (ruleStatusFilter === 'enabled'  && r.enabled === false) return false;
+        if (ruleStatusFilter === 'disabled' && r.enabled !== false) return false;
+        return true;
+    });
+
+    if (allRules.length === 0) {
         list.innerHTML =
             '<div class="empty-state">' +
                 '<div class="empty-state-icon">&#x1F4CB;</div>' +
                 '<p>No rules configured yet.</p>' +
                 '<p style="font-size:0.85rem;margin-top:4px">Click &ldquo;Add Rule&rdquo; to create one.</p>' +
             '</div>';
+        return;
+    }
+    if (rules.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p style="color:#888">No rules match the current filter.</p></div>';
         return;
     }
 
@@ -2925,6 +2965,20 @@ function readFilterFields(eventType) {
 
 function initRules() {
     el('btnAddRule').addEventListener('click', function() { showRuleForm(null); });
+    // Filter controls
+    var ruleNameEl   = el('ruleFilterName');
+    var ruleEventEl  = el('ruleFilterEvent');
+    var ruleStatusEl = el('ruleFilterStatus');
+    var ruleClearEl  = el('ruleFilterClear');
+    if (ruleNameEl)   ruleNameEl.addEventListener('input',   function() { renderRules(); });
+    if (ruleEventEl)  ruleEventEl.addEventListener('change',  function() { renderRules(); });
+    if (ruleStatusEl) ruleStatusEl.addEventListener('change', function() { renderRules(); });
+    if (ruleClearEl)  ruleClearEl.addEventListener('click', function() {
+        if (ruleNameEl)   ruleNameEl.value   = '';
+        if (ruleEventEl)  ruleEventEl.value  = '';
+        if (ruleStatusEl) ruleStatusEl.value = '';
+        renderRules();
+    });
 }
 
 // =============================================================================

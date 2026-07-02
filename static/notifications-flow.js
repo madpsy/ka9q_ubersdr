@@ -35,7 +35,8 @@ const NODE_GAP    = 14;   // vertical gap between nodes in same column
 const LINE_H_TITLE  = 22; // px per title line
 const LINE_H_SUB    = 17; // px per subtitle line
 const LINE_H_DETAIL = 15; // px per detail line
-const COL_PAD_TOP = 16;   // top padding before first node
+const HEADER_H    = 32;   // height reserved for column header labels
+const COL_PAD_TOP = HEADER_H + 8; // top padding before first node (below headers)
 const MAX_DETAIL_LINES = 5; // max filter lines shown in node before truncation
 
 // ─── Colour palette ──────────────────────────────────────────────────────────
@@ -193,22 +194,13 @@ function renderFlowDiagram() {
         }
         eventMap[rule.event].ruleCount++;
     });
-    const eventNodes = Object.values(eventMap).sort(function(a, b) {
-        return a.label.localeCompare(b.label);
-    });
-
-    // Rule nodes: all rules, enabled first then by name
-    const ruleNodes = rules.slice().sort(function(a, b) {
-        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-        return a.name.localeCompare(b.name);
-    });
 
     // Channel nodes: only channels referenced by at least one rule
     const referencedChannelNames = new Set();
     rules.forEach(function(rule) {
         (rule.channels || []).forEach(function(ch) { referencedChannelNames.add(ch); });
     });
-    const channelNodes = Array.from(referencedChannelNames)
+    const allChannelNodes = Array.from(referencedChannelNames)
         .filter(function(name) { return channels[name]; })
         .map(function(name) {
             const ch = channels[name];
@@ -218,11 +210,80 @@ function renderFlowDiagram() {
                 emoji: FLOW_CHANNEL_EMOJIS[ch.type] || '📤',
                 rate:  ch.rate_limit_minutes > 0 ? ch.rate_limit_minutes : 0,
             };
-        })
-        .sort(function(a, b) {
+        });
+
+    // ── 1b. Barycentric ordering to minimise edge crossovers ─────────────────
+    // Start with a sensible initial order, then iteratively reorder each column
+    // by the median position of its neighbours (3 passes is sufficient).
+
+    let ruleNodes    = rules.slice().sort(function(a, b) {
+        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+        return a.name.localeCompare(b.name);
+    });
+    let eventNodes   = Object.values(eventMap).sort(function(a, b) { return a.label.localeCompare(b.label); });
+    let channelNodes = allChannelNodes.slice().sort(function(a, b) {
+        if (a.type !== b.type) return a.type.localeCompare(b.type);
+        return a.name.localeCompare(b.name);
+    });
+
+    // Helper: median of an array of numbers
+    function median(arr) {
+        if (arr.length === 0) return 0;
+        const s = arr.slice().sort(function(a, b) { return a - b; });
+        const m = Math.floor(s.length / 2);
+        return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
+    }
+
+    // Run 3 passes of barycentric sorting
+    for (let pass = 0; pass < 3; pass++) {
+        // Build current index maps
+        const evIdx = {};  eventNodes.forEach(function(n, i)   { evIdx[n.type]  = i; });
+        const chIdx = {};  channelNodes.forEach(function(n, i) { chIdx[n.name]  = i; });
+
+        // Sort rules by median of their connected event index + channel indices
+        ruleNodes.sort(function(a, b) {
+            const aNeighbours = [evIdx[a.event]].concat(
+                (a.channels || []).map(function(c) { return chIdx[c] !== undefined ? chIdx[c] : 0; })
+            );
+            const bNeighbours = [evIdx[b.event]].concat(
+                (b.channels || []).map(function(c) { return chIdx[c] !== undefined ? chIdx[c] : 0; })
+            );
+            const diff = median(aNeighbours) - median(bNeighbours);
+            if (diff !== 0) return diff;
+            // Stable tie-break: enabled first, then name
+            if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        // Rebuild rule index after sort
+        const ruIdx = {};  ruleNodes.forEach(function(n, i) { ruIdx[n.name] = i; });
+
+        // Sort event nodes by median index of their connected rules
+        eventNodes.sort(function(a, b) {
+            const aRules = ruleNodes
+                .map(function(r, i) { return r.event === a.type ? i : -1; })
+                .filter(function(i) { return i >= 0; });
+            const bRules = ruleNodes
+                .map(function(r, i) { return r.event === b.type ? i : -1; })
+                .filter(function(i) { return i >= 0; });
+            const diff = median(aRules) - median(bRules);
+            return diff !== 0 ? diff : a.label.localeCompare(b.label);
+        });
+
+        // Sort channel nodes by median index of their connected rules
+        channelNodes.sort(function(a, b) {
+            const aRules = ruleNodes
+                .map(function(r, i) { return (r.channels || []).indexOf(a.name) >= 0 ? i : -1; })
+                .filter(function(i) { return i >= 0; });
+            const bRules = ruleNodes
+                .map(function(r, i) { return (r.channels || []).indexOf(b.name) >= 0 ? i : -1; })
+                .filter(function(i) { return i >= 0; });
+            const diff = median(aRules) - median(bRules);
+            if (diff !== 0) return diff;
             if (a.type !== b.type) return a.type.localeCompare(b.type);
             return a.name.localeCompare(b.name);
         });
+    }
 
     // ── 2. Pre-compute node heights and Y positions ───────────────────────────
 
@@ -281,10 +342,12 @@ function renderFlowDiagram() {
     const parts = [];
 
     // ── 4a. Column header labels ──────────────────────────────────────────────
-    const headerY = 14;
-    parts.push(svgText(COL_X.event  + NODE_W.event  / 2, headerY, 'Event Types', 11, '#888', '600', 'middle'));
-    parts.push(svgText(COL_X.rule   + NODE_W.rule   / 2, headerY, 'Rules',       11, '#888', '600', 'middle'));
-    parts.push(svgText(COL_X.channel + NODE_W.channel / 2, headerY, 'Channels',  11, '#888', '600', 'middle'));
+    const headerY = 16;
+    parts.push(svgText(COL_X.event   + NODE_W.event   / 2, headerY, 'Event Types', 11, '#888', '600', 'middle'));
+    parts.push(svgText(COL_X.rule    + NODE_W.rule    / 2, headerY, 'Rules',       11, '#888', '600', 'middle'));
+    parts.push(svgText(COL_X.channel + NODE_W.channel / 2, headerY, 'Channels',   11, '#888', '600', 'middle'));
+    // Separator line under headers
+    parts.push('<line x1="0" y1="' + (HEADER_H - 2) + '" x2="' + svgW + '" y2="' + (HEADER_H - 2) + '" stroke="#e0e0e0" stroke-width="1"/>');
 
     // ── 4b. Edges (drawn first so nodes appear on top) ────────────────────────
     // Group edges by rule index for hover interaction

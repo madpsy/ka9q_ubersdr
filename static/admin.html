@@ -13266,6 +13266,11 @@ function resetStationIdColor() {
             timelineCanvas.style.display = 'block';
             timelineContainer.appendChild(timelineCanvas);
 
+            const rotatorSolarNote = document.createElement('p');
+            rotatorSolarNote.style.cssText = 'font-size:11px;color:#888;margin:4px 0 0;text-align:left;';
+            rotatorSolarNote.textContent = 'ℹ️ At high latitudes in summer, nautical and astronomical twilight may not occur — the sun stays above −12°/−18° all day. Affected events will overlap or show incorrect times on the timeline.';
+            timelineContainer.appendChild(rotatorSolarNote);
+
             positionsSection.appendChild(timelineContainer);
 
             // Fetch sun path first if enabled, then draw timeline
@@ -21814,6 +21819,12 @@ const tooltipLine2 = timeStr;
             timelineCanvas.id = 'antSwitchTimeline';
             timelineCanvas.style.cssText = 'width:100%;height:160px;display:block;';
             timelineContainer.appendChild(timelineCanvas);
+
+            const antSwitchSolarNote = document.createElement('p');
+            antSwitchSolarNote.style.cssText = 'font-size:11px;color:#888;margin:4px 0 0;text-align:left;';
+            antSwitchSolarNote.textContent = 'ℹ️ At high latitudes in summer, nautical and astronomical twilight may not occur — the sun stays above −12°/−18° all day. Affected events will overlap or show incorrect times on the timeline.';
+            timelineContainer.appendChild(antSwitchSolarNote);
+
             container.appendChild(timelineContainer);
 
             setTimeout(() => {

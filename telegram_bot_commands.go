@@ -1668,18 +1668,35 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 	// ── Read-only display ─────────────────────────────────────────────────────
 	var sb strings.Builder
 
+	// ── Relay status for the calling user ────────────────────────────────────
+	if l.currentFrom != nil {
+		l.chatRelayUsersMu.Lock()
+		_, relayOn := l.chatRelayUsers[l.currentFrom.ID]
+		l.chatRelayUsersMu.Unlock()
+		if relayOn {
+			sb.WriteString("🟢 <b>Chat relay: ON</b> — your messages are being forwarded to the SDR chat.\nUse <code>/chat off</code> to stop.\n\n")
+		} else {
+			sb.WriteString("🔴 <b>Chat relay: OFF</b>\nUse <code>/chat on</code> to start relaying your messages to the SDR chat.\n\n")
+		}
+	}
+
 	// ── Active users ──────────────────────────────────────────────────────────
 	activeUsers := l.chatManager.GetActiveUsers()
 	if len(activeUsers) > 0 {
 		fmt.Fprintf(&sb, "💬 <b>Active in chat (%d)</b>\n", len(activeUsers))
 		for _, u := range activeUsers {
 			ip := l.chatManager.GetSessionIP(u.SessionID)
-			if ip == "" {
-				ip = "unknown"
+			var ipLabel string
+			if ip != "" {
+				ipLabel = "<code>" + html.EscapeString(ip) + "</code>"
+			} else if strings.HasPrefix(u.SessionID, "telegram:") {
+				ipLabel = "📱 Telegram relay"
+			} else {
+				ipLabel = "<i>unknown</i>"
 			}
-			fmt.Fprintf(&sb, "• <b>%s</b> — <code>%s</code>\n",
+			fmt.Fprintf(&sb, "• <b>%s</b> — %s\n",
 				html.EscapeString(u.Username),
-				html.EscapeString(ip),
+				ipLabel,
 			)
 		}
 		sb.WriteString("\n")

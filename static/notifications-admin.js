@@ -523,9 +523,9 @@ function updateConfigStats() {
             fmtCount(value) + '</div><div class="stat-label">' + label + '</div></div>';
     };
     grid.insertAdjacentHTML('beforeend',
-        card(activeChannels, 'Channels Active') +
+        card(enabledEvents,  'Event Types') +
         card(enabledRules,   'Rules Enabled') +
-        card(enabledEvents,  'Event Types')
+        card(activeChannels, 'Channels Active')
     );
 }
 

@@ -452,6 +452,8 @@ async function loadHealth() {
         statsGrid.innerHTML = statItems.map(function(s) {
             return '<div class="stat-card"><div class="stat-value">' + fmtCount(s.value) + '</div><div class="stat-label">' + s.label + '</div></div>';
         }).join('');
+        // Append config-derived cards (channels / rules / events enabled)
+        updateConfigStats();
 
         const dotClass = data.enabled ? 'green' : 'grey';
         const lastSent  = fmtDate(stats.last_sent_at);
@@ -484,6 +486,37 @@ async function loadHealth() {
         content.style.display = 'block';
         showAlert(el('overviewAlerts'), 'error', 'Failed to load health: ' + err.message, false);
     }
+}
+
+// Appends (or refreshes) config-derived stat cards to the stats grid.
+// Called after loadConfig() and saveConfig() so counts stay in sync.
+function updateConfigStats() {
+    const grid = el('statsGrid');
+    if (!grid) return;
+
+    const rules    = localConfig.rules    || [];
+    const channels = localConfig.channels || {};
+
+    const enabledRules    = rules.filter(function(r) { return r.enabled; }).length;
+    const enabledChannels = Object.keys(channels).length; // all configured channels count
+    const enabledEvents   = (function() {
+        const evts = new Set();
+        rules.forEach(function(r) { if (r.enabled && r.event) evts.add(r.event); });
+        return evts.size;
+    }());
+
+    // Remove any previously injected config cards, then append fresh ones
+    grid.querySelectorAll('.stat-card-config').forEach(function(el) { el.remove(); });
+
+    var card = function(value, label) {
+        return '<div class="stat-card stat-card-config"><div class="stat-value">' +
+            fmtCount(value) + '</div><div class="stat-label">' + label + '</div></div>';
+    };
+    grid.insertAdjacentHTML('beforeend',
+        card(enabledChannels, 'Channels') +
+        card(enabledRules,    'Rules Enabled') +
+        card(enabledEvents,   'Event Types')
+    );
 }
 
 async function loadConfig() {
@@ -553,6 +586,7 @@ async function loadConfig() {
         el('masterEnable').checked = localConfig.enabled;
         renderChannels();
         renderRules();
+        updateConfigStats();
         if (typeof renderFlowDiagram === 'function') renderFlowDiagram();
     } catch (err) {
         if (err.message === 'Redirecting to login') return;
@@ -745,6 +779,7 @@ async function saveConfig(alertContainer) {
 
         if (resp.ok && data.ok) {
             showAlert(alertContainer, 'success', data.message || 'Configuration saved.');
+            updateConfigStats();
             if (typeof renderFlowDiagram === 'function') renderFlowDiagram();
             return true;
         } else {

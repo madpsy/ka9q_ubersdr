@@ -59,6 +59,37 @@ const C = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Compact number formatter (mirrors fmtCount in notifications-admin.js)
+function flowFmtCount(n) {
+    n = Number(n) || 0;
+    var abs = Math.abs(n);
+    if (abs >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (abs >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (abs >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(n);
+}
+
+// Render right-aligned stat badges inside a node.
+// x = right edge of node, startY = top of first badge, lineH = line height.
+// Returns array of SVG strings (no extra height consumed).
+function svgStatBadges(x, startY, sent, errors, rateLimited, lineH) {
+    const out = [];
+    let y = startY;
+    const rx = x - NODE_PAD; // right-align anchor
+    if (sent > 0) {
+        out.push('<text x="' + rx + '" y="' + y + '" font-size="10" fill="#4caf50" font-weight="600" text-anchor="end">✉ ' + flowFmtCount(sent) + '</text>');
+        y += lineH;
+    }
+    if (errors > 0) {
+        out.push('<text x="' + rx + '" y="' + y + '" font-size="10" fill="#e53935" font-weight="600" text-anchor="end">⚠ ' + flowFmtCount(errors) + '</text>');
+        y += lineH;
+    }
+    if (rateLimited > 0) {
+        out.push('<text x="' + rx + '" y="' + y + '" font-size="10" fill="#f57c00" font-weight="600" text-anchor="end">⏱ ' + flowFmtCount(rateLimited) + '</text>');
+    }
+    return out;
+}
+
 function flowEventLabel(eventType) {
     // Reuse EVENT_TYPE_LABELS from notifications-admin.js if available
     if (typeof EVENT_TYPE_LABELS !== 'undefined' && EVENT_TYPE_LABELS[eventType]) {
@@ -175,6 +206,15 @@ function renderFlowDiagram() {
 
     const rules    = localConfig.rules    || [];
     const channels = localConfig.channels || {};
+
+    // Read per-channel and per-rule stats from lastStats (set by loadHealth())
+    const _stats    = (typeof lastStats !== 'undefined' && lastStats) || {};
+    const byCh      = _stats.by_channel              || {};
+    const byChErr   = _stats.by_channel_errors        || {};
+    const byChRL    = _stats.by_channel_rate_limited  || {};
+    const byRule    = _stats.by_rule                  || {};
+    const byRuleErr = _stats.by_rule_errors            || {};
+    const byRuleRL  = _stats.by_rule_rate_limited      || {};
 
     const hasChannels = Object.keys(channels).length > 0;
     const hasRules    = rules.length > 0;
@@ -438,6 +478,11 @@ function renderFlowDiagram() {
         const evLabel = flowEventLabel(rule.event);
         const evEmoji = FLOW_EVENT_EMOJIS[rule.event] || '📌';
 
+        // Stats for this rule (declared once, used in both tooltip and badges)
+        const rSent = Number(byRule[rule.name])    || 0;
+        const rErr  = Number(byRuleErr[rule.name]) || 0;
+        const rRL   = Number(byRuleRL[rule.name])  || 0;
+
         // Build full tooltip
         const tooltipLines = [
             indicator + ' ' + rule.name,
@@ -446,6 +491,9 @@ function renderFlowDiagram() {
         if (rule.channels && rule.channels.length > 0) {
             tooltipLines.push('Channels: ' + rule.channels.join(', '));
         }
+        if (rSent > 0) tooltipLines.push('✉ Sent: ' + flowFmtCount(rSent));
+        if (rErr  > 0) tooltipLines.push('⚠ Errors: ' + flowFmtCount(rErr));
+        if (rRL   > 0) tooltipLines.push('⏱ Rate-limited: ' + flowFmtCount(rRL));
         tooltipLines.push('Click to edit');
         const tooltip = tooltipLines.join('\n');
 
@@ -454,7 +502,9 @@ function renderFlowDiagram() {
         parts.push(svgRect(x, y, w, h, 6, fill, border, 1.5, ' class="flow-node-rect"'));
 
         let lineY = y + NODE_PAD + LINE_H_TITLE - 4;
-        parts.push(svgText(tx, lineY, indicator + ' ' + truncStr(rule.name, 26), 13, C.titleColor, '600'));
+        parts.push(svgText(tx, lineY, indicator + ' ' + truncStr(rule.name, 20), 13, C.titleColor, '600'));
+        // Stats badges right-aligned in the title row area
+        svgStatBadges(x + w, y + NODE_PAD + LINE_H_TITLE - 4, rSent, rErr, rRL, LINE_H_DETAIL).forEach(function(s) { parts.push(s); });
 
         lineY += LINE_H_SUB;
         parts.push(svgText(tx, lineY, evEmoji + ' ' + truncStr(evLabel, 26), 11, C.subtitleColor, 'normal'));
@@ -481,9 +531,17 @@ function renderFlowDiagram() {
         const h = channelHeights[ci];
         const tx = x + NODE_PAD;
 
+        // Stats for this channel (declared once, used in both tooltip and badges)
+        const cSent = Number(byCh[ch.name])    || 0;
+        const cErr  = Number(byChErr[ch.name]) || 0;
+        const cRL   = Number(byChRL[ch.name])  || 0;
+
         const tooltipLines = [ch.emoji + ' ' + ch.name, ch.type];
         if (ch.rate > 0) tooltipLines.push('Rate limit: ' + ch.rate + ' min');
         if (ch.botCmds) tooltipLines.push('🤖 Bot Commands enabled');
+        if (cSent > 0) tooltipLines.push('✉ Sent: ' + flowFmtCount(cSent));
+        if (cErr  > 0) tooltipLines.push('⚠ Errors: ' + flowFmtCount(cErr));
+        if (cRL   > 0) tooltipLines.push('⏱ Rate-limited: ' + flowFmtCount(cRL));
         tooltipLines.push('Click to edit');
         const tooltip = tooltipLines.join('\n');
 
@@ -498,6 +556,8 @@ function renderFlowDiagram() {
 
         let lineY = y + NODE_PAD + LINE_H_TITLE - 4;
         parts.push(svgText(tx, lineY, nameLabel, 13, C.titleColor, '600'));
+        // Stats badges right-aligned in the title row area
+        svgStatBadges(x + w, y + NODE_PAD + LINE_H_TITLE - 4, cSent, cErr, cRL, LINE_H_DETAIL).forEach(function(s) { parts.push(s); });
 
         lineY += LINE_H_SUB;
         parts.push(svgText(tx, lineY, ch.type, 11, C.subtitleColor, 'normal'));

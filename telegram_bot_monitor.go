@@ -334,6 +334,48 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 		})
 	}
 
+	// ── Notifications ─────────────────────────────────────────────────────────
+	if l.notifManager != nil {
+		h := l.notifManager.GetHealth()
+		enabled, _ := h["enabled"].(bool)
+		if enabled {
+			status, _ := h["status"].(string)
+			healthy := status == "ok" || status == ""
+			warn := status == "warning"
+			stats := l.notifManager.GetStats()
+			var issues []string
+			// Per-channel error rates — iterate ByChannelErrors keys (public API)
+			for chName, errs := range stats.ByChannelErrors {
+				if errs == 0 {
+					continue
+				}
+				sent := stats.ByChannel[chName]
+				attempts := sent + errs
+				var errRate float64
+				if attempts > 0 {
+					errRate = float64(errs) / float64(attempts) * 100.0
+				} else {
+					errRate = 100.0
+				}
+				if errRate > 5.0 {
+					issues = append(issues, fmt.Sprintf(
+						"channel %q: %.1f%% error rate (%d errors / %d attempts)",
+						chName, errRate, errs, attempts))
+				}
+			}
+			// Summary line always shown
+			summary := fmt.Sprintf("Sent: %d · Errors: %d · Rate limited: %d",
+				stats.TotalSent, stats.TotalErrors, stats.TotalRateLimited)
+			issues = append([]string{summary}, issues...)
+			items = append(items, item{
+				name:   "Notifications",
+				ok:     healthy,
+				warn:   warn,
+				issues: issues,
+			})
+		}
+	}
+
 	// ── Tunnel server ─────────────────────────────────────────────────────────
 	if ah.config.InstanceReporting.TunnelServerEnabled {
 		tun := fetchTunnelServerHealth(ah.config)

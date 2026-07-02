@@ -2269,6 +2269,7 @@ func main() {
 	// Wire admin handler so the /monitor Telegram bot command can report
 	// the health of all enabled subsystems (mirrors the admin monitor tab).
 	notifManager.SetAdminHandler(adminHandler)
+	notifManager.SetNotifManagerOnListeners()
 	// Wire notif manager into admin handler so restartServer() can publish
 	// a shutdown notification before os.Exit.
 	adminHandler.SetNotifManager(notifManager)
@@ -2299,6 +2300,7 @@ func main() {
 			instanceReporter,
 			config,
 			sessions,
+			notifManager,
 		)
 		StartSystemMonitorNotifier(mainCtx, notifManager, 30*time.Second, sysProbes)
 	}

@@ -77,6 +77,7 @@ type TelegramBotListener struct {
 	chatManager      *ChatManager               // nil if chat not enabled
 	gpsdoMonitor     *GPSDOMonitor              // nil if GPSDO not enabled
 	adminHandler     *AdminHandler              // nil until wired; used by /monitor
+	notifManager     *NotificationManager       // nil until wired; used by /monitor (notifications health)
 	config           *Config                    // nil until wired; used by /info
 	instanceReporter *InstanceReporter          // nil until wired; used by /info (public URL)
 	ipBanManager     *IPBanManager              // nil until wired; used by /banned
@@ -827,6 +828,7 @@ type TelegramListenerRegistry struct {
 	chatManager       *ChatManager               // nil if chat not enabled
 	gpsdoMonitor      *GPSDOMonitor              // nil if GPSDO not enabled
 	adminHandler      *AdminHandler              // nil until wired; used by /monitor
+	notifManager      *NotificationManager       // nil until wired; used by /monitor (notifications health)
 	config            *Config                    // nil until wired; used by /info
 	instanceReporter  *InstanceReporter          // nil until wired; used by /info (public URL)
 	ipBanManager      *IPBanManager              // nil until wired; used by /banned
@@ -931,6 +933,17 @@ func (r *TelegramListenerRegistry) SetAdminHandler(h *AdminHandler) {
 	r.adminHandler = h
 	for _, l := range r.listeners {
 		l.adminHandler = h
+	}
+}
+
+// SetNotifManager wires the notification manager into all current and future listeners.
+// Used by /monitor to report notifications health.
+func (r *TelegramListenerRegistry) SetNotifManager(nm *NotificationManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notifManager = nm
+	for _, l := range r.listeners {
+		l.notifManager = nm
 	}
 }
 
@@ -1056,6 +1069,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.chatManager = r.chatManager
 		l.gpsdoMonitor = r.gpsdoMonitor
 		l.adminHandler = r.adminHandler
+		l.notifManager = r.notifManager
 		l.receiverCallsign = r.receiverCallsign
 		l.cwSkimmerCallsign = r.cwSkimmerCallsign
 		l.config = r.config

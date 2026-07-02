@@ -313,6 +313,7 @@ func BuildSystemHealthProbes(
 	instanceReporter *InstanceReporter,
 	config *Config,
 	sessions *SessionManager,
+	notifManager *NotificationManager,
 ) []systemHealthProbe {
 	var probes []systemHealthProbe
 
@@ -628,6 +629,54 @@ func BuildSystemHealthProbes(
 					return false, []string{fmt.Sprintf("New version available: %s (current: %s)", latestVersion, Version)}
 				}
 				return true, nil
+			},
+		})
+	}
+
+	// Notifications probe — fires when any channel's error rate crosses a threshold.
+	// Only active when notifications are enabled and at least one channel is configured.
+	// Uses the same per-channel error-rate thresholds as GetHealth():
+	//   warning  = any channel error rate > 5%
+	//   critical = any channel error rate > 25% (or errors with zero sends)
+	if notifManager != nil {
+		probes = append(probes, systemHealthProbe{
+			component: "notifications",
+			probe: func() (bool, []string) {
+				h := notifManager.GetHealth()
+				enabled, _ := h["enabled"].(bool)
+				if !enabled {
+					return true, nil // not enabled — skip
+				}
+				status, _ := h["status"].(string)
+				if status == "ok" || status == "" {
+					return true, nil
+				}
+				// Build per-channel issue list using the public stats API.
+				var issues []string
+				stats := notifManager.GetStats()
+				for chName, errs := range stats.ByChannelErrors {
+					if errs == 0 {
+						continue
+					}
+					sent := stats.ByChannel[chName]
+					attempts := sent + errs
+					var errRate float64
+					if attempts > 0 {
+						errRate = float64(errs) / float64(attempts) * 100.0
+					} else {
+						errRate = 100.0
+					}
+					if errRate > 5.0 {
+						issues = append(issues, fmt.Sprintf(
+							"channel %q: %.1f%% error rate (%d errors / %d attempts)",
+							chName, errRate, errs, attempts))
+					}
+				}
+				if len(issues) == 0 {
+					issues = append(issues, fmt.Sprintf(
+						"%d delivery error(s) since server start", stats.TotalErrors))
+				}
+				return false, issues
 			},
 		})
 	}

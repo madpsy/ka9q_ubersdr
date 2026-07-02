@@ -527,7 +527,8 @@
         #monitor-mqtt,
         #monitor-rotctl,
         #monitor-ant-switch,
-        #monitor-software-version {
+        #monitor-software-version,
+        #monitor-notifications {
             scroll-margin-top: 52px;
         }
 
@@ -1875,6 +1876,15 @@
                         <div id="softwareVersionDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
                             <div class="spinner" style="margin: 20px auto;"></div>
                             <p style="text-align: center; color: #666;">Checking version...</p>
+                        </div>
+                    </div>
+
+                    <!-- Notifications Section -->
+                    <div id="monitor-notifications" class="config-section" style="display: none;">
+                        <h3>🔔 Notifications</h3>
+                        <div id="notificationsMonitorDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <div class="spinner" style="margin: 20px auto;"></div>
+                            <p style="text-align: center; color: #666;">Loading notifications status...</p>
                         </div>
                     </div>
 
@@ -18694,7 +18704,7 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch, DSP and version health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch, DSP, version and notifications health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
@@ -18709,7 +18719,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/gpsdo-health'),
                     authenticatedFetch('/admin/ant-switch-health'),
                     authenticatedFetch('/admin/dsp-health'),
-                    authenticatedFetch('/admin/version-health')
+                    authenticatedFetch('/admin/version-health'),
+                    authenticatedFetch('/admin/notifications/health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -18718,9 +18729,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse, dspResponse, versionResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse, dspResponse, versionResponse, notifResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse || !versionResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse || !versionResponse || !notifResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -18740,17 +18751,18 @@ const tooltipLine2 = timeStr;
                 const antSwitchHealth = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
                 const dspHealth = (dspResponse.ok || dspResponse.status === 503) ? await dspResponse.json() : null;
                 const versionHealth = versionResponse.ok ? await versionResponse.json() : null;
+                const notifHealth = (notifResponse.ok || notifResponse.status === 503) ? await notifResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
                 lastGPSDOHealth = gpsdoHealth;
                 updateGPSDOTabVisibility();
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth, softwareVersion: versionHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth, softwareVersion: versionHealth, notifications: notifHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false) && (versionHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false) && (versionHealth?.healthy !== false) && (!notifHealth?.enabled || notifHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -18804,7 +18816,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/cwskimmer-health?detailed=true'),
                     authenticatedFetch('/admin/mqtt-health'),
                     authenticatedFetch('/admin/rotctl-health'),
-                    authenticatedFetch('/admin/ant-switch-health')
+                    authenticatedFetch('/admin/ant-switch-health'),
+                    authenticatedFetch('/admin/notifications/health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -18813,9 +18826,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, antSwitchResponse] = await Promise.all(fetchPromises);
+                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, antSwitchResponse, notifResponse] = await Promise.all(fetchPromises);
 
-                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !antSwitchResponse) return; // Auth failed, already handled
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !antSwitchResponse || !notifResponse) return; // Auth failed, already handled
 
                 const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
@@ -18826,11 +18839,12 @@ const tooltipLine2 = timeStr;
                 const mqttDiag = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
                 const rotctlDiag = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
                 const antSwitchDiag = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
+                const notifDiag = (notifResponse.ok || notifResponse.status === 503) ? await notifResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag, antSwitch: antSwitchDiag }, true);
+                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag, antSwitch: antSwitchDiag, notifications: notifDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -19121,8 +19135,9 @@ const tooltipLine2 = timeStr;
                 const hasGPSDOIssues = data.gpsdo && data.gpsdo.enabled && !data.gpsdo.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
                 const hasDSPIssues = data.dsp && data.dsp.enabled && !data.dsp.healthy;
+                const hasNotificationsIssues = data.notifications && data.notifications.enabled && (data.notifications.status === 'warning' || data.notifications.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues || hasDSPIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues || hasDSPIssues || hasNotificationsIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -19241,6 +19256,14 @@ const tooltipLine2 = timeStr;
                     if (hasDSPIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>DSP Noise Reduction:</strong> ' + (data.dsp.issues && data.dsp.issues.length > 0 ? data.dsp.issues.join(', ') : 'Capacity limit reached') + (data.dsp.suggestion ? ' — ' + data.dsp.suggestion : '');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasNotificationsIssues) {
+                        const li = document.createElement('li');
+                        const errCount = data.notifications.stats ? data.notifications.stats.TotalErrors : 0;
+                        const isCritical = data.notifications.status === 'critical';
+                        li.innerHTML = '<strong>Notifications:</strong> ' + (isCritical ? '🚨 Critical — ' : '⚠️ ') + errCount + ' delivery error' + (errCount !== 1 ? 's' : '') + ' since server start';
                         issuesList.appendChild(li);
                     }
 
@@ -19415,6 +19438,14 @@ const tooltipLine2 = timeStr;
                     const sv = data.softwareVersion;
                     renderSoftwareVersionHealth(sv.current_version, sv.latest_version, sv.check_failed);
                 }
+
+                // Render notifications health status (only when enabled)
+                if (data.notifications && data.notifications.enabled) {
+                    renderNotificationsHealth(data.notifications);
+                } else {
+                    const notifSection = document.getElementById('monitor-notifications');
+                    if (notifSection) notifSection.style.display = 'none';
+                }
             }
 
             // Update the monitor section navigation bar
@@ -19442,6 +19473,7 @@ const tooltipLine2 = timeStr;
                 { id: 'monitor-mqtt',              label: 'MQTT' },
                 { id: 'monitor-rotctl',            label: 'Rotator' },
                 { id: 'monitor-ant-switch',        label: 'Ant Switch' },
+                { id: 'monitor-notifications',     label: 'Notifications' },
             ];
 
             const visible = sections.filter(s => {
@@ -19550,6 +19582,169 @@ const tooltipLine2 = timeStr;
                     }
                 }
             }
+
+            updateMonitorNav();
+        }
+
+        function renderNotificationsHealth(data) {
+            const section = document.getElementById('monitor-notifications');
+            const display = document.getElementById('notificationsMonitorDisplay');
+            if (!section || !display) return;
+
+            // Only show when notifications are enabled
+            if (!data || !data.enabled) {
+                section.style.display = 'none';
+                return;
+            }
+
+            section.style.display = 'block';
+
+            const stats = data.stats || {};
+            const channels = data.channels || [];
+            const totalRules = data.total_rules || 0;
+            const enabledRules = data.enabled_rules || 0;
+            const totalSent = stats.TotalSent || 0;
+            const totalErrors = stats.TotalErrors || 0;
+            const totalRateLimited = stats.TotalRateLimited || 0;
+            const byRule = stats.ByRule || {};
+            const byRuleErrors = stats.ByRuleErrors || {};
+            const byRuleRateLimited = stats.ByRuleRateLimited || {};
+
+            // Use backend-computed status (ok / warning / critical)
+            const overallStatus = data.status || (totalErrors > 0 ? 'warning' : 'ok');
+            const isCritical = overallStatus === 'critical';
+            const isWarning  = overallStatus === 'warning';
+
+            const statusIcon   = isCritical ? '🚨' : isWarning ? '⚠️' : '✅';
+            const statusColor  = isCritical ? '#721c24' : isWarning ? '#856404' : '#155724';
+            const statusBg     = isCritical ? '#f8d7da' : isWarning ? '#fff3cd' : '#d4edda';
+            const statusBorder = isCritical ? '#f5c6cb' : isWarning ? '#ffc107' : '#c3e6cb';
+            const statusText   = isCritical ? 'Critical: channel delivery failing'
+                               : isWarning  ? 'Warning: delivery errors detected'
+                               : 'Healthy';
+
+            // Per-channel cards — backend now provides sent/errors/rate_limited/attempts/error_rate_pct/status per channel
+            const channelCards = channels.map(ch => {
+                const chStatus = ch.status || 'ok';
+                const chCritical = chStatus === 'critical';
+                const chWarning  = chStatus === 'warning';
+                const typeColor  = ch.type === 'telegram' ? '#0088cc' : ch.type === 'email' ? '#e65100' : '#6f42c1';
+                const errColor   = chCritical ? '#dc3545' : chWarning ? '#f57c00' : '#28a745';
+                const cardBorder = chCritical ? '#f5c6cb' : chWarning ? '#ffc107' : '#dee2e6';
+                const cardBg     = chCritical ? '#fff5f5' : chWarning ? '#fffbf0' : '#fff';
+                const errRatePct = ch.error_rate_pct !== undefined ? ch.error_rate_pct.toFixed(1) : '0.0';
+                const sent       = ch.sent !== undefined ? ch.sent : 0;
+                const errs       = ch.errors !== undefined ? ch.errors : 0;
+                const rl         = ch.rate_limited !== undefined ? ch.rate_limited : 0;
+                const attempts   = ch.attempts !== undefined ? ch.attempts : 0;
+
+                return `<div style="padding:12px 14px;background:${cardBg};border:1px solid ${cardBorder};border-radius:6px;min-width:180px;flex:1;">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                        <span style="font-size:11px;font-weight:700;color:${typeColor};text-transform:uppercase;letter-spacing:0.5px;">${ch.type}</span>
+                        <span style="font-size:13px;font-weight:600;color:#333;">${ch.name}</span>
+                        ${chCritical ? '<span style="margin-left:auto;font-size:11px;font-weight:700;color:#dc3545;">CRITICAL</span>'
+                          : chWarning ? '<span style="margin-left:auto;font-size:11px;font-weight:700;color:#f57c00;">WARNING</span>' : ''}
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                        <div style="text-align:center;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;">
+                            <div style="font-size:10px;color:#666;margin-bottom:2px;">Sent</div>
+                            <div style="font-size:16px;font-weight:bold;color:#28a745;">${sent.toLocaleString()}</div>
+                        </div>
+                        <div style="text-align:center;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;">
+                            <div style="font-size:10px;color:#666;margin-bottom:2px;">Errors</div>
+                            <div style="font-size:16px;font-weight:bold;color:${errColor};">${errs.toLocaleString()}</div>
+                        </div>
+                        <div style="text-align:center;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;">
+                            <div style="font-size:10px;color:#666;margin-bottom:2px;">Rate Limited</div>
+                            <div style="font-size:16px;font-weight:bold;color:#f57c00;">${rl.toLocaleString()}</div>
+                        </div>
+                        <div style="text-align:center;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;">
+                            <div style="font-size:10px;color:#666;margin-bottom:2px;">Error Rate</div>
+                            <div style="font-size:16px;font-weight:bold;color:${errColor};">${attempts > 0 ? errRatePct + '%' : '—'}</div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Build per-rule rows (only rules with activity), sorted by sent desc
+            const ruleEntries = Object.entries(byRule).sort((a, b) => b[1] - a[1]);
+            const ruleRows = ruleEntries.map(([name, sent]) => {
+                const errs = byRuleErrors[name] || 0;
+                const rl   = byRuleRateLimited[name] || 0;
+                const attempts = sent + errs;
+                const errRate = attempts > 0 ? (errs / attempts * 100).toFixed(1) + '%' : '—';
+                const errColor = errs > 0 ? (errs / attempts > 0.25 ? '#dc3545' : errs / attempts > 0.05 ? '#f57c00' : '#dc3545') : '#888';
+                return `<tr style="border-bottom:1px solid #f0f0f0;">
+                    <td style="padding:6px 8px;font-size:13px;color:#333;">${name}</td>
+                    <td style="padding:6px 8px;font-size:13px;text-align:right;color:#28a745;font-weight:600;">${sent.toLocaleString()}</td>
+                    <td style="padding:6px 8px;font-size:13px;text-align:right;color:${errs > 0 ? errColor : '#888'};">${errs > 0 ? errs.toLocaleString() : '—'}</td>
+                    <td style="padding:6px 8px;font-size:13px;text-align:right;color:#f57c00;">${rl > 0 ? rl.toLocaleString() : '—'}</td>
+                    <td style="padding:6px 8px;font-size:13px;text-align:right;color:${errs > 0 ? errColor : '#888'};">${errRate}</td>
+                </tr>`;
+            }).join('');
+
+            display.innerHTML = `
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px 16px;
+                            background:${statusBg};border:1px solid ${statusBorder};border-radius:6px;color:${statusColor};">
+                    <span style="font-size:20px;">${statusIcon}</span>
+                    <span style="font-weight:600;font-size:15px;">${statusText}</span>
+                    <a href="notifications-admin.html" style="margin-left:auto;padding:5px 14px;background:#667eea;color:white;
+                       text-decoration:none;border-radius:4px;font-size:13px;font-weight:600;white-space:nowrap;">
+                        ⚙️ Manage Notifications
+                    </a>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px;">
+                    <div style="padding:12px;background:#fff;border-radius:5px;border:1px solid #dee2e6;text-align:center;">
+                        <div style="font-size:11px;color:#666;margin-bottom:5px;">Channels</div>
+                        <div style="font-size:22px;font-weight:bold;color:#667eea;">${channels.length}</div>
+                    </div>
+                    <div style="padding:12px;background:#fff;border-radius:5px;border:1px solid #dee2e6;text-align:center;">
+                        <div style="font-size:11px;color:#666;margin-bottom:5px;">Rules (enabled)</div>
+                        <div style="font-size:22px;font-weight:bold;color:#667eea;">${enabledRules}<span style="font-size:13px;color:#999;font-weight:400;"> / ${totalRules}</span></div>
+                    </div>
+                    <div style="padding:12px;background:#fff;border-radius:5px;border:1px solid #dee2e6;text-align:center;">
+                        <div style="font-size:11px;color:#666;margin-bottom:5px;">Total Sent</div>
+                        <div style="font-size:22px;font-weight:bold;color:#28a745;">${totalSent.toLocaleString()}</div>
+                    </div>
+                    <div style="padding:12px;background:#fff;border-radius:5px;border:1px solid #dee2e6;text-align:center;">
+                        <div style="font-size:11px;color:#666;margin-bottom:5px;">Total Errors</div>
+                        <div style="font-size:22px;font-weight:bold;color:${isCritical ? '#dc3545' : isWarning ? '#f57c00' : '#28a745'};">${totalErrors.toLocaleString()}</div>
+                    </div>
+                    <div style="padding:12px;background:#fff;border-radius:5px;border:1px solid #dee2e6;text-align:center;">
+                        <div style="font-size:11px;color:#666;margin-bottom:5px;">Rate Limited</div>
+                        <div style="font-size:22px;font-weight:bold;color:#f57c00;">${totalRateLimited.toLocaleString()}</div>
+                    </div>
+                </div>
+
+                ${channels.length > 0 ? `
+                <div style="margin-bottom:16px;">
+                    <div style="font-size:12px;font-weight:600;color:#555;margin-bottom:8px;">Channels</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;">${channelCards}</div>
+                    <div style="margin-top:8px;font-size:11px;color:#999;">
+                        <span style="color:#28a745;">●</span> OK (&lt;5% error rate)&nbsp;
+                        <span style="color:#f57c00;">●</span> Warning (5–25%)&nbsp;
+                        <span style="color:#dc3545;">●</span> Critical (&gt;25%)
+                    </div>
+                </div>` : ''}
+
+                ${ruleEntries.length > 0 ? `
+                <div>
+                    <div style="font-size:12px;font-weight:600;color:#555;margin-bottom:8px;">Rule Activity (since server start)</div>
+                    <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:5px;border:1px solid #dee2e6;overflow:hidden;">
+                        <thead>
+                            <tr style="background:#f8f9fa;">
+                                <th style="padding:6px 8px;font-size:12px;text-align:left;color:#555;font-weight:600;">Rule</th>
+                                <th style="padding:6px 8px;font-size:12px;text-align:right;color:#555;font-weight:600;">Sent</th>
+                                <th style="padding:6px 8px;font-size:12px;text-align:right;color:#555;font-weight:600;">Errors</th>
+                                <th style="padding:6px 8px;font-size:12px;text-align:right;color:#555;font-weight:600;">Rate Ltd</th>
+                                <th style="padding:6px 8px;font-size:12px;text-align:right;color:#555;font-weight:600;">Err Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody>${ruleRows}</tbody>
+                    </table>
+                </div>` : '<p style="color:#888;font-size:13px;margin:0;">No notifications sent yet since server start.</p>'}
+            `;
 
             updateMonitorNav();
         }

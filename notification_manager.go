@@ -282,6 +282,17 @@ func (m *NotificationManager) SetAdminHandler(h *AdminHandler) {
 	}
 }
 
+// SetNotifManagerOnListeners wires this NotificationManager into the listener
+// registry so that the /monitor bot command can report notifications health.
+func (m *NotificationManager) SetNotifManagerOnListeners() {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetNotifManager(m)
+	}
+}
+
 // SetGPSDOMonitor wires the GPSDO monitor into the listener registry
 // so that the /gpsdo bot command can report GPSDO status.
 func (m *NotificationManager) SetGPSDOMonitor(h *GPSDOMonitor) {
@@ -1345,6 +1356,25 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 		if e.NewRank > 0 {
 			newStr = fmt.Sprintf("#%d", e.NewRank)
 		}
+		// Direction indicator and places-moved suffix.
+		// Lower rank number = better position, so OldRank > NewRank means improvement.
+		// 🟢 ▲ = improved, 🔴 ▼ = worsened.
+		dirEmoji := ""
+		moveStr := ""
+		if e.OldRank > 0 && e.NewRank > 0 {
+			places := e.OldRank - e.NewRank // positive = improved
+			if places > 0 {
+				dirEmoji = "🟢 ▲"
+				moveStr = fmt.Sprintf(" (+%d)", places)
+			} else if places < 0 {
+				dirEmoji = "🔴 ▼"
+				moveStr = fmt.Sprintf(" (%d)", places)
+			}
+		} else if e.OldRank == 0 && e.NewRank > 0 {
+			dirEmoji = "🟢 ▲" // entered the leaderboard
+		} else if e.NewRank == 0 && e.OldRank > 0 {
+			dirEmoji = "🔴 ▼" // dropped off the leaderboard
+		}
 		switch e.Component {
 		case "psk":
 			dimLabel := "reports"
@@ -1354,34 +1384,34 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 				unit = "countries"
 			}
 			if e.NewRank > 0 {
-				return fmt.Sprintf("📊 PSK %s rank: %s %s → %s (%d %s/24h)",
-					dimLabel, e.Callsign, oldStr, newStr, e.NewValue, unit)
+				return fmt.Sprintf("📊 %s PSK %s rank: %s %s → %s%s (%d %s/24h)",
+					dirEmoji, dimLabel, e.Callsign, oldStr, newStr, moveStr, e.NewValue, unit)
 			}
-			return fmt.Sprintf("📊 PSK %s rank: %s %s → %s",
-				dimLabel, e.Callsign, oldStr, newStr)
+			return fmt.Sprintf("📊 %s PSK %s rank: %s %s → %s%s",
+				dirEmoji, dimLabel, e.Callsign, oldStr, newStr, moveStr)
 		case "wspr":
 			if e.NewRank > 0 {
-				return fmt.Sprintf("📻 WSPR %s rank: %s %s → %s (%d unique spots)",
-					e.Dimension, e.Callsign, oldStr, newStr, e.NewValue)
+				return fmt.Sprintf("📻 %s WSPR %s rank: %s %s → %s%s (%d unique spots)",
+					dirEmoji, e.Dimension, e.Callsign, oldStr, newStr, moveStr, e.NewValue)
 			}
-			return fmt.Sprintf("📻 WSPR %s rank: %s %s → %s",
-				e.Dimension, e.Callsign, oldStr, newStr)
+			return fmt.Sprintf("📻 %s WSPR %s rank: %s %s → %s%s",
+				dirEmoji, e.Dimension, e.Callsign, oldStr, newStr, moveStr)
 		case "rbn":
 			if e.NewRank > 0 && e.TotalRanked > 0 {
-				return fmt.Sprintf("📡 RBN rank: %s %s → %s (%d spots, %d skimmers)",
-					e.Callsign, oldStr, newStr, e.NewValue, e.TotalRanked)
+				return fmt.Sprintf("📡 %s RBN rank: %s %s → %s%s (%d spots, %d skimmers)",
+					dirEmoji, e.Callsign, oldStr, newStr, moveStr, e.NewValue, e.TotalRanked)
 			} else if e.NewRank > 0 {
-				return fmt.Sprintf("📡 RBN rank: %s %s → %s (%d spots)",
-					e.Callsign, oldStr, newStr, e.NewValue)
+				return fmt.Sprintf("📡 %s RBN rank: %s %s → %s%s (%d spots)",
+					dirEmoji, e.Callsign, oldStr, newStr, moveStr, e.NewValue)
 			}
 			if e.TotalRanked > 0 {
-				return fmt.Sprintf("📡 RBN rank: %s %s → %s (%d skimmers)",
-					e.Callsign, oldStr, newStr, e.TotalRanked)
+				return fmt.Sprintf("📡 %s RBN rank: %s %s → %s%s (%d skimmers)",
+					dirEmoji, e.Callsign, oldStr, newStr, moveStr, e.TotalRanked)
 			}
-			return fmt.Sprintf("📡 RBN rank: %s %s → %s", e.Callsign, oldStr, newStr)
+			return fmt.Sprintf("📡 %s RBN rank: %s %s → %s%s", dirEmoji, e.Callsign, oldStr, newStr, moveStr)
 		default:
-			return fmt.Sprintf("📊 %s %s rank: %s %s → %s",
-				e.Component, e.Dimension, e.Callsign, oldStr, newStr)
+			return fmt.Sprintf("📊 %s %s %s rank: %s %s → %s%s",
+				dirEmoji, e.Component, e.Dimension, e.Callsign, oldStr, newStr, moveStr)
 		}
 
 	case ServerStartupEvent:
@@ -1520,11 +1550,56 @@ func (m *NotificationManager) GetStats() NotificationStats {
 // GetHealth returns a health summary suitable for the admin API.
 func (m *NotificationManager) GetHealth() map[string]interface{} {
 	stats := m.GetStats()
-	channels := make([]map[string]interface{}, 0, len(m.channels))
+
+	// Build per-channel detail including error rate and status.
+	type channelDetail struct {
+		Name         string  `json:"name"`
+		Type         string  `json:"type"`
+		Sent         int64   `json:"sent"`
+		Errors       int64   `json:"errors"`
+		RateLimited  int64   `json:"rate_limited"`
+		Attempts     int64   `json:"attempts"`
+		ErrorRatePct float64 `json:"error_rate_pct"`
+		Status       string  `json:"status"` // "ok", "warning", "critical"
+	}
+
+	channels := make([]channelDetail, 0, len(m.channels))
+	overallStatus := "ok"
+
 	for name, ch := range m.channels {
-		channels = append(channels, map[string]interface{}{
-			"name": name,
-			"type": ch.Type(),
+		sent := stats.ByChannel[name]
+		errs := stats.ByChannelErrors[name]
+		rl := stats.ByChannelRateLimited[name]
+		attempts := sent + errs // rate-limited never reached the channel
+		var errRatePct float64
+		chStatus := "ok"
+		if attempts > 0 {
+			errRatePct = float64(errs) / float64(attempts) * 100.0
+			if errRatePct > 25.0 {
+				chStatus = "critical"
+			} else if errRatePct > 5.0 {
+				chStatus = "warning"
+			}
+		} else if errs > 0 {
+			// errors but no successful sends at all
+			chStatus = "critical"
+			errRatePct = 100.0
+		}
+		// escalate overall status
+		if chStatus == "critical" {
+			overallStatus = "critical"
+		} else if chStatus == "warning" && overallStatus == "ok" {
+			overallStatus = "warning"
+		}
+		channels = append(channels, channelDetail{
+			Name:         name,
+			Type:         ch.Type(),
+			Sent:         sent,
+			Errors:       errs,
+			RateLimited:  rl,
+			Attempts:     attempts,
+			ErrorRatePct: errRatePct,
+			Status:       chStatus,
 		})
 	}
 
@@ -1541,5 +1616,7 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 		"total_rules":   len(m.cfg.Rules),
 		"enabled_rules": enabledRules,
 		"stats":         stats,
+		"healthy":       overallStatus == "ok",
+		"status":        overallStatus,
 	}
 }

@@ -324,6 +324,17 @@ func (m *NotificationManager) SetInstanceReporter(ir *InstanceReporter) {
 	}
 }
 
+// SetIPBanManager wires the IP ban manager into the listener registry
+// so that the /banned bot command can list, add, and remove IP bans.
+func (m *NotificationManager) SetIPBanManager(h *IPBanManager) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetIPBanManager(h)
+	}
+}
+
 // NewNotificationManager creates and initialises a NotificationManager.
 // If cfg.Enabled is false the manager is a no-op but safe to call.
 func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, error) {

@@ -2268,6 +2268,8 @@ func main() {
 	// receiver details (name, callsign, public URL, GPS coordinates, version).
 	notifManager.SetConfig(config)
 	notifManager.SetInstanceReporter(instanceReporter)
+	// Wire IP ban manager so the /banned bot command can list, add, and remove bans.
+	notifManager.SetIPBanManager(ipBanManager)
 
 	// Start system monitor health notifier — polls subsystems every 30s and fires
 	// SystemMonitorEvent notifications on healthy↔unhealthy transitions.

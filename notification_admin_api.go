@@ -510,7 +510,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "bot_token", Type: "string", Required: true, Description: "Token from @BotFather.", Example: "7123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
 				{Name: "chat_id", Type: "string", Required: true, Description: "Target chat ID. Negative for groups/channels, positive for personal chats.", Example: "-1001234567890"},
 				{Name: "parse_mode", Type: "string", Required: false, Description: "Message formatting. Default: HTML.", ValidValues: []string{"HTML", "Markdown", "MarkdownV2", ""}, Example: "HTML"},
-				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
 			},
 		},
 		{
@@ -525,7 +525,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "email_from", Type: "string", Required: true, Description: "From address. May be 'Name <addr@example.com>' or a bare address.", Example: "UberSDR <me@gmail.com>"},
 				{Name: "email_to", Type: "[]string", Required: true, Description: "Recipient address(es).", Example: `["you@example.com"]`},
 				{Name: "subject_prefix", Type: "string", Required: false, Description: "Prepended to the dynamic subject (prefix + first line of the message). Default: [UberSDR].", Example: "[UberSDR]"},
-				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
 			},
 		},
 		{
@@ -540,7 +540,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "webhook_timeout_seconds", Type: "int", Required: false, Description: "Per-request timeout in seconds. Range: 1–60. Default: 10.", Example: "10"},
 				{Name: "webhook_insecure_skip_verify", Type: "bool", Required: false, Description: "Skip TLS certificate verification. Only for self-signed certs on private LANs.", Example: "false"},
 				{Name: "webhook_body_template", Type: "string", Required: false, Description: `Go text/template string rendered as the full request body. Overrides webhook_format when set. Template data: .Message (string), .Channel (string), .Timestamp (RFC3339 string). Content-Type defaults to application/json; override via webhook_headers.`, Example: `{"message":"{{.Message}}","title":"UberSDR","priority":5}`},
-				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 10.", Example: "10"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
 			},
 		},
 	}

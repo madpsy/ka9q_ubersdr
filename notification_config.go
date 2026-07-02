@@ -463,7 +463,7 @@ func applyChannelDefaults(ch *NotificationChannelConfig) {
 		ch.ParseMode = "HTML"
 	}
 	if ch.RateLimitMinutes == 0 {
-		ch.RateLimitMinutes = 10
+		ch.RateLimitMinutes = 1
 	}
 	if ch.Type == "email" {
 		if ch.SMTPPort == 0 {

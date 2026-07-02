@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"html"
+	"net"
 	"os"
 	"runtime"
 	"sort"
@@ -47,6 +48,12 @@ type botCommand struct {
 // sorted alphabetically when building the /help message and setMyCommands payload
 // so the output is deterministic.
 var botCommands = map[string]botCommand{
+	"banned": {
+		desc:      "List banned IPs",
+		readOnly:  false,
+		writeHint: "Use <code>/banned ban &lt;ip&gt; [reason]</code> to ban an IP, or <code>/banned unban &lt;ip&gt;</code> to remove a ban.",
+		handler:   (*TelegramBotListener).handleBanned,
+	},
 	"passwords": {
 		desc:     "Show configured passwords (admin, bypass, rotator, switch)",
 		readOnly: true,
@@ -56,6 +63,11 @@ var botCommands = map[string]botCommand{
 		desc:     "Show receiver info (name, callsign, URL, location, version)",
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleInfo,
+	},
+	"ip": {
+		desc:     "Look up GeoIP info for an IP address (e.g. /ip 1.2.3.4)",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleIP,
 	},
 	"qrz": {
 		desc:     "Look up a callsign via QRZ (e.g. /qrz MM3NDH)",
@@ -200,6 +212,150 @@ func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, 
 }
 
 // handlePSK reports the PSKReporter rank for the configured receiver callsign.
+// handleBanned lists banned IPs (no args) or bans/unbans an IP (write-gated).
+//
+//	/banned            — list all current bans
+//	/banned ban <ip> [reason]  — ban an IP (requires write access)
+//	/banned unban <ip>         — unban an IP (requires write access)
+//
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleBanned(chatID int64, args string) (string, string, bool) {
+	if l.ipBanManager == nil {
+		msg := "🚫 IP ban manager unavailable."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	argNorm := strings.TrimSpace(args)
+
+	// ── ban / unban subcommands ───────────────────────────────────────────────
+	if strings.HasPrefix(argNorm, "ban ") || strings.HasPrefix(argNorm, "unban ") {
+		if !l.commandWriteEnabled("banned") {
+			msg := "⚠️ Write access is not enabled for /banned. Enable it in the bot listener config."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		if strings.HasPrefix(argNorm, "ban ") {
+			// /banned ban <ip> [reason]
+			rest := strings.TrimSpace(strings.TrimPrefix(argNorm, "ban "))
+			parts := strings.SplitN(rest, " ", 2)
+			ip := strings.TrimSpace(parts[0])
+			reason := "Banned via Telegram bot"
+			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+				reason = strings.TrimSpace(parts[1])
+			}
+
+			// Validate IP or CIDR
+			if net.ParseIP(ip) == nil {
+				if _, _, err := net.ParseCIDR(ip); err != nil {
+					msg := fmt.Sprintf("⚠️ Invalid IP address or CIDR: <code>%s</code>", html.EscapeString(ip))
+					apiResp, apiOK := l.sendMessage(chatID, msg)
+					return msg, apiResp, apiOK
+				}
+			}
+
+			// Check for duplicate
+			if existing, found := l.ipBanManager.GetBanInfo(ip); found {
+				msg := fmt.Sprintf("⚠️ <code>%s</code> is already banned (reason: %s)",
+					html.EscapeString(ip), html.EscapeString(existing.Reason))
+				apiResp, apiOK := l.sendMessage(chatID, msg)
+				return msg, apiResp, apiOK
+			}
+
+			// Ban + kick
+			if l.adminHandler != nil {
+				sessKicked, dxKicked, msgsRemoved, err := l.adminHandler.BanIPWithKick(ip, reason, "telegram")
+				if err != nil {
+					msg := fmt.Sprintf("❌ Failed to ban <code>%s</code>: %s", html.EscapeString(ip), html.EscapeString(err.Error()))
+					apiResp, apiOK := l.sendMessage(chatID, msg)
+					return msg, apiResp, apiOK
+				}
+				msg := fmt.Sprintf("✅ Banned <code>%s</code> (reason: %s)\nKicked %d session(s), %d DX connection(s)",
+					html.EscapeString(ip), html.EscapeString(reason), sessKicked, dxKicked)
+				if msgsRemoved > 0 {
+					msg += fmt.Sprintf(", removed %d chat message(s)", msgsRemoved)
+				}
+				apiResp, apiOK := l.sendMessage(chatID, msg)
+				return msg, apiResp, apiOK
+			}
+			// No adminHandler — ban only (no kick)
+			if err := l.ipBanManager.BanIP(ip, reason, "telegram"); err != nil {
+				msg := fmt.Sprintf("❌ Failed to ban <code>%s</code>: %s", html.EscapeString(ip), html.EscapeString(err.Error()))
+				apiResp, apiOK := l.sendMessage(chatID, msg)
+				return msg, apiResp, apiOK
+			}
+			msg := fmt.Sprintf("✅ Banned <code>%s</code> (reason: %s)", html.EscapeString(ip), html.EscapeString(reason))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		// /banned unban <ip>
+		ip := strings.TrimSpace(strings.TrimPrefix(argNorm, "unban "))
+
+		// Validate IP or CIDR
+		if net.ParseIP(ip) == nil {
+			if _, _, err := net.ParseCIDR(ip); err != nil {
+				msg := fmt.Sprintf("⚠️ Invalid IP address or CIDR: <code>%s</code>", html.EscapeString(ip))
+				apiResp, apiOK := l.sendMessage(chatID, msg)
+				return msg, apiResp, apiOK
+			}
+		}
+
+		// Check it's actually banned
+		if _, found := l.ipBanManager.GetBanInfo(ip); !found {
+			msg := fmt.Sprintf("⚠️ <code>%s</code> is not in the ban list", html.EscapeString(ip))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		if err := l.ipBanManager.UnbanIP(ip); err != nil {
+			msg := fmt.Sprintf("❌ Failed to unban <code>%s</code>: %s", html.EscapeString(ip), html.EscapeString(err.Error()))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		msg := fmt.Sprintf("✅ Unbanned <code>%s</code>", html.EscapeString(ip))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// ── List bans ─────────────────────────────────────────────────────────────
+	bans := l.ipBanManager.GetBannedIPs()
+	if len(bans) == 0 {
+		msg := "🚫 No IPs are currently banned."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🚫 <b>Banned IPs (%d)</b>\n\n", len(bans))
+	for i, b := range bans {
+		expiry := "permanent"
+		if b.Temporary && !b.ExpiresAt.IsZero() {
+			remaining := time.Until(b.ExpiresAt)
+			if remaining > 0 {
+				expiry = fmt.Sprintf("expires in %s", fmtSessionDuration(remaining))
+			} else {
+				expiry = "expired"
+			}
+		}
+		reason := b.Reason
+		if reason == "" {
+			reason = "no reason"
+		}
+		fmt.Fprintf(&sb, "%d. <code>%s</code> — %s (%s)\n",
+			i+1,
+			html.EscapeString(b.IP),
+			html.EscapeString(reason),
+			html.EscapeString(expiry),
+		)
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
 // handlePasswords reports the configured passwords: admin, bypass, rotator, and
 // antenna switch. The latter three are omitted when empty.
 // Returns (botText, telegramAPIResponse, apiOK).
@@ -230,6 +386,112 @@ func (l *TelegramBotListener) handlePasswords(chatID int64, args string) (string
 	// Antenna switch password — omit when empty.
 	if cfg.AntSwitch.Password != "" {
 		fmt.Fprintf(&sb, "🔌 <b>Switch:</b> <code>%s</code>\n", html.EscapeString(cfg.AntSwitch.Password))
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleIP performs a GeoIP lookup for the given IP address.
+// Usage: /ip <ip-address>
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleIP(chatID int64, args string) (string, string, bool) {
+	ip := strings.TrimSpace(args)
+	if ip == "" {
+		msg := "ℹ️ Usage: <code>/ip &lt;ip-address&gt;</code>"
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Validate — must be a plain IP, not a CIDR
+	if net.ParseIP(ip) == nil {
+		msg := fmt.Sprintf("⚠️ Invalid IP address: <code>%s</code>", html.EscapeString(ip))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	if l.adminHandler == nil {
+		msg := "🌍 GeoIP lookup unavailable."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	result, err := l.adminHandler.LookupIP(ip)
+	if err != nil {
+		msg := fmt.Sprintf("❌ Lookup failed: %s", html.EscapeString(err.Error()))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🌍 <b>GeoIP: %s</b>\n\n", html.EscapeString(ip))
+
+	if result.Hostname != "" {
+		fmt.Fprintf(&sb, "🖥️ <b>Hostname:</b> <code>%s</code>\n", html.EscapeString(result.Hostname))
+	}
+
+	if result.Country != "" {
+		flag := countryCodeToFlag(result.CountryCode)
+		if flag != "" {
+			fmt.Fprintf(&sb, "🏳️ <b>Country:</b> %s %s (<code>%s</code>)\n",
+				flag, html.EscapeString(result.Country), html.EscapeString(result.CountryCode))
+		} else {
+			fmt.Fprintf(&sb, "🏳️ <b>Country:</b> %s (<code>%s</code>)\n",
+				html.EscapeString(result.Country), html.EscapeString(result.CountryCode))
+		}
+	}
+
+	if result.Continent != "" {
+		fmt.Fprintf(&sb, "🌐 <b>Continent:</b> %s (<code>%s</code>)\n",
+			html.EscapeString(result.Continent), html.EscapeString(result.ContinentCode))
+	}
+
+	if result.City != "" {
+		fmt.Fprintf(&sb, "🏙️ <b>City:</b> %s\n", html.EscapeString(result.City))
+	}
+
+	if len(result.Subdivisions) > 0 && result.Subdivisions[0].Name != "" {
+		fmt.Fprintf(&sb, "📍 <b>Region:</b> %s\n", html.EscapeString(result.Subdivisions[0].Name))
+	}
+
+	if result.TimeZone != "" {
+		fmt.Fprintf(&sb, "🕐 <b>Timezone:</b> %s\n", html.EscapeString(result.TimeZone))
+	}
+
+	if result.Latitude != nil && result.Longitude != nil {
+		mapsURL := fmt.Sprintf("https://maps.google.com/?q=%.4f,%.4f", *result.Latitude, *result.Longitude)
+		fmt.Fprintf(&sb, "📌 <b>Coordinates:</b> <a href=\"%s\">%.4f, %.4f</a>\n",
+			mapsURL, *result.Latitude, *result.Longitude)
+	}
+
+	if result.ISP != "" {
+		fmt.Fprintf(&sb, "🏢 <b>ISP/ASN:</b> %s", html.EscapeString(result.ISP))
+		if result.ASN != nil {
+			fmt.Fprintf(&sb, " (AS%d)", *result.ASN)
+		}
+		sb.WriteString("\n")
+	}
+
+	if result.IsAnonymousProxy {
+		sb.WriteString("⚠️ <b>Anonymous proxy detected</b>\n")
+	}
+	if result.IsSatelliteProvider {
+		sb.WriteString("🛰️ <b>Satellite provider</b>\n")
+	}
+
+	// Check if IP is currently banned
+	if l.ipBanManager != nil {
+		if ban, found := l.ipBanManager.GetBanInfo(ip); found {
+			fmt.Fprintf(&sb, "\n🚫 <b>Banned:</b> %s", html.EscapeString(ban.Reason))
+			if ban.Temporary && !ban.ExpiresAt.IsZero() {
+				remaining := time.Until(ban.ExpiresAt)
+				if remaining > 0 {
+					fmt.Fprintf(&sb, " (expires in %s)", html.EscapeString(fmtSessionDuration(remaining)))
+				}
+			}
+			sb.WriteString("\n")
+		}
 	}
 
 	msg := sb.String()
@@ -667,6 +929,7 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 	type userGroup struct {
 		audioFreq   uint64
 		audioMode   string
+		specFreq    uint64 // spectrum centre frequency (fallback when no audio)
 		hasAudio    bool
 		hasSpectrum bool
 		hasDX       bool
@@ -725,6 +988,11 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 
 		if isSpectrum {
 			g.hasSpectrum = true
+			// Capture spectrum centre frequency as fallback when no audio session exists.
+			freq, _ := s["frequency"].(uint64)
+			if freq > 0 {
+				g.specFreq = freq
+			}
 		} else {
 			// Audio session — capture frequency and mode.
 			g.hasAudio = true
@@ -760,7 +1028,6 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(groupOrder))
 	for i, key := range groupOrder {
 		g := groupMap[key]
-		freqMHz := float64(g.audioFreq) / 1_000_000.0
 
 		// Build the connection-type emoji string (no spaces between emojis).
 		var icons strings.Builder
@@ -774,10 +1041,15 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 			icons.WriteString("🌐")
 		}
 
-		// Build the main frequency+mode part (only when audio is present).
+		// Build the main frequency+mode part.
+		// Prefer audio frequency; fall back to spectrum frequency when spectrum-only.
 		var freqPart string
-		if g.hasAudio {
+		if g.hasAudio && g.audioFreq > 0 {
+			freqMHz := float64(g.audioFreq) / 1_000_000.0
 			freqPart = fmt.Sprintf("%.3f MHz | %s | ", freqMHz, html.EscapeString(g.audioMode))
+		} else if !g.hasAudio && g.hasSpectrum && g.specFreq > 0 {
+			freqMHz := float64(g.specFreq) / 1_000_000.0
+			freqPart = fmt.Sprintf("%.3f MHz | ", freqMHz)
 		}
 
 		// Build suffix: IP, optional flag+country, optional bypassed tag, duration.

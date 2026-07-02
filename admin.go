@@ -7429,6 +7429,15 @@ func (ah *AdminHandler) HandleLoadHourlyHistory(w http.ResponseWriter, r *http.R
 	}
 }
 
+// LookupIP performs a GeoIP lookup for the given IP address (with reverse DNS).
+// Returns nil if the GeoIP service is not available or the lookup fails.
+func (ah *AdminHandler) LookupIP(ip string) (*GeoIPResult, error) {
+	if ah.geoIPService == nil || !ah.geoIPService.IsEnabled() {
+		return nil, fmt.Errorf("GeoIP service not available")
+	}
+	return ah.geoIPService.Lookup(ip, true)
+}
+
 // HandleGeoIPLookup handles POST /admin/geoip/lookup - lookup IP address geolocation
 func (ah *AdminHandler) HandleGeoIPLookup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

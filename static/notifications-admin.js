@@ -506,7 +506,7 @@ async function loadConfig() {
                                         : (ch.bot_token_set ? '********' : ''),
                 chat_id:            ch.chat_id            || '',
                 parse_mode:         ch.parse_mode         || 'HTML',
-                rate_limit_minutes: ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10,
+                rate_limit_minutes: ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1,
                 // Bot command listener config — round-tripped as-is from server.
                 bot_commands:       ch.bot_commands || { enabled: false, commands: [] },
                 // Email (SMTP) — password redacted like the bot token.
@@ -674,7 +674,7 @@ async function saveConfig(alertContainer) {
                 email_from:         ch.email_from || '',
                 email_to:           Array.isArray(ch.email_to) ? ch.email_to : parseCSV(String(ch.email_to || '')),
                 subject_prefix:     ch.subject_prefix || '[UberSDR]',
-                rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
+                rate_limit_minutes: Number(ch.rate_limit_minutes) || 1,
             };
         } else if (ch.type === 'webhook') {
             payload.channels[name] = {
@@ -688,7 +688,7 @@ async function saveConfig(alertContainer) {
                 webhook_timeout_seconds:    Number(ch.webhook_timeout_seconds) || 10,
                 webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
                 webhook_body_template:      ch.webhook_body_template || '',
-                rate_limit_minutes:         Number(ch.rate_limit_minutes) || 10,
+                rate_limit_minutes:         Number(ch.rate_limit_minutes) || 1,
             };
         } else {
             // Telegram channel — include bot_commands config if present.
@@ -697,7 +697,7 @@ async function saveConfig(alertContainer) {
                 bot_token:          ch.bot_token || '********',
                 chat_id:            ch.chat_id,
                 parse_mode:         ch.parse_mode || 'HTML',
-                rate_limit_minutes: Number(ch.rate_limit_minutes) || 10,
+                rate_limit_minutes: Number(ch.rate_limit_minutes) || 1,
             };
             if (ch.bot_commands) {
                 tgCh.bot_commands = {
@@ -961,7 +961,7 @@ function renderChannels() {
                     '<div class="item-card-meta">' +
                         '<span class="badge badge-blue">' + escHtml(ch.type) + '</span>' +
                         metaBadges +
-                        '<span class="badge badge-grey">rate: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10) + ' min</span>' +
+                        '<span class="badge badge-grey">rate: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + ' min</span>' +
                         statsBadges +
                     '</div>' +
                 '</div>' +
@@ -2040,7 +2040,7 @@ function showChannelForm(editName) {
     const container = el('channelFormContainer');
     const isEdit = editName !== null && editName !== undefined;
     const ch = isEdit ? Object.assign({}, localConfig.channels[editName]) : {
-        type: 'telegram', bot_token: '', chat_id: '', parse_mode: 'HTML', rate_limit_minutes: 10,
+        type: 'telegram', bot_token: '', chat_id: '', parse_mode: 'HTML', rate_limit_minutes: 1,
     };
 
     const nameReadonly = isEdit ? 'readonly style="background:#f0f0f0"' : '';
@@ -2069,7 +2069,7 @@ function showChannelForm(editName) {
             '<div id="chTypeFields"></div>' +
             '<div class="form-group" style="max-width:200px">' +
                 '<label>Rate Limit (minutes)</label>' +
-                '<input type="number" id="chRateLimit" value="' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 10) + '" min="0" max="1440">' +
+                '<input type="number" id="chRateLimit" value="' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + '" min="0" max="1440">' +
                 '<div class="form-hint">Suppress duplicate alerts within this window. 0 = no limit.</div>' +
             '</div>' +
             '<div class="form-actions">' +

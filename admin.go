@@ -396,6 +396,13 @@ type AdminHandler struct {
 	pskRank             *PSKRankFetcher            // PSKReporter top-monitor ranking fetcher
 	gpsdoProxy          *GPSDOProxy                // GPSDO reverse proxy (live-reloadable)
 	freqRefMonitor      *FrequencyReferenceMonitor // nil if frequency reference not enabled
+	notifManager        *NotificationManager       // for shutdown notifications
+}
+
+// SetNotifManager wires the notification manager so restartServer() can publish
+// a shutdown event before os.Exit. Called from main after NewAdminHandler.
+func (ah *AdminHandler) SetNotifManager(nm *NotificationManager) {
+	ah.notifManager = nm
 }
 
 // GetEnabledPublicAddonNames returns the names of currently enabled, non-admin-only
@@ -423,6 +430,18 @@ func (ah *AdminHandler) restartServer() {
 	go func() {
 		time.Sleep(1 * time.Second) // Give time for HTTP response to be sent
 		log.Println("Shutting down all components before restart...")
+
+		// Publish shutdown notification synchronously before stopping components,
+		// so notifiers (Telegram, webhook, etc.) have a chance to dispatch.
+		if ah.notifManager != nil {
+			ah.notifManager.Publish(ServerStartupEvent{
+				Version:   Version,
+				Callsign:  ah.config.Admin.Callsign,
+				Name:      ah.config.Admin.Name,
+				Component: "shutdown",
+				Reason:    "restart",
+			})
+		}
 
 		// Stop all components in reverse order of initialization
 		// This ensures proper cleanup of all radiod channels and connections

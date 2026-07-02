@@ -782,16 +782,18 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
-			Type:         "server_startup",
-			Description:  "Server finished initialising. Fires once per start. Useful for crash/restart detection.",
+			Type:        "server_startup",
+			Description: "Server started or is about to shut down / restart. Filter by component to receive only one. A startup event with no preceding shutdown indicates a crash.",
 			FilterFields: []filterField{
-				// No filter fields — always fires on startup
+				{Name: "components", Type: "[]string", Description: `"startup" = server finished initialising; "shutdown" = server is about to exit. Empty = both.`, ValidValues: []string{"startup", "shutdown"}, Example: `["startup","shutdown"]`},
 			},
 			TemplateFields: []templateField{
 				{Name: ".Version", GoType: "string", Description: "UberSDR version string."},
 				{Name: ".Callsign", GoType: "string", Description: "Configured station callsign."},
 				{Name: ".Name", GoType: "string", Description: "Configured station name."},
-				{Name: ".StartTime", GoType: "time.Time", Description: "Server start timestamp."},
+				{Name: ".StartTime", GoType: "time.Time", Description: "Server start timestamp (zero on shutdown)."},
+				{Name: ".Component", GoType: "string", Description: `"startup" or "shutdown".`},
+				{Name: ".Reason", GoType: "string", Description: `Shutdown reason: "restart" (admin-triggered) or "signal" (SIGTERM/SIGINT). Empty on startup.`},
 			},
 		},
 		{

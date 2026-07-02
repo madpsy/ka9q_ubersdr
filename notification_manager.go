@@ -748,7 +748,7 @@ func (m *NotificationManager) rateSubject(evt NotificationEvent) string {
 	case DigitalRankEvent:
 		return fmt.Sprintf("rank:%s:%s", e.Component, e.Dimension)
 	case ServerStartupEvent:
-		return "startup"
+		return "startup:" + e.Component
 	case ChatEvent:
 		if e.Action == ChatActionMessage {
 			// Each message is unique content — include the text so every message
@@ -856,7 +856,8 @@ func (m *NotificationManager) matchFilter(evt NotificationEvent, f NotificationF
 	case DigitalRankEvent:
 		return m.matchDigitalRank(e, f)
 	case ServerStartupEvent:
-		return true // no filter fields for startup
+		// Empty Components slice matches both "startup" and "shutdown".
+		return matchStringSlice(e.Component, f.Components)
 	case ChatEvent:
 		return m.matchChat(e, f)
 	}
@@ -1371,6 +1372,12 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 		}
 
 	case ServerStartupEvent:
+		if e.Component == "shutdown" {
+			if e.Reason == "restart" {
+				return fmt.Sprintf("🔄 UberSDR %s shutting down / restarting (%s)", e.Version, e.Callsign)
+			}
+			return fmt.Sprintf("🔴 UberSDR %s shutting down (%s)", e.Version, e.Callsign)
+		}
 		return fmt.Sprintf("🚀 UberSDR %s started (%s)", e.Version, e.Callsign)
 
 	default:

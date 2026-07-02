@@ -1995,6 +1995,7 @@ func main() {
 		Callsign:  config.Admin.Callsign,
 		Name:      config.Admin.Name,
 		StartTime: StartTime,
+		Component: "startup",
 	})
 
 	// Register space weather update callback for notifications
@@ -2268,6 +2269,9 @@ func main() {
 	// Wire admin handler so the /monitor Telegram bot command can report
 	// the health of all enabled subsystems (mirrors the admin monitor tab).
 	notifManager.SetAdminHandler(adminHandler)
+	// Wire notif manager into admin handler so restartServer() can publish
+	// a shutdown notification before os.Exit.
+	adminHandler.SetNotifManager(notifManager)
 	// Wire config and instance reporter so the /info bot command can report
 	// receiver details (name, callsign, public URL, GPS coordinates, version).
 	notifManager.SetConfig(config)
@@ -2905,6 +2909,16 @@ func main() {
 		<-sigChan
 
 		log.Println("Shutting down server...")
+
+		// Publish shutdown notification synchronously before tearing down sessions,
+		// so notifiers (Telegram, webhook, etc.) have a chance to dispatch.
+		notifManager.Publish(ServerStartupEvent{
+			Version:   Version,
+			Callsign:  config.Admin.Callsign,
+			Name:      config.Admin.Name,
+			Component: "shutdown",
+			Reason:    "signal",
+		})
 
 		// Clean up all active sessions first
 		sessions.Shutdown()

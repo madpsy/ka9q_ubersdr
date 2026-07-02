@@ -305,15 +305,25 @@ type ChatEvent struct {
 
 func (e ChatEvent) EventType() NotificationEventType { return EventTypeChat }
 
-// ─── Server Startup ───────────────────────────────────────────────────────────
+// ─── Server Startup / Shutdown ────────────────────────────────────────────────
 
-// ServerStartupEvent is published once when the server finishes initialising.
-// Useful for detecting restarts after crashes or deployments.
+// ServerStartupEvent is published when the server starts or is about to shut down.
+// Component distinguishes the two cases:
+//   - "startup"  — server finished initialising (fires once on boot)
+//   - "shutdown" — server is about to exit (fires before os.Exit)
+//
+// Useful for crash detection: a startup event with no preceding shutdown event
+// indicates an unexpected crash or OOM kill.
 type ServerStartupEvent struct {
 	Version   string    `json:"version"`
 	Callsign  string    `json:"callsign"`
 	Name      string    `json:"name"`
 	StartTime time.Time `json:"start_time"`
+	// Component is "startup" or "shutdown".
+	Component string `json:"component"`
+	// Reason is set on shutdown: "restart" (admin-triggered) or "signal" (SIGTERM/SIGINT).
+	// Empty on startup.
+	Reason string `json:"reason,omitempty"`
 }
 
 func (e ServerStartupEvent) EventType() NotificationEventType { return EventTypeServerStartup }

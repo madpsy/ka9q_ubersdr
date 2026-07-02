@@ -2776,8 +2776,12 @@ function showRuleForm(editIdx) {
             '</div>' +
             '<div class="config-section">' +
                 '<div class="config-section-title">Default Template <span style="font-weight:400;font-size:0.8rem;color:#888">(optional — leave blank to use built-in default)</span></div>' +
-                '<div class="form-group">' +
+                '<div class="form-group" style="position:relative">' +
                     '<textarea id="ruleTemplate" rows="4" placeholder="Go template, e.g. DX: {{.DXCall}} on {{khz .Frequency}} kHz">' + escHtml(rule.template || '') + '</textarea>' +
+                    (!(rule.template) ? '<div id="ruleTemplateOverlay" style="position:absolute;inset:0;background:rgba(248,249,250,0.93);border:1px solid #dee2e6;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:default">' +
+                        '<span style="font-size:0.85rem;color:#666">Using built-in default template</span>' +
+                        '<button type="button" class="btn btn-secondary btn-sm" id="btnCustomiseTemplate">&#x270F;&#xFE0F; Customise</button>' +
+                    '</div>' : '') +
                     '<div class="form-hint">Used for any selected channel without its own override below. Uses Go <code>text/template</code> syntax — see fields below.</div>' +
                 '</div>' +
                 '<div id="channelTemplateOverrides"></div>' +
@@ -2794,6 +2798,18 @@ function showRuleForm(editIdx) {
     renderDedupFields(rule.event, rule.dedup_by, rule.dedup_window_minutes);
     renderTemplateFields(rule.event);
     renderChannelTemplateOverrides(workingTemplates);
+
+    // Wire up the "Customise" overlay button if present
+    var btnCustomise = el('btnCustomiseTemplate');
+    if (btnCustomise) {
+        btnCustomise.addEventListener('click', function() {
+            var overlay = el('ruleTemplateOverlay');
+            if (overlay) overlay.remove();
+            var ta = el('ruleTemplate');
+            if (ta) { ta.focus(); ta.setSelectionRange(0, 0); }
+        });
+    }
+
     container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     // Re-render filters, dedup and template reference when event type changes

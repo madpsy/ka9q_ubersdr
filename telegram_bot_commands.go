@@ -47,6 +47,16 @@ type botCommand struct {
 // sorted alphabetically when building the /help message and setMyCommands payload
 // so the output is deterministic.
 var botCommands = map[string]botCommand{
+	"passwords": {
+		desc:     "Show configured passwords (admin, bypass, rotator, switch)",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handlePasswords,
+	},
+	"info": {
+		desc:     "Show receiver info (name, callsign, URL, location, version)",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleInfo,
+	},
 	"qrz": {
 		desc:     "Look up a callsign via QRZ (e.g. /qrz MM3NDH)",
 		readOnly: true,
@@ -190,6 +200,115 @@ func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, 
 }
 
 // handlePSK reports the PSKReporter rank for the configured receiver callsign.
+// handlePasswords reports the configured passwords: admin, bypass, rotator, and
+// antenna switch. The latter three are omitted when empty.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handlePasswords(chatID int64, args string) (string, string, bool) {
+	if l.config == nil {
+		msg := "🔑 Password info unavailable."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	cfg := l.config
+	var sb strings.Builder
+	sb.WriteString("🔑 <b>Passwords</b>\n\n")
+
+	// Admin password — always shown (required field).
+	fmt.Fprintf(&sb, "🛡️ <b>Admin:</b> <code>%s</code>\n", html.EscapeString(cfg.Admin.Password))
+
+	// Bypass password — omit when empty.
+	if cfg.Server.BypassPassword != "" {
+		fmt.Fprintf(&sb, "🔓 <b>Bypass:</b> <code>%s</code>\n", html.EscapeString(cfg.Server.BypassPassword))
+	}
+
+	// Rotator password — omit when empty.
+	if cfg.Rotctl.Password != "" {
+		fmt.Fprintf(&sb, "🧭 <b>Rotator:</b> <code>%s</code>\n", html.EscapeString(cfg.Rotctl.Password))
+	}
+
+	// Antenna switch password — omit when empty.
+	if cfg.AntSwitch.Password != "" {
+		fmt.Fprintf(&sb, "🔌 <b>Switch:</b> <code>%s</code>\n", html.EscapeString(cfg.AntSwitch.Password))
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleInfo reports receiver details: name, callsign, public URL, GPS location,
+// version, and server time. Mirrors the key fields from GET /api/description.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleInfo(chatID int64, args string) (string, string, bool) {
+	if l.config == nil {
+		msg := "ℹ️ Receiver info unavailable."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	cfg := l.config
+
+	// Build public URL using effective host from instance reporter when available.
+	var publicURL string
+	if l.instanceReporter != nil {
+		publicURL = cfg.InstanceReporting.ConstructPublicURL(l.instanceReporter.GetEffectiveHost())
+	} else {
+		publicURL = cfg.InstanceReporting.ConstructPublicURL()
+	}
+
+	var sb strings.Builder
+	sb.WriteString("ℹ️ <b>Receiver Info</b>\n\n")
+
+	// Name
+	if cfg.Admin.Name != "" {
+		fmt.Fprintf(&sb, "📻 <b>Name:</b> %s\n", html.EscapeString(cfg.Admin.Name))
+	}
+
+	// Callsign
+	if cfg.Admin.Callsign != "" {
+		fmt.Fprintf(&sb, "📡 <b>Callsign:</b> <code>%s</code>\n", html.EscapeString(cfg.Admin.Callsign))
+	}
+
+	// Public URL and admin URL
+	if publicURL != "" {
+		fmt.Fprintf(&sb, "🌐 <b>URL:</b> %s\n", html.EscapeString(publicURL))
+		adminURL := strings.TrimRight(publicURL, "/") + "/admin.html"
+		fmt.Fprintf(&sb, "🔧 <b>Admin URL:</b> %s\n", html.EscapeString(adminURL))
+	}
+
+	// GPS coordinates as a Google Maps link
+	lat := cfg.Admin.GPS.Lat
+	lon := cfg.Admin.GPS.Lon
+	if lat != 0 || lon != 0 {
+		mapsURL := fmt.Sprintf("https://maps.google.com/?q=%.6f,%.6f", lat, lon)
+		fmt.Fprintf(&sb, "📍 <b>Location:</b> <a href=\"%s\">%.4f, %.4f</a>\n",
+			mapsURL, lat, lon)
+	}
+
+	// Available client slots
+	if l.sessions != nil {
+		regularCount := l.sessions.GetNonBypassedUserCount()
+		maxSessions := cfg.Server.MaxSessions
+		available := maxSessions - regularCount
+		if available < 0 {
+			available = 0
+		}
+		fmt.Fprintf(&sb, "👥 <b>Listeners:</b> %d of %d (%d available)\n", regularCount, maxSessions, available)
+	}
+
+	// Version
+	fmt.Fprintf(&sb, "🔖 <b>Version:</b> <code>%s</code>\n", html.EscapeString(Version))
+
+	// Server time in local time (UTC+1 for Europe/London, but we use the process TZ)
+	now := time.Now()
+	fmt.Fprintf(&sb, "🕐 <b>Server time:</b> %s\n", html.EscapeString(now.Format("2006-01-02 15:04:05 MST")))
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handlePSK(chatID int64, args string) (string, string, bool) {
 	if l.pskRank == nil {

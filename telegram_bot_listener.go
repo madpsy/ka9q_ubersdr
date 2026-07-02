@@ -63,19 +63,21 @@ type tgChatMember struct {
 //	// … later …
 //	listener.Stop()    // cancels context, goroutine exits cleanly
 type TelegramBotListener struct {
-	channelName  string
-	cfg          NotificationChannelConfig
-	sessions     *SessionManager
-	rotctl       *RotctlAPIHandler    // nil if rotator not enabled
-	antSwitch    *AntSwitchHandler    // nil if antenna switch not enabled
-	noiseFloor   *NoiseFloorMonitor   // nil if noise floor monitoring not enabled
-	pskRank      *PSKRankFetcher      // nil if PSK reporter not enabled
-	wsprRank     *WSPRRankFetcher     // nil if WSPR rank not enabled
-	rbnStore     *RBNDataStore        // nil if CW skimmer / RBN not enabled
-	spaceWeather *SpaceWeatherMonitor // nil if space weather monitoring not enabled
-	chatManager  *ChatManager         // nil if chat not enabled
-	gpsdoMonitor *GPSDOMonitor        // nil if GPSDO not enabled
-	adminHandler *AdminHandler        // nil until wired; used by /monitor
+	channelName      string
+	cfg              NotificationChannelConfig
+	sessions         *SessionManager
+	rotctl           *RotctlAPIHandler    // nil if rotator not enabled
+	antSwitch        *AntSwitchHandler    // nil if antenna switch not enabled
+	noiseFloor       *NoiseFloorMonitor   // nil if noise floor monitoring not enabled
+	pskRank          *PSKRankFetcher      // nil if PSK reporter not enabled
+	wsprRank         *WSPRRankFetcher     // nil if WSPR rank not enabled
+	rbnStore         *RBNDataStore        // nil if CW skimmer / RBN not enabled
+	spaceWeather     *SpaceWeatherMonitor // nil if space weather monitoring not enabled
+	chatManager      *ChatManager         // nil if chat not enabled
+	gpsdoMonitor     *GPSDOMonitor        // nil if GPSDO not enabled
+	adminHandler     *AdminHandler        // nil until wired; used by /monitor
+	config           *Config              // nil until wired; used by /info
+	instanceReporter *InstanceReporter    // nil until wired; used by /info (public URL)
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -758,6 +760,8 @@ type TelegramListenerRegistry struct {
 	chatManager       *ChatManager         // nil if chat not enabled
 	gpsdoMonitor      *GPSDOMonitor        // nil if GPSDO not enabled
 	adminHandler      *AdminHandler        // nil until wired; used by /monitor
+	config            *Config              // nil until wired; used by /info
+	instanceReporter  *InstanceReporter    // nil until wired; used by /info (public URL)
 	receiverCallsign  string               // from config.Decoder.ReceiverCallsign
 	cwSkimmerCallsign string               // from cwskimmerConfig.Callsign
 }
@@ -848,6 +852,26 @@ func (r *TelegramListenerRegistry) SetAdminHandler(h *AdminHandler) {
 	r.adminHandler = h
 	for _, l := range r.listeners {
 		l.adminHandler = h
+	}
+}
+
+// SetConfig wires the server config into all current and future listeners.
+func (r *TelegramListenerRegistry) SetConfig(c *Config) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.config = c
+	for _, l := range r.listeners {
+		l.config = c
+	}
+}
+
+// SetInstanceReporter wires the instance reporter into all current and future listeners.
+func (r *TelegramListenerRegistry) SetInstanceReporter(ir *InstanceReporter) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.instanceReporter = ir
+	for _, l := range r.listeners {
+		l.instanceReporter = ir
 	}
 }
 
@@ -944,6 +968,8 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.adminHandler = r.adminHandler
 		l.receiverCallsign = r.receiverCallsign
 		l.cwSkimmerCallsign = r.cwSkimmerCallsign
+		l.config = r.config
+		l.instanceReporter = r.instanceReporter
 		l.Start()
 		r.listeners[name] = l
 	}

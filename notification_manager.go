@@ -302,6 +302,28 @@ func (m *NotificationManager) SetCWSkimmerCallsign(cs string) {
 	}
 }
 
+// SetConfig wires the server config into the listener registry
+// so that the /info bot command can report receiver details.
+func (m *NotificationManager) SetConfig(c *Config) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetConfig(c)
+	}
+}
+
+// SetInstanceReporter wires the instance reporter into the listener registry
+// so that the /info bot command can report the public URL.
+func (m *NotificationManager) SetInstanceReporter(ir *InstanceReporter) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetInstanceReporter(ir)
+	}
+}
+
 // NewNotificationManager creates and initialises a NotificationManager.
 // If cfg.Enabled is false the manager is a no-op but safe to call.
 func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, error) {

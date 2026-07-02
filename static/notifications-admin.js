@@ -1409,6 +1409,15 @@ function renderTelegramManagePanel(name, panel) {
                             'Allow write (e.g. <code>/' + escHtml(c.name) + ' &hellip;</code>)' +
                         '</label>';
                 }
+                // Security warning for the /passwords command.
+                var securityWarning = '';
+                if (c.name === 'passwords') {
+                    securityWarning =
+                        '<div style="margin-left:18px;margin-top:2px;padding:5px 8px;background:#fff3e0;border-left:3px solid #f57c00;border-radius:2px;font-size:0.78rem;color:#e65100">' +
+                            '⚠️ <strong>Security risk:</strong> This command sends your admin, bypass, rotator, and switch passwords in plaintext to the Telegram chat. ' +
+                            'Only enable this if your bot chat is private and you understand the risk.' +
+                        '</div>';
+                }
                 return '<div style="display:flex;flex-direction:column;gap:2px">' +
                     '<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;cursor:pointer">' +
                         '<input type="checkbox" class="tgMgr-cmdCheck-' + escHtml(name) + '" value="' + escHtml(c.name) + '"' + checked + '> ' +
@@ -1416,6 +1425,7 @@ function renderTelegramManagePanel(name, panel) {
                         (c.read_only ? ' <span style="font-size:0.75rem;color:#888">(read-only)</span>' : '') +
                     '</label>' +
                     rwToggle +
+                    securityWarning +
                 '</div>';
             }).join('');
         }).catch(function() {

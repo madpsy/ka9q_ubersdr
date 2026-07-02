@@ -2259,6 +2259,10 @@ func main() {
 	// Wire admin handler so the /monitor Telegram bot command can report
 	// the health of all enabled subsystems (mirrors the admin monitor tab).
 	notifManager.SetAdminHandler(adminHandler)
+	// Wire config and instance reporter so the /info bot command can report
+	// receiver details (name, callsign, public URL, GPS coordinates, version).
+	notifManager.SetConfig(config)
+	notifManager.SetInstanceReporter(instanceReporter)
 
 	// Start system monitor health notifier — polls subsystems every 30s and fires
 	// SystemMonitorEvent notifications on healthy↔unhealthy transitions.

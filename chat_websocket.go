@@ -78,6 +78,24 @@ type ChatManager struct {
 	adminCallsign                string       // Admin callsign (uppercase for comparison)
 	ownerCallsignFromAdminIPOnly bool         // Restrict owner callsign to admin IPs only
 	adminConfig                  *AdminConfig // For IP checking
+
+	// notifyFn is called for join, leave, and message events (optional).
+	// Set via OnChatEvent after construction.
+	notifyFn func(ChatEvent)
+}
+
+// OnChatEvent registers a callback that is called for every chat event
+// (join, leave, message). Safe to call before any events fire.
+func (cm *ChatManager) OnChatEvent(fn func(ChatEvent)) {
+	cm.notifyFn = fn
+}
+
+// fireChatEvent dispatches a ChatEvent to the registered callback in a
+// separate goroutine to avoid blocking the caller.
+func (cm *ChatManager) fireChatEvent(evt ChatEvent) {
+	if cm.notifyFn != nil {
+		go cm.notifyFn(evt)
+	}
 }
 
 // NewChatManager creates a new chat manager
@@ -260,6 +278,15 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 
 	// Broadcast user join notification to all users
 	cm.broadcastUserJoined(username, country, countryCode)
+
+	// Fire notification event
+	ip := cm.GetSessionIP(sessionID)
+	cm.fireChatEvent(ChatEvent{
+		Action:   ChatActionJoined,
+		Username: username,
+		ClientIP: ip,
+		Time:     now,
+	})
 
 	// Send success confirmation to the user who just joined
 	cm.broadcastUsernameSetSuccess(sessionID, username)
@@ -539,6 +566,14 @@ func (cm *ChatManager) RemoveUser(sessionID string) {
 		log.Printf("Chat: User '%s' (session %s) removed", username, sessionID)
 		// Broadcast user left notification
 		cm.broadcastUserLeft(username)
+		// Fire notification event
+		ip := cm.GetSessionIP(sessionID)
+		cm.fireChatEvent(ChatEvent{
+			Action:   ChatActionLeft,
+			Username: username,
+			ClientIP: ip,
+			Time:     time.Now(),
+		})
 	}
 }
 
@@ -731,6 +766,14 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 
 	// Broadcast to all connected clients
 	cm.broadcastChatMessage(chatMsg)
+
+	// Fire notification event
+	cm.fireChatEvent(ChatEvent{
+		Action:   ChatActionMessage,
+		Username: username,
+		Message:  messageText,
+		Time:     now,
+	})
 
 	return nil
 }

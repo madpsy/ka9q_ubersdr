@@ -90,6 +90,9 @@ const FILTER_FIELDS = {
         { name: 'voice_min_confidence', type: 'float',       label: 'Min Confidence',  hint: '0.0 to 1.0' },
     ],
     server_startup: [],
+    chat: [
+        { name: 'chat_actions', type: 'enum_list', label: 'Actions', values: ['joined','left','message'] },
+    ],
     digital_rank: [
         { name: 'rank_components', type: 'enum_list',   label: 'Components',    values: ['psk','wspr','rbn'], hint: 'Which ranking systems to watch. Empty = all enabled' },
         { name: 'rank_improved',   type: 'bool',        label: 'Improved Only', hint: 'Fire only when rank number decreases (or first appearance on leaderboard)' },
@@ -112,6 +115,7 @@ const EVENT_TYPE_LABELS = {
     voice_activity: 'Voice Activity',
     server_startup: 'Server Startup',
     digital_rank:   'Digital Rank',
+    chat:           'Chat',
 };
 
 function eventLabel(et) {
@@ -154,6 +158,10 @@ const DEDUP_FIELDS = {
         { name: 'itu_zone',     label: 'ITU Zone' },
         { name: 'band',         label: 'Band' },
         { name: 'mode',         label: 'Mode' },
+    ],
+    chat: [
+        { name: 'username', label: 'Username' },
+        { name: 'action',   label: 'Action' },
     ],
 };
 
@@ -303,6 +311,13 @@ const TEMPLATE_FIELDS = {
         { name: '.DXCountryCode',     goType: 'string',   desc: 'DX cluster enriched ISO alpha-2 code (may be empty).' },
         { name: '.DXContinent',       goType: 'string',   desc: 'DX cluster enriched continent code (may be empty).' },
         { name: '.Time',              goType: 'time.Time',desc: 'Detection timestamp.' },
+    ],
+    chat: [
+        { name: '.Action',   goType: 'string',    desc: '"joined", "left", or "message".' },
+        { name: '.Username', goType: 'string',    desc: 'Chat username.' },
+        { name: '.ClientIP', goType: 'string',    desc: 'Client IP address (joined/left only; empty for messages).' },
+        { name: '.Message',  goType: 'string',    desc: 'Message text (message events only; empty for join/leave).' },
+        { name: '.Time',     goType: 'time.Time', desc: 'Event timestamp.' },
     ],
 };
 

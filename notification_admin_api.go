@@ -843,6 +843,21 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: ".Time", GoType: "time.Time", Description: "Detection timestamp."},
 			},
 		},
+		{
+			Type:        "chat",
+			Description: "A user joined, left, or sent a message in the chat room.",
+			FilterFields: []filterField{
+				{Name: "chat_actions", Type: "[]string", Description: "Chat event type.", ValidValues: []string{"joined", "left", "message"}, Example: `["joined","left"]`},
+			},
+			TemplateFields: []templateField{
+				{Name: ".Action", GoType: "string", Description: `"joined", "left", or "message".`},
+				{Name: ".Username", GoType: "string", Description: "Chat username."},
+				{Name: ".ClientIP", GoType: "string", Description: "Client IP address (joined/left only; empty for messages)."},
+				{Name: ".Message", GoType: "string", Description: "Message text (message events only; empty for join/leave)."},
+				{Name: ".Time", GoType: "time.Time", Description: "Event timestamp."},
+			},
+			DedupKeys: []string{"username", "action"},
+		},
 	}
 
 	// ── Template functions ───────────────────────────────────────────────────

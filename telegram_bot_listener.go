@@ -78,6 +78,7 @@ type TelegramBotListener struct {
 	adminHandler     *AdminHandler        // nil until wired; used by /monitor
 	config           *Config              // nil until wired; used by /info
 	instanceReporter *InstanceReporter    // nil until wired; used by /info (public URL)
+	ipBanManager     *IPBanManager        // nil until wired; used by /banned
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -762,6 +763,7 @@ type TelegramListenerRegistry struct {
 	adminHandler      *AdminHandler        // nil until wired; used by /monitor
 	config            *Config              // nil until wired; used by /info
 	instanceReporter  *InstanceReporter    // nil until wired; used by /info (public URL)
+	ipBanManager      *IPBanManager        // nil until wired; used by /banned
 	receiverCallsign  string               // from config.Decoder.ReceiverCallsign
 	cwSkimmerCallsign string               // from cwskimmerConfig.Callsign
 }
@@ -875,6 +877,16 @@ func (r *TelegramListenerRegistry) SetInstanceReporter(ir *InstanceReporter) {
 	}
 }
 
+// SetIPBanManager wires the IP ban manager into all current and future listeners.
+func (r *TelegramListenerRegistry) SetIPBanManager(h *IPBanManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ipBanManager = h
+	for _, l := range r.listeners {
+		l.ipBanManager = h
+	}
+}
+
 // SetGPSDOMonitor wires the GPSDO monitor into all current and future listeners.
 func (r *TelegramListenerRegistry) SetGPSDOMonitor(h *GPSDOMonitor) {
 	r.mu.Lock()
@@ -970,6 +982,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.cwSkimmerCallsign = r.cwSkimmerCallsign
 		l.config = r.config
 		l.instanceReporter = r.instanceReporter
+		l.ipBanManager = r.ipBanManager
 		l.Start()
 		r.listeners[name] = l
 	}

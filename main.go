@@ -2145,6 +2145,11 @@ func main() {
 	// chat messages from the in-memory ring buffer.
 	if dxClusterWsHandler != nil && dxClusterWsHandler.chatManager != nil {
 		notifManager.SetChatManager(dxClusterWsHandler.chatManager)
+		// Register chat event callback so join/leave/message events are published
+		// to the notification system (chat event type).
+		dxClusterWsHandler.chatManager.OnChatEvent(func(evt ChatEvent) {
+			notifManager.Publish(evt)
+		})
 	}
 	// Wire GPSDO monitor so the /gpsdo Telegram bot command can report
 	// Leo Bodnar LBE-1420 device and GPS status.

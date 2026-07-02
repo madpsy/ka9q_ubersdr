@@ -1206,6 +1206,7 @@ func (l *TelegramBotListener) handleQRZ(chatID int64, args string) (string, stri
 
 // handleChat reports the last 10 messages from the in-memory chat ring buffer —
 // the same history that new websocket clients receive on connect.
+// Also lists currently active chat users with their username and IP address.
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, string, bool) {
 	if l.chatManager == nil {
@@ -1214,14 +1215,36 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 		return msg, apiResp, apiOK
 	}
 
+	var sb strings.Builder
+
+	// ── Active users ──────────────────────────────────────────────────────────
+	activeUsers := l.chatManager.GetActiveUsers()
+	if len(activeUsers) > 0 {
+		fmt.Fprintf(&sb, "💬 <b>Active in chat (%d)</b>\n", len(activeUsers))
+		for _, u := range activeUsers {
+			ip := l.chatManager.GetSessionIP(u.SessionID)
+			if ip == "" {
+				ip = "unknown"
+			}
+			fmt.Fprintf(&sb, "• <b>%s</b> — <code>%s</code>\n",
+				html.EscapeString(u.Username),
+				html.EscapeString(ip),
+			)
+		}
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("💬 <i>No users currently in chat.</i>\n\n")
+	}
+
+	// ── Recent messages ───────────────────────────────────────────────────────
 	all := l.chatManager.GetBufferedMessages()
 	if len(all) == 0 {
-		msg := "💬 No chat messages yet."
+		sb.WriteString("<i>No chat messages yet.</i>")
+		msg := sb.String()
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
 
-	// Take the last 10 messages.
 	const maxChat = 10
 	start := len(all) - maxChat
 	if start < 0 {
@@ -1229,8 +1252,7 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 	}
 	msgs := all[start:]
 
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "💬 <b>Recent Chat</b> (%d messages)\n\n", len(msgs))
+	fmt.Fprintf(&sb, "<b>Recent messages (%d)</b>\n\n", len(msgs))
 	for _, m := range msgs {
 		ts := m.Timestamp.UTC().Format("15:04")
 		fmt.Fprintf(&sb, "<code>%s</code> <b>%s</b>: %s\n",

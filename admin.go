@@ -3023,6 +3023,39 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// BanIPWithKick bans an IP and immediately kicks all active sessions from that IP.
+// It mirrors the full sequence performed by HandleBanIP:
+//  1. Remove chat messages from the IP
+//  2. Add the IP to the ban list
+//  3. Kick audio/spectrum sessions
+//  4. Kick DX cluster / chat WebSocket connections
+//
+// Returns the number of sessions kicked, DX connections kicked, and chat messages removed.
+func (ah *AdminHandler) BanIPWithKick(ip, reason, bannedBy string) (sessionsKicked, dxKicked, messagesRemoved int, err error) {
+	// 1. Remove chat messages from this IP
+	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+		messagesRemoved = ah.dxClusterWsHandler.chatManager.RemoveUserMessagesByIP(ip)
+	}
+
+	// 2. Ban the IP
+	if err = ah.ipBanManager.BanIP(ip, reason, bannedBy); err != nil {
+		return
+	}
+
+	// 3. Kick audio/spectrum sessions
+	sessionsKicked, err = ah.sessions.KickUserByIP(ip)
+	if err != nil {
+		log.Printf("BanIPWithKick: error kicking sessions for %s: %v", ip, err)
+		err = nil // non-fatal
+	}
+
+	// 4. Kick DX cluster / chat WebSocket connections
+	if ah.dxClusterWsHandler != nil {
+		dxKicked = ah.dxClusterWsHandler.KickConnectionsByIP(ip)
+	}
+	return
+}
+
 // HandleUnbanIP unbans an IP address
 func (ah *AdminHandler) HandleUnbanIP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

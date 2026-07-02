@@ -172,7 +172,7 @@ type NotificationRule struct {
 	// Event is the event type this rule matches.
 	// One of: cw_spot, dx_spot, digital_decode, space_weather,
 	//         antenna_switch, rotator, system_monitor, user_session,
-	//         server_startup
+	//         server_startup, chat
 	Event NotificationEventType `yaml:"event" json:"event"`
 
 	// Filter contains optional match criteria. All specified criteria must
@@ -236,6 +236,10 @@ func dedupKeysForEvent(evt NotificationEventType) map[string]bool {
 		return map[string]bool{
 			"callsign": true, "country": true, "country_code": true,
 			"continent": true, "band": true,
+		}
+	case EventTypeChat:
+		return map[string]bool{
+			"username": true, "action": true,
 		}
 	default:
 		return nil
@@ -406,6 +410,10 @@ type NotificationFilter struct {
 	// Set to false to also receive notifications for bypassed users.
 	ExcludeBypassed *bool `yaml:"exclude_bypassed,omitempty" json:"exclude_bypassed,omitempty"`
 
+	// ── Chat (chat) ───────────────────────────────────────────────────────────
+	// ChatActions matches "joined", "left", or "message".
+	ChatActions []string `yaml:"chat_actions,omitempty" json:"chat_actions,omitempty"`
+
 	// ── Digital Rank (digital_rank) ───────────────────────────────────────────
 	// RankComponents selects which ranking systems to watch.
 	// Valid values: "psk", "wspr", "rbn". Empty = all enabled components.
@@ -537,6 +545,7 @@ func (cfg *NotificationsConfig) Validate() []string {
 		EventTypeServerStartup: true,
 		EventTypeVoiceActivity: true,
 		EventTypeDigitalRank:   true,
+		EventTypeChat:          true,
 	}
 
 	for i, rule := range cfg.Rules {

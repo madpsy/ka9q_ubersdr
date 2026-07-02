@@ -727,6 +727,8 @@ func (m *NotificationManager) rateSubject(evt NotificationEvent) string {
 		return fmt.Sprintf("rank:%s:%s", e.Component, e.Dimension)
 	case ServerStartupEvent:
 		return "startup"
+	case ChatEvent:
+		return fmt.Sprintf("chat:%s:%s", e.Action, e.Username)
 	default:
 		return "unknown"
 	}
@@ -788,6 +790,13 @@ func dedupValue(evt NotificationEvent, key string) string {
 		case "mode":
 			return e.Mode
 		}
+	case ChatEvent:
+		switch key {
+		case "username":
+			return e.Username
+		case "action":
+			return string(e.Action)
+		}
 	}
 	return ""
 }
@@ -819,6 +828,8 @@ func (m *NotificationManager) matchFilter(evt NotificationEvent, f NotificationF
 		return m.matchDigitalRank(e, f)
 	case ServerStartupEvent:
 		return true // no filter fields for startup
+	case ChatEvent:
+		return m.matchChat(e, f)
 	}
 	return true
 }
@@ -1029,6 +1040,13 @@ func (m *NotificationManager) matchUserSession(e UserSessionEvent, f Notificatio
 	// Only pass through when explicitly set to false.
 	excludeBypassed := f.ExcludeBypassed == nil || *f.ExcludeBypassed
 	if excludeBypassed && e.Bypassed {
+		return false
+	}
+	return true
+}
+
+func (m *NotificationManager) matchChat(e ChatEvent, f NotificationFilter) bool {
+	if !matchStringSlice(string(e.Action), f.ChatActions) {
 		return false
 	}
 	return true
@@ -1249,6 +1267,17 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 			counts += fmt.Sprintf("\n• Bypassed users: %d", e.BypassedUsers)
 		}
 		return base + counts
+
+	case ChatEvent:
+		switch e.Action {
+		case ChatActionJoined:
+			return fmt.Sprintf("💬 %s joined chat (%s)", e.Username, e.ClientIP)
+		case ChatActionLeft:
+			return fmt.Sprintf("💬 %s left chat (%s)", e.Username, e.ClientIP)
+		case ChatActionMessage:
+			return fmt.Sprintf("💬 %s: %s", e.Username, e.Message)
+		}
+		return fmt.Sprintf("💬 Chat event: %s (%s)", e.Action, e.Username)
 
 	case VoiceActivityEvent:
 		dx := ""

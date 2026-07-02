@@ -17,6 +17,7 @@ const (
 	EventTypeServerStartup NotificationEventType = "server_startup"
 	EventTypeVoiceActivity NotificationEventType = "voice_activity"
 	EventTypeDigitalRank   NotificationEventType = "digital_rank"
+	EventTypeChat          NotificationEventType = "chat"
 )
 
 // NotificationEvent is the interface implemented by every event type.
@@ -279,6 +280,30 @@ type UserSessionEvent struct {
 }
 
 func (e UserSessionEvent) EventType() NotificationEventType { return EventTypeUserSession }
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+// ChatAction describes what kind of chat event occurred.
+type ChatAction string
+
+const (
+	ChatActionJoined  ChatAction = "joined"
+	ChatActionLeft    ChatAction = "left"
+	ChatActionMessage ChatAction = "message"
+)
+
+// ChatEvent is published when a user joins, leaves, or sends a message in chat.
+type ChatEvent struct {
+	Action   ChatAction `json:"action"`
+	Username string     `json:"username"`
+	// ClientIP is set for joined/left events; empty for message events.
+	ClientIP string `json:"client_ip,omitempty"`
+	// Message is set only for message events.
+	Message string    `json:"message,omitempty"`
+	Time    time.Time `json:"time"`
+}
+
+func (e ChatEvent) EventType() NotificationEventType { return EventTypeChat }
 
 // ─── Server Startup ───────────────────────────────────────────────────────────
 

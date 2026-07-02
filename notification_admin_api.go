@@ -230,25 +230,29 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 
 	// ── Send and time it ─────────────────────────────────────────────────────
 	start := time.Now()
-	sendErr := ch.Send(msg)
+	chResp, sendErr := ch.Send(msg)
 	durationMs := time.Since(start).Milliseconds()
 
 	// ── Build response ───────────────────────────────────────────────────────
 	type testResponse struct {
-		OK          bool   `json:"ok"`
-		Channel     string `json:"channel"`
-		Type        string `json:"type"`
-		MessageSent string `json:"message_sent"`
-		DurationMs  int64  `json:"duration_ms"`
-		Error       string `json:"error,omitempty"`
+		OK           bool   `json:"ok"`
+		Channel      string `json:"channel"`
+		Type         string `json:"type"`
+		MessageSent  string `json:"message_sent"`
+		DurationMs   int64  `json:"duration_ms"`
+		StatusCode   int    `json:"status_code,omitempty"`
+		ResponseBody string `json:"response_body,omitempty"`
+		Error        string `json:"error,omitempty"`
 	}
 
 	resp := testResponse{
-		OK:          sendErr == nil,
-		Channel:     channelName,
-		Type:        channelType,
-		MessageSent: msg,
-		DurationMs:  durationMs,
+		OK:           sendErr == nil,
+		Channel:      channelName,
+		Type:         channelType,
+		MessageSent:  msg,
+		DurationMs:   durationMs,
+		StatusCode:   chResp.StatusCode,
+		ResponseBody: chResp.Body,
 	}
 	if sendErr != nil {
 		resp.Error = sendErr.Error()
@@ -257,6 +261,31 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 		w.WriteHeader(http.StatusOK)
 	}
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+// handleNotificationsChannelLog returns the last 10 send attempts for a channel.
+//
+// GET /admin/notifications/channel-log/{name}
+func handleNotificationsChannelLog(w http.ResponseWriter, r *http.Request, nm *NotificationManager) {
+	w.Header().Set("Content-Type", "application/json")
+	if nm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "notification manager not initialised"}) //nolint:errcheck
+		return
+	}
+	// Extract channel name from path: /admin/notifications/channel-log/{name}
+	name := r.URL.Path[len("/admin/notifications/channel-log/"):]
+	if name == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "channel name required"}) //nolint:errcheck
+		return
+	}
+	entries := nm.GetChannelLog(name)
+	if entries == nil {
+		entries = []ChannelLogEntry{}
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"channel": name, "log": entries}) //nolint:errcheck
 }
 
 // handleNotificationsConfig handles GET and PUT for the notification config.

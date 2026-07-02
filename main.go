@@ -2270,6 +2270,11 @@ func main() {
 	// the health of all enabled subsystems (mirrors the admin monitor tab).
 	notifManager.SetAdminHandler(adminHandler)
 	notifManager.SetNotifManagerOnListeners()
+	// Wire MQTT publisher into notification manager so dispatches and health
+	// stats are published to MQTT when both systems are enabled.
+	if prometheusMetrics.mqttPublisher != nil {
+		notifManager.SetMQTTPublisher(prometheusMetrics.mqttPublisher)
+	}
 	// Wire notif manager into admin handler so restartServer() can publish
 	// a shutdown notification before os.Exit.
 	adminHandler.SetNotifManager(notifManager)
@@ -2689,6 +2694,9 @@ func main() {
 	}))
 	http.HandleFunc("/admin/notifications/test", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsTest(w, r, notifManager)
+	}))
+	http.HandleFunc("/admin/notifications/channel-log/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNotificationsChannelLog(w, r, notifManager)
 	}))
 	http.HandleFunc("/admin/notifications/config", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsConfig(w, r, notifManager, notifConfig, notificationsPath)

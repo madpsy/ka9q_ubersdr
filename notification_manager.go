@@ -11,13 +11,25 @@ import (
 	"time"
 )
 
+// ChannelResponse holds the server's response to a notification send attempt.
+// For HTTP-based channels (Telegram, webhook) it captures the HTTP status code
+// and up to 512 bytes of the response body. For SMTP it captures the server
+// greeting / error string. On success, StatusCode is the HTTP 2xx code (or 0
+// for SMTP which has no numeric status exposed at this level).
+type ChannelResponse struct {
+	StatusCode int    `json:"status_code,omitempty"` // HTTP status (0 for SMTP)
+	Body       string `json:"body,omitempty"`        // response body snippet (≤512 bytes)
+}
+
 // NotificationChannel is the interface that every output channel must implement.
 // Adding a new channel type (email, Matrix, ntfy, …) only requires implementing
 // this interface and registering it in NotificationManager.buildChannels().
 type NotificationChannel interface {
 	// Send delivers a pre-rendered message to the channel.
 	// The implementation is responsible for its own retries / error handling.
-	Send(message string) error
+	// It returns a ChannelResponse with the server's HTTP status and body snippet,
+	// and a non-nil error if delivery failed.
+	Send(message string) (ChannelResponse, error)
 	// Name returns the human-readable channel name for logging.
 	Name() string
 	// Type returns the channel type string (e.g. "telegram").
@@ -143,6 +155,18 @@ type NotificationStats struct {
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
+// ChannelLogEntry records a single send attempt for a channel's response ring buffer.
+type ChannelLogEntry struct {
+	At        time.Time       `json:"at"`
+	Rule      string          `json:"rule"`
+	EventType string          `json:"event_type"`
+	Status    string          `json:"status"` // "sent", "error", "template_error"
+	ErrorMsg  string          `json:"error,omitempty"`
+	Response  ChannelResponse `json:"response"`
+}
+
+const maxChannelLogEntries = 10
+
 // NotificationManager is the central hub. Sources call Publish() with a typed
 // event; the manager evaluates all rules, renders templates, applies rate
 // limiting, and dispatches to the configured channels.
@@ -155,9 +179,11 @@ type NotificationManager struct {
 	dedup     *notifDedupTracker
 	funcMap   template.FuncMap
 	listeners *TelegramListenerRegistry
+	mqtt      *MQTTPublisher // may be nil; publishes dispatch events and health stats to MQTT
 
-	mu    sync.RWMutex
-	stats NotificationStats
+	mu       sync.RWMutex
+	stats    NotificationStats
+	chanLogs map[string][]ChannelLogEntry // per-channel ring buffer of last 10 responses
 }
 
 // SetSessionManager wires the SessionManager into the listener registry so
@@ -293,6 +319,20 @@ func (m *NotificationManager) SetNotifManagerOnListeners() {
 	}
 }
 
+// SetMQTTPublisher wires an MQTTPublisher into the notification manager so that
+// every dispatch attempt and periodic health stats are published to MQTT.
+func (m *NotificationManager) SetMQTTPublisher(mp *MQTTPublisher) {
+	m.mu.Lock()
+	m.mqtt = mp
+	m.mu.Unlock()
+	// SetNotifManager is called outside the lock to avoid any potential
+	// lock ordering issues (the health publisher goroutine calls GetHealth/GetStats
+	// which acquire m.mu.RLock).
+	if mp != nil {
+		mp.SetNotifManager(m)
+	}
+}
+
 // SetGPSDOMonitor wires the GPSDO monitor into the listener registry
 // so that the /gpsdo bot command can report GPSDO status.
 func (m *NotificationManager) SetGPSDOMonitor(h *GPSDOMonitor) {
@@ -367,6 +407,7 @@ func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, err
 		blocked:  make(map[string]bool),
 		rl:       newNotifRateLimiter(),
 		dedup:    newNotifDedupTracker(),
+		chanLogs: make(map[string][]ChannelLogEntry),
 		stats: NotificationStats{
 			ByRule:               make(map[string]int64),
 			ByRuleErrors:         make(map[string]int64),
@@ -703,6 +744,10 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 			msg, err := m.renderForChannel(key, chName, evt, tmpls)
 			if err != nil {
 				log.Printf("[Notifications] Rule %q → channel %q: template error: %v", key, chName, err)
+				entry := ChannelLogEntry{
+					At: time.Now(), Rule: key, EventType: string(evt.EventType()),
+					Status: "template_error", ErrorMsg: err.Error(),
+				}
 				m.mu.Lock()
 				m.stats.TotalErrors++
 				m.stats.ByRuleErrors[key]++
@@ -710,28 +755,53 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 				m.stats.LastError = err.Error()
 				now := time.Now()
 				m.stats.LastErrorAt = &now
+				m.appendChannelLog(chName, entry)
+				mqttPub := m.mqtt
 				m.mu.Unlock()
+				if mqttPub != nil {
+					go mqttPub.PublishNotificationDispatch(string(evt.EventType()), key, chName, ch.Type(), "", "template_error", err.Error(), ChannelResponse{})
+				}
 				continue
 			}
 
-			if err := ch.Send(msg); err != nil {
-				log.Printf("[Notifications] Rule %q → channel %q: send error: %v", key, chName, err)
+			chResp, sendErr := ch.Send(msg)
+			if sendErr != nil {
+				log.Printf("[Notifications] Rule %q → channel %q: send error: %v", key, chName, sendErr)
+				errMsg := fmt.Sprintf("channel %s: %v", chName, sendErr)
+				entry := ChannelLogEntry{
+					At: time.Now(), Rule: key, EventType: string(evt.EventType()),
+					Status: "error", ErrorMsg: sendErr.Error(), Response: chResp,
+				}
 				m.mu.Lock()
 				m.stats.TotalErrors++
 				m.stats.ByRuleErrors[key]++
 				m.stats.ByChannelErrors[chName]++
-				m.stats.LastError = fmt.Sprintf("channel %s: %v", chName, err)
+				m.stats.LastError = errMsg
 				now := time.Now()
 				m.stats.LastErrorAt = &now
+				m.appendChannelLog(chName, entry)
+				mqttPub := m.mqtt
 				m.mu.Unlock()
+				if mqttPub != nil {
+					go mqttPub.PublishNotificationDispatch(string(evt.EventType()), key, chName, ch.Type(), msg, "error", sendErr.Error(), chResp)
+				}
 			} else {
+				entry := ChannelLogEntry{
+					At: time.Now(), Rule: key, EventType: string(evt.EventType()),
+					Status: "sent", Response: chResp,
+				}
 				m.mu.Lock()
 				m.stats.TotalSent++
 				m.stats.ByRule[key]++
 				m.stats.ByChannel[chName]++
 				now := time.Now()
 				m.stats.LastSentAt = &now
+				m.appendChannelLog(chName, entry)
+				mqttPub := m.mqtt
 				m.mu.Unlock()
+				if mqttPub != nil {
+					go mqttPub.PublishNotificationDispatch(string(evt.EventType()), key, chName, ch.Type(), msg, "sent", "", chResp)
+				}
 				if DebugMode {
 					log.Printf("[Notifications] Rule %q → channel %q: sent (subject: %s)", key, chName, subject)
 				}
@@ -1551,6 +1621,13 @@ func (m *NotificationManager) GetStats() NotificationStats {
 func (m *NotificationManager) GetHealth() map[string]interface{} {
 	stats := m.GetStats()
 
+	// Snapshot channels and config under the read lock so a concurrent Reload
+	// cannot swap them mid-iteration.
+	m.mu.RLock()
+	channels := m.channels
+	cfg := m.cfg
+	m.mu.RUnlock()
+
 	// Build per-channel detail including error rate and status.
 	type channelDetail struct {
 		Name         string  `json:"name"`
@@ -1563,10 +1640,10 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 		Status       string  `json:"status"` // "ok", "warning", "critical"
 	}
 
-	channels := make([]channelDetail, 0, len(m.channels))
+	chDetails := make([]channelDetail, 0, len(channels))
 	overallStatus := "ok"
 
-	for name, ch := range m.channels {
+	for name, ch := range channels {
 		sent := stats.ByChannel[name]
 		errs := stats.ByChannelErrors[name]
 		rl := stats.ByChannelRateLimited[name]
@@ -1591,7 +1668,7 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 		} else if chStatus == "warning" && overallStatus == "ok" {
 			overallStatus = "warning"
 		}
-		channels = append(channels, channelDetail{
+		chDetails = append(chDetails, channelDetail{
 			Name:         name,
 			Type:         ch.Type(),
 			Sent:         sent,
@@ -1604,19 +1681,50 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 	}
 
 	enabledRules := 0
-	for _, r := range m.cfg.Rules {
+	for _, r := range cfg.Rules {
 		if r.IsEnabled() {
 			enabledRules++
 		}
 	}
 
 	return map[string]interface{}{
-		"enabled":       m.cfg.Enabled,
-		"channels":      channels,
-		"total_rules":   len(m.cfg.Rules),
+		"enabled":       cfg.Enabled,
+		"channels":      chDetails,
+		"total_rules":   len(cfg.Rules),
 		"enabled_rules": enabledRules,
 		"stats":         stats,
 		"healthy":       overallStatus == "ok",
 		"status":        overallStatus,
 	}
+}
+
+// appendChannelLog appends an entry to the per-channel ring buffer (last 10).
+// Must be called with m.mu held (write lock).
+func (m *NotificationManager) appendChannelLog(chName string, entry ChannelLogEntry) {
+	if m.chanLogs == nil {
+		m.chanLogs = make(map[string][]ChannelLogEntry)
+	}
+	buf := m.chanLogs[chName]
+	buf = append(buf, entry)
+	if len(buf) > maxChannelLogEntries {
+		buf = buf[len(buf)-maxChannelLogEntries:]
+	}
+	m.chanLogs[chName] = buf
+}
+
+// GetChannelLog returns a copy of the response log for the named channel,
+// newest-first. Returns nil if the channel has no log entries.
+func (m *NotificationManager) GetChannelLog(chName string) []ChannelLogEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := m.chanLogs[chName]
+	if len(src) == 0 {
+		return nil
+	}
+	// Return newest-first copy.
+	out := make([]ChannelLogEntry, len(src))
+	for i, e := range src {
+		out[len(src)-1-i] = e
+	}
+	return out
 }

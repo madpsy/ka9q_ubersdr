@@ -45,17 +45,17 @@ func (e *EmailChannel) Type() string { return "email" }
 // prefix plus the first non-empty line of the rendered message, so each alert
 // gets a meaningful, dynamic subject without any per-rule configuration.
 // It retries once on a transient connection error.
-func (e *EmailChannel) Send(message string) error {
+func (e *EmailChannel) Send(message string) (ChannelResponse, error) {
 	return e.sendWithRetry(message, 2)
 }
 
-func (e *EmailChannel) sendWithRetry(message string, attemptsLeft int) error {
+func (e *EmailChannel) sendWithRetry(message string, attemptsLeft int) (ChannelResponse, error) {
 	if e.cfg.SMTPHost == "" {
-		return fmt.Errorf("email: smtp_host not configured")
+		return ChannelResponse{}, fmt.Errorf("email: smtp_host not configured")
 	}
 	recipients := e.recipients()
 	if len(recipients) == 0 {
-		return fmt.Errorf("email: no recipients configured")
+		return ChannelResponse{}, fmt.Errorf("email: no recipients configured")
 	}
 
 	port := e.cfg.SMTPPort
@@ -81,7 +81,12 @@ func (e *EmailChannel) sendWithRetry(message string, attemptsLeft int) error {
 		time.Sleep(2 * time.Second)
 		return e.sendWithRetry(message, attemptsLeft-1)
 	}
-	return err
+	if err != nil {
+		return ChannelResponse{Body: err.Error()}, err
+	}
+	// SMTP success — no HTTP status code; body summarises recipients.
+	return ChannelResponse{Body: fmt.Sprintf("delivered to %d recipient(s): %s",
+		len(recipients), strings.Join(recipients, ", "))}, nil
 }
 
 // deliver opens the SMTP connection (honouring the security mode), authenticates

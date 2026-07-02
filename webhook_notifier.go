@@ -97,21 +97,21 @@ func (w *WebhookChannel) Type() string { return "webhook" }
 
 // Send delivers message to the configured webhook URL. It retries once on
 // transient network errors (same pattern as EmailChannel).
-func (w *WebhookChannel) Send(message string) error {
+func (w *WebhookChannel) Send(message string) (ChannelResponse, error) {
 	return w.sendWithRetry(message, 2)
 }
 
-func (w *WebhookChannel) sendWithRetry(message string, attemptsLeft int) error {
-	err := w.doSend(message)
+func (w *WebhookChannel) sendWithRetry(message string, attemptsLeft int) (ChannelResponse, error) {
+	resp, err := w.doSend(message)
 	if err != nil && isTransientWebhookError(err) && attemptsLeft > 1 {
 		log.Printf("[Webhook:%s] send error (retrying): %v", w.name, err)
 		time.Sleep(2 * time.Second)
 		return w.sendWithRetry(message, attemptsLeft-1)
 	}
-	return err
+	return resp, err
 }
 
-func (w *WebhookChannel) doSend(message string) error {
+func (w *WebhookChannel) doSend(message string) (ChannelResponse, error) {
 	body, contentType := w.buildBody(message)
 
 	method := strings.ToUpper(w.cfg.WebhookMethod)
@@ -121,7 +121,7 @@ func (w *WebhookChannel) doSend(message string) error {
 
 	req, err := http.NewRequest(method, w.cfg.WebhookURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("webhook: build request: %w", err)
+		return ChannelResponse{}, fmt.Errorf("webhook: build request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", contentType)
@@ -144,20 +144,21 @@ func (w *WebhookChannel) doSend(message string) error {
 		req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
-	resp, err := w.client.Do(req)
+	httpResp, err := w.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("webhook: request to %s: %w", w.cfg.WebhookURL, err)
+		return ChannelResponse{}, fmt.Errorf("webhook: request to %s: %w", w.cfg.WebhookURL, err)
 	}
-	defer resp.Body.Close()
+	defer httpResp.Body.Close()
 
-	// Read up to 512 bytes of the response body for error messages.
-	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	// Read up to 512 bytes of the response body for error messages and logging.
+	snippet, _ := io.ReadAll(io.LimitReader(httpResp.Body, 512))
+	chResp := ChannelResponse{StatusCode: httpResp.StatusCode, Body: strings.TrimSpace(string(snippet))}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook: server returned %d: %s",
-			resp.StatusCode, strings.TrimSpace(string(snippet)))
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return chResp, fmt.Errorf("webhook: server returned %d: %s",
+			httpResp.StatusCode, chResp.Body)
 	}
-	return nil
+	return chResp, nil
 }
 
 // buildBody returns the request body bytes and Content-Type for the configured

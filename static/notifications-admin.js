@@ -2195,6 +2195,10 @@ function showChannelForm(editName) {
                     ruleItems +
                 '</div>';
             })() +
+            (isEdit ? '<div id="chResponseLog" style="margin-top:16px;padding-top:12px;border-top:1px solid #e8e8e8">' +
+                '<div style="font-size:0.8rem;font-weight:600;color:#555;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">&#x1F4E8; Recent Responses</div>' +
+                '<div id="chResponseLogTable" style="color:#888;font-size:0.8rem">Loading\u2026</div>' +
+            '</div>' : '') +
             '<div class="form-actions">' +
                 '<button type="button" class="btn" id="btnSaveChannel">Save Channel</button>' +
                 '<button type="button" class="btn btn-secondary" id="btnCancelChannel">Cancel</button>' +
@@ -2261,6 +2265,121 @@ function showChannelForm(editName) {
     renderTypeFields();
     el('chType').addEventListener('change', renderTypeFields);
     container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // ── Response log (edit mode only) ─────────────────────────────────────────
+    if (isEdit) {
+        var expandedAts = new Set();
+        var logTimer = null;
+
+        function renderChannelLog() {
+            var tableEl = el('chResponseLogTable');
+            if (!tableEl) { if (logTimer) clearInterval(logTimer); return; }
+
+            apiFetch('/admin/notifications/channel-log/' + encodeURIComponent(editName)).then(function(r) {
+                return r.json();
+            }).then(function(data) {
+                var tableEl2 = el('chResponseLogTable');
+                if (!tableEl2) { if (logTimer) clearInterval(logTimer); return; }
+                var entries = (data && data.log) || [];
+                if (entries.length === 0) {
+                    tableEl2.innerHTML = '<span style="color:#888;font-size:0.8rem">No send attempts recorded yet.</span>';
+                    return;
+                }
+
+                var statusColors = { sent: '#2e7d32', error: '#c62828', template_error: '#e65100' };
+                var statusLabels = { sent: 'Sent', error: 'Error', template_error: 'Template error' };
+
+                var tbody = document.createElement('tbody');
+                entries.forEach(function(e) {
+                    var d = new Date(e.at);
+                    var ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    var sc = statusColors[e.status] || '#555';
+                    var sl = statusLabels[e.status] || e.status;
+                    var hasDetail = (e.response && (e.response.body || e.response.status_code)) || e.error;
+                    var rowId = 'chLogDetail-' + editName.replace(/[^a-zA-Z0-9]/g, '_') + '-' + e.at.replace(/[^a-zA-Z0-9]/g, '_');
+                    var isExpanded = expandedAts.has(e.at);
+
+                    // Build detail content
+                    var detailLines = [];
+                    if (e.error) detailLines.push('Error: ' + e.error);
+                    if (e.response && e.response.status_code) detailLines.push('HTTP ' + e.response.status_code);
+                    if (e.response && e.response.body) detailLines.push(e.response.body);
+                    var detailText = detailLines.join('\n');
+
+                    var tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid #f0f0f0';
+                    tr.innerHTML =
+                        '<td style="padding:2px 6px;white-space:nowrap;color:#555;font-size:0.78rem">' + escHtml(ts) + '</td>' +
+                        '<td style="padding:2px 6px;font-size:0.78rem;color:#888">' + escHtml(e.event_type || '') + '</td>' +
+                        '<td style="padding:2px 6px;font-size:0.78rem;font-family:monospace">' + escHtml(e.rule || '') + '</td>' +
+                        '<td style="padding:2px 6px;font-weight:600;color:' + sc + ';font-size:0.78rem">' + escHtml(sl) + '</td>' +
+                        '<td style="padding:2px 6px;white-space:nowrap">' +
+                            (hasDetail
+                                ? '<button class="btn btn-xs btn-secondary chLog-view" data-target="' + rowId + '" data-at="' + escHtml(e.at) + '" style="font-size:0.72rem;padding:1px 6px">' + (isExpanded ? 'Hide' : 'View') + '</button>' +
+                                  ' <button class="btn btn-xs btn-secondary chLog-copy" data-copy="' + escHtml(detailText) + '" title="Copy" style="font-size:0.72rem;padding:1px 5px">\uD83D\uDCCB</button>'
+                                : '<span style="color:#bbb">\u2014</span>') +
+                        '</td>';
+                    tbody.appendChild(tr);
+
+                    if (hasDetail) {
+                        var detailTr = document.createElement('tr');
+                        detailTr.id = rowId;
+                        detailTr.style.display = isExpanded ? 'table-row' : 'none';
+                        detailTr.innerHTML =
+                            '<td colspan="5" style="padding:4px 6px 8px">' +
+                                '<pre style="margin:0;font-size:0.72rem;background:#f8f8f8;border:1px solid #e0e0e0;border-radius:3px;padding:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
+                                escHtml(detailText) +
+                                '</pre>' +
+                            '</td>';
+                        tbody.appendChild(detailTr);
+                    }
+                });
+
+                var table = document.createElement('table');
+                table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.8rem';
+                table.innerHTML =
+                    '<thead><tr style="color:#888;font-size:0.75rem;border-bottom:1px solid #e0e0e0">' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Time</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Event</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Rule</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Status</th>' +
+                        '<th style="padding:2px 6px;text-align:left;font-weight:600">Response</th>' +
+                    '</thead>';
+                table.appendChild(tbody);
+                tableEl2.innerHTML = '';
+                tableEl2.appendChild(table);
+
+                // Wire View/Hide buttons
+                tableEl2.querySelectorAll('button.chLog-view').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var target = document.getElementById(btn.getAttribute('data-target'));
+                        var at = btn.getAttribute('data-at');
+                        if (!target) return;
+                        var visible = target.style.display !== 'none';
+                        target.style.display = visible ? 'none' : 'table-row';
+                        btn.textContent = visible ? 'View' : 'Hide';
+                        if (visible) { expandedAts.delete(at); } else { expandedAts.add(at); }
+                    });
+                });
+
+                // Copy buttons
+                tableEl2.querySelectorAll('button.chLog-copy').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        navigator.clipboard.writeText(btn.getAttribute('data-copy')).then(function() {
+                            btn.textContent = '\u2705';
+                            setTimeout(function() { btn.textContent = '\uD83D\uDCCB'; }, 1500);
+                        }).catch(function() {
+                            btn.textContent = '\u274C';
+                            setTimeout(function() { btn.textContent = '\uD83D\uDCCB'; }, 1500);
+                        });
+                    });
+                });
+            }).catch(function() {});
+        }
+
+        renderChannelLog();
+        logTimer = setInterval(renderChannelLog, 3000);
+    }
 
     el('btnCancelChannel').addEventListener('click', function() {
         container.style.display = 'none';

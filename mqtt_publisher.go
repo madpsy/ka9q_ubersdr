@@ -33,6 +33,7 @@ type MQTTPublisher struct {
 	dxClusterWsHandler  *DXClusterWebSocketHandler // may be nil; used for sessions publishing
 	geoIPService        *GeoIPService              // may be nil; used for sessions publishing
 	multiDecoder        *MultiDecoder              // may be nil; used for WSPR phone prediction publishing
+	notifManager        *NotificationManager       // may be nil; used for notifications health publishing
 
 	// Stored when StartPublisher is called so late-registered setters can
 	// launch their own goroutines after startup.
@@ -1977,6 +1978,142 @@ func (mp *MQTTPublisher) publishDSPHealthOnce(appConfig *Config) {
 	go func() {
 		if token.Wait() && token.Error() != nil {
 			mp.logPublishError("MQTT ERROR: Failed to publish DSP health to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// SetNotifManager wires the notification manager into the MQTT publisher so that
+// notification dispatches and health stats are published to MQTT.
+// If StartPublisher has already been called, the health goroutine is launched immediately.
+func (mp *MQTTPublisher) SetNotifManager(nm *NotificationManager) {
+	mp.notifManager = nm
+	if mp.publisherCtx != nil {
+		go mp.startNotificationsHealthPublisher(mp.publisherCtx)
+	}
+}
+
+// PublishNotificationDispatch publishes a single notification dispatch event to MQTT.
+// Called from NotificationManager after each channel send attempt (success or error).
+// Topic: {prefix}/notifications
+// Payload includes event_type, rule, channel_name, channel_type, message, status, timestamp.
+func (mp *MQTTPublisher) PublishNotificationDispatch(eventType, ruleName, channelName, channelType, message, status string, errMsg string, resp ChannelResponse) {
+	if mp == nil || !mp.isConnected() {
+		return
+	}
+
+	topic := fmt.Sprintf("%s/notifications", mp.config.TopicPrefix)
+
+	payload := map[string]interface{}{
+		"timestamp":    time.Now().Unix(),
+		"event_type":   eventType,
+		"rule":         ruleName,
+		"channel_name": channelName,
+		"channel_type": channelType,
+		"message":      message,
+		"status":       status, // "sent", "error", "rate_limited", "template_error"
+	}
+	if errMsg != "" {
+		payload["error"] = errMsg
+	}
+	if resp.StatusCode != 0 {
+		payload["response_status_code"] = resp.StatusCode
+	}
+	if resp.Body != "" {
+		payload["response_body"] = resp.Body
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		mp.logPublishError("MQTT ERROR: Failed to marshal notification dispatch payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, false, data) // never retain — events are ephemeral
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish notification dispatch to %s: %v", topic, token.Error())
+		} else {
+			mp.mu.Lock()
+			mp.messagesSent++
+			mp.lastMessageTime = time.Now()
+			mp.mu.Unlock()
+		}
+	}()
+}
+
+// startNotificationsHealthPublisher publishes notification health stats every 60 seconds.
+// Topic: {prefix}/notifications/health
+// Payload mirrors the /admin/notifications/health endpoint: enabled, status, channels, stats.
+func (mp *MQTTPublisher) startNotificationsHealthPublisher(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	log.Printf("MQTT: Notifications health publisher started (60s interval)")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			mp.publishNotificationsHealthOnce()
+		}
+	}
+}
+
+// publishNotificationsHealthOnce performs a single notifications health publish.
+func (mp *MQTTPublisher) publishNotificationsHealthOnce() {
+	if !mp.isConnected() || mp.notifManager == nil {
+		return
+	}
+
+	health := mp.notifManager.GetHealth()
+	stats := mp.notifManager.GetStats()
+
+	// Build a flat stats map for easy consumption
+	payload := map[string]interface{}{
+		"timestamp":               time.Now().Unix(),
+		"enabled":                 health["enabled"],
+		"status":                  health["status"],
+		"healthy":                 health["healthy"],
+		"total_rules":             health["total_rules"],
+		"enabled_rules":           health["enabled_rules"],
+		"total_sent":              stats.TotalSent,
+		"total_errors":            stats.TotalErrors,
+		"total_rate_limited":      stats.TotalRateLimited,
+		"total_published":         stats.TotalPublished,
+		"total_matched":           stats.TotalMatched,
+		"by_channel":              stats.ByChannel,
+		"by_channel_errors":       stats.ByChannelErrors,
+		"by_channel_rate_limited": stats.ByChannelRateLimited,
+		"by_rule":                 stats.ByRule,
+		"by_rule_errors":          stats.ByRuleErrors,
+		"by_rule_rate_limited":    stats.ByRuleRateLimited,
+	}
+	if stats.LastSentAt != nil {
+		payload["last_sent_at"] = stats.LastSentAt.Unix()
+	}
+	if stats.LastError != "" {
+		payload["last_error"] = stats.LastError
+	}
+	if stats.LastErrorAt != nil {
+		payload["last_error_at"] = stats.LastErrorAt.Unix()
+	}
+
+	topic := fmt.Sprintf("%s/notifications/health", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		mp.logPublishError("MQTT ERROR: Failed to marshal notifications health payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			mp.logPublishError("MQTT ERROR: Failed to publish notifications health to %s: %v", topic, token.Error())
 		} else {
 			mp.mu.Lock()
 			mp.messagesSent++

@@ -49,11 +49,11 @@ type telegramAPIResponse struct {
 
 // Send delivers message to the configured Telegram chat.
 // It retries once on a transient HTTP error (5xx) with a 2-second delay.
-func (t *TelegramChannel) Send(message string) error {
+func (t *TelegramChannel) Send(message string) (ChannelResponse, error) {
 	return t.sendWithRetry(message, 2)
 }
 
-func (t *TelegramChannel) sendWithRetry(message string, attemptsLeft int) error {
+func (t *TelegramChannel) sendWithRetry(message string, attemptsLeft int) (ChannelResponse, error) {
 	parseMode := t.cfg.ParseMode
 	if parseMode == "" {
 		parseMode = "HTML"
@@ -68,7 +68,7 @@ func (t *TelegramChannel) sendWithRetry(message string, attemptsLeft int) error 
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("telegram: marshal error: %w", err)
+		return ChannelResponse{}, fmt.Errorf("telegram: marshal error: %w", err)
 	}
 
 	url := t.apiBase + "/sendMessage"
@@ -79,11 +79,16 @@ func (t *TelegramChannel) sendWithRetry(message string, attemptsLeft int) error 
 			time.Sleep(2 * time.Second)
 			return t.sendWithRetry(message, attemptsLeft-1)
 		}
-		return fmt.Errorf("telegram: HTTP error: %w", err)
+		return ChannelResponse{}, fmt.Errorf("telegram: HTTP error: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	snippet := string(respBody)
+	if len(snippet) > 512 {
+		snippet = snippet[:512]
+	}
+	chResp := ChannelResponse{StatusCode: resp.StatusCode, Body: snippet}
 
 	// Retry on 5xx
 	if resp.StatusCode >= 500 && attemptsLeft > 1 {
@@ -94,12 +99,12 @@ func (t *TelegramChannel) sendWithRetry(message string, attemptsLeft int) error 
 
 	var apiResp telegramAPIResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return fmt.Errorf("telegram: unexpected response (status %d): %s", resp.StatusCode, string(respBody))
+		return chResp, fmt.Errorf("telegram: unexpected response (status %d): %s", resp.StatusCode, snippet)
 	}
 
 	if !apiResp.OK {
-		return fmt.Errorf("telegram API error: %s", apiResp.Description)
+		return chResp, fmt.Errorf("telegram API error: %s", apiResp.Description)
 	}
 
-	return nil
+	return chResp, nil
 }

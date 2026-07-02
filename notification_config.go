@@ -462,9 +462,9 @@ func applyChannelDefaults(ch *NotificationChannelConfig) {
 	if ch.ParseMode == "" {
 		ch.ParseMode = "HTML"
 	}
-	if ch.RateLimitMinutes == 0 {
-		ch.RateLimitMinutes = 1
-	}
+	// RateLimitMinutes: 0 means "no rate limit" (unlimited). Do not apply a
+	// default here — the user may have explicitly set it to 0. The rate limiter
+	// already treats 0 as unlimited (allow() returns true when limitMinutes <= 0).
 	if ch.Type == "email" {
 		if ch.SMTPPort == 0 {
 			ch.SMTPPort = 587

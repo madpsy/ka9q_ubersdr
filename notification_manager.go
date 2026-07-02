@@ -739,6 +739,13 @@ func (m *NotificationManager) rateSubject(evt NotificationEvent) string {
 	case ServerStartupEvent:
 		return "startup"
 	case ChatEvent:
+		if e.Action == ChatActionMessage {
+			// Each message is unique content — include the text so every message
+			// gets its own rate-limit bucket and none are suppressed by the channel
+			// rate limiter when rate_limit_minutes is 0.
+			return fmt.Sprintf("chat:message:%s:%s", e.Username, e.Message)
+		}
+		// joined/left: bucket per user+action so rapid rejoin spam is suppressed.
 		return fmt.Sprintf("chat:%s:%s", e.Action, e.Username)
 	default:
 		return "unknown"

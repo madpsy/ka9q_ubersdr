@@ -2144,6 +2144,8 @@ function showChannelForm(editName) {
     });
 
     el('btnSaveChannel').addEventListener('click', async function() {
+        // Clear any previous validation errors before re-validating.
+        el('channelsAlerts').innerHTML = '';
         const name = el('chName').value.trim();
         if (!name) { showAlert(el('channelsAlerts'), 'error', 'Channel name is required.', false); return; }
         if (!/^[a-zA-Z0-9_]+$/.test(name)) { showAlert(el('channelsAlerts'), 'error', 'Channel name must be letters, numbers, underscores only.', false); return; }
@@ -2527,6 +2529,8 @@ function showRuleForm(editIdx) {
     });
 
     el('btnSaveRule').addEventListener('click', async function() {
+        // Clear any previous validation errors before re-validating.
+        el('rulesAlerts').innerHTML = '';
         const name = el('ruleName').value.trim();
         if (!name) { showAlert(el('rulesAlerts'), 'error', 'Rule name is required.', false); return; }
 

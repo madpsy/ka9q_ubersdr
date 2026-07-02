@@ -553,6 +553,7 @@ async function loadConfig() {
         el('masterEnable').checked = localConfig.enabled;
         renderChannels();
         renderRules();
+        if (typeof renderFlowDiagram === 'function') renderFlowDiagram();
     } catch (err) {
         if (err.message === 'Redirecting to login') return;
         console.error('loadConfig error:', err);
@@ -744,6 +745,7 @@ async function saveConfig(alertContainer) {
 
         if (resp.ok && data.ok) {
             showAlert(alertContainer, 'success', data.message || 'Configuration saved.');
+            if (typeof renderFlowDiagram === 'function') renderFlowDiagram();
             return true;
         } else {
             const issues = data.issues ? '\n' + data.issues.join('\n') : '';

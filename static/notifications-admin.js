@@ -2163,10 +2163,6 @@ function showChannelForm(editName) {
                 '<input type="number" id="chRateLimit" value="' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + '" min="0" max="1440">' +
                 '<div class="form-hint">Suppress duplicate alerts within this window. 0 = no limit.</div>' +
             '</div>' +
-            '<div class="form-actions">' +
-                '<button type="button" class="btn" id="btnSaveChannel">Save Channel</button>' +
-                '<button type="button" class="btn btn-secondary" id="btnCancelChannel">Cancel</button>' +
-            '</div>' +
             (function() {
                 if (!isEdit) return '';
                 var chName = editName;
@@ -2199,6 +2195,10 @@ function showChannelForm(editName) {
                     ruleItems +
                 '</div>';
             })() +
+            '<div class="form-actions">' +
+                '<button type="button" class="btn" id="btnSaveChannel">Save Channel</button>' +
+                '<button type="button" class="btn btn-secondary" id="btnCancelChannel">Cancel</button>' +
+            '</div>' +
         '</div>';
 
     // Render the fields for the currently-selected type, plus its info panel.

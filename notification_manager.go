@@ -1289,9 +1289,15 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 	case ChatEvent:
 		switch e.Action {
 		case ChatActionJoined:
-			return fmt.Sprintf("💬 %s joined chat (%s)", e.Username, e.ClientIP)
+			if e.ClientIP != "" {
+				return fmt.Sprintf("💬 %s joined chat (%s)", e.Username, e.ClientIP)
+			}
+			return fmt.Sprintf("💬 %s joined chat", e.Username)
 		case ChatActionLeft:
-			return fmt.Sprintf("💬 %s left chat (%s)", e.Username, e.ClientIP)
+			if e.ClientIP != "" {
+				return fmt.Sprintf("💬 %s left chat (%s)", e.Username, e.ClientIP)
+			}
+			return fmt.Sprintf("💬 %s left chat", e.Username)
 		case ChatActionMessage:
 			return fmt.Sprintf("💬 %s: %s", e.Username, e.Message)
 		}

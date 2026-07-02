@@ -2271,6 +2271,9 @@ function showChannelForm(editName) {
         var expandedAts = new Set();
         var logTimer = null;
 
+        // Track the last rendered state so we can skip no-op redraws.
+        var lastLogKey = null;
+
         function renderChannelLog() {
             var tableEl = el('chResponseLogTable');
             if (!tableEl) { if (logTimer) clearInterval(logTimer); return; }
@@ -2281,6 +2284,14 @@ function showChannelForm(editName) {
                 var tableEl2 = el('chResponseLogTable');
                 if (!tableEl2) { if (logTimer) clearInterval(logTimer); return; }
                 var entries = (data && data.log) || [];
+
+                // Build a cheap fingerprint: join all entry timestamps + statuses.
+                // If nothing changed since the last render, skip the DOM update entirely
+                // to prevent the table from flashing on every poll tick.
+                var key = entries.map(function(e) { return e.at + ':' + e.status; }).join('|');
+                if (key === lastLogKey) return;
+                lastLogKey = key;
+
                 if (entries.length === 0) {
                     tableEl2.innerHTML = '<span style="color:#888;font-size:0.8rem">No send attempts recorded yet.</span>';
                     return;

@@ -1020,7 +1020,7 @@ function renderChannels() {
             : '';
         return '<div class="item-card" data-channel="' + escHtml(name) + '">' +
             '<div class="item-card-header">' +
-                '<div>' +
+                '<div class="item-card-info">' +
                     '<div class="item-card-title">&#x1F4E1; ' + escHtml(name) + '</div>' +
                     '<div class="item-card-meta">' +
                         '<span class="badge badge-blue">' + escHtml(ch.type) + '</span>' +

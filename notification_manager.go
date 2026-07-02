@@ -592,6 +592,9 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 	m.channels = newChannels
 	m.tmpls = newTmpls
 	m.blocked = newBlocked
+	// chanLogs is intentionally preserved across reloads so the response history
+	// survives a config save. Entries for channels that no longer exist are
+	// harmless (they will never be queried) and are cheap to keep.
 	m.mu.Unlock()
 
 	// Sync bot command listeners with the new config (start/stop as needed).
@@ -1696,6 +1699,15 @@ func (m *NotificationManager) GetHealth() map[string]interface{} {
 		"healthy":       overallStatus == "ok",
 		"status":        overallStatus,
 	}
+}
+
+// AppendTestChannelLog records a manual test-send result in the per-channel
+// ring buffer. It acquires the write lock itself, unlike appendChannelLog which
+// requires the caller to hold it.
+func (m *NotificationManager) AppendTestChannelLog(chName string, entry ChannelLogEntry) {
+	m.mu.Lock()
+	m.appendChannelLog(chName, entry)
+	m.mu.Unlock()
 }
 
 // appendChannelLog appends an entry to the per-channel ring buffer (last 10).

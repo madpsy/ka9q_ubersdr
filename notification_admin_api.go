@@ -233,6 +233,25 @@ func handleNotificationsTest(w http.ResponseWriter, r *http.Request, nm *Notific
 	chResp, sendErr := ch.Send(msg)
 	durationMs := time.Since(start).Milliseconds()
 
+	// ── Log to channel ring buffer (named channels only, not ad-hoc) ─────────
+	if isNamed && nm != nil {
+		status := "sent"
+		errMsg := ""
+		if sendErr != nil {
+			status = "error"
+			errMsg = sendErr.Error()
+		}
+		entry := ChannelLogEntry{
+			At:        time.Now(),
+			Rule:      "(test)",
+			EventType: "test",
+			Status:    status,
+			ErrorMsg:  errMsg,
+			Response:  chResp,
+		}
+		nm.AppendTestChannelLog(channelName, entry)
+	}
+
 	// ── Build response ───────────────────────────────────────────────────────
 	type testResponse struct {
 		OK           bool   `json:"ok"`

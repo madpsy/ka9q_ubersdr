@@ -387,10 +387,14 @@ body {
 
 .item-card-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    flex-wrap: wrap;
+}
+
+.item-card-info {
+    flex: 1;
+    min-width: 0;
 }
 
 .item-card-title {
@@ -410,6 +414,7 @@ body {
     display: flex;
     gap: 6px;
     flex-shrink: 0;
+    align-self: flex-start;
 }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */

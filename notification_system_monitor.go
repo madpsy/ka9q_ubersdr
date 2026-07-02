@@ -599,7 +599,8 @@ func BuildSystemHealthProbes(
 			if tempC > cpuTempThreshold {
 				return false, []string{fmt.Sprintf("CPU temperature %.1f°C exceeds threshold %.0f°C", tempC, cpuTempThreshold)}
 			}
-			return true, nil
+			// Always include current reading so recovery notifications show the temp.
+			return true, []string{fmt.Sprintf("%.1f°C (threshold %.0f°C)", tempC, cpuTempThreshold)}
 		},
 	})
 

@@ -64,14 +64,25 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 		tempStatus, _ := load["cpu_temp_status"].(string)
 		tempAvail, _ := load["cpu_temp_available"].(bool)
 		tempC, _ := load["cpu_temp_c"].(float64)
+		loadStatus, _ := load["status"].(string) // "ok", "warning", "critical" — set by getSystemLoad()
 		load1, _ := load["load_1min"].(string)
 		load5, _ := load["load_5min"].(string)
 		load15, _ := load["load_15min"].(string)
 		cores, _ := load["cpu_cores"].(int)
 
-		ok := tempStatus == "ok" || tempStatus == "unknown" || !tempAvail
-		warn := tempStatus == "warning"
+		// Combine load status and temp status: worst of the two wins.
+		isCritical := tempStatus == "critical" || loadStatus == "critical"
+		isWarn := !isCritical && (tempStatus == "warning" || loadStatus == "warning")
+		isOK := !isCritical && !isWarn
+
 		var issues []string
+		// Load issues (load status is based on 15-min average vs core count).
+		if loadStatus == "critical" {
+			issues = append(issues, fmt.Sprintf("Load average critical: %s / %s / %s (%d cores, threshold %.0f×)", load1, load5, load15, cores, 2.0))
+		} else if loadStatus == "warning" {
+			issues = append(issues, fmt.Sprintf("Load average high: %s / %s / %s (%d cores, threshold %.0f×)", load1, load5, load15, cores, 1.0))
+		}
+		// CPU temp issues.
 		if tempStatus == "critical" {
 			issues = append(issues, fmt.Sprintf("CPU temperature critical: %.1f°C (threshold %.0f°C)", tempC, configuredThreshold))
 		} else if tempStatus == "warning" {
@@ -85,13 +96,13 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 		if tempAvail {
 			detail += fmt.Sprintf(" · CPU: %.1f°C", tempC)
 		}
-		// Prepend load detail as first issue line (informational, not a problem)
+		// Prepend load detail as first issue line (informational summary).
 		issues = append([]string{detail}, issues...)
 
 		items = append(items, item{
 			name:   "System Load",
-			ok:     ok && !warn,
-			warn:   warn,
+			ok:     isOK,
+			warn:   isWarn,
 			issues: issues,
 		})
 	}

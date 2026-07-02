@@ -1379,6 +1379,9 @@ func (m *NotificationManager) defaultMessage(evt NotificationEvent) string {
 
 	case SystemMonitorEvent:
 		if e.Healthy {
+			if len(e.Issues) > 0 {
+				return fmt.Sprintf("✅ %s recovered: %s", e.Component, strings.Join(e.Issues, "; "))
+			}
 			return fmt.Sprintf("✅ %s recovered", e.Component)
 		}
 		issues := strings.Join(e.Issues, "; ")

@@ -1265,6 +1265,7 @@ function renderTelegramManagePanel(name, panel) {
                 '<strong style="color:#1565c0">Bot Management</strong>' +
                 '<span style="flex:1"></span>' +
                 '<button class="btn btn-sm btn-secondary" id="tgMgr-refresh-' + escHtml(name) + '">&#x1F504; Refresh</button>' +
+                '<button class="btn btn-sm btn-secondary" id="tgMgr-close-' + escHtml(name) + '" title="Close">&#x2715;</button>' +
             '</div>' +
             '<div id="tgMgr-info-' + escHtml(name) + '">' +
                 '<div class="loading-overlay" style="padding:8px 0"><div class="spinner"></div> Loading bot &amp; chat info\u2026</div>' +
@@ -1348,11 +1349,16 @@ function renderTelegramManagePanel(name, panel) {
                 '</div>' +
             '</div>' +
             '<div id="tgMgr-alert-' + escHtml(name) + '" style="margin-top:10px"></div>' +
+            '<div style="margin-top:12px;text-align:right">' +
+                '<button class="btn btn-sm btn-secondary" id="tgMgr-closeBottom-' + escHtml(name) + '">&#x2715; Close</button>' +
+            '</div>' +
         '</div>';
 
     loadTelegramInfo(name);
 
     el('tgMgr-refresh-' + name).addEventListener('click', function() { loadTelegramInfo(name); });
+    el('tgMgr-close-' + name).addEventListener('click', function() { toggleTelegramManagePanel(name); });
+    el('tgMgr-closeBottom-' + name).addEventListener('click', function() { toggleTelegramManagePanel(name); });
 
     el('tgMgr-setTitle-' + name).addEventListener('click', async function() {
         var title = el('tgMgr-title-' + name).value.trim();

@@ -947,13 +947,48 @@ function renderChannels() {
         const sent      = byCh[name]    || 0;
         const errors    = byChErr[name]  || 0;
         const rateLim   = byChRL[name]   || 0;
+        const ruleCount = (localConfig.rules || []).filter(function(r) {
+            return Array.isArray(r.channels) && r.channels.indexOf(name) >= 0;
+        }).length;
         const statsBadges =
             '<span class="badge badge-green" title="Messages sent">&#x2709; ' + sent + ' sent</span>' +
             (errors  > 0 ? '<span class="badge badge-red"   title="Send errors">&#x26A0; '    + errors  + ' err</span>'   : '') +
-            (rateLim > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>'    : '');
+            (rateLim > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>'    : '') +
+            (ruleCount > 0 ? '<span class="badge badge-grey" title="Notification rules using this channel">&#x1F4CB; Rules: ' + ruleCount + '</span>' : '');
         const manageBtn = (ch.type === 'telegram')
             ? '<button class="btn btn-sm btn-secondary btn-manage-channel" data-name="' + escHtml(name) + '">&#x1F916; Manage</button>'
             : '';
+        // Build the linked rules section for this channel.
+        const linkedRules = (localConfig.rules || []).filter(function(r) {
+            return Array.isArray(r.channels) && r.channels.indexOf(name) >= 0;
+        });
+        let rulesSection = '';
+        if (linkedRules.length > 0) {
+            const ruleItems = linkedRules.map(function(r) {
+                const enabled = r.enabled !== false;
+                const enabledBadge = enabled
+                    ? '<span class="badge badge-green" style="font-size:0.72rem">enabled</span>'
+                    : '<span class="badge badge-grey" style="font-size:0.72rem">disabled</span>';
+                // Show all channels this rule sends to, highlighting the current one.
+                const chList = (r.channels || []).map(function(c) {
+                    return c === name
+                        ? '<strong>' + escHtml(c) + '</strong>'
+                        : escHtml(c);
+                }).join(', ');
+                return '<div style="display:flex;align-items:baseline;gap:6px;padding:3px 0;border-bottom:1px solid #f0f0f0;font-size:0.8rem">' +
+                    enabledBadge +
+                    '<span style="font-weight:500">' + escHtml(r.name || '(unnamed)') + '</span>' +
+                    '<span class="badge badge-blue" style="font-size:0.72rem">' + escHtml(r.event || '') + '</span>' +
+                    '<span style="color:#888;font-size:0.75rem">\u2192 ' + chList + '</span>' +
+                '</div>';
+            }).join('');
+            rulesSection =
+                '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #e8e8e8">' +
+                    '<div style="font-size:0.78rem;font-weight:600;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em">&#x1F4CB; Rules (' + linkedRules.length + ')</div>' +
+                    ruleItems +
+                '</div>';
+        }
+
         return '<div class="item-card" data-channel="' + escHtml(name) + '">' +
             '<div class="item-card-header">' +
                 '<div>' +
@@ -972,6 +1007,7 @@ function renderChannels() {
                     '<button class="btn btn-sm btn-danger btn-delete-channel" data-name="' + escHtml(name) + '">&#x1F5D1;&#xFE0F; Delete</button>' +
                 '</div>' +
             '</div>' +
+            rulesSection +
             '<div class="tg-manage-panel" id="tgManage-' + escHtml(name) + '" style="display:none"></div>' +
         '</div>';
     }).join('');

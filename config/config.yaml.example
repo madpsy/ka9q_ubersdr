@@ -815,7 +815,7 @@ chat:
   # the first thing a new user sees — right before live messages start.
   # Sent under the admin callsign (admin->callsign). Leave empty to disable.
   # Default: "" (no welcome message)
-  welcome_message: "Welcome! Please keep chat friendly and on-topic. Enjoy the SDR!"
+  welcome_message: "Welcome! Please keep chat friendly and on-topic. Enjoy UberSDR!"
 
 # Space Weather settings
 spaceweather:

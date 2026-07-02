@@ -344,12 +344,11 @@ func (l *TelegramBotListener) handleBanned(chatID int64, args string) (string, s
 		if reason == "" {
 			reason = "no reason"
 		}
-		fmt.Fprintf(&sb, "%d. %s — %s (%s)%s\n",
+		fmt.Fprintf(&sb, "%d. <code>%s</code> — %s (%s)\n",
 			i+1,
-			l.ipLookupLink(b.IP),
+			html.EscapeString(b.IP),
 			html.EscapeString(reason),
 			html.EscapeString(expiry),
-			l.ipUnbanLink(b.IP),
 		)
 	}
 
@@ -1089,8 +1088,7 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 		// HTML parser (e.g. country names like "Bosnia & Herzegovina").
 		var suffix strings.Builder
 		if g.clientIP != "" {
-			suffix.WriteString(l.ipLookupLink(g.clientIP))
-			suffix.WriteString(l.ipBanLink(g.clientIP))
+			suffix.WriteString(html.EscapeString(g.clientIP))
 		}
 		if g.country != "" {
 			flag := countryCodeToFlag(g.countryCC)
@@ -1580,8 +1578,8 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 				apiResp, apiOK := l.sendMessage(chatID, msg)
 				return msg, apiResp, apiOK
 			}
-			msg := fmt.Sprintf("✅ Banned <b>%s</b> (%s%s) — reason: %s\nKicked %d session(s), %d DX connection(s)",
-				html.EscapeString(username), l.ipLookupLink(ip), ipSource, html.EscapeString(reason),
+			msg := fmt.Sprintf("✅ Banned <b>%s</b> (<code>%s</code>%s) — reason: %s\nKicked %d session(s), %d DX connection(s)",
+				html.EscapeString(username), html.EscapeString(ip), ipSource, html.EscapeString(reason),
 				sessKicked, dxKicked)
 			if msgsRemoved > 0 {
 				msg += fmt.Sprintf(", removed %d chat message(s)", msgsRemoved)
@@ -1601,8 +1599,8 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 			apiResp, apiOK := l.sendMessage(chatID, msg)
 			return msg, apiResp, apiOK
 		}
-		msg := fmt.Sprintf("✅ Banned <b>%s</b> (%s%s) — reason: %s",
-			html.EscapeString(username), l.ipLookupLink(ip), ipSource, html.EscapeString(reason))
+		msg := fmt.Sprintf("✅ Banned <b>%s</b> (<code>%s</code>%s) — reason: %s",
+			html.EscapeString(username), html.EscapeString(ip), ipSource, html.EscapeString(reason))
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
@@ -1619,10 +1617,9 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 			if ip == "" {
 				ip = "unknown"
 			}
-			fmt.Fprintf(&sb, "• <b>%s</b> — %s%s\n",
+			fmt.Fprintf(&sb, "• <b>%s</b> — <code>%s</code>\n",
 				html.EscapeString(u.Username),
-				l.ipLookupLink(ip),
-				l.ipBanLink(ip),
+				html.EscapeString(ip),
 			)
 		}
 		sb.WriteString("\n")

@@ -76,9 +76,9 @@ func (l *TelegramBotListener) handleCW(chatID int64, args string) (string, strin
 
 		freqMHz := freqHz / 1_000_000.0
 
-		// Line 1: callsign (tappable /qrz link if enabled), freq, WPM, SNR, comment, band
+		// Line 1: callsign, freq, WPM, SNR, comment, band
 		line1 := fmt.Sprintf("<b>%s</b>  %.3f MHz  %d WPM  %d dB",
-			l.callsignQRZLink(dxCall), freqMHz, wpm, snr)
+			html.EscapeString(dxCall), freqMHz, wpm, snr)
 		if comment != "" {
 			line1 += "  " + html.EscapeString(comment)
 		}
@@ -211,7 +211,7 @@ func (l *TelegramBotListener) handleVoice(chatID int64, args string) (string, st
 			// DX callsign enrichment (from DX cluster).
 			if act.DXCallsign != "" {
 				flag := countryCodeToFlag(act.DXCountryCode)
-				line += "  " + l.callsignQRZLink(act.DXCallsign)
+				line += "  <b>" + html.EscapeString(act.DXCallsign) + "</b>"
 				if act.DXCountry != "" {
 					if flag != "" {
 						line += " " + flag
@@ -235,60 +235,4 @@ func pluralS(n int) string {
 		return ""
 	}
 	return "s"
-}
-
-// callsignQRZLink renders a callsign as a tappable /qrz command only when the
-// /qrz command is enabled for this listener. Falls back to plain text.
-// In Telegram's HTML parse mode, /command text is rendered as a tappable link
-// that sends the command to the bot when tapped.
-func (l *TelegramBotListener) callsignQRZLink(callsign string) string {
-	if callsign == "" {
-		return ""
-	}
-	if l.commandEnabled("qrz") {
-		return "/qrz " + html.EscapeString(callsign)
-	}
-	return html.EscapeString(callsign)
-}
-
-// ipLookupLink renders an IP address as a tappable /ip command only when the
-// /ip command is enabled for this listener. Falls back to <code>ip</code>.
-// Only plain IP addresses (not CIDRs) are linked — CIDRs are always plain.
-func (l *TelegramBotListener) ipLookupLink(ip string) string {
-	if ip == "" {
-		return ""
-	}
-	// Only link plain IPs, not CIDR ranges.
-	if strings.Contains(ip, "/") {
-		return "<code>" + html.EscapeString(ip) + "</code>"
-	}
-	if l.commandEnabled("ip") {
-		return "/ip " + html.EscapeString(ip)
-	}
-	return "<code>" + html.EscapeString(ip) + "</code>"
-}
-
-// ipBanLink returns a tappable /banned ban <ip> command when /banned is both
-// enabled and write-enabled for this listener, otherwise returns empty string.
-// Only plain IPs are linkable (not CIDRs).
-func (l *TelegramBotListener) ipBanLink(ip string) string {
-	if ip == "" || strings.Contains(ip, "/") {
-		return ""
-	}
-	if l.commandEnabled("banned") && l.commandWriteEnabled("banned") {
-		return " [/banned ban " + html.EscapeString(ip) + "]"
-	}
-	return ""
-}
-
-// ipUnbanLink returns a tappable /banned unban <ip> command when /banned is
-// both enabled and write-enabled for this listener, otherwise returns empty string.
-func (l *TelegramBotListener) ipUnbanLink(ip string) string {
-	if ip == "" {
-		return ""
-	}
-	if l.commandEnabled("banned") && l.commandWriteEnabled("banned") {
-		return " [/banned unban " + html.EscapeString(ip) + "]"
-	}
-	return ""
 }

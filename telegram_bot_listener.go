@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -62,15 +63,18 @@ type tgChatMember struct {
 //	// … later …
 //	listener.Stop()    // cancels context, goroutine exits cleanly
 type TelegramBotListener struct {
-	channelName string
-	cfg         NotificationChannelConfig
-	sessions    *SessionManager
-	rotctl      *RotctlAPIHandler  // nil if rotator not enabled
-	antSwitch   *AntSwitchHandler  // nil if antenna switch not enabled
-	noiseFloor  *NoiseFloorMonitor // nil if noise floor monitoring not enabled
-	pskRank     *PSKRankFetcher    // nil if PSK reporter not enabled
-	wsprRank    *WSPRRankFetcher   // nil if WSPR rank not enabled
-	rbnStore    *RBNDataStore      // nil if CW skimmer / RBN not enabled
+	channelName  string
+	cfg          NotificationChannelConfig
+	sessions     *SessionManager
+	rotctl       *RotctlAPIHandler    // nil if rotator not enabled
+	antSwitch    *AntSwitchHandler    // nil if antenna switch not enabled
+	noiseFloor   *NoiseFloorMonitor   // nil if noise floor monitoring not enabled
+	pskRank      *PSKRankFetcher      // nil if PSK reporter not enabled
+	wsprRank     *WSPRRankFetcher     // nil if WSPR rank not enabled
+	rbnStore     *RBNDataStore        // nil if CW skimmer / RBN not enabled
+	spaceWeather *SpaceWeatherMonitor // nil if space weather monitoring not enabled
+	chatManager  *ChatManager         // nil if chat not enabled
+	gpsdoMonitor *GPSDOMonitor        // nil if GPSDO not enabled
 	// receiverCallsign is the callsign used for PSK/WSPR/RBN lookups.
 	// Set from config.Decoder.ReceiverCallsign at wiring time.
 	receiverCallsign string
@@ -647,6 +651,86 @@ func splitMessage(text string, maxRunes int) []string {
 	return chunks
 }
 
+// sendPhoto fetches imageURL (must be a QRZ CDN URL) and sends it to chatID
+// via Telegram's sendPhoto endpoint with an HTML caption.
+// Falls back to sending caption as a plain text message if the fetch or upload fails.
+// Returns (rawAPIResponse, allChunksOK).
+func (l *TelegramBotListener) sendPhoto(chatID int64, imageURL, caption string) (string, bool) {
+	// Fetch the image bytes directly from the QRZ CDN.
+	imgResp, err := l.client.Get(imageURL) //nolint:noctx
+	if err != nil {
+		log.Printf("[TelegramListener:%s] sendPhoto: fetch %s error: %v", l.channelName, imageURL, err)
+		return l.sendMessage(chatID, caption)
+	}
+	defer imgResp.Body.Close()
+	if imgResp.StatusCode != http.StatusOK {
+		log.Printf("[TelegramListener:%s] sendPhoto: fetch %s returned %d", l.channelName, imageURL, imgResp.StatusCode)
+		return l.sendMessage(chatID, caption)
+	}
+	imgBytes, err := io.ReadAll(io.LimitReader(imgResp.Body, 10*1024*1024)) // 10 MiB cap
+	if err != nil || len(imgBytes) == 0 {
+		log.Printf("[TelegramListener:%s] sendPhoto: read error: %v", l.channelName, err)
+		return l.sendMessage(chatID, caption)
+	}
+
+	// Build multipart/form-data body.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	// chat_id field.
+	_ = mw.WriteField("chat_id", fmt.Sprintf("%d", chatID))
+	// parse_mode field.
+	_ = mw.WriteField("parse_mode", "HTML")
+	// caption field (Telegram caption limit is 1024 chars).
+	cap := caption
+	if len([]rune(cap)) > 1024 {
+		runes := []rune(cap)
+		cap = string(runes[:1024])
+	}
+	_ = mw.WriteField("caption", cap)
+
+	// Determine filename extension from Content-Type.
+	ct := imgResp.Header.Get("Content-Type")
+	ext := ".jpg"
+	switch {
+	case strings.Contains(ct, "png"):
+		ext = ".png"
+	case strings.Contains(ct, "gif"):
+		ext = ".gif"
+	case strings.Contains(ct, "webp"):
+		ext = ".webp"
+	}
+	fw, err := mw.CreateFormFile("photo", "photo"+ext)
+	if err != nil {
+		log.Printf("[TelegramListener:%s] sendPhoto: create form file error: %v", l.channelName, err)
+		return l.sendMessage(chatID, caption)
+	}
+	if _, err := fw.Write(imgBytes); err != nil {
+		log.Printf("[TelegramListener:%s] sendPhoto: write image error: %v", l.channelName, err)
+		return l.sendMessage(chatID, caption)
+	}
+	mw.Close()
+
+	resp, err := l.client.Post(l.apiBase+"/sendPhoto", mw.FormDataContentType(), &buf) //nolint:noctx
+	if err != nil {
+		log.Printf("[TelegramListener:%s] sendPhoto: upload error: %v", l.channelName, err)
+		return l.sendMessage(chatID, caption)
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+
+	var tgResp struct {
+		OK bool `json:"ok"`
+	}
+	_ = json.Unmarshal(rawBody, &tgResp)
+	if !tgResp.OK {
+		log.Printf("[TelegramListener:%s] sendPhoto: Telegram error: %s", l.channelName, string(rawBody))
+		// Fall back to text message.
+		return l.sendMessage(chatID, caption)
+	}
+	return string(rawBody), true
+}
+
 // minDuration returns the smaller of two durations.
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
@@ -663,14 +747,17 @@ type TelegramListenerRegistry struct {
 	mu                sync.RWMutex
 	listeners         map[string]*TelegramBotListener
 	sessions          *SessionManager
-	rotctl            *RotctlAPIHandler  // nil if rotator not enabled
-	antSwitch         *AntSwitchHandler  // nil if antenna switch not enabled
-	noiseFloor        *NoiseFloorMonitor // nil if noise floor monitoring not enabled
-	pskRank           *PSKRankFetcher    // nil if PSK reporter not enabled
-	wsprRank          *WSPRRankFetcher   // nil if WSPR rank not enabled
-	rbnStore          *RBNDataStore      // nil if CW skimmer / RBN not enabled
-	receiverCallsign  string             // from config.Decoder.ReceiverCallsign
-	cwSkimmerCallsign string             // from cwskimmerConfig.Callsign
+	rotctl            *RotctlAPIHandler    // nil if rotator not enabled
+	antSwitch         *AntSwitchHandler    // nil if antenna switch not enabled
+	noiseFloor        *NoiseFloorMonitor   // nil if noise floor monitoring not enabled
+	pskRank           *PSKRankFetcher      // nil if PSK reporter not enabled
+	wsprRank          *WSPRRankFetcher     // nil if WSPR rank not enabled
+	rbnStore          *RBNDataStore        // nil if CW skimmer / RBN not enabled
+	spaceWeather      *SpaceWeatherMonitor // nil if space weather monitoring not enabled
+	chatManager       *ChatManager         // nil if chat not enabled
+	gpsdoMonitor      *GPSDOMonitor        // nil if GPSDO not enabled
+	receiverCallsign  string               // from config.Decoder.ReceiverCallsign
+	cwSkimmerCallsign string               // from cwskimmerConfig.Callsign
 }
 
 // NewTelegramListenerRegistry creates an empty registry.
@@ -741,6 +828,36 @@ func (r *TelegramListenerRegistry) SetRBNStore(h *RBNDataStore) {
 	}
 }
 
+// SetSpaceWeatherMonitor wires the space weather monitor into all current and future listeners.
+func (r *TelegramListenerRegistry) SetSpaceWeatherMonitor(h *SpaceWeatherMonitor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.spaceWeather = h
+	for _, l := range r.listeners {
+		l.spaceWeather = h
+	}
+}
+
+// SetGPSDOMonitor wires the GPSDO monitor into all current and future listeners.
+func (r *TelegramListenerRegistry) SetGPSDOMonitor(h *GPSDOMonitor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gpsdoMonitor = h
+	for _, l := range r.listeners {
+		l.gpsdoMonitor = h
+	}
+}
+
+// SetChatManager wires the chat manager into all current and future listeners.
+func (r *TelegramListenerRegistry) SetChatManager(h *ChatManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.chatManager = h
+	for _, l := range r.listeners {
+		l.chatManager = h
+	}
+}
+
 // SetReceiverCallsign sets the receiver callsign used for PSK/WSPR lookups.
 func (r *TelegramListenerRegistry) SetReceiverCallsign(cs string) {
 	r.mu.Lock()
@@ -808,6 +925,9 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.pskRank = r.pskRank
 		l.wsprRank = r.wsprRank
 		l.rbnStore = r.rbnStore
+		l.spaceWeather = r.spaceWeather
+		l.chatManager = r.chatManager
+		l.gpsdoMonitor = r.gpsdoMonitor
 		l.receiverCallsign = r.receiverCallsign
 		l.cwSkimmerCallsign = r.cwSkimmerCallsign
 		l.Start()

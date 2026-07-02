@@ -47,6 +47,16 @@ type botCommand struct {
 // sorted alphabetically when building the /help message and setMyCommands payload
 // so the output is deterministic.
 var botCommands = map[string]botCommand{
+	"qrz": {
+		desc:     "Look up a callsign via QRZ (e.g. /qrz MM3NDH)",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleQRZ,
+	},
+	"chat": {
+		desc:     "Show the last 10 chat messages",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleChat,
+	},
 	"bands": {
 		desc:     "Show band conditions (FT8 SNR per band)",
 		readOnly: true,
@@ -84,6 +94,16 @@ var botCommands = map[string]botCommand{
 		readOnly:  false,
 		writeHint: "Use <code>/version update</code> to trigger an update when one is available, or <code>/version update force</code> to force a reinstall.",
 		handler:   (*TelegramBotListener).handleVersion,
+	},
+	"gpsdo": {
+		desc:     "Show Leo Bodnar GPSDO device and GPS status",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleGPSDO,
+	},
+	"space": {
+		desc:     "Show current space weather report",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleSpace,
 	},
 	"wspr": {
 		desc:     "Show WSPR Live rank for this receiver",
@@ -905,6 +925,364 @@ func (l *TelegramBotListener) handleSwitch(chatID int64, args string) (string, s
 				fmt.Fprintf(&sb, "Port %d: <b>%s</b>\n", port, html.EscapeString(label))
 			}
 		}
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleQRZ looks up a callsign via the configured QRZ service (or CTY-only if
+// QRZ is not configured) and returns a concise summary.
+// Usage: /qrz <callsign>
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleQRZ(chatID int64, args string) (string, string, bool) {
+	// Require a callsign argument.
+	rawCS := strings.TrimSpace(args)
+	if rawCS == "" {
+		msg := "📡 Usage: <code>/qrz &lt;callsign&gt;</code> — e.g. <code>/qrz MM3NDH</code>"
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Normalise (strip /P, /M, country-prefix overlays, etc.).
+	cs := NormaliseCallsign(rawCS)
+	if !reValidCallsign.MatchString(cs) {
+		msg := "⚠️ Invalid callsign. Must be 3–10 alphanumeric characters after normalisation."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Check whether QRZ lookups are enabled at all.
+	if globalQRZService == nil {
+		// Fall back to CTY-only if available.
+		if globalCTY == nil {
+			msg := "📡 QRZ lookup service is not enabled on this receiver."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		// CTY-only response.
+		cty := globalCTY.LookupCallsignFull(cs)
+		if cty == nil {
+			msg := fmt.Sprintf("📡 <code>%s</code> — not found in CTY database.", html.EscapeString(cs))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "📡 <b>%s</b> (CTY only)\n\n", html.EscapeString(cs))
+		if cty.Country != "" {
+			fmt.Fprintf(&sb, "Country: %s\n", html.EscapeString(cty.Country))
+		}
+		if cty.Continent != "" {
+			fmt.Fprintf(&sb, "Continent: %s\n", html.EscapeString(cty.Continent))
+		}
+		if cty.CQZone != 0 {
+			fmt.Fprintf(&sb, "CQ Zone: %d\n", cty.CQZone)
+		}
+		if cty.ITUZone != 0 {
+			fmt.Fprintf(&sb, "ITU Zone: %d\n", cty.ITUZone)
+		}
+		msg := sb.String()
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Full QRZ lookup (cache-first, then live API).
+	result, err := globalQRZService.Lookup(cs)
+	if err != nil {
+		msg := fmt.Sprintf("⚠️ QRZ lookup failed: %s", html.EscapeString(err.Error()))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+	if result == nil {
+		msg := fmt.Sprintf("📡 <code>%s</code> — callsign not found in QRZ database.", html.EscapeString(cs))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📡 <b>%s</b>\n\n", html.EscapeString(result.Call))
+
+	// Operator name.
+	name := result.NameFmt
+	if name == "" {
+		name = strings.TrimSpace(result.FName + " " + result.Name)
+	}
+	if name != "" {
+		fmt.Fprintf(&sb, "Name: %s\n", html.EscapeString(name))
+	}
+
+	// Location.
+	location := result.Addr2
+	if result.State != "" {
+		if location != "" {
+			location += ", " + result.State
+		} else {
+			location = result.State
+		}
+	}
+	if result.Country != "" {
+		if location != "" {
+			location += ", " + result.Country
+		} else {
+			location = result.Country
+		}
+	}
+	if location != "" {
+		fmt.Fprintf(&sb, "Location: %s\n", html.EscapeString(location))
+	}
+
+	// Grid square.
+	if result.Grid != "" {
+		fmt.Fprintf(&sb, "Grid: <code>%s</code>\n", html.EscapeString(result.Grid))
+	}
+
+	// Licence class.
+	if result.Class != "" {
+		fmt.Fprintf(&sb, "Class: %s\n", html.EscapeString(result.Class))
+	}
+
+	// CQ / ITU zones (prefer CTY augmentation if available).
+	cqZone := result.CQZone
+	ituZone := result.ITUZone
+	if globalCTY != nil {
+		if cty := globalCTY.LookupCallsignFull(cs); cty != nil {
+			if cty.CQZone != 0 {
+				cqZone = cty.CQZone
+			}
+			if cty.ITUZone != 0 {
+				ituZone = cty.ITUZone
+			}
+		}
+	}
+	if cqZone != 0 {
+		fmt.Fprintf(&sb, "CQ Zone: %d\n", cqZone)
+	}
+	if ituZone != 0 {
+		fmt.Fprintf(&sb, "ITU Zone: %d\n", ituZone)
+	}
+
+	// QRZ profile URL.
+	fmt.Fprintf(&sb, "\n<a href=\"https://www.qrz.com/db/%s\">View on QRZ.com</a>",
+		html.EscapeString(result.Call))
+
+	msg := sb.String()
+
+	// If a profile photo is available, send it with the text as caption.
+	// sendPhoto falls back to a plain text message on any fetch/upload error.
+	if result.Image != "" {
+		apiResp, apiOK := l.sendPhoto(chatID, result.Image, msg)
+		return msg, apiResp, apiOK
+	}
+
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleChat reports the last 10 messages from the in-memory chat ring buffer —
+// the same history that new websocket clients receive on connect.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, string, bool) {
+	if l.chatManager == nil {
+		msg := "💬 Chat is not enabled on this receiver."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	all := l.chatManager.GetBufferedMessages()
+	if len(all) == 0 {
+		msg := "💬 No chat messages yet."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Take the last 10 messages.
+	const maxChat = 10
+	start := len(all) - maxChat
+	if start < 0 {
+		start = 0
+	}
+	msgs := all[start:]
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "💬 <b>Recent Chat</b> (%d messages)\n\n", len(msgs))
+	for _, m := range msgs {
+		ts := m.Timestamp.UTC().Format("15:04")
+		fmt.Fprintf(&sb, "<code>%s</code> <b>%s</b>: %s\n",
+			ts,
+			html.EscapeString(m.Username),
+			html.EscapeString(m.Message),
+		)
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleSpace reports the current space weather conditions and 24-hour forecast.
+// It mirrors the forecast summary shown at the top of bandconditions.html plus
+// the key solar indices shown in the space weather panel.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleSpace(chatID int64, args string) (string, string, bool) {
+	if l.spaceWeather == nil {
+		msg := "☀️ Space weather monitoring is not enabled on this receiver."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	data := l.spaceWeather.GetData()
+	if data == nil || data.LastUpdate.IsZero() {
+		msg := "☀️ Space weather data not yet available. Try again in a few minutes."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	var sb strings.Builder
+	sb.WriteString("☀️ <b>Space Weather Report</b>\n")
+	fmt.Fprintf(&sb, "<i>Updated %s</i>\n\n", data.LastUpdate.UTC().Format("02 Jan 15:04 UTC"))
+
+	// ── Forecast summary (mirrors the top banner in bandconditions.html) ──────
+	if data.Forecast != nil && data.Forecast.Summary != "" {
+		fmt.Fprintf(&sb, "<i>%s</i>\n\n", html.EscapeString(data.Forecast.Summary))
+	}
+
+	// ── Key solar indices ─────────────────────────────────────────────────────
+	fmt.Fprintf(&sb, "Solar Flux: <b>%.0f SFU</b>\n", data.SolarFlux)
+	fmt.Fprintf(&sb, "K-Index: <b>%d</b>", data.KIndex)
+	if data.KIndexStatus != "" {
+		fmt.Fprintf(&sb, " (%s)", html.EscapeString(data.KIndexStatus))
+	}
+	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "A-Index: <b>%d</b>\n", data.AIndex)
+
+	// Solar wind Bz — positive = northward (generally benign), negative = southward (storm risk).
+	bzDir := "Northward"
+	if data.SolarWindBz < 0 {
+		bzDir = "Southward"
+	}
+	fmt.Fprintf(&sb, "Solar Wind Bz: <b>%.1f nT</b> (%s)\n", data.SolarWindBz, bzDir)
+
+	// Overall propagation quality.
+	if data.PropagationQuality != "" {
+		fmt.Fprintf(&sb, "Propagation: <b>%s</b>\n", html.EscapeString(data.PropagationQuality))
+	}
+
+	// ── 24-hour forecast detail (when available) ──────────────────────────────
+	if data.Forecast != nil {
+		sb.WriteString("\n<b>24-hour Forecast:</b>\n")
+		if data.Forecast.GeomagneticStorm != "" {
+			fmt.Fprintf(&sb, "  Geomagnetic storm: %s\n", html.EscapeString(data.Forecast.GeomagneticStorm))
+		}
+		if data.Forecast.RadioBlackout != "" {
+			fmt.Fprintf(&sb, "  Radio blackout: %s\n", html.EscapeString(data.Forecast.RadioBlackout))
+		}
+		if data.Forecast.SolarRadiation != "" {
+			fmt.Fprintf(&sb, "  Solar radiation: %s\n", html.EscapeString(data.Forecast.SolarRadiation))
+		}
+	}
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
+}
+
+// handleGPSDO reports the current Leo Bodnar LBE-1420 GPSDO device and GPS status.
+// It shows device lock states, output configuration, frequency, and full GPS telemetry.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleGPSDO(chatID int64, args string) (string, string, bool) {
+	if l.gpsdoMonitor == nil {
+		msg := "📡 GPSDO monitoring is not enabled on this receiver."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	snap := l.gpsdoMonitor.GetSnapshot()
+	if snap == nil {
+		msg := "📡 GPSDO data not available — the Leo Bodnar container may be unreachable."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	boolIcon := func(v bool) string {
+		if v {
+			return "✅"
+		}
+		return "❌"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📡 <b>GPSDO Status (Leo Bodnar LBE-1420)</b>\n\n")
+
+	// ── Device paths ──────────────────────────────────────────────────────────
+	if snap.Device != "" {
+		fmt.Fprintf(&sb, "HID device: <code>%s</code>\n", html.EscapeString(snap.Device))
+	}
+	if snap.Serial != "" {
+		fmt.Fprintf(&sb, "Serial port: <code>%s</code>\n", html.EscapeString(snap.Serial))
+	}
+
+	// ── Device status ─────────────────────────────────────────────────────────
+	if ds := snap.DeviceStatus; ds != nil {
+		sb.WriteString("\n<b>Device</b>\n")
+		fmt.Fprintf(&sb, "  GPS lock: %s\n", boolIcon(ds.GPSLock))
+		fmt.Fprintf(&sb, "  PLL lock: %s\n", boolIcon(ds.PLLLock))
+		fmt.Fprintf(&sb, "  Antenna: %s\n", boolIcon(ds.AntennaOK))
+		if ds.Mode != "" {
+			fmt.Fprintf(&sb, "  Mode: <b>%s</b>\n", html.EscapeString(ds.Mode))
+		}
+		if ds.FrequencyHz > 0 {
+			mhz := float64(ds.FrequencyHz) / 1_000_000.0
+			fmt.Fprintf(&sb, "  Frequency: <b>%.6f MHz</b>\n", mhz)
+		}
+		sb.WriteString("\n<b>Output 1</b>\n")
+		fmt.Fprintf(&sb, "  Enabled: %s\n", boolIcon(ds.Output1Enabled))
+		fmt.Fprintf(&sb, "  1PPS: %s\n", boolIcon(ds.Output1PPS))
+		if ds.Output1Drive != "" {
+			fmt.Fprintf(&sb, "  Drive: %s\n", html.EscapeString(ds.Output1Drive))
+		}
+	} else {
+		sb.WriteString("\n⚠️ <i>Device status unavailable</i>\n")
+	}
+
+	// ── GPS telemetry ─────────────────────────────────────────────────────────
+	if gps := snap.GPS; gps != nil {
+		sb.WriteString("\n<b>GPS</b>\n")
+		if gps.DatetimeUTC != "" {
+			fmt.Fprintf(&sb, "  UTC time: <b>%s</b>\n", html.EscapeString(gps.DatetimeUTC))
+		}
+		if gps.Fix != "" {
+			fmt.Fprintf(&sb, "  Fix: <b>%s</b>", html.EscapeString(gps.Fix))
+			if gps.FixMode != "" {
+				fmt.Fprintf(&sb, " (%s)", html.EscapeString(gps.FixMode))
+			}
+			sb.WriteString("\n")
+		}
+		fmt.Fprintf(&sb, "  Satellites used: <b>%d</b>", gps.SatsUsed)
+		if gps.GPSInView > 0 || gps.GLOInView > 0 {
+			fmt.Fprintf(&sb, " (GPS in view: %d", gps.GPSInView)
+			if gps.GLOInView > 0 {
+				fmt.Fprintf(&sb, ", GLONASS in view: %d", gps.GLOInView)
+			}
+			sb.WriteString(")")
+		}
+		sb.WriteString("\n")
+
+		// DOP values
+		fmt.Fprintf(&sb, "  HDOP: %.2f  VDOP: %.2f  PDOP: %.2f\n", gps.HDOP, gps.VDOP, gps.PDOP)
+
+		// Position
+		if gps.AltitudeM != 0 {
+			fmt.Fprintf(&sb, "  Altitude: <b>%.1f m</b>\n", gps.AltitudeM)
+		}
+		if gps.Latitude != 0 || gps.Longitude != 0 {
+			fmt.Fprintf(&sb, "  Position: <b>%.6f, %.6f</b>\n", gps.Latitude, gps.Longitude)
+		}
+		if gps.SpeedKnots != 0 {
+			fmt.Fprintf(&sb, "  Speed: %.2f kn\n", gps.SpeedKnots)
+		}
+	} else {
+		sb.WriteString("\n⚠️ <i>GPS data unavailable</i>\n")
 	}
 
 	msg := sb.String()

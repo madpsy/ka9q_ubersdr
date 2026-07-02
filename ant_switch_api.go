@@ -1011,9 +1011,13 @@ func (h *AntSwitchHandler) backgroundPoller() {
 		state, err := h.backend.GetState()
 		if err != nil {
 			h.mu.Lock()
-			h.state.LastError = err.Error()
 			h.consecutiveFailures++
 			if h.consecutiveFailures >= 3 {
+				// Only surface the error (and mark the device down) after 3
+				// consecutive failures so that a single transient poll blip
+				// does not immediately flip the health status red in the
+				// Monitor tab or trigger a Telegram health alert.
+				h.state.LastError = err.Error()
 				h.lastPollOK = false
 			}
 			h.mu.Unlock()

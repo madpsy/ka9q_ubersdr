@@ -2136,6 +2136,21 @@ func main() {
 	if noiseFloorMonitor != nil {
 		notifManager.SetNoiseFloorMonitor(noiseFloorMonitor)
 	}
+	// Wire space weather monitor so the /space Telegram bot command can report
+	// current solar conditions and forecast.
+	if spaceWeatherMonitor != nil {
+		notifManager.SetSpaceWeatherMonitor(spaceWeatherMonitor)
+	}
+	// Wire chat manager so the /chat Telegram bot command can report recent
+	// chat messages from the in-memory ring buffer.
+	if dxClusterWsHandler != nil && dxClusterWsHandler.chatManager != nil {
+		notifManager.SetChatManager(dxClusterWsHandler.chatManager)
+	}
+	// Wire GPSDO monitor so the /gpsdo Telegram bot command can report
+	// Leo Bodnar LBE-1420 device and GPS status.
+	if gpsdoMonitor != nil {
+		notifManager.SetGPSDOMonitor(gpsdoMonitor)
+	}
 
 	// Set the frequency reference monitor in instance reporter for tracking information
 	// This must be done after both are initialized

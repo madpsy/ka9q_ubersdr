@@ -238,6 +238,39 @@ func (m *NotificationManager) SetRBNStore(h *RBNDataStore) {
 	}
 }
 
+// SetSpaceWeatherMonitor wires the space weather monitor into the listener
+// registry so that the /space bot command can report current space weather.
+func (m *NotificationManager) SetSpaceWeatherMonitor(h *SpaceWeatherMonitor) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetSpaceWeatherMonitor(h)
+	}
+}
+
+// SetChatManager wires the chat manager into the listener registry
+// so that the /chat bot command can report recent chat messages.
+func (m *NotificationManager) SetChatManager(h *ChatManager) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetChatManager(h)
+	}
+}
+
+// SetGPSDOMonitor wires the GPSDO monitor into the listener registry
+// so that the /gpsdo bot command can report GPSDO status.
+func (m *NotificationManager) SetGPSDOMonitor(h *GPSDOMonitor) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetGPSDOMonitor(h)
+	}
+}
+
 // SetReceiverCallsign sets the receiver callsign used for PSK/WSPR lookups.
 func (m *NotificationManager) SetReceiverCallsign(cs string) {
 	m.mu.RLock()

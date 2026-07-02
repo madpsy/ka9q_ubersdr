@@ -2137,6 +2137,7 @@ function showChannelForm(editName) {
     }
     renderTypeFields();
     el('chType').addEventListener('change', renderTypeFields);
+    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     el('btnCancelChannel').addEventListener('click', function() {
         container.style.display = 'none';
@@ -2513,6 +2514,7 @@ function showRuleForm(editIdx) {
     renderDedupFields(rule.event, rule.dedup_by, rule.dedup_window_minutes);
     renderTemplateFields(rule.event);
     renderChannelTemplateOverrides(workingTemplates);
+    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     // Re-render filters, dedup and template reference when event type changes
     el('ruleEvent').addEventListener('change', function() {

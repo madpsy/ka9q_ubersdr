@@ -453,7 +453,11 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 	// All other commands require explicit enablement.
 	if !l.commandEnabled(cmd) {
 		log.Printf("[TelegramListener:%s] command /%s is not enabled — ignoring", l.channelName, cmd)
+		reply := "❓ Unknown command. Use /help to see available commands."
+		apiResp, _ := l.sendMessage(msg.Chat.ID, reply)
 		baseEntry.Result = "not_enabled"
+		baseEntry.Response = truncateResponse(reply)
+		baseEntry.TelegramAPIResponse = apiResp
 		l.recordCommand(baseEntry)
 		return
 	}
@@ -470,7 +474,13 @@ func (l *TelegramBotListener) dispatch(upd tgUpdate) {
 		baseEntry.Response = truncateResponse(resp)
 		baseEntry.TelegramAPIResponse = apiResp
 	} else {
+		// Command is enabled in config but has no registered handler — shouldn't
+		// happen in normal operation, but reply gracefully just in case.
+		reply := "❓ Unknown command. Use /help to see available commands."
+		apiResp, _ := l.sendMessage(msg.Chat.ID, reply)
 		baseEntry.Result = "unknown_command"
+		baseEntry.Response = truncateResponse(reply)
+		baseEntry.TelegramAPIResponse = apiResp
 	}
 	l.recordCommand(baseEntry)
 }

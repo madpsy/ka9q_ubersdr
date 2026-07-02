@@ -47,6 +47,13 @@ type ChatManager struct {
 	sessionUsernames   map[string]string
 	sessionUsernamesMu sync.RWMutex
 
+	// Cache of last known IP per lowercase username, updated on every join.
+	// This survives the session being torn down so /chat ban works even after
+	// a user leaves without having sent any messages (which would otherwise
+	// only be captured in the CSV log).
+	usernameIPs   map[string]string // lowercase username → IP
+	usernameIPsMu sync.RWMutex
+
 	// Chat message buffer for new connections
 	messageBuffer   []ChatMessage
 	messageBufferMu sync.RWMutex
@@ -105,6 +112,7 @@ func (cm *ChatManager) fireChatEvent(evt ChatEvent) {
 func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher, adminConfig *AdminConfig, chatConfig ChatConfig, ipBanManager *IPBanManager) *ChatManager {
 	cm := &ChatManager{
 		sessionUsernames:             make(map[string]string),
+		usernameIPs:                  make(map[string]string),
 		messageBuffer:                make([]ChatMessage, 0, maxMessages),
 		maxMessages:                  maxMessages,
 		wsHandler:                    wsHandler,
@@ -154,14 +162,18 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 }
 
 // GetIPForUsername resolves the IP address for a chat username.
-// It first checks currently active users (live session lookup), then falls back
-// to the chat logger's historical CSV records for the last known IP.
+// Resolution order (most to least current):
+//  1. Live session lookup — user is currently connected (SessionManager)
+//  2. In-memory join cache — user connected this server run but has since left
+//  3. CSV chat log history — last IP recorded when the user sent a message
+//
 // Returns ("", false) if the IP cannot be determined.
-// The second return value is true when the IP came from a live session, false when from logs.
+// The second return value is true when the IP came from a live session or the
+// in-memory join cache, false when it came from the CSV logs.
 func (cm *ChatManager) GetIPForUsername(username string) (ip string, fromLiveSession bool) {
 	lowerUsername := strings.ToLower(username)
 
-	// Live path: scan active users for a matching username.
+	// 1. Live path: scan active users for a matching username.
 	cm.activeUsersMu.RLock()
 	var matchedSessionID string
 	for _, user := range cm.activeUsers {
@@ -179,7 +191,17 @@ func (cm *ChatManager) GetIPForUsername(username string) (ip string, fromLiveSes
 		}
 	}
 
-	// Historical path: scan CSV chat logs for the last known IP.
+	// 2. In-memory join cache: populated on every SetUsername call, survives
+	// the session being torn down so we get the correct IP even when the user
+	// left without sending any messages.
+	cm.usernameIPsMu.RLock()
+	cachedIP := cm.usernameIPs[lowerUsername]
+	cm.usernameIPsMu.RUnlock()
+	if cachedIP != "" {
+		return cachedIP, true
+	}
+
+	// 3. Historical path: scan CSV chat logs for the last known IP.
 	if cm.chatLogger != nil {
 		histIP := cm.chatLogger.GetLastKnownIPForUser(username)
 		if histIP != "" {
@@ -328,6 +350,15 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	cm.activeUsersMu.Unlock()
 
 	log.Printf("Chat: Username '%s' set for session %s", username, sessionID)
+
+	// Cache the IP for this username so /chat ban can resolve it even after
+	// the user disconnects without having sent any messages.
+	joinIP := cm.GetSessionIP(sessionID)
+	if joinIP != "" {
+		cm.usernameIPsMu.Lock()
+		cm.usernameIPs[strings.ToLower(username)] = joinIP
+		cm.usernameIPsMu.Unlock()
+	}
 
 	// Broadcast user join notification to all users
 	cm.broadcastUserJoined(username, country, countryCode)
@@ -786,6 +817,14 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	sourceIP := cm.GetSessionIP(sessionID)
 	if sourceIP == "" {
 		sourceIP = "unknown"
+	}
+
+	// Keep the username→IP cache current so /chat ban always has the most
+	// recent IP even if the user reconnects between visits.
+	if sourceIP != "unknown" {
+		cm.usernameIPsMu.Lock()
+		cm.usernameIPs[strings.ToLower(username)] = sourceIP
+		cm.usernameIPsMu.Unlock()
 	}
 
 	// Get country information from session

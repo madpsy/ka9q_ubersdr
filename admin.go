@@ -2997,6 +2997,11 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if net.ParseIP(req.IP) == nil {
+		http.Error(w, "Invalid IP address", http.StatusBadRequest)
+		return
+	}
+
 	if req.Reason == "" {
 		req.Reason = "Banned by admin"
 	}

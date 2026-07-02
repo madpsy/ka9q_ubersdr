@@ -1507,6 +1507,32 @@ func (l *TelegramBotListener) handleQRZ(chatID int64, args string) (string, stri
 	return msg, apiResp, apiOK
 }
 
+// telegramRelayUsername builds the chat username for a Telegram relay user.
+// It sanitises the raw display name (keeping only alphanumeric, hyphen, underscore,
+// forward-slash) and prepends "~" so the result can never clash with a web chat
+// username (which must start with [A-Za-z0-9]).  The total length is capped at 15
+// characters (14 chars of sanitised name + the "~" prefix).
+// If the sanitised name is empty after stripping, it falls back to "tg<userID>".
+func telegramRelayUsername(rawName string, userID int64) string {
+	// Keep only chars valid in the middle of a web username: [A-Za-z0-9_\-/]
+	var buf []byte
+	for _, r := range rawName {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '/' {
+			buf = append(buf, byte(r))
+		}
+	}
+	name := string(buf)
+	if name == "" {
+		name = fmt.Sprintf("tg%d", userID)
+	}
+	// Cap at 14 chars so "~" + name ≤ 15 chars total
+	if len(name) > 14 {
+		name = name[:14]
+	}
+	return "~" + name
+}
+
 // handleChat reports the last 10 messages from the in-memory chat ring buffer —
 // the same history that new websocket clients receive on connect.
 // Also lists currently active chat users with their username and IP address.
@@ -1545,10 +1571,13 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 		}
 
 		userID := l.currentFrom.ID
-		displayName := l.currentFrom.Username
-		if displayName == "" {
-			displayName = l.currentFrom.FirstName
+		// Build the raw name from Telegram username or first name, then sanitise
+		// it into a ~-prefixed chat username that can never clash with a web user.
+		rawName := l.currentFrom.Username
+		if rawName == "" {
+			rawName = l.currentFrom.FirstName
 		}
+		displayName := telegramRelayUsername(rawName, userID)
 		sessionID := fmt.Sprintf("telegram:%s:%d", l.channelName, userID)
 
 		if argNorm == "on" {
@@ -1559,13 +1588,9 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 			// Add relay user to the active users list so they appear in the web UI.
 			l.chatManager.InjectJoin(displayName, sessionID)
 
-			handle := displayName
-			if l.currentFrom.Username != "" {
-				handle = "@" + l.currentFrom.Username
-			}
 			msg := fmt.Sprintf(
 				"✅ <b>Chat relay ON</b>\n\nYour messages will appear in the SDR chat as <b>%s</b>.\n\nAny message you send here that doesn't start with <code>/</code> will be posted to the chat.\nUse <code>/chat off</code> to stop.",
-				html.EscapeString(handle),
+				html.EscapeString(displayName),
 			)
 			apiResp, apiOK := l.sendMessage(chatID, msg)
 			return msg, apiResp, apiOK

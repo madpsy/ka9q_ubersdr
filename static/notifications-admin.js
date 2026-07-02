@@ -674,7 +674,7 @@ async function saveConfig(alertContainer) {
                 email_from:         ch.email_from || '',
                 email_to:           Array.isArray(ch.email_to) ? ch.email_to : parseCSV(String(ch.email_to || '')),
                 subject_prefix:     ch.subject_prefix || '[UberSDR]',
-                rate_limit_minutes: Number(ch.rate_limit_minutes) || 1,
+                rate_limit_minutes: ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
             };
         } else if (ch.type === 'webhook') {
             payload.channels[name] = {
@@ -688,7 +688,7 @@ async function saveConfig(alertContainer) {
                 webhook_timeout_seconds:    Number(ch.webhook_timeout_seconds) || 10,
                 webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
                 webhook_body_template:      ch.webhook_body_template || '',
-                rate_limit_minutes:         Number(ch.rate_limit_minutes) || 1,
+                rate_limit_minutes:         ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
             };
         } else {
             // Telegram channel — include bot_commands config if present.
@@ -697,7 +697,7 @@ async function saveConfig(alertContainer) {
                 bot_token:          ch.bot_token || '********',
                 chat_id:            ch.chat_id,
                 parse_mode:         ch.parse_mode || 'HTML',
-                rate_limit_minutes: Number(ch.rate_limit_minutes) || 1,
+                rate_limit_minutes: ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
             };
             if (ch.bot_commands) {
                 tgCh.bot_commands = {
@@ -2250,6 +2250,13 @@ function showChannelForm(editName) {
                 parse_mode:         el('chParseMode').value,
                 rate_limit_minutes: rate,
             };
+            // Preserve bot_commands from the existing channel config — the channel
+            // edit form does not touch bot_commands (that is managed via the
+            // separate "Manage" panel). Without this, editing any channel field
+            // would wipe the bot listener configuration.
+            if (isEdit && ch && ch.bot_commands) {
+                channel.bot_commands = ch.bot_commands;
+            }
         }
 
         localConfig.channels[name] = channel;

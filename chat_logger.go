@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -288,6 +289,76 @@ func (cl *ChatLogger) readDayFile(filePath string, banManager *IPBanManager) ([]
 	}
 
 	return msgs, nil
+}
+
+// GetLastKnownIPForUser scans recent CSV day-files in reverse-chronological order
+// and returns the most recent source_ip logged for the given username (case-insensitive).
+// Walks back up to maxDays days. Returns "" if not found or logging is disabled.
+func (cl *ChatLogger) GetLastKnownIPForUser(username string) string {
+	if !cl.enabled || username == "" {
+		return ""
+	}
+
+	lowerUsername := strings.ToLower(username)
+	now := time.Now().UTC()
+	const maxDays = 30
+
+	for i := 0; i < maxDays; i++ {
+		day := now.AddDate(0, 0, -i)
+		filePath := filepath.Join(
+			cl.dataDir,
+			fmt.Sprintf("%04d", day.Year()),
+			fmt.Sprintf("%02d", day.Month()),
+			fmt.Sprintf("%02d", day.Day()),
+			"chat.csv",
+		)
+
+		ip := cl.findLastIPInDayFile(filePath, lowerUsername)
+		if ip != "" {
+			return ip
+		}
+	}
+
+	return ""
+}
+
+// findLastIPInDayFile reads a single CSV day-file and returns the most recent
+// source_ip for the given lowercase username, or "" if not found.
+func (cl *ChatLogger) findLastIPInDayFile(filePath, lowerUsername string) string {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+
+	// Skip header
+	if _, err := reader.Read(); err != nil {
+		return ""
+	}
+
+	// Read all rows and keep the last matching IP (most recent in the file).
+	lastIP := ""
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		// Minimum columns: timestamp, source_ip, username, message
+		if len(record) < 4 {
+			continue
+		}
+		if strings.ToLower(record[2]) == lowerUsername && record[1] != "" {
+			lastIP = record[1]
+		}
+	}
+	return lastIP
 }
 
 // Close closes the open CSV file

@@ -75,9 +75,10 @@ var botCommands = map[string]botCommand{
 		handler:  (*TelegramBotListener).handleQRZ,
 	},
 	"chat": {
-		desc:     "Show the last 10 chat messages",
-		readOnly: true,
-		handler:  (*TelegramBotListener).handleChat,
+		desc:      "Show the last 10 chat messages and active users",
+		readOnly:  false,
+		writeHint: "Use <code>/chat ban &lt;username&gt; [reason]</code> to ban a user by their last known IP.",
+		handler:   (*TelegramBotListener).handleChat,
 	},
 	"bands": {
 		desc:     "Show band conditions (FT8 SNR per band)",
@@ -1479,6 +1480,11 @@ func (l *TelegramBotListener) handleQRZ(chatID int64, args string) (string, stri
 // handleChat reports the last 10 messages from the in-memory chat ring buffer —
 // the same history that new websocket clients receive on connect.
 // Also lists currently active chat users with their username and IP address.
+//
+// With write access enabled, supports:
+//
+//	/chat ban <username> [reason]  — ban a user by their last known IP
+//
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, string, bool) {
 	if l.chatManager == nil {
@@ -1487,6 +1493,89 @@ func (l *TelegramBotListener) handleChat(chatID int64, args string) (string, str
 		return msg, apiResp, apiOK
 	}
 
+	// ── ban subcommand: /chat ban <username> [reason] ─────────────────────────
+	argNorm := strings.TrimSpace(args)
+	if strings.HasPrefix(argNorm, "ban ") || argNorm == "ban" {
+		if !l.commandWriteEnabled("chat") {
+			msg := "⚠️ Write access is not enabled for /chat. Enable it in the bot listener config."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		rest := strings.TrimSpace(strings.TrimPrefix(argNorm, "ban"))
+		if rest == "" {
+			msg := "⚠️ Usage: <code>/chat ban &lt;username&gt; [reason]</code>"
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		parts := strings.SplitN(rest, " ", 2)
+		username := strings.TrimSpace(parts[0])
+		reason := "Banned via Telegram bot (/chat ban)"
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+			reason = strings.TrimSpace(parts[1])
+		}
+
+		// Resolve IP — live session first, then chat log history.
+		ip, fromLive := l.chatManager.GetIPForUsername(username)
+		if ip == "" {
+			msg := fmt.Sprintf("⚠️ Could not resolve IP for user <b>%s</b> — they may never have sent a message or chat logging is disabled.",
+				html.EscapeString(username))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		// Check for duplicate ban.
+		if l.ipBanManager != nil {
+			if existing, found := l.ipBanManager.GetBanInfo(ip); found {
+				msg := fmt.Sprintf("⚠️ <code>%s</code> is already banned (reason: %s)",
+					html.EscapeString(ip), html.EscapeString(existing.Reason))
+				apiResp, apiOK := l.sendMessage(chatID, msg)
+				return msg, apiResp, apiOK
+			}
+		}
+
+		// Ban + kick via adminHandler (same path as /banned ban).
+		ipSource := ""
+		if !fromLive {
+			ipSource = ", last seen in chat logs"
+		}
+
+		if l.adminHandler != nil {
+			sessKicked, dxKicked, msgsRemoved, err := l.adminHandler.BanIPWithKick(ip, reason, "telegram")
+			if err != nil {
+				msg := fmt.Sprintf("❌ Failed to ban <code>%s</code>: %s", html.EscapeString(ip), html.EscapeString(err.Error()))
+				apiResp, apiOK := l.sendMessage(chatID, msg)
+				return msg, apiResp, apiOK
+			}
+			msg := fmt.Sprintf("✅ Banned <b>%s</b> (<code>%s</code>%s) — reason: %s\nKicked %d session(s), %d DX connection(s)",
+				html.EscapeString(username), html.EscapeString(ip), ipSource, html.EscapeString(reason),
+				sessKicked, dxKicked)
+			if msgsRemoved > 0 {
+				msg += fmt.Sprintf(", removed %d chat message(s)", msgsRemoved)
+			}
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+
+		// No adminHandler — ban only (no kick).
+		if l.ipBanManager == nil {
+			msg := "🚫 IP ban manager unavailable."
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		if err := l.ipBanManager.BanIP(ip, reason, "telegram"); err != nil {
+			msg := fmt.Sprintf("❌ Failed to ban <code>%s</code>: %s", html.EscapeString(ip), html.EscapeString(err.Error()))
+			apiResp, apiOK := l.sendMessage(chatID, msg)
+			return msg, apiResp, apiOK
+		}
+		msg := fmt.Sprintf("✅ Banned <b>%s</b> (<code>%s</code>%s) — reason: %s",
+			html.EscapeString(username), html.EscapeString(ip), ipSource, html.EscapeString(reason))
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// ── Read-only display ─────────────────────────────────────────────────────
 	var sb strings.Builder
 
 	// ── Active users ──────────────────────────────────────────────────────────

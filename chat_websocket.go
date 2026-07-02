@@ -153,6 +153,43 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 	return cm
 }
 
+// GetIPForUsername resolves the IP address for a chat username.
+// It first checks currently active users (live session lookup), then falls back
+// to the chat logger's historical CSV records for the last known IP.
+// Returns ("", false) if the IP cannot be determined.
+// The second return value is true when the IP came from a live session, false when from logs.
+func (cm *ChatManager) GetIPForUsername(username string) (ip string, fromLiveSession bool) {
+	lowerUsername := strings.ToLower(username)
+
+	// Live path: scan active users for a matching username.
+	cm.activeUsersMu.RLock()
+	var matchedSessionID string
+	for _, user := range cm.activeUsers {
+		if strings.ToLower(user.Username) == lowerUsername {
+			matchedSessionID = user.SessionID
+			break
+		}
+	}
+	cm.activeUsersMu.RUnlock()
+
+	if matchedSessionID != "" {
+		liveIP := cm.GetSessionIP(matchedSessionID)
+		if liveIP != "" {
+			return liveIP, true
+		}
+	}
+
+	// Historical path: scan CSV chat logs for the last known IP.
+	if cm.chatLogger != nil {
+		histIP := cm.chatLogger.GetLastKnownIPForUser(username)
+		if histIP != "" {
+			return histIP, false
+		}
+	}
+
+	return "", false
+}
+
 // GetSessionIP retrieves the IP address for a session UUID from SessionManager
 func (cm *ChatManager) GetSessionIP(sessionID string) string {
 	if cm.sessionManager == nil {

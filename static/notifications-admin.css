@@ -334,15 +334,15 @@ body {
 
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 10px;
     margin-bottom: 20px;
 }
 
 .stat-card {
     background: #f8f9fa;
     border-radius: 8px;
-    padding: 16px;
+    padding: 10px 8px;
     text-align: center;
 }
 

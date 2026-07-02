@@ -497,9 +497,19 @@ function updateConfigStats() {
     const rules    = localConfig.rules    || [];
     const channels = localConfig.channels || {};
 
-    const enabledRules    = rules.filter(function(r) { return r.enabled; }).length;
-    const enabledChannels = Object.keys(channels).length; // all configured channels count
-    const enabledEvents   = (function() {
+    const enabledRules = rules.filter(function(r) { return r.enabled; }).length;
+
+    // Channels referenced by at least one enabled rule
+    const activeChannels = (function() {
+        const s = new Set();
+        rules.forEach(function(r) {
+            if (r.enabled) (r.channels || []).forEach(function(c) { s.add(c); });
+        });
+        return s.size;
+    }());
+
+    // Unique event types used by enabled rules
+    const enabledEvents = (function() {
         const evts = new Set();
         rules.forEach(function(r) { if (r.enabled && r.event) evts.add(r.event); });
         return evts.size;
@@ -513,9 +523,9 @@ function updateConfigStats() {
             fmtCount(value) + '</div><div class="stat-label">' + label + '</div></div>';
     };
     grid.insertAdjacentHTML('beforeend',
-        card(enabledChannels, 'Channels') +
-        card(enabledRules,    'Rules Enabled') +
-        card(enabledEvents,   'Event Types')
+        card(activeChannels, 'Channels Active') +
+        card(enabledRules,   'Rules Enabled') +
+        card(enabledEvents,  'Event Types')
     );
 }
 

@@ -13990,7 +13990,13 @@ function openVibeSDRModal() {
 
     // Show the modal
     const modal = document.getElementById('vibesdr-modal');
-    if (modal) modal.style.display = 'flex';
+    console.log('[VibeSDR] modal element=', modal, 'display before=', modal && modal.style.display);
+    if (modal) {
+        modal.style.display = 'flex';
+        console.log('[VibeSDR] modal display set to flex, computed=', window.getComputedStyle(modal).display);
+    } else {
+        console.error('[VibeSDR] #vibesdr-modal element NOT FOUND in DOM');
+    }
 }
 
 /** Close the VibeSDR modal. */

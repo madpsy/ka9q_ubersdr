@@ -65,20 +65,27 @@ type voiceActivitySSEClient struct {
 	bandFilter string // empty = all bands
 }
 
+// lastSentEntry records what was last broadcast for a given (band, dialFreq).
+type lastSentEntry struct {
+	sentAt     time.Time
+	dxCallsign string // empty if no DX spot was available at send time
+}
+
 // VoiceActivitySSEHub manages all connected SSE clients for the voice activity feed.
 // It tracks when each (band, dialFreq) was last broadcast and suppresses re-sends
 // until 60 s have elapsed, ensuring a new client sees any active station within
-// at most 60 s of connecting.
+// at most 60 s of connecting.  A re-broadcast is also triggered immediately when
+// the DX callsign for a frequency changes (e.g. a spot arrives after first detection).
 type VoiceActivitySSEHub struct {
 	mu      sync.RWMutex
 	clients map[*voiceActivitySSEClient]struct{}
 	enabled atomic.Bool // true when the noise floor monitor is active
 
-	// lastSent tracks the last broadcast time per band per dial frequency.
+	// lastSent tracks the last broadcast state per band per dial frequency.
 	// Rebuilt from current activities after each broadcast; gone stations
 	// naturally fall out of the map.
 	lastSentMu sync.Mutex
-	lastSent   map[string]map[uint64]time.Time // band → dialFreq → last sent
+	lastSent   map[string]map[uint64]lastSentEntry // band → dialFreq → last sent entry
 
 	lastActivityTime atomic.Int64 // Unix nanoseconds of most recent broadcast; 0 = none
 }
@@ -87,7 +94,7 @@ type VoiceActivitySSEHub struct {
 func NewVoiceActivitySSEHub() *VoiceActivitySSEHub {
 	return &VoiceActivitySSEHub{
 		clients:  make(map[*voiceActivitySSEClient]struct{}),
-		lastSent: make(map[string]map[uint64]time.Time),
+		lastSent: make(map[string]map[uint64]lastSentEntry),
 	}
 }
 
@@ -113,9 +120,11 @@ func (h *VoiceActivitySSEHub) unregister(c *voiceActivitySSEClient) {
 }
 
 // MaybeBroadcast is called by the background scanner after each band scan.
-// It broadcasts each activity that is either new or has not been sent in the
-// last 60 s.  Activities that are no longer present simply stop being sent;
-// clients expire them via their own time window.
+// It broadcasts each activity that is either new, has not been sent in the last
+// 60 s, or whose DX callsign has changed since the last send (e.g. a DX cluster
+// spot arrived after the station was first detected).
+// Activities that are no longer present simply stop being sent; clients expire
+// them via their own time window.
 func (h *VoiceActivitySSEHub) MaybeBroadcast(band string, activities []VoiceActivity, nfm *NoiseFloorMonitor) {
 	if len(activities) == 0 {
 		return
@@ -128,14 +137,18 @@ func (h *VoiceActivitySSEHub) MaybeBroadcast(band string, activities []VoiceActi
 
 	bandMap := h.lastSent[band]
 	if bandMap == nil {
-		bandMap = make(map[uint64]time.Time)
+		bandMap = make(map[uint64]lastSentEntry)
 		h.lastSent[band] = bandMap
 	}
 
-	// Collect activities that are due for broadcast.
+	// Collect activities that are due for broadcast:
+	//   - never sent before
+	//   - 60 s re-broadcast window elapsed
+	//   - DX callsign changed since last send (spot arrived after first detection)
 	var due []VoiceActivity
 	for _, act := range activities {
-		if t, seen := bandMap[act.EstimatedDialFreq]; !seen || now.Sub(t) >= rebroadcastInterval {
+		entry, seen := bandMap[act.EstimatedDialFreq]
+		if !seen || now.Sub(entry.sentAt) >= rebroadcastInterval || entry.dxCallsign != act.DXCallsign {
 			due = append(due, act)
 		}
 	}
@@ -145,9 +158,12 @@ func (h *VoiceActivitySSEHub) MaybeBroadcast(band string, activities []VoiceActi
 		return
 	}
 
-	// Update timestamps for all due activities before releasing the lock.
+	// Update last-sent entries for all due activities before releasing the lock.
 	for _, act := range due {
-		bandMap[act.EstimatedDialFreq] = now
+		bandMap[act.EstimatedDialFreq] = lastSentEntry{
+			sentAt:     now,
+			dxCallsign: act.DXCallsign,
+		}
 	}
 
 	h.lastSentMu.Unlock()

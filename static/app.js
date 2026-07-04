@@ -3535,16 +3535,6 @@ async function fetchSiteDescription() {
                     }
                 }
 
-                // Show UUID button if public_uuid is available
-                if (data.public_uuid && data.public_uuid.trim() !== '') {
-                    const uuidBtn = document.getElementById('uuid-button');
-                    if (uuidBtn) {
-                        uuidBtn.style.display = 'block';
-                        // Store the UUID for the copy function
-                        window.publicUUID = data.public_uuid;
-                    }
-                }
-
                 // Add map if GPS coordinates are available
                 if (data.receiver && data.receiver.gps &&
                     data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {
@@ -3828,6 +3818,15 @@ async function fetchSiteDescription() {
             // know whether server-side DSP is available.  updateNRModeSupport()
             // reads instanceDescription.dsp, so call it after the global is set.
             updateNRModeSupport(currentMode);
+
+            // Show VibeSDR / UUID button if public_uuid is available.
+            // This is intentionally outside the `if (descriptionEl && data.description)`
+            // block so it works even when no description text is configured.
+            if (data.public_uuid && data.public_uuid.trim() !== '') {
+                window.publicUUID = data.public_uuid;
+                const uuidBtn = document.getElementById('uuid-button');
+                if (uuidBtn) uuidBtn.style.display = 'block';
+            }
         } else {
             console.error('Failed to fetch site description:', response.status);
         }

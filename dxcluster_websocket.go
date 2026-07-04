@@ -1335,6 +1335,22 @@ func (h *DXClusterWebSocketHandler) KickConnectionsByUUID(userSessionID string) 
 	return len(connsToClose)
 }
 
+// GetConnForSession returns the first active WebSocket connection for the given
+// user session UUID, or nil if no connection is found.
+func (h *DXClusterWebSocketHandler) GetConnForSession(userSessionID string) *websocket.Conn {
+	if userSessionID == "" {
+		return nil
+	}
+	h.connToSessionIDMu.RLock()
+	defer h.connToSessionIDMu.RUnlock()
+	for conn, sid := range h.connToSessionID {
+		if sid == userSessionID {
+			return conn
+		}
+	}
+	return nil
+}
+
 // AddDXBytes tracks bytes sent to a DX cluster connection for a given UserSessionID
 func (h *DXClusterWebSocketHandler) AddDXBytes(userSessionID string, bytes uint64) {
 	if userSessionID == "" {

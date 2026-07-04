@@ -372,17 +372,41 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 		Time:     now,
 	})
 
-	// Send success confirmation to the user who just joined
-	cm.broadcastUsernameSetSuccess(sessionID, username)
+	// Send personalised welcome message directly to the joining user (if configured)
+	cm.sendPersonalisedWelcome(sessionID, username)
 
 	return nil
 }
 
-// broadcastUsernameSetSuccess sends a success confirmation to the user who set their username
-func (cm *ChatManager) broadcastUsernameSetSuccess(sessionID string, username string) {
-	// This is sent only to the specific user, not broadcast to everyone
-	// We'll need to add a method to send to a specific session
-	// For now, we rely on the broadcastUserJoined message which goes to everyone including the sender
+// sendPersonalisedWelcome sends the welcome message with @username prepended directly
+// to the connection that just set their username, so it appears as a mention.
+func (cm *ChatManager) sendPersonalisedWelcome(sessionID string, username string) {
+	if cm.welcomeMessage == nil {
+		return
+	}
+
+	conn := cm.wsHandler.GetConnForSession(sessionID)
+	if conn == nil {
+		return
+	}
+
+	welcome := *cm.welcomeMessage
+	welcome.Timestamp = time.Now().UTC()
+	welcome.Message = "@" + username + " " + welcome.Message
+
+	data := map[string]interface{}{
+		"username":  welcome.Username,
+		"message":   welcome.Message,
+		"timestamp": welcome.Timestamp.Format(time.RFC3339),
+	}
+	message := map[string]interface{}{
+		"type": "chat_message",
+		"data": data,
+	}
+
+	if err := cm.wsHandler.sendMessage(conn, message); err != nil {
+		log.Printf("Chat: Failed to send personalised welcome to %s: %v", username, err)
+	}
 }
 
 // GetUsername retrieves the username for a session UUID
@@ -900,13 +924,9 @@ func (cm *ChatManager) GetBufferedMessages() []ChatMessage {
 // of the replay window — the first thing a new user sees.
 func (cm *ChatManager) SendBufferedMessages(conn *websocket.Conn) {
 	messages := cm.GetBufferedMessages()
-
-	// Append welcome last so it lands at the bottom of the replay window.
-	// Only done here (not in GetBufferedMessages) so admin tools like the
-	// Telegram /chat command see only real messages.
-	if cm.welcomeMessage != nil {
-		messages = append(messages, *cm.welcomeMessage)
-	}
+	// Note: the personalised welcome message (with @username) is sent separately
+	// in sendPersonalisedWelcome() once the user sets their username, so it is
+	// NOT appended here.  This keeps the buffer replay clean for admin tools.
 
 	if len(messages) == 0 {
 		log.Printf("Chat: No buffered messages to send to new client")

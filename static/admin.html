@@ -21595,6 +21595,7 @@ const tooltipLine2 = timeStr;
                     : `<button class="btn" style="background:#dc3545;border-color:#dc3545;" onclick="antSwitchSetThunderstorm(true)">⚡ Thunderstorm Mode</button>`
                 }
                 <button class="btn btn-secondary" onclick="antSwitchTestConn()">🔌 Test</button>
+                ${health.device_url ? `<button class="btn btn-secondary" onclick="window.open(${JSON.stringify(health.device_url)},'_blank')">🌐 Open Switch URL</button>` : ''}
                 <span id="antSwitchTabTestResult" style="font-size:12px;color:#666;"></span>
             </div>`;
 

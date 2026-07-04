@@ -127,6 +127,20 @@
       "allowed_ips": ["0.0.0.0/0"]
     },
     {
+      "name": "dxcluster",
+      "status": "Stable",
+      "description": "Custom DX cluster service — connects to UberSDR, aggregates DX spots from the built-in CW skimmer and external cluster feeds, and serves a live web UI with real-time spot filtering.",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_dxcluster/refs/heads/main/install.sh",
+      "host": "dxcluster",
+      "port": 6087,
+      "enabled": true,
+      "require_admin": false,
+      "strip_prefix": true,
+      "rewrite_origin": false,
+      "rate_limit": 100,
+      "allowed_ips": ["0.0.0.0/0"]
+    },
+    {
       "name": "loran",
       "status": "Stable",
       "description": "Loran-C pulse-envelope viewer — connects to UberSDR, requests a raw IQ stream at 100 kHz, decodes the Loran-C pulse envelope for up to two simultaneous GRI chains, and serves a browser-based scope display with emission-delay station markers.",

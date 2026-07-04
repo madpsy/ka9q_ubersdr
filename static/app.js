@@ -13948,18 +13948,24 @@ function _buildVibeSDRUri() {
     return `vibesdr://connect?uuid=${uuid}`;
 }
 
-/** Open the VibeSDR QR / deep-link modal. */
+/** Open the VibeSDR QR / deep-link modal (desktop) or launch the URI directly (mobile). */
 function openVibeSDRModal() {
-    console.log('[VibeSDR] openVibeSDRModal called, publicUUID=', window.publicUUID);
     const uuid = window.publicUUID;
     if (!uuid) {
-        console.warn('[VibeSDR] No publicUUID set');
         showNotification('UUID not available — is this instance registered with the collector?', 'error');
         return;
     }
 
     const uri = _buildVibeSDRUri();
-    console.log('[VibeSDR] URI=', uri);
+
+    // On mobile, skip the modal and launch the vibesdr:// URI directly so the
+    // app opens immediately without an extra tap.
+    if (_isMobile) {
+        window.location.href = uri;
+        return;
+    }
+
+    // Desktop: show the QR / link modal.
 
     // Populate the raw URI display
     const uriText = document.getElementById('vibesdr-uri-text');
@@ -13990,13 +13996,7 @@ function openVibeSDRModal() {
 
     // Show the modal
     const modal = document.getElementById('vibesdr-modal');
-    console.log('[VibeSDR] modal element=', modal, 'display before=', modal && modal.style.display);
-    if (modal) {
-        modal.style.display = 'flex';
-        console.log('[VibeSDR] modal display set to flex, computed=', window.getComputedStyle(modal).display);
-    } else {
-        console.error('[VibeSDR] #vibesdr-modal element NOT FOUND in DOM');
-    }
+    if (modal) modal.style.display = 'flex';
 }
 
 /** Close the VibeSDR modal. */
@@ -14043,7 +14043,6 @@ document.addEventListener('click', (e) => {
 });
 
 // Expose globally (called from inline onclick in index.html)
-console.log('[VibeSDR] registering window.openVibeSDRModal');
 window.openVibeSDRModal  = openVibeSDRModal;
 window.closeVibeSDRModal = closeVibeSDRModal;
 window.vibesdrCopyURI    = vibesdrCopyURI;

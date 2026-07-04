@@ -13982,13 +13982,31 @@ function openVibeSDRModal() {
 
     // On mobile, skip the modal and launch the vibesdr:// URI directly so the
     // app opens immediately without an extra tap.
-    // Navigate first (must stay inside the user-gesture call stack so iOS/Android
-    // don't block the custom-scheme launch), then defer the WebSocket teardown so
-    // the server slot is freed and none of them auto-reconnect while VibeSDR
-    // handles the stream. The page stays loaded but disconnected until refresh.
+    // The deep-link must be set while still inside the user-gesture call stack
+    // so iOS/Android don't block the custom-scheme launch.
+    // We then register a one-shot visibilitychange listener: when the OS
+    // switches to VibeSDR the browser tab becomes hidden, which fires the event
+    // reliably even if the JS event loop is suspended — unlike setTimeout(0).
+    // This tears down all WebSocket connections so the server slot is freed
+    // immediately and none of them auto-reconnect. Page stays idle until refresh.
     if (_isMobile) {
         window.location.href = uri;
-        setTimeout(disconnectAllWebSockets, 0);
+
+        const _vibesdrDisconnectOnHide = () => {
+            if (document.hidden) {
+                document.removeEventListener('visibilitychange', _vibesdrDisconnectOnHide);
+                disconnectAllWebSockets();
+            }
+        };
+        document.addEventListener('visibilitychange', _vibesdrDisconnectOnHide);
+
+        // Safety net: if the tab never hides (e.g. VibeSDR not installed and
+        // the browser stays in the foreground), disconnect after 5 s anyway.
+        setTimeout(() => {
+            document.removeEventListener('visibilitychange', _vibesdrDisconnectOnHide);
+            disconnectAllWebSockets();
+        }, 5000);
+
         return;
     }
 

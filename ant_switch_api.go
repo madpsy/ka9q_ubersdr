@@ -187,6 +187,39 @@ type antSwitchBackend interface {
 	ToggleAntenna(n int) (AntSwitchState, error)
 }
 
+// ─── Optional backend interfaces ─────────────────────────────────────────────
+//
+// Backends may optionally implement any of these interfaces to expose
+// additional capabilities. The AntSwitchHandler checks for them via type
+// assertions — backends that do not implement them are unaffected.
+
+// antSwitchNamer is implemented by backends that can read per-port names
+// stored on the device itself (e.g. UberANT). Used at startup to pre-populate
+// AntennaLabels slots that are not set in config.yaml.
+type antSwitchNamer interface {
+	// Names returns a map of 1-based port number → custom name.
+	// Ports with no custom name are absent from the map.
+	Names() map[int]string
+}
+
+// antSwitchRenamer is implemented by backends that can persist per-port names
+// on the device (e.g. UberANT). Called when antenna_labels change via the
+// admin config save so the device OLED/web UI stays in sync.
+type antSwitchRenamer interface {
+	// SetName pushes a custom name for port n to the device.
+	SetName(port int, name string) error
+	// ClearName removes the custom name for port n from the device.
+	ClearName(port int) error
+}
+
+// antSwitchLocker is implemented by backends that support a hardware lock
+// (e.g. UberANT). When thunderstorm mode is enabled the handler locks the
+// device so physical button presses are also blocked.
+type antSwitchLocker interface {
+	// SetLock enables (true) or disables (false) the hardware lock.
+	SetLock(locked bool) error
+}
+
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 // httpGet performs a GET request and returns the response body as a string.
@@ -884,7 +917,7 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		return nil, fmt.Errorf("antenna switch device_url must start with http:// or https:// (got %q)", config.DeviceURL)
 	}
 	if config.BackendType == "" {
-		return nil, fmt.Errorf("antenna switch backend_type is required (ms-s7-web, ms-sNa-web, kmtronic, snaptekk)")
+		return nil, fmt.Errorf("antenna switch backend_type is required (ms-s7-web, ms-sNa-web, kmtronic, snaptekk, uberant)")
 	}
 	if config.TimeoutMs <= 0 {
 		config.TimeoutMs = 2000
@@ -909,8 +942,30 @@ func NewAntSwitchHandler(config *AntSwitchConfig) (*AntSwitchHandler, error) {
 		backend = newKmtronicBackend(config.DeviceURL, config.NumAntennas, timeout)
 	case "snaptekk":
 		backend = newSnaptekkBackend(config.DeviceURL, config.NumAntennas, timeout)
+	case "uberant":
+		backend = newUberantBackend(config.DeviceURL, config.NumAntennas, timeout)
 	default:
-		return nil, fmt.Errorf("unknown antenna switch backend_type %q (valid: ms-s7-web, ms-sNa-web, kmtronic, snaptekk)", config.BackendType)
+		return nil, fmt.Errorf("unknown antenna switch backend_type %q (valid: ms-s7-web, ms-sNa-web, kmtronic, snaptekk, uberant)", config.BackendType)
+	}
+
+	// For backends that expose port names (e.g. uberant), pre-populate any
+	// AntennaLabels slots that are not already set in config.yaml with the
+	// names stored on the device. Config-file labels always take priority.
+	if namer, ok := backend.(antSwitchNamer); ok {
+		deviceNames := namer.Names()
+		if len(deviceNames) > 0 {
+			// Extend the slice to NumAntennas length so index writes are safe.
+			for len(config.AntennaLabels) < config.NumAntennas {
+				config.AntennaLabels = append(config.AntennaLabels, "")
+			}
+			for port, name := range deviceNames {
+				idx := port - 1
+				if idx >= 0 && idx < len(config.AntennaLabels) && config.AntennaLabels[idx] == "" {
+					config.AntennaLabels[idx] = name
+				}
+			}
+			log.Printf("AntSwitch: loaded %d port name(s) from device", len(deviceNames))
+		}
 	}
 
 	h := &AntSwitchHandler{

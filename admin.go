@@ -1155,6 +1155,35 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 					labels[i] = s
 				}
 			}
+
+			// For backends that support on-device naming (e.g. uberant), push
+			// any changed labels to the device so its OLED/web UI stays in sync.
+			// This is non-fatal — the config save proceeds even if the push fails.
+			if ah.antSwitchHandler != nil {
+				if r, ok := ah.antSwitchHandler.backend.(antSwitchRenamer); ok {
+					old := ah.config.AntSwitch.AntennaLabels
+					for i, newLabel := range labels {
+						oldLabel := ""
+						if i < len(old) {
+							oldLabel = old[i]
+						}
+						if newLabel == oldLabel {
+							continue
+						}
+						port := i + 1
+						if newLabel == "" {
+							if err := r.ClearName(port); err != nil {
+								log.Printf("AntSwitch: failed to clear name for port %d on device: %v", port, err)
+							}
+						} else {
+							if err := r.SetName(port, newLabel); err != nil {
+								log.Printf("AntSwitch: failed to push name for port %d to device: %v", port, err)
+							}
+						}
+					}
+				}
+			}
+
 			ah.config.AntSwitch.AntennaLabels = labels
 		}
 		if v, ok := antSwitch["default_antenna"].(float64); ok {
@@ -8424,7 +8453,8 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 
 	case "set_thunderstorm":
 		// Toggle thunderstorm mode — admin only
-		// When enabling, also ground all antennas immediately
+		// When enabling, also ground all antennas immediately and lock the device.
+		// When disabling, unlock the device.
 		ah.config.AntSwitch.Thunderstorm = req.Value
 		log.Printf("AntSwitch: Admin set thunderstorm mode to %v", req.Value)
 
@@ -8434,7 +8464,30 @@ func (ah *AdminHandler) HandleAdminAntSwitchCommand(w http.ResponseWriter, r *ht
 		if req.Value {
 			// Ground all antennas when entering thunderstorm mode
 			state, verified, err = h.groundAll()
+
+			// For backends that support hardware locking (e.g. uberant), also
+			// lock the device so physical button presses are blocked.
+			if verified {
+				if locker, ok := h.backend.(antSwitchLocker); ok {
+					if lockErr := locker.SetLock(true); lockErr != nil {
+						log.Printf("AntSwitch: failed to lock device during thunderstorm: %v", lockErr)
+						// Non-fatal — thunderstorm mode is still active in software;
+						// the background poller will re-ground if the hardware is moved.
+					} else {
+						log.Printf("AntSwitch: device locked (thunderstorm mode)")
+					}
+				}
+			}
 		} else {
+			// Unlock the device when leaving thunderstorm mode.
+			if locker, ok := h.backend.(antSwitchLocker); ok {
+				if lockErr := locker.SetLock(false); lockErr != nil {
+					log.Printf("AntSwitch: failed to unlock device after thunderstorm: %v", lockErr)
+				} else {
+					log.Printf("AntSwitch: device unlocked (thunderstorm mode off)")
+				}
+			}
+
 			// Just query current state when leaving thunderstorm mode
 			state, err = h.backend.GetState()
 			verified = err == nil

@@ -13982,12 +13982,13 @@ function openVibeSDRModal() {
 
     // On mobile, skip the modal and launch the vibesdr:// URI directly so the
     // app opens immediately without an extra tap.
-    // Kill all WebSocket connections first so the server slot is freed and
-    // none of them auto-reconnect while VibeSDR handles the stream.
-    // The page stays loaded but disconnected until the user refreshes.
+    // Navigate first (must stay inside the user-gesture call stack so iOS/Android
+    // don't block the custom-scheme launch), then defer the WebSocket teardown so
+    // the server slot is freed and none of them auto-reconnect while VibeSDR
+    // handles the stream. The page stays loaded but disconnected until refresh.
     if (_isMobile) {
-        disconnectAllWebSockets();
         window.location.href = uri;
+        setTimeout(disconnectAllWebSockets, 0);
         return;
     }
 

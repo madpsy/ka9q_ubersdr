@@ -13950,13 +13950,16 @@ function _buildVibeSDRUri() {
 
 /** Open the VibeSDR QR / deep-link modal. */
 function openVibeSDRModal() {
+    console.log('[VibeSDR] openVibeSDRModal called, publicUUID=', window.publicUUID);
     const uuid = window.publicUUID;
     if (!uuid) {
+        console.warn('[VibeSDR] No publicUUID set');
         showNotification('UUID not available — is this instance registered with the collector?', 'error');
         return;
     }
 
     const uri = _buildVibeSDRUri();
+    console.log('[VibeSDR] URI=', uri);
 
     // Populate the raw URI display
     const uriText = document.getElementById('vibesdr-uri-text');
@@ -14034,6 +14037,7 @@ document.addEventListener('click', (e) => {
 });
 
 // Expose globally (called from inline onclick in index.html)
+console.log('[VibeSDR] registering window.openVibeSDRModal');
 window.openVibeSDRModal  = openVibeSDRModal;
 window.closeVibeSDRModal = closeVibeSDRModal;
 window.vibesdrCopyURI    = vibesdrCopyURI;

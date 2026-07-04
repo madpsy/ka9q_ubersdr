@@ -1713,6 +1713,10 @@ func main() {
 	// Create SSE hubs for real-time admin feeds
 	decoderSSEHub := NewDecoderSSEHub()
 	cwSkimmerSSEHub := NewCWSkimmerSSEHub()
+	dxClusterSSEHub := NewDXClusterSSEHub()
+	if config.DXCluster.Enabled {
+		dxClusterSSEHub.SetEnabled(true)
+	}
 
 	// Register CW Skimmer spot handler to broadcast via websocket, MQTT, and SSE
 	if cwSkimmer != nil {
@@ -1734,12 +1738,15 @@ func main() {
 		})
 	}
 
-	// Register DX spot handler for logging
+	// Register DX spot handler for logging and SSE broadcast
 	dxCluster.OnSpot(func(spot DXSpot) {
 		// Spot logging removed
 
 		// Publish to notification manager
 		notifManager.Publish(newDXSpotEvent(spot))
+
+		// Broadcast to SSE clients
+		dxClusterSSEHub.Broadcast(spot)
 	})
 
 	// Initialize WSJT-X UDP broadcaster if enabled
@@ -2797,9 +2804,11 @@ func main() {
 	decoderSSELimiter := NewSSEIPLimiter(2)
 	cwSkimmerSSELimiter := NewSSEIPLimiter(2)
 	voiceActivitySSELimiter := NewSSEIPLimiter(2)
+	dxClusterSSELimiter := NewSSEIPLimiter(2)
 	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter, &config.Server))
 	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter, &config.Server))
 	http.HandleFunc("/api/voice-activity/stream", HandlePublicVoiceActivityStream(voiceActivitySSEHub, voiceActivitySSELimiter, &config.Server))
+	http.HandleFunc("/api/dxcluster/stream", HandlePublicDXClusterStream(dxClusterSSEHub, dxClusterSSELimiter, &config.Server))
 
 	// Widget management endpoints (admin only)
 	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))

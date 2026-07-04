@@ -42,8 +42,9 @@ var voiceActivityCache = &VoiceActivityCache{
 var activeDXCluster *DXClusterClient
 
 // StartVoiceActivityBackgroundScanner starts a background goroutine that continuously
-// scans all bands for voice activity to keep the cache populated
-func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
+// scans all bands for voice activity to keep the cache populated.
+// If hub is non-nil, confirmed activities are broadcast to SSE clients via MaybeBroadcast.
+func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor, hub *VoiceActivitySSEHub) {
 	if nfm == nil {
 		return
 	}
@@ -74,8 +75,19 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 				// Detect voice activity using multi-frame analysis
 				newActivities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
 
+				// Apply filters before merging into cache
+				newActivities = filterActivitiesBySSBStart(newActivities, bandConfig.Name)
+				newActivities = filterActivitiesByExclusionRange(newActivities, bandConfig.Name)
+
 				// Update cache (this will increment detection counts)
-				voiceActivityCache.mergeWithCache(bandConfig.Name, newActivities)
+				confirmed := voiceActivityCache.mergeWithCache(bandConfig.Name, newActivities)
+
+				// Broadcast confirmed activities to SSE clients (suppressed if nothing new/due)
+				if hub != nil && len(confirmed) > 0 {
+					// Enrich with DX cluster callsigns before broadcasting
+					confirmed = enrichWithDXCallsigns(confirmed)
+					hub.MaybeBroadcast(bandConfig.Name, confirmed, nfm)
+				}
 			}
 		}
 	}()

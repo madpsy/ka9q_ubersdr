@@ -742,6 +742,10 @@ func main() {
 		config.Spectrogram.DataDir = *configDir + "/" + config.Spectrogram.DataDir
 	}
 
+	// Create voice activity SSE hub early — needed by the background scanner
+	// which starts as soon as the noise floor monitor is ready.
+	voiceActivitySSEHub := NewVoiceActivitySSEHub()
+
 	noiseFloorMonitor, err := NewNoiseFloorMonitor(config, radiod, sessions)
 	if err != nil {
 		log.Fatalf("Failed to initialize noise floor monitor: %v", err)
@@ -752,7 +756,8 @@ func main() {
 		}
 
 		// Start background voice activity scanner to keep cache populated
-		StartVoiceActivityBackgroundScanner(noiseFloorMonitor)
+		StartVoiceActivityBackgroundScanner(noiseFloorMonitor, voiceActivitySSEHub)
+		voiceActivitySSEHub.SetEnabled(true)
 
 		defer noiseFloorMonitor.Stop()
 	}
@@ -2791,8 +2796,10 @@ func main() {
 	// Bypassed IPs (timeout_bypass_ips) are exempt from the connection limit.
 	decoderSSELimiter := NewSSEIPLimiter(2)
 	cwSkimmerSSELimiter := NewSSEIPLimiter(2)
+	voiceActivitySSELimiter := NewSSEIPLimiter(2)
 	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter, &config.Server))
 	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter, &config.Server))
+	http.HandleFunc("/api/voice-activity/stream", HandlePublicVoiceActivityStream(voiceActivitySSEHub, voiceActivitySSELimiter, &config.Server))
 
 	// Widget management endpoints (admin only)
 	http.HandleFunc("/admin/widgets/enabled", adminHandler.AuthMiddleware(widgetManager.HandleEnabled))

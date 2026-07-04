@@ -3922,6 +3922,28 @@ function disconnect() {
     }
 }
 
+/**
+ * Permanently disconnect all WebSocket connections (audio, spectrum, DX cluster/chat).
+ * Sets the appropriate userDisconnected flags so none of them auto-reconnect.
+ * The page remains loaded but idle until the user manually refreshes.
+ */
+function disconnectAllWebSockets() {
+    // Audio WebSocket + AudioContext
+    window.audioUserDisconnected = true;
+    disconnect();
+
+    // Spectrum WebSocket
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.disconnect();
+    }
+
+    // DX cluster / chat WebSocket
+    if (window.dxClusterClient) {
+        window.dxClusterClient.disconnect();
+    }
+}
+window.disconnectAllWebSockets = disconnectAllWebSockets;
+
 // Active Channels Stats Functions
 function startStatsUpdates() {
     // Clear any existing interval
@@ -13960,7 +13982,11 @@ function openVibeSDRModal() {
 
     // On mobile, skip the modal and launch the vibesdr:// URI directly so the
     // app opens immediately without an extra tap.
+    // Kill all WebSocket connections first so the server slot is freed and
+    // none of them auto-reconnect while VibeSDR handles the stream.
+    // The page stays loaded but disconnected until the user refreshes.
     if (_isMobile) {
+        disconnectAllWebSockets();
         window.location.href = uri;
         return;
     }

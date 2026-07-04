@@ -5,6 +5,7 @@ class DXClusterClient {
         this.reconnectDelay = 5000; // 5 seconds
         this.reconnectTimer = null;
         this.connected = false;
+        this.userDisconnected = false; // Prevents auto-reconnect after explicit disconnect
         this.spotCallbacks = []; // Array of DX spot callbacks
         this.digitalSpotCallbacks = []; // Array of digital spot callbacks
         this.cwSpotCallbacks = []; // Array of CW spot callbacks
@@ -413,6 +414,7 @@ class DXClusterClient {
     }
 
     scheduleReconnect() {
+        if (this.userDisconnected) return; // Don't reconnect after explicit disconnect
         if (this.reconnectTimer) {
             return; // Already scheduled
         }
@@ -426,7 +428,10 @@ class DXClusterClient {
 
     disconnect() {
         console.log('[DX Cluster] Disconnecting...');
-        
+
+        // Prevent onclose from scheduling a reconnect
+        this.userDisconnected = true;
+
         // Clear reconnect timer
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);

@@ -13937,46 +13937,110 @@ window.populateOutputDevices = populateOutputDevices;
 window.setOutputDevice = setOutputDevice;
 window.toggleChatMarkers = toggleChatMarkers;
 
-// Copy UUID to clipboard
-function copyUUIDToClipboard() {
-    if (!window.publicUUID) {
-        showNotification('UUID not available', 'error');
+// ── VibeSDR modal ────────────────────────────────────────────────────────────
+
+/**
+ * Build the vibesdr:// deep-link URI from the instance public UUID.
+ * Phase 1: UUID only (VibeSDR resolves the backend URL from the collector).
+ */
+function _buildVibeSDRUri() {
+    const uuid = window.publicUUID;
+    if (!uuid) return null;
+    return `vibesdr://connect?uuid=${uuid}`;
+}
+
+/** Open the VibeSDR QR / deep-link modal. */
+function openVibeSDRModal() {
+    const uuid = window.publicUUID;
+    if (!uuid) {
+        showNotification('UUID not available — is this instance registered with the collector?', 'error');
         return;
     }
 
-    // Use the Clipboard API if available
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(window.publicUUID)
-            .then(() => {
-                showNotification('UUID copied to clipboard - Use this in the desktop client application', 'success', 3000);
-                log('UUID copied to clipboard');
-            })
-            .catch(err => {
-                console.error('Failed to copy UUID:', err);
-                showNotification('Failed to copy UUID', 'error');
+    const uri = _buildVibeSDRUri();
+
+    // Populate the raw URI display
+    const uriText = document.getElementById('vibesdr-uri-text');
+    if (uriText) uriText.textContent = uri;
+
+    // Set the "Open in VibeSDR" link href
+    const openLink = document.getElementById('vibesdr-open-link');
+    if (openLink) openLink.href = uri;
+
+    // Render QR code into the container
+    const qrContainer = document.getElementById('vibesdr-qr-container');
+    if (qrContainer) {
+        // Clear any previous QR render
+        qrContainer.innerHTML = '';
+        if (typeof QRCode !== 'undefined') {
+            new QRCode(qrContainer, {
+                text: uri,
+                width: 220,
+                height: 220,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M,
             });
-    } else {
-        // Fallback for older browsers
-        const textArea = document.createElement('textarea');
-        textArea.value = window.publicUUID;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            showNotification('UUID copied to clipboard - Use this in the desktop client application', 'success', 3000);
-            log('UUID copied to clipboard');
-        } catch (err) {
-            console.error('Failed to copy UUID:', err);
-            showNotification('Failed to copy UUID', 'error');
+        } else {
+            qrContainer.innerHTML = '<p style="color:#c00;font-size:12px;">QR library not loaded</p>';
         }
-        document.body.removeChild(textArea);
+    }
+
+    // Show the modal
+    const modal = document.getElementById('vibesdr-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+/** Close the VibeSDR modal. */
+function closeVibeSDRModal() {
+    const modal = document.getElementById('vibesdr-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+/** Copy the vibesdr:// URI to clipboard. */
+function vibesdrCopyURI() {
+    const uri = _buildVibeSDRUri();
+    if (!uri) {
+        showNotification('URI not available', 'error');
+        return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(uri)
+            .then(() => showNotification('VibeSDR link copied to clipboard', 'success', 3000))
+            .catch(() => _vibesdrCopyFallback(uri));
+    } else {
+        _vibesdrCopyFallback(uri);
     }
 }
 
-// Expose UUID copy function globally
-window.copyUUIDToClipboard = copyUUIDToClipboard;
+function _vibesdrCopyFallback(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        showNotification('VibeSDR link copied to clipboard', 'success', 3000);
+    } catch {
+        showNotification('Failed to copy link', 'error');
+    }
+    document.body.removeChild(ta);
+}
+
+// Close modal on backdrop click
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('vibesdr-modal');
+    if (modal && e.target === modal) closeVibeSDRModal();
+});
+
+// Expose globally (called from inline onclick in index.html)
+window.openVibeSDRModal  = openVibeSDRModal;
+window.closeVibeSDRModal = closeVibeSDRModal;
+window.vibesdrCopyURI    = vibesdrCopyURI;
+
+// Keep legacy alias so any existing references don't break
+window.copyUUIDToClipboard = openVibeSDRModal;
 
 // Frequency scroll configuration
 let frequencyScrollMode = '500-fast'; // Default mode

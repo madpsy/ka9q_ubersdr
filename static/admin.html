@@ -21663,6 +21663,7 @@ const tooltipLine2 = timeStr;
                             <option value="ms-s7-web"   ${(cfg.backend_type||'') === 'ms-s7-web'   ? 'selected' : ''}>ms-s7-web (MS-S7-WEB, mixing)</option>
                             <option value="kmtronic"    ${(cfg.backend_type||'') === 'kmtronic'    ? 'selected' : ''}>kmtronic (KMTronic relay board)</option>
                             <option value="snaptekk"    ${(cfg.backend_type||'') === 'snaptekk'    ? 'selected' : ''}>snaptekk (Snaptekk relay board)</option>
+                            <option value="uberant"     ${(cfg.backend_type||'') === 'uberant'     ? 'selected' : ''}>uberant (UberANT Native API)</option>
                         </select>
                     </div>
                     <div>
@@ -21724,7 +21725,7 @@ const tooltipLine2 = timeStr;
         // Backends that do NOT support mixing (rotary switches with a single active position).
         // When one of these is selected the Mixing Mode checkbox is disabled and unchecked.
         // All other backends support mixing and the checkbox is freely toggleable.
-        const ANT_SWITCH_NO_MIXING_BACKENDS = new Set(['ms-sNa-web']);
+        const ANT_SWITCH_NO_MIXING_BACKENDS = new Set(['ms-sNa-web', 'uberant']);
 
         function antSwitchUpdateMixingForBackend(backendType) {
             const cb      = document.getElementById('antCfgAllowMixing');

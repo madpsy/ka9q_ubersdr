@@ -13994,7 +13994,9 @@ function openVibeSDRModal() {
         }
     }
 
-    // Show the modal
+    // Show the modal — set the just-opened flag so the backdrop-click listener
+    // ignores the bubble from this same click event.
+    _vibesdrModalJustOpened = true;
     const modal = document.getElementById('vibesdr-modal');
     if (modal) modal.style.display = 'flex';
 }
@@ -14036,8 +14038,16 @@ function _vibesdrCopyFallback(text) {
     document.body.removeChild(ta);
 }
 
-// Close modal on backdrop click
+// Close modal on backdrop click.
+// Use capture=false (bubble phase) and check the modal was already visible
+// *before* this event — prevents the opening click from immediately re-closing
+// the modal if it bubbles up to document while the modal is display:flex.
+let _vibesdrModalJustOpened = false;
 document.addEventListener('click', (e) => {
+    if (_vibesdrModalJustOpened) {
+        _vibesdrModalJustOpened = false;
+        return;
+    }
     const modal = document.getElementById('vibesdr-modal');
     if (modal && e.target === modal) closeVibeSDRModal();
 });

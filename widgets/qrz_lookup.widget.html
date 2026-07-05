@@ -172,11 +172,12 @@
     font-weight: normal;
     color: rgba(100,200,255,0.8);
     margin-top: 2px;
-    letter-spacing: 0.2px;
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 3px;
+    flex-wrap: nowrap;
+    gap: 2px;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
   #qrz-ant-bearing {
@@ -239,9 +240,11 @@
   }
 
   .qrz-ant-btn.qrz-ant-selected {
-    background: rgba(74,158,255,0.35);
-    border-color: rgba(74,158,255,0.7);
+    background: rgba(74,158,255,0.55);
+    border-color: rgba(74,158,255,1);
     color: #fff;
+    font-weight: bold;
+    box-shadow: 0 0 0 1px rgba(74,158,255,0.5);
   }
 
   .qrz-ant-btn:disabled {
@@ -727,9 +730,9 @@
     var antAzimuth  = rotEnabled && api.rotator.azimuth !== null ? api.rotator.azimuth : null;
     var hasPassword = rotEnabled && api.rotator.hasPassword;
 
-    var inner = '📍\u00A0' + db.distKm.toLocaleString() + '\u00A0km\u00A0·\u00A0' + db.bearing + '°';
+    var inner = '📍 ' + db.distKm.toLocaleString() + 'km · ' + db.bearing + '°';
     if (antAzimuth !== null) {
-      inner += '<span id="qrz-ant-bearing">\u00A0|\u00A0' + antAzimuth + '°\u00A0🧭</span>';
+      inner += '<span id="qrz-ant-bearing"> | ' + antAzimuth + '°🧭</span>';
     }
     if (hasPassword) {
       inner += '<button id="qrz-set-btn" title="Rotate antenna to ' + db.bearing + '°">Set</button>';
@@ -787,7 +790,8 @@
       var isSel = sw.selected.indexOf(i) !== -1;
       var selClass = isSel ? ' qrz-ant-selected' : '';
       var dis = disabled ? ' disabled' : '';
-      html += '<button class="qrz-ant-btn' + selClass + '" data-ant="' + i + '"' + dis + '>' + esc(label) + '</button>';
+      var prefix = isSel ? '✓\u00A0' : '';
+      html += '<button class="qrz-ant-btn' + selClass + '" data-ant="' + i + '"' + dis + '>' + prefix + esc(label) + '</button>';
     }
     html += '</div>';
     return html;
@@ -806,9 +810,16 @@
       var ant = parseInt(btn.dataset.ant, 10);
       if (isNaN(ant)) return;
       api.selectAntenna(ant);
-      // Optimistic highlight
+      // Optimistic highlight — update class and ✓ prefix
+      var sw = api.antSwitch;
       row.querySelectorAll('.qrz-ant-btn').forEach(function (b) {
-        b.classList.toggle('qrz-ant-selected', parseInt(b.dataset.ant, 10) === ant);
+        var i = parseInt(b.dataset.ant, 10);
+        var isSel = i === ant;
+        b.classList.toggle('qrz-ant-selected', isSel);
+        var label = (sw.antenna_labels[i - 1] && sw.antenna_labels[i - 1] !== '')
+          ? sw.antenna_labels[i - 1]
+          : ('Ant\u00A0' + i);
+        b.textContent = (isSel ? '✓\u00A0' : '') + label;
       });
     });
   }
@@ -830,8 +841,14 @@
       var disabled = sw.thunderstorm || !sw.hasPassword;
       existing.querySelectorAll('.qrz-ant-btn').forEach(function (b) {
         var i = parseInt(b.dataset.ant, 10);
-        b.classList.toggle('qrz-ant-selected', sw.selected.indexOf(i) !== -1);
+        var isSel = sw.selected.indexOf(i) !== -1;
+        b.classList.toggle('qrz-ant-selected', isSel);
         b.disabled = disabled;
+        // Keep ✓ prefix in sync with selected state
+        var label = (sw.antenna_labels[i - 1] && sw.antenna_labels[i - 1] !== '')
+          ? sw.antenna_labels[i - 1]
+          : ('Ant\u00A0' + i);
+        b.textContent = (isSel ? '✓\u00A0' : '') + label;
       });
       // Update grounded label
       var groundedEl = existing.querySelector('.qrz-ant-grounded');

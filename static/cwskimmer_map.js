@@ -43,6 +43,23 @@ class CWSkimmerMap {
         this.bandConditionsAvailable = false; // Track if band conditions are available
         this.currentStatus = 'disconnected'; // Track current connection status to avoid unnecessary DOM updates
 
+        // Globe.gl state
+        this.globe = null; // Globe.gl instance
+        // URL param ?view=globe|map takes priority over localStorage
+        const urlView = new URLSearchParams(window.location.search).get('view');
+        this.mapMode = (urlView === 'globe' || urlView === 'map')
+            ? (urlView === 'globe' ? 'globe' : 'leaflet')
+            : (localStorage.getItem('cwskimmer_mapMode') || 'leaflet');
+        this.globeSpinning = false; // Whether auto-spin is active
+        this.globeSpinInterval = null; // Auto-spin animation frame ID
+        this.globeUserInteracting = false; // True while user is dragging
+        // Spin speed step: 0=stopped, 1=slow, 2=med, 3=fast
+        this.globeSpinStep = 0;
+        this.globeSpinSpeeds = [0, 0.08, 0.20, 0.50]; // degrees per frame
+        this.globeSpinLabels = ['Spin', 'Slow', 'Med', 'Fast'];
+        this.globeTooltipEl = null; // Tooltip DOM element for globe hover
+        this.globeRefreshTimer = null; // Debounce timer for globe point refresh
+
         // Track spots per minute
         this.spotTimestamps = []; // Array of timestamps for rate calculation
         this.lastSpotTime = null; // Timestamp of most recent spot
@@ -183,6 +200,18 @@ class CWSkimmerMap {
         // Periodically re-apply filters to handle aging spots
         // This ensures markers are hidden as they age past the filter threshold
         setInterval(() => this.applyFilters(), 60000); // Every 60 seconds
+
+        // Setup text zoom controls
+        this.setupTextZoom();
+
+        // Setup map view toggle (2D/3D)
+        this.setupMapViewToggle();
+
+        // If user previously chose globe, switch to it after map is ready
+        if (this.mapMode === 'globe') {
+            // Defer until after receiver location loads
+            setTimeout(() => this.switchMapView('globe'), 500);
+        }
     }
 
     loadPreferences() {
@@ -192,6 +221,7 @@ class CWSkimmerMap {
         const showWeather = localStorage.getItem('cwskimmer_showWeather');
         const showLegend = localStorage.getItem('cwskimmer_showLegend');
         const showClusters = localStorage.getItem('cwskimmer_showClusters');
+        const showLive = localStorage.getItem('cwskimmer_showLive');
 
         // Load filter values
         const ageFilter = localStorage.getItem('cwskimmer_ageFilter');
@@ -230,6 +260,10 @@ class CWSkimmerMap {
             this.clustersEnabled = showClusters === 'true';
             const checkbox = document.getElementById('show-clusters-checkbox');
             if (checkbox) checkbox.checked = this.clustersEnabled;
+        }
+        if (showLive !== null) {
+            const checkbox = document.getElementById('show-live-checkbox');
+            if (checkbox) checkbox.checked = showLive === 'true';
         }
 
         // Apply filter values
@@ -633,6 +667,510 @@ class CWSkimmerMap {
 
         // Setup map view state saving
         this.setupMapViewSaving();
+
+        // If globe mode was saved, hide the leaflet map div immediately
+        // (the actual globe init happens after receiver location loads)
+        if (this.mapMode === 'globe') {
+            document.getElementById('map').style.display = 'none';
+        }
+    }
+
+    // ─── Globe.gl methods ────────────────────────────────────────────────────
+
+    setupMapViewToggle() {
+        const btn = document.getElementById('map-view-toggle');
+        if (!btn) return;
+
+        // Set initial button icon and tooltip
+        btn.textContent = this.mapMode === 'globe' ? '🗺️' : '🌍';
+        btn.title = this.mapMode === 'globe' ? 'Switch to 2D Map' : 'Switch to 3D Globe';
+        if (this.mapMode === 'globe') btn.classList.add('active-globe');
+
+        btn.addEventListener('click', () => {
+            const newMode = this.mapMode === 'leaflet' ? 'globe' : 'leaflet';
+            this.mapMode = newMode;
+            localStorage.setItem('cwskimmer_mapMode', newMode);
+            // Update URL param so the link is shareable without a page reload
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', newMode === 'globe' ? 'globe' : 'map');
+            history.replaceState(null, '', url.toString());
+            this.switchMapView(newMode);
+        });
+    }
+
+    // Globe texture URLs keyed by theme name
+    get globeTextures() {
+        return {
+            'night':       'https://unpkg.com/three-globe/example/img/earth-night.jpg',
+            'day':         'https://unpkg.com/three-globe/example/img/earth-day.jpg',
+            'blue-marble': 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+            'dark':        'https://unpkg.com/three-globe/example/img/earth-dark.jpg',
+            'topology':    'https://unpkg.com/three-globe/example/img/earth-topology.png',
+        };
+    }
+
+    switchMapView(mode) {
+        const mapEl = document.getElementById('map');
+        const globeEl = document.getElementById('globe-container');
+        const btn = document.getElementById('map-view-toggle');
+        const globeControls = document.getElementById('globe-controls');
+
+        if (mode === 'globe') {
+            mapEl.style.display = 'none';
+            globeEl.style.display = 'block';
+            if (globeControls) globeControls.style.display = 'flex';
+            if (btn) {
+                btn.textContent = '🗺️';
+                btn.title = 'Switch to 2D Map';
+                btn.classList.add('active-globe');
+            }
+            if (!this.globe) {
+                this.initGlobe();
+            } else {
+                // Globe already exists — refresh data and restart spin at slow speed
+                this.refreshGlobePoints();
+                this.globeSpinStep = 1;
+                this.startGlobeSpin();
+            }
+        } else {
+            mapEl.style.display = 'block';
+            globeEl.style.display = 'none';
+            if (globeControls) globeControls.style.display = 'none';
+            if (btn) {
+                btn.textContent = '🌍';
+                btn.title = 'Switch to 3D Globe';
+                btn.classList.remove('active-globe');
+            }
+            this.stopGlobeSpin();
+            // Rebuild any Leaflet markers that were skipped while in globe mode,
+            // then re-apply filters so only matching spots are visible.
+            this.rebuildLeafletMarkers();
+            this.applyFilters();
+            // Leaflet loses track of its container size when hidden — force a recalculation
+            if (this.map) {
+                setTimeout(() => this.map.invalidateSize(), 50);
+            }
+        }
+    }
+
+    initGlobe() {
+        const container = document.getElementById('globe-container');
+        if (!container || typeof Globe === 'undefined') {
+            console.error('[Globe] Globe.gl not loaded or container missing');
+            return;
+        }
+
+        // Build initial filtered spots array
+        const spotsArray = this.getFilteredSpotsArray();
+
+        // Resolve globe theme — URL param takes priority over localStorage
+        const urlTheme = new URLSearchParams(window.location.search).get('theme');
+        const validThemes = Object.keys(this.globeTextures);
+        const savedTheme = (urlTheme && validThemes.includes(urlTheme))
+            ? urlTheme
+            : (localStorage.getItem('cwskimmer_globeTheme') || 'blue-marble');
+        const themeUrl = this.globeTextures[savedTheme];
+        // Sync the select element to the resolved value
+        const themeSelect = document.getElementById('globe-theme-select');
+        if (themeSelect) themeSelect.value = savedTheme;
+
+        // Receiver ring data
+        const receiverRings = this.receiverLocation ? [{
+            lat: this.receiverLocation.lat,
+            lng: this.receiverLocation.lon,
+            maxR: 1.5,
+            propagationSpeed: 1,
+            repeatPeriod: 2000
+        }] : [];
+
+        this.globe = Globe({ animateIn: false })(container)
+            // Appearance
+            .globeImageUrl(themeUrl)
+            .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
+            .showAtmosphere(true)
+            .atmosphereColor('#1a6aff')
+            .atmosphereAltitude(0.15)
+
+            // Spot points
+            .pointsData(spotsArray)
+            .pointLat('latitude')
+            .pointLng('longitude')
+            .pointColor(d => this.bandColors[d.band] || '#999')
+            .pointRadius(() => {
+                // Scale radius with camera altitude so points stay ~constant screen size
+                const alt = this.globe ? this.globe.pointOfView().altitude : 2.5;
+                return Math.max(0.05, 0.1 * alt);
+            })
+            .pointAltitude(0.005)
+            .pointResolution(6)
+            .onPointClick((spot) => {
+                this.showGlobePopup(spot);
+            })
+            .onPointHover((spot) => {
+                this.handleGlobeHover(spot);
+            })
+
+            // Receiver location ring
+            .ringsData(receiverRings)
+            .ringColor(() => '#ff4444')
+            .ringMaxRadius('maxR')
+            .ringPropagationSpeed('propagationSpeed')
+            .ringRepeatPeriod('repeatPeriod')
+            .ringAltitude(0.005);
+
+        // Set initial camera position — centre on receiver or world view
+        const initLat = this.receiverLocation ? this.receiverLocation.lat : 20;
+        const initLng = this.receiverLocation ? this.receiverLocation.lon : 0;
+        this.globe.pointOfView({ lat: initLat, lng: initLng, altitude: 2.5 }, 0);
+
+        // Re-evaluate pointRadius after zoom so markers stay constant screen size
+        const updatePointRadius = () => {
+            if (!this.globe) return;
+            const alt = this.globe.pointOfView().altitude;
+            this.globe.pointRadius(Math.max(0.05, 0.1 * alt));
+        };
+
+        // Detect user interaction to pause auto-spin
+        const renderer = container.querySelector('canvas');
+        if (renderer) {
+            // Recompute point radius after wheel zoom (debounced 100ms)
+            let wheelTimer = null;
+            renderer.addEventListener('wheel', () => {
+                if (wheelTimer) clearTimeout(wheelTimer);
+                wheelTimer = setTimeout(updatePointRadius, 100);
+            }, { passive: true });
+
+            renderer.addEventListener('mousedown', () => {
+                this.globeUserInteracting = true;
+                this.stopGlobeSpin();
+            });
+            renderer.addEventListener('mouseup', () => {
+                this.globeUserInteracting = false;
+                // Spin stays stopped after user interaction — user must not be interrupted
+            });
+            renderer.addEventListener('touchstart', () => {
+                this.globeUserInteracting = true;
+                this.stopGlobeSpin();
+            }, { passive: true });
+            renderer.addEventListener('touchend', () => {
+                this.globeUserInteracting = false;
+                // Spin stays stopped after user interaction
+                updatePointRadius();
+            }, { passive: true });
+            // Pinch-to-zoom: recompute radius during touch move
+            renderer.addEventListener('touchmove', () => {
+                if (wheelTimer) clearTimeout(wheelTimer);
+                wheelTimer = setTimeout(updatePointRadius, 100);
+            }, { passive: true });
+        }
+
+        // Store for use in showGlobePopup after fly-to
+        this.updateGlobePointRadius = updatePointRadius;
+
+        // Create tooltip element
+        this.globeTooltipEl = document.createElement('div');
+        this.globeTooltipEl.className = 'globe-tooltip';
+        this.globeTooltipEl.style.display = 'none';
+        document.body.appendChild(this.globeTooltipEl);
+
+        // Track mouse position for tooltip placement
+        document.addEventListener('mousemove', (e) => {
+            if (this.globeTooltipEl && this.globeTooltipEl.style.display !== 'none') {
+                this.globeTooltipEl.style.left = (e.clientX + 14) + 'px';
+                this.globeTooltipEl.style.top = (e.clientY - 10) + 'px';
+            }
+        });
+
+        // Resize globe when container size changes (e.g. window resize)
+        const resizeObserver = new ResizeObserver(() => {
+            if (!this.globe) return;
+            this.globe
+                .width(container.clientWidth)
+                .height(container.clientHeight);
+        });
+        resizeObserver.observe(container);
+
+        // Wire globe theme select
+        if (themeSelect) {
+            themeSelect.addEventListener('change', (e) => {
+                const theme = e.target.value;
+                const url = this.globeTextures[theme] || this.globeTextures['night'];
+                localStorage.setItem('cwskimmer_globeTheme', theme);
+                // Update URL param so the link is shareable
+                const pageUrl = new URL(window.location.href);
+                pageUrl.searchParams.set('theme', theme);
+                history.replaceState(null, '', pageUrl.toString());
+                if (this.globe) this.globe.globeImageUrl(url);
+            });
+        }
+
+        // Wire spin toggle button — cycles: Stopped → Slow → Med → Fast → Stopped
+        const spinBtn = document.getElementById('globe-spin-btn');
+        if (spinBtn) {
+            spinBtn.addEventListener('click', () => {
+                this.globeSpinStep = (this.globeSpinStep + 1) % 4;
+                if (this.globeSpinStep === 0) {
+                    this.stopGlobeSpin();
+                } else {
+                    this.startGlobeSpin();
+                }
+            });
+        }
+
+        // Start auto-spin at slow speed (step 1)
+        this.globeSpinStep = 1;
+        this.startGlobeSpin();
+
+        console.log('[Globe] Initialised with', spotsArray.length, 'spots');
+    }
+
+    startGlobeSpin() {
+        if (!this.globe) return;
+        // Cancel any existing animation loop before starting a new one
+        if (this.globeSpinInterval) {
+            cancelAnimationFrame(this.globeSpinInterval);
+            this.globeSpinInterval = null;
+        }
+        this.globeSpinning = true;
+        this._updateSpinBtn();
+
+        const speed = this.globeSpinSpeeds[this.globeSpinStep] || 0.08;
+        const spin = () => {
+            if (!this.globeSpinning || this.globeUserInteracting) return;
+            const pov = this.globe.pointOfView();
+            this.globe.pointOfView({ lat: pov.lat, lng: pov.lng + speed, altitude: pov.altitude }, 0);
+            this.globeSpinInterval = requestAnimationFrame(spin);
+        };
+        this.globeSpinInterval = requestAnimationFrame(spin);
+    }
+
+    stopGlobeSpin() {
+        this.globeSpinning = false;
+        this.globeSpinStep = 0;
+        if (this.globeSpinInterval) {
+            cancelAnimationFrame(this.globeSpinInterval);
+            this.globeSpinInterval = null;
+        }
+        this._updateSpinBtn();
+    }
+
+    _updateSpinBtn() {
+        const btn = document.getElementById('globe-spin-btn');
+        if (!btn) return;
+        if (this.globeSpinning) {
+            const label = this.globeSpinLabels[this.globeSpinStep] || 'Spin';
+            btn.textContent = '\u23F8 ' + label;
+            btn.classList.add('spin-active');
+            btn.title = 'Click to change spin speed (current: ' + label + ')';
+        } else {
+            btn.textContent = '\u27F3 Spin';
+            btn.classList.remove('spin-active');
+            btn.title = 'Start globe spin';
+        }
+    }
+
+    getFilteredSpotsArray() {
+        const now = Date.now();
+        const result = [];
+        this.spots.forEach(spot => {
+            if (!spot.latitude || !spot.longitude) return;
+            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+            const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
+            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
+            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
+            let ageMatch = true;
+            if (this.ageFilter !== 'none') {
+                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
+                const age = now - new Date(spot.timestamp).getTime();
+                ageMatch = age <= maxAgeMs;
+            }
+            if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
+                result.push(spot);
+            }
+        });
+        return result;
+    }
+
+    refreshGlobePoints() {
+        if (!this.globe) return;
+        this.globe.pointsData(this.getFilteredSpotsArray());
+    }
+
+    debouncedGlobeRefresh() {
+        // Coalesce rapid incoming spots into a single refresh after 250ms idle
+        if (this.globeRefreshTimer) {
+            clearTimeout(this.globeRefreshTimer);
+        }
+        this.globeRefreshTimer = setTimeout(() => {
+            this.globeRefreshTimer = null;
+            this.refreshGlobePoints();
+        }, 250);
+    }
+
+    debouncedUIRefresh() {
+        // Coalesce per-spot O(n) UI panel updates into one call per burst
+        if (this._uiRefreshTimer) clearTimeout(this._uiRefreshTimer);
+        this._uiRefreshTimer = setTimeout(() => {
+            this._uiRefreshTimer = null;
+            this.updateSpotCount();
+            this.updateDistanceStatistics();
+            this.updateBandLegend();
+            this.updateFilterDropdowns();
+            this.updateRarestEntities();
+        }, 250);
+    }
+
+    rebuildLeafletMarkers() {
+        // Called once when switching globe→leaflet to create markers for spots
+        // that arrived while the Leaflet map was hidden (globe mode).
+        for (const [key, spot] of this.spots.entries()) {
+            if (!this.markers.has(key)) {
+                this.addOrUpdateMarker(key, spot);
+            }
+        }
+    }
+
+    handleGlobeHover(spot) {
+        if (!this.globeTooltipEl) return;
+        if (!spot) {
+            this.globeTooltipEl.style.display = 'none';
+            return;
+        }
+        this.globeTooltipEl.innerHTML = this.createPopupContent(spot);
+        this.globeTooltipEl.style.display = 'block';
+    }
+
+    showGlobePopup(spot) {
+        if (!spot || !this.globe) return;
+        // Fly to the spot
+        this.globe.pointOfView(
+            { lat: spot.latitude, lng: spot.longitude, altitude: 1.2 },
+            800
+        );
+        // Stop spin — stays stopped until user switches back to globe view
+        this.stopGlobeSpin();
+        // Recompute point radius after fly-to animation completes (800ms)
+        setTimeout(() => {
+            if (this.updateGlobePointRadius) this.updateGlobePointRadius();
+        }, 850);
+    }
+
+    // ─── End Globe.gl methods ─────────────────────────────────────────────────
+
+    setupTextZoom() {
+        // Load saved zoom level or default to 100%
+        const savedZoom = localStorage.getItem('cwskimmer_textZoom');
+        let currentZoom = savedZoom ? parseInt(savedZoom) : 100;
+
+        const MIN_ZOOM = 70;
+        const MAX_ZOOM = 150;
+        const ZOOM_STEP = 10;
+
+        // Apply zoom to all elements except the map
+        const applyZoom = (zoom) => {
+            const scale = zoom / 100;
+            const elementsToZoom = [
+                '.header',
+                '.legend',
+                '.space-weather-legend',
+                '.distance-legend',
+                '.new-entities-legend',
+                '.live-messages-panel'
+            ];
+
+            elementsToZoom.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    el.style.zoom = scale;
+                });
+            });
+        };
+
+        // Only apply zoom if user has previously set a preference
+        if (savedZoom) {
+            applyZoom(currentZoom);
+        }
+
+        // Setup zoom in button
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        if (zoomInBtn) {
+            zoomInBtn.addEventListener('click', () => {
+                if (currentZoom < MAX_ZOOM) {
+                    currentZoom += ZOOM_STEP;
+                    applyZoom(currentZoom);
+                    localStorage.setItem('cwskimmer_textZoom', currentZoom);
+                    this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
+                }
+            });
+
+            zoomInBtn.addEventListener('mouseenter', () => {
+                if (currentZoom < MAX_ZOOM) {
+                    zoomInBtn.style.background = '#2a2a2a';
+                    zoomInBtn.style.borderColor = '#666';
+                    zoomInBtn.style.color = '#fff';
+                }
+            });
+            zoomInBtn.addEventListener('mouseleave', () => {
+                zoomInBtn.style.background = '#1a1a1a';
+                zoomInBtn.style.borderColor = '#444';
+                zoomInBtn.style.color = '#aaa';
+            });
+        }
+
+        // Setup zoom out button
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+        if (zoomOutBtn) {
+            zoomOutBtn.addEventListener('click', () => {
+                if (currentZoom > MIN_ZOOM) {
+                    currentZoom -= ZOOM_STEP;
+                    applyZoom(currentZoom);
+                    localStorage.setItem('cwskimmer_textZoom', currentZoom);
+                    this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
+                }
+            });
+
+            zoomOutBtn.addEventListener('mouseenter', () => {
+                if (currentZoom > MIN_ZOOM) {
+                    zoomOutBtn.style.background = '#2a2a2a';
+                    zoomOutBtn.style.borderColor = '#666';
+                    zoomOutBtn.style.color = '#fff';
+                }
+            });
+            zoomOutBtn.addEventListener('mouseleave', () => {
+                zoomOutBtn.style.background = '#1a1a1a';
+                zoomOutBtn.style.borderColor = '#444';
+                zoomOutBtn.style.color = '#aaa';
+            });
+        }
+
+        // Set initial button states
+        this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
+    }
+
+    updateZoomButtonStates(currentZoom, minZoom, maxZoom) {
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+
+        if (zoomInBtn) {
+            if (currentZoom >= maxZoom) {
+                zoomInBtn.style.opacity = '0.3';
+                zoomInBtn.style.cursor = 'not-allowed';
+            } else {
+                zoomInBtn.style.opacity = '1';
+                zoomInBtn.style.cursor = 'pointer';
+            }
+        }
+
+        if (zoomOutBtn) {
+            if (currentZoom <= minZoom) {
+                zoomOutBtn.style.opacity = '0.3';
+                zoomOutBtn.style.cursor = 'not-allowed';
+            } else {
+                zoomOutBtn.style.opacity = '1';
+                zoomOutBtn.style.cursor = 'pointer';
+            }
+        }
     }
 
     setupMapViewSaving() {
@@ -652,6 +1190,7 @@ class CWSkimmerMap {
         const summaryCheckbox = document.getElementById('show-summary-checkbox');
         const weatherCheckbox = document.getElementById('show-weather-checkbox');
         const legendCheckbox = document.getElementById('show-legend-checkbox');
+        const liveCheckbox = document.getElementById('show-live-checkbox');
 
         if (statsCheckbox) {
             this.toggleStatsPanel(statsCheckbox.checked);
@@ -664,6 +1203,9 @@ class CWSkimmerMap {
         }
         if (legendCheckbox) {
             this.toggleLegendPanels(legendCheckbox.checked);
+        }
+        if (liveCheckbox) {
+            this.toggleLivePanel(liveCheckbox.checked);
         }
     }
 
@@ -706,6 +1248,14 @@ class CWSkimmerMap {
             clustersCheckbox.addEventListener('change', (e) => {
                 this.setClustersEnabled(e.target.checked);
                 this.savePreference('showClusters', e.target.checked);
+            });
+        }
+
+        const liveCheckbox = document.getElementById('show-live-checkbox');
+        if (liveCheckbox) {
+            liveCheckbox.addEventListener('change', (e) => {
+                this.toggleLivePanel(e.target.checked);
+                this.savePreference('showLive', e.target.checked);
             });
         }
     }
@@ -757,6 +1307,14 @@ class CWSkimmerMap {
 
         if (legend) {
             legend.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    toggleLivePanel(show) {
+        const livePanel = document.getElementById('live-messages-panel');
+
+        if (livePanel) {
+            livePanel.style.display = show ? 'flex' : 'none';
         }
     }
 
@@ -825,39 +1383,47 @@ class CWSkimmerMap {
     }
 
     applyFilters() {
-        // Clear active marker container and re-add filtered markers
-        this.activeMarkerLayer.clearLayers();
-        
-        const now = Date.now();
-        this.markers.forEach((marker, key) => {
-            const spot = this.spots.get(key);
-            if (!spot) return;
+        // In globe mode there are no Leaflet markers to show/hide; just refresh globe points.
+        if (this.mapMode !== 'globe') {
+            // Clear active marker container and re-add filtered markers
+            this.activeMarkerLayer.clearLayers();
 
-            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-            const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
-            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
+            const now = Date.now();
+            this.markers.forEach((marker, key) => {
+                const spot = this.spots.get(key);
+                if (!spot) return;
 
-            // Age filter check
-            let ageMatch = true;
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000; // Convert minutes to milliseconds
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                ageMatch = age <= maxAgeMs;
-            }
+                const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+                const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
+                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
+                const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
 
-            if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
-                this.activeMarkerLayer.addLayer(marker);
-            }
-        });
-        
+                // Age filter check
+                let ageMatch = true;
+                if (this.ageFilter !== 'none') {
+                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000; // Convert minutes to milliseconds
+                    const spotTime = new Date(spot.timestamp).getTime();
+                    const age = now - spotTime;
+                    ageMatch = age <= maxAgeMs;
+                }
+
+                if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
+                    this.activeMarkerLayer.addLayer(marker);
+                }
+            });
+        }
+
         this.updateSpotCount();
         this.updateDistanceStatistics();
         this.updateLiveMessagesDisplay(); // Update live messages when filters change
         this.updateRarestEntities(); // Update rarest entities when filters change
         this.updateSpaceWeatherPosition(); // Update space weather panel position
+
+        // Refresh globe points if in globe mode
+        if (this.mapMode === 'globe') {
+            this.refreshGlobePoints();
+        }
     }
 
     async loadReceiverLocation() {
@@ -1118,24 +1684,23 @@ class CWSkimmerMap {
         // Check for new continent or country
         this.checkNewEntities(spot);
 
-        // Add or update marker
-        this.addOrUpdateMarker(key, spot);
+        // Add or update marker — skip in globe mode (no Leaflet DOM needed while globe is active)
+        if (this.mapMode === 'globe') {
+            // If a stale marker exists from before the mode switch, remove it
+            if (this.markers.has(key)) {
+                this.activeMarkerLayer.removeLayer(this.markers.get(key));
+                this.markers.delete(key);
+            }
+            this.debouncedGlobeRefresh();
+        } else {
+            this.addOrUpdateMarker(key, spot);
+        }
 
         // Add to live messages
         this.addLiveMessage(spot);
 
-        // Update spot count and distance statistics
-        this.updateSpotCount();
-        this.updateDistanceStatistics();
-        
-        // Update band legend
-        this.updateBandLegend();
-        
-        // Update filter dropdowns
-        this.updateFilterDropdowns();
-
-        // Update rarest entities
-        this.updateRarestEntities();
+        // Debounce the O(n) UI panel updates — no need to run on every single spot arrival
+        this.debouncedUIRefresh();
 
         // Limit number of spots
         if (this.spots.size > this.maxSpots) {
@@ -1335,6 +1900,10 @@ class CWSkimmerMap {
                 this.updateDistanceStatistics();
                 this.updateLiveMessagesDisplay();
                 this.updateRarestEntities();
+                // Refresh globe after batch removal
+                if (this.mapMode === 'globe') {
+                    this.refreshGlobePoints();
+                }
             }
         }, 60000); // Every minute
     }
@@ -2235,7 +2804,16 @@ class CWSkimmerMap {
     }
 
     showSpotOnMap(spotKey) {
-        // Find the marker for this spot
+        if (this.mapMode === 'globe') {
+            // In globe mode: fly to the spot's coordinates
+            const spot = this.spots.get(spotKey);
+            if (spot && spot.latitude && spot.longitude) {
+                this.showGlobePopup(spot);
+            }
+            return;
+        }
+
+        // Leaflet mode: find the marker for this spot
         const marker = this.markers.get(spotKey);
         if (marker) {
             // Pan to the marker and zoom in to ensure it's unclustered

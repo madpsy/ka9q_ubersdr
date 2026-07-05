@@ -471,3 +471,111 @@
     line-height: 30px;
     color: white;
 }
+
+        /* Map view toggle — fixed overlay, top-left, to the right of Leaflet zoom controls */
+        #map-view-toggle-wrap {
+            position: fixed;
+            top: 70px; /* same vertical position as Leaflet zoom control (60px header + 10px Leaflet offset) */
+            left: 46px; /* 10px Leaflet margin + ~26px zoom control width + 10px gap */
+            z-index: 1001;
+        }
+
+        /* Globe controls wrapper — centred top, only shown in globe mode */
+        #globe-controls {
+            background: transparent;
+        }
+
+        /* Globe theme selector and spin button share the same base style */
+        #globe-theme-select,
+        #globe-spin-btn {
+            background: rgba(26, 26, 26, 0.92);
+            border: 1px solid #555;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 12px;
+            padding: 5px 10px;
+            cursor: pointer;
+            outline: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            backdrop-filter: blur(6px);
+            transition: border-color 0.15s;
+        }
+
+        #globe-theme-select:hover,
+        #globe-spin-btn:hover {
+            border-color: #4a9eff;
+        }
+
+        #globe-spin-btn.spin-active {
+            border-color: #4a9eff;
+            color: #4a9eff;
+        }
+
+        /* Map view toggle button */
+        .map-view-btn {
+            display: block;
+            padding: 0;
+            width: 34px;
+            height: 34px;
+            background: #fff;
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            color: #333;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            line-height: 30px;
+            text-align: center;
+            transition: background 0.15s;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            white-space: nowrap;
+        }
+
+        .map-view-btn:hover {
+            background: #f4f4f4;
+        }
+
+        .map-view-btn.active-globe {
+            background: rgba(26, 26, 26, 0.92);
+            border-color: #555;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            backdrop-filter: blur(6px);
+        }
+
+        .map-view-btn.active-globe:hover {
+            background: rgba(40, 40, 40, 0.95);
+            border-color: #4a9eff;
+        }
+
+        /* Globe container */
+        #globe-container {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+            display: none;
+            background: #000010;
+        }
+
+        #globe-container canvas {
+            display: block;
+        }
+
+        /* Globe tooltip */
+        .globe-tooltip {
+            position: fixed;
+            background: rgba(26, 26, 26, 0.95);
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: ui-monospace, 'Courier New', monospace, 'Twemoji Flags';
+            font-size: 12px;
+            color: #fff;
+            pointer-events: none;
+            z-index: 9999;
+            max-width: 260px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }

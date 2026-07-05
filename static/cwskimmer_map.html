@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="MarkerCluster.css" />
     <link rel="stylesheet" href="MarkerCluster.Default.css" />
     <link rel="stylesheet" href="cwskimmer_map.css" />
+    <script src="https://unpkg.com/globe.gl@2.30.0/dist/globe.gl.min.js"></script>
 </head>
 <body>
     <!-- Resolution Info Overlay -->
@@ -43,6 +44,12 @@
                 <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
                     <input type="checkbox" id="show-summary-checkbox" checked style="margin: 0; cursor: pointer;">
                     <span>Summary</span>
+                </label>
+            </div>
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-live-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Live</span>
                 </label>
             </div>
             <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
@@ -115,6 +122,24 @@
     </div>
 
     <div id="map"></div>
+    <div id="globe-container"></div>
+
+    <!-- Map view toggle — fixed top-left, to the right of Leaflet zoom controls -->
+    <div id="map-view-toggle-wrap">
+        <button id="map-view-toggle" class="map-view-btn" title="Switch to 3D Globe view">🌍 3D Globe</button>
+    </div>
+
+    <!-- Globe controls — only visible in globe mode, centred top -->
+    <div id="globe-controls" style="position:fixed; top:74px; left:50%; transform:translateX(-50%); z-index:1001; display:none; align-items:center; gap:6px;">
+        <button id="globe-spin-btn" title="Toggle globe spin">&#x27F3; Spin</button>
+        <select id="globe-theme-select">
+            <option value="night">Night (City Lights)</option>
+            <option value="day">Day</option>
+            <option value="blue-marble" selected>Blue Marble</option>
+            <option value="dark">Dark</option>
+            <option value="topology">Topology</option>
+        </select>
+    </div>
 
     <div class="legend" id="band-legend">
         <div class="legend-item">
@@ -128,6 +153,11 @@
             <span>Receiver</span>
         </div>
         <div id="band-legend-items" style="margin-top: 8px;"></div>
+        <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #333; display: flex; gap: 4px; justify-content: center; align-items: center;">
+            <button id="zoom-out-btn" style="padding: 2px 8px; background: #1a1a1a; border: 1px solid #444; border-radius: 3px; color: #aaa; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s;" title="Decrease text size">−</button>
+            <span style="font-size: 9px; color: #666;">Size</span>
+            <button id="zoom-in-btn" style="padding: 2px 8px; background: #1a1a1a; border: 1px solid #444; border-radius: 3px; color: #aaa; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s;" title="Increase text size">+</button>
+        </div>
     </div>
 
     <div class="new-entities-legend">

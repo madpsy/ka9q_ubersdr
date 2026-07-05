@@ -1090,24 +1090,8 @@ class CWSkimmerMap {
                 endLng: spot.longitude
             }]);
 
-            // Label at geographic midpoint of the arc
-            const midPts = this._greatCirclePoints(rx.lat, rx.lon, spot.latitude, spot.longitude, 10);
-            const mid = midPts[Math.floor(midPts.length / 2)];
-            const distKm = spot.distance_km !== undefined && spot.distance_km !== null
-                ? Math.round(spot.distance_km) + ' km'
-                : '';
-            const bearingStr = spot.bearing_deg !== undefined && spot.bearing_deg !== null
-                ? Math.round(spot.bearing_deg) + '°'
-                : '';
-            const labelText = [distKm, bearingStr].filter(Boolean).join(' · ');
-
-            // Arc altitude at midpoint ≈ arcAltitudeAutoScale * sin(π/2) = 0.25
-            this.globe.labelsData(labelText ? [{
-                lat: mid[0],
-                lng: mid[1],
-                alt: 0.28,
-                text: labelText
-            }] : []);
+            // No label on the arc — distance/bearing shown in the tooltip
+            this.globe.labelsData([]);
         }
     }
 
@@ -1194,47 +1178,7 @@ class CWSkimmerMap {
             interactive: false
         }).addTo(this.map);
 
-        // Label at the first quarter of the arc (nearest the receiver)
-        const mid = pts[Math.floor(pts.length / 4)];
-        const midNext = pts[Math.floor(pts.length / 4) + 1] || pts[Math.floor(pts.length / 4)];
-
-        // Bearing of the arc at the midpoint (for label rotation).
-        // CSS rotate() treats 0° as "pointing right" (east), but bearing 0° = north.
-        // Convert: screenAngle = bearing - 90. Then flip 180° if text would read right-to-left.
-        const arcBearing = this._bearing(mid[0], mid[1], midNext[0], midNext[1]);
-        let labelRotation = arcBearing - 90;
-        if (labelRotation > 90 || labelRotation < -90) labelRotation -= 180;
-
-        const distKm = spot.distance_km !== undefined && spot.distance_km !== null
-            ? Math.round(spot.distance_km) + ' km'
-            : '';
-        const bearingStr = spot.bearing_deg !== undefined && spot.bearing_deg !== null
-            ? Math.round(spot.bearing_deg) + '°'
-            : '';
-        const labelText = [distKm, bearingStr].filter(Boolean).join(' • ');
-
-        if (labelText) {
-            const labelIcon = L.divIcon({
-                className: '',
-                html: `<div style="
-                    transform: rotate(${labelRotation}deg);
-                    transform-origin: center center;
-                    white-space: nowrap;
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: #000;
-                    pointer-events: none;
-                    font-family: ui-monospace, 'Courier New', monospace;
-                ">${labelText}</div>`,
-                iconSize: [0, 0],
-                iconAnchor: [0, 0]
-            });
-            this.hoverGeodesicLabel = L.marker(mid, {
-                icon: labelIcon,
-                interactive: false,
-                zIndexOffset: 500
-            }).addTo(this.map);
-        }
+        // No label on the line — distance/bearing shown in the tooltip
     }
 
     clearLeafletGeodesicHover() {

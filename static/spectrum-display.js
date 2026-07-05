@@ -2539,6 +2539,17 @@ class SpectrumDisplay {
             // The spectrum line graph auto-ranges independently from the waterfall.
             minDb = avgMinDb;
             maxDb = avgMaxDb;
+
+            // Enforce minimum dynamic range (same logic as updateAutoRange / waterfall).
+            // Only fires on quiet bands where auto has compressed the range too much.
+            if (this.config.autoMinSpan !== null) {
+                const span = maxDb - minDb;
+                if (span < this.config.autoMinSpan) {
+                    const deficit = this.config.autoMinSpan - span;
+                    maxDb += deficit * 0.75;
+                    minDb -= deficit * 0.25;
+                }
+            }
         }
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;

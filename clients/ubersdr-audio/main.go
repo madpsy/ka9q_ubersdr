@@ -414,18 +414,20 @@ func main() {
 	agcThreshSlider.OnChangeEnded = func(_ float64) { sendAGC() }
 
 	// agcRow holds all three sliders side-by-side; hidden when not in USB/LSB mode.
+	// Use VBox (name over value) for the left label so it stays narrow and the
+	// slider gets as much horizontal space as possible.
 	agcHangRow := container.NewBorder(nil, nil,
-		container.NewHBox(widget.NewLabel("Hang"), agcHangLabel),
+		container.NewVBox(widget.NewLabel("Hang"), agcHangLabel),
 		nil,
 		agcHangSlider,
 	)
 	agcRecoveryRow := container.NewBorder(nil, nil,
-		container.NewHBox(widget.NewLabel("Recovery"), agcRecoveryLabel),
+		container.NewVBox(widget.NewLabel("Recovery"), agcRecoveryLabel),
 		nil,
 		agcRecoverySlider,
 	)
 	agcThreshRow := container.NewBorder(nil, nil,
-		container.NewHBox(widget.NewLabel("Threshold"), agcThreshLabel),
+		container.NewVBox(widget.NewLabel("Threshold"), agcThreshLabel),
 		nil,
 		agcThreshSlider,
 	)

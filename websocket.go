@@ -937,11 +937,26 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					// For USB/LSB: always apply — using user overrides if set, operator config defaults otherwise.
 					// For other modes (AM, FM, CW, etc.): do nothing — their presets set appropriate AGC values.
 					if newMode == "usb" || newMode == "lsb" {
+						// Read config defaults, falling back to presets.conf values if nil (should not happen after LoadConfig).
+						cfgHang := float32(1.1)
+						cfgRecov := float32(20.0)
+						cfgThresh := float32(-15.0)
+						if wsh.config != nil {
+							if wsh.config.Server.SSBAgcDefaults.HangTimeS != nil {
+								cfgHang = *wsh.config.Server.SSBAgcDefaults.HangTimeS
+							}
+							if wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
+								cfgRecov = *wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS
+							}
+							if wsh.config.Server.SSBAgcDefaults.ThresholdDb != nil {
+								cfgThresh = *wsh.config.Server.SSBAgcDefaults.ThresholdDb
+							}
+						}
 						currentSession.mu.RLock()
 						reapplyAGC := AGCParams{
-							HangTime:     coalesceF32(currentSession.UserAGCHangTime, wsh.config.Server.SSBAgcDefaults.HangTimeS),
-							RecoveryRate: coalesceF32(currentSession.UserAGCRecoveryRate, wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS),
-							Threshold:    coalesceF32(currentSession.UserAGCThreshold, wsh.config.Server.SSBAgcDefaults.ThresholdDb),
+							HangTime:     coalesceF32(currentSession.UserAGCHangTime, cfgHang),
+							RecoveryRate: coalesceF32(currentSession.UserAGCRecoveryRate, cfgRecov),
+							Threshold:    coalesceF32(currentSession.UserAGCThreshold, cfgThresh),
 						}
 						currentSession.mu.RUnlock()
 						if err := wsh.sessions.UpdateAGC(currentSession.ID, reapplyAGC); err != nil {
@@ -2244,6 +2259,8 @@ func coalesceF32(userVal *float32, configDefault float32) *float32 {
 // agcStateInfo returns the current AGC parameter values for a session.
 // Priority: user override > operator config default.
 // The config pointer may be nil (e.g. in tests); hardcoded presets.conf values are used as fallback.
+// SSBAgcConfig fields are pointers so nil means "not set in config" — LoadConfig always fills them in,
+// but we guard with nil checks here for safety.
 func agcStateInfo(session *Session, cfg *Config) map[string]interface{} {
 	session.mu.RLock()
 	ht := session.UserAGCHangTime
@@ -2251,14 +2268,20 @@ func agcStateInfo(session *Session, cfg *Config) map[string]interface{} {
 	th := session.UserAGCThreshold
 	session.mu.RUnlock()
 
-	// Operator config defaults (or hardcoded presets.conf values if config unavailable).
+	// Operator config defaults (or hardcoded presets.conf values if config/field unavailable).
 	hangDefault := float32(1.1)
 	recovDefault := float32(20.0)
 	threshDefault := float32(-15.0)
 	if cfg != nil {
-		hangDefault = cfg.Server.SSBAgcDefaults.HangTimeS
-		recovDefault = cfg.Server.SSBAgcDefaults.RecoveryRateDbS
-		threshDefault = cfg.Server.SSBAgcDefaults.ThresholdDb
+		if cfg.Server.SSBAgcDefaults.HangTimeS != nil {
+			hangDefault = *cfg.Server.SSBAgcDefaults.HangTimeS
+		}
+		if cfg.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
+			recovDefault = *cfg.Server.SSBAgcDefaults.RecoveryRateDbS
+		}
+		if cfg.Server.SSBAgcDefaults.ThresholdDb != nil {
+			threshDefault = *cfg.Server.SSBAgcDefaults.ThresholdDb
+		}
 	}
 
 	hangTime := hangDefault

@@ -258,10 +258,12 @@ type RadiodConfig struct {
 // SSBAgcConfig holds the server-wide default AGC parameters applied to all new USB/LSB sessions.
 // These values are used when a user has not overridden the AGC settings via the sliders.
 // Defaults match ka9q-radio's share/presets.conf values for the usb/lsb presets.
+// Pointer fields allow nil to mean "not set in config" so that valid zero-equivalent values
+// (e.g. hang_time_s: 0 for no hang, threshold_db: 0 for maximum noise) are honoured correctly.
 type SSBAgcConfig struct {
-	HangTimeS       float32 `yaml:"hang_time_s"`        // AGC hang time in seconds (0.0–10.0); presets.conf: hang-time = 1.1
-	RecoveryRateDbS float32 `yaml:"recovery_rate_db_s"` // AGC recovery rate in dB/s (1.0–100.0); presets.conf: recovery-rate = 20
-	ThresholdDb     float32 `yaml:"threshold_db"`       // AGC threshold in dB relative to headroom (-30.0–0.0); presets.conf: threshold = -15.0; clamped to -30 minimum
+	HangTimeS       *float32 `yaml:"hang_time_s"`        // AGC hang time in seconds (0.0–10.0); nil → default 1.1
+	RecoveryRateDbS *float32 `yaml:"recovery_rate_db_s"` // AGC recovery rate in dB/s (1.0–100.0); nil → default 20.0
+	ThresholdDb     *float32 `yaml:"threshold_db"`       // AGC threshold in dB relative to headroom (-30.0–0.0); nil → default -15.0
 }
 
 // ServerConfig contains web server settings
@@ -711,28 +713,30 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Server.CPUTempThresholdC = DefaultCPUTempThresholdC
 	}
 
-	// Apply SSB AGC defaults when not set in config.
+	// Apply SSB AGC defaults when not set in config (nil pointer = absent from YAML).
+	// Using pointers avoids the sentinel problem where 0 is both a valid value and the Go zero value.
 	// These match ka9q-radio's share/presets.conf usb/lsb preset values.
-	if config.Server.SSBAgcDefaults.HangTimeS <= 0 {
-		config.Server.SSBAgcDefaults.HangTimeS = 1.1
+	if config.Server.SSBAgcDefaults.HangTimeS == nil {
+		v := float32(1.1)
+		config.Server.SSBAgcDefaults.HangTimeS = &v
 	}
-	if config.Server.SSBAgcDefaults.RecoveryRateDbS <= 0 {
-		config.Server.SSBAgcDefaults.RecoveryRateDbS = 20.0
+	if config.Server.SSBAgcDefaults.RecoveryRateDbS == nil {
+		v := float32(20.0)
+		config.Server.SSBAgcDefaults.RecoveryRateDbS = &v
 	}
-	if config.Server.SSBAgcDefaults.ThresholdDb == 0 {
-		// 0 is a valid threshold value, but the presets.conf default is -15.
-		// We use a sentinel: if the field was not set (zero value from YAML),
-		// apply the presets.conf default. Operators who genuinely want 0 dB
-		// must set it explicitly in config.yaml.
-		config.Server.SSBAgcDefaults.ThresholdDb = -15.0
+	if config.Server.SSBAgcDefaults.ThresholdDb == nil {
+		v := float32(-15.0)
+		config.Server.SSBAgcDefaults.ThresholdDb = &v
 	}
 	// Clamp threshold to the valid range [-30, 0] dB.
 	// Values below -30 dB are too aggressive and effectively silence the receiver.
-	if config.Server.SSBAgcDefaults.ThresholdDb < -30.0 {
-		config.Server.SSBAgcDefaults.ThresholdDb = -30.0
+	if *config.Server.SSBAgcDefaults.ThresholdDb < -30.0 {
+		v := float32(-30.0)
+		config.Server.SSBAgcDefaults.ThresholdDb = &v
 	}
-	if config.Server.SSBAgcDefaults.ThresholdDb > 0.0 {
-		config.Server.SSBAgcDefaults.ThresholdDb = 0.0
+	if *config.Server.SSBAgcDefaults.ThresholdDb > 0.0 {
+		v := float32(0.0)
+		config.Server.SSBAgcDefaults.ThresholdDb = &v
 	}
 
 	// Parse admin allowed IPs/CIDRs

@@ -141,15 +141,14 @@
         </select>
     </div>
 
-    <!-- Map tile selector — only visible in leaflet mode, below the view toggle button -->
-    <div id="map-tile-select-wrap" style="position:fixed; top:112px; left:10px; z-index:1001;">
+    <!-- Map tile selector — only visible in leaflet mode, centred top (mirrors globe controls position) -->
+    <div id="map-tile-select-wrap" style="position:fixed; top:74px; left:50%; transform:translateX(-50%); z-index:1001; display:flex; align-items:center; gap:6px;">
         <select id="map-tile-select" title="Change map style">
             <option value="osm" selected>OpenStreetMap</option>
             <option value="topo">Topo (OpenTopoMap)</option>
             <option value="satellite">Satellite (Esri)</option>
             <option value="dark">Dark (CartoDB)</option>
             <option value="light">Light (CartoDB)</option>
-            <option value="watercolor">Watercolor (Stadia)</option>
         </select>
     </div>
 

@@ -1394,11 +1394,6 @@ class CWSkimmerMap {
                 attribution: '© OpenStreetMap contributors, © CARTO',
                 maxZoom: 19
             },
-            'watercolor': {
-                url: 'https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg',
-                attribution: '© Stadia Maps, © Stamen Design, © OpenStreetMap contributors',
-                maxZoom: 16
-            }
         };
     }
 

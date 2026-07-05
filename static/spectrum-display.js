@@ -815,6 +815,12 @@ class SpectrumDisplay {
         this.autoRangeMinHistory = []; // Track minimum values over time for stable noise floor
         this.autoRangeMaxHistory = []; // Track maximum values over time for stable ceiling
         this.autoRangeMinHistoryMaxAge = 2000; // 2 second window for noise floor
+        // Last committed clamped values — used for hysteresis to prevent flicker
+        this._clampedMinDb = null;
+        this._clampedMaxDb = null;
+        // Same for line graph path
+        this._lgClampedMinDb = null;
+        this._lgClampedMaxDb = null;
         this.autoRangeMaxHistoryMaxAge = 5000; // 5 second window for maximum (faster recovery after strong signals)
 
         // Waterfall
@@ -2545,8 +2551,20 @@ class SpectrumDisplay {
                 const rawSpan = rawMax - rawMin;
                 if (rawSpan < this.config.autoMinSpan) {
                     const deficit = this.config.autoMinSpan - rawSpan;
-                    rawMax += deficit * 0.75;
-                    rawMin -= deficit * 0.25;
+                    const newMax = Math.round(rawMax + deficit * 0.75);
+                    const newMin = Math.round(rawMin - deficit * 0.25);
+                    const hysteresis = 3;
+                    if (this._lgClampedMinDb === null ||
+                        Math.abs(newMin - this._lgClampedMinDb) > hysteresis ||
+                        Math.abs(newMax - this._lgClampedMaxDb) > hysteresis) {
+                        this._lgClampedMinDb = newMin;
+                        this._lgClampedMaxDb = newMax;
+                    }
+                    rawMin = this._lgClampedMinDb;
+                    rawMax = this._lgClampedMaxDb;
+                } else {
+                    this._lgClampedMinDb = null;
+                    this._lgClampedMaxDb = null;
                 }
             }
             minDb = rawMin;
@@ -3957,6 +3975,9 @@ class SpectrumDisplay {
             // autoMinSpan is the minimum visible dB span the user wants to see.
             // Uses a 75/25 split: 75% of the deficit expands the ceiling upward (headroom
             // for signals), 25% expands the floor downward (buffer below noise floor).
+            // Hysteresis: only commit new clamped boundaries when they differ from the
+            // last committed values by more than 3 dB — prevents rapid oscillation of
+            // grid ticks when the smoothed values drift near a boundary.
             // This clamp only fires on quiet bands where auto has compressed the range
             // below the minimum; when signals are present and the natural range already
             // exceeds autoMinSpan the clamp never fires and existing behaviour is unchanged.
@@ -3964,8 +3985,21 @@ class SpectrumDisplay {
                 const range = this.actualMaxDb - this.actualMinDb;
                 if (range < this.config.autoMinSpan) {
                     const deficit = this.config.autoMinSpan - range;
-                    this.actualMaxDb += deficit * 0.75;
-                    this.actualMinDb -= deficit * 0.25;
+                    const newMax = Math.round(this.actualMaxDb + deficit * 0.75);
+                    const newMin = Math.round(this.actualMinDb - deficit * 0.25);
+                    const hysteresis = 3; // dB dead-band
+                    if (this._clampedMinDb === null ||
+                        Math.abs(newMin - this._clampedMinDb) > hysteresis ||
+                        Math.abs(newMax - this._clampedMaxDb) > hysteresis) {
+                        this._clampedMinDb = newMin;
+                        this._clampedMaxDb = newMax;
+                    }
+                    this.actualMinDb = this._clampedMinDb;
+                    this.actualMaxDb = this._clampedMaxDb;
+                } else {
+                    // Natural range exceeds minimum — clear cached clamped values
+                    this._clampedMinDb = null;
+                    this._clampedMaxDb = null;
                 }
             }
         }
@@ -4997,11 +5031,20 @@ class SpectrumDisplay {
                 syncRangeControlVisibility(e.target.checked);
 
                 if (e.target.checked) {
-                    // Clear auto-range history when switching to manual
+                    // Clear auto-range history and clamp cache when switching to manual
                     this.autoRangeMinHistory = [];
                     this.autoRangeMaxHistory = [];
+                    this._clampedMinDb = null;
+                    this._clampedMaxDb = null;
+                    this._lgClampedMinDb = null;
+                    this._lgClampedMaxDb = null;
                     console.log(`Manual range enabled: ${this.config.manualMinDb} to ${this.config.manualMaxDb} dB`);
                 } else {
+                    // Clear clamp cache when switching back to auto so it recalculates fresh
+                    this._clampedMinDb = null;
+                    this._clampedMaxDb = null;
+                    this._lgClampedMinDb = null;
+                    this._lgClampedMaxDb = null;
                     console.log('Auto-range enabled');
                 }
             });

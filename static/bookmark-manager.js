@@ -186,6 +186,9 @@ async function loadBands() {
                 console.log('[bookmark-manager.js] Calling populateBandSelector()');
                 window.populateBandSelector();
             }
+
+            // Render custom quick-tune band buttons (bands with button_name set)
+            renderCustomBandButtons();
         } else {
             console.error('[bookmark-manager.js] No bands available, status:', response.status);
         }
@@ -193,6 +196,74 @@ async function loadBands() {
         console.error('[bookmark-manager.js] Failed to load bands:', err);
     }
 }
+
+/**
+ * Render the custom quick-tune band button row below the 160m–10m badges.
+ * Only shown when at least one band has a button_name set.
+ * Clicking a button tunes to the center of that band (reusing selectBandFromDropdown).
+ */
+function renderCustomBandButtons() {
+    const row = document.getElementById('custom-band-buttons-row');
+    const container = document.getElementById('custom-band-buttons-container');
+    if (!row || !container) return;
+
+    // Filter bands that have a button_name
+    const customBands = (window.amateurBands || []).filter(b => b.button_name && b.button_name.trim() !== '');
+
+    if (customBands.length === 0) {
+        row.style.display = 'none';
+        return;
+    }
+
+    // Build buttons
+    container.innerHTML = '';
+    customBands.forEach(band => {
+        const centerHz = Math.round((band.start + band.end) / 2);
+        const startKHz = (band.start / 1000).toFixed(1);
+        const endKHz   = (band.end   / 1000).toFixed(1);
+
+        // Build tooltip: label, freq range, group, mode
+        let tooltip = `${band.label}\n${startKHz}–${endKHz} kHz`;
+        if (band.group) tooltip += `\nGroup: ${band.group}`;
+        if (band.mode)  tooltip += `\nMode: ${band.mode.toUpperCase()}`;
+
+        const btn = document.createElement('div');
+        btn.className = 'band-status-badge custom-band-button';
+        btn.setAttribute('data-status', 'EXCELLENT'); // always green
+        btn.setAttribute('title', tooltip);
+        btn.textContent = band.button_name;
+        btn.style.cursor = 'pointer';
+
+        btn.addEventListener('click', () => {
+            const centerHz = Math.round((band.start + band.end) / 2);
+            // Use selectBandFromDropdown for full tuning parity (freq, mode, zoom, URL, auto-connect)
+            if (typeof selectBandFromDropdown === 'function') {
+                selectBandFromDropdown(JSON.stringify({
+                    label: band.label,
+                    start: band.start,
+                    end:   band.end
+                }));
+            }
+            // Fire extras that selectBandFromDropdown doesn't cover (same as setBand does)
+            if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+                window.ttsAnnouncements.announceFrequencyChange(centerHz);
+            }
+            if (typeof updateVoiceActivityPopup === 'function') {
+                updateVoiceActivityPopup(band.label);
+            }
+            if (window.radioAPI) {
+                window.radioAPI.notifyFrequencyChange(centerHz);
+            }
+        });
+
+        container.appendChild(btn);
+    });
+
+    row.style.display = '';
+}
+
+// Expose so it can be called externally if bands are reloaded
+window.renderCustomBandButtons = renderCustomBandButtons;
 
 // Load bookmarks from server
 // Shared offscreen canvas context used to pre-measure label widths once at load time.

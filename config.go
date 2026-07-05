@@ -240,11 +240,12 @@ type Bookmark struct {
 
 // Band represents an amateur radio band
 type Band struct {
-	Label string `yaml:"label" json:"label"`
-	Start uint64 `yaml:"start" json:"start"`
-	End   uint64 `yaml:"end" json:"end"`
-	Group string `yaml:"group,omitempty" json:"group,omitempty"`
-	Mode  string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Label      string `yaml:"label" json:"label"`
+	Start      uint64 `yaml:"start" json:"start"`
+	End        uint64 `yaml:"end" json:"end"`
+	Group      string `yaml:"group,omitempty" json:"group,omitempty"`
+	Mode       string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	ButtonName string `yaml:"button_name,omitempty" json:"button_name,omitempty"`
 }
 
 // RadiodConfig contains radiod connection settings

@@ -821,6 +821,25 @@ body {
     z-index: 10;
 }
 
+/* Custom quick-tune band buttons (second row, bands with button_name set) */
+.custom-band-buttons-container {
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.custom-band-button {
+    background: #22c55e !important;
+    border-color: #22c55e !important;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5) !important;
+    font-size: 0.82em;
+}
+
+.custom-band-button:hover {
+    filter: brightness(1.15);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(34, 197, 94, 0.5) !important;
+}
+
 /* Voice Activity Button */
 .voice-activity-button {
     padding: 8px 12px;
@@ -2509,8 +2528,11 @@ input[type="range"]::-moz-range-thumb {
     }
 
     /* Make band badges smaller and tighter on mobile */
-    .band-buttons-container {
+    .band-buttons-container,
+    .custom-band-buttons-container {
         gap: 2px;
+        flex-wrap: wrap;
+        justify-content: center;
     }
 
     .band-status-badge {

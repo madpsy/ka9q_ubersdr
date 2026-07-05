@@ -1365,6 +1365,11 @@
                             </select>
                             <small>Optional mode to set when this band is selected</small>
                         </div>
+                        <div class="config-field">
+                            <label>Button Name (Optional)</label>
+                            <input type="text" id="newBandButtonName" placeholder="e.g., FT8 40m" maxlength="10">
+                            <small>Max 10 characters. If set, adds a quick-tune button row below the 160m–10m band buttons on the main UI.</small>
+                        </div>
                         <button class="btn" id="saveBandBtn" onclick="saveBand()">Save Band</button>
                         <button class="btn btn-secondary" onclick="cancelBandForm()">Cancel</button>
                     </div>
@@ -6429,6 +6434,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         <th style="padding: 12px; text-align: left;">Bandwidth</th>
                         <th style="padding: 12px; text-align: left;">Group</th>
                         <th style="padding: 12px; text-align: left;">Mode</th>
+                        <th style="padding: 12px; text-align: left;">Button Name</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
                 </thead>
@@ -6444,6 +6450,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const bandwidthKHz = (bandwidth / 1000).toFixed(0);
                 const groupDisplay = band.group ? `<span style="color: #667eea; font-weight: bold;">${band.group}</span>` : '<em style="color: #999;">—</em>';
                 const modeDisplay = band.mode ? `<span style="color: #28a745; font-weight: bold;">${band.mode.toUpperCase()}</span>` : '<em style="color: #999;">—</em>';
+                const buttonNameDisplay = band.button_name ? `<span style="color: #e67e22; font-weight: bold;">${band.button_name}</span>` : '<em style="color: #999;">—</em>';
                 // Escape label for use in onclick attribute
                 const escapedLabel = band.label.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 row.innerHTML = `
@@ -6453,6 +6460,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     <td style="padding: 12px;">${bandwidthKHz} kHz</td>
                     <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px;">${modeDisplay}</td>
+                    <td style="padding: 12px;">${buttonNameDisplay}</td>
                     <td style="padding: 12px; text-align: center; white-space: nowrap;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBand('${escapedLabel}')">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBand('${escapedLabel}')">Delete</button>
@@ -6471,6 +6479,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             document.getElementById('newBandEnd').value = '';
             document.getElementById('newBandGroup').value = '';
             document.getElementById('newBandMode').value = '';
+            document.getElementById('newBandButtonName').value = '';
             validateBandForm(); // Initial validation
         }
 
@@ -6489,6 +6498,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             document.getElementById('newBandEnd').value = band.end;
             document.getElementById('newBandGroup').value = band.group || '';
             document.getElementById('newBandMode').value = band.mode || '';
+            document.getElementById('newBandButtonName').value = band.button_name || '';
             validateBandForm(); // Initial validation
 
             // Scroll the form into view
@@ -6578,6 +6588,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             const end = parseInt(document.getElementById('newBandEnd').value);
             const group = document.getElementById('newBandGroup').value.trim();
             const mode = document.getElementById('newBandMode').value.trim();
+            const buttonName = document.getElementById('newBandButtonName').value.trim();
             const originalLabel = document.getElementById('editBandIndex').value; // Original label if editing
 
             if (!label || isNaN(start) || isNaN(end)) {
@@ -6587,6 +6598,11 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
             if (start >= end) {
                 showAlert('Start frequency must be less than end frequency', 'error');
+                return;
+            }
+
+            if (buttonName.length > 10) {
+                showAlert('Button name must be 10 characters or fewer', 'error');
                 return;
             }
 
@@ -6612,6 +6628,9 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             }
             if (mode) {
                 bandData.mode = mode;
+            }
+            if (buttonName) {
+                bandData.button_name = buttonName;
             }
 
             try {
@@ -6703,6 +6722,9 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 }
                 if (band.mode) {
                     yamlContent += `    mode: ${band.mode}\n`;
+                }
+                if (band.button_name) {
+                    yamlContent += `    button_name: ${band.button_name}\n`;
                 }
             });
 
@@ -6797,6 +6819,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                                 currentBand.group = trimmed.substring(6).trim().replace(/^["']|["']$/g, '');
                             } else if (trimmed.startsWith('mode:')) {
                                 currentBand.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('button_name:')) {
+                                currentBand.button_name = trimmed.substring(12).trim().replace(/^["']|["']$/g, '').substring(0, 10);
                             }
                         }
                     }

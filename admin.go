@@ -2077,6 +2077,12 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate button_name length
+	if len(newBand.ButtonName) > 10 {
+		http.Error(w, "Button name must be 10 characters or fewer", http.StatusBadRequest)
+		return
+	}
+
 	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
 	if err := validateAndClampBandFrequencies(&newBand); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -2119,6 +2125,9 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 	}
 	if newBand.Mode != "" {
 		bandMap["mode"] = newBand.Mode
+	}
+	if newBand.ButtonName != "" {
+		bandMap["button_name"] = newBand.ButtonName
 	}
 	bands = append(bands, bandMap)
 	bandsConfig["bands"] = bands
@@ -2294,6 +2303,12 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Validate button_name length
+	if len(updatedBand.ButtonName) > 10 {
+		http.Error(w, "Button name must be 10 characters or fewer", http.StatusBadRequest)
+		return
+	}
+
 	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
 	if err := validateAndClampBandFrequencies(&updatedBand); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -2362,6 +2377,9 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	}
 	if updatedBand.Mode != "" {
 		bandMap["mode"] = updatedBand.Mode
+	}
+	if updatedBand.ButtonName != "" {
+		bandMap["button_name"] = updatedBand.ButtonName
 	}
 	bands[bandIndex] = bandMap
 	bandsConfig["bands"] = bands

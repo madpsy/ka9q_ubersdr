@@ -1072,8 +1072,8 @@ class CWSkimmerMap {
         this.globeTooltipEl.innerHTML = this.createPopupContent(spot);
         this.globeTooltipEl.style.display = 'block';
 
-        // Draw geodesic arc from receiver to spot
-        if (this.globe && this.receiverLocation && spot.latitude && spot.longitude) {
+        // Draw geodesic arc from receiver to spot — only when globe is not spinning
+        if (this.globe && !this.globeSpinning && this.receiverLocation && spot.latitude && spot.longitude) {
             const rx = this.receiverLocation;
             this.globe.arcsData([{
                 startLat: rx.lat,

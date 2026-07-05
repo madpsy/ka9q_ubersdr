@@ -745,6 +745,40 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		log.Printf("WIDEIQ_SKIP_BANDWIDTH: mode=%s session=%s", mode, session.ID)
 	}
 
+	// Push AGC defaults to radiod immediately after session creation.
+	// radiod creates the channel using its own preset values (from presets.conf);
+	// without this push the operator config (or user-saved) values are never applied
+	// until the user manually moves a slider or triggers a mode change.
+	// For USB/LSB only — other modes (AM, FM, CW, etc.) have appropriate AGC in their own presets.
+	// Priority: user override (always nil on a brand-new session) > operator config default.
+	if mode == "usb" || mode == "lsb" {
+		cfgHang := float32(1.1)
+		cfgRecov := float32(20.0)
+		cfgThresh := float32(-15.0)
+		if wsh.config != nil {
+			if wsh.config.Server.SSBAgcDefaults.HangTimeS != nil {
+				cfgHang = *wsh.config.Server.SSBAgcDefaults.HangTimeS
+			}
+			if wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
+				cfgRecov = *wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS
+			}
+			if wsh.config.Server.SSBAgcDefaults.ThresholdDb != nil {
+				cfgThresh = *wsh.config.Server.SSBAgcDefaults.ThresholdDb
+			}
+		}
+		session.mu.RLock()
+		initialAGC := AGCParams{
+			HangTime:     coalesceF32(session.UserAGCHangTime, cfgHang),
+			RecoveryRate: coalesceF32(session.UserAGCRecoveryRate, cfgRecov),
+			Threshold:    coalesceF32(session.UserAGCThreshold, cfgThresh),
+		}
+		session.mu.RUnlock()
+		if err := wsh.sessions.UpdateAGC(session.ID, initialAGC); err != nil {
+			log.Printf("Warning: failed to apply initial AGC for session %s: %v", session.ID, err)
+			// Non-fatal — continue; radiod will use its own preset values
+		}
+	}
+
 	// Subscribe to audio
 	wsh.audioReceiver.GetChannelAudio(session)
 

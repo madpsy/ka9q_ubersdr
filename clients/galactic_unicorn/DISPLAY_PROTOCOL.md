@@ -38,11 +38,11 @@
 
 | `size` | Font height | Max lines | Auto Y positions |
 |--------|------------|-----------|-----------------|
-| `1` | 5 px | 2 | Line 0: y=0, Line 1: y=6 |
+| `1` | 5 px | 2 | Line 0: y=0 (rows 0–4), Line 1: y=6 (rows 6–10), 1 px gap at row 5 |
 | `2` | 7 px | 1 | Line 0: y=0 (4 px spare below) |
 | `3` | 11 px | 1 | Line 0: y=0 (fills display exactly) |
 
-> **Mixed sizes in 2-line layouts:** Line 0 always starts at y=0. Line 1 starts at y = (size_0_height + 1). If the combined height exceeds 11 px the firmware clips the lower line and logs a warning.
+> **Mixed sizes in 2-line layouts:** Line 0 always starts at y=0. Line 1 starts at y = (size_0_height + 1). If the combined height exceeds 11 px the firmware clips the lower line.
 
 ---
 

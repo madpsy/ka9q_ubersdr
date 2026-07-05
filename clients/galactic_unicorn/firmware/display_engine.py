@@ -15,7 +15,11 @@ import uasyncio as asyncio
 DISPLAY_WIDTH = 53
 DISPLAY_HEIGHT = 11
 
-# Font heights in pixels for each size value
+# Font heights in pixels for each size value.
+# The PicoGraphics built-in bitmap font renders 5 px tall at scale=1,
+# 7 px at scale=2, and 11 px at scale=3 (fills the display exactly).
+# Two size=1 lines fit: line 0 at y=0 (rows 0-4), line 1 at y=6 (rows 6-10),
+# with a 1 px gap at row 5.
 FONT_HEIGHTS = {1: 5, 2: 7, 3: 11}
 
 # Approximate character widths in pixels per font size (PicoGraphics bitmap font)

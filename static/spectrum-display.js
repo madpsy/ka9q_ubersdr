@@ -2718,8 +2718,12 @@ class SpectrumDisplay {
         // Use the same gamma as drawLineGraph() so labels sit at the correct pixel positions
         const gamma = Math.pow(2, (this.config.autoContrast - 10) / 15);
 
-        const firstDb = Math.ceil(minDb / dbStep) * dbStep;
-        for (let db = firstDb; db <= maxDb; db += dbStep) {
+        // Use a small inset (20% of dbStep) so ticks only appear/disappear when the
+        // boundary has moved well past a grid line — prevents flickering on slow drift.
+        const tickMargin = dbStep * 0.2;
+        const firstDb = Math.ceil((minDb + tickMargin) / dbStep) * dbStep;
+        const lastDb  = Math.floor((maxDb - tickMargin) / dbStep) * dbStep;
+        for (let db = firstDb; db <= lastDb; db += dbStep) {
             // Calculate y position with gamma correction — matches where signals are drawn
             const linearNorm = Math.max(0, Math.min(1, (db - minDb) / dbRange));
             const y = graphTopMargin + graphDrawHeight - Math.pow(linearNorm, gamma) * graphDrawHeight;
@@ -3973,10 +3977,14 @@ class SpectrumDisplay {
         this.ctx.lineWidth = 1;
 
         // Horizontal grid lines (dB levels)
+        // Use a 2 dB inset margin so ticks only appear/disappear when the boundary
+        // has moved well past a grid line — prevents flickering when actualMinDb/
+        // actualMaxDb drift slowly across a 10 dB boundary.
         const dbStep = 10;
         const dbRange = this.actualMaxDb - this.actualMinDb;
-        const minDb = Math.floor(this.actualMinDb / dbStep) * dbStep;
-        const maxDb = Math.ceil(this.actualMaxDb / dbStep) * dbStep;
+        const gridMargin = 2;
+        const minDb = Math.floor((this.actualMinDb + gridMargin) / dbStep) * dbStep;
+        const maxDb = Math.ceil((this.actualMaxDb - gridMargin) / dbStep) * dbStep;
 
         for (let db = minDb; db <= maxDb; db += dbStep) {
             const y = this.height - ((db - this.actualMinDb) / dbRange) * this.height;
@@ -4009,11 +4017,13 @@ class SpectrumDisplay {
         this._setFont(this.ctx, '10px monospace');
         this.ctx.textAlign = 'left';
 
-        // dB labels on left
+        // dB labels on left — use a 2 dB inset margin (same as drawGrid) so labels
+        // only appear/disappear when the boundary has moved well past a grid line.
         const dbStep = 20;
         const dbRange = this.actualMaxDb - this.actualMinDb;
-        const minDb = Math.floor(this.actualMinDb / dbStep) * dbStep;
-        const maxDb = Math.ceil(this.actualMaxDb / dbStep) * dbStep;
+        const gridMargin = 2;
+        const minDb = Math.floor((this.actualMinDb + gridMargin) / dbStep) * dbStep;
+        const maxDb = Math.ceil((this.actualMaxDb - gridMargin) / dbStep) * dbStep;
 
         for (let db = minDb; db <= maxDb; db += dbStep) {
             const y = this.height - ((db - this.actualMinDb) / dbRange) * this.height;

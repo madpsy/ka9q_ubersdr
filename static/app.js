@@ -8428,7 +8428,7 @@ const AGC_MODE_SETTINGS = {
     controls: [
         { id: 'agcHangTime',     label: 'AGC Hang Time',     min: 0,   max: 10,  step: 0.1, default: 1.1,  unit: 's',    decimals: 1 },
         { id: 'agcRecoveryRate', label: 'AGC Recovery Rate', min: 1,   max: 100, step: 1,   default: 20,   unit: 'dB/s', decimals: 0 },
-        { id: 'agcThreshold',    label: 'AGC Threshold',     min: -60, max: 0,   step: 1,   default: -15,  unit: 'dB',   decimals: 0 },
+        { id: 'agcThreshold',    label: 'AGC Threshold',     min: -30, max: 0,   step: 1,   default: -15,  unit: 'dB',   decimals: 0 },
     ],
     apply: (values) => {
         if (!wsManager || !wsManager.ws || wsManager.ws.readyState !== WebSocket.OPEN) return;

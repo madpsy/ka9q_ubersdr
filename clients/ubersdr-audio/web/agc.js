@@ -20,6 +20,7 @@ const AGC = (() => {
   const agcRow        = () => document.getElementById('agc-row');
 
   // Preset defaults — used only as fallback if the server fetch fails.
+  // Valid range for threshold: -30.0 to 0.0 dB (enforced server-side).
   const DEFAULT_HANG   = 1.1;
   const DEFAULT_RECOV  = 20.0;
   const DEFAULT_THRESH = -15.0;

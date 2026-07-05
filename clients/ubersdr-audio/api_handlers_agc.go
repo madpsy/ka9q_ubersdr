@@ -75,8 +75,8 @@ func (s *APIServer) putAGC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.Threshold != nil {
-		if *body.Threshold < -60.0 || *body.Threshold > 0.0 {
-			apiFieldError(w, "threshold_db", *body.Threshold, "-60.0–0.0 dB")
+		if *body.Threshold < -30.0 || *body.Threshold > 0.0 {
+			apiFieldError(w, "threshold_db", *body.Threshold, "-30.0–0.0 dB")
 			return
 		}
 		thresh = *body.Threshold

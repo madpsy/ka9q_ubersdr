@@ -374,7 +374,7 @@ func main() {
 	agcRecoverySlider.Value = agcRecoveryDefault
 	agcRecoveryLabel := widget.NewLabel(fmt.Sprintf("%.0f dB/s", agcRecoveryDefault))
 
-	agcThreshSlider := widget.NewSlider(-60.0, 0.0)
+	agcThreshSlider := widget.NewSlider(-30.0, 0.0)
 	agcThreshSlider.Step = 1.0
 	agcThreshSlider.Value = agcThresholdDefault
 	agcThreshLabel := widget.NewLabel(fmt.Sprintf("%.0f dB", agcThresholdDefault))

@@ -1120,8 +1120,8 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}
 			}
 			if msg.AgcThreshold != nil {
-				if *msg.AgcThreshold < -60.0 || *msg.AgcThreshold > 0.0 {
-					wsh.sendError(conn, fmt.Sprintf("agcThreshold %.1f dB is out of valid range (-60.0–0.0 dB)", *msg.AgcThreshold))
+				if *msg.AgcThreshold < -30.0 || *msg.AgcThreshold > 0.0 {
+					wsh.sendError(conn, fmt.Sprintf("agcThreshold %.1f dB is out of valid range (-30.0–0.0 dB)", *msg.AgcThreshold))
 					continue
 				}
 			}

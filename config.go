@@ -261,7 +261,7 @@ type RadiodConfig struct {
 type SSBAgcConfig struct {
 	HangTimeS       float32 `yaml:"hang_time_s"`        // AGC hang time in seconds (0.0–10.0); presets.conf: hang-time = 1.1
 	RecoveryRateDbS float32 `yaml:"recovery_rate_db_s"` // AGC recovery rate in dB/s (1.0–100.0); presets.conf: recovery-rate = 20
-	ThresholdDb     float32 `yaml:"threshold_db"`       // AGC threshold in dB relative to headroom (-60.0–0.0); presets.conf: threshold = -15.0
+	ThresholdDb     float32 `yaml:"threshold_db"`       // AGC threshold in dB relative to headroom (-30.0–0.0); presets.conf: threshold = -15.0; clamped to -30 minimum
 }
 
 // ServerConfig contains web server settings
@@ -725,6 +725,14 @@ func LoadConfig(filename string) (*Config, error) {
 		// apply the presets.conf default. Operators who genuinely want 0 dB
 		// must set it explicitly in config.yaml.
 		config.Server.SSBAgcDefaults.ThresholdDb = -15.0
+	}
+	// Clamp threshold to the valid range [-30, 0] dB.
+	// Values below -30 dB are too aggressive and effectively silence the receiver.
+	if config.Server.SSBAgcDefaults.ThresholdDb < -30.0 {
+		config.Server.SSBAgcDefaults.ThresholdDb = -30.0
+	}
+	if config.Server.SSBAgcDefaults.ThresholdDb > 0.0 {
+		config.Server.SSBAgcDefaults.ThresholdDb = 0.0
 	}
 
 	// Parse admin allowed IPs/CIDRs

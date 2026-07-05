@@ -745,10 +745,11 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		log.Printf("WIDEIQ_SKIP_BANDWIDTH: mode=%s session=%s", mode, session.ID)
 	}
 
-	// Push AGC defaults to radiod immediately after session creation.
-	// radiod creates the channel using its own preset values (from presets.conf);
-	// without this push the operator config (or user-saved) values are never applied
-	// until the user manually moves a slider or triggers a mode change.
+	// Push AGC defaults to radiod after session creation for USB/LSB modes.
+	// radiod loads its preset asynchronously when a channel is created, which resets AGC
+	// to preset defaults. We must wait for that preset load to complete before sending
+	// our overrides — the same race that affects mode changes (see time.Sleep at line ~967).
+	// Done in a goroutine so the 500ms wait does not block connection setup or audio streaming.
 	// For USB/LSB only — other modes (AM, FM, CW, etc.) have appropriate AGC in their own presets.
 	// Priority: user override (always nil on a brand-new session) > operator config default.
 	if mode == "usb" || mode == "lsb" {
@@ -773,10 +774,16 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 			Threshold:    coalesceF32(session.UserAGCThreshold, cfgThresh),
 		}
 		session.mu.RUnlock()
-		if err := wsh.sessions.UpdateAGC(session.ID, initialAGC); err != nil {
-			log.Printf("Warning: failed to apply initial AGC for session %s: %v", session.ID, err)
-			// Non-fatal — continue; radiod will use its own preset values
-		}
+		sessionID := session.ID
+		go func() {
+			// Wait for radiod to finish loading the preset before applying overrides.
+			// Same delay used after mode changes for the same reason.
+			time.Sleep(500 * time.Millisecond)
+			if err := wsh.sessions.UpdateAGC(sessionID, initialAGC); err != nil {
+				log.Printf("Warning: failed to apply initial AGC for session %s: %v", sessionID, err)
+				// Non-fatal — radiod will use its own preset values
+			}
+		}()
 	}
 
 	// Subscribe to audio

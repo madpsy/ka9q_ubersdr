@@ -371,6 +371,22 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		WebhookTimeoutSeconds     int               `json:"webhook_timeout_seconds,omitempty"`
 		WebhookInsecureSkipVerify bool              `json:"webhook_insecure_skip_verify,omitempty"`
 		WebhookBodyTemplate       string            `json:"webhook_body_template,omitempty"`
+		// Galactic Unicorn — no secrets; all fields returned as-is.
+		GalacticUnicornModel              string  `json:"galactic_unicorn_model,omitempty"`
+		GalacticUnicornURL                string  `json:"galactic_unicorn_url,omitempty"`
+		GalacticUnicornColor              string  `json:"galactic_unicorn_color,omitempty"`
+		GalacticUnicornSize               int     `json:"galactic_unicorn_size,omitempty"`
+		GalacticUnicornEffect             string  `json:"galactic_unicorn_effect,omitempty"`
+		GalacticUnicornAlign              string  `json:"galactic_unicorn_align,omitempty"`
+		GalacticUnicornScrollSpeed        int     `json:"galactic_unicorn_scroll_speed,omitempty"`
+		GalacticUnicornScrollPause        float64 `json:"galactic_unicorn_scroll_pause,omitempty"`
+		GalacticUnicornDuration           float64 `json:"galactic_unicorn_duration,omitempty"`
+		GalacticUnicornPriority           int     `json:"galactic_unicorn_priority,omitempty"`
+		GalacticUnicornTransition         string  `json:"galactic_unicorn_transition,omitempty"`
+		GalacticUnicornBgColor            string  `json:"galactic_unicorn_bg_color,omitempty"`
+		GalacticUnicornBrightness         float64 `json:"galactic_unicorn_brightness,omitempty"`
+		GalacticUnicornTimeoutSeconds     int     `json:"galactic_unicorn_timeout_seconds,omitempty"`
+		GalacticUnicornInsecureSkipVerify bool    `json:"galactic_unicorn_insecure_skip_verify,omitempty"`
 	}
 	channels := make(map[string]redactedChannel, len(cfg.Channels))
 	for name, ch := range cfg.Channels {
@@ -399,6 +415,22 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			WebhookTimeoutSeconds:     ch.WebhookTimeoutSeconds,
 			WebhookInsecureSkipVerify: ch.WebhookInsecureSkipVerify,
 			WebhookBodyTemplate:       ch.WebhookBodyTemplate,
+			// Galactic Unicorn fields — no secrets, returned as-is.
+			GalacticUnicornModel:              ch.GalacticUnicornModel,
+			GalacticUnicornURL:                ch.GalacticUnicornURL,
+			GalacticUnicornColor:              ch.GalacticUnicornColor,
+			GalacticUnicornSize:               ch.GalacticUnicornSize,
+			GalacticUnicornEffect:             ch.GalacticUnicornEffect,
+			GalacticUnicornAlign:              ch.GalacticUnicornAlign,
+			GalacticUnicornScrollSpeed:        ch.GalacticUnicornScrollSpeed,
+			GalacticUnicornScrollPause:        ch.GalacticUnicornScrollPause,
+			GalacticUnicornDuration:           ch.GalacticUnicornDuration,
+			GalacticUnicornPriority:           ch.GalacticUnicornPriority,
+			GalacticUnicornTransition:         ch.GalacticUnicornTransition,
+			GalacticUnicornBgColor:            ch.GalacticUnicornBgColor,
+			GalacticUnicornBrightness:         ch.GalacticUnicornBrightness,
+			GalacticUnicornTimeoutSeconds:     ch.GalacticUnicornTimeoutSeconds,
+			GalacticUnicornInsecureSkipVerify: ch.GalacticUnicornInsecureSkipVerify,
 		}
 	}
 

@@ -272,12 +272,39 @@ curl -s http://192.168.1.42/status | python3 -m json.tool
 
 ## Hardware Button Behaviour
 
-The Galactic Unicorn's built-in brightness buttons work at all times:
+All buttons are active at all times — they work regardless of what is currently displayed and interrupt any queued content with a high-priority timed message that expires automatically.
 
-| Button | Action |
-|--------|--------|
-| **Brightness ▲** | Increase brightness by 0.1 (configurable in `config.py`) |
-| **Brightness ▼** | Decrease brightness by 0.1 (minimum 0.05) |
+| Button | Action | Config keys |
+|--------|--------|-------------|
+| **A** | Show the device IP address (cyan if connected, red if not) | `BTN_IP_PRIORITY`, `BTN_IP_DURATION`, `BTN_IP_COLOR` |
+| **B** | Show Wi-Fi SSID (top line) + `WiFi OK` / `No WiFi` (bottom line) | `BTN_WIFI_PRIORITY`, `BTN_WIFI_DURATION` |
+| **C** | Clear the display queue and restore the idle display | — |
+| **D** | Toggle between dim (`BTN_DIM_BRIGHTNESS`) and full brightness | `BTN_DIM_BRIGHTNESS`, `BTN_BRIGHTNESS_PRIORITY`, `BTN_BRIGHTNESS_DURATION` |
+| **Brightness ▲** | Increase brightness by `BRIGHTNESS_STEP` | `BRIGHTNESS_STEP`, `BRIGHTNESS_MAX` |
+| **Brightness ▼** | Decrease brightness by `BRIGHTNESS_STEP` | `BRIGHTNESS_STEP`, `BRIGHTNESS_MIN` |
+
+### Button configuration (`config.py`)
+
+```python
+# Brightness rocker
+BRIGHTNESS_STEP = 0.1       # Change per press
+BRIGHTNESS_MIN  = 0.05      # Floor (never fully off via rocker)
+BRIGHTNESS_MAX  = 1.0       # Ceiling via rocker
+
+# Button A — show IP address
+BTN_IP_PRIORITY = 8         # Interrupts most content (0–10)
+BTN_IP_DURATION = 5.0       # Seconds before reverting
+BTN_IP_COLOR    = "cyan"    # Colour when connected; red when disconnected
+
+# Button B — show Wi-Fi status
+BTN_WIFI_PRIORITY = 8
+BTN_WIFI_DURATION = 5.0
+
+# Button D — dim / full brightness toggle
+BTN_DIM_BRIGHTNESS       = 0.1   # Brightness in "dim" state
+BTN_BRIGHTNESS_PRIORITY  = 8
+BTN_BRIGHTNESS_DURATION  = 1.5   # How long the label stays on screen
+```
 
 ---
 

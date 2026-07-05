@@ -25,13 +25,33 @@ Options:
     --firmware-dir DIR  Directory containing the firmware .py files
                         (default: same directory as this script / firmware/)
     --dry-run           Show what would be done without doing it
+    --monitor           After flashing, open the serial REPL to see boot output
 
 Requirements:
-    pip install mpremote requests
+    pip install mpremote
     (mpremote is the official MicroPython file transfer tool)
 
 Pimoroni MicroPython firmware is downloaded from:
     https://github.com/pimoroni/pimoroni-pico/releases
+
+IMPORTANT — Model-specific firmware:
+    Each Unicorn board requires its OWN dedicated Pimoroni MicroPython build.
+    The generic "picow" build does NOT include the galactic/stellar/cosmic modules.
+    This script downloads the correct model-specific UF2 automatically.
+
+    In Pimoroni MicroPython v1.24+, the Python module name is:
+        from galactic import GalacticUnicorn   # Galactic Unicorn
+        from stellar import StellarUnicorn     # Stellar Unicorn
+        from cosmic import CosmicUnicorn       # Cosmic Unicorn
+    (NOT from galactic_unicorn import ... — that was the old name)
+
+BOOTSEL mode (flashing firmware):
+    1. UNPLUG the Pico W from USB
+    2. Hold the BOOTSEL button (small white button on the board)
+    3. While holding BOOTSEL, plug in the USB cable
+    4. Release BOOTSEL — the Pico W appears as a USB drive called RPI-RP2
+    5. This script will detect it and copy the UF2 automatically
+    6. The Pico W reboots itself after the UF2 is copied — do NOT unplug it
 """
 
 import argparse
@@ -56,19 +76,19 @@ import json
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FIRMWARE_DIR = os.path.join(SCRIPT_DIR, "firmware")
 
-# GitHub API URL for latest Pimoroni MicroPython release
-PIMORONI_RELEASES_API = "https://api.github.com/repos/pimoroni/pimoroni-pico/releases/latest"
+# GitHub API URL for Pimoroni MicroPython releases (list, not just latest,
+# because the Unicorn-specific builds may be in an older or beta release).
+PIMORONI_RELEASES_API = "https://api.github.com/repos/pimoroni/pimoroni-pico/releases"
 
-# UF2 filename pattern — all Unicorn boards (Galactic, Stellar, Cosmic) run on
-# the Pico W, so they all use the same picow Pimoroni MicroPython firmware.
-# The model selection only affects which MicroPython modules are available at
-# runtime (galactic_unicorn, stellar_unicorn, cosmic_unicorn from Pimoroni).
-UF2_PATTERN = r"^picow-v[\d.]+-pimoroni-micropython\.uf2$"
-# Keep per-model dict for API compatibility but all point to the same pattern
+# UF2 filename patterns per model.
+# Each Unicorn board has its own dedicated Pimoroni MicroPython build that
+# includes the board-specific C module (galactic, stellar, cosmic).
+# The generic picow build does NOT include these modules.
+# Matches e.g. "galactic_unicorn-v1.24.0-beta2-pimoroni-micropython.uf2"
 UF2_PATTERNS = {
-    "galactic": UF2_PATTERN,
-    "stellar":  UF2_PATTERN,
-    "cosmic":   UF2_PATTERN,
+    "galactic": r"^galactic_unicorn-v[\d.\-a-z]+-pimoroni-micropython\.uf2$",
+    "stellar":  r"^stellar_unicorn-v[\d.\-a-z]+-pimoroni-micropython\.uf2$",
+    "cosmic":   r"^cosmic_unicorn-v[\d.\-a-z]+-pimoroni-micropython\.uf2$",
 }
 
 # RPI-RP2 drive name (BOOTSEL mode mount point)
@@ -98,24 +118,52 @@ def err(msg):   print(_c("✗ " + msg, "31"), file=sys.stderr)
 def step(msg):  print(_c("\n● " + msg, "1;34"))
 
 # ---------------------------------------------------------------------------
+# mpremote invocation helper
+# ---------------------------------------------------------------------------
+
+def _mpremote_cmd():
+    """Return the command list prefix to invoke mpremote.
+
+    Prefers 'python3 -m mpremote' over bare 'mpremote' because on systems
+    with multiple Python environments (e.g. platformio) the mpremote script
+    may not be on PATH even after 'pip install mpremote'.
+    """
+    # Try bare mpremote first (fastest)
+    if shutil.which("mpremote"):
+        return ["mpremote"]
+    # Fall back to module invocation
+    return [sys.executable, "-m", "mpremote"]
+
+# ---------------------------------------------------------------------------
 # Dependency checks
 # ---------------------------------------------------------------------------
 
 def check_dependencies():
-    """Check that required tools are available."""
-    missing = []
+    """Check that required tools are available, install mpremote if missing."""
+    # Test mpremote availability
+    cmd = _mpremote_cmd() + ["version"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            ok("mpremote found")
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
 
-    # mpremote
-    if shutil.which("mpremote") is None:
-        missing.append("mpremote  →  pip install mpremote")
-
-    if missing:
-        err("Missing required tools:")
-        for m in missing:
-            err("  " + m)
+    # Not found — try to install it
+    warn("mpremote not found — attempting to install via pip…")
+    install_result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "mpremote"],
+        capture_output=True, text=True
+    )
+    if install_result.returncode == 0:
+        ok("mpremote installed successfully")
+    else:
+        err("Failed to install mpremote automatically.")
+        err("Please install it manually:")
+        err("  pip install mpremote")
+        err("  or: pip3 install mpremote")
         sys.exit(1)
-
-    ok("mpremote found")
 
 # ---------------------------------------------------------------------------
 # Serial port detection
@@ -215,32 +263,43 @@ def find_bootsel_drive():
 # ---------------------------------------------------------------------------
 
 def get_latest_uf2_url(model):
-    """Fetch the download URL for the latest Pimoroni UF2 for the given model."""
-    info(f"Fetching latest Pimoroni MicroPython release info…")
+    """Fetch the download URL for the latest Pimoroni UF2 for the given model.
+
+    Searches all releases (not just the latest) because the Unicorn-specific
+    builds (galactic_unicorn, stellar_unicorn, cosmic_unicorn) are only
+    available in older or beta releases — the latest release only has the
+    generic picow build.
+    """
+    info(f"Fetching Pimoroni MicroPython release list…")
     try:
         req = urllib.request.Request(
             PIMORONI_RELEASES_API,
             headers={"User-Agent": "UberSDR-flasher/1.0"}
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
+            releases = json.loads(resp.read().decode())
     except Exception as e:
         err(f"Failed to fetch release info: {e}")
         return None, None
 
-    tag = data.get("tag_name", "unknown")
-    assets = data.get("assets", [])
+    if not isinstance(releases, list):
+        releases = [releases]
+
     pattern = re.compile(UF2_PATTERNS[model], re.IGNORECASE)
 
-    for asset in assets:
-        name = asset.get("name", "")
-        if pattern.search(name):
-            url = asset.get("browser_download_url")
-            ok(f"Found UF2: {name} ({tag})")
-            return url, name
+    # Search releases in order (newest first) for the model-specific UF2
+    for release in releases:
+        tag = release.get("tag_name", "unknown")
+        assets = release.get("assets", [])
+        for asset in assets:
+            name = asset.get("name", "")
+            if pattern.search(name):
+                url = asset.get("browser_download_url")
+                ok(f"Found UF2: {name} ({tag})")
+                return url, name
 
-    err(f"No UF2 found for model '{model}' in release {tag}")
-    err(f"Available assets: {[a['name'] for a in assets]}")
+    err(f"No UF2 found for model '{model}' in any release")
+    err(f"Check: https://github.com/pimoroni/pimoroni-pico/releases")
     return None, None
 
 
@@ -276,20 +335,56 @@ def download_uf2(url, dest_path):
 # UF2 flashing
 # ---------------------------------------------------------------------------
 
+def _umount_drive(drive):
+    """Unmount the BOOTSEL drive on Linux/macOS to trigger the UF2 flash.
+
+    On Linux, simply copying the UF2 to the FAT filesystem is not always
+    enough — the kernel may buffer the write. Calling umount flushes the
+    buffer and signals the RP2040 bootloader to start flashing.
+    """
+    if platform.system() == "Linux":
+        try:
+            result = subprocess.run(["umount", drive], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                ok("Drive unmounted — Pico W is now flashing")
+            else:
+                # umount may fail if the drive auto-unmounted after the copy
+                # (which is fine — the flash still proceeds)
+                warn(f"umount returned non-zero (this is usually OK): {result.stderr.strip()}")
+        except FileNotFoundError:
+            warn("umount not found — skipping (flash should still proceed)")
+        except subprocess.TimeoutExpired:
+            warn("umount timed out — flash may still proceed")
+    elif platform.system() == "Darwin":
+        try:
+            subprocess.run(["diskutil", "unmount", drive], capture_output=True, timeout=10)
+            ok("Drive unmounted — Pico W is now flashing")
+        except Exception:
+            pass
+
+
 def flash_uf2(uf2_path, dry_run=False):
     """Copy the UF2 file to the BOOTSEL drive."""
     step("Flashing UF2 firmware")
 
-    print("\nTo enter BOOTSEL mode:")
-    print("  1. Hold the BOOTSEL button on the Pico W")
-    print("  2. While holding BOOTSEL, plug in the USB cable")
-    print("  3. Release BOOTSEL — the Pico W appears as a USB drive (RPI-RP2)")
+    print()
+    print("  ┌─────────────────────────────────────────────────────┐")
+    print("  │  How to enter BOOTSEL mode:                         │")
+    print("  │                                                     │")
+    print("  │  1. UNPLUG the Pico W from USB                      │")
+    print("  │  2. Hold the BOOTSEL button (small white button)    │")
+    print("  │  3. While holding BOOTSEL, plug in the USB cable    │")
+    print("  │  4. Release BOOTSEL                                 │")
+    print("  │                                                     │")
+    print("  │  The Pico W will appear as a USB drive: RPI-RP2    │")
+    print("  │  Do NOT unplug it during flashing!                  │")
+    print("  └─────────────────────────────────────────────────────┘")
     print()
 
     # Wait for the drive to appear
     drive = None
     print("Waiting for RPI-RP2 drive", end="", flush=True)
-    for _ in range(30):  # Wait up to 30 seconds
+    for _ in range(60):  # Wait up to 60 seconds
         drive = find_bootsel_drive()
         if drive:
             break
@@ -298,14 +393,19 @@ def flash_uf2(uf2_path, dry_run=False):
     print()
 
     if not drive:
-        err("RPI-RP2 drive not found after 30 seconds.")
-        err("Make sure the Pico W is in BOOTSEL mode (hold BOOTSEL while plugging in USB).")
+        err("RPI-RP2 drive not found after 60 seconds.")
+        err("")
+        err("Troubleshooting:")
+        err("  • Make sure you held BOOTSEL BEFORE plugging in USB")
+        err("  • Try a different USB cable (some cables are charge-only)")
+        err("  • Try a different USB port")
+        err("  • On Linux, check: ls /media/$USER/ or ls /run/media/$USER/")
         return False
 
     ok(f"Found RPI-RP2 drive at: {drive}")
 
     dest = os.path.join(drive, os.path.basename(uf2_path))
-    info(f"Copying {uf2_path} → {dest}")
+    info(f"Copying {os.path.basename(uf2_path)} → {drive}")
 
     if dry_run:
         ok("[dry-run] Would copy UF2 to drive")
@@ -317,9 +417,14 @@ def flash_uf2(uf2_path, dry_run=False):
         err(f"Failed to copy UF2: {e}")
         return False
 
-    ok("UF2 copied — Pico W will reboot automatically")
-    info("Waiting for Pico W to reboot and appear as serial port…")
-    time.sleep(5)
+    ok("UF2 copied")
+
+    # On Linux/macOS, unmount the drive to flush the write and trigger flash.
+    # The RP2040 bootloader detects the UF2 and reboots automatically.
+    _umount_drive(drive)
+
+    info("Pico W is rebooting into MicroPython — please wait…")
+    time.sleep(8)
     return True
 
 # ---------------------------------------------------------------------------
@@ -354,7 +459,9 @@ QUEUE_MAX_SIZE = 16
 # ---------------------------------------------------------------------------
 SPLASH_TEXT = "UberSDR"
 SPLASH_COLOR = "rainbow"
-SPLASH_SIZE = {"3" if model == "galactic" else "2"}
+# Galactic Unicorn is 11px tall; PicoGraphics bitmap font at scale 1 = 8px.
+# Scale 2 = 16px which doesn't fit. Always use scale 1 for the splash.
+SPLASH_SIZE = 1
 
 # ---------------------------------------------------------------------------
 # Idle display (shown when queue is empty)
@@ -386,7 +493,7 @@ HTTP_READ_TIMEOUT = 5
 
 def mpremote_copy(port, local_path, remote_name, dry_run=False):
     """Copy a local file to the Pico W using mpremote."""
-    cmd = ["mpremote"]
+    cmd = _mpremote_cmd()
     if port:
         cmd += ["connect", port]
     cmd += ["cp", local_path, f":{remote_name}"]
@@ -397,7 +504,7 @@ def mpremote_copy(port, local_path, remote_name, dry_run=False):
         ok(f"  [dry-run] Would run: {' '.join(cmd)}")
         return True
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         err(f"  mpremote error: {result.stderr.strip() or result.stdout.strip()}")
         return False
@@ -406,7 +513,7 @@ def mpremote_copy(port, local_path, remote_name, dry_run=False):
 
 def mpremote_reset(port, dry_run=False):
     """Soft-reset the Pico W."""
-    cmd = ["mpremote"]
+    cmd = _mpremote_cmd()
     if port:
         cmd += ["connect", port]
     cmd += ["reset"]
@@ -422,7 +529,7 @@ def mpremote_reset(port, dry_run=False):
 
 def mpremote_ls(port):
     """List files on the Pico W to verify copy succeeded."""
-    cmd = ["mpremote"]
+    cmd = _mpremote_cmd()
     if port:
         cmd += ["connect", port]
     cmd += ["ls"]
@@ -484,6 +591,9 @@ def main():
                         help=f"Directory containing firmware .py files (default: {FIRMWARE_DIR})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be done without doing it")
+    parser.add_argument("--monitor", action="store_true",
+                        help="After flashing, open the serial REPL to see boot output "
+                             "(Ctrl+] or Ctrl+X to exit). Equivalent to: mpremote connect <port> repl")
     args = parser.parse_args()
 
     print()
@@ -518,6 +628,18 @@ def main():
     uf2_path = args.uf2
     if not args.no_flash:
         step("Pimoroni MicroPython firmware")
+
+        print()
+        print("  NOTE: You need the model-specific Pimoroni MicroPython build.")
+        print(f"  For {model_labels[args.model]}, the correct UF2 is named:")
+        model_uf2_example = {
+            "galactic": "galactic_unicorn-vX.Y.Z-pimoroni-micropython.uf2",
+            "stellar":  "stellar_unicorn-vX.Y.Z-pimoroni-micropython.uf2",
+            "cosmic":   "cosmic_unicorn-vX.Y.Z-pimoroni-micropython.uf2",
+        }
+        print(f"    {model_uf2_example[args.model]}")
+        print("  The generic 'picow-*.uf2' build will NOT work.")
+        print()
 
         if uf2_path:
             if not os.path.exists(uf2_path):
@@ -557,7 +679,15 @@ def main():
         # Flash the UF2
         if not flash_uf2(uf2_path, dry_run=args.dry_run):
             err("UF2 flashing failed.")
-            err("You can flash manually by copying the UF2 file to the RPI-RP2 drive.")
+            err("")
+            err("You can flash manually:")
+            err("  1. Hold BOOTSEL, plug in USB, release BOOTSEL")
+            err(f"  2. Copy the UF2 to the RPI-RP2 drive:")
+            err(f"       Linux:   cp {uf2_path} /media/$USER/RPI-RP2/")
+            err(f"                umount /media/$USER/RPI-RP2")
+            err(f"       macOS:   cp {uf2_path} /Volumes/RPI-RP2/")
+            err(f"       Windows: copy {uf2_path} E:\\  (where E: is the RPI-RP2 drive)")
+            err("  3. The Pico W reboots automatically after the copy")
             sys.exit(1)
 
         # Wait for Pico W to reboot into MicroPython
@@ -573,7 +703,7 @@ def main():
     if not port:
         # After a UF2 flash the Pico W takes several seconds to enumerate as a
         # serial port. Retry for up to 15 seconds before asking the user.
-        info("Scanning for Pico W serial port", )
+        info("Scanning for Pico W serial port")
         for attempt in range(15):
             port = find_pico_port()
             if port:
@@ -611,13 +741,14 @@ def main():
         idle_text=args.idle_text,
     )
 
-    # Write to a temp file for transfer
+    # Write to a temp file for transfer — credentials NEVER touch the repo
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False,
                                      prefix="gu_config_") as tmp:
         tmp.write(config_content)
         tmp_config_path = tmp.name
 
     ok(f"config.py generated (SSID: {ssid}, brightness: {args.brightness})")
+    info("Credentials written to temp file only — not saved to disk permanently")
 
     # ── Step 6: Copy firmware files ──────────────────────────────────────────
     step("Copying firmware files to Pico W")
@@ -644,8 +775,9 @@ def main():
     # config.py goes last so the device boots correctly even if interrupted
     files_to_copy.append((tmp_config_path, "config.py"))
 
-    # Retry loop — mpremote can fail on first attempt after reboot
-    max_retries = 3
+    # Retry loop — mpremote can fail on first attempt after reboot with
+    # "could not enter raw repl" if the device is still booting or busy.
+    max_retries = 5
     for attempt in range(1, max_retries + 1):
         success = True
 
@@ -654,6 +786,7 @@ def main():
                 success = False
                 if attempt < max_retries:
                     warn(f"Copy failed (attempt {attempt}/{max_retries}), retrying in 3s…")
+                    warn("(This is normal if the device is still booting)")
                     time.sleep(3)
                 break
 
@@ -661,10 +794,15 @@ def main():
             break
     else:
         err("Failed to copy firmware files after multiple attempts.")
+        err("")
         err("Try running manually:")
-        err(f"  mpremote connect {port or 'auto'} cp firmware/display_engine.py :display_engine.py")
-        err(f"  mpremote connect {port or 'auto'} cp firmware/main.py :main.py")
-        err(f"  mpremote connect {port or 'auto'} cp /tmp/gu_config_XXXXX.py :config.py")
+        err(f"  python3 -m mpremote connect {port or 'auto'} cp firmware/display_engine.py :display_engine.py")
+        err(f"  python3 -m mpremote connect {port or 'auto'} cp firmware/main.py :main.py")
+        err(f"  python3 -m mpremote connect {port or 'auto'} cp /tmp/gu_config_XXXXX.py :config.py")
+        err("")
+        err("If you see 'could not enter raw repl', the device may be running code.")
+        err("Press Ctrl+C in the REPL (connect with: python3 -m mpremote connect <port> repl)")
+        err("then try again with --no-flash --port <port>")
         os.unlink(tmp_config_path)
         sys.exit(1)
 
@@ -682,33 +820,63 @@ def main():
         else:
             warn("Could not list files (device may still be booting)")
 
-    # ── Step 8: Reset ────────────────────────────────────────────────────────
-    step("Resetting Pico W")
-    mpremote_reset(port, dry_run=args.dry_run)
+    # ── Step 8: Reset or monitor ─────────────────────────────────────────────
+    if args.monitor:
+        # Open the REPL so the user can see boot output in real time.
+        # mpremote repl does a soft-reset automatically before attaching.
+        print()
+        print("╔══════════════════════════════════════════════════════╗")
+        print("║   ✓  Firmware installed — opening serial monitor     ║")
+        print("╚══════════════════════════════════════════════════════╝")
+        print()
+        ok(f"Model:      {model_labels[args.model]}")
+        ok(f"Wi-Fi:      {ssid}")
+        print()
+        info("Opening REPL — you will see boot output below.")
+        info("Press Ctrl+] or Ctrl+X to exit the monitor.")
+        print()
+        if not args.dry_run:
+            cmd = _mpremote_cmd()
+            if port:
+                cmd += ["connect", port]
+            cmd += ["repl"]
+            # exec replaces the current process — terminal handles Ctrl+] natively
+            os.execvp(cmd[0], cmd)
+        else:
+            ok(f"[dry-run] Would run: {' '.join(_mpremote_cmd())} connect {port} repl")
+    else:
+        step("Resetting Pico W")
+        mpremote_reset(port, dry_run=args.dry_run)
 
-    # ── Done ─────────────────────────────────────────────────────────────────
-    print()
-    print("╔══════════════════════════════════════════════════════╗")
-    print("║   ✓  Firmware installed successfully!                ║")
-    print("╚══════════════════════════════════════════════════════╝")
-    print()
-    ok(f"Model:      {model_labels[args.model]}")
-    ok(f"Wi-Fi:      {ssid}")
-    ok(f"Brightness: {args.brightness}")
-    print()
-    info("The display will show 'UberSDR' while connecting to Wi-Fi,")
-    info("then briefly show its IP address.")
-    info("Add that IP to your notifications.yaml:")
-    print()
-    print("  channels:")
-    print("    shack_display:")
-    print("      type: galactic_unicorn")
-    print(f"      galactic_unicorn_model: {args.model}")
-    print("      galactic_unicorn_url: http://<IP-shown-on-display>")
-    print("      galactic_unicorn_color: amber")
-    print("      galactic_unicorn_effect: auto")
-    print("      galactic_unicorn_duration: 10.0")
-    print()
+        # ── Done ─────────────────────────────────────────────────────────────
+        print()
+        print("╔══════════════════════════════════════════════════════╗")
+        print("║   ✓  Firmware installed successfully!                ║")
+        print("╚══════════════════════════════════════════════════════╝")
+        print()
+        ok(f"Model:      {model_labels[args.model]}")
+        ok(f"Wi-Fi:      {ssid}")
+        ok(f"Brightness: {args.brightness}")
+        print()
+        info("The display will show 'UberSDR' in rainbow colours while connecting,")
+        info("then briefly show its IP address when Wi-Fi connects.")
+        info("")
+        info("Add that IP to your notifications.yaml:")
+        print()
+        print("  channels:")
+        print("    shack_display:")
+        print("      type: galactic_unicorn")
+        print(f"      galactic_unicorn_model: {args.model}")
+        print("      galactic_unicorn_url: http://<IP-shown-on-display>")
+        print("      galactic_unicorn_color: amber")
+        print("      galactic_unicorn_effect: auto")
+        print("      galactic_unicorn_duration: 10.0")
+        print()
+        info("To see boot output, run:")
+        mpremote_bin = " ".join(_mpremote_cmd())
+        info(f"  {mpremote_bin} connect {port or '<port>'} repl")
+        info("(Press Ctrl+] or Ctrl+X to exit the monitor)")
+        print()
 
 
 if __name__ == "__main__":

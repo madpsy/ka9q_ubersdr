@@ -39,12 +39,37 @@ IDLE_ALIGN = "center"
 
 # ---------------------------------------------------------------------------
 # Hardware button behaviour
-# Brightness buttons on the Galactic Unicorn adjust global brightness
-# by BRIGHTNESS_STEP each press.
+#
+# Front-panel buttons (A/B/C/D):
+#   A — Show IP address
+#   B — Show Wi-Fi SSID + connection status
+#   C — Clear display queue (restores idle display if configured)
+#   D — Toggle between dim and full brightness
+#
+# Brightness rocker (▲/▼):
+#   Adjusts global brightness by BRIGHTNESS_STEP each press.
 # ---------------------------------------------------------------------------
-BRIGHTNESS_STEP = 0.1       # How much each button press changes brightness
-BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off via buttons)
-BRIGHTNESS_MAX = 1.0        # Maximum brightness via buttons
+
+# Brightness rocker
+BRIGHTNESS_STEP = 0.1       # How much each rocker press changes brightness
+BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off via rocker)
+BRIGHTNESS_MAX = 1.0        # Maximum brightness via rocker
+
+# Button A — show IP address
+BTN_IP_PRIORITY = 8         # Priority of the IP display message (interrupts most content)
+BTN_IP_DURATION = 5.0       # Seconds to show the IP before reverting
+BTN_IP_COLOR = "cyan"       # Colour when connected; red is used automatically if disconnected
+
+# Button B — show Wi-Fi status
+BTN_WIFI_PRIORITY = 8       # Priority of the Wi-Fi status message
+BTN_WIFI_DURATION = 5.0     # Seconds to show the status before reverting
+
+# Button C — clear display (no extra config needed; always clears and reinstalls idle)
+
+# Button D — toggle dim / full brightness
+BTN_DIM_BRIGHTNESS = 0.1    # Brightness level used for the "dim" state
+BTN_BRIGHTNESS_PRIORITY = 8 # Priority of the brief brightness-confirmation message
+BTN_BRIGHTNESS_DURATION = 1.5  # Seconds to show the brightness label
 
 # ---------------------------------------------------------------------------
 # Network timeouts

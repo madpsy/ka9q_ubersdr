@@ -8,6 +8,13 @@
 #
 # MicroPython version: 1.22+ with Pimoroni firmware
 # Hardware: Pimoroni Galactic Unicorn
+#
+# Button assignments (front panel):
+#   A — Show IP address (cyan scroll)
+#   B — Show Wi-Fi status (SSID + connected/disconnected)
+#   C — Clear display queue
+#   D — Toggle brightness between dim and full
+#   Brightness ▲/▼ — Adjust brightness by BRIGHTNESS_STEP
 
 import gc
 import json
@@ -15,7 +22,7 @@ import network
 import time
 import uasyncio as asyncio
 
-from galactic_unicorn import GalacticUnicorn
+from galactic import GalacticUnicorn
 from picographics import PicoGraphics, DISPLAY_GALACTIC_UNICORN
 
 import config
@@ -30,8 +37,12 @@ graphics = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)
 engine = DisplayEngine(gu, graphics, brightness=config.DEFAULT_BRIGHTNESS)
 
 # ---------------------------------------------------------------------------
-# Wi-Fi connection
+# Global state (set during boot, used by button handlers)
 # ---------------------------------------------------------------------------
+
+_wlan = None          # network.WLAN object — set in connect_wifi()
+_device_ip = None     # IP string or "0.0.0.0" — set in main()
+_brightness_toggled = False  # tracks dim/full toggle state for button D
 
 # ---------------------------------------------------------------------------
 # Boot animation helpers (synchronous — asyncio not running yet)
@@ -56,6 +67,16 @@ def _hsv_to_rgb(h, s, v):
     return int(v*255), int(p*255), int(q*255)
 
 
+def _draw_rainbow_bar(y_start, height, hue_offset):
+    """Draw a full-width horizontal rainbow bar from y_start for 'height' rows."""
+    for x in range(53):
+        hue = (hue_offset + x / 53.0) % 1.0
+        r, g, b = _hsv_to_rgb(hue, 1.0, 0.9)
+        graphics.set_pen(graphics.create_pen(r, g, b))
+        for y in range(y_start, y_start + height):
+            graphics.pixel(x, y)
+
+
 def _draw_rainbow_text(text, x, y, scale, hue_offset):
     """Draw text with per-character rainbow colouring. hue_offset cycles 0.0–1.0."""
     cx = x
@@ -69,19 +90,30 @@ def _draw_rainbow_text(text, x, y, scale, hue_offset):
         cx += w
 
 
-def _draw_scroll_rainbow(text, scroll_x, y, scale, hue_offset):
-    """Draw scrolling rainbow text at a given x offset."""
+def _draw_scroll_rainbow(text, scroll_x, hue_offset):
+    """Draw scrolling rainbow text filling the full 11-pixel display height.
+
+    Layout (11 rows total):
+      rows 0-7  : text at scale 1 (8px bitmap font), y=0
+      rows 8-10 : animated rainbow bar (3px)
+    """
     graphics.set_pen(graphics.create_pen(0, 0, 0))
     graphics.clear()
+
+    # Text row (rows 0-7)
     cx = int(scroll_x)
     for ch in text:
-        w = graphics.measure_text(ch, scale=scale)
+        w = graphics.measure_text(ch, scale=1)
         if cx + w > 0 and cx < 53:  # only draw visible characters
             hue = (hue_offset + (cx + w // 2) / 53.0) % 1.0
             r, g, b = _hsv_to_rgb(hue, 1.0, 1.0)
             graphics.set_pen(graphics.create_pen(r, g, b))
-            graphics.text(ch, cx, y, scale=scale)
+            graphics.text(ch, cx, 0, scale=1)
         cx += w
+
+    # Rainbow bar (rows 8-10) — shifts opposite direction for cool effect
+    _draw_rainbow_bar(8, 3, (1.0 - hue_offset) % 1.0)
+
     gu.update(graphics)
 
 
@@ -91,21 +123,21 @@ def _draw_scroll_rainbow(text, scroll_x, y, scale, hue_offset):
 
 def connect_wifi():
     """Connect to Wi-Fi. Animates rainbow 'UberSDR' scroll while connecting.
-    Returns IP string or None on timeout."""
+    Returns (wlan, ip_string) — ip is None on timeout."""
+    global _wlan
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
+    _wlan = wlan
 
     if wlan.isconnected():
-        return wlan.ifconfig()[0]
+        return wlan, wlan.ifconfig()[0]
 
     print(f"Connecting to Wi-Fi: {config.WIFI_SSID}")
     wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
 
     splash_text = config.SPLASH_TEXT or "UberSDR"
-    splash_scale = config.SPLASH_SIZE
-    text_width = graphics.measure_text(splash_text, scale=splash_scale)
-    font_h = {1: 5, 2: 7, 3: 11}.get(splash_scale, 5)
-    y = (11 - font_h) // 2  # vertically centred
+    # _draw_scroll_rainbow handles layout: 8px text (rows 0-7) + 3px bar (rows 8-10)
+    text_width = graphics.measure_text(splash_text, scale=1)
 
     # Scroll state
     scroll_x = float(53)          # start off right edge
@@ -119,7 +151,7 @@ def connect_wifi():
     while not wlan.isconnected():
         if time.time() > deadline:
             print("Wi-Fi connection timed out")
-            return None
+            return wlan, None
 
         now_ms = time.ticks_ms()
         dt = time.ticks_diff(now_ms, last_ms) / 1000.0
@@ -133,14 +165,14 @@ def connect_wifi():
         # Advance hue
         hue_offset = (hue_offset + hue_speed * dt) % 1.0
 
-        # Draw frame
-        _draw_scroll_rainbow(splash_text, scroll_x, y, splash_scale, hue_offset)
+        # Draw frame — fills all 11 rows (8px text + 3px rainbow bar)
+        _draw_scroll_rainbow(splash_text, scroll_x, hue_offset)
 
         time.sleep_ms(33)  # ~30 fps
 
     ip = wlan.ifconfig()[0]
     print(f"Wi-Fi connected: {ip}")
-    return ip
+    return wlan, ip
 
 
 # ---------------------------------------------------------------------------
@@ -418,26 +450,222 @@ async def handle_client(reader, writer):
 
 
 # ---------------------------------------------------------------------------
+# Button action helpers
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Config helpers — safe getattr with defaults so old config.py files work
+# ---------------------------------------------------------------------------
+
+def _cfg(key, default):
+    """Return config.KEY if it exists, otherwise default."""
+    return getattr(config, key, default)
+
+
+def _btn_show_ip():
+    """Button A — display the device IP address as a high-priority timed message."""
+    ip = _device_ip or "0.0.0.0"
+    connected = _wlan is not None and _wlan.isconnected()
+    color = _cfg("BTN_IP_COLOR", "cyan") if connected else "red"
+    raw = {
+        "type": "display",
+        "id": "btn-ip",
+        "priority": _cfg("BTN_IP_PRIORITY", 8),
+        "duration": _cfg("BTN_IP_DURATION", 5.0),
+        "transition": "cut",
+        "lines": [{
+            "text": ip,
+            "color": color,
+            "size": 1,
+            "effect": "auto",
+            "align": "center",
+            "y": "middle",
+            "scroll_speed": 30,
+            "scroll_pause": 0.5,
+            "scroll_loop": False,
+        }]
+    }
+    try:
+        msg = DisplayMessage(raw)
+        engine.set_message(msg)
+        print(f"[BTN A] Showing IP: {ip}")
+    except Exception as e:
+        print(f"[BTN A] Error: {e}")
+
+
+def _btn_show_wifi():
+    """Button B — display Wi-Fi SSID and connection status as a two-line message."""
+    connected = _wlan is not None and _wlan.isconnected()
+    ssid = getattr(config, "WIFI_SSID", None) or "?"
+
+    if connected:
+        status_text = "WiFi OK"
+        status_color = "lime"
+    else:
+        status_text = "No WiFi"
+        status_color = "red"
+
+    raw = {
+        "type": "display",
+        "id": "btn-wifi",
+        "priority": _cfg("BTN_WIFI_PRIORITY", 8),
+        "duration": _cfg("BTN_WIFI_DURATION", 5.0),
+        "transition": "cut",
+        "lines": [
+            {
+                "text": ssid,
+                "color": "cyan",
+                "size": 1,
+                "effect": "auto",
+                "align": "center",
+                "y": "top",
+                "scroll_speed": 28,
+                "scroll_pause": 0.5,
+                "scroll_loop": False,
+            },
+            {
+                "text": status_text,
+                "color": status_color,
+                "size": 1,
+                "effect": "static",
+                "align": "center",
+                "y": "bottom",
+            },
+        ]
+    }
+    try:
+        msg = DisplayMessage(raw)
+        engine.set_message(msg)
+        print(f"[BTN B] Showing WiFi: {ssid} / {status_text}")
+    except Exception as e:
+        print(f"[BTN B] Error: {e}")
+
+
+def _btn_clear():
+    """Button C — clear the display queue and blank the screen."""
+    engine.clear()
+    # Reinstall idle display so the screen doesn't stay blank forever
+    install_idle_display()
+    print("[BTN C] Display cleared")
+
+
+def _btn_toggle_brightness():
+    """Button D — toggle between dim (BTN_DIM_BRIGHTNESS) and full brightness."""
+    global _brightness_toggled
+    _brightness_toggled = not _brightness_toggled
+    if _brightness_toggled:
+        new_br = _cfg("BTN_DIM_BRIGHTNESS", 0.1)
+        label = f"Dim {int(new_br * 100)}%"
+    else:
+        new_br = _cfg("BRIGHTNESS_MAX", 1.0)
+        label = f"Bright {int(new_br * 100)}%"
+    engine.set_brightness(new_br)
+    # Brief on-screen confirmation
+    raw = {
+        "type": "display",
+        "id": "btn-brightness",
+        "priority": _cfg("BTN_BRIGHTNESS_PRIORITY", 8),
+        "duration": _cfg("BTN_BRIGHTNESS_DURATION", 1.5),
+        "transition": "cut",
+        "lines": [{
+            "text": label,
+            "color": "amber",
+            "size": 1,
+            "effect": "static",
+            "align": "center",
+            "y": "middle",
+        }]
+    }
+    try:
+        msg = DisplayMessage(raw)
+        engine.set_message(msg)
+        print(f"[BTN D] Brightness → {new_br:.2f}")
+    except Exception as e:
+        print(f"[BTN D] Error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Hardware button handler
 # ---------------------------------------------------------------------------
 
 async def button_handler():
-    """Poll hardware brightness buttons and adjust display brightness."""
-    from galactic_unicorn import GalacticUnicorn as GU
+    """Poll hardware buttons and respond to presses.
+
+    Brightness ▲/▼  — adjust global brightness by BRIGHTNESS_STEP
+    A               — show IP address
+    B               — show Wi-Fi SSID + status
+    C               — clear display queue
+    D               — toggle dim / full brightness
+    """
+    # Verify that the A/B/C/D switch constants exist on this firmware build.
+    # Older Pimoroni builds may not expose them; log a warning but keep running.
+    _has_abcd = all(
+        hasattr(GalacticUnicorn, sw)
+        for sw in ("SWITCH_A", "SWITCH_B", "SWITCH_C", "SWITCH_D")
+    )
+    if _has_abcd:
+        print("Button handler: A/B/C/D switches available")
+    else:
+        print("Button handler: WARNING — SWITCH_A/B/C/D not found on this firmware; "
+              "only brightness rocker will work")
+
+    # Per-button debounce state: tracks whether the button was held last tick
+    _held = {
+        "br_up":   False,
+        "br_down": False,
+        "a":       False,
+        "b":       False,
+        "c":       False,
+        "d":       False,
+    }
+
     while True:
-        if gu.is_pressed(GU.SWITCH_BRIGHTNESS_UP):
-            new_br = min(config.BRIGHTNESS_MAX,
-                         engine.get_brightness() + config.BRIGHTNESS_STEP)
-            engine.set_brightness(new_br)
-            await asyncio.sleep(0.2)  # Debounce
+        try:
+            # --- Brightness up ---
+            pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP)
+            if pressed and not _held["br_up"]:
+                new_br = min(_cfg("BRIGHTNESS_MAX", 1.0),
+                             engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1))
+                engine.set_brightness(new_br)
+            _held["br_up"] = pressed
 
-        elif gu.is_pressed(GU.SWITCH_BRIGHTNESS_DOWN):
-            new_br = max(config.BRIGHTNESS_MIN,
-                         engine.get_brightness() - config.BRIGHTNESS_STEP)
-            engine.set_brightness(new_br)
-            await asyncio.sleep(0.2)  # Debounce
+            # --- Brightness down ---
+            pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN)
+            if pressed and not _held["br_down"]:
+                new_br = max(_cfg("BRIGHTNESS_MIN", 0.05),
+                             engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1))
+                engine.set_brightness(new_br)
+            _held["br_down"] = pressed
 
-        await asyncio.sleep(0.05)
+            if _has_abcd:
+                # --- Button A: show IP ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_A)
+                if pressed and not _held["a"]:
+                    _btn_show_ip()
+                _held["a"] = pressed
+
+                # --- Button B: show Wi-Fi status ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_B)
+                if pressed and not _held["b"]:
+                    _btn_show_wifi()
+                _held["b"] = pressed
+
+                # --- Button C: clear queue ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_C)
+                if pressed and not _held["c"]:
+                    _btn_clear()
+                _held["c"] = pressed
+
+                # --- Button D: toggle brightness ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_D)
+                if pressed and not _held["d"]:
+                    _btn_toggle_brightness()
+                _held["d"] = pressed
+
+        except Exception as e:
+            print(f"Button handler error: {e}")
+
+        await asyncio.sleep(0.05)  # 20 Hz poll — fast enough for responsive feel
 
 
 # ---------------------------------------------------------------------------
@@ -447,23 +675,20 @@ async def button_handler():
 def show_splash():
     """Show a brief static splash before Wi-Fi animation begins.
     The main rainbow animation runs inside connect_wifi() itself."""
-    # Brief flash of the splash text in white to signal boot
     if not config.SPLASH_TEXT:
         return
     graphics.set_pen(graphics.create_pen(0, 0, 0))
     graphics.clear()
-    # Draw each character with a different hue for an instant rainbow
-    text = config.SPLASH_TEXT
-    scale = config.SPLASH_SIZE
-    font_h = {1: 5, 2: 7, 3: 11}.get(scale, 5)
-    y = (11 - font_h) // 2
-    _draw_rainbow_text(text, 0, y, scale, 0.0)
+    # Text at y=0 (rows 0-7), rainbow bar at rows 8-10
+    _draw_rainbow_text(config.SPLASH_TEXT, 0, 0, 1, 0.0)
+    _draw_rainbow_bar(8, 3, 0.0)
     gu.update(graphics)
     time.sleep_ms(200)  # brief flash before scroll begins
 
 
 def show_ip(ip):
-    """Scroll the IP address across the display in cyan after connecting."""
+    """Scroll the IP address across the display in cyan after connecting.
+    Uses rows 0-7 for text, rows 8-10 for a static cyan bar."""
     text = "  " + ip + "  "   # padding so it scrolls fully on and off
     text_width = graphics.measure_text(text, scale=1)
     scroll_x = float(53)
@@ -481,7 +706,13 @@ def show_ip(ip):
         graphics.set_pen(graphics.create_pen(0, 0, 0))
         graphics.clear()
         graphics.set_pen(graphics.create_pen(0, 220, 255))  # cyan
-        graphics.text(text, int(scroll_x), 3, scale=1)
+        graphics.text(text, int(scroll_x), 0, scale=1)
+        # Cyan bar on rows 8-10
+        for x in range(53):
+            graphics.set_pen(graphics.create_pen(0, 180, 220))
+            graphics.pixel(x, 8)
+            graphics.pixel(x, 9)
+            graphics.pixel(x, 10)
         gu.update(graphics)
         time.sleep_ms(33)
 
@@ -536,17 +767,20 @@ def install_idle_display():
 # ---------------------------------------------------------------------------
 
 async def main():
+    global _device_ip, _wlan
+
     show_splash()   # brief static rainbow flash on first boot
 
-    ip = connect_wifi()  # rainbow scroll animation runs here during Wi-Fi wait
+    _wlan, ip = connect_wifi()  # rainbow scroll animation runs here during Wi-Fi wait
     if ip is None:
         show_error("No WiFi")
         # Continue without network — display still works locally via buttons
-        ip = "0.0.0.0"
+        _device_ip = "0.0.0.0"
     else:
+        _device_ip = ip
         show_ip(ip)
 
-    print(f"HTTP server starting on {ip}:{config.HTTP_PORT}")
+    print(f"HTTP server starting on {_device_ip}:{config.HTTP_PORT}")
 
     # Install idle display (lowest priority — shown when queue is empty)
     install_idle_display()
@@ -559,7 +793,8 @@ async def main():
         backlog=4
     )
 
-    print(f"Ready. POST JSON to http://{ip}:{config.HTTP_PORT}/display")
+    print(f"Ready. POST JSON to http://{_device_ip}:{config.HTTP_PORT}/display")
+    print("Buttons: A=IP  B=WiFi  C=Clear  D=Dim/Bright  ▲▼=Brightness")
 
     # Run all tasks concurrently
     await asyncio.gather(

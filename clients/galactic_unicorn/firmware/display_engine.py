@@ -1,6 +1,9 @@
 # Galactic Unicorn Display Engine
 # Handles all rendering: colour parsing, layout, effects, scroll, queue management.
 # Runs as an asyncio task on the Pico W.
+#
+# Note: the hardware module is named 'galactic' (not 'galactic_unicorn') in
+# Pimoroni MicroPython v1.24+. Import it as: from galactic import GalacticUnicorn
 
 import math
 import time

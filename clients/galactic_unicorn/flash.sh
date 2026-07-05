@@ -8,9 +8,33 @@
 #   ./flash.sh --ssid MyNet --password secret
 #   ./flash.sh --no-flash               # skip UF2, only copy Python files
 #   ./flash.sh --port /dev/ttyACM0      # specify serial port
+#   ./flash.sh --monitor                # open REPL after flashing to see boot output
 #   ./flash.sh --dry-run                # preview without making changes
 #
 # All arguments are passed through to flash.py — run with --help for full list.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# IMPORTANT: Model-specific firmware
+# ─────────────────────────────────────────────────────────────────────────────
+# Each Unicorn board needs its OWN Pimoroni MicroPython build.
+# The generic "picow-*.uf2" does NOT include the galactic/stellar/cosmic module.
+# This script downloads the correct model-specific UF2 automatically.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# BOOTSEL mode (how to enter firmware flash mode)
+# ─────────────────────────────────────────────────────────────────────────────
+# When prompted to flash the UF2:
+#   1. UNPLUG the Pico W from USB
+#   2. Hold the BOOTSEL button (small white button on the board)
+#   3. While holding BOOTSEL, plug in the USB cable
+#   4. Release BOOTSEL
+#   The Pico W appears as a USB drive called RPI-RP2
+#   This script detects it and copies the UF2 automatically
+#   The Pico W reboots itself — do NOT unplug it during flashing
+#
+# On Linux, after copying the UF2 the script runs 'umount' on the drive.
+# This flushes the write buffer and triggers the RP2040 bootloader to flash.
+# Without umount, the flash may not complete reliably.
 
 set -euo pipefail
 
@@ -29,7 +53,18 @@ if [ "$PYTHON_VERSION" -lt 38 ]; then
 fi
 
 # ── Check / install mpremote ────────────────────────────────────────────────
-if ! command -v mpremote &>/dev/null; then
+# mpremote is the official MicroPython file transfer tool.
+# We prefer 'python3 -m mpremote' over bare 'mpremote' because on systems
+# with multiple Python environments (e.g. platformio) the mpremote script
+# may not be on PATH even after 'pip install mpremote'.
+MPREMOTE_OK=0
+if command -v mpremote &>/dev/null; then
+    MPREMOTE_OK=1
+elif python3 -m mpremote version &>/dev/null 2>&1; then
+    MPREMOTE_OK=1
+fi
+
+if [ "$MPREMOTE_OK" -eq 0 ]; then
     echo "→ mpremote not found. Installing…"
     if python3 -m pip install --quiet mpremote; then
         echo "✓ mpremote installed"
@@ -37,12 +72,6 @@ if ! command -v mpremote &>/dev/null; then
         echo "✗ Failed to install mpremote. Run manually: pip install mpremote" >&2
         exit 1
     fi
-fi
-
-# ── Check / install requests (used for GitHub API) ──────────────────────────
-if ! python3 -c "import urllib.request" &>/dev/null 2>&1; then
-    echo "✗ Python urllib not available (should be in stdlib)." >&2
-    exit 1
 fi
 
 # ── Run the flasher ─────────────────────────────────────────────────────────

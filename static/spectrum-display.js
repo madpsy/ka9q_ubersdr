@@ -740,6 +740,7 @@ class SpectrumDisplay {
             manualMaxDb: -40, // Manual maximum dB
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
             autoContrast: 10, // Symmetric contrast: floor raised by +N, ceiling lowered by -N
+            autoMinSpan: 30, // Minimum dynamic range in dB (null = disabled / full auto)
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
             contrast: config.contrast !== undefined ? config.contrast : 35, // Contrast threshold (0-100), lower = more signals visible in auto mode
@@ -3935,6 +3936,21 @@ class SpectrumDisplay {
             // Apply smoothed values with user-controlled symmetric contrast offset
             this.actualMinDb = avgMin + this.config.autoContrast;
             this.actualMaxDb = avgMax - this.config.autoContrast;
+
+            // Enforce minimum dynamic range (only on quiet bands / no-signal conditions).
+            // Uses a 75/25 split: 75% of the deficit expands the ceiling upward (headroom
+            // for signals), 25% expands the floor downward (buffer below noise floor).
+            // This clamp only fires when auto has compressed the range below the minimum;
+            // when signals are present and the natural range exceeds autoMinSpan the
+            // existing behaviour is completely unchanged.
+            if (this.config.autoMinSpan !== null) {
+                const range = this.actualMaxDb - this.actualMinDb;
+                if (range < this.config.autoMinSpan) {
+                    const deficit = this.config.autoMinSpan - range;
+                    this.actualMaxDb += deficit * 0.75;
+                    this.actualMinDb -= deficit * 0.25;
+                }
+            }
         }
     }
 
@@ -4883,6 +4899,8 @@ class SpectrumDisplay {
         const maxDbValue = document.getElementById('spectrum-max-db-value');
         const autoContrastSlider = document.getElementById('spectrum-auto-contrast');
         const autoContrastValue = document.getElementById('spectrum-auto-contrast-value');
+        const autoMinSpanSlider = document.getElementById('spectrum-auto-min-span');
+        const autoMinSpanValue = document.getElementById('spectrum-auto-min-span-value');
 
         // Helper: sync auto/manual control visibility to current manual state
         const syncRangeControlVisibility = (manualEnabled) => {
@@ -4895,6 +4913,7 @@ class SpectrumDisplay {
         const savedMinDb = localStorage.getItem('spectrumManualMinDb');
         const savedMaxDb = localStorage.getItem('spectrumManualMaxDb');
         const savedAutoContrast = localStorage.getItem('spectrumAutoContrast');
+        const savedAutoMinSpan = localStorage.getItem('spectrumAutoMinSpan');
 
         if (savedManualRangeEnabled !== null) {
             const isEnabled = savedManualRangeEnabled === 'true';
@@ -4932,6 +4951,19 @@ class SpectrumDisplay {
             this.config.autoContrast = val;
             if (autoContrastSlider) autoContrastSlider.value = val;
             if (autoContrastValue)  autoContrastValue.textContent = val.toFixed(0);
+        }
+
+        // Restore minimum dynamic range setting.
+        // Slider value 0 = Auto (disabled), positive values = minimum dB span.
+        if (savedAutoMinSpan !== null) {
+            const val = parseFloat(savedAutoMinSpan);
+            this.config.autoMinSpan = val === 0 ? null : val;
+            if (autoMinSpanSlider) autoMinSpanSlider.value = val;
+            if (autoMinSpanValue)  autoMinSpanValue.textContent = val === 0 ? 'Auto' : `${val}`;
+        } else {
+            // Apply default (30 dB) to the slider element
+            if (autoMinSpanSlider) autoMinSpanSlider.value = 30;
+            if (autoMinSpanValue)  autoMinSpanValue.textContent = '30';
         }
 
         if (manualRangeCheckbox) {
@@ -4976,6 +5008,27 @@ class SpectrumDisplay {
                 this.config.autoContrast = value;
                 autoContrastValue.textContent = value.toFixed(0);
                 localStorage.setItem('spectrumAutoContrast', value.toString());
+            });
+        }
+
+        if (autoMinSpanSlider && autoMinSpanValue) {
+            autoMinSpanSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                this.config.autoMinSpan = value === 0 ? null : value;
+                autoMinSpanValue.textContent = value === 0 ? 'Auto' : `${value}`;
+                localStorage.setItem('spectrumAutoMinSpan', value.toString());
+            });
+        }
+
+        // Right-click on Min Span slider → reset to default (30 dB)
+        if (autoMinSpanSlider && autoMinSpanValue) {
+            autoMinSpanSlider.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const def = 30;
+                this.config.autoMinSpan = def;
+                autoMinSpanSlider.value = def;
+                autoMinSpanValue.textContent = `${def}`;
+                localStorage.setItem('spectrumAutoMinSpan', def.toString());
             });
         }
 

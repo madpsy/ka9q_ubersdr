@@ -362,12 +362,16 @@
                             <input type="range" id="spectrum-auto-contrast" min="0" max="20" value="10" step="1" style="width: 80px;" title="Auto-range contrast: higher = tighter dB window (floor raised, ceiling lowered). Right-click to reset to default (10)." class="context-menu-cursor">
                             <span id="spectrum-auto-contrast-value" style="min-width: 24px; font-size: 0.8em; text-align: right;">10</span>
                         </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="range" id="spectrum-auto-min-span" min="0" max="120" value="30" step="5" style="width: 80px;" title="Minimum dynamic range: guarantees at least this many dB are always shown. Prevents noise spikes on quiet bands. 0 = Auto (no minimum). Right-click to reset to default (30 dB)." class="context-menu-cursor">
+                            <span id="spectrum-auto-min-span-value" style="min-width: 36px; font-size: 0.8em; text-align: right;">30</span>
+                        </div>
                     </div>
                     <!-- Manual range sliders: visible when Manual is ON -->
                     <div id="spectrum-manual-range-controls" class="spectrum-control-group" style="display: none; flex-direction: column; gap: 4px;">
                         <div style="display: flex; align-items: center; gap: 4px;">
                             <label id="spectrum-min-db-label" style="min-width: 35px; font-size: 0.8em; cursor: context-menu;" title="Manual minimum dB. Right-click to reset to default (-120).">Min:</label>
-                            <input type="range" id="spectrum-min-db" min="-140" max="-20" value="-120" step="5" style="width: 80px;">
+                            <input type="range" id="spectrum-min-db" min="-120" max="-20" value="-120" step="5" style="width: 80px;">
                             <span id="spectrum-min-db-value" style="min-width: 40px; font-size: 0.8em; text-align: right;">-120</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 4px;">

@@ -193,6 +193,20 @@ function applyServerUIDefaults() {
         contrastValue.textContent = contrastDefault;
     }
 
+    // ── Auto minimum dynamic range ────────────────────────────────────────────
+    // Apply default minimum dynamic range to the slider element.
+    // The slider range is 0-120 dB (0 = Auto / disabled). Default 30 dB.
+    // localStorage key: spectrumAutoMinSpan
+    const minSpanDefault = getUIDefaultNumber('spectrumAutoMinSpan', 'min_span', 30);
+    const minSpanSlider = document.getElementById('spectrum-auto-min-span');
+    const minSpanValue = document.getElementById('spectrum-auto-min-span-value');
+    if (minSpanSlider) {
+        minSpanSlider.value = minSpanDefault;
+    }
+    if (minSpanValue) {
+        minSpanValue.textContent = minSpanDefault === 0 ? 'Auto' : `${minSpanDefault}`;
+    }
+
     // ── Signal bar meter mode ─────────────────────────────────────────────────
     // SignalMeter reads from localStorage in its constructor.
     // localStorage key: signalMeterDisplayMode

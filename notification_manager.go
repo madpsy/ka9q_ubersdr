@@ -214,16 +214,17 @@ const maxChannelLogEntries = 10
 // event; the manager evaluates all rules, renders templates, applies rate
 // limiting, and dispatches to the configured channels.
 type NotificationManager struct {
-	cfg        *NotificationsConfig
-	channels   map[string]NotificationChannel // keyed by channel name
-	tmpls      map[string]*template.Template  // keyed by rule name
-	blocked    map[string]bool                // rule keys disabled at runtime by the high-volume guardrail
-	rl         *notifRateLimiter
-	dedup      *notifDedupTracker
-	throughput map[string]*channelThroughputLimiter // keyed by channel name; preserved across Reload
-	funcMap    template.FuncMap
-	listeners  *TelegramListenerRegistry
-	mqtt       *MQTTPublisher // may be nil; publishes dispatch events and health stats to MQTT
+	cfg            *NotificationsConfig
+	channels       map[string]NotificationChannel // keyed by channel name
+	tmpls          map[string]*template.Template  // keyed by rule name
+	blocked        map[string]bool                // rule keys disabled at runtime by the high-volume guardrail
+	rl             *notifRateLimiter
+	dedup          *notifDedupTracker
+	throughput     map[string]*channelThroughputLimiter // keyed by channel name; preserved across Reload
+	ruleThroughput map[string]*channelThroughputLimiter // keyed by rule key; preserved across Reload
+	funcMap        template.FuncMap
+	listeners      *TelegramListenerRegistry
+	mqtt           *MQTTPublisher // may be nil; publishes dispatch events and health stats to MQTT
 
 	mu       sync.RWMutex
 	stats    NotificationStats
@@ -445,14 +446,15 @@ func (m *NotificationManager) SetIPBanManager(h *IPBanManager) {
 // If cfg.Enabled is false the manager is a no-op but safe to call.
 func NewNotificationManager(cfg *NotificationsConfig) (*NotificationManager, error) {
 	m := &NotificationManager{
-		cfg:        cfg,
-		channels:   make(map[string]NotificationChannel),
-		tmpls:      make(map[string]*template.Template),
-		blocked:    make(map[string]bool),
-		rl:         newNotifRateLimiter(),
-		dedup:      newNotifDedupTracker(),
-		throughput: make(map[string]*channelThroughputLimiter),
-		chanLogs:   make(map[string][]ChannelLogEntry),
+		cfg:            cfg,
+		channels:       make(map[string]NotificationChannel),
+		tmpls:          make(map[string]*template.Template),
+		blocked:        make(map[string]bool),
+		rl:             newNotifRateLimiter(),
+		dedup:          newNotifDedupTracker(),
+		throughput:     make(map[string]*channelThroughputLimiter),
+		ruleThroughput: make(map[string]*channelThroughputLimiter),
+		chanLogs:       make(map[string][]ChannelLogEntry),
 		stats: NotificationStats{
 			ByRule:               make(map[string]int64),
 			ByRuleErrors:         make(map[string]int64),
@@ -598,12 +600,14 @@ func computeBlockedRules(cfg *NotificationsConfig) map[string]bool {
 	return blocked
 }
 
-// syncThroughputLimiters reconciles m.throughput with the channel configs in
-// cfg. It is called under the write lock during Reload (and once at init via
-// buildChannels). Existing limiters are reused so their sliding windows survive
-// a hot-reload; the maxRate is updated in-place if the config changed. Limiters
-// for channels that no longer exist are removed.
+// syncThroughputLimiters reconciles m.throughput and m.ruleThroughput with the
+// channel and rule configs in cfg. It is called under the write lock during
+// Reload (and once at init via buildChannels). Existing limiters are reused so
+// their sliding windows survive a hot-reload; the maxRate is updated in-place
+// if the config changed. Limiters for channels/rules that no longer exist are
+// removed.
 func (m *NotificationManager) syncThroughputLimiters(cfg *NotificationsConfig) {
+	// ── Per-channel limiters ──────────────────────────────────────────────────
 	// Remove limiters for channels that no longer exist.
 	for name := range m.throughput {
 		if _, ok := cfg.Channels[name]; !ok {
@@ -619,6 +623,37 @@ func (m *NotificationManager) syncThroughputLimiters(cfg *NotificationsConfig) {
 			lim.mu.Unlock()
 		} else {
 			m.throughput[name] = newChannelThroughputLimiter(chCfg.MaxPerMinute)
+		}
+	}
+
+	// ── Per-rule limiters ─────────────────────────────────────────────────────
+	// Build the set of current rule keys so we can prune stale entries.
+	currentRuleKeys := make(map[string]bool, len(cfg.Rules))
+	for i, rule := range cfg.Rules {
+		key := ruleKey(i, rule)
+		currentRuleKeys[key] = true
+	}
+	// Remove limiters for rules that no longer exist.
+	for key := range m.ruleThroughput {
+		if !currentRuleKeys[key] {
+			delete(m.ruleThroughput, key)
+		}
+	}
+	// Add or update limiters for current rules.
+	for i, rule := range cfg.Rules {
+		if rule.MaxPerMinute <= 0 {
+			// No cap configured — remove any stale limiter.
+			key := ruleKey(i, rule)
+			delete(m.ruleThroughput, key)
+			continue
+		}
+		key := ruleKey(i, rule)
+		if lim, ok := m.ruleThroughput[key]; ok {
+			lim.mu.Lock()
+			lim.maxRate = rule.MaxPerMinute
+			lim.mu.Unlock()
+		} else {
+			m.ruleThroughput[key] = newChannelThroughputLimiter(rule.MaxPerMinute)
 		}
 	}
 }
@@ -811,7 +846,19 @@ func (m *NotificationManager) Publish(evt NotificationEvent) {
 			// limiter itself is internally thread-safe.
 			m.mu.RLock()
 			tpLim := m.throughput[chName]
+			ruleTpLim := m.ruleThroughput[key]
 			m.mu.RUnlock()
+			if ruleTpLim != nil && !ruleTpLim.allow(time.Now()) {
+				m.mu.Lock()
+				m.stats.TotalRateLimited++
+				m.stats.ByRuleRateLimited[key]++
+				m.stats.ByChannelRateLimited[chName]++
+				m.mu.Unlock()
+				if DebugMode {
+					log.Printf("[Notifications] Rule %q → channel %q: rule max_per_minute cap reached", key, chName)
+				}
+				continue
+			}
 			if tpLim != nil && !tpLim.allow(time.Now()) {
 				m.mu.Lock()
 				m.stats.TotalRateLimited++

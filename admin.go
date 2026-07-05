@@ -8590,7 +8590,17 @@ func (ah *AdminHandler) HandleAntSwitchTest(w http.ResponseWriter, r *http.Reque
 		selectedWithLabels = append(selectedWithLabels, entry)
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	// If the backend supports it, send a test message to the device display.
+	// Errors here are non-fatal — the connectivity test already succeeded.
+	var displayErr string
+	if tester, ok := h.backend.(antSwitchTester); ok {
+		if err := tester.ShowTestMessage(); err != nil {
+			log.Printf("AntSwitch test: ShowTestMessage failed: %v", err)
+			displayErr = err.Error()
+		}
+	}
+
+	resp := map[string]interface{}{
 		"success":              true,
 		"duration_ms":          durationMs,
 		"device_url":           ah.config.AntSwitch.DeviceURL,
@@ -8599,7 +8609,11 @@ func (ah *AdminHandler) HandleAntSwitchTest(w http.ResponseWriter, r *http.Reque
 		"selected":             state.Selected,
 		"selected_with_labels": selectedWithLabels,
 		"last_update":          state.LastUpdate,
-	})
+	}
+	if displayErr != "" {
+		resp["display_warning"] = displayErr
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // rotctlAdminPositionRequest is the JSON body for POST /admin/rotctl-position.

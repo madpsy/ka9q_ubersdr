@@ -218,6 +218,11 @@ type NotificationRule struct {
 	// again. 0 (with a non-empty DedupBy) means once per value until the server
 	// restarts. Ignored when DedupBy is empty.
 	DedupWindowMinutes int `yaml:"dedup_window_minutes,omitempty" json:"dedup_window_minutes,omitempty"`
+
+	// MaxPerMinute is a hard throughput cap on the total number of messages
+	// this rule may send across all its channels per minute, using a sliding
+	// window. 0 = unlimited (no cap).
+	MaxPerMinute int `yaml:"max_per_minute,omitempty" json:"max_per_minute,omitempty"`
 }
 
 // highVolumeSpotEvents are the event types that fire many times per minute, for
@@ -617,6 +622,10 @@ func (cfg *NotificationsConfig) Validate() []string {
 						"or set 'notify once per' (dedup_by) to limit volume",
 					label, rule.Event))
 			}
+		}
+
+		if rule.MaxPerMinute < 0 {
+			issues = append(issues, fmt.Sprintf("%s: max_per_minute must be 0 (unlimited) or a positive integer", label))
 		}
 
 		// System monitor flap-detection parameters must be sensible when present.

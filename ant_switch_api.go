@@ -220,6 +220,14 @@ type antSwitchLocker interface {
 	SetLock(locked bool) error
 }
 
+// antSwitchTester is implemented by backends that can display a test message
+// on the device (e.g. UberANT OLED). Called by HandleAntSwitchTest after a
+// successful connectivity check so the operator gets physical confirmation.
+type antSwitchTester interface {
+	// ShowTestMessage sends a test message to the device display.
+	ShowTestMessage() error
+}
+
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 // httpGet performs a GET request and returns the response body as a string.

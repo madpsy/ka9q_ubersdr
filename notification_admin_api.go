@@ -412,6 +412,7 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		Filters            NotificationFilter    `json:"filters"`
 		DedupBy            []string              `json:"dedup_by,omitempty"`
 		DedupWindowMinutes int                   `json:"dedup_window_minutes,omitempty"`
+		MaxPerMinute       int                   `json:"max_per_minute,omitempty"`
 		Template           string                `json:"template"`
 		Templates          map[string]string     `json:"templates,omitempty"`
 	}
@@ -425,6 +426,7 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			Filters:            r.Filter,
 			DedupBy:            r.DedupBy,
 			DedupWindowMinutes: r.DedupWindowMinutes,
+			MaxPerMinute:       r.MaxPerMinute,
 			Template:           r.Template,
 			Templates:          r.Templates,
 		})

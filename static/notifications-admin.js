@@ -589,6 +589,7 @@ async function loadConfig() {
                 filters:              sr.filters  || {},
                 dedup_by:             sr.dedup_by || [],
                 dedup_window_minutes: sr.dedup_window_minutes || 0,
+                max_per_minute:       sr.max_per_minute != null ? sr.max_per_minute : 0,
                 template:             sr.template || '',
                 templates:            sr.templates || {},
             };
@@ -771,6 +772,7 @@ async function saveConfig(alertContainer) {
             r.dedup_by = rule.dedup_by;
             r.dedup_window_minutes = Number(rule.dedup_window_minutes) || 0;
         }
+        if (rule.max_per_minute) r.max_per_minute = Number(rule.max_per_minute);
         if (rule.template) r.template = rule.template;
         if (rule.templates && Object.keys(rule.templates).length > 0) {
             // Only keep overrides for channels the rule actually targets.
@@ -1017,7 +1019,7 @@ function renderChannels() {
         const statsBadges =
             '<span class="badge badge-green" title="Messages sent">&#x2709; ' + sent + ' sent</span>' +
             (errors    > 0 ? '<span class="badge badge-red"    title="Send errors">&#x26A0; '    + errors    + ' err</span>' : '') +
-            (rateLim   > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; '   + rateLim   + ' RL</span>'  : '') +
+            '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>' +
             (ruleCount > 0 ? '<span class="badge badge-grey"   title="Notification rules using this channel">&#x1F4CB; Rules: ' + ruleCount + '</span>' : '');
         const manageBtn = (ch.type === 'telegram')
             ? '<button class="btn btn-sm btn-secondary btn-manage-channel" data-name="' + escHtml(name) + '">&#x1F916; Manage</button>'
@@ -1030,7 +1032,7 @@ function renderChannels() {
                         '<span class="badge badge-blue">' + escHtml(ch.type) + '</span>' +
                         metaBadges +
                         '<span class="badge badge-grey">dedup: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + ' min</span>' +
-                        (function() { var cap = ch.max_per_minute; return cap ? '<span class="badge badge-grey">cap: ' + cap + '/min</span>' : ''; })() +
+                        '<span class="badge badge-grey">cap: ' + (ch.max_per_minute || 'unlimited') + (ch.max_per_minute ? '/min' : '') + '</span>' +
                         statsBadges +
                     '</div>' +
                 '</div>' +
@@ -2696,6 +2698,7 @@ function renderRules() {
                 (rule.dedup_window_minutes ? ' every ' + rule.dedup_window_minutes + ' min' : ' (until restart)') + '">' +
                 '&#x1F501; once per ' + escHtml(rule.dedup_by.join('+')) + '</span>'
             : '';
+        const ruleCapBadge = '<span class="badge badge-grey" title="Rule-level throughput cap">cap: ' + (rule.max_per_minute || 'unlimited') + (rule.max_per_minute ? '/min' : '') + '</span>';
         const rKey    = rule.name;
         const sent    = byRule[rKey]    || 0;
         const errors  = byRuleErr[rKey]  || 0;
@@ -2703,7 +2706,7 @@ function renderRules() {
         const statsBadges =
             '<span class="badge badge-green" title="Messages sent">&#x2709; ' + sent + ' sent</span>' +
             (errors  > 0 ? '<span class="badge badge-red"    title="Send errors">&#x26A0; '   + errors  + ' err</span>'  : '') +
-            (rateLim > 0 ? '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>'   : '');
+            '<span class="badge badge-yellow" title="Rate-limited">&#x23F1; ' + rateLim + ' RL</span>';
 
         return '<div class="item-card" data-rule-idx="' + idx + '">' +
             '<div class="item-card-header">' +
@@ -2715,6 +2718,7 @@ function renderRules() {
                         channelBadges +
                         filterBadge +
                         dedupBadge +
+                        ruleCapBadge +
                         templateBadge +
                         overrideBadge +
                         statsBadges +
@@ -2762,7 +2766,7 @@ function showRuleForm(editIdx) {
     const isEdit = editIdx !== null && editIdx !== undefined && editIdx >= 0;
     const rule = isEdit ? Object.assign({}, localConfig.rules[editIdx], { filters: Object.assign({}, localConfig.rules[editIdx].filters) }) : {
         name: '', enabled: true, event: 'dx_spot', channels: [], filters: {}, template: '',
-        dedup_by: [], dedup_window_minutes: 0, templates: {},
+        dedup_by: [], dedup_window_minutes: 0, max_per_minute: 0, templates: {},
     };
     // Working copy of per-channel template overrides, preserved across re-renders.
     const workingTemplates = Object.assign({}, rule.templates || {});
@@ -2823,6 +2827,16 @@ function showRuleForm(editIdx) {
                 '</div>' +
                 '<div id="channelTemplateOverrides"></div>' +
                 '<div id="templateFieldsRef"></div>' +
+            '</div>' +
+            '<div class="config-section">' +
+                '<div class="config-section-title">Rate Limiting</div>' +
+                '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
+                    '<div class="form-group" style="max-width:200px">' +
+                        '<label>Max per Minute</label>' +
+                        '<input type="number" id="ruleMaxPerMinute" value="' + (rule.max_per_minute != null ? rule.max_per_minute : 0) + '" min="0" max="10000">' +
+                        '<div class="form-hint">Hard cap on messages sent by this rule per minute across all its channels. 0 = unlimited.</div>' +
+                    '</div>' +
+                '</div>' +
             '</div>' +
             '<div class="form-actions">' +
                 '<button type="button" class="btn" id="btnSaveRule">Save Rule</button>' +
@@ -2898,6 +2912,7 @@ function showRuleForm(editIdx) {
             if (workingTemplates[c]) templates[c] = workingTemplates[c];
         });
 
+        const ruleMaxPerMin = parseInt(el('ruleMaxPerMinute').value, 10);
         const newRule = {
             name:                 name,
             enabled:              el('ruleEnabled').checked,
@@ -2906,6 +2921,7 @@ function showRuleForm(editIdx) {
             filters:              filters,
             dedup_by:             dedup.dedup_by,
             dedup_window_minutes: dedup.dedup_window_minutes,
+            max_per_minute:       isNaN(ruleMaxPerMin) ? 0 : Math.max(0, ruleMaxPerMin),
             template:             template,
             templates:            templates,
         };

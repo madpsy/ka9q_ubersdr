@@ -216,3 +216,17 @@ func (b *uberantBackend) SetLock(locked bool) error {
 	body := map[string]bool{"locked": locked}
 	return b.doJSON(http.MethodPost, b.baseURL+"/api/lock", body, nil)
 }
+
+// ─── antSwitchTester optional interface ──────────────────────────────────────
+
+// ShowTestMessage sends a two-line test message to the UberANT OLED display.
+// POST /api/display with {"text":"UberSDR\nSuccess","duration":5,"align":"center"}
+// The message is shown for 5 seconds then the display resumes normal operation.
+func (b *uberantBackend) ShowTestMessage() error {
+	body := map[string]interface{}{
+		"text":     "UberSDR\nSuccess",
+		"duration": 5,
+		"align":    "center",
+	}
+	return b.doJSON(http.MethodPost, b.baseURL+"/api/display", body, nil)
+}

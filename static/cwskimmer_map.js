@@ -1191,10 +1191,12 @@ class CWSkimmerMap {
         const mid = pts[Math.floor(pts.length / 2)];
         const midNext = pts[Math.floor(pts.length / 2) + 1] || pts[Math.floor(pts.length / 2)];
 
-        // Bearing of the arc at the midpoint (for label rotation)
+        // Bearing of the arc at the midpoint (for label rotation).
+        // CSS rotate() treats 0° as "pointing right" (east), but bearing 0° = north.
+        // Convert: screenAngle = bearing - 90. Then flip 180° if text would read right-to-left.
         const arcBearing = this._bearing(mid[0], mid[1], midNext[0], midNext[1]);
-        // Rotate so text reads left-to-right: flip 180° if bearing points "downward" on screen
-        const labelRotation = arcBearing > 90 && arcBearing < 270 ? arcBearing - 180 : arcBearing;
+        let labelRotation = arcBearing - 90;
+        if (labelRotation > 90 || labelRotation < -90) labelRotation -= 180;
 
         const distKm = spot.distance_km !== undefined && spot.distance_km !== null
             ? Math.round(spot.distance_km) + ' km'

@@ -1187,9 +1187,9 @@ class CWSkimmerMap {
             interactive: false
         }).addTo(this.map);
 
-        // Label at the midpoint
-        const mid = pts[Math.floor(pts.length / 2)];
-        const midNext = pts[Math.floor(pts.length / 2) + 1] || pts[Math.floor(pts.length / 2)];
+        // Label at the first quarter of the arc (nearest the receiver)
+        const mid = pts[Math.floor(pts.length / 4)];
+        const midNext = pts[Math.floor(pts.length / 4) + 1] || pts[Math.floor(pts.length / 4)];
 
         // Bearing of the arc at the midpoint (for label rotation).
         // CSS rotate() treats 0° as "pointing right" (east), but bearing 0° = north.

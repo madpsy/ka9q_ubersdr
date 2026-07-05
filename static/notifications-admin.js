@@ -575,6 +575,22 @@ async function loadConfig() {
                 webhook_timeout_seconds:    ch.webhook_timeout_seconds    || 10,
                 webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
                 webhook_body_template:      ch.webhook_body_template      || '',
+                // Galactic Unicorn display
+                galactic_unicorn_model:              ch.galactic_unicorn_model              || 'galactic',
+                galactic_unicorn_url:                ch.galactic_unicorn_url                || '',
+                galactic_unicorn_color:              ch.galactic_unicorn_color              || 'white',
+                galactic_unicorn_size:               ch.galactic_unicorn_size               || 1,
+                galactic_unicorn_effect:             ch.galactic_unicorn_effect             || 'auto',
+                galactic_unicorn_align:              ch.galactic_unicorn_align              || 'left',
+                galactic_unicorn_scroll_speed:       ch.galactic_unicorn_scroll_speed       || 40,
+                galactic_unicorn_scroll_pause:       ch.galactic_unicorn_scroll_pause       || 1.0,
+                galactic_unicorn_duration:           ch.galactic_unicorn_duration           || 10,
+                galactic_unicorn_priority:           ch.galactic_unicorn_priority           || 5,
+                galactic_unicorn_transition:         ch.galactic_unicorn_transition         || 'cut',
+                galactic_unicorn_bg_color:           ch.galactic_unicorn_bg_color           || '',
+                galactic_unicorn_brightness:         ch.galactic_unicorn_brightness         || 0,
+                galactic_unicorn_timeout_seconds:    ch.galactic_unicorn_timeout_seconds    || 5,
+                galactic_unicorn_insecure_skip_verify: !!ch.galactic_unicorn_insecure_skip_verify,
             };
         }
         localConfig.channels = merged;
@@ -738,6 +754,27 @@ async function saveConfig(alertContainer) {
                 webhook_body_template:      ch.webhook_body_template || '',
                 rate_limit_minutes:         ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
                 max_per_minute:             ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
+            };
+        } else if (ch.type === 'galactic_unicorn') {
+            payload.channels[name] = {
+                type:                               'galactic_unicorn',
+                galactic_unicorn_model:             ch.galactic_unicorn_model             || 'galactic',
+                galactic_unicorn_url:               ch.galactic_unicorn_url               || '',
+                galactic_unicorn_color:             ch.galactic_unicorn_color             || 'white',
+                galactic_unicorn_size:              Number(ch.galactic_unicorn_size)       || 1,
+                galactic_unicorn_effect:            ch.galactic_unicorn_effect            || 'auto',
+                galactic_unicorn_align:             ch.galactic_unicorn_align             || 'left',
+                galactic_unicorn_scroll_speed:      Number(ch.galactic_unicorn_scroll_speed) || 40,
+                galactic_unicorn_scroll_pause:      Number(ch.galactic_unicorn_scroll_pause) || 1.0,
+                galactic_unicorn_duration:          Number(ch.galactic_unicorn_duration)   || 10,
+                galactic_unicorn_priority:          Number(ch.galactic_unicorn_priority)   || 5,
+                galactic_unicorn_transition:        ch.galactic_unicorn_transition        || 'cut',
+                galactic_unicorn_bg_color:          ch.galactic_unicorn_bg_color          || '',
+                galactic_unicorn_brightness:        Number(ch.galactic_unicorn_brightness) || 0,
+                galactic_unicorn_timeout_seconds:   Number(ch.galactic_unicorn_timeout_seconds) || 5,
+                galactic_unicorn_insecure_skip_verify: !!ch.galactic_unicorn_insecure_skip_verify,
+                rate_limit_minutes:                 ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
+                max_per_minute:                     ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
         } else {
             // Telegram channel — include bot_commands config if present.
@@ -997,6 +1034,18 @@ function renderChannels() {
                 (urlDisplay ? '<span class="badge badge-grey" title="' + escHtml(ch.webhook_url) + '">' + escHtml(urlDisplay) + '</span>' : '<span class="badge badge-red">No URL</span>') +
                 '<span class="badge badge-grey">' + escHtml(ch.webhook_method || 'POST') + '</span>' +
                 '<span class="badge badge-grey">' + escHtml(ch.webhook_format || 'text') + '</span>';
+        } else if (ch.type === 'galactic_unicorn') {
+            const guUrl = ch.galactic_unicorn_url
+                ? ch.galactic_unicorn_url.replace(/^https?:\/\//, '').substring(0, 30) +
+                  (ch.galactic_unicorn_url.replace(/^https?:\/\//, '').length > 30 ? '…' : '')
+                : '';
+            const modelLabels = { galactic: 'Galactic 53×11', stellar: 'Stellar 16×16', cosmic: 'Cosmic 32×32' };
+            const modelLabel = modelLabels[ch.galactic_unicorn_model || 'galactic'] || escHtml(ch.galactic_unicorn_model || 'galactic');
+            metaBadges =
+                (guUrl ? '<span class="badge badge-grey" title="' + escHtml(ch.galactic_unicorn_url) + '">' + escHtml(guUrl) + '</span>' : '<span class="badge badge-red">No URL</span>') +
+                '<span class="badge badge-grey">&#x1F984; ' + modelLabel + '</span>' +
+                '<span class="badge badge-grey">' + escHtml(ch.galactic_unicorn_color || 'white') + '</span>' +
+                '<span class="badge badge-grey">size ' + (ch.galactic_unicorn_size || 1) + '</span>';
         } else {
             let tokenBadge;
             if (ch.bot_token && ch.bot_token !== '********') {
@@ -1799,6 +1848,9 @@ async function testChannel(name) {
                 webhook_body_template:      ch.webhook_body_template || '',
             };
         }
+    } else if (ch.type === 'galactic_unicorn') {
+        // Always test via the saved channel name — no secrets to inline.
+        body = { channel: name };
     } else if (ch.bot_token && ch.bot_token !== '********') {
         body = { type: ch.type, bot_token: ch.bot_token, chat_id: ch.chat_id, parse_mode: ch.parse_mode || 'HTML' };
     } else {
@@ -1886,6 +1938,21 @@ function renderChannelTypeInfo(type, provider) {
                 '</p>' +
                 hintHtml +
                 '<p style="margin:8px 0 0;font-size:0.8rem;color:#555">&#x1F512; Use <strong>https://</strong> and a <strong>Signing Secret</strong> so the receiver can verify requests came from UberSDR.</p>' +
+            '</div>';
+    } else if (type === 'galactic_unicorn') {
+        panel.innerHTML =
+            '<div class="config-section" style="background:#f0f4ff;border:1px solid #a5b4fc;border-radius:6px;padding:14px 16px;margin-bottom:16px">' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+                    '<span style="font-size:1.3rem">&#x1F984;</span>' +
+                    '<strong style="color:#3730a3">Pimoroni Unicorn LED Display</strong>' +
+                '</div>' +
+                '<p style="margin:0;font-size:0.875rem;color:#312e81;line-height:1.6">' +
+                    'Sends notification text directly to a Pimoroni Unicorn LED matrix display (Pico W) over Wi-Fi. ' +
+                    'Flash the firmware from <code>clients/galactic_unicorn/firmware/</code> onto the Pico W first, ' +
+                    'then enter the IP address it shows on boot.' +
+                '</p>' +
+                '<p style="margin:8px 0 0;font-size:0.8rem;color:#555">&#x1F4A1; Select the correct <strong>Model</strong> for your hardware: ' +
+                    'Stellar (16×16), Galactic (53×11), or Cosmic (32×32).</p>' +
             '</div>';
     } else {
         panel.innerHTML = '';
@@ -2133,6 +2200,119 @@ function webhookFieldsHTML(ch, isEdit) {
         '</details>';
 }
 
+function galacticUnicornFieldsHTML(ch, isEdit) {
+    var models = [['galactic','Galactic Unicorn — 53×11'],['stellar','Stellar Unicorn — 16×16'],['cosmic','Cosmic Unicorn — 32×32']];
+    var modelOptions = models.map(function(m) {
+        return '<option value="' + m[0] + '"' + ((ch.galactic_unicorn_model || 'galactic') === m[0] ? ' selected' : '') + '>' + escHtml(m[1]) + '</option>';
+    }).join('');
+    var effects = [['auto','Auto (scroll if too wide)'],['static','Static'],['scroll','Scroll'],['blink','Blink'],['pulse','Pulse']];
+    var effectOptions = effects.map(function(e) {
+        return '<option value="' + e[0] + '"' + ((ch.galactic_unicorn_effect || 'auto') === e[0] ? ' selected' : '') + '>' + escHtml(e[1]) + '</option>';
+    }).join('');
+    var aligns = [['left','Left'],['center','Center'],['right','Right']];
+    var alignOptions = aligns.map(function(a) {
+        return '<option value="' + a[0] + '"' + ((ch.galactic_unicorn_align || 'left') === a[0] ? ' selected' : '') + '>' + escHtml(a[1]) + '</option>';
+    }).join('');
+    var transitions = [['cut','Cut'],['fade','Fade'],['wipe_left','Wipe Left'],['wipe_right','Wipe Right']];
+    var transitionOptions = transitions.map(function(t) {
+        return '<option value="' + t[0] + '"' + ((ch.galactic_unicorn_transition || 'cut') === t[0] ? ' selected' : '') + '>' + escHtml(t[1]) + '</option>';
+    }).join('');
+    var sizes = ['1','2','3'];
+    var sizeOptions = sizes.map(function(s) {
+        return '<option value="' + s + '"' + (String(ch.galactic_unicorn_size || 1) === s ? ' selected' : '') + '>' + s + (s==='1'?' (5px — small)':s==='2'?' (7px — medium)':' (11px — large)') + '</option>';
+    }).join('');
+
+    return '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Model *</label>' +
+                '<select id="chGUModel">' + modelOptions + '</select>' +
+                '<div class="form-hint">Select your Pimoroni Unicorn hardware variant.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Device URL *</label>' +
+                '<input type="url" id="chGUUrl" value="' + escHtml(ch.galactic_unicorn_url || '') + '" placeholder="http://192.168.1.42">' +
+                '<div class="form-hint">Base URL shown on the display at boot. Use <code>http://</code> for LAN devices.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Text Colour</label>' +
+                '<input type="text" id="chGUColor" value="' + escHtml(ch.galactic_unicorn_color || 'white') + '" placeholder="white">' +
+                '<div class="form-hint">Named colour, hex <code>#FF8000</code>, <code>rainbow</code>, or <code>gradient:orange:red</code>.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Font Size</label>' +
+                '<select id="chGUSize">' + sizeOptions + '</select>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Effect</label>' +
+                '<select id="chGUEffect">' + effectOptions + '</select>' +
+                '<div class="form-hint"><strong>Auto</strong> scrolls only if text is wider than the display.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Alignment</label>' +
+                '<select id="chGUAlign">' + alignOptions + '</select>' +
+                '<div class="form-hint">For static text only. Ignored when scrolling.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Scroll Speed <span style="font-weight:400;color:#888">(px/s)</span></label>' +
+                '<input type="number" id="chGUScrollSpeed" value="' + (ch.galactic_unicorn_scroll_speed || 40) + '" min="1" max="200">' +
+                '<div class="form-hint">1–200 pixels per second. Default: 40.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Scroll Pause <span style="font-weight:400;color:#888">(s)</span></label>' +
+                '<input type="number" id="chGUScrollPause" value="' + (ch.galactic_unicorn_scroll_pause || 1.0) + '" min="0" max="30" step="0.1">' +
+                '<div class="form-hint">Seconds to pause before scrolling begins.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Duration <span style="font-weight:400;color:#888">(s)</span></label>' +
+                '<input type="number" id="chGUDuration" value="' + (ch.galactic_unicorn_duration || 10) + '" min="0" step="0.5">' +
+                '<div class="form-hint">Seconds to show message. 0 = show forever.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Priority <span style="font-weight:400;color:#888">(0–10)</span></label>' +
+                '<input type="number" id="chGUPriority" value="' + (ch.galactic_unicorn_priority || 5) + '" min="0" max="10">' +
+                '<div class="form-hint">Higher priority interrupts lower. Default: 5.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Transition</label>' +
+                '<select id="chGUTransition">' + transitionOptions + '</select>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Background Colour</label>' +
+                '<input type="text" id="chGUBgColor" value="' + escHtml(ch.galactic_unicorn_bg_color || '') + '" placeholder="(black)">' +
+                '<div class="form-hint">Leave blank for black background.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Brightness Override</label>' +
+                '<input type="number" id="chGUBrightness" value="' + (ch.galactic_unicorn_brightness || 0) + '" min="0" max="1" step="0.05">' +
+                '<div class="form-hint">0.0–1.0. Set to 0 to use the device\'s current brightness.</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Timeout <span style="font-weight:400;color:#888">(s)</span></label>' +
+                '<input type="number" id="chGUTimeout" value="' + (ch.galactic_unicorn_timeout_seconds || 5) + '" min="1" max="30">' +
+                '<div class="form-hint">HTTP request timeout. 1–30 seconds.</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label class="checkbox-item">' +
+                '<input type="checkbox" id="chGUInsecure"' + (ch.galactic_unicorn_insecure_skip_verify ? ' checked' : '') + '> ' +
+                'Skip TLS certificate verification' +
+            '</label>' +
+            '<div class="form-hint">Only for self-signed certificates on private LANs.</div>' +
+        '</div>';
+}
+
 function renderWebhookPresetHint(presetKey) {
     var panel = el('chWebhookPresetHint');
     if (!panel) return;
@@ -2152,7 +2332,7 @@ function showChannelForm(editName) {
     };
 
     const nameReadonly = isEdit ? 'readonly style="background:#f0f0f0"' : '';
-    const types = [['telegram','Telegram'],['email','Email (SMTP)'],['webhook','Webhook (HTTP)']];
+    const types = [['telegram','Telegram'],['email','Email (SMTP)'],['webhook','Webhook (HTTP)'],['galactic_unicorn','Unicorn Display (LED)']];
     const typeOptions = types.map(function(t) {
         return '<option value="' + t[0] + '"' + ((ch.type || 'telegram') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
     }).join('');
@@ -2290,6 +2470,9 @@ function showChannelForm(editName) {
                     if (ta) { ta.focus(); ta.setSelectionRange(0, 0); }
                 });
             }
+        } else if (type === 'galactic_unicorn') {
+            el('chTypeFields').innerHTML = galacticUnicornFieldsHTML(ch, isEdit);
+            renderChannelTypeInfo('galactic_unicorn');
         } else {
             el('chTypeFields').innerHTML = telegramFieldsHTML(ch, isEdit);
             renderChannelTypeInfo('telegram');
@@ -2520,6 +2703,32 @@ function showChannelForm(editName) {
                 webhook_body_template:      el('chWebhookBodyTemplate').value.trim(),
                 rate_limit_minutes:         rate,
                 max_per_minute:             maxPerMinFinal,
+            };
+        } else if (type === 'galactic_unicorn') {
+            const guUrl = el('chGUUrl').value.trim();
+            if (!guUrl) { showAlert(el('channelsAlerts'), 'error', 'Device URL is required.', false); return; }
+            if (!/^https?:\/\/.+/.test(guUrl)) { showAlert(el('channelsAlerts'), 'error', 'Device URL must start with http:// or https://', false); return; }
+            const guTimeout = parseInt(el('chGUTimeout').value, 10);
+            if (isNaN(guTimeout) || guTimeout < 1 || guTimeout > 30) { showAlert(el('channelsAlerts'), 'error', 'Timeout must be 1–30 seconds.', false); return; }
+            channel = {
+                type:                               'galactic_unicorn',
+                galactic_unicorn_model:             el('chGUModel').value,
+                galactic_unicorn_url:               guUrl,
+                galactic_unicorn_color:             el('chGUColor').value.trim() || 'white',
+                galactic_unicorn_size:              parseInt(el('chGUSize').value, 10) || 1,
+                galactic_unicorn_effect:            el('chGUEffect').value,
+                galactic_unicorn_align:             el('chGUAlign').value,
+                galactic_unicorn_scroll_speed:      parseInt(el('chGUScrollSpeed').value, 10) || 40,
+                galactic_unicorn_scroll_pause:      parseFloat(el('chGUScrollPause').value) || 1.0,
+                galactic_unicorn_duration:          parseFloat(el('chGUDuration').value) || 10,
+                galactic_unicorn_priority:          parseInt(el('chGUPriority').value, 10) || 5,
+                galactic_unicorn_transition:        el('chGUTransition').value,
+                galactic_unicorn_bg_color:          el('chGUBgColor').value.trim(),
+                galactic_unicorn_brightness:        parseFloat(el('chGUBrightness').value) || 0,
+                galactic_unicorn_timeout_seconds:   guTimeout,
+                galactic_unicorn_insecure_skip_verify: el('chGUInsecure').checked,
+                rate_limit_minutes:                 rate,
+                max_per_minute:                     maxPerMinFinal,
             };
         } else {
             const newToken = el('chBotToken').value.trim();

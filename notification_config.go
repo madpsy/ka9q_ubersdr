@@ -67,8 +67,7 @@ type TelegramBotCommandsConfig struct {
 // type-specific and ignored when not relevant.
 type NotificationChannelConfig struct {
 	// Type selects the channel implementation.
-	// Currently supported: "telegram", "email"
-	// Future: "matrix", "ntfy", "webhook"
+	// Currently supported: "telegram", "email", "webhook", "galactic_unicorn"
 	Type string `yaml:"type" json:"type"`
 
 	// ── Telegram ────────────────────────────────────────────────────────────
@@ -164,6 +163,62 @@ type NotificationChannelConfig struct {
 	// override it by setting a "Content-Type" entry in WebhookHeaders.
 	// Example (Gotify): {"message":"{{.Message}}","title":"UberSDR","priority":5}
 	WebhookBodyTemplate string `yaml:"webhook_body_template,omitempty" json:"webhook_body_template,omitempty"`
+
+	// ── Galactic Unicorn (Pimoroni LED matrix display) ────────────────────────
+	// GalacticUnicornModel selects the Pimoroni Unicorn display variant, which
+	// determines the physical LED matrix dimensions used for layout decisions.
+	//   "galactic" — Galactic Unicorn: 53×11 (default)
+	//   "stellar"  — Stellar Unicorn: 16×16
+	//   "cosmic"   — Cosmic Unicorn: 32×32
+	GalacticUnicornModel string `yaml:"galactic_unicorn_model,omitempty" json:"galactic_unicorn_model,omitempty"`
+	// GalacticUnicornURL is the base URL of the Pico W HTTP server.
+	// Required when Type is "galactic_unicorn". Example: "http://192.168.1.42"
+	GalacticUnicornURL string `yaml:"galactic_unicorn_url,omitempty" json:"galactic_unicorn_url,omitempty"`
+	// GalacticUnicornColor is the text colour. Accepts any value valid in the
+	// display protocol: named colour ("amber", "cyan", …), hex ("#FF8000"),
+	// RGB array encoded as "r,g,b" string, "rainbow", or "gradient:c1:c2".
+	// Default: "white".
+	GalacticUnicornColor string `yaml:"galactic_unicorn_color,omitempty" json:"galactic_unicorn_color,omitempty"`
+	// GalacticUnicornSize is the font size: 1 (5 px, small), 2 (7 px, medium),
+	// or 3 (11 px, large — fills the full display height). Default: 1.
+	GalacticUnicornSize int `yaml:"galactic_unicorn_size,omitempty" json:"galactic_unicorn_size,omitempty"`
+	// GalacticUnicornEffect controls the text animation:
+	//   "auto"   — scroll if text is wider than 53 px, static otherwise (default)
+	//   "static" — always static, respecting GalacticUnicornAlign
+	//   "scroll" — always scroll
+	//   "blink"  — blink at GalacticUnicornBlinkRate Hz
+	//   "pulse"  — brightness pulses sinusoidally
+	GalacticUnicornEffect string `yaml:"galactic_unicorn_effect,omitempty" json:"galactic_unicorn_effect,omitempty"`
+	// GalacticUnicornAlign is the horizontal alignment for static text:
+	// "left" (default), "center", or "right". Ignored when effect is "scroll".
+	GalacticUnicornAlign string `yaml:"galactic_unicorn_align,omitempty" json:"galactic_unicorn_align,omitempty"`
+	// GalacticUnicornScrollSpeed is the scroll speed in pixels per second.
+	// Range: 1–200. Default: 40.
+	GalacticUnicornScrollSpeed int `yaml:"galactic_unicorn_scroll_speed,omitempty" json:"galactic_unicorn_scroll_speed,omitempty"`
+	// GalacticUnicornScrollPause is the pause in seconds at the start of each
+	// scroll pass before the text begins moving. Default: 1.0.
+	GalacticUnicornScrollPause float64 `yaml:"galactic_unicorn_scroll_pause,omitempty" json:"galactic_unicorn_scroll_pause,omitempty"`
+	// GalacticUnicornDuration is how long (seconds) to show the message before
+	// the display reverts to the next queued item. 0 = show forever. Default: 10.
+	GalacticUnicornDuration float64 `yaml:"galactic_unicorn_duration,omitempty" json:"galactic_unicorn_duration,omitempty"`
+	// GalacticUnicornPriority is the display queue priority (0–10). Higher
+	// priority interrupts lower. Default: 5.
+	GalacticUnicornPriority int `yaml:"galactic_unicorn_priority,omitempty" json:"galactic_unicorn_priority,omitempty"`
+	// GalacticUnicornTransition is the animation when switching to this message:
+	// "cut" (default), "fade", "wipe_left", or "wipe_right".
+	GalacticUnicornTransition string `yaml:"galactic_unicorn_transition,omitempty" json:"galactic_unicorn_transition,omitempty"`
+	// GalacticUnicornBgColor is the background colour (non-text pixels).
+	// Accepts the same formats as GalacticUnicornColor. Default: "" (black).
+	GalacticUnicornBgColor string `yaml:"galactic_unicorn_bg_color,omitempty" json:"galactic_unicorn_bg_color,omitempty"`
+	// GalacticUnicornBrightness overrides the display brightness for this
+	// message only (0.0–1.0). 0.0 means "don't override" (use device default).
+	GalacticUnicornBrightness float64 `yaml:"galactic_unicorn_brightness,omitempty" json:"galactic_unicorn_brightness,omitempty"`
+	// GalacticUnicornTimeoutSeconds is the HTTP request timeout in seconds.
+	// Range: 1–30. Default: 5.
+	GalacticUnicornTimeoutSeconds int `yaml:"galactic_unicorn_timeout_seconds,omitempty" json:"galactic_unicorn_timeout_seconds,omitempty"`
+	// GalacticUnicornInsecureSkipVerify disables TLS certificate verification.
+	// Only for self-signed certificates on private LANs.
+	GalacticUnicornInsecureSkipVerify bool `yaml:"galactic_unicorn_insecure_skip_verify,omitempty" json:"galactic_unicorn_insecure_skip_verify,omitempty"`
 }
 
 // NotificationRule maps an event type to a filter, a template, and one or
@@ -545,6 +600,8 @@ func (cfg *NotificationsConfig) Validate() []string {
 			}
 		case "webhook":
 			issues = append(issues, validateWebhookChannel(name, ch)...)
+		case "galactic_unicorn":
+			issues = append(issues, validateGalacticUnicornChannel(name, ch)...)
 		case "":
 			issues = append(issues, fmt.Sprintf("channel %q: type is required", name))
 		default:
@@ -817,4 +874,64 @@ func webhookValidHeaderValue(s string) bool {
 		}
 	}
 	return true
+}
+
+// validateGalacticUnicornChannel checks all galactic_unicorn-specific fields.
+func validateGalacticUnicornChannel(name string, ch NotificationChannelConfig) []string {
+	var issues []string
+
+	switch ch.GalacticUnicornModel {
+	case "", "galactic", "stellar", "cosmic":
+	default:
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_model must be galactic, stellar, or cosmic (got %q)", name, ch.GalacticUnicornModel))
+	}
+
+	if ch.GalacticUnicornURL == "" {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_url is required (e.g. http://192.168.1.42)", name))
+	} else {
+		lower := strings.ToLower(ch.GalacticUnicornURL)
+		if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+			issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_url must start with http:// or https://", name))
+		}
+	}
+
+	if ch.GalacticUnicornSize != 0 && (ch.GalacticUnicornSize < 1 || ch.GalacticUnicornSize > 3) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_size must be 1, 2, or 3 (got %d)", name, ch.GalacticUnicornSize))
+	}
+
+	switch ch.GalacticUnicornEffect {
+	case "", "auto", "static", "scroll", "blink", "pulse":
+	default:
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_effect must be auto, static, scroll, blink, or pulse (got %q)", name, ch.GalacticUnicornEffect))
+	}
+
+	switch ch.GalacticUnicornAlign {
+	case "", "left", "center", "right":
+	default:
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_align must be left, center, or right (got %q)", name, ch.GalacticUnicornAlign))
+	}
+
+	switch ch.GalacticUnicornTransition {
+	case "", "cut", "fade", "wipe_left", "wipe_right":
+	default:
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_transition must be cut, fade, wipe_left, or wipe_right (got %q)", name, ch.GalacticUnicornTransition))
+	}
+
+	if ch.GalacticUnicornPriority != 0 && (ch.GalacticUnicornPriority < 0 || ch.GalacticUnicornPriority > 10) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_priority must be 0–10 (got %d)", name, ch.GalacticUnicornPriority))
+	}
+
+	if ch.GalacticUnicornScrollSpeed != 0 && (ch.GalacticUnicornScrollSpeed < 1 || ch.GalacticUnicornScrollSpeed > 200) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_scroll_speed must be 1–200 (got %d)", name, ch.GalacticUnicornScrollSpeed))
+	}
+
+	if ch.GalacticUnicornBrightness != 0 && (ch.GalacticUnicornBrightness < 0.0 || ch.GalacticUnicornBrightness > 1.0) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_brightness must be 0.0–1.0 (got %g)", name, ch.GalacticUnicornBrightness))
+	}
+
+	if ch.GalacticUnicornTimeoutSeconds != 0 && (ch.GalacticUnicornTimeoutSeconds < 1 || ch.GalacticUnicornTimeoutSeconds > 30) {
+		issues = append(issues, fmt.Sprintf("channel %q: galactic_unicorn_timeout_seconds must be 1–30 (got %d)", name, ch.GalacticUnicornTimeoutSeconds))
+	}
+
+	return issues
 }

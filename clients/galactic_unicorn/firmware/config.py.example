@@ -1,0 +1,53 @@
+# Galactic Unicorn Display Firmware — Configuration
+# Copy this file to the Pico W as config.py and edit before first boot.
+
+# ---------------------------------------------------------------------------
+# Wi-Fi credentials
+# ---------------------------------------------------------------------------
+WIFI_SSID = "YourNetworkName"
+WIFI_PASSWORD = "YourNetworkPassword"
+
+# ---------------------------------------------------------------------------
+# HTTP server
+# ---------------------------------------------------------------------------
+HTTP_PORT = 80          # Port the display server listens on
+HTTP_HOST = "0.0.0.0"  # Listen on all interfaces
+
+# ---------------------------------------------------------------------------
+# Display defaults
+# ---------------------------------------------------------------------------
+DEFAULT_BRIGHTNESS = 0.5    # 0.0 (off) – 1.0 (full brightness)
+QUEUE_MAX_SIZE = 16         # Maximum number of queued display messages
+
+# ---------------------------------------------------------------------------
+# Startup splash screen (shown while connecting to Wi-Fi)
+# Set SPLASH_TEXT = "" to disable
+# ---------------------------------------------------------------------------
+SPLASH_TEXT = "UberSDR"
+SPLASH_COLOR = "rainbow"    # Any valid colour from the protocol spec
+SPLASH_SIZE = 3
+
+# ---------------------------------------------------------------------------
+# Idle display (shown when queue is empty and no forever-duration message)
+# Set IDLE_TEXT = "" to disable idle display entirely (blank screen)
+# ---------------------------------------------------------------------------
+IDLE_TEXT = ""
+IDLE_COLOR = "amber"
+IDLE_SIZE = 1
+IDLE_EFFECT = "static"
+IDLE_ALIGN = "center"
+
+# ---------------------------------------------------------------------------
+# Hardware button behaviour
+# Brightness buttons on the Galactic Unicorn adjust global brightness
+# by BRIGHTNESS_STEP each press.
+# ---------------------------------------------------------------------------
+BRIGHTNESS_STEP = 0.1       # How much each button press changes brightness
+BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off via buttons)
+BRIGHTNESS_MAX = 1.0        # Maximum brightness via buttons
+
+# ---------------------------------------------------------------------------
+# Network timeouts
+# ---------------------------------------------------------------------------
+WIFI_CONNECT_TIMEOUT = 20   # Seconds to wait for Wi-Fi connection
+HTTP_READ_TIMEOUT = 5       # Seconds to wait for full HTTP request body

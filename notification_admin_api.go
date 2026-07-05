@@ -598,6 +598,29 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages sent to this channel per minute (sliding window). 0 = unlimited (no cap).", Example: "10"},
 			},
 		},
+		{
+			Type:        "galactic_unicorn",
+			Description: "Pimoroni Unicorn LED matrix display (Stellar 16×16, Galactic 53×11, Cosmic 32×32 — Raspberry Pi Pico W). Sends notification text directly to the display over Wi-Fi using the Galactic Unicorn Display Protocol.",
+			Fields: []channelField{
+				{Name: "galactic_unicorn_model", Type: "string", Required: false, Description: "Display model variant. galactic = Galactic Unicorn 53×11 (default), stellar = Stellar Unicorn 16×16, cosmic = Cosmic Unicorn 32×32.", ValidValues: []string{"galactic", "stellar", "cosmic"}, Example: "galactic"},
+				{Name: "galactic_unicorn_url", Type: "string", Required: true, Description: "Base URL of the Pico W HTTP server. Must be http:// or https://.", Example: "http://192.168.1.42"},
+				{Name: "galactic_unicorn_color", Type: "string", Required: false, Description: `Text colour. Named colour ("amber", "cyan", "lime", "rainbow", …), hex ("#FF8000"), or "gradient:c1:c2". Default: white.`, Example: "amber"},
+				{Name: "galactic_unicorn_size", Type: "int", Required: false, Description: "Font size: 1 = 5 px (small, 2 lines fit), 2 = 7 px (medium), 3 = 11 px (large, fills display). Default: 1.", ValidValues: []string{"1", "2", "3"}, Example: "1"},
+				{Name: "galactic_unicorn_effect", Type: "string", Required: false, Description: `Text animation. "auto" = scroll if text is wider than 53 px, static otherwise (default). "static", "scroll", "blink", "pulse".`, ValidValues: []string{"auto", "static", "scroll", "blink", "pulse"}, Example: "auto"},
+				{Name: "galactic_unicorn_align", Type: "string", Required: false, Description: `Horizontal alignment for static text. "left" (default), "center", "right". Ignored when effect is scroll.`, ValidValues: []string{"left", "center", "right"}, Example: "left"},
+				{Name: "galactic_unicorn_scroll_speed", Type: "int", Required: false, Description: "Scroll speed in pixels per second. Range: 1–200. Default: 40.", Example: "40"},
+				{Name: "galactic_unicorn_scroll_pause", Type: "float", Required: false, Description: "Pause in seconds at the start of each scroll pass. Default: 1.0.", Example: "1.0"},
+				{Name: "galactic_unicorn_duration", Type: "float", Required: false, Description: "How long (seconds) to show the message before reverting to the next queued item. 0 = show forever. Default: 10.", Example: "10"},
+				{Name: "galactic_unicorn_priority", Type: "int", Required: false, Description: "Display queue priority (0–10). Higher priority interrupts lower. Default: 5.", Example: "5"},
+				{Name: "galactic_unicorn_transition", Type: "string", Required: false, Description: `Transition animation when switching to this message. "cut" (default), "fade", "wipe_left", "wipe_right".`, ValidValues: []string{"cut", "fade", "wipe_left", "wipe_right"}, Example: "cut"},
+				{Name: "galactic_unicorn_bg_color", Type: "string", Required: false, Description: "Background colour (non-text pixels). Same format as galactic_unicorn_color. Default: black.", Example: ""},
+				{Name: "galactic_unicorn_brightness", Type: "float", Required: false, Description: "Override display brightness for this message only (0.0–1.0). 0.0 = don't override (use device default).", Example: "0.0"},
+				{Name: "galactic_unicorn_timeout_seconds", Type: "int", Required: false, Description: "HTTP request timeout in seconds. Range: 1–30. Default: 5.", Example: "5"},
+				{Name: "galactic_unicorn_insecure_skip_verify", Type: "bool", Required: false, Description: "Skip TLS certificate verification. Only for self-signed certs on private LANs.", Example: "false"},
+				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
+				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages sent to this channel per minute (sliding window). 0 = unlimited (no cap).", Example: "10"},
+			},
+		},
 	}
 
 	// ── Filter fields per event type ─────────────────────────────────────────

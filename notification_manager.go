@@ -508,6 +508,8 @@ func (m *NotificationManager) buildChannels() error {
 			ch = NewEmailChannel(name, chCfg)
 		case "webhook":
 			ch = NewWebhookChannel(name, chCfg)
+		case "galactic_unicorn":
+			ch = NewGalacticUnicornChannel(name, chCfg)
 		default:
 			return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 		}
@@ -676,6 +678,8 @@ func (m *NotificationManager) Reload(newCfg *NotificationsConfig) error {
 				ch = NewEmailChannel(name, chCfg)
 			case "webhook":
 				ch = NewWebhookChannel(name, chCfg)
+			case "galactic_unicorn":
+				ch = NewGalacticUnicornChannel(name, chCfg)
 			default:
 				return fmt.Errorf("notification channel %q: unknown type %q", name, chCfg.Type)
 			}

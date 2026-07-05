@@ -23,6 +23,9 @@ class CWSkimmerMap {
         this.receiverLocation = null;
         this.receiverInfo = null;
         this.greylineLayer = null;
+        // Geodesic hover line state
+        this.hoverGeodesicLine = null;   // L.polyline for Leaflet geodesic arc
+        this.hoverGeodesicLabel = null;  // L.marker with divIcon for distance/bearing label
         this.maxSpots = 10000; // Maximum number of spots to display
         this.maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         this.userSessionID = this.generateUserSessionID();
@@ -817,7 +820,31 @@ class CWSkimmerMap {
             .ringMaxRadius('maxR')
             .ringPropagationSpeed('propagationSpeed')
             .ringRepeatPeriod('repeatPeriod')
-            .ringAltitude(0.005);
+            .ringAltitude(0.005)
+
+            // Hover geodesic arc (starts empty)
+            .arcsData([])
+            .arcStartLat('startLat')
+            .arcStartLng('startLng')
+            .arcEndLat('endLat')
+            .arcEndLng('endLng')
+            .arcColor(() => 'rgba(255,34,34,0.85)')
+            .arcDashLength(0.4)
+            .arcDashGap(0.25)
+            .arcDashAnimateTime(0)
+            .arcStroke(1.5)
+            .arcAltitudeAutoScale(0.25)
+
+            // Hover arc midpoint label (starts empty)
+            .labelsData([])
+            .labelLat('lat')
+            .labelLng('lng')
+            .labelAltitude('alt')
+            .labelText('text')
+            .labelSize(0.6)
+            .labelColor(() => '#ff4444')
+            .labelResolution(2)
+            .labelIncludeDot(false);
 
         // Set initial camera position — centre on receiver or world view
         const initLat = this.receiverLocation ? this.receiverLocation.lat : 20;
@@ -1036,10 +1063,45 @@ class CWSkimmerMap {
         if (!this.globeTooltipEl) return;
         if (!spot) {
             this.globeTooltipEl.style.display = 'none';
+            // Clear arc and label
+            if (this.globe) {
+                this.globe.arcsData([]);
+                this.globe.labelsData([]);
+            }
             return;
         }
         this.globeTooltipEl.innerHTML = this.createPopupContent(spot);
         this.globeTooltipEl.style.display = 'block';
+
+        // Draw geodesic arc from receiver to spot
+        if (this.globe && this.receiverLocation && spot.latitude && spot.longitude) {
+            const rx = this.receiverLocation;
+            this.globe.arcsData([{
+                startLat: rx.lat,
+                startLng: rx.lon,
+                endLat: spot.latitude,
+                endLng: spot.longitude
+            }]);
+
+            // Label at geographic midpoint of the arc
+            const midPts = this._greatCirclePoints(rx.lat, rx.lon, spot.latitude, spot.longitude, 10);
+            const mid = midPts[Math.floor(midPts.length / 2)];
+            const distKm = spot.distance_km !== undefined && spot.distance_km !== null
+                ? Math.round(spot.distance_km) + ' km'
+                : '';
+            const bearingStr = spot.bearing_deg !== undefined && spot.bearing_deg !== null
+                ? Math.round(spot.bearing_deg) + '°'
+                : '';
+            const labelText = [distKm, bearingStr].filter(Boolean).join(' · ');
+
+            // Arc altitude at midpoint ≈ arcAltitudeAutoScale * sin(π/2) = 0.25
+            this.globe.labelsData(labelText ? [{
+                lat: mid[0],
+                lng: mid[1],
+                alt: 0.28,
+                text: labelText
+            }] : []);
+        }
     }
 
     showGlobePopup(spot) {
@@ -1058,6 +1120,127 @@ class CWSkimmerMap {
     }
 
     // ─── End Globe.gl methods ─────────────────────────────────────────────────
+
+    // ─── Geodesic hover line helpers ─────────────────────────────────────────
+
+    /**
+     * Interpolate N points along the great-circle arc from (lat1,lon1) to (lat2,lon2).
+     * Returns an array of [lat, lon] pairs suitable for L.polyline.
+     */
+    _greatCirclePoints(lat1, lon1, lat2, lon2, steps = 80) {
+        const toRad = d => d * Math.PI / 180;
+        const toDeg = r => r * 180 / Math.PI;
+        const φ1 = toRad(lat1), λ1 = toRad(lon1);
+        const φ2 = toRad(lat2), λ2 = toRad(lon2);
+
+        // Angular distance
+        const d = 2 * Math.asin(Math.sqrt(
+            Math.sin((φ2 - φ1) / 2) ** 2 +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+        ));
+
+        if (d < 1e-10) return [[lat1, lon1]]; // same point
+
+        const pts = [];
+        for (let i = 0; i <= steps; i++) {
+            const f = i / steps;
+            const A = Math.sin((1 - f) * d) / Math.sin(d);
+            const B = Math.sin(f * d) / Math.sin(d);
+            const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+            const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+            const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+            pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))),
+                      toDeg(Math.atan2(y, x))]);
+        }
+        return pts;
+    }
+
+    /**
+     * Compute the initial bearing (degrees) from (lat1,lon1) to (lat2,lon2).
+     */
+    _bearing(lat1, lon1, lat2, lon2) {
+        const toRad = d => d * Math.PI / 180;
+        const φ1 = toRad(lat1), φ2 = toRad(lat2);
+        const Δλ = toRad(lon2 - lon1);
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    /**
+     * Show a dashed red geodesic arc on the Leaflet map from the receiver to `spot`,
+     * with a rotated distance/bearing label at the arc midpoint.
+     */
+    showLeafletGeodesicHover(spot) {
+        this.clearLeafletGeodesicHover();
+        if (!this.receiverLocation || !spot.latitude || !spot.longitude) return;
+
+        const rx = this.receiverLocation;
+        const pts = this._greatCirclePoints(rx.lat, rx.lon, spot.latitude, spot.longitude, 80);
+
+        // Draw dashed red polyline
+        this.hoverGeodesicLine = L.polyline(pts, {
+            color: '#ff2222',
+            weight: 2,
+            dashArray: '8 6',
+            opacity: 0.85,
+            interactive: false
+        }).addTo(this.map);
+
+        // Label at the midpoint
+        const mid = pts[Math.floor(pts.length / 2)];
+        const midNext = pts[Math.floor(pts.length / 2) + 1] || pts[Math.floor(pts.length / 2)];
+
+        // Bearing of the arc at the midpoint (for label rotation)
+        const arcBearing = this._bearing(mid[0], mid[1], midNext[0], midNext[1]);
+        // Rotate so text reads left-to-right: flip 180° if bearing points "downward" on screen
+        const labelRotation = arcBearing > 90 && arcBearing < 270 ? arcBearing - 180 : arcBearing;
+
+        const distKm = spot.distance_km !== undefined && spot.distance_km !== null
+            ? Math.round(spot.distance_km) + ' km'
+            : '';
+        const bearingStr = spot.bearing_deg !== undefined && spot.bearing_deg !== null
+            ? Math.round(spot.bearing_deg) + '°'
+            : '';
+        const labelText = [distKm, bearingStr].filter(Boolean).join(' • ');
+
+        if (labelText) {
+            const labelIcon = L.divIcon({
+                className: '',
+                html: `<div style="
+                    transform: rotate(${labelRotation}deg);
+                    transform-origin: center center;
+                    white-space: nowrap;
+                    font-size: 11px;
+                    font-weight: bold;
+                    color: #ff4444;
+                    text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 3px #000;
+                    pointer-events: none;
+                    font-family: ui-monospace, 'Courier New', monospace;
+                ">${labelText}</div>`,
+                iconSize: [0, 0],
+                iconAnchor: [0, 0]
+            });
+            this.hoverGeodesicLabel = L.marker(mid, {
+                icon: labelIcon,
+                interactive: false,
+                zIndexOffset: 500
+            }).addTo(this.map);
+        }
+    }
+
+    clearLeafletGeodesicHover() {
+        if (this.hoverGeodesicLine) {
+            this.hoverGeodesicLine.remove();
+            this.hoverGeodesicLine = null;
+        }
+        if (this.hoverGeodesicLabel) {
+            this.hoverGeodesicLabel.remove();
+            this.hoverGeodesicLabel = null;
+        }
+    }
+
+    // ─── End Geodesic hover line helpers ─────────────────────────────────────
 
     setupTextZoom() {
         // Load saved zoom level or default to 100%
@@ -1771,6 +1954,10 @@ class CWSkimmerMap {
             direction: 'top',
             offset: [0, -10]
         });
+
+        // Geodesic hover line
+        marker.on('mouseover', () => this.showLeafletGeodesicHover(spot));
+        marker.on('mouseout', () => this.clearLeafletGeodesicHover());
 
         // Add to map only if it passes all filters
         const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;

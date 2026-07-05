@@ -671,10 +671,15 @@ class CWSkimmerMap {
         // Setup map view state saving
         this.setupMapViewSaving();
 
+        // Setup map tile selector
+        this.setupMapTileSelector();
+
         // If globe mode was saved, hide the leaflet map div immediately
         // (the actual globe init happens after receiver location loads)
         if (this.mapMode === 'globe') {
             document.getElementById('map').style.display = 'none';
+            const tileWrap = document.getElementById('map-tile-select-wrap');
+            if (tileWrap) tileWrap.style.display = 'none';
         }
     }
 
@@ -718,10 +723,12 @@ class CWSkimmerMap {
         const btn = document.getElementById('map-view-toggle');
         const globeControls = document.getElementById('globe-controls');
 
+        const tileWrap = document.getElementById('map-tile-select-wrap');
         if (mode === 'globe') {
             mapEl.style.display = 'none';
             globeEl.style.display = 'block';
             if (globeControls) globeControls.style.display = 'flex';
+            if (tileWrap) tileWrap.style.display = 'none';
             if (btn) {
                 btn.textContent = '🗺️';
                 btn.title = 'Switch to 2D Map';
@@ -739,6 +746,7 @@ class CWSkimmerMap {
             mapEl.style.display = 'block';
             globeEl.style.display = 'none';
             if (globeControls) globeControls.style.display = 'none';
+            if (tileWrap) tileWrap.style.display = 'block';
             if (btn) {
                 btn.textContent = '🌍';
                 btn.title = 'Switch to 3D Globe';
@@ -1356,6 +1364,82 @@ class CWSkimmerMap {
             }
         }
     }
+
+    // ─── Map tile selector ────────────────────────────────────────────────────
+
+    get mapTileLayers() {
+        return {
+            'osm': {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            },
+            'topo': {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors, © OpenTopoMap (CC-BY-SA)',
+                maxZoom: 17
+            },
+            'satellite': {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            },
+            'dark': {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                attribution: '© OpenStreetMap contributors, © CARTO',
+                maxZoom: 19
+            },
+            'light': {
+                url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                attribution: '© OpenStreetMap contributors, © CARTO',
+                maxZoom: 19
+            },
+            'watercolor': {
+                url: 'https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg',
+                attribution: '© Stadia Maps, © Stamen Design, © OpenStreetMap contributors',
+                maxZoom: 16
+            }
+        };
+    }
+
+    setupMapTileSelector() {
+        const select = document.getElementById('map-tile-select');
+        if (!select) return;
+
+        // Restore saved tile preference
+        const saved = localStorage.getItem('cwskimmer_mapTile') || 'osm';
+        select.value = saved;
+        if (saved !== 'osm') {
+            this._applyMapTile(saved);
+        }
+
+        select.addEventListener('change', (e) => {
+            const key = e.target.value;
+            localStorage.setItem('cwskimmer_mapTile', key);
+            this._applyMapTile(key);
+        });
+    }
+
+    _applyMapTile(key) {
+        const layers = this.mapTileLayers;
+        const cfg = layers[key] || layers['osm'];
+
+        // Remove existing tile layers
+        this.map.eachLayer(layer => {
+            if (layer instanceof L.TileLayer) {
+                this.map.removeLayer(layer);
+            }
+        });
+
+        // Add new tile layer beneath everything else
+        L.tileLayer(cfg.url, {
+            attribution: cfg.attribution,
+            maxZoom: cfg.maxZoom,
+            minZoom: 2
+        }).addTo(this.map);
+    }
+
+    // ─── End Map tile selector ────────────────────────────────────────────────
 
     setupMapViewSaving() {
         // Save map view state when user moves or zooms the map

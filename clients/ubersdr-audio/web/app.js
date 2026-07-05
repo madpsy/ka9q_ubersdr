@@ -77,6 +77,9 @@ const App = (() => {
       Signal.startSSE();
       Bookmarks.onConnected();
       WebAudio.onConnectionChange(true);
+      // Fetch current AGC values from server on connect so sliders reflect
+      // any values previously set (e.g. by the Fyne GUI or another client).
+      if (typeof AGC !== 'undefined') AGC.fetchAndApply();
     } else if (_lastState === 'connected') {
       // Retry bookmark fetch on every poll tick while connected but empty
       // (handles the auto-connect race where the first fetch fires before the

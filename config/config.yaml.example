@@ -509,6 +509,19 @@ server:
   #
   custom_ads_txt: ""
 
+  # Default AGC parameters for USB/LSB sessions.
+  # These values are applied automatically when a user opens a USB or LSB channel,
+  # or switches into USB/LSB from another mode (e.g. AM → USB).
+  # If a user adjusts the AGC sliders, their values take priority for that session.
+  # Defaults match ka9q-radio's share/presets.conf usb/lsb preset values.
+  # Omit this section (or any field) to use the built-in defaults shown below.
+  ssb_agc:
+    hang_time_s: 1.1          # AGC hang time in seconds (0.0–10.0)
+    recovery_rate_db_s: 20.0  # AGC recovery rate in dB/s (1.0–100.0)
+    threshold_db: -15.0       # AGC threshold in dB relative to headroom (-60.0–0.0)
+                              # More negative = quieter background noise but weaker signals harder to hear
+                              # Less negative (e.g. -8.0) = louder background but weak signals more audible
+
   # CPU temperature threshold in °C for the cpu_temperature system-health probe.
   # When the host's thermal sensor reports a temperature at or above this value,
   # the cpu_temperature component is marked unhealthy and any matching

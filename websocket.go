@@ -378,19 +378,20 @@ var dspValidParams = map[string]map[string]bool{
 
 // ServerMessage represents a message to the client
 type ServerMessage struct {
-	Type        string      `json:"type"`
-	Data        string      `json:"data,omitempty"`
-	SampleRate  int         `json:"sampleRate,omitempty"`
-	Channels    int         `json:"channels,omitempty"`
-	Frequency   uint64      `json:"frequency,omitempty"`
-	Mode        string      `json:"mode,omitempty"`
-	Timestamp   int64       `json:"timestamp,omitempty"`   // RTP timestamp (uint32 sample count) for drift-free tracking
-	WallclockMs int64       `json:"wallclockMs,omitempty"` // NTP-synced wall-clock time in milliseconds for multi-server alignment
-	SessionID   string      `json:"sessionId,omitempty"`
-	Error       string      `json:"error,omitempty"`
-	Status      int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
-	Info        interface{} `json:"info,omitempty"`
-	AudioFormat string      `json:"audioFormat,omitempty"` // "pcm" or "opus"
+	Type        string                 `json:"type"`
+	Data        string                 `json:"data,omitempty"`
+	SampleRate  int                    `json:"sampleRate,omitempty"`
+	Channels    int                    `json:"channels,omitempty"`
+	Frequency   uint64                 `json:"frequency,omitempty"`
+	Mode        string                 `json:"mode,omitempty"`
+	Timestamp   int64                  `json:"timestamp,omitempty"`   // RTP timestamp (uint32 sample count) for drift-free tracking
+	WallclockMs int64                  `json:"wallclockMs,omitempty"` // NTP-synced wall-clock time in milliseconds for multi-server alignment
+	SessionID   string                 `json:"sessionId,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	Status      int                    `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
+	Info        interface{}            `json:"info,omitempty"`
+	AudioFormat string                 `json:"audioFormat,omitempty"` // "pcm" or "opus"
+	AGC         map[string]interface{} `json:"agc,omitempty"`         // Current AGC parameter values
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -931,20 +932,20 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					// 500ms gives radiod enough time to fully process the preset
 					time.Sleep(500 * time.Millisecond)
 
-					// Re-apply user AGC overrides if set.
-					// The preset reload triggered by the mode change resets radiod's AGC to preset defaults,
-					// so we must re-send the user's values here, at the same point we re-send bandwidth.
-					currentSession.mu.RLock()
-					reapplyAGC := AGCParams{
-						HangTime:     currentSession.UserAGCHangTime,
-						RecoveryRate: currentSession.UserAGCRecoveryRate,
-					}
-					hasAGCOverride := currentSession.UserAGCHangTime != nil || currentSession.UserAGCRecoveryRate != nil
-					currentSession.mu.RUnlock()
-
-					if hasAGCOverride {
+					// Apply AGC parameters after preset reload.
+					// The preset reload triggered by the mode change resets radiod's AGC to preset defaults.
+					// For USB/LSB: always apply — using user overrides if set, operator config defaults otherwise.
+					// For other modes (AM, FM, CW, etc.): do nothing — their presets set appropriate AGC values.
+					if newMode == "usb" || newMode == "lsb" {
+						currentSession.mu.RLock()
+						reapplyAGC := AGCParams{
+							HangTime:     coalesceF32(currentSession.UserAGCHangTime, wsh.config.Server.SSBAgcDefaults.HangTimeS),
+							RecoveryRate: coalesceF32(currentSession.UserAGCRecoveryRate, wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS),
+							Threshold:    coalesceF32(currentSession.UserAGCThreshold, wsh.config.Server.SSBAgcDefaults.ThresholdDb),
+						}
+						currentSession.mu.RUnlock()
 						if err := wsh.sessions.UpdateAGC(currentSession.ID, reapplyAGC); err != nil {
-							log.Printf("Warning: failed to re-apply AGC after mode change for session %s: %v", currentSession.ID, err)
+							log.Printf("Warning: failed to apply AGC after mode change to %s for session %s: %v", newMode, currentSession.ID, err)
 							// Non-fatal — continue with bandwidth update
 						}
 					}
@@ -1035,6 +1036,14 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 		case "get_status":
 			wsh.sendStatus(conn, currentSession)
+
+		case "get_agc":
+			// Return current AGC parameter values for this session.
+			// Falls back to operator config defaults (or presets.conf values) for any value the user has not overridden.
+			wsh.sendMessage(conn, ServerMessage{
+				Type: "agc_state",
+				AGC:  agcStateInfo(currentSession, wsh.config),
+			})
 
 		case "set_squelch":
 			// Update squelch thresholds
@@ -1136,6 +1145,9 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			}
 			if msg.AgcRecoveryRate != nil {
 				currentSession.UserAGCRecoveryRate = msg.AgcRecoveryRate
+			}
+			if msg.AgcThreshold != nil {
+				currentSession.UserAGCThreshold = msg.AgcThreshold
 			}
 			currentSession.mu.Unlock()
 
@@ -2218,6 +2230,56 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 	}
 }
 
+// coalesceF32 returns userVal if non-nil, otherwise wraps configDefault in a new pointer.
+// Used to build AGCParams that prefer user overrides but fall back to operator config defaults.
+func coalesceF32(userVal *float32, configDefault float32) *float32 {
+	if userVal != nil {
+		v := *userVal // copy to avoid aliasing
+		return &v
+	}
+	v := configDefault
+	return &v
+}
+
+// agcStateInfo returns the current AGC parameter values for a session.
+// Priority: user override > operator config default.
+// The config pointer may be nil (e.g. in tests); hardcoded presets.conf values are used as fallback.
+func agcStateInfo(session *Session, cfg *Config) map[string]interface{} {
+	session.mu.RLock()
+	ht := session.UserAGCHangTime
+	rr := session.UserAGCRecoveryRate
+	th := session.UserAGCThreshold
+	session.mu.RUnlock()
+
+	// Operator config defaults (or hardcoded presets.conf values if config unavailable).
+	hangDefault := float32(1.1)
+	recovDefault := float32(20.0)
+	threshDefault := float32(-15.0)
+	if cfg != nil {
+		hangDefault = cfg.Server.SSBAgcDefaults.HangTimeS
+		recovDefault = cfg.Server.SSBAgcDefaults.RecoveryRateDbS
+		threshDefault = cfg.Server.SSBAgcDefaults.ThresholdDb
+	}
+
+	hangTime := hangDefault
+	recoveryRate := recovDefault
+	threshold := threshDefault
+	if ht != nil {
+		hangTime = *ht
+	}
+	if rr != nil {
+		recoveryRate = *rr
+	}
+	if th != nil {
+		threshold = *th
+	}
+	return map[string]interface{}{
+		"agcHangTime":     hangTime,
+		"agcRecoveryRate": recoveryRate,
+		"agcThreshold":    threshold,
+	}
+}
+
 // sendStatus sends current session status to client
 func (wsh *WebSocketHandler) sendStatus(conn *wsConn, session *Session) error {
 	msg := ServerMessage{
@@ -2228,6 +2290,7 @@ func (wsh *WebSocketHandler) sendStatus(conn *wsConn, session *Session) error {
 		SampleRate: session.SampleRate,
 		Channels:   session.Channels,
 		Info:       session.GetInfo(),
+		AGC:        agcStateInfo(session, wsh.config),
 	}
 	return wsh.sendMessage(conn, msg)
 }

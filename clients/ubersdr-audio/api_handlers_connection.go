@@ -39,6 +39,7 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	devID := st.DeviceID
 	agcHang := st.AGCHangTime
 	agcRec := st.AGCRecoveryRate
+	agcThresh := st.AGCThreshold
 	dspAvail := st.DSPAvailable
 	dspEnabled := st.DSPEnabled
 	dspFilter := st.DSPFilter
@@ -149,6 +150,7 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"agc": map[string]any{
 			"hang_time_s":        agcHang,
 			"recovery_rate_db_s": agcRec,
+			"threshold_db":       agcThresh,
 		},
 		"signal": map[string]any{
 			"baseband_dbfs":      sigBB,

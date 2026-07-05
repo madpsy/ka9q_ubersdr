@@ -45,6 +45,7 @@ type AppState struct {
 	// ── AGC ───────────────────────────────────────────────────────────────────
 	AGCHangTime     float64 // seconds [0.0, 10.0]
 	AGCRecoveryRate float64 // dB/s [1.0, 100.0]
+	AGCThreshold    float64 // dB relative to headroom [-60.0, 0.0]
 
 	// ── DSP ───────────────────────────────────────────────────────────────────
 	DSPAvailable bool
@@ -112,6 +113,8 @@ type AppState struct {
 	AGCHangLabel          *widget.Label
 	AGCRecSlider          *widget.Slider
 	AGCRecLabel           *widget.Label
+	AGCThreshSlider       *widget.Slider
+	AGCThreshLabel        *widget.Label
 	DSPEnableCheck        *widget.Check
 	DSPFilterSel          *widget.Select
 	URLEntry              *widget.Entry
@@ -192,8 +195,9 @@ func NewAppState() *AppState {
 		Volume:                 100,
 		ChannelMode:            "both",
 		Format:                 "opus",
-		AGCHangTime:            1.1,  // matches agcHangTimeDefault in main.go
-		AGCRecoveryRate:        20.0, // matches agcRecoveryDefault in main.go
+		AGCHangTime:            1.1,   // matches agcHangTimeDefault in main.go
+		AGCRecoveryRate:        20.0,  // matches agcRecoveryDefault in main.go
+		AGCThreshold:           -15.0, // matches agcThresholdDefault in main.go (presets.conf threshold = -15.0)
 		DSPParams:              map[string]string{},
 		FlrigHost:              "127.0.0.1",
 		FlrigPort:              12345,

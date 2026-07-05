@@ -251,13 +251,14 @@ const wsManager = new WebSocketManager({
             // Only send if the user has previously saved values (i.e. interacted with the modal).
             // This ensures the server session has the correct overrides from the start,
             // so they are available to re-apply after any subsequent mode-change preset reload.
-            const _agcHasHang = typeof modeSettingValues.agcHangTime === 'number';
-            const _agcHasRate = typeof modeSettingValues.agcRecoveryRate === 'number';
-            if (_agcHasHang || _agcHasRate) {
+            const _agcHasHang   = typeof modeSettingValues.agcHangTime === 'number';
+            const _agcHasRate   = typeof modeSettingValues.agcRecoveryRate === 'number';
+            const _agcHasThresh = typeof modeSettingValues.agcThreshold === 'number';
+            if (_agcHasHang || _agcHasRate || _agcHasThresh) {
                 const _agcValues = {};
                 AGC_MODE_SETTINGS.controls.forEach(c => { _agcValues[c.id] = getModeSettingValue(c); });
                 AGC_MODE_SETTINGS.apply(_agcValues);
-                log(`Restored AGC: hangTime=${_agcValues.agcHangTime}s, recoveryRate=${_agcValues.agcRecoveryRate}dB/s`);
+                log(`Restored AGC: hangTime=${_agcValues.agcHangTime}s, recoveryRate=${_agcValues.agcRecoveryRate}dB/s, threshold=${_agcValues.agcThreshold}dB`);
             }
         }, 0);
     },
@@ -4506,6 +4507,15 @@ function handleMessage(msg) {
             }
 
             updateStatus(msg);
+
+            // If the status message carries AGC values, update local state so
+            // the modal shows correct slider positions without a separate get_agc round-trip.
+            if (msg.agc) {
+                if (typeof msg.agc.agcHangTime     === 'number') modeSettingValues.agcHangTime     = msg.agc.agcHangTime;
+                if (typeof msg.agc.agcRecoveryRate  === 'number') modeSettingValues.agcRecoveryRate  = msg.agc.agcRecoveryRate;
+                if (typeof msg.agc.agcThreshold     === 'number') modeSettingValues.agcThreshold     = msg.agc.agcThreshold;
+                saveModeSettingValues();
+            }
             break;
         case 'audio':
             handleAudio(msg);
@@ -4603,6 +4613,19 @@ function handleMessage(msg) {
         case 'dsp_params_sent':
             // Param update acknowledged — no UI action needed
             break;
+
+        case 'agc_state': {
+            // Server-authoritative AGC values — update local modeSettingValues so
+            // the next modal open shows the correct slider positions.
+            const agc = msg.agc || msg.info;
+            if (agc) {
+                if (typeof agc.agcHangTime     === 'number') modeSettingValues.agcHangTime     = agc.agcHangTime;
+                if (typeof agc.agcRecoveryRate  === 'number') modeSettingValues.agcRecoveryRate  = agc.agcRecoveryRate;
+                if (typeof agc.agcThreshold     === 'number') modeSettingValues.agcThreshold     = agc.agcThreshold;
+                saveModeSettingValues();
+            }
+            break;
+        }
 
         default:
             console.log('Unknown message type:', msg.type);
@@ -8397,18 +8420,23 @@ function applyOffset() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // AGC controls — shared by USB and LSB (mirrors the ubersdr-audio Go client).
-// Defaults match share/presets.conf: hang-time 1.1 s, recovery-rate 20 dB/s.
+// Defaults match share/presets.conf: hang-time 1.1 s, recovery-rate 20 dB/s, threshold -15 dB.
+// The server applies operator-configured defaults (from config.yaml ssb_agc section) to every
+// new USB/LSB session and on mode changes, so the modal always reflects the actual server values
+// via the agc_state WebSocket message (sent on connect and in response to get_agc).
 const AGC_MODE_SETTINGS = {
     controls: [
-        { id: 'agcHangTime',     label: 'AGC Hang Time',     min: 0, max: 10,  step: 0.1, default: 1.1, unit: 's',    decimals: 1 },
-        { id: 'agcRecoveryRate', label: 'AGC Recovery Rate', min: 1, max: 100, step: 1,   default: 20,  unit: 'dB/s', decimals: 0 },
+        { id: 'agcHangTime',     label: 'AGC Hang Time',     min: 0,   max: 10,  step: 0.1, default: 1.1,  unit: 's',    decimals: 1 },
+        { id: 'agcRecoveryRate', label: 'AGC Recovery Rate', min: 1,   max: 100, step: 1,   default: 20,   unit: 'dB/s', decimals: 0 },
+        { id: 'agcThreshold',    label: 'AGC Threshold',     min: -60, max: 0,   step: 1,   default: -15,  unit: 'dB',   decimals: 0 },
     ],
     apply: (values) => {
         if (!wsManager || !wsManager.ws || wsManager.ws.readyState !== WebSocket.OPEN) return;
         wsManager.send({
             type: 'set_agc',
-            agcHangTime: values.agcHangTime,
+            agcHangTime:     values.agcHangTime,
             agcRecoveryRate: values.agcRecoveryRate,
+            agcThreshold:    values.agcThreshold,
         });
     },
 };
@@ -8446,6 +8474,15 @@ function openModeSettingsModal(mode) {
     const title = document.getElementById('mode-settings-title');
     const body = document.getElementById('mode-settings-body');
     if (!modal || !title || !body) return;
+
+    // Request current AGC values from server before building the modal.
+    // The agc_state response will update modeSettingValues; if the modal is
+    // already open the sliders won't auto-update, but on the next open they will.
+    // For the current open we rely on the values already in modeSettingValues
+    // (which were updated by the last agc_state or agc_updated message).
+    if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+        wsManager.send({ type: 'get_agc' });
+    }
 
     title.textContent = `${mode.toUpperCase()} Settings`;
     body.innerHTML = '';

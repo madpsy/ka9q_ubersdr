@@ -24,11 +24,13 @@ func (s *APIServer) getAGC(w http.ResponseWriter, _ *http.Request) {
 	s.state.Mu.RLock()
 	hang := s.state.AGCHangTime
 	rec := s.state.AGCRecoveryRate
+	thresh := s.state.AGCThreshold
 	s.state.Mu.RUnlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hang_time_s":        hang,
 		"recovery_rate_db_s": rec,
+		"threshold_db":       thresh,
 	})
 }
 
@@ -36,6 +38,7 @@ func (s *APIServer) putAGC(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		HangTime     *float64 `json:"hang_time_s"`
 		RecoveryRate *float64 `json:"recovery_rate_db_s"`
+		Threshold    *float64 `json:"threshold_db"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -46,6 +49,7 @@ func (s *APIServer) putAGC(w http.ResponseWriter, r *http.Request) {
 	mode := s.state.CurrentMode
 	hang := s.state.AGCHangTime
 	rec := s.state.AGCRecoveryRate
+	thresh := s.state.AGCThreshold
 	s.state.Mu.RUnlock()
 
 	if mode != "usb" && mode != "lsb" {
@@ -70,10 +74,19 @@ func (s *APIServer) putAGC(w http.ResponseWriter, r *http.Request) {
 		rec = *body.RecoveryRate
 	}
 
+	if body.Threshold != nil {
+		if *body.Threshold < -60.0 || *body.Threshold > 0.0 {
+			apiFieldError(w, "threshold_db", *body.Threshold, "-60.0–0.0 dB")
+			return
+		}
+		thresh = *body.Threshold
+	}
+
 	// Apply to state.
 	s.state.Mu.Lock()
 	s.state.AGCHangTime = hang
 	s.state.AGCRecoveryRate = rec
+	s.state.AGCThreshold = thresh
 	s.state.Mu.Unlock()
 
 	// Update Fyne widgets.
@@ -89,16 +102,24 @@ func (s *APIServer) putAGC(w http.ResponseWriter, r *http.Request) {
 	if s.state.AGCRecLabel != nil {
 		s.state.AGCRecLabel.SetText(fmt.Sprintf("%.0f dB/s", rec))
 	}
+	if s.state.AGCThreshSlider != nil {
+		s.state.AGCThreshSlider.SetValue(thresh)
+	}
+	if s.state.AGCThreshLabel != nil {
+		s.state.AGCThreshLabel.SetText(fmt.Sprintf("%.0f dB", thresh))
+	}
 
 	// Send to server if connected.
 	if s.client.State() == StateConnected {
 		ht := float32(hang)
 		rr := float32(rec)
-		_ = s.client.SendSetAGC(&ht, &rr)
+		th := float32(thresh)
+		_ = s.client.SendSetAGC(&ht, &rr, &th)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hang_time_s":        hang,
 		"recovery_rate_db_s": rec,
+		"threshold_db":       thresh,
 	})
 }

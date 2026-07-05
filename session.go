@@ -178,6 +178,7 @@ type Session struct {
 	// Protected by mu.
 	UserAGCHangTime     *float32
 	UserAGCRecoveryRate *float32
+	UserAGCThreshold    *float32
 
 	// Client-requested mute.  When true, streamAudio() suppresses all audio
 	// packets (both WebSocket and HTTP paths) but continues sending

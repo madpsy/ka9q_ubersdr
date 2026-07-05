@@ -255,6 +255,15 @@ type RadiodConfig struct {
 	Interface   string `yaml:"interface"`
 }
 
+// SSBAgcConfig holds the server-wide default AGC parameters applied to all new USB/LSB sessions.
+// These values are used when a user has not overridden the AGC settings via the sliders.
+// Defaults match ka9q-radio's share/presets.conf values for the usb/lsb presets.
+type SSBAgcConfig struct {
+	HangTimeS       float32 `yaml:"hang_time_s"`        // AGC hang time in seconds (0.0–10.0); presets.conf: hang-time = 1.1
+	RecoveryRateDbS float32 `yaml:"recovery_rate_db_s"` // AGC recovery rate in dB/s (1.0–100.0); presets.conf: recovery-rate = 20
+	ThresholdDb     float32 `yaml:"threshold_db"`       // AGC threshold in dB relative to headroom (-60.0–0.0); presets.conf: threshold = -15.0
+}
+
 // ServerConfig contains web server settings
 type ServerConfig struct {
 	Listen                          string               `yaml:"listen"`
@@ -296,6 +305,7 @@ type ServerConfig struct {
 	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
 	EnabledWidgets                  []string             `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
 	CPUTempThresholdC               float64              `yaml:"cpu_temp_threshold_c"`                // CPU temperature (°C) above which the cpu_temperature health probe fires (default: 80)
+	SSBAgcDefaults                  SSBAgcConfig         `yaml:"ssb_agc"`                             // Default AGC parameters for USB/LSB sessions (applied on session create and mode change)
 	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
 	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
 	containerProxyIPs               []string             // Dynamically resolved container IPs (internal use)
@@ -699,6 +709,22 @@ func LoadConfig(filename string) (*Config, error) {
 	// Default the CPU temperature health-probe threshold when unset.
 	if config.Server.CPUTempThresholdC <= 0 {
 		config.Server.CPUTempThresholdC = DefaultCPUTempThresholdC
+	}
+
+	// Apply SSB AGC defaults when not set in config.
+	// These match ka9q-radio's share/presets.conf usb/lsb preset values.
+	if config.Server.SSBAgcDefaults.HangTimeS <= 0 {
+		config.Server.SSBAgcDefaults.HangTimeS = 1.1
+	}
+	if config.Server.SSBAgcDefaults.RecoveryRateDbS <= 0 {
+		config.Server.SSBAgcDefaults.RecoveryRateDbS = 20.0
+	}
+	if config.Server.SSBAgcDefaults.ThresholdDb == 0 {
+		// 0 is a valid threshold value, but the presets.conf default is -15.
+		// We use a sentinel: if the field was not set (zero value from YAML),
+		// apply the presets.conf default. Operators who genuinely want 0 dB
+		// must set it explicitly in config.yaml.
+		config.Server.SSBAgcDefaults.ThresholdDb = -15.0
 	}
 
 	// Parse admin allowed IPs/CIDRs

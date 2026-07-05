@@ -358,10 +358,11 @@ func main() {
 	bwValueLabel := widget.NewLabel(fmt.Sprintf("%.0f Hz", bwSlider.Value))
 
 	// AGC sliders — only shown for USB/LSB modes.
-	// Defaults match share/presets.conf: hang-time = 1.1 s, recovery-rate = 20 dB/s.
+	// Defaults match share/presets.conf: hang-time = 1.1 s, recovery-rate = 20 dB/s, threshold = -15 dB.
 	const (
-		agcHangTimeDefault = 1.1
-		agcRecoveryDefault = 20.0
+		agcHangTimeDefault  = 1.1
+		agcRecoveryDefault  = 20.0
+		agcThresholdDefault = -15.0
 	)
 	agcHangSlider := widget.NewSlider(0.0, 10.0)
 	agcHangSlider.Step = 0.1
@@ -373,20 +374,28 @@ func main() {
 	agcRecoverySlider.Value = agcRecoveryDefault
 	agcRecoveryLabel := widget.NewLabel(fmt.Sprintf("%.0f dB/s", agcRecoveryDefault))
 
+	agcThreshSlider := widget.NewSlider(-60.0, 0.0)
+	agcThreshSlider.Step = 1.0
+	agcThreshSlider.Value = agcThresholdDefault
+	agcThreshLabel := widget.NewLabel(fmt.Sprintf("%.0f dB", agcThresholdDefault))
+
 	// sendAGC sends the current AGC slider values to the server.
 	sendAGC := func() {
 		ht := agcHangSlider.Value
 		rr := agcRecoverySlider.Value
+		th := agcThreshSlider.Value
 		appState.Mu.Lock()
 		appState.AGCHangTime = ht
 		appState.AGCRecoveryRate = rr
+		appState.AGCThreshold = th
 		appState.Mu.Unlock()
 		if client.State() != StateConnected {
 			return
 		}
 		htf := float32(ht)
 		rrf := float32(rr)
-		_ = client.SendSetAGC(&htf, &rrf)
+		thf := float32(th)
+		_ = client.SendSetAGC(&htf, &rrf, &thf)
 	}
 
 	agcHangSlider.OnChanged = func(v float64) {
@@ -399,7 +408,12 @@ func main() {
 	}
 	agcRecoverySlider.OnChangeEnded = func(_ float64) { sendAGC() }
 
-	// agcRow holds both sliders side-by-side; hidden when not in USB/LSB mode.
+	agcThreshSlider.OnChanged = func(v float64) {
+		agcThreshLabel.SetText(fmt.Sprintf("%.0f dB", v))
+	}
+	agcThreshSlider.OnChangeEnded = func(_ float64) { sendAGC() }
+
+	// agcRow holds all three sliders side-by-side; hidden when not in USB/LSB mode.
 	agcHangRow := container.NewBorder(nil, nil,
 		container.NewHBox(widget.NewLabel("Hang"), agcHangLabel),
 		nil,
@@ -410,7 +424,12 @@ func main() {
 		nil,
 		agcRecoverySlider,
 	)
-	agcRow := container.NewGridWithColumns(2, agcHangRow, agcRecoveryRow)
+	agcThreshRow := container.NewBorder(nil, nil,
+		container.NewHBox(widget.NewLabel("Threshold"), agcThreshLabel),
+		nil,
+		agcThreshSlider,
+	)
+	agcRow := container.NewGridWithColumns(3, agcHangRow, agcRecoveryRow, agcThreshRow)
 
 	// isSSBMode returns true when the mode uses the SSB AGC preset.
 	isSSBMode := func(mode string) bool {
@@ -424,6 +443,8 @@ func main() {
 		agcHangLabel.SetText(fmt.Sprintf("%.1f s", agcHangTimeDefault))
 		agcRecoverySlider.SetValue(agcRecoveryDefault)
 		agcRecoveryLabel.SetText(fmt.Sprintf("%.0f dB/s", agcRecoveryDefault))
+		agcThreshSlider.SetValue(agcThresholdDefault)
+		agcThreshLabel.SetText(fmt.Sprintf("%.0f dB", agcThresholdDefault))
 	}
 
 	// updateAGCVisibility shows or hides the AGC row based on the current mode.
@@ -3084,6 +3105,7 @@ func main() {
 	appState.DeviceID = prefs.String(prefKeyDevice)
 	appState.AGCHangTime = agcHangSlider.Value
 	appState.AGCRecoveryRate = agcRecoverySlider.Value
+	appState.AGCThreshold = agcThreshSlider.Value
 	appState.FlrigEnabled = flrigEnabledSaved
 	appState.FlrigHost = flrigHostSaved
 	appState.FlrigPort = flrigPortSaved
@@ -3103,6 +3125,8 @@ func main() {
 	appState.AGCHangLabel = agcHangLabel
 	appState.AGCRecSlider = agcRecoverySlider
 	appState.AGCRecLabel = agcRecoveryLabel
+	appState.AGCThreshSlider = agcThreshSlider
+	appState.AGCThreshLabel = agcThreshLabel
 	appState.DSPEnableCheck = dspEnableCheck
 	appState.DSPFilterSel = dspFilterSelect
 	appState.URLEntry = urlEntry

@@ -106,9 +106,10 @@ type DSPFiltersResponse struct {
 
 // AGCSetRequest is sent over the WebSocket to update AGC parameters.
 type AGCSetRequest struct {
-	Type        string   `json:"type"` // "set_agc"
-	AgcHangTime *float32 `json:"agcHangTime,omitempty"`
-	AgcRecovery *float32 `json:"agcRecoveryRate,omitempty"`
+	Type         string   `json:"type"` // "set_agc"
+	AgcHangTime  *float32 `json:"agcHangTime,omitempty"`
+	AgcRecovery  *float32 `json:"agcRecoveryRate,omitempty"`
+	AgcThreshold *float32 `json:"agcThreshold,omitempty"`
 }
 
 // DSPSetRequest is sent over the WebSocket to enable/disable the DSP insert.
@@ -660,9 +661,9 @@ func (c *RadioClient) SendSetDSPParams(params map[string]interface{}) error {
 	return conn.WriteJSON(req)
 }
 
-// SendSetAGC sends a set_agc message to update AGC hang time and/or recovery rate.
+// SendSetAGC sends a set_agc message to update AGC hang time, recovery rate, and/or threshold.
 // Pass nil for any parameter you do not want to change.
-func (c *RadioClient) SendSetAGC(hangTime, recoveryRate *float32) error {
+func (c *RadioClient) SendSetAGC(hangTime, recoveryRate, threshold *float32) error {
 	c.mu.RLock()
 	conn := c.conn
 	c.mu.RUnlock()
@@ -670,9 +671,10 @@ func (c *RadioClient) SendSetAGC(hangTime, recoveryRate *float32) error {
 		return fmt.Errorf("not connected")
 	}
 	req := AGCSetRequest{
-		Type:        "set_agc",
-		AgcHangTime: hangTime,
-		AgcRecovery: recoveryRate,
+		Type:         "set_agc",
+		AgcHangTime:  hangTime,
+		AgcRecovery:  recoveryRate,
+		AgcThreshold: threshold,
 	}
 	return conn.WriteJSON(req)
 }

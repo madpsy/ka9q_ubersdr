@@ -2627,7 +2627,7 @@ class SpectrumDisplay {
         // Frequency scale is now drawn in overlay (always visible)
 
         // Draw dBFS scale on left side
-        this.drawLineGraphDbScale(minDb, maxDb, graphHeight, graphTopMargin);
+        this.drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin);
 
         // Draw thin grey separator line at bottom of spectrum (before waterfall)
         ctx.strokeStyle = '#808080'; // Grey color

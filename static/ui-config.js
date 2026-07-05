@@ -195,7 +195,7 @@ function applyServerUIDefaults() {
 
     // ── Auto minimum dynamic range ────────────────────────────────────────────
     // Apply default minimum dynamic range to the slider element.
-    // The slider range is 0-120 dB (0 = Auto / disabled). Default 30 dB.
+    // The slider range is 0-60 dB (0 = Auto / disabled). Default 30 dB.
     // localStorage key: spectrumAutoMinSpan
     const minSpanDefault = getUIDefaultNumber('spectrumAutoMinSpan', 'min_span', 30);
     const minSpanSlider = document.getElementById('spectrum-auto-min-span');

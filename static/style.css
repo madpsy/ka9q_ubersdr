@@ -2531,6 +2531,10 @@ input[type="range"]::-moz-range-thumb {
     .band-buttons-container,
     .custom-band-buttons-container {
         gap: 2px;
+    }
+
+    /* Custom band button row wraps on narrow screens */
+    .custom-band-buttons-container {
         flex-wrap: wrap;
         justify-content: center;
     }

@@ -726,6 +726,31 @@
             display: block;
         }
 
+        /* Map tile selector — light Leaflet-style control */
+        #map-tile-select {
+            appearance: auto;
+            background: #fff;
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            color: #333;
+            font-size: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            padding: 4px 6px;
+            cursor: pointer;
+            outline: none;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            transition: border-color 0.15s;
+        }
+
+        #map-tile-select:hover {
+            border-color: rgba(0,0,0,0.4);
+        }
+
+        #map-tile-select option {
+            background: #fff;
+            color: #333;
+        }
+
         /* Globe tooltip */
         .globe-tooltip {
             position: fixed;

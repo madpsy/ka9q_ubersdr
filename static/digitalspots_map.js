@@ -39,6 +39,10 @@ class DigitalSpotsMap {
         this.bandConditionsAvailable = false; // Track if band conditions are available
         this.currentStatus = 'disconnected'; // Track current connection status to avoid unnecessary DOM updates
 
+        // Geodesic hover line state
+        this.hoverGeodesicLine = null;   // L.polyline for Leaflet geodesic arc
+        this.hoverGeodesicLabel = null;  // L.marker with divIcon (unused but kept for clearLeafletGeodesicHover)
+
         // Globe.gl state
         this.globe = null; // Globe.gl instance
         // URL param ?view=globe|map takes priority over localStorage
@@ -625,10 +629,15 @@ class DigitalSpotsMap {
         // Setup map view state saving
         this.setupMapViewSaving();
 
+        // Setup map tile selector
+        this.setupMapTileSelector();
+
         // If globe mode was saved, hide the leaflet map div immediately
         // (the actual globe init happens after receiver location loads)
         if (this.mapMode === 'globe') {
             document.getElementById('map').style.display = 'none';
+            const tileWrap = document.getElementById('map-tile-select-wrap');
+            if (tileWrap) tileWrap.style.display = 'none';
         }
     }
 
@@ -682,11 +691,13 @@ class DigitalSpotsMap {
         const globeEl = document.getElementById('globe-container');
         const btn = document.getElementById('map-view-toggle');
         const globeControls = document.getElementById('globe-controls');
+        const tileWrap = document.getElementById('map-tile-select-wrap');
 
         if (mode === 'globe') {
             mapEl.style.display = 'none';
             globeEl.style.display = 'block';
             if (globeControls) globeControls.style.display = 'flex';
+            if (tileWrap) tileWrap.style.display = 'none';
             if (btn) {
                 btn.textContent = '🗺️';
                 btn.title = 'Switch to 2D Map';
@@ -714,6 +725,7 @@ class DigitalSpotsMap {
             // then re-apply filters so only matching spots are visible.
             this.rebuildLeafletMarkers();
             this.applyFilters();
+            if (tileWrap) tileWrap.style.display = 'flex';
             // Leaflet loses track of its container size when hidden — force a recalculation
             if (this.map) {
                 setTimeout(() => this.map.invalidateSize(), 50);
@@ -785,7 +797,33 @@ class DigitalSpotsMap {
             .ringMaxRadius('maxR')
             .ringPropagationSpeed('propagationSpeed')
             .ringRepeatPeriod('repeatPeriod')
-            .ringAltitude(0.005);
+            .ringAltitude(0.005)
+
+            // Hover geodesic arc (starts empty)
+            .arcsData([])
+            .arcStartLat('startLat')
+            .arcStartLng('startLng')
+            .arcEndLat('endLat')
+            .arcEndLng('endLng')
+            .arcColor(() => 'rgba(255,34,34,0.8)')
+            .arcDashLength(1)
+            .arcDashGap(0)
+            .arcStroke(() => {
+                const alt = this.globe ? this.globe.pointOfView().altitude : 2.5;
+                return Math.max(0.1, 0.2 * alt);
+            })
+            .arcAltitudeAutoScale(0.25)
+
+            // Labels layer (kept empty — no text on arc)
+            .labelsData([])
+            .labelLat('lat')
+            .labelLng('lng')
+            .labelAltitude('alt')
+            .labelText('text')
+            .labelSize(0.6)
+            .labelColor(() => '#ff4444')
+            .labelResolution(2)
+            .labelIncludeDot(false);
 
         // Set initial camera position — centre on receiver or world view
         const initLat = this.receiverLocation ? this.receiverLocation.lat : 20;
@@ -1004,10 +1042,26 @@ class DigitalSpotsMap {
         if (!this.globeTooltipEl) return;
         if (!spot) {
             this.globeTooltipEl.style.display = 'none';
+            if (this.globe) {
+                this.globe.arcsData([]);
+                this.globe.labelsData([]);
+            }
             return;
         }
         this.globeTooltipEl.innerHTML = this.createPopupContent(spot);
         this.globeTooltipEl.style.display = 'block';
+
+        // Draw geodesic arc from receiver to spot — only when globe is not spinning
+        if (this.globe && !this.globeSpinning && this.receiverLocation && spot.latitude && spot.longitude) {
+            const rx = this.receiverLocation;
+            this.globe.arcsData([{
+                startLat: rx.lat,
+                startLng: rx.lon,
+                endLat: spot.latitude,
+                endLng: spot.longitude
+            }]);
+            this.globe.labelsData([]);
+        }
     }
 
     showGlobePopup(spot) {
@@ -1026,6 +1080,120 @@ class DigitalSpotsMap {
     }
 
     // ─── End Globe.gl methods ─────────────────────────────────────────────────
+
+    // ─── Geodesic hover line helpers ─────────────────────────────────────────
+
+    _greatCirclePoints(lat1, lon1, lat2, lon2, steps = 80) {
+        const toRad = d => d * Math.PI / 180;
+        const toDeg = r => r * 180 / Math.PI;
+        const φ1 = toRad(lat1), λ1 = toRad(lon1);
+        const φ2 = toRad(lat2), λ2 = toRad(lon2);
+        const d = 2 * Math.asin(Math.sqrt(
+            Math.sin((φ2 - φ1) / 2) ** 2 +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+        ));
+        if (d < 1e-10) return [[lat1, lon1]];
+        const pts = [];
+        for (let i = 0; i <= steps; i++) {
+            const f = i / steps;
+            const A = Math.sin((1 - f) * d) / Math.sin(d);
+            const B = Math.sin(f * d) / Math.sin(d);
+            const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+            const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+            const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+            pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))),
+                      toDeg(Math.atan2(y, x))]);
+        }
+        return pts;
+    }
+
+    showLeafletGeodesicHover(spot, marker) {
+        this.clearLeafletGeodesicHover();
+        if (!this.receiverLocation) return;
+        const rx = this.receiverLocation;
+        const endLatLng = marker ? marker.getLatLng() : { lat: spot.latitude, lng: spot.longitude };
+        if (!endLatLng) return;
+        const pts = this._greatCirclePoints(rx.lat, rx.lon, endLatLng.lat, endLatLng.lng, 80);
+        this.hoverGeodesicLine = L.polyline(pts, {
+            color: '#ff2222',
+            weight: 2,
+            dashArray: '8 6',
+            opacity: 0.85,
+            interactive: false
+        }).addTo(this.map);
+    }
+
+    clearLeafletGeodesicHover() {
+        if (this.hoverGeodesicLine) {
+            this.hoverGeodesicLine.remove();
+            this.hoverGeodesicLine = null;
+        }
+        if (this.hoverGeodesicLabel) {
+            this.hoverGeodesicLabel.remove();
+            this.hoverGeodesicLabel = null;
+        }
+    }
+
+    // ─── End Geodesic hover line helpers ─────────────────────────────────────
+
+    // ─── Map tile selector ────────────────────────────────────────────────────
+
+    get mapTileLayers() {
+        return {
+            'osm': {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            },
+            'topo': {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors, © OpenTopoMap (CC-BY-SA)',
+                maxZoom: 17
+            },
+            'satellite': {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            },
+            'dark': {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                attribution: '© OpenStreetMap contributors, © CARTO',
+                maxZoom: 19
+            },
+            'light': {
+                url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                attribution: '© OpenStreetMap contributors, © CARTO',
+                maxZoom: 19
+            }
+        };
+    }
+
+    setupMapTileSelector() {
+        const select = document.getElementById('map-tile-select');
+        if (!select) return;
+        const saved = localStorage.getItem('digspots_mapTile') || 'osm';
+        select.value = saved;
+        if (saved !== 'osm') this._applyMapTile(saved);
+        select.addEventListener('change', (e) => {
+            const key = e.target.value;
+            localStorage.setItem('digspots_mapTile', key);
+            this._applyMapTile(key);
+        });
+    }
+
+    _applyMapTile(key) {
+        const cfg = this.mapTileLayers[key] || this.mapTileLayers['osm'];
+        this.map.eachLayer(layer => {
+            if (layer instanceof L.TileLayer) this.map.removeLayer(layer);
+        });
+        L.tileLayer(cfg.url, {
+            attribution: cfg.attribution,
+            maxZoom: cfg.maxZoom,
+            minZoom: 2
+        }).addTo(this.map);
+    }
+
+    // ─── End Map tile selector ────────────────────────────────────────────────
 
     setupTextZoom() {
         // Load saved zoom level or default to 100%
@@ -1711,6 +1879,10 @@ class DigitalSpotsMap {
             direction: 'top',
             offset: [0, -10]
         });
+
+        // Geodesic hover line
+        marker.on('mouseover', () => this.showLeafletGeodesicHover(spot, marker));
+        marker.on('mouseout', () => this.clearLeafletGeodesicHover());
 
         // Add to map only if it passes all filters
         const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;

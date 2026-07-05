@@ -723,6 +723,19 @@ dxcluster:
   reconnect_delay: 30
   # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
   keepalive_delay: 300
+  # Commands to send to the cluster server after a successful login, one per line.
+  # Each command is sent 250 ms after the previous one to give the server time to process.
+  # Useful for setting filters, enabling DX announcements, or configuring cluster behaviour.
+  # Leave empty (or omit) to send no post-login commands.
+  #
+  # Examples:
+  #   login_commands:
+  #     - "set/dx"           # Enable DX spot announcements (some clusters require this)
+  #     - "set/skimmer"      # Enable RBN/skimmer spots
+  #     - "set/filter"       # Apply a pre-configured filter
+  #     - "accept/spot 1 on hf"   # Accept only HF spots
+  #
+  login_commands: []
 
 # FreeDV Reporter activity monitor
 # When enabled, UberSDR connects to the FreeDV Reporter server as a view-only client

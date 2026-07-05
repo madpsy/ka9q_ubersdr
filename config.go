@@ -394,12 +394,13 @@ type LoggingConfig struct {
 
 // DXClusterConfig contains DX cluster connection settings
 type DXClusterConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	Host           string `yaml:"host"`
-	Port           int    `yaml:"port"`
-	Callsign       string `yaml:"callsign"`
-	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts
-	KeepAliveDelay int    `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+	Enabled        bool     `yaml:"enabled"`
+	Host           string   `yaml:"host"`
+	Port           int      `yaml:"port"`
+	Callsign       string   `yaml:"callsign"`
+	ReconnectDelay int      `yaml:"reconnect_delay"` // Seconds between reconnection attempts
+	KeepAliveDelay int      `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+	LoginCommands  []string `yaml:"login_commands"`  // Commands sent after login, 250 ms apart
 }
 
 // FreeDVReporterConfig contains settings for the FreeDV Reporter activity monitor.

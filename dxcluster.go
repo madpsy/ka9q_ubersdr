@@ -366,6 +366,16 @@ func (c *DXClusterClient) login() error {
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
 
+	// Send any post-login commands, 250 ms apart (first command also waits 250 ms)
+	for i, cmd := range c.config.LoginCommands {
+		time.Sleep(250 * time.Millisecond)
+		if err := c.writeLine(cmd); err != nil {
+			log.Printf("DX Cluster: Failed to send login command %q: %v", cmd, err)
+		} else {
+			log.Printf("DX Cluster: >> %s (login command %d/%d)", cmd, i+1, len(c.config.LoginCommands))
+		}
+	}
+
 	// Start keepalive timer
 	c.startKeepalive()
 

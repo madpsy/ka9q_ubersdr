@@ -2908,10 +2908,40 @@ class DigitalSpotsMap {
 
     showSpotOnMap(spotKey) {
         if (this.mapMode === 'globe') {
-            // In globe mode: fly to the spot's coordinates
+            // In globe mode: fly to the spot's coordinates and show tooltip
             const spot = this.spots.get(spotKey);
             if (spot && spot.latitude && spot.longitude) {
                 this.showGlobePopup(spot);
+                // Show the tooltip after the fly-to animation completes (800ms)
+                setTimeout(() => {
+                    if (!this.globeTooltipEl) return;
+                    // Populate tooltip content
+                    this.globeTooltipEl.innerHTML = this.createPopupContent(spot);
+                    // Position tooltip near the centre of the globe container
+                    const container = document.getElementById('globe-container');
+                    if (container) {
+                        const rect = container.getBoundingClientRect();
+                        this.globeTooltipEl.style.left = (rect.left + rect.width / 2 - 130) + 'px';
+                        this.globeTooltipEl.style.top  = (rect.top  + rect.height / 2 - 60) + 'px';
+                    }
+                    this.globeTooltipEl.style.display = 'block';
+                    // Draw geodesic arc from receiver to spot
+                    if (this.globe && this.receiverLocation) {
+                        const rx = this.receiverLocation;
+                        this.globe.arcsData([{
+                            startLat: rx.lat,
+                            startLng: rx.lon,
+                            endLat: spot.latitude,
+                            endLng: spot.longitude
+                        }]);
+                    }
+                    // Auto-hide tooltip after 5 seconds
+                    clearTimeout(this._globeTooltipHideTimer);
+                    this._globeTooltipHideTimer = setTimeout(() => {
+                        if (this.globeTooltipEl) this.globeTooltipEl.style.display = 'none';
+                        if (this.globe) this.globe.arcsData([]);
+                    }, 5000);
+                }, 850);
             }
             return;
         }

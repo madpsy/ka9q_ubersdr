@@ -36,13 +36,17 @@
 
 ### Font Sizes and Line Capacity
 
-| `size` | Font height | Max lines | Auto Y positions |
-|--------|------------|-----------|-----------------|
-| `1` | 5 px | 2 | Line 0: y=0 (rows 0–4), Line 1: y=6 (rows 6–10), 1 px gap at row 5 |
-| `2` | 7 px | 1 | Line 0: y=0 (4 px spare below) |
-| `3` | 11 px | 1 | Line 0: y=0 (fills display exactly) |
+The default font (`bitmap6`) is a 6×6 pixel font at scale=1. Heights scale linearly.
 
-> **Mixed sizes in 2-line layouts:** Line 0 always starts at y=0. Line 1 starts at y = (size_0_height + 1). If the combined height exceeds 11 px the firmware clips the lower line.
+| `size` | Font height | Fits on 11 px display? | Two-line auto layout |
+|--------|------------|------------------------|----------------------|
+| `1` | 6 px | Yes — 5 px spare | Line 0: y=0 (rows 0–5), Line 1: y=5 (rows 5–10), share row 5 |
+| `2` | 12 px | Clips 1 px at bottom | Single line only; best at y=0 |
+| `3` | 18 px | Clips 7 px at bottom | Single line only; best at y=0 |
+
+> **Two-line layouts with size=1:** Both lines fit. The firmware packs them tightly (no gap) so both are fully visible. `y="top"` places line 0 at y=0; `y="bottom"` places a line at y=5 (rows 5–10).
+>
+> **size=2 and size=3:** The font is taller than the display. Text is always drawn from y=0 and the bottom 1–7 rows are clipped by the hardware. Use `y="top"` or `y=0` explicitly; `y="middle"` and `y="bottom"` both resolve to y=0 for these sizes.
 
 ---
 

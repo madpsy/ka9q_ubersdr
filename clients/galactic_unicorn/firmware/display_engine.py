@@ -16,16 +16,19 @@ DISPLAY_WIDTH = 53
 DISPLAY_HEIGHT = 11
 
 # Font heights in pixels for each size value.
-# The PicoGraphics built-in bitmap font renders 5 px tall at scale=1,
-# 7 px at scale=2, and 11 px at scale=3 (fills the display exactly).
-# Two size=1 lines fit: line 0 at y=0 (rows 0-4), line 1 at y=6 (rows 6-10),
-# with a 1 px gap at row 5.
-FONT_HEIGHTS = {1: 5, 2: 7, 3: 11}
+# The default PicoGraphics font (bitmap6) is a 6×6 pixel font at scale=1.
+# Heights scale linearly: 6px, 12px, 18px for scales 1, 2, 3.
+# The display is only 11px tall, so scale=2 and scale=3 always clip.
+# For layout purposes we cap at DISPLAY_HEIGHT so y="middle" stays on screen.
+#
+# Two size=1 lines: y=0 (rows 0-5) and y=6 (rows 6-11, bottom row clips by 1px).
+# This is the best fit possible and is visually acceptable.
+FONT_HEIGHTS = {1: 6, 2: 11, 3: 11}
 
 # Approximate character widths in pixels per font size (PicoGraphics bitmap font)
 # The built-in font is proportional; these are conservative averages used for
 # layout decisions. Actual pixel width is measured via graphics.measure_text().
-FONT_CHAR_WIDTHS = {1: 5, 2: 6, 3: 8}
+FONT_CHAR_WIDTHS = {1: 6, 2: 12, 3: 18}
 
 # ---------------------------------------------------------------------------
 # Named colour table  (R, G, B)
@@ -164,13 +167,20 @@ def resolve_y(y_spec, size, line_index, prev_line_bottom):
 
     Returns:
         Integer y pixel offset (0–10).
+
+    Font height notes (bitmap6 font, 6×6 px at scale=1):
+        size=1 → 6 px tall  (two lines: y=0 rows 0-5, y=5 rows 5-10 — share row 5)
+        size=2 → 12 px tall (clips on 11 px display; best position is y=0)
+        size=3 → 18 px tall (clips heavily; best position is y=0)
     """
-    font_h = FONT_HEIGHTS.get(size, 5)
+    font_h = FONT_HEIGHTS.get(size, 6)
 
     if y_spec == "auto":
         if line_index == 0:
             return 0
-        return prev_line_bottom + 1
+        # Pack lines tightly with no gap — the display is only 11px tall.
+        # prev_line_bottom is already the first pixel below the previous line.
+        return min(prev_line_bottom, DISPLAY_HEIGHT - font_h)
 
     if y_spec == "top":
         return 0
@@ -182,7 +192,7 @@ def resolve_y(y_spec, size, line_index, prev_line_bottom):
         return max(0, DISPLAY_HEIGHT - font_h)
 
     if isinstance(y_spec, int):
-        return max(0, min(10, y_spec))
+        return max(0, min(DISPLAY_HEIGHT - 1, y_spec))
 
     return 0
 
@@ -243,7 +253,7 @@ class DisplayMessage:
         for i, line in enumerate(self.lines):
             y = resolve_y(line.y_spec, line.size, i, prev_bottom)
             line.y = y
-            prev_bottom = y + FONT_HEIGHTS.get(line.size, 5)
+            prev_bottom = y + FONT_HEIGHTS.get(line.size, 6)
 
         # Timestamps set when message becomes active
         self.started_at = None
@@ -387,7 +397,8 @@ class DisplayEngine:
         self._active_brightness = None  # Saved brightness override
 
         self._rainbow_phase = 0.0    # Advances each frame for rainbow effect
-        self._frame_time = 0.033     # ~30 fps target
+        self._frame_time = 0.0       # yield to scheduler each frame; rate controlled by ticks_ms
+        self._min_frame_ms = 20      # minimum ms between renders (~50 fps cap)
 
         # Transition state
         self._transition_active = False
@@ -475,18 +486,40 @@ class DisplayEngine:
     # ------------------------------------------------------------------
 
     async def run(self):
-        """Main display loop. Call once as an asyncio task."""
-        last_time = time.time()
+        """Main display loop. Call once as an asyncio task.
+
+        Uses asyncio.sleep(0) to yield to other tasks each iteration, but
+        gates actual rendering behind _min_frame_ms so we don't burn CPU
+        rendering faster than needed. This gives smooth animation while
+        keeping the HTTP server and button handler responsive.
+        """
+        last_render_ms = time.ticks_ms()
+        last_ms = time.ticks_ms()
         while True:
-            now = time.time()
-            dt = now - last_time
-            last_time = now
+            # Always yield first so HTTP/button tasks get CPU time
+            await asyncio.sleep(0)
+
+            now_ms = time.ticks_ms()
+
+            # Only render if enough time has passed since last frame
+            elapsed_since_render = time.ticks_diff(now_ms, last_render_ms)
+            if elapsed_since_render < self._min_frame_ms:
+                continue
+
+            dt = time.ticks_diff(now_ms, last_ms) / 1000.0
+            last_ms = now_ms
+            last_render_ms = now_ms
+
+            # Clamp dt to avoid huge jumps after pauses (e.g. GC, HTTP handling)
+            if dt > 0.1:
+                dt = 0.1
 
             self._rainbow_phase = (self._rainbow_phase + dt * 0.5) % 1.0
 
-            # Check if active message has expired
+            # Check if active message has expired (use wall time for duration)
+            now_wall = time.time()
             if self._active is not None and self._active.duration is not None:
-                elapsed = now - self._active.started_at
+                elapsed = now_wall - self._active.started_at
                 if elapsed >= self._active.duration:
                     # Restore brightness if it was overridden
                     if self._active_brightness is not None:
@@ -496,15 +529,16 @@ class DisplayEngine:
                     self._advance_queue()
 
             # Render current frame
-            if self._active is not None:
-                self._render_frame(dt)
-            else:
-                # Blank display
-                self._g.set_pen(self._g.create_pen(0, 0, 0))
-                self._g.clear()
-                self._gu.update(self._g)
-
-            await asyncio.sleep(self._frame_time)
+            try:
+                if self._active is not None:
+                    self._render_frame(dt)
+                else:
+                    # Blank display
+                    self._g.set_pen(self._g.create_pen(0, 0, 0))
+                    self._g.clear()
+                    self._gu.update(self._g)
+            except Exception as e:
+                print(f"Render error: {e}")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -512,13 +546,15 @@ class DisplayEngine:
 
     def _start_message(self, msg):
         """Make msg the active message, applying transition and brightness."""
-        msg.started_at = time.time()
+        msg.started_at = time.time()  # wall time — used for duration expiry only
 
         # Reset scroll state for each line
+        # scroll_pause_start uses ticks_ms for millisecond precision
+        now_ms = time.ticks_ms()
         for line in msg.lines:
             line.scroll_x = 0.0
             line.scroll_phase = "pause"
-            line.scroll_pause_start = msg.started_at
+            line.scroll_pause_start = now_ms
             line.text_width = 0  # will be measured on first render
 
         # Apply brightness override
@@ -571,14 +607,16 @@ class DisplayEngine:
     def _render_line(self, line, dt):
         """Render a single line onto the graphics buffer."""
         g = self._g
-        now = time.time()
+        # Use millisecond time for smooth animation (time.time() is integer seconds)
+        now_ms = time.ticks_ms()
+        now_s = now_ms / 1000.0  # float seconds for blink/pulse phase calculations
 
         # Measure text width on first render
         if line.text_width == 0:
             line.text_width = measure_text(g, line.text, line.size)
 
         text_w = line.text_width
-        font_h = FONT_HEIGHTS.get(line.size, 5)
+        font_h = FONT_HEIGHTS.get(line.size, 6)
         y = line.y
 
         # Determine effective effect
@@ -600,8 +638,8 @@ class DisplayEngine:
                     line.scroll_phase = "scrolling"
 
             if line.scroll_phase == "pause":
-                elapsed_pause = now - line.scroll_pause_start
-                if elapsed_pause >= line.scroll_pause:
+                elapsed_pause_ms = time.ticks_diff(now_ms, line.scroll_pause_start)
+                if elapsed_pause_ms >= line.scroll_pause * 1000:
                     line.scroll_phase = "scrolling"
             elif line.scroll_phase == "scrolling":
                 line.scroll_x -= line.scroll_speed * dt
@@ -610,11 +648,12 @@ class DisplayEngine:
                     if line.scroll_loop:
                         line.scroll_x = float(DISPLAY_WIDTH)
                         line.scroll_phase = "pause"
-                        line.scroll_pause_start = now
+                        line.scroll_pause_start = now_ms
                     else:
                         line.scroll_phase = "done"
                         line.scroll_x = -float(text_w)
 
+            # PicoGraphics text() requires an integer x position
             x = int(line.scroll_x)
 
         # --- Static / blink / pulse logic ---
@@ -628,13 +667,13 @@ class DisplayEngine:
 
             if effect == "blink":
                 period = 1.0 / line.blink_rate
-                phase = (now % period) / period
+                phase = (now_s % period) / period
                 if phase > 0.5:
                     return  # invisible half of blink cycle
 
             elif effect == "pulse":
                 period = 1.0 / line.pulse_speed
-                phase = (now % period) / period
+                phase = (now_s % period) / period
                 brightness_mult = line.pulse_min + (1.0 - line.pulse_min) * (
                     0.5 + 0.5 * math.sin(2 * math.pi * phase - math.pi / 2)
                 )

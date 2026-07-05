@@ -2537,19 +2537,20 @@ class SpectrumDisplay {
 
             // Use smoothed minimum as floor, smoothed maximum as ceiling.
             // The spectrum line graph auto-ranges independently from the waterfall.
-            minDb = avgMinDb;
-            maxDb = avgMaxDb;
-
-            // Enforce minimum dynamic range (same logic as updateAutoRange / waterfall).
-            // Only fires on quiet bands where auto has compressed the range too much.
+            // Enforce minimum dynamic range before the contrast offset so the final
+            // displayed span equals autoMinSpan (same logic as updateAutoRange).
+            let rawMin = avgMinDb;
+            let rawMax = avgMaxDb;
             if (this.config.autoMinSpan !== null) {
-                const span = maxDb - minDb;
-                if (span < this.config.autoMinSpan) {
-                    const deficit = this.config.autoMinSpan - span;
-                    maxDb += deficit * 0.75;
-                    minDb -= deficit * 0.25;
+                const rawSpan = rawMax - rawMin;
+                if (rawSpan < this.config.autoMinSpan) {
+                    const deficit = this.config.autoMinSpan - rawSpan;
+                    rawMax += deficit * 0.75;
+                    rawMin -= deficit * 0.25;
                 }
             }
+            minDb = rawMin;
+            maxDb = rawMax;
         }
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
@@ -3948,12 +3949,13 @@ class SpectrumDisplay {
             this.actualMinDb = avgMin + this.config.autoContrast;
             this.actualMaxDb = avgMax - this.config.autoContrast;
 
-            // Enforce minimum dynamic range (only on quiet bands / no-signal conditions).
+            // Enforce minimum dynamic range on the FINAL displayed values (post-contrast).
+            // autoMinSpan is the minimum visible dB span the user wants to see.
             // Uses a 75/25 split: 75% of the deficit expands the ceiling upward (headroom
             // for signals), 25% expands the floor downward (buffer below noise floor).
-            // This clamp only fires when auto has compressed the range below the minimum;
-            // when signals are present and the natural range exceeds autoMinSpan the
-            // existing behaviour is completely unchanged.
+            // This clamp only fires on quiet bands where auto has compressed the range
+            // below the minimum; when signals are present and the natural range already
+            // exceeds autoMinSpan the clamp never fires and existing behaviour is unchanged.
             if (this.config.autoMinSpan !== null) {
                 const range = this.actualMaxDb - this.actualMinDb;
                 if (range < this.config.autoMinSpan) {

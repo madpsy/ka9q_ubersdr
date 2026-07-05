@@ -839,7 +839,11 @@ class CWSkimmerMap {
             .arcColor(() => 'rgba(255,34,34,0.8)')
             .arcDashLength(1)
             .arcDashGap(0)
-            .arcStroke(0.5)
+            .arcStroke(() => {
+                // Scale stroke with camera altitude so it stays ~constant screen width
+                const alt = this.globe ? this.globe.pointOfView().altitude : 2.5;
+                return Math.max(0.1, 0.2 * alt);
+            })
             .arcAltitudeAutoScale(0.25)
 
             // Hover arc midpoint label (starts empty)
@@ -1162,12 +1166,17 @@ class CWSkimmerMap {
      * Show a dashed red geodesic arc on the Leaflet map from the receiver to `spot`,
      * with a rotated distance/bearing label at the arc midpoint.
      */
-    showLeafletGeodesicHover(spot) {
+    showLeafletGeodesicHover(spot, marker) {
         this.clearLeafletGeodesicHover();
-        if (!this.receiverLocation || !spot.latitude || !spot.longitude) return;
+        if (!this.receiverLocation) return;
 
         const rx = this.receiverLocation;
-        const pts = this._greatCirclePoints(rx.lat, rx.lon, spot.latitude, spot.longitude, 80);
+        // Use the marker's actual rendered position (which includes the callsign hash offset)
+        // so the arc endpoint lands exactly on the dot, not the raw geographic coordinate.
+        const endLatLng = marker ? marker.getLatLng() : { lat: spot.latitude, lng: spot.longitude };
+        if (!endLatLng) return;
+
+        const pts = this._greatCirclePoints(rx.lat, rx.lon, endLatLng.lat, endLatLng.lng, 80);
 
         // Draw dashed red polyline
         this.hoverGeodesicLine = L.polyline(pts, {
@@ -1978,8 +1987,8 @@ class CWSkimmerMap {
             offset: [0, -10]
         });
 
-        // Geodesic hover line
-        marker.on('mouseover', () => this.showLeafletGeodesicHover(spot));
+        // Geodesic hover line — pass the marker so we use its rendered (offset) position
+        marker.on('mouseover', () => this.showLeafletGeodesicHover(spot, marker));
         marker.on('mouseout', () => this.clearLeafletGeodesicHover());
 
         // Add to map only if it passes all filters

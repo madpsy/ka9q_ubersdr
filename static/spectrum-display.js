@@ -5050,9 +5050,17 @@ class SpectrumDisplay {
             });
         }
 
+        const MIN_DB_GAP = 10; // minimum dB separation between min and max sliders
+
         if (minDbSlider && minDbValue) {
             minDbSlider.addEventListener('input', (e) => {
-                const value = parseFloat(e.target.value);
+                let value = parseFloat(e.target.value);
+                // Clamp so min stays at least MIN_DB_GAP below max
+                const maxAllowed = this.config.manualMaxDb - MIN_DB_GAP;
+                if (value > maxAllowed) {
+                    value = maxAllowed;
+                    e.target.value = value;
+                }
                 this.config.manualMinDb = value;
                 minDbValue.textContent = value.toFixed(0);
                 localStorage.setItem('spectrumManualMinDb', value.toString());
@@ -5061,7 +5069,13 @@ class SpectrumDisplay {
 
         if (maxDbSlider && maxDbValue) {
             maxDbSlider.addEventListener('input', (e) => {
-                const value = parseFloat(e.target.value);
+                let value = parseFloat(e.target.value);
+                // Clamp so max stays at least MIN_DB_GAP above min
+                const minAllowed = this.config.manualMinDb + MIN_DB_GAP;
+                if (value < minAllowed) {
+                    value = minAllowed;
+                    e.target.value = value;
+                }
                 this.config.manualMaxDb = value;
                 maxDbValue.textContent = value.toFixed(0);
                 localStorage.setItem('spectrumManualMaxDb', value.toString());

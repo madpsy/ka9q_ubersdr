@@ -771,6 +771,7 @@ class DigitalSpotsMap {
             })
             .pointAltitude(0.005)
             .pointResolution(6)
+            .pointLabel(() => '')
             .onPointClick((spot) => {
                 this.showGlobePopup(spot);
             })

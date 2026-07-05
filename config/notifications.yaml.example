@@ -42,6 +42,9 @@ channels:
   #   parse_mode: "HTML"          # HTML (default), Markdown, MarkdownV2, or "" for plain text
   #   rate_limit_minutes: 10      # suppress duplicate (rule+subject) alerts within this window
   #                               # 0 = no rate limiting
+  #   max_per_minute: 10          # hard throughput cap: at most N messages/min to this channel
+  #                               # sliding window — if 10 arrive in 1 s, no more for ~59 s
+  #                               # 0 = unlimited (no cap)
 
   # You can define multiple channels — e.g. a personal chat and a group:
   # telegram_personal:

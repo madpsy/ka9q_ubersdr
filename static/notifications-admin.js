@@ -550,6 +550,7 @@ async function loadConfig() {
                 chat_id:            ch.chat_id            || '',
                 parse_mode:         ch.parse_mode         || 'HTML',
                 rate_limit_minutes: ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1,
+                max_per_minute:     ch.max_per_minute     != null ? ch.max_per_minute     : 0,
                 // Bot command listener config — round-tripped as-is from server.
                 bot_commands:       ch.bot_commands || { enabled: false, commands: [] },
                 // Email (SMTP) — password redacted like the bot token.
@@ -720,6 +721,7 @@ async function saveConfig(alertContainer) {
                 email_to:           Array.isArray(ch.email_to) ? ch.email_to : parseCSV(String(ch.email_to || '')),
                 subject_prefix:     ch.subject_prefix || '[UberSDR]',
                 rate_limit_minutes: ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
+                max_per_minute:     ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
         } else if (ch.type === 'webhook') {
             payload.channels[name] = {
@@ -734,6 +736,7 @@ async function saveConfig(alertContainer) {
                 webhook_insecure_skip_verify: !!ch.webhook_insecure_skip_verify,
                 webhook_body_template:      ch.webhook_body_template || '',
                 rate_limit_minutes:         ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
+                max_per_minute:             ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
         } else {
             // Telegram channel — include bot_commands config if present.
@@ -743,6 +746,7 @@ async function saveConfig(alertContainer) {
                 chat_id:            ch.chat_id,
                 parse_mode:         ch.parse_mode || 'HTML',
                 rate_limit_minutes: ch.rate_limit_minutes != null ? Number(ch.rate_limit_minutes) : 1,
+                max_per_minute:     ch.max_per_minute     != null ? Number(ch.max_per_minute)     : 0,
             };
             if (ch.bot_commands) {
                 tgCh.bot_commands = {
@@ -1025,7 +1029,8 @@ function renderChannels() {
                     '<div class="item-card-meta">' +
                         '<span class="badge badge-blue">' + escHtml(ch.type) + '</span>' +
                         metaBadges +
-                        '<span class="badge badge-grey">rate: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + ' min</span>' +
+                        '<span class="badge badge-grey">dedup: ' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + ' min</span>' +
+                        (function() { var cap = ch.max_per_minute; return cap ? '<span class="badge badge-grey">cap: ' + cap + '/min</span>' : ''; })() +
                         statsBadges +
                     '</div>' +
                 '</div>' +
@@ -2141,7 +2146,7 @@ function showChannelForm(editName) {
     const container = el('channelFormContainer');
     const isEdit = editName !== null && editName !== undefined;
     const ch = isEdit ? Object.assign({}, localConfig.channels[editName]) : {
-        type: 'telegram', bot_token: '', chat_id: '', parse_mode: 'HTML', rate_limit_minutes: 1,
+        type: 'telegram', bot_token: '', chat_id: '', parse_mode: 'HTML', rate_limit_minutes: 1, max_per_minute: 10,
     };
 
     const nameReadonly = isEdit ? 'readonly style="background:#f0f0f0"' : '';
@@ -2168,10 +2173,17 @@ function showChannelForm(editName) {
             '</div>' +
             '<div id="chTypeInfo"></div>' +
             '<div id="chTypeFields"></div>' +
-            '<div class="form-group" style="max-width:200px">' +
-                '<label>Rate Limit (minutes)</label>' +
-                '<input type="number" id="chRateLimit" value="' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + '" min="0" max="1440">' +
-                '<div class="form-hint">Suppress duplicate alerts within this window. 0 = no limit.</div>' +
+            '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
+                '<div class="form-group" style="max-width:200px">' +
+                    '<label>Dedup Window (minutes)</label>' +
+                    '<input type="number" id="chRateLimit" value="' + (ch.rate_limit_minutes != null ? ch.rate_limit_minutes : 1) + '" min="0" max="1440">' +
+                    '<div class="form-hint">Suppress duplicate (same rule+subject) alerts within this window. 0 = no limit.</div>' +
+                '</div>' +
+                '<div class="form-group" style="max-width:200px">' +
+                    '<label>Max per Minute</label>' +
+                    '<input type="number" id="chMaxPerMinute" value="' + (ch.max_per_minute != null ? ch.max_per_minute : 10) + '" min="0" max="10000">' +
+                    '<div class="form-hint">Hard throughput cap for this channel. 0 = unlimited. Default: 10.</div>' +
+                '</div>' +
             '</div>' +
             (function() {
                 if (!isEdit) return '';
@@ -2426,6 +2438,8 @@ function showChannelForm(editName) {
 
         const type = el('chType').value;
         const rate = parseInt(el('chRateLimit').value, 10) || 0;
+        const maxPerMin = parseInt(el('chMaxPerMinute').value, 10);
+        const maxPerMinFinal = isNaN(maxPerMin) ? 0 : Math.max(0, maxPerMin);
         let channel;
 
         if (type === 'email') {
@@ -2457,6 +2471,7 @@ function showChannelForm(editName) {
                 email_to:           to,
                 subject_prefix:     el('chSubjectPrefix').value.trim() || '[UberSDR]',
                 rate_limit_minutes: rate,
+                max_per_minute:     maxPerMinFinal,
             };
         } else if (type === 'webhook') {
             const url = el('chWebhookURL').value.trim();
@@ -2502,6 +2517,7 @@ function showChannelForm(editName) {
                 webhook_insecure_skip_verify: el('chWebhookInsecure').checked,
                 webhook_body_template:      el('chWebhookBodyTemplate').value.trim(),
                 rate_limit_minutes:         rate,
+                max_per_minute:             maxPerMinFinal,
             };
         } else {
             const newToken = el('chBotToken').value.trim();
@@ -2523,6 +2539,7 @@ function showChannelForm(editName) {
                 chat_id:            chatId,
                 parse_mode:         el('chParseMode').value,
                 rate_limit_minutes: rate,
+                max_per_minute:     maxPerMinFinal,
             };
             // Preserve bot_commands from the existing channel config — the channel
             // edit form does not touch bot_commands (that is managed via the

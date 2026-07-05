@@ -122,6 +122,13 @@ type NotificationChannelConfig struct {
 	// Default: 10 minutes.
 	RateLimitMinutes int `yaml:"rate_limit_minutes" json:"rate_limit_minutes"`
 
+	// MaxPerMinute is a hard throughput cap on the total number of messages
+	// sent to this channel per minute, regardless of rule or subject.
+	// It uses a sliding window: once the cap is reached, further messages are
+	// dropped (counted as rate_limited) until old sends age out of the 60-second
+	// window. 0 = unlimited (no cap).
+	MaxPerMinute int `yaml:"max_per_minute" json:"max_per_minute"`
+
 	// ── Webhook (HTTP POST) ───────────────────────────────────────────────────
 	// WebhookURL is the endpoint to POST to. Must be http:// or https://.
 	// Required when Type is "webhook".
@@ -465,6 +472,13 @@ func applyChannelDefaults(ch *NotificationChannelConfig) {
 	// RateLimitMinutes: 0 means "no rate limit" (unlimited). Do not apply a
 	// default here — the user may have explicitly set it to 0. The rate limiter
 	// already treats 0 as unlimited (allow() returns true when limitMinutes <= 0).
+	//
+	// MaxPerMinute: same convention — 0 means unlimited. We do NOT apply a
+	// default here because we cannot distinguish "not set" from "explicitly 0"
+	// after YAML/JSON unmarshal, and overriding an explicit 0 would prevent
+	// users from disabling the cap via the admin UI. The UI defaults new
+	// channels to 10; existing channels without the field will have 0 (unlimited)
+	// until the user edits and saves them.
 	if ch.Type == "email" {
 		if ch.SMTPPort == 0 {
 			ch.SMTPPort = 587
@@ -530,6 +544,9 @@ func (cfg *NotificationsConfig) Validate() []string {
 			issues = append(issues, fmt.Sprintf("channel %q: type is required", name))
 		default:
 			issues = append(issues, fmt.Sprintf("channel %q: unknown type %q", name, ch.Type))
+		}
+		if ch.MaxPerMinute < 0 {
+			issues = append(issues, fmt.Sprintf("channel %q: max_per_minute must be 0 (unlimited) or a positive integer", name))
 		}
 	}
 

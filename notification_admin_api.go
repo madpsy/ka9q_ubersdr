@@ -349,6 +349,7 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 		ChatID           string `json:"chat_id"`
 		ParseMode        string `json:"parse_mode"`
 		RateLimitMinutes int    `json:"rate_limit_minutes"`
+		MaxPerMinute     int    `json:"max_per_minute"`
 		BotTokenSet      bool   `json:"bot_token_set"`
 		// Bot command listener config — returned as-is (no secrets).
 		BotCommands TelegramBotCommandsConfig `json:"bot_commands,omitempty"`
@@ -378,6 +379,7 @@ func handleNotificationsConfigGet(w http.ResponseWriter, r *http.Request, cfg *N
 			ChatID:           ch.ChatID,
 			ParseMode:        ch.ParseMode,
 			RateLimitMinutes: ch.RateLimitMinutes,
+			MaxPerMinute:     ch.MaxPerMinute,
 			BotTokenSet:      ch.BotToken != "",
 			BotCommands:      ch.BotCommands,
 			SMTPHost:         ch.SMTPHost,
@@ -559,6 +561,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "chat_id", Type: "string", Required: true, Description: "Target chat ID. Negative for groups/channels, positive for personal chats.", Example: "-1001234567890"},
 				{Name: "parse_mode", Type: "string", Required: false, Description: "Message formatting. Default: HTML.", ValidValues: []string{"HTML", "Markdown", "MarkdownV2", ""}, Example: "HTML"},
 				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
+				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages sent to this channel per minute (sliding window). 0 = unlimited (no cap).", Example: "10"},
 			},
 		},
 		{
@@ -574,6 +577,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "email_to", Type: "[]string", Required: true, Description: "Recipient address(es).", Example: `["you@example.com"]`},
 				{Name: "subject_prefix", Type: "string", Required: false, Description: "Prepended to the dynamic subject (prefix + first line of the message). Default: [UberSDR].", Example: "[UberSDR]"},
 				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
+				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages sent to this channel per minute (sliding window). 0 = unlimited (no cap).", Example: "10"},
 			},
 		},
 		{
@@ -589,6 +593,7 @@ func handleNotificationsSchema(w http.ResponseWriter, r *http.Request) {
 				{Name: "webhook_insecure_skip_verify", Type: "bool", Required: false, Description: "Skip TLS certificate verification. Only for self-signed certs on private LANs.", Example: "false"},
 				{Name: "webhook_body_template", Type: "string", Required: false, Description: `Go text/template string rendered as the full request body. Overrides webhook_format when set. Template data: .Message (string), .Channel (string), .Timestamp (RFC3339 string). Content-Type defaults to application/json; override via webhook_headers.`, Example: `{"message":"{{.Message}}","title":"UberSDR","priority":5}`},
 				{Name: "rate_limit_minutes", Type: "int", Required: false, Description: "Suppress duplicate (rule+subject) alerts within this window. 0 = no limit. Default: 1.", Example: "1"},
+				{Name: "max_per_minute", Type: "int", Required: false, Description: "Hard throughput cap: maximum total messages sent to this channel per minute (sliding window). 0 = unlimited (no cap).", Example: "10"},
 			},
 		},
 	}

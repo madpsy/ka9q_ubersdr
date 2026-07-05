@@ -49,8 +49,100 @@ class RotatorUI {
         this.createRotatorPanel();
         this.setupEventHandlers();
 
+        // ── Widget API ─────────────────────────────────────────────────────────
+        // Expose a stable global object that any widget (or other in-page code)
+        // can read for current state and call to issue commands.
+        // Updated by _publishWidgetAPI() after every status poll.
+        window._rotatorAntAPI = {
+            rotator: {
+                enabled:     this.rotatorEnabled,
+                connected:   false,
+                azimuth:     null,
+                moving:      false,
+                hasPassword: !!this.savedPassword,
+            },
+            antSwitch: {
+                enabled:        this.antSwitchEnabled,
+                num_antennas:   0,
+                antenna_labels: [],
+                selected:       [],
+                grounded:       false,
+                thunderstorm:   false,
+                hasPassword:    !!this.antSwitchPassword,
+            },
+            // Action: rotate to bearing (degrees).  No-op when no password.
+            setRotatorBearing: (degrees) => this._apiSetRotatorBearing(degrees),
+            // Action: select antenna by 1-based number.  No-op when no password.
+            selectAntenna:     (num)     => this._apiSelectAntenna(num),
+            // Action: ground all antennas.  No-op when no password.
+            groundAntennas:    ()        => this._apiGroundAntennas(),
+        };
+
         // Start fetching status immediately for collapsed tab display
         this.startStatusUpdates();
+    }
+
+    // ── Widget API helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Publish current rotator + ant-switch state to window._rotatorAntAPI and
+     * dispatch a 'rotator_ant_status' CustomEvent so widgets can react without
+     * polling.  Safe to call even when _rotatorAntAPI doesn't exist yet.
+     */
+    _publishWidgetAPI() {
+        const api = window._rotatorAntAPI;
+        if (!api) return;
+        // Dispatch so widgets listening on window get the update
+        window.dispatchEvent(new CustomEvent('rotator_ant_status', { detail: api }));
+    }
+
+    /** Set rotator bearing — mirrors the postMessage handler but for in-page use */
+    async _apiSetRotatorBearing(degrees) {
+        const bearing = parseFloat(degrees);
+        if (isNaN(bearing)) return;
+        // Re-read password from localStorage in case it was set after page load
+        if (!this.savedPassword) {
+            this.savedPassword = localStorage.getItem('rotctl_password') || '';
+        }
+        if (!this.savedPassword) return;
+        try {
+            const r = await fetch('/api/rotctl/position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: this.savedPassword, azimuth: bearing })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok || !d.success) {
+                if (r.status === 401 || (d.error && d.error.toLowerCase().includes('password'))) {
+                    this.savedPassword = '';
+                    localStorage.removeItem('rotctl_password');
+                    if (window._rotatorAntAPI) window._rotatorAntAPI.rotator.hasPassword = false;
+                    this._publishWidgetAPI();
+                }
+            }
+        } catch (err) {
+            console.error('[RotatorUI] _apiSetRotatorBearing error:', err);
+        }
+    }
+
+    /** Select antenna — delegates to existing _sendAntCommand */
+    _apiSelectAntenna(num) {
+        const antenna = parseInt(num, 10);
+        if (isNaN(antenna)) return;
+        if (!this.antSwitchPassword) {
+            this.antSwitchPassword = localStorage.getItem('ant_switch_password') || '';
+        }
+        if (!this.antSwitchPassword) return;
+        this._sendAntCommand({ command: 'select', antenna });
+    }
+
+    /** Ground all antennas — delegates to existing _sendAntCommand */
+    _apiGroundAntennas() {
+        if (!this.antSwitchPassword) {
+            this.antSwitchPassword = localStorage.getItem('ant_switch_password') || '';
+        }
+        if (!this.antSwitchPassword) return;
+        this._sendAntCommand({ command: 'ground' });
     }
     
     /**
@@ -1024,6 +1116,16 @@ class RotatorUI {
         }
         this.lastMoving = !!data.moving;
 
+        // ── Update widget API ──────────────────────────────────────────────────
+        if (window._rotatorAntAPI) {
+            window._rotatorAntAPI.rotator.connected   = !!data.connected;
+            window._rotatorAntAPI.rotator.azimuth     = (data.position && data.position.azimuth !== undefined)
+                                                            ? Math.round(data.position.azimuth) : null;
+            window._rotatorAntAPI.rotator.moving      = !!data.moving;
+            window._rotatorAntAPI.rotator.hasPassword = !!this.savedPassword;
+            this._publishWidgetAPI();
+        }
+
         // Push rotator state to callsign lookup popup (if open)
         // The popup uses this to show current antenna bearing and the Set button.
         const lw = window._callsignLookupWindow;
@@ -1302,6 +1404,18 @@ class RotatorUI {
         }
 
         this.antSwitchStatus = data;
+
+        // ── Update widget API ──────────────────────────────────────────────────
+        if (window._rotatorAntAPI) {
+            window._rotatorAntAPI.antSwitch.enabled        = !!data.enabled;
+            window._rotatorAntAPI.antSwitch.num_antennas   = data.num_antennas   || 0;
+            window._rotatorAntAPI.antSwitch.antenna_labels = data.antenna_labels || [];
+            window._rotatorAntAPI.antSwitch.selected       = data.selected       || [];
+            window._rotatorAntAPI.antSwitch.grounded       = !!data.grounded;
+            window._rotatorAntAPI.antSwitch.thunderstorm   = !!data.thunderstorm;
+            window._rotatorAntAPI.antSwitch.hasPassword    = !!this.antSwitchPassword;
+            this._publishWidgetAPI();
+        }
 
         // ── Update collapsed tab label ─────────────────────────────────────
         const tabLabel = document.getElementById('cp-tab-ant-label');

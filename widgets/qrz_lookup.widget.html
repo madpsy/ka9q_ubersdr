@@ -167,6 +167,94 @@
     color: rgba(255,255,255,0.6);
   }
 
+  #qrz-dist-line {
+    font-size: 10px;
+    font-weight: normal;
+    color: rgba(100,200,255,0.8);
+    margin-top: 2px;
+    letter-spacing: 0.2px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+
+  #qrz-ant-bearing {
+    color: rgba(255,210,80,0.9);
+    font-size: 10px;
+  }
+
+  #qrz-set-btn {
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    color: rgba(255,255,255,0.8);
+    font-size: 9px;
+    padding: 1px 5px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+    line-height: 1.4;
+  }
+
+  #qrz-set-btn:hover {
+    background: rgba(255,255,255,0.22);
+    color: #fff;
+  }
+
+  #qrz-set-btn.qrz-set-sent {
+    background: rgba(40,167,69,0.4);
+    border-color: rgba(40,167,69,0.6);
+    color: #fff;
+  }
+
+  /* ── Antenna switch row ─────────────────────────────────────────────── */
+  #qrz-ant-switch {
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .qrz-ant-btn {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    color: rgba(255,255,255,0.75);
+    font-size: 9px;
+    padding: 2px 6px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  .qrz-ant-btn:hover {
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+  }
+
+  .qrz-ant-btn.qrz-ant-selected {
+    background: rgba(74,158,255,0.35);
+    border-color: rgba(74,158,255,0.7);
+    color: #fff;
+  }
+
+  .qrz-ant-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .qrz-ant-grounded {
+    font-size: 9px;
+    color: rgba(255,200,80,0.85);
+    font-weight: bold;
+  }
+
   #qrz-photo-wrap {
     margin-top: 6px;
     text-align: center;
@@ -426,6 +514,28 @@
     inputEl.focus();
   });
 
+  // ── Distance / bearing helper ─────────────────────────────────────────────
+  function calcDistBearing(spotLat, spotLon) {
+    var desc = window.instanceDescription;
+    if (!desc || !desc.receiver || !desc.receiver.gps) return null;
+    var rxLat = desc.receiver.gps.lat;
+    var rxLon = desc.receiver.gps.lon;
+    if (!rxLat || !rxLon) return null;
+    var toRad = function (d) { return d * Math.PI / 180; };
+    var R = 6371;
+    var φ1 = toRad(rxLat), φ2 = toRad(spotLat);
+    var Δφ = toRad(spotLat - rxLat);
+    var Δλ = toRad(spotLon - rxLon);
+    var a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    var distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    var y = Math.sin(toRad(spotLon - rxLon)) * Math.cos(φ2);
+    var x = Math.cos(φ1) * Math.sin(φ2) -
+            Math.sin(φ1) * Math.cos(φ2) * Math.cos(toRad(spotLon - rxLon));
+    var bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    return { distKm: Math.round(distKm), bearing: Math.round(bearing) };
+  }
+
   // ── Lookup ───────────────────────────────────────────────────────────────
   function doLookup() {
     var raw = inputEl.value.trim().toUpperCase();
@@ -549,6 +659,19 @@
     var country = d.country || (cty && cty.country) || '';
     var imageUrl = d.image || '';
 
+    // ── Distance / bearing ────────────────────────────────────────────────
+    // Prefer QRZ lat/lon; fall back to decoding the Maidenhead grid square
+    // (maidenhead.js is loaded in index.html so maidenheadToLatLon is available).
+    var distBearing = null;
+    if (d.lat && d.lon) {
+      distBearing = calcDistBearing(parseFloat(d.lat), parseFloat(d.lon));
+    } else if (d.grid && typeof maidenheadToLatLon === 'function') {
+      var gridCoord = maidenheadToLatLon(d.grid);
+      if (gridCoord) {
+        distBearing = calcDistBearing(gridCoord.lat, gridCoord.lon);
+      }
+    }
+
     var html = '';
     if (fullName) {
       var nameDisplay = flagEmoji ? flagEmoji + '\u00A0' + fullName : fullName;
@@ -558,6 +681,9 @@
       var loc = [country, d.grid].filter(Boolean).join(' · ');
       html += '<div id="qrz-country-line">' + esc(loc) + '</div>';
     }
+    if (distBearing) {
+      html += buildDistLineHtml(distBearing);
+    }
     if (imageUrl) {
       html += '<div id="qrz-photo-wrap">' +
                 '<img id="qrz-photo" src="' + esc(imageUrl) + '" alt="' + esc(callsign) + '" ' +
@@ -565,8 +691,20 @@
               '</div>';
     }
 
+    // Antenna switch row (last element)
+    html += buildAntSwitchHtml();
+
+    // Store bearing for live updates
+    lastDistBearing = distBearing || null;
+
     resultEl.innerHTML = html;
     resultEl.style.display = '';
+
+    // Wire Set button
+    wireSetBtn();
+
+    // Wire antenna buttons
+    wireAntBtns();
 
     // Wire up photo click → modal
     if (imageUrl) {
@@ -576,6 +714,144 @@
           openPhotoModal(photoEl.src, photoEl.alt);
         });
       }
+    }
+  }
+
+  // ── Dist line builder ─────────────────────────────────────────────────────
+  // Builds the HTML for the distance/bearing line, optionally including the
+  // current antenna bearing and a Set button when the rotator API is available.
+  function buildDistLineHtml(db) {
+    if (!db) return '';
+    var api = window._rotatorAntAPI;
+    var rotEnabled  = api && api.rotator.enabled;
+    var antAzimuth  = rotEnabled && api.rotator.azimuth !== null ? api.rotator.azimuth : null;
+    var hasPassword = rotEnabled && api.rotator.hasPassword;
+
+    var inner = '📍\u00A0' + db.distKm.toLocaleString() + '\u00A0km\u00A0·\u00A0' + db.bearing + '°';
+    if (antAzimuth !== null) {
+      inner += '<span id="qrz-ant-bearing">\u00A0|\u00A0' + antAzimuth + '°\u00A0🧭</span>';
+    }
+    if (hasPassword) {
+      inner += '<button id="qrz-set-btn" title="Rotate antenna to ' + db.bearing + '°">Set</button>';
+    }
+    return '<div id="qrz-dist-line">' + inner + '</div>';
+  }
+
+  // Update just the dist line in-place (called by rotator_ant_status listener).
+  // lastDistBearing is kept in closure scope so we can rebuild without re-rendering.
+  var lastDistBearing = null;
+
+  function refreshDistLine() {
+    var el = document.getElementById('qrz-dist-line');
+    if (!el || !lastDistBearing) return;
+    el.outerHTML = buildDistLineHtml(lastDistBearing);
+    wireSetBtn();
+  }
+
+  function wireSetBtn() {
+    var btn = document.getElementById('qrz-set-btn');
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', function () {
+      var api = window._rotatorAntAPI;
+      if (!api || !api.rotator.hasPassword || !lastDistBearing) return;
+      api.setRotatorBearing(lastDistBearing.bearing);
+      btn.classList.add('qrz-set-sent');
+      btn.textContent = '✓';
+      setTimeout(function () {
+        btn.classList.remove('qrz-set-sent');
+        btn.textContent = 'Set';
+      }, 1500);
+    });
+  }
+
+  // ── Antenna switch row builder ────────────────────────────────────────────
+  // Returns HTML for the antenna button row, or '' when ant switch is absent/
+  // disabled/no-password.  Grounded state shown as a label; thunderstorm
+  // disables all buttons.
+  function buildAntSwitchHtml() {
+    var api = window._rotatorAntAPI;
+    if (!api || !api.antSwitch.enabled) return '';
+    var sw = api.antSwitch;
+    if (!sw.num_antennas) return '';
+
+    var html = '<div id="qrz-ant-switch">';
+    if (sw.grounded) {
+      html += '<span class="qrz-ant-grounded">⏚\u00A0Grounded</span>';
+    }
+    var disabled = sw.thunderstorm || !sw.hasPassword;
+    for (var i = 1; i <= sw.num_antennas; i++) {
+      var label = (sw.antenna_labels[i - 1] && sw.antenna_labels[i - 1] !== '')
+        ? sw.antenna_labels[i - 1]
+        : ('Ant\u00A0' + i);
+      var isSel = sw.selected.indexOf(i) !== -1;
+      var selClass = isSel ? ' qrz-ant-selected' : '';
+      var dis = disabled ? ' disabled' : '';
+      html += '<button class="qrz-ant-btn' + selClass + '" data-ant="' + i + '"' + dis + '>' + esc(label) + '</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // Wire click handlers on antenna buttons (idempotent via data-wired).
+  function wireAntBtns() {
+    var row = document.getElementById('qrz-ant-switch');
+    if (!row || row.dataset.wired) return;
+    row.dataset.wired = '1';
+    row.addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('.qrz-ant-btn') : null;
+      if (!btn || btn.disabled) return;
+      var api = window._rotatorAntAPI;
+      if (!api || !api.antSwitch.hasPassword) return;
+      var ant = parseInt(btn.dataset.ant, 10);
+      if (isNaN(ant)) return;
+      api.selectAntenna(ant);
+      // Optimistic highlight
+      row.querySelectorAll('.qrz-ant-btn').forEach(function (b) {
+        b.classList.toggle('qrz-ant-selected', parseInt(b.dataset.ant, 10) === ant);
+      });
+    });
+  }
+
+  // Refresh the antenna switch row in-place on live updates.
+  function refreshAntSwitch() {
+    var existing = document.getElementById('qrz-ant-switch');
+    var api = window._rotatorAntAPI;
+    var sw = api && api.antSwitch;
+
+    // If ant switch not enabled or no antennas, remove row if present
+    if (!sw || !sw.enabled || !sw.num_antennas) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    if (existing) {
+      // Patch button states without a full rebuild to avoid flicker
+      var disabled = sw.thunderstorm || !sw.hasPassword;
+      existing.querySelectorAll('.qrz-ant-btn').forEach(function (b) {
+        var i = parseInt(b.dataset.ant, 10);
+        b.classList.toggle('qrz-ant-selected', sw.selected.indexOf(i) !== -1);
+        b.disabled = disabled;
+      });
+      // Update grounded label
+      var groundedEl = existing.querySelector('.qrz-ant-grounded');
+      if (sw.grounded && !groundedEl) {
+        var span = document.createElement('span');
+        span.className = 'qrz-ant-grounded';
+        span.textContent = '⏚\u00A0Grounded';
+        existing.insertBefore(span, existing.firstChild);
+      } else if (!sw.grounded && groundedEl) {
+        groundedEl.remove();
+      }
+    } else {
+      // Row doesn't exist yet — ant switch became available after render
+      var newHtml = buildAntSwitchHtml();
+      if (!newHtml) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = newHtml;
+      var newRow = tmp.firstChild;
+      resultEl.appendChild(newRow);
+      wireAntBtns();
     }
   }
 
@@ -664,6 +940,15 @@
       showMobilePhoto(imageUrl, cs);
     });
   })();
+
+  // ── Live rotator/ant-switch updates ──────────────────────────────────────
+  // rotator-ui.js dispatches 'rotator_ant_status' on window every ~1 s when
+  // the rotator is enabled.  We use it to keep the dist line and antenna
+  // switch row current without re-running the full lookup.
+  window.addEventListener('rotator_ant_status', function () {
+    refreshDistLine();
+    refreshAntSwitch();
+  });
 
 })();
 </script>

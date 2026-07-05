@@ -1213,12 +1213,17 @@ class CWSkimmerMap {
                     transform: rotate(${labelRotation}deg);
                     transform-origin: center center;
                     white-space: nowrap;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: bold;
-                    color: #ff4444;
-                    text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 3px #000;
+                    color: #fff;
+                    background: rgba(180,0,0,0.82);
+                    border: 1px solid rgba(255,80,80,0.7);
+                    border-radius: 4px;
+                    padding: 2px 7px;
                     pointer-events: none;
                     font-family: ui-monospace, 'Courier New', monospace;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.7);
+                    letter-spacing: 0.03em;
                 ">${labelText}</div>`,
                 iconSize: [0, 0],
                 iconAnchor: [0, 0]

@@ -300,39 +300,47 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 		return nil
 	}
 
-	var parts []string
-	if hasReport {
-		parts = append(parts, fmt.Sprintf("#%d spots (%d/day)", allReport.Rank, allReport.Day))
-	}
-	if hasCountry {
-		parts = append(parts, fmt.Sprintf("#%d countries (%d/day)", allCountry.Rank, allCountry.Day))
-	}
-
 	// Colour by report rank: top 10 = lime, top 50 = amber, otherwise white.
-	color := "white"
+	topColor := "white"
 	if hasReport {
 		switch {
 		case allReport.Rank <= 10:
-			color = "lime"
+			topColor = "lime"
 		case allReport.Rank <= 50:
-			color = "amber"
+			topColor = "amber"
 		}
 	}
 
-	age := ""
+	// Build segments: rank label in white, daily count in blue.
+	// e.g. ["#3 spots", " (120/day)  ", "#7 countries", " (45/day)", " (5m ago)"]
+	var segs []gudriver.Segment
+	if hasReport {
+		segs = append(segs,
+			gudriver.Segment{Text: fmt.Sprintf("#%d spots", allReport.Rank), Color: "white"},
+			gudriver.Segment{Text: fmt.Sprintf(" (%d/day)", allReport.Day), Color: "blue"},
+		)
+	}
+	if hasCountry {
+		if hasReport {
+			segs = append(segs, gudriver.Segment{Text: "  ", Color: "blue"})
+		}
+		segs = append(segs,
+			gudriver.Segment{Text: fmt.Sprintf("#%d countries", allCountry.Rank), Color: "white"},
+			gudriver.Segment{Text: fmt.Sprintf(" (%d/day)", allCountry.Day), Color: "blue"},
+		)
+	}
 	if !data.FetchedAt.IsZero() {
 		mins := int(time.Since(data.FetchedAt).Minutes())
 		if mins > 0 {
-			age = fmt.Sprintf(" (%dm ago)", mins)
+			segs = append(segs, gudriver.Segment{Text: fmt.Sprintf(" (%dm ago)", mins), Color: "blue"})
 		}
 	}
 
 	return &monitorSlide{
-		topLine:    formatTopLine("PSK", userCountStr(sessions, maxSessions)),
-		topColor:   color,
-		value:      strings.Join(parts, "  ") + age,
-		valueColor: color,
-		transition: gudriver.TransitionFade,
+		topLine:       formatTopLine("PSK", userCountStr(sessions, maxSessions)),
+		topColor:      topColor,
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
 	}
 }
 
@@ -537,7 +545,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 					Y:           "bottom",
 					ScrollSpeed: monitorScrollSpeed,
 					ScrollPause: monitorScrollPause,
-					ScrollLoop:  false,
+					ScrollLoop:  true,
 					ScrollStart: gudriver.ScrollStartLeft,
 				},
 			},
@@ -553,7 +561,7 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 		Y:           "bottom",
 		ScrollSpeed: monitorScrollSpeed,
 		ScrollPause: monitorScrollPause,
-		ScrollLoop:  false,
+		ScrollLoop:  true,
 		ScrollStart: gudriver.ScrollStartLeft,
 	}
 	if len(slide.valueSegments) > 0 {

@@ -834,6 +834,12 @@ body {
     font-size: 0.82em;
 }
 
+.custom-band-button.active {
+    border-color: white !important;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.8),
+                0 0 8px rgba(255, 255, 255, 0.6) inset !important;
+}
+
 .custom-band-button:hover {
     filter: brightness(1.15);
     transform: translateY(-2px);

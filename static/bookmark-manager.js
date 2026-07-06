@@ -865,10 +865,19 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     const minSignalWidthHz = rxBandwidthHz * 0.5;
     const maxSignalWidthHz = rxBandwidthHz * 1.5;
     const hzPerBin = totalBandwidth / binCount;
+
+    // DEBUG — remove after tuning
+    console.log(`[brackets] noise=${noiseFloor.toFixed(1)}dB  appear@${(noiseFloor+BRACKET_APPEAR_THRESHOLD_DB).toFixed(1)}dB  rxBW=${rxBandwidthHz.toFixed(0)}Hz  min=${minSignalWidthHz.toFixed(0)}Hz  max=${maxSignalWidthHz.toFixed(0)}Hz  hzPerBin=${hzPerBin.toFixed(2)}`);
+    console.log(`[brackets] raw runs: ${newRuns.length}`, newRuns.map(r => `peak=${r.peakDb.toFixed(1)}dB bins=${r.startBin}-${r.endBin}`));
+    console.log(`[brackets] expanded:`, expandedRuns.map(r => { const w=(r.endBin-r.startBin+1)*hzPerBin; return `${w.toFixed(0)}Hz peak=${r.peakDb.toFixed(1)}dB`; }));
+
     const filteredRuns = expandedRuns.filter(run => {
         const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
-        return runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
+        const pass = runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
+        if (!pass) console.log(`[brackets] REJECTED ${runWidthHz.toFixed(0)}Hz (need ${minSignalWidthHz.toFixed(0)}–${maxSignalWidthHz.toFixed(0)}Hz)`);
+        return pass;
     });
+    console.log(`[brackets] after filter: ${filteredRuns.length} runs`);
 
     // Sort by peak power, take top N
     filteredRuns.sort((a, b) => b.peakDb - a.peakDb);

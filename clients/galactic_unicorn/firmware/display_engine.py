@@ -21,8 +21,9 @@ DISPLAY_HEIGHT = 11
 # The display is only 11px tall, so scale=2 and scale=3 always clip.
 # For layout purposes we cap at DISPLAY_HEIGHT so y="middle" stays on screen.
 #
-# Two size=1 lines: y=0 (rows 0-5) and y=6 (rows 6-11, bottom row clips by 1px).
-# This is the best fit possible and is visually acceptable.
+# Two size=1 lines (auto): y=1 (rows 1-6) and y=7 (rows 7-12, bottom row clips
+# by 1px — but the font doesn't use that pixel). This shifts the font's blank
+# leading row from the top of the display to between the two lines.
 FONT_HEIGHTS = {1: 6, 2: 11, 3: 11}
 
 # Approximate character widths in pixels per font size (PicoGraphics bitmap font)
@@ -254,6 +255,19 @@ class DisplayMessage:
             y = resolve_y(line.y_spec, line.size, i, prev_bottom)
             line.y = y
             prev_bottom = y + FONT_HEIGHTS.get(line.size, 6)
+
+        # When showing 2 size=1 lines, clip the font's 1px blank leading row
+        # off the top by starting line 0 at y=-1.  The visible glyph pixels
+        # (rows 1-5 of the 6px cell) land on display rows 0-4.  Line 1 at y=5
+        # then fills rows 5-10, using all 11 display rows with no wasted LEDs.
+        #   Line 0: y=-1 (cell rows 0-5 → display rows -1 to 4; top blank clips)
+        #   Line 1: y=5  (cell rows 0-5 → display rows 5-10; fits perfectly)
+        # Apply regardless of y_spec.
+        if (len(self.lines) == 2
+                and self.lines[0].size == 1
+                and self.lines[1].size == 1):
+            self.lines[0].y = -1
+            self.lines[1].y = 5
 
         # Timestamps set when message becomes active
         self.started_at = None

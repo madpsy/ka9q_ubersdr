@@ -505,7 +505,8 @@ def _btn_show_ip():
 def _btn_show_wifi():
     """Button B — display Wi-Fi SSID (top line) and connection status (bottom line).
 
-    Two size=1 lines fit on the 11px display: y=0 (rows 0-4) and y=6 (rows 6-10).
+    Two size=1 lines: display_engine shifts them to y=1 and y=7 so the font's
+    blank leading row appears between the lines rather than above line 0.
     """
     connected = _wlan is not None and _wlan.isconnected()
     ssid = getattr(config, "WIFI_SSID", None) or "?"

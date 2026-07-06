@@ -835,6 +835,9 @@ body {
 }
 
 .band-status-badge.custom-band-button.active {
+    /* Distinct dark-green background like the main .band-btn.active buttons so the
+       highlight is obvious (the base .custom-band-button green never changed before). */
+    background: #155724 !important;
     border: 3px solid white !important;
     box-shadow: 0 0 15px rgba(255, 255, 255, 0.8),
                 0 0 8px rgba(255, 255, 255, 0.6) inset !important;

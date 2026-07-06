@@ -1376,19 +1376,15 @@ function updateBandButtons(frequency) {
     });
 
     // Update custom band buttons (have data-min / data-max instead of data-band)
-    const customBtns = document.querySelectorAll('.custom-band-button');
-    console.log(`[custom-band] updateBandButtons freq=${frequency}, found ${customBtns.length} custom buttons`);
-    customBtns.forEach(btn => {
+    document.querySelectorAll('.custom-band-button').forEach(btn => {
         const min = parseInt(btn.getAttribute('data-min'));
         const max = parseInt(btn.getAttribute('data-max'));
         const inRange = !isNaN(min) && !isNaN(max) && frequency >= min && frequency <= max;
-        console.log(`[custom-band] btn="${btn.textContent}" min=${min} max=${max} inRange=${inRange} classes=${btn.className}`);
         if (inRange) {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
         }
-        console.log(`[custom-band] btn="${btn.textContent}" classes after=${btn.className}`);
     });
 
     // Also update band status badges if the function exists

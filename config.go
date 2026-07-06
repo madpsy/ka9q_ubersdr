@@ -471,7 +471,7 @@ type ChatConfig struct {
 	UpdateRateLimitPerSecond     int    `yaml:"update_rate_limit_per_second"`      // Maximum user updates per second per user (default: 4)
 	LogToCSV                     bool   `yaml:"log_to_csv"`                        // Enable CSV logging of chat messages (default: true)
 	DataDir                      string `yaml:"data_dir"`                          // Directory to store CSV chat log files (default: "chat")
-	OwnerCallsignFromAdminIPOnly bool   `yaml:"owner_callsign_from_admin_ip_only"` // Restrict owner callsign to admin IPs only (default: true)
+	OwnerCallsignFromAdminIPOnly *bool  `yaml:"owner_callsign_from_admin_ip_only"` // Restrict owner callsign to admin IPs only (default: true)
 	WelcomeMessage               string `yaml:"welcome_message"`                   // Optional welcome message sent to new clients (empty = disabled)
 }
 
@@ -486,7 +486,7 @@ type SpaceWeatherConfig struct {
 // InstanceReportingConfig contains settings for reporting to central instance registry
 type InstanceReportingConfig struct {
 	Enabled                    bool                   `yaml:"enabled"`                      // Enable/disable instance reporting
-	UseHTTPS                   bool                   `yaml:"use_https"`                    // Use HTTPS (true) or HTTP (false) for connections
+	UseHTTPS                   *bool                  `yaml:"use_https"`                    // Use HTTPS (true) or HTTP (false) for connections
 	UseMyIP                    bool                   `yaml:"use_myip"`                     // Automatically use public IP for public access
 	CreateDomain               bool                   `yaml:"create_domain"`                // Request automatic DNS subdomain creation
 	GenerateTLS                bool                   `yaml:"generate_tls"`                 // Generate TLS certificate with Caddy (default: false)
@@ -501,7 +501,7 @@ type InstanceReportingConfig struct {
 	TunnelServerEnabled        bool                   `yaml:"tunnel_server_enabled"`        // Enable/disable tunnel server integration (default: false)
 	TunnelServerURI            string                 `yaml:"tunnel_server_uri"`            // Tunnel server WebSocket URI (default: wss://tunnel.ubersdr.org/tunnel/connect)
 	BetaFrontend               bool                   `yaml:"beta_frontend"`                // Enable beta frontend features (default: false)
-	NotifyInstanceDisconnected bool                   `yaml:"notify_instance_disconnected"` // Notify when instance disconnects (default: true)
+	NotifyInstanceDisconnected *bool                  `yaml:"notify_instance_disconnected"` // Notify when instance disconnects (default: true)
 	NotifyInstanceStartup      bool                   `yaml:"notify_instance_startup"`      // Notify on instance startup (default: false)
 	tunnelServerIPs            []string               // Resolved IPs of tunnel server (internal use)
 	instanceReporterIPs        []string               // Resolved IPs of instance reporter (internal use)
@@ -518,7 +518,7 @@ type InstanceConnectionInfo struct {
 type NoiseFloorConfig struct {
 	Enabled         bool             `yaml:"enabled"`
 	PollIntervalSec int              `yaml:"poll_interval_sec"` // Seconds between measurements
-	RestartOnStall  bool             `yaml:"restart_on_stall"`  // Exit ubersdr when all bands stall post-reconnect
+	RestartOnStall  *bool            `yaml:"restart_on_stall"`  // Exit ubersdr when all bands stall post-reconnect (default: true)
 	DataDir         string           `yaml:"data_dir"`          // Directory to store CSV files
 	Bands           []NoiseFloorBand `yaml:"bands"`             // Amateur radio bands to monitor
 }
@@ -599,7 +599,7 @@ type GPSDOConfig struct {
 
 // SSHProxyConfig contains SSH terminal proxy settings
 type SSHProxyConfig struct {
-	Enabled    bool     `yaml:"enabled"`     // Enable/disable SSH terminal proxy
+	Enabled    *bool    `yaml:"enabled"`     // Enable/disable SSH terminal proxy
 	Host       string   `yaml:"host"`        // GoTTY container hostname
 	Port       int      `yaml:"port"`        // GoTTY container port
 	AllowedIPs []string `yaml:"allowed_ips"` // List of IPs/CIDRs allowed to access SSH proxy
@@ -800,7 +800,7 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Parse SSH proxy allowed IPs/CIDRs
-	if config.SSHProxy.Enabled {
+	if config.SSHProxy.Enabled != nil && *config.SSHProxy.Enabled {
 		if err := config.SSHProxy.parseAllowedIPs(); err != nil {
 			return nil, fmt.Errorf("failed to parse ssh_proxy.allowed_ips: %w", err)
 		}
@@ -1077,11 +1077,11 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Chat.DataDir == "" {
 		config.Chat.DataDir = "chat" // Default "chat" directory
 	}
-	// Owner callsign restriction defaults to true (enabled) for security
-	// Note: YAML bool defaults to false, so we need to explicitly set it to true
-	// This prevents impersonation of the station owner in chat
-	if !config.Chat.OwnerCallsignFromAdminIPOnly {
-		config.Chat.OwnerCallsignFromAdminIPOnly = true // Default true (enabled)
+	// Owner callsign restriction defaults to true (enabled) for security.
+	// Uses *bool so "not set" (nil) can be distinguished from "explicitly false".
+	if config.Chat.OwnerCallsignFromAdminIPOnly == nil {
+		t := true
+		config.Chat.OwnerCallsignFromAdminIPOnly = &t
 	}
 
 	// Set space weather defaults if not specified
@@ -1094,10 +1094,12 @@ func LoadConfig(filename string) (*Config, error) {
 	// to exactly 60 seconds so the band-status badges always reflect real data.
 	config.NoiseFloor.Enabled = true
 	config.NoiseFloor.PollIntervalSec = 60 // Always 60 seconds — not user-configurable
-	// RestartOnStall defaults to true - exit ubersdr when all bands stall post-reconnect
-	// Note: YAML booleans default to false, so we set it to true if not explicitly disabled
-	if !config.NoiseFloor.RestartOnStall {
-		config.NoiseFloor.RestartOnStall = true
+	// RestartOnStall defaults to true - exit ubersdr when all bands stall post-reconnect.
+	// Uses *bool so we can distinguish "not set in YAML" (nil → default true) from
+	// "explicitly set to false" (pointer to false → honour the user's choice).
+	if config.NoiseFloor.RestartOnStall == nil {
+		t := true
+		config.NoiseFloor.RestartOnStall = &t
 	}
 	// Note: DataDir will be set relative to config directory in main.go
 	// Default is "noisefloor" subdirectory in config directory
@@ -1149,21 +1151,16 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.InstanceReporting.TunnelServerURI == "" {
 		config.InstanceReporting.TunnelServerURI = "wss://tunnel.ubersdr.org/tunnel/connect"
 	}
-	// UseHTTPS defaults to true (YAML unmarshaling will set it to false if explicitly set)
-	// We set it to true here to ensure it's true by default
-	if !config.InstanceReporting.UseHTTPS {
-		// Only set to true if it's currently false (meaning it wasn't explicitly set in YAML)
-		// This is a bit of a hack, but YAML booleans default to false
-		// In practice, we'll document that use_https defaults to true
-		config.InstanceReporting.UseHTTPS = true
+	// UseHTTPS defaults to true. Uses *bool so "not set" (nil) is distinguished from
+	// "explicitly set to false" (e.g. for local HTTP-only testing).
+	if config.InstanceReporting.UseHTTPS == nil {
+		t := true
+		config.InstanceReporting.UseHTTPS = &t
 	}
-	// NotifyInstanceDisconnected defaults to true
-	// Note: YAML booleans default to false, so we need to explicitly set this
-	// We'll assume it should be true unless explicitly set to false in the config
-	// This is handled by checking if the value is false (default) and setting to true
-	// In practice, users can set it to false in their config to disable
-	if !config.InstanceReporting.NotifyInstanceDisconnected {
-		config.InstanceReporting.NotifyInstanceDisconnected = true
+	// NotifyInstanceDisconnected defaults to true. Same *bool pattern.
+	if config.InstanceReporting.NotifyInstanceDisconnected == nil {
+		t := true
+		config.InstanceReporting.NotifyInstanceDisconnected = &t
 	}
 	// NotifyInstanceStartup defaults to false (already false by default from YAML unmarshaling)
 
@@ -1215,10 +1212,11 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.SSHProxy.Port == 0 {
 		config.SSHProxy.Port = 9980 // Default GoTTY port
 	}
-	// SSHProxy.Enabled defaults to true (enabled by default)
-	// Note: YAML booleans default to false, so we set it to true if not explicitly disabled
-	if !config.SSHProxy.Enabled {
-		config.SSHProxy.Enabled = true
+	// SSHProxy.Enabled defaults to true. Uses *bool so "not set" (nil) is distinguished
+	// from "explicitly set to false" (to disable the SSH terminal proxy).
+	if config.SSHProxy.Enabled == nil {
+		t := true
+		config.SSHProxy.Enabled = &t
 	}
 	// Set default allowed IPs if not specified (allow all by default)
 	if len(config.SSHProxy.AllowedIPs) == 0 {

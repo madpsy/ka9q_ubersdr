@@ -19,7 +19,7 @@ type SSHProxy struct {
 
 // NewSSHProxy creates a new SSH proxy instance
 func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
-	if !config.Enabled {
+	if config.Enabled == nil || !*config.Enabled {
 		return &SSHProxy{
 			config:      config,
 			rateLimiter: NewSSHProxyRateLimiter(),
@@ -103,7 +103,7 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 
 // ServeHTTP handles the proxy request (authentication handled by middleware)
 func (sp *SSHProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !sp.config.Enabled {
+	if sp.config.Enabled == nil || !*sp.config.Enabled {
 		http.Error(w, "SSH terminal proxy is disabled", http.StatusServiceUnavailable)
 		return
 	}

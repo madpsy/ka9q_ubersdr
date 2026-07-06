@@ -1109,6 +1109,7 @@ noisefloor:
   # (Docker) will restart ubersdr, which in turn triggers a fresh radiod restart via
   # entrypoint.sh. This is the most reliable recovery from a radiod crash or hang.
   # When disabled, only individual channel reconnection is attempted indefinitely.
+  # NOTE: Set explicitly to false to disable — omitting this key defaults to true.
   restart_on_stall: true
 
   # Directory to store CSV data files (one file per day)

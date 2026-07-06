@@ -1785,7 +1785,7 @@ func (nfm *NoiseFloorMonitor) checkAndReconnectStalled() {
 	// radiod has likely died and is not recovering. Exit ubersdr so the process
 	// manager restarts it, which in turn triggers a fresh radiod restart via
 	// entrypoint.sh (touch /var/run/restart-trigger/restart).
-	if nfm.config.NoiseFloor.RestartOnStall {
+	if nfm.config.NoiseFloor.RestartOnStall != nil && *nfm.config.NoiseFloor.RestartOnStall {
 		stalledPostReconnect := 0
 		eligible := 0
 		for _, bs := range nfm.bandSpectrums {

@@ -437,7 +437,7 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 			// Log to CSV
 			if md.spotsLogger != nil {
 				shouldLog := true
-				if md.config.SpotsLogLocatorsOnly && !decode.HasLocator {
+				if (md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly) && !decode.HasLocator {
 					shouldLog = false
 				}
 				if shouldLog {
@@ -706,7 +706,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 				if md.spotsLogger != nil {
 					// Check if we should only log spots with valid locators
 					shouldLog := true
-					if md.config.SpotsLogLocatorsOnly && !decode.HasLocator {
+					if (md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly) && !decode.HasLocator {
 						shouldLog = false
 					}
 

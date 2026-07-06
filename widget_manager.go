@@ -100,7 +100,7 @@ func (wm *WidgetManager) Stop() {
 // collectorBaseURL returns the base URL for the collector API.
 func (wm *WidgetManager) collectorBaseURL() string {
 	scheme := "https"
-	if !wm.config.InstanceReporting.UseHTTPS {
+	if wm.config.InstanceReporting.UseHTTPS == nil || !*wm.config.InstanceReporting.UseHTTPS {
 		scheme = "http"
 	}
 	host := wm.config.InstanceReporting.Hostname

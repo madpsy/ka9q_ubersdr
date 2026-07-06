@@ -33,7 +33,7 @@ type GoTTYExecResponse struct {
 // NewGoTTYClient creates a new GoTTY API client using the provided config
 // Returns nil if SSH proxy is not enabled in the configuration
 func NewGoTTYClient(config *SSHProxyConfig) *GoTTYClient {
-	if config == nil || !config.Enabled {
+	if config == nil || config.Enabled == nil || !*config.Enabled {
 		return nil
 	}
 

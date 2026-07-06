@@ -125,7 +125,7 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 		chatLogger:                   chatLogger,
 		mqttPublisher:                mqttPublisher,
 		adminCallsign:                strings.ToUpper(adminConfig.Callsign),
-		ownerCallsignFromAdminIPOnly: chatConfig.OwnerCallsignFromAdminIPOnly,
+		ownerCallsignFromAdminIPOnly: chatConfig.OwnerCallsignFromAdminIPOnly != nil && *chatConfig.OwnerCallsignFromAdminIPOnly,
 		adminConfig:                  adminConfig,
 	}
 

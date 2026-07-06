@@ -602,7 +602,7 @@ func (ir *InstanceReporter) getPublicIP() (string, error) {
 	// Build URL with http or https based on config
 	protocol := "https"
 	defaultPort := 443
-	if !ir.config.InstanceReporting.UseHTTPS {
+	if ir.config.InstanceReporting.UseHTTPS == nil || !*ir.config.InstanceReporting.UseHTTPS {
 		protocol = "http"
 		defaultPort = 80
 	}
@@ -771,7 +771,7 @@ func (ir *InstanceReporter) sendReport() error {
 		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
 		EnabledWidgets:             ir.config.Server.EnabledWidgets,
-		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
+		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected != nil && *ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 	}
 	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
@@ -790,7 +790,7 @@ func (ir *InstanceReporter) sendReport() error {
 	// Build URL with http or https based on config
 	protocol := "https"
 	defaultPort := 443
-	if !ir.config.InstanceReporting.UseHTTPS {
+	if ir.config.InstanceReporting.UseHTTPS == nil || !*ir.config.InstanceReporting.UseHTTPS {
 		protocol = "http"
 		defaultPort = 80
 	}
@@ -1166,7 +1166,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Addons:                     ir.getEnabledAddonNames(),
 		EnabledWidgets:             ir.config.Server.EnabledWidgets,
 		Test:                       isTest,
-		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
+		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected != nil && *ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 	}
 	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
@@ -1184,7 +1184,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	// Build URL with http or https based on config
 	protocol = "https"
 	defaultPort := 443
-	if !ir.config.InstanceReporting.UseHTTPS {
+	if ir.config.InstanceReporting.UseHTTPS == nil || !*ir.config.InstanceReporting.UseHTTPS {
 		protocol = "http"
 		defaultPort = 80
 	}
@@ -1579,7 +1579,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			Spectrogram:                config.Spectrogram.IsEnabled(),
 			StartupReport:              true,
 			Addons:                     enabledAddons,
-			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected,
+			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected != nil && *config.InstanceReporting.NotifyInstanceDisconnected,
 			NotifyInstanceStartup:      config.InstanceReporting.NotifyInstanceStartup,
 			Frontend:                   buildStartupFrontendInfo(frontendHistory),
 		}
@@ -1593,7 +1593,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 		// Build URL
 		protocol := "https"
 		defaultPort := 443
-		if !config.InstanceReporting.UseHTTPS {
+		if config.InstanceReporting.UseHTTPS == nil || !*config.InstanceReporting.UseHTTPS {
 			protocol = "http"
 			defaultPort = 80
 		}

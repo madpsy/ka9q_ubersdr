@@ -901,11 +901,12 @@ func main() {
 
 	// Set default value for spots locators only filter
 	// Default to true (only log/show spots with valid locators)
-	// Users must explicitly set to false in config to log/see all spots
+	// Users must explicitly set to false in config to log/see all spots.
+	// Uses *bool so "not set" (nil) is distinguished from "explicitly false".
 	if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled {
-		// Since bool defaults to false in Go/YAML, we set it to true if it's false
-		if !config.Decoder.SpotsLogLocatorsOnly {
-			config.Decoder.SpotsLogLocatorsOnly = true
+		if config.Decoder.SpotsLogLocatorsOnly == nil {
+			t := true
+			config.Decoder.SpotsLogLocatorsOnly = &t
 		}
 	}
 
@@ -1853,7 +1854,7 @@ func main() {
 
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
 	var sshProxy *SSHProxy
-	if config.SSHProxy.Enabled {
+	if config.SSHProxy.Enabled != nil && *config.SSHProxy.Enabled {
 		var err error
 		sshProxy, err = NewSSHProxy(&config.SSHProxy)
 		if err != nil {
@@ -5508,7 +5509,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 
 	// Hardcode deduplication and locators only to true
 	deduplicate := true
-	locatorsOnly := md.config.SpotsLogLocatorsOnly
+	locatorsOnly := md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64
@@ -5682,7 +5683,7 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 
 	// Hardcode deduplication and locators only to true
 	deduplicate := true
-	locatorsOnly := md.config.SpotsLogLocatorsOnly
+	locatorsOnly := md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64

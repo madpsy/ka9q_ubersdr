@@ -71,9 +71,9 @@ const (
 	monitorMessageID = "monitor-display"
 
 	// monitorTopLineWidth is the character budget for the top status line.
-	// At size=1 (6 px/char) this gives 48 px — fits in the 53 px display
-	// without scrolling.
-	monitorTopLineWidth = 8
+	// At size=1 the bitmap6 font averages ~5 px/char; 10 chars ≈ 50 px which
+	// fits comfortably in the 53 px display without scrolling.
+	monitorTopLineWidth = 10
 
 	// monitorBandsPerLine is the number of band labels that fit on one line
 	// without scrolling.  "80 40 30" = 8 chars × 6 px = 48 px ≤ 53 px.
@@ -177,8 +177,8 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		value = fmt.Sprintf("%d/%d users (%d free)", regular, maxSessions, free)
 	}
 
-	// Users slide: top line shows "USR" label; user count is already in the value.
-	topLine := formatTopLine("USR", fmt.Sprintf("%d/%d", regular, maxSessions))
+	// Users slide: top line shows "USER" label; user count is already in the value.
+	topLine := formatTopLine("USER", fmt.Sprintf("%d/%d", regular, maxSessions))
 
 	return monitorSlide{
 		topLine:    topLine,
@@ -265,7 +265,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 
 	// Colour-coded segments: temperature in status colour, limit in white.
 	segs := []gudriver.Segment{
-		{Text: fmt.Sprintf("%.1fC", tempC), Color: color},
+		{Text: fmt.Sprintf("%.0fC", tempC), Color: color},
 	}
 	if threshold > 0 {
 		segs = append(segs, gudriver.Segment{Text: fmt.Sprintf(" /%.0fC", threshold), Color: "white"})

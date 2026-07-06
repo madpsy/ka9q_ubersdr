@@ -4,11 +4,20 @@ package main
 // Unicorn (or compatible) LED matrix display using the gudriver sub-package.
 //
 // When config.MonitorDisplay.Enabled is true, a background goroutine starts
-// that rotates through a set of "slides" every SlideDuration seconds.  Each
-// slide uses the 2-line layout supported by the bitmap6 font at size=1:
+// that rotates through a set of "slides" every SlideDuration seconds.
 //
-//	Line 0 (top, static)    — category label, e.g. "USERS"
-//	Line 1 (bottom, scroll) — value string, e.g. "3 of 20 regular (17 free)"
+// Layout
+// ──────
+// Most slides use a two-line layout at size=1 (6 px per line):
+//
+//	Line 0 (top, static)    — short category label left + "N/MAX" user count right
+//	Line 1 (bottom, scroll) — metric value; scrolls once if wider than 53 px
+//
+// The clock slide is a special case: a single centred line showing HH:MM:SS
+// at size=1, updated every second.  No label — the format is self-evident.
+//
+// The band-conditions slide uses the segments feature to colour each band name
+// individually (lime = good/excellent, amber = fair).
 //
 // Colour coding follows the same green/amber/red convention used in the admin
 // monitor tab:
@@ -57,6 +66,11 @@ const (
 	// monitorMessageID is the stable ID used for all monitor slides so each
 	// new slide replaces the previous one in-place without queuing.
 	monitorMessageID = "monitor-display"
+
+	// monitorTopLineWidth is the character budget for the top status line.
+	// At size=1 (6 px/char) this gives 48 px — fits in the 53 px display
+	// without scrolling.
+	monitorTopLineWidth = 8
 )
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
@@ -76,22 +90,55 @@ func statusColor(status string) string {
 	}
 }
 
+// ─── Top-line helpers ─────────────────────────────────────────────────────────
+
+// formatTopLine builds the 8-character top status line:
+// label is left-aligned, right is right-aligned, padded with spaces between.
+// Both are truncated if they would overflow the budget.
+func formatTopLine(label, right string) string {
+	total := monitorTopLineWidth
+	// Ensure label + right fit with at least one space between them.
+	maxLabel := total - len(right) - 1
+	if maxLabel < 0 {
+		maxLabel = 0
+	}
+	if len(label) > maxLabel {
+		label = label[:maxLabel]
+	}
+	pad := total - len(label) - len(right)
+	if pad < 0 {
+		pad = 0
+	}
+	return label + strings.Repeat(" ", pad) + right
+}
+
+// userCountStr returns a compact "N/MAX" user count string.
+func userCountStr(sessions *SessionManager, maxSessions int) string {
+	regular := sessions.GetNonBypassedUserCount()
+	return fmt.Sprintf("%d/%d", regular, maxSessions)
+}
+
 // ─── Slide builders ───────────────────────────────────────────────────────────
 
-// monitorSlide is a single display frame: a label line and a value line.
+// monitorSlide is a single display frame.
 type monitorSlide struct {
-	label      string // top line — short category name, static
-	value      string // bottom line — metric value, scrolling
-	labelColor string // named colour for the label
-	valueColor string // named colour for the value
-	isClock    bool   // when true, the slide is re-sent every second with the current time
+	// Two-line layout fields (used when singleLine is false):
+	topLine       string             // top line text (label + user count), static
+	topColor      string             // colour for the top line
+	topSegments   []gudriver.Segment // when non-nil, top line uses multi-colour segments
+	value         string             // bottom line — metric value, may scroll
+	valueColor    string             // colour for the value
+	valueSegments []gudriver.Segment // when non-nil, used instead of value+valueColor
+
+	// Single-line layout (clock):
+	singleLine bool // when true, render only value centred on the full display
+	isClock    bool // when true, re-sent every second with the current time
 }
 
 // buildUsersSlide returns a slide showing current / max user counts.
 func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	regular := sessions.GetNonBypassedUserCount()
 	bypassed := sessions.GetBypassedUserCount()
-	total := regular + bypassed
 	free := maxSessions - regular
 	if free < 0 {
 		free = 0
@@ -109,61 +156,83 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 
 	var value string
 	if bypassed > 0 {
-		value = fmt.Sprintf("%d of %d users (%d free, %d admin)", regular, maxSessions, free, bypassed)
+		value = fmt.Sprintf("%d/%d users (%d free, %d admin)", regular, maxSessions, free, bypassed)
 	} else {
-		value = fmt.Sprintf("%d of %d users (%d free)", regular, maxSessions, free)
+		value = fmt.Sprintf("%d/%d users (%d free)", regular, maxSessions, free)
 	}
-	_ = total
+
+	// Users slide: top line shows "USR" label; user count is already in the value.
+	topLine := formatTopLine("USR", fmt.Sprintf("%d/%d", regular, maxSessions))
 
 	return monitorSlide{
-		label:      "USERS",
+		topLine:    topLine,
+		topColor:   valueColor,
 		value:      value,
-		labelColor: valueColor,
 		valueColor: valueColor,
 	}
 }
 
-// buildTimeSlide returns a slide that shows the current UTC time (HH:MM:SS).
-// The slide is marked isClock=true so the sequencer refreshes it every second.
+// buildTimeSlide returns a clock slide: single centred line showing HH:MM:SS.
+// No label — the format is self-evident.  Marked isClock=true so the
+// sequencer refreshes it every second.
 func buildTimeSlide() monitorSlide {
 	now := time.Now().UTC()
 	return monitorSlide{
-		label:      "UTC TIME",
-		value:      now.Format("15:04:05  Mon 02 Jan 2006"),
-		labelColor: "cyan",
-		valueColor: "white",
+		value:      now.Format("15:04:05"),
+		valueColor: "cyan",
+		singleLine: true,
 		isClock:    true,
 	}
 }
 
-// buildLoadSlide returns a slide showing the 5-minute load average.
-func buildLoadSlide() monitorSlide {
+// loadColor returns a colour for a load value relative to core count.
+// ≥ cores = red, ≥ 75% cores = amber, otherwise lime.
+func loadColor(load float64, cores int) string {
+	if cores <= 0 {
+		return "white"
+	}
+	switch {
+	case load >= float64(cores):
+		return "red"
+	case load >= float64(cores)*0.75:
+		return "amber"
+	default:
+		return "lime"
+	}
+}
+
+// buildLoadSlide returns a slide showing load averages, colour-coded per value.
+// Bottom line uses segments: 5m value in status colour, 1m value in its own
+// colour, core count in white — all compact with no redundant labels.
+func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	data := getSystemLoad()
 
 	load5, _ := strconv.ParseFloat(fmt.Sprintf("%v", data["load_5min"]), 64)
 	load1, _ := strconv.ParseFloat(fmt.Sprintf("%v", data["load_1min"]), 64)
 	cores, _ := data["cpu_cores"].(int)
 	status, _ := data["status"].(string)
+	topColor := statusColor(status)
 
-	var coresStr string
+	// Build colour-coded segments: "0.42 " (5m colour) + "0.38" (1m colour) + " /4c" (white)
+	segs := []gudriver.Segment{
+		{Text: fmt.Sprintf("%.2f ", load5), Color: loadColor(load5, cores)},
+		{Text: fmt.Sprintf("%.2f", load1), Color: loadColor(load1, cores)},
+	}
 	if cores > 0 {
-		coresStr = fmt.Sprintf(" / %d cores", cores)
+		segs = append(segs, gudriver.Segment{Text: fmt.Sprintf(" /%dc", cores), Color: "white"})
 	}
 
-	value := fmt.Sprintf("5m: %.2f  1m: %.2f%s", load5, load1, coresStr)
-	color := statusColor(status)
-
 	return monitorSlide{
-		label:      "LOAD AVG",
-		value:      value,
-		labelColor: color,
-		valueColor: color,
+		topLine:       formatTopLine("LOAD", userCountStr(sessions, maxSessions)),
+		topColor:      topColor,
+		valueSegments: segs,
 	}
 }
 
-// buildCPUTempSlide returns a slide showing CPU temperature.
+// buildCPUTempSlide returns a slide showing CPU temperature, colour-coded.
 // Returns nil if temperature is not available.
-func buildCPUTempSlide() *monitorSlide {
+// Bottom line uses segments: temperature value in status colour, threshold in white.
+func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide {
 	data := getSystemLoad()
 
 	avail, _ := data["cpu_temp_available"].(bool)
@@ -174,31 +243,26 @@ func buildCPUTempSlide() *monitorSlide {
 	tempC, _ := data["cpu_temp_c"].(float64)
 	threshold, _ := data["cpu_temp_threshold_c"].(float64)
 	tempStatus, _ := data["cpu_temp_status"].(string)
-	driver, _ := data["cpu_temp_driver"].(string)
-
-	var threshStr string
-	if threshold > 0 {
-		threshStr = fmt.Sprintf(" / %.0f°C limit", threshold)
-	}
-	var driverStr string
-	if driver != "" {
-		driverStr = fmt.Sprintf(" [%s]", driver)
-	}
-
-	value := fmt.Sprintf("%.1f°C%s%s", tempC, threshStr, driverStr)
 	color := statusColor(tempStatus)
 
+	// Colour-coded segments: temperature in status colour, limit in white.
+	segs := []gudriver.Segment{
+		{Text: fmt.Sprintf("%.1fC", tempC), Color: color},
+	}
+	if threshold > 0 {
+		segs = append(segs, gudriver.Segment{Text: fmt.Sprintf(" /%.0fC", threshold), Color: "white"})
+	}
+
 	return &monitorSlide{
-		label:      "CPU TEMP",
-		value:      value,
-		labelColor: color,
-		valueColor: color,
+		topLine:       formatTopLine("TEMP", userCountStr(sessions, maxSessions)),
+		topColor:      color,
+		valueSegments: segs,
 	}
 }
 
 // buildPSKSlide returns a slide showing PSKReporter rank for the given callsign.
 // Returns nil when no data is available or the callsign is not ranked.
-func buildPSKSlide(psk *PSKRankFetcher, callsign string) *monitorSlide {
+func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManager, maxSessions int) *monitorSlide {
 	if psk == nil || callsign == "" {
 		return nil
 	}
@@ -245,85 +309,11 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string) *monitorSlide {
 	}
 
 	return &monitorSlide{
-		label:      "PSK RANK",
+		topLine:    formatTopLine("PSK", userCountStr(sessions, maxSessions)),
+		topColor:   color,
 		value:      strings.Join(parts, "  ") + age,
-		labelColor: color,
 		valueColor: color,
 	}
-}
-
-// buildNoiseFloorSlides returns one slide per band that has a recent
-// measurement, sorted by band name.  Bands with no FT8 SNR data are still
-// shown using the P5 noise floor estimate.
-func buildNoiseFloorSlides(nfm *NoiseFloorMonitor) []monitorSlide {
-	if nfm == nil {
-		return nil
-	}
-	measurements := nfm.GetLatestMeasurements()
-	if len(measurements) == 0 {
-		return nil
-	}
-
-	// Sort band names for a consistent slide order.
-	bands := make([]string, 0, len(measurements))
-	for b := range measurements {
-		bands = append(bands, b)
-	}
-	sort.Strings(bands)
-
-	slides := make([]monitorSlide, 0, len(bands))
-	for _, band := range bands {
-		m := measurements[band]
-		if m == nil {
-			continue
-		}
-
-		// Skip stale measurements (older than 10 minutes).
-		if time.Since(m.Timestamp) > 10*time.Minute {
-			continue
-		}
-
-		var parts []string
-
-		// Noise floor (5th percentile).
-		parts = append(parts, fmt.Sprintf("NF: %.0fdBm", m.P5DB))
-
-		// FT8 SNR if meaningful (> -30 dB is a real measurement).
-		if m.FT8SNR > -30 {
-			parts = append(parts, fmt.Sprintf("FT8 SNR: %.0fdB", m.FT8SNR))
-		}
-
-		// Dynamic range.
-		if m.DynamicRange > 0 {
-			parts = append(parts, fmt.Sprintf("DR: %.0fdB", m.DynamicRange))
-		}
-
-		// Occupancy.
-		if m.OccupancyPct >= 0 {
-			parts = append(parts, fmt.Sprintf("Occ: %.0f%%", m.OccupancyPct))
-		}
-
-		value := strings.Join(parts, "  ")
-
-		// Colour by FT8 SNR quality: good propagation = lime, poor = amber.
-		var color string
-		switch {
-		case m.FT8SNR > 10:
-			color = "lime"
-		case m.FT8SNR > 0:
-			color = "amber"
-		default:
-			color = "white"
-		}
-
-		slides = append(slides, monitorSlide{
-			label:      strings.ToUpper(band),
-			value:      value,
-			labelColor: "cyan",
-			valueColor: color,
-		})
-	}
-	return slides
 }
 
 // ─── Slide sequencer ──────────────────────────────────────────────────────────
@@ -332,62 +322,201 @@ func buildNoiseFloorSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, maxSessions int) []monitorSlide {
 	var slides []monitorSlide
 
-	// 1. UTC clock
+	// 1. UTC clock (single centred line, no label)
 	slides = append(slides, buildTimeSlide())
 
 	// 2. Users
 	slides = append(slides, buildUsersSlide(sessions, maxSessions))
 
 	// 3. Load average
-	slides = append(slides, buildLoadSlide())
+	slides = append(slides, buildLoadSlide(sessions, maxSessions))
 
 	// 4. CPU temperature (optional — omitted if not available)
-	if s := buildCPUTempSlide(); s != nil {
+	if s := buildCPUTempSlide(sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
 	// 5. PSK Reporter rank (optional — omitted if fetcher not wired or callsign not ranked)
-	if s := buildPSKSlide(psk, callsign); s != nil {
+	if s := buildPSKSlide(psk, callsign, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 6. Noise floor per band (optional — omitted if monitor not running)
-	slides = append(slides, buildNoiseFloorSlides(nfm)...)
+	// 6. Band conditions — single slide with per-band colour segments.
+	if s := buildBandConditionsSlideImpl(nfm, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
 
 	return slides
+}
+
+// buildBandConditionsSlideImpl is the real implementation (the function above
+// has a dead-code path that the compiler would reject; this one is clean).
+func buildBandConditionsSlideImpl(nfm *NoiseFloorMonitor, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if nfm == nil {
+		return nil
+	}
+	measurements := nfm.GetLatestMeasurements()
+	if len(measurements) == 0 {
+		return nil
+	}
+
+	bands := make([]string, 0, len(measurements))
+	for b := range measurements {
+		bands = append(bands, b)
+	}
+	sort.Strings(bands)
+
+	var goodSegs []gudriver.Segment
+	var fairSegs []gudriver.Segment
+
+	for _, band := range bands {
+		m := measurements[band]
+		if m == nil {
+			continue
+		}
+		if time.Since(m.Timestamp) > 10*time.Minute {
+			continue
+		}
+		if m.FT8SNR <= 0 {
+			continue
+		}
+		quality := BandSNRQuality(m.FT8SNR)
+		if quality == "POOR" {
+			continue
+		}
+		label := strings.ToUpper(band) + " "
+		switch quality {
+		case "EXCELLENT", "GOOD":
+			goodSegs = append(goodSegs, gudriver.Segment{Text: label, Color: "lime"})
+		case "FAIR":
+			fairSegs = append(fairSegs, gudriver.Segment{Text: label, Color: "amber"})
+		}
+	}
+
+	if len(goodSegs) == 0 && len(fairSegs) == 0 {
+		return nil
+	}
+
+	uCount := userCountStr(sessions, maxSessions)
+
+	if len(goodSegs) == 0 {
+		return &monitorSlide{
+			topLine:       formatTopLine("BANDS", uCount),
+			topColor:      "amber",
+			valueSegments: fairSegs,
+		}
+	}
+	if len(fairSegs) == 0 {
+		return &monitorSlide{
+			topLine:       formatTopLine("BANDS", uCount),
+			topColor:      "lime",
+			valueSegments: goodSegs,
+		}
+	}
+
+	// Both tiers: top line = good bands (lime), bottom line = fair bands (amber).
+	// Use a dedicated dualSegments slide type via the topSegments field.
+	return &monitorSlide{
+		topSegments:   goodSegs,
+		valueSegments: fairSegs,
+	}
 }
 
 // ─── Display sender ───────────────────────────────────────────────────────────
 
 // sendSlide pushes a single slide to the display.
 func sendSlide(client *gudriver.Client, slide monitorSlide) error {
+	durationSecs := gudriver.DurationSeconds(float64(monitorSlideDuration) / float64(time.Second))
+
+	// ── Clock / single-line layout ────────────────────────────────────────────
+	if slide.singleLine {
+		cmd := gudriver.DisplayCommand{
+			ID:         monitorMessageID,
+			Priority:   monitorPriority,
+			Duration:   durationSecs,
+			Transition: gudriver.TransitionFade,
+			Lines: []gudriver.DisplayLine{
+				{
+					Text:   slide.value,
+					Color:  slide.valueColor,
+					Size:   1,
+					Effect: gudriver.EffectStatic,
+					Align:  gudriver.AlignCenter,
+					Y:      "middle",
+				},
+			},
+		}
+		_, err := client.Display(cmd)
+		return err
+	}
+
+	// ── Dual-segment layout (band conditions with both tiers) ─────────────────
+	if len(slide.topSegments) > 0 {
+		cmd := gudriver.DisplayCommand{
+			ID:         monitorMessageID,
+			Priority:   monitorPriority,
+			Duration:   durationSecs,
+			Transition: gudriver.TransitionFade,
+			Lines: []gudriver.DisplayLine{
+				{
+					Segments:    slide.topSegments,
+					Size:        1,
+					Effect:      gudriver.EffectAuto,
+					Y:           "top",
+					ScrollSpeed: monitorScrollSpeed,
+					ScrollPause: monitorScrollPause,
+					ScrollLoop:  false,
+					ScrollStart: gudriver.ScrollStartLeft,
+				},
+				{
+					Segments:    slide.valueSegments,
+					Size:        1,
+					Effect:      gudriver.EffectAuto,
+					Y:           "bottom",
+					ScrollSpeed: monitorScrollSpeed,
+					ScrollPause: monitorScrollPause,
+					ScrollLoop:  false,
+					ScrollStart: gudriver.ScrollStartLeft,
+				},
+			},
+		}
+		_, err := client.Display(cmd)
+		return err
+	}
+
+	// ── Standard two-line layout ──────────────────────────────────────────────
+	bottomLine := gudriver.DisplayLine{
+		Size:        1,
+		Effect:      gudriver.EffectAuto,
+		Y:           "bottom",
+		ScrollSpeed: monitorScrollSpeed,
+		ScrollPause: monitorScrollPause,
+		ScrollLoop:  false,
+		ScrollStart: gudriver.ScrollStartLeft,
+	}
+	if len(slide.valueSegments) > 0 {
+		bottomLine.Segments = slide.valueSegments
+	} else {
+		bottomLine.Text = slide.value
+		bottomLine.Color = slide.valueColor
+	}
+
 	cmd := gudriver.DisplayCommand{
 		ID:         monitorMessageID,
 		Priority:   monitorPriority,
-		Duration:   gudriver.DurationSeconds(float64(monitorSlideDuration) / float64(time.Second)),
+		Duration:   durationSecs,
 		Transition: gudriver.TransitionFade,
 		Lines: []gudriver.DisplayLine{
 			{
-				// Top line: static label
-				Text:   slide.label,
-				Color:  slide.labelColor,
+				// Top line: static label + user count
+				Text:   slide.topLine,
+				Color:  slide.topColor,
 				Size:   1,
 				Effect: gudriver.EffectStatic,
 				Align:  gudriver.AlignLeft,
 				Y:      "top",
 			},
-			{
-				// Bottom line: scrolling value
-				Text:        slide.value,
-				Color:       slide.valueColor,
-				Size:        1,
-				Effect:      gudriver.EffectAuto,
-				Y:           "bottom",
-				ScrollSpeed: monitorScrollSpeed,
-				ScrollPause: monitorScrollPause,
-				ScrollLoop:  true,
-				ScrollStart: gudriver.ScrollStartRight,
-			},
+			bottomLine,
 		},
 	}
 
@@ -479,8 +608,6 @@ func (md *MonitorDisplay) Stop() {
 // run is the main loop: collect slides, send each one, advance after the slide
 // duration, then repeat.
 func (md *MonitorDisplay) run(ctx context.Context) {
-	// slideIndex tracks position across rotations so we don't restart from
-	// slide 0 every time we rebuild the list.
 	slideIndex := 0
 
 	for {
@@ -499,7 +626,6 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.callsign, md.maxSessions)
 	if len(slides) == 0 {
-		// Nothing to show — wait a bit and try again.
 		select {
 		case <-ctx.Done():
 		case <-time.After(monitorSlideDuration):
@@ -507,7 +633,6 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 		return
 	}
 
-	// Wrap index.
 	if *idx >= len(slides) {
 		*idx = 0
 	}
@@ -523,10 +648,9 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 		if ctx.Err() != nil {
 			return
 		}
-		log.Printf("[MonitorDisplay] Failed to send slide %q: %v", slide.label, err)
+		log.Printf("[MonitorDisplay] Failed to send slide %q: %v", slide.topLine, err)
 	}
 
-	// Wait for the slide duration before advancing.
 	select {
 	case <-ctx.Done():
 	case <-time.After(monitorSlideDuration):
@@ -540,7 +664,6 @@ func (md *MonitorDisplay) runClockSlide(ctx context.Context) {
 	ticker := time.NewTicker(monitorClockUpdateInterval)
 	defer ticker.Stop()
 
-	// Send immediately, then on each tick.
 	sendClock := func() {
 		slide := buildTimeSlide()
 		if err := sendSlide(md.client, slide); err != nil && ctx.Err() == nil {

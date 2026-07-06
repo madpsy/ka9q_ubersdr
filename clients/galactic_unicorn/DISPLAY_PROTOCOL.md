@@ -100,15 +100,18 @@ Each entry in the `lines` array is a Line Object. A maximum of **2 line objects*
 
 ### Required Fields
 
+Either `text` **or** `segments` must be provided (not both).
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `text` | string | The text to render. UTF-8. Printable ASCII characters are guaranteed supported. |
+| `segments` | array of Segment Objects | Multi-colour text. Each segment has its own `text` and `color`. When present, the top-level `text` and `color` fields are ignored. See [Segments](#45-segments). |
 
 ### Optional Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `color` | [Colour](#5-colour-specification) | `"white"` | Text colour. |
+| `color` | [Colour](#5-colour-specification) | `"white"` | Text colour. Ignored when `segments` is present. |
 | `size` | integer 1–3 | `1` | Font size. See [Display Hardware Reference](#1-display-hardware-reference). |
 | `effect` | string | `"auto"` | Rendering effect. See [Effects](#6-effects). |
 | `align` | string | `"left"` | Horizontal alignment for static text. One of: `"left"`, `"center"`, `"right"`. Ignored when `effect` is `"scroll"`. |
@@ -120,6 +123,63 @@ Each entry in the `lines` array is a Line Object. A maximum of **2 line objects*
 | `blink_rate` | number 0.1–20 | `2.0` | Blink frequency in Hz. Only used when `effect` is `"blink"`. |
 | `pulse_speed` | number 0.1–10 | `1.0` | Pulse cycles per second. Only used when `effect` is `"pulse"`. |
 | `pulse_min` | number 0.0–1.0 | `0.1` | Minimum brightness multiplier during pulse. `0.0` = fully off at trough. |
+
+### 4.5 Segments
+
+The `segments` field enables **multi-colour text within a single line**. Each segment is rendered sequentially left-to-right, each in its own colour. This is useful for displaying per-item status indicators (e.g. band conditions) where each item needs a different colour.
+
+#### Segment Object Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `text` | string | **Yes** | The text for this segment. |
+| `color` | [Colour](#5-colour-specification) | No | Colour for this segment. Default: `"white"`. |
+
+#### Example — Band Conditions with Per-Band Colour
+
+```json
+{
+  "type": "display",
+  "id": "band-conditions",
+  "priority": 3,
+  "duration": 12.0,
+  "lines": [
+    {
+      "segments": [
+        {"text": "20m ", "color": "lime"},
+        {"text": "17m ", "color": "lime"},
+        {"text": "40m ", "color": "amber"},
+        {"text": "80m",  "color": "amber"}
+      ],
+      "size": 1,
+      "effect": "static",
+      "align": "left",
+      "y": "top"
+    },
+    {
+      "segments": [
+        {"text": "15m ", "color": "lime"},
+        {"text": "10m ", "color": "lime"},
+        {"text": "30m",  "color": "amber"}
+      ],
+      "size": 1,
+      "effect": "static",
+      "align": "left",
+      "y": "bottom"
+    }
+  ]
+}
+```
+
+**Visual layout:**
+```
+┌─────────────────────────────────────────────────────┐
+│ 20m 17m 40m 80m                                     │  lime lime amber amber
+│ 15m 10m 30m                                         │  lime lime amber
+└─────────────────────────────────────────────────────┘
+```
+
+> **Note:** `effect`, `align`, `scroll_*`, `blink_*`, and `pulse_*` fields apply to the line as a whole when `segments` is used. The combined text of all segments is used for width measurement and scroll distance. Scroll and blink/pulse effects work correctly with segmented lines.
 
 ---
 

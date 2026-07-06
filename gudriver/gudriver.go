@@ -108,10 +108,25 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 
 // ─── Protocol types ───────────────────────────────────────────────────────────
 
+// Segment is one coloured run of text within a segmented DisplayLine.
+// When a line uses Segments, the top-level Text and Color fields are ignored.
+type Segment struct {
+	Text  string `json:"text"`
+	Color string `json:"color,omitempty"` // named, hex, "rainbow", "gradient:c1:c2"
+}
+
 // DisplayLine is one entry in the Lines array of a DisplayCommand.
-// All fields except Text are optional; zero values use firmware defaults.
+// All fields except Text (or Segments) are optional; zero values use firmware defaults.
+//
+// Multi-colour text: set Segments to a slice of Segment values instead of Text+Color.
+// The firmware renders each segment sequentially in its own colour.
+// Effect, Align, Scroll*, Blink*, and Pulse* fields still apply to the line as a whole.
 type DisplayLine struct {
-	Text string `json:"text"`
+	// Text is the content to display. Mutually exclusive with Segments.
+	Text string `json:"text,omitempty"`
+
+	// Segments enables multi-colour text. When non-nil, Text and Color are ignored.
+	Segments []Segment `json:"segments,omitempty"`
 
 	// Appearance
 	Color string `json:"color,omitempty"` // named, hex, "rainbow", "gradient:c1:c2"

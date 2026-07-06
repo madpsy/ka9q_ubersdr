@@ -260,17 +260,58 @@ class DisplayMessage:
 
 
 class LineSpec:
-    """Parsed line object."""
+    """Parsed line object.
+
+    Supports an optional ``segments`` field for multi-colour text within a
+    single line.  When present, ``segments`` is a list of dicts each with
+    ``text`` and ``color`` keys.  The ``text`` and ``color`` fields at the
+    top level are ignored when ``segments`` is provided.
+
+    Example JSON::
+
+        {
+            "segments": [
+                {"text": "20m ", "color": "lime"},
+                {"text": "17m ", "color": "amber"},
+                {"text": "40m",  "color": "red"}
+            ],
+            "size": 1,
+            "effect": "static",
+            "y": "bottom"
+        }
+    """
 
     def __init__(self, raw, index):
         if not isinstance(raw, dict):
             raise ValueError(f"line {index} must be an object")
-        text = raw.get("text")
-        if text is None:
-            raise ValueError(f"line {index}: 'text' is required")
-        self.text = str(text)
 
-        self.color = parse_color(raw.get("color", "white"))
+        # --- segments (multi-colour) vs plain text ---
+        segs_raw = raw.get("segments")
+        if segs_raw is not None:
+            if not isinstance(segs_raw, list) or len(segs_raw) == 0:
+                raise ValueError(f"line {index}: 'segments' must be a non-empty array")
+            self.segments = []
+            for si, seg in enumerate(segs_raw):
+                if not isinstance(seg, dict):
+                    raise ValueError(f"line {index} segment {si} must be an object")
+                seg_text = seg.get("text")
+                if seg_text is None:
+                    raise ValueError(f"line {index} segment {si}: 'text' is required")
+                self.segments.append({
+                    "text": str(seg_text),
+                    "color": parse_color(seg.get("color", "white")),
+                })
+            # Synthesise a combined text string for width measurement and scroll
+            self.text = "".join(s["text"] for s in self.segments)
+            self.color = None  # unused when segments present
+        else:
+            text = raw.get("text")
+            if text is None:
+                raise ValueError(f"line {index}: 'text' is required")
+            self.text = str(text)
+            self.segments = None
+            self.color = parse_color(raw.get("color", "white"))
+
         self.size = int(raw.get("size", 1))
         if self.size not in (1, 2, 3):
             raise ValueError(f"line {index}: size must be 1, 2, or 3")
@@ -680,6 +721,12 @@ class DisplayEngine:
                 # We'll apply this as a colour scale below
 
         # --- Colour resolution ---
+
+        # Multi-colour segments: draw each segment in its own colour at x offset
+        if line.segments is not None:
+            self._draw_segments(line.segments, x, y, line.size)
+            return
+
         color_spec = line.color
 
         if color_spec == "rainbow":
@@ -702,7 +749,7 @@ class DisplayEngine:
         # Apply pulse brightness multiplier if needed
         if effect == "pulse":
             period = 1.0 / line.pulse_speed
-            phase = (now % period) / period
+            phase = (now_s % period) / period
             bm = line.pulse_min + (1.0 - line.pulse_min) * (
                 0.5 + 0.5 * math.sin(2 * math.pi * phase - math.pi / 2)
             )
@@ -713,6 +760,21 @@ class DisplayEngine:
         pen = self._g.create_pen(r, g_c, b)
         self._g.set_pen(pen)
         self._g.text(line.text, x, y, scale=line.size)
+
+    def _draw_segments(self, segments, x, y, size):
+        """Draw multi-colour segments sequentially from x, each in its own colour."""
+        g = self._g
+        cx = x
+        for seg in segments:
+            text = seg["text"]
+            color_spec = seg["color"]
+            if isinstance(color_spec, tuple) and len(color_spec) == 3:
+                r, gv, b = color_spec
+            else:
+                r, gv, b = 255, 255, 255
+            g.set_pen(g.create_pen(r, gv, b))
+            g.text(text, cx, y, scale=size)
+            cx += measure_text(g, text, size)
 
     def _draw_rainbow_text(self, text, x, y, size, text_w):
         """Draw text with per-character rainbow colouring."""

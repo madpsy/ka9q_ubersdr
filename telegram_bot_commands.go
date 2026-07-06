@@ -833,17 +833,9 @@ var hfBandOrder = []string{
 
 // bandSNRQuality returns a quality label matching the UI thresholds in bandconditions.js.
 // snr < 6 → POOR, 6–19 → FAIR, 20–29 → GOOD, ≥ 30 → EXCELLENT.
+// Delegates to the shared BandSNRQuality helper in band_snr_quality.go.
 func bandSNRQuality(snr float32) string {
-	switch {
-	case snr >= 30:
-		return "EXCELLENT"
-	case snr >= 20:
-		return "GOOD"
-	case snr >= 6:
-		return "FAIR"
-	default:
-		return "POOR"
-	}
+	return BandSNRQuality(snr)
 }
 
 // bandSNREmoji returns a traffic-light emoji for the given SNR quality label.

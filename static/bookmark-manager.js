@@ -929,8 +929,8 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     const maxGapBins = Math.ceil((rxBandwidthHz * 0.3) / hzPerBin);
     const mergedRuns = _mergeNearbyRuns(expandedRuns, maxGapBins);
 
-    // Filter: signal run width must be > 30% and < 150% of the current receive bandwidth.
-    const minSignalWidthHz = rxBandwidthHz * 0.3;
+    // Filter: signal run width must be > 50% and < 150% of the current receive bandwidth.
+    const minSignalWidthHz = rxBandwidthHz * 0.5;
     const maxSignalWidthHz = rxBandwidthHz * 1.5;
 
     const filteredRuns = mergedRuns.filter(run => {

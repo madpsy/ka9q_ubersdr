@@ -38,6 +38,10 @@ gu = GalacticUnicorn()
 graphics = PicoGraphics(display=DISPLAY_GALACTIC_UNICORN)
 engine = DisplayEngine(gu, graphics, brightness=config.DEFAULT_BRIGHTNESS)
 
+# Initialise hardware volume from config (0.0–1.0).
+_default_volume = getattr(config, "DEFAULT_VOLUME", 0.5)
+gu.set_volume(_default_volume)
+
 # ---------------------------------------------------------------------------
 # Global state (set during boot, used by button handlers)
 # ---------------------------------------------------------------------------
@@ -568,26 +572,8 @@ def _mark_manual_brightness():
     _manual_brightness_at = time.ticks_ms()
 
 
-def _btn_step_brightness():
-    """Button D — step brightness up by BRIGHTNESS_STEP, wrapping after max.
-
-    Each press (or hold-repeat) increments the global brightness by BRIGHTNESS_STEP
-    (default 10%).  After reaching BRIGHTNESS_MAX the next step wraps back to
-    BRIGHTNESS_MIN so the user can cycle through the full range without needing
-    the rocker buttons.
-    """
-    step    = _cfg("BRIGHTNESS_STEP", 0.1)
-    br_min  = _cfg("BRIGHTNESS_MIN",  0.05)
-    br_max  = _cfg("BRIGHTNESS_MAX",  1.0)
-
-    current = engine.get_brightness()
-    new_br  = round(current + step, 2)
-    if new_br > br_max + 0.001:   # overshoot → wrap to minimum
-        new_br = br_min
-
-    engine.set_brightness(new_br)
-    _mark_manual_brightness()
-
+def _show_brightness_feedback(new_br, source="BTN"):
+    """Show a brief brightness percentage on the display and log to console."""
     label = f"{int(round(new_br * 100))}%"
     raw = {
         "type": "display",
@@ -607,9 +593,57 @@ def _btn_step_brightness():
     try:
         msg = DisplayMessage(raw)
         engine.set_message(msg)
-        print(f"[BTN D] Brightness → {new_br:.2f} ({label})")
+        print(f"[{source}] Brightness → {new_br:.2f} ({label})")
     except Exception as e:
-        print(f"[BTN D] Error: {e}")
+        print(f"[{source}] Brightness feedback error: {e}")
+
+
+def _show_volume_feedback(new_vol, source="VOL"):
+    """Show a brief volume percentage on the display and log to console."""
+    label = f"VOL {int(round(new_vol * 100))}%"
+    raw = {
+        "type": "display",
+        "id": "btn-volume",
+        "priority": _cfg("BTN_BRIGHTNESS_PRIORITY", 8),
+        "duration": _cfg("BTN_BRIGHTNESS_DURATION", 1.0),
+        "transition": "cut",
+        "lines": [{
+            "text": label,
+            "color": "cyan",
+            "size": 1,
+            "effect": "static",
+            "align": "center",
+            "y": "middle",
+        }]
+    }
+    try:
+        msg = DisplayMessage(raw)
+        engine.set_message(msg)
+        print(f"[{source}] Volume → {new_vol:.2f} ({label})")
+    except Exception as e:
+        print(f"[{source}] Volume feedback error: {e}")
+
+
+def _btn_step_brightness():
+    """Button D — step brightness up by BRIGHTNESS_STEP, wrapping after max.
+
+    Each press (or hold-repeat) increments the global brightness by BRIGHTNESS_STEP
+    (default 10%).  After reaching BRIGHTNESS_MAX the next step wraps back to
+    BRIGHTNESS_MIN so the user can cycle through the full range without needing
+    the LUX buttons.
+    """
+    step    = _cfg("BRIGHTNESS_STEP", 0.1)
+    br_min  = _cfg("BRIGHTNESS_MIN",  0.05)
+    br_max  = _cfg("BRIGHTNESS_MAX",  1.0)
+
+    current = engine.get_brightness()
+    new_br  = round(current + step, 2)
+    if new_br > br_max + 0.001:   # overshoot → wrap to minimum
+        new_br = br_min
+
+    engine.set_brightness(new_br)
+    _mark_manual_brightness()
+    _show_brightness_feedback(new_br, "BTN D")
 
 
 # ---------------------------------------------------------------------------
@@ -678,30 +712,40 @@ async def button_handler():
                 # --- LUX + — brightness up, no wrap ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP)
                 if pressed and not _held["lux_up"]:
-                    new_br = min(_cfg("BRIGHTNESS_MAX", 1.0),
-                                 engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1))
+                    new_br = round(min(_cfg("BRIGHTNESS_MAX", 1.0),
+                                       engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1)), 2)
                     engine.set_brightness(new_br)
                     _mark_manual_brightness()
+                    _show_brightness_feedback(new_br, "LUX+")
                 _held["lux_up"] = pressed
 
                 # --- LUX - — brightness down, no wrap ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN)
                 if pressed and not _held["lux_dn"]:
-                    new_br = max(_cfg("BRIGHTNESS_MIN", 0.05),
-                                 engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1))
+                    new_br = round(max(_cfg("BRIGHTNESS_MIN", 0.05),
+                                       engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1)), 2)
                     engine.set_brightness(new_br)
                     _mark_manual_brightness()
+                    _show_brightness_feedback(new_br, "LUX-")
                 _held["lux_dn"] = pressed
 
             if _has_vol:
-                # --- VOL + — reserved for future use ---
+                # --- VOL + — increase hardware volume ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_VOLUME_UP)
-                # TODO: wire to volume control when audio output is supported
+                if pressed and not _held["vol_up"]:
+                    new_vol = round(min(_cfg("VOLUME_MAX", 1.0),
+                                        gu.get_volume() + _cfg("VOLUME_STEP", 0.1)), 2)
+                    gu.set_volume(new_vol)
+                    _show_volume_feedback(new_vol, "VOL+")
                 _held["vol_up"] = pressed
 
-                # --- VOL - — reserved for future use ---
+                # --- VOL - — decrease hardware volume ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_VOLUME_DOWN)
-                # TODO: wire to volume control when audio output is supported
+                if pressed and not _held["vol_dn"]:
+                    new_vol = round(max(_cfg("VOLUME_MIN", 0.0),
+                                        gu.get_volume() - _cfg("VOLUME_STEP", 0.1)), 2)
+                    gu.set_volume(new_vol)
+                    _show_volume_feedback(new_vol, "VOL-")
                 _held["vol_dn"] = pressed
 
             if _has_sleep:

@@ -17,6 +17,7 @@ HTTP_HOST = "0.0.0.0"  # Listen on all interfaces
 # Display defaults
 # ---------------------------------------------------------------------------
 DEFAULT_BRIGHTNESS = 0.5    # 0.0 (off) – 1.0 (full brightness)
+DEFAULT_VOLUME = 0.5        # 0.0 (silent) – 1.0 (full volume); set at boot
 QUEUE_MAX_SIZE = 16         # Maximum number of queued display messages
 
 # ---------------------------------------------------------------------------
@@ -58,10 +59,15 @@ IDLE_ALIGN = "center"
 #   Reserved for future use (display sleep/wake).
 # ---------------------------------------------------------------------------
 
-# Brightness step size and limits (shared by LUX rocker and button D)
+# Brightness step size and limits (shared by LUX buttons and button D)
 BRIGHTNESS_STEP = 0.1       # How much each press changes brightness (10%)
 BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off)
 BRIGHTNESS_MAX = 1.0        # Maximum brightness
+
+# Volume step size and limits (VOL +/- buttons)
+VOLUME_STEP = 0.1           # How much each press changes volume (10%)
+VOLUME_MIN = 0.0            # Minimum volume (silent)
+VOLUME_MAX = 1.0            # Maximum volume
 
 # Button A — show IP address
 BTN_IP_PRIORITY = 8         # Priority of the IP display message (interrupts most content)

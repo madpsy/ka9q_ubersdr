@@ -32,6 +32,9 @@ import (
 	"github.com/cwsl/ka9q_ubersdr/gudriver"
 )
 
+// monitorClockUpdateInterval is how often the clock slide re-sends its time.
+const monitorClockUpdateInterval = time.Second
+
 // ─── Tunables ─────────────────────────────────────────────────────────────────
 
 const (
@@ -81,6 +84,7 @@ type monitorSlide struct {
 	value      string // bottom line — metric value, scrolling
 	labelColor string // named colour for the label
 	valueColor string // named colour for the value
+	isClock    bool   // when true, the slide is re-sent every second with the current time
 }
 
 // buildUsersSlide returns a slide showing current / max user counts.
@@ -116,6 +120,19 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		value:      value,
 		labelColor: valueColor,
 		valueColor: valueColor,
+	}
+}
+
+// buildTimeSlide returns a slide that shows the current UTC time (HH:MM:SS).
+// The slide is marked isClock=true so the sequencer refreshes it every second.
+func buildTimeSlide() monitorSlide {
+	now := time.Now().UTC()
+	return monitorSlide{
+		label:      "UTC TIME",
+		value:      now.Format("15:04:05  Mon 02 Jan 2006"),
+		labelColor: "cyan",
+		valueColor: "white",
+		isClock:    true,
 	}
 }
 
@@ -315,23 +332,26 @@ func buildNoiseFloorSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, maxSessions int) []monitorSlide {
 	var slides []monitorSlide
 
-	// 1. Users
+	// 1. UTC clock
+	slides = append(slides, buildTimeSlide())
+
+	// 2. Users
 	slides = append(slides, buildUsersSlide(sessions, maxSessions))
 
-	// 2. Load average
+	// 3. Load average
 	slides = append(slides, buildLoadSlide())
 
-	// 3. CPU temperature (optional — omitted if not available)
+	// 4. CPU temperature (optional — omitted if not available)
 	if s := buildCPUTempSlide(); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 4. PSK Reporter rank (optional — omitted if fetcher not wired or callsign not ranked)
+	// 5. PSK Reporter rank (optional — omitted if fetcher not wired or callsign not ranked)
 	if s := buildPSKSlide(psk, callsign); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 5. Noise floor per band (optional — omitted if monitor not running)
+	// 6. Noise floor per band (optional — omitted if monitor not running)
 	slides = append(slides, buildNoiseFloorSlides(nfm)...)
 
 	return slides
@@ -463,29 +483,27 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 	// slide 0 every time we rebuild the list.
 	slideIndex := 0
 
-	// ticker fires every SlideDuration to advance to the next slide.
-	ticker := time.NewTicker(monitorSlideDuration)
-	defer ticker.Stop()
-
-	// Send the first slide immediately without waiting for the first tick.
-	md.sendNext(ctx, &slideIndex)
-
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return
-		case <-ticker.C:
-			md.sendNext(ctx, &slideIndex)
 		}
+		md.sendNext(ctx, &slideIndex)
 	}
 }
 
-// sendNext collects the current slide list, picks the next slide, and sends it.
-// On error it logs and backs off; the index is not advanced so the same slide
-// is retried on the next tick.
+// sendNext collects the current slide list, picks the next slide, sends it,
+// then waits for monitorSlideDuration before returning.
+//
+// Clock slides are special: they re-send every second with the updated time
+// for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.callsign, md.maxSessions)
 	if len(slides) == 0 {
+		// Nothing to show — wait a bit and try again.
+		select {
+		case <-ctx.Done():
+		case <-time.After(monitorSlideDuration):
+		}
 		return
 	}
 
@@ -494,15 +512,52 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 		*idx = 0
 	}
 	slide := slides[*idx]
+	*idx = (*idx + 1) % len(slides)
 
-	if err := sendSlide(md.client, slide); err != nil {
-		if ctx.Err() != nil {
-			return // shutting down
-		}
-		log.Printf("[MonitorDisplay] Failed to send slide %q: %v", slide.label, err)
-		// Don't advance — retry the same slide next tick.
+	if slide.isClock {
+		md.runClockSlide(ctx)
 		return
 	}
 
-	*idx = (*idx + 1) % len(slides)
+	if err := sendSlide(md.client, slide); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		log.Printf("[MonitorDisplay] Failed to send slide %q: %v", slide.label, err)
+	}
+
+	// Wait for the slide duration before advancing.
+	select {
+	case <-ctx.Done():
+	case <-time.After(monitorSlideDuration):
+	}
+}
+
+// runClockSlide shows the UTC clock for monitorSlideDuration, updating every
+// second so the seconds digit ticks in real time.
+func (md *MonitorDisplay) runClockSlide(ctx context.Context) {
+	deadline := time.Now().Add(monitorSlideDuration)
+	ticker := time.NewTicker(monitorClockUpdateInterval)
+	defer ticker.Stop()
+
+	// Send immediately, then on each tick.
+	sendClock := func() {
+		slide := buildTimeSlide()
+		if err := sendSlide(md.client, slide); err != nil && ctx.Err() == nil {
+			log.Printf("[MonitorDisplay] Clock slide send error: %v", err)
+		}
+	}
+	sendClock()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			if t.After(deadline) {
+				return
+			}
+			sendClock()
+		}
+	}
 }

@@ -50,6 +50,9 @@ const (
 	// monitorSlideDuration is how long each slide is shown before advancing.
 	monitorSlideDuration = 12 * time.Second
 
+	// monitorBandSlideDuration is the duration for each band-conditions page.
+	monitorBandSlideDuration = 6 * time.Second
+
 	// monitorRetryDelay is the back-off between failed display attempts.
 	monitorRetryDelay = 30 * time.Second
 
@@ -71,6 +74,10 @@ const (
 	// At size=1 (6 px/char) this gives 48 px — fits in the 53 px display
 	// without scrolling.
 	monitorTopLineWidth = 8
+
+	// monitorBandsPerLine is the number of band labels that fit on one line
+	// without scrolling.  "80 40 30" = 8 chars × 6 px = 48 px ≤ 53 px.
+	monitorBandsPerLine = 3
 )
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
@@ -133,6 +140,15 @@ type monitorSlide struct {
 	// Single-line layout (clock):
 	singleLine bool // when true, render only value centred on the full display
 	isClock    bool // when true, re-sent every second with the current time
+
+	// transition is the display transition for this slide.
+	// Defaults to TransitionCut (instantaneous) when empty.
+	// Set to TransitionFade for slide-to-slide transitions.
+	transition string
+
+	// displayDuration overrides the global monitorSlideDuration for this slide.
+	// Zero means use the global default.
+	displayDuration time.Duration
 }
 
 // buildUsersSlide returns a slide showing current / max user counts.
@@ -169,6 +185,7 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		topColor:   valueColor,
 		value:      value,
 		valueColor: valueColor,
+		transition: gudriver.TransitionFade,
 	}
 }
 
@@ -226,6 +243,7 @@ func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		topLine:       formatTopLine("LOAD", userCountStr(sessions, maxSessions)),
 		topColor:      topColor,
 		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
 	}
 }
 
@@ -257,6 +275,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 		topLine:       formatTopLine("TEMP", userCountStr(sessions, maxSessions)),
 		topColor:      color,
 		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
 	}
 }
 
@@ -313,6 +332,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 		topColor:   color,
 		value:      strings.Join(parts, "  ") + age,
 		valueColor: color,
+		transition: gudriver.TransitionFade,
 	}
 }
 
@@ -341,17 +361,20 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 6. Band conditions — single slide with per-band colour segments.
-	if s := buildBandConditionsSlideImpl(nfm, sessions, maxSessions); s != nil {
-		slides = append(slides, *s)
-	}
+	// 6. Band conditions — one or two pages, 3 bands per line, each coloured.
+	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
 }
 
-// buildBandConditionsSlideImpl is the real implementation (the function above
-// has a dead-code path that the compiler would reject; this one is clean).
-func buildBandConditionsSlideImpl(nfm *NoiseFloorMonitor, sessions *SessionManager, maxSessions int) *monitorSlide {
+// buildBandConditionsSlides returns one or two slides showing all non-POOR bands
+// with per-band colour coding.  Bands are sorted descending by wavelength
+// (80m before 40m before 20m) so lower bands appear first.
+//
+// Layout: 3 bands per line (fits in 53 px without scrolling), 2 lines per slide.
+// If more than 6 bands qualify, a second slide is produced.
+// Each band label is the numeric part only (e.g. "80 " not "80M ").
+func buildBandConditionsSlides(nfm *NoiseFloorMonitor) []monitorSlide {
 	if nfm == nil {
 		return nil
 	}
@@ -360,16 +383,37 @@ func buildBandConditionsSlideImpl(nfm *NoiseFloorMonitor, sessions *SessionManag
 		return nil
 	}
 
-	bands := make([]string, 0, len(measurements))
-	for b := range measurements {
-		bands = append(bands, b)
+	// Collect qualifying bands sorted by name (lexicographic gives 10m < 160m < 20m
+	// which is wrong for display; we sort by numeric wavelength descending instead).
+	type bandEntry struct {
+		label string // e.g. "80 "
+		color string // lime / amber
 	}
-	sort.Strings(bands)
 
-	var goodSegs []gudriver.Segment
-	var fairSegs []gudriver.Segment
+	// Parse numeric value from band name for sorting (e.g. "80m" → 80).
+	bandNum := func(b string) int {
+		n := 0
+		for _, c := range b {
+			if c >= '0' && c <= '9' {
+				n = n*10 + int(c-'0')
+			} else {
+				break
+			}
+		}
+		return n
+	}
 
-	for _, band := range bands {
+	// Sort band names descending by wavelength (highest number = lowest freq first).
+	allBands := make([]string, 0, len(measurements))
+	for b := range measurements {
+		allBands = append(allBands, b)
+	}
+	sort.Slice(allBands, func(i, j int) bool {
+		return bandNum(allBands[i]) > bandNum(allBands[j])
+	})
+
+	var entries []bandEntry
+	for _, band := range allBands {
 		m := measurements[band]
 		if m == nil {
 			continue
@@ -384,57 +428,75 @@ func buildBandConditionsSlideImpl(nfm *NoiseFloorMonitor, sessions *SessionManag
 		if quality == "POOR" {
 			continue
 		}
-		label := strings.ToUpper(band) + " "
-		switch quality {
-		case "EXCELLENT", "GOOD":
-			goodSegs = append(goodSegs, gudriver.Segment{Text: label, Color: "lime"})
-		case "FAIR":
-			fairSegs = append(fairSegs, gudriver.Segment{Text: label, Color: "amber"})
-		}
+		// Strip "m" suffix for compact label: "80m" → "80 "
+		label := strings.TrimSuffix(strings.ToUpper(band), "M") + " "
+		color := BandSNRColor(quality)
+		entries = append(entries, bandEntry{label: label, color: color})
 	}
 
-	if len(goodSegs) == 0 && len(fairSegs) == 0 {
+	if len(entries) == 0 {
 		return nil
 	}
 
-	uCount := userCountStr(sessions, maxSessions)
-
-	if len(goodSegs) == 0 {
-		return &monitorSlide{
-			topLine:       formatTopLine("BANDS", uCount),
-			topColor:      "amber",
-			valueSegments: fairSegs,
+	// Pack entries into pages: monitorBandsPerLine per line, 2 lines per page.
+	bandsPerPage := monitorBandsPerLine * 2
+	var slides []monitorSlide
+	for pageStart := 0; pageStart < len(entries); pageStart += bandsPerPage {
+		pageEnd := pageStart + bandsPerPage
+		if pageEnd > len(entries) {
+			pageEnd = len(entries)
 		}
-	}
-	if len(fairSegs) == 0 {
-		return &monitorSlide{
-			topLine:       formatTopLine("BANDS", uCount),
-			topColor:      "lime",
-			valueSegments: goodSegs,
-		}
-	}
+		page := entries[pageStart:pageEnd]
 
-	// Both tiers: top line = good bands (lime), bottom line = fair bands (amber).
-	// Use a dedicated dualSegments slide type via the topSegments field.
-	return &monitorSlide{
-		topSegments:   goodSegs,
-		valueSegments: fairSegs,
+		// Split page into top and bottom lines.
+		splitAt := monitorBandsPerLine
+		if splitAt > len(page) {
+			splitAt = len(page)
+		}
+		topSegs := make([]gudriver.Segment, splitAt)
+		for i, e := range page[:splitAt] {
+			topSegs[i] = gudriver.Segment{Text: e.label, Color: e.color}
+		}
+		var botSegs []gudriver.Segment
+		if len(page) > splitAt {
+			botSegs = make([]gudriver.Segment, len(page)-splitAt)
+			for i, e := range page[splitAt:] {
+				botSegs[i] = gudriver.Segment{Text: e.label, Color: e.color}
+			}
+		}
+
+		slides = append(slides, monitorSlide{
+			topSegments:     topSegs,
+			valueSegments:   botSegs,
+			transition:      gudriver.TransitionFade,
+			displayDuration: monitorBandSlideDuration,
+		})
 	}
+	return slides
 }
 
 // ─── Display sender ───────────────────────────────────────────────────────────
 
 // sendSlide pushes a single slide to the display.
+// The transition defaults to TransitionCut (instantaneous) unless slide.transition
+// is set explicitly — use TransitionFade for slide-to-slide transitions.
+//
+// All slides use duration="forever": the Go server controls timing by sending
+// the next slide before the current one would expire, eliminating the blank-screen
+// gap that occurs when the firmware auto-expires a timed message.
 func sendSlide(client *gudriver.Client, slide monitorSlide) error {
-	durationSecs := gudriver.DurationSeconds(float64(monitorSlideDuration) / float64(time.Second))
+	transition := slide.transition
+	if transition == "" {
+		transition = gudriver.TransitionCut
+	}
 
 	// ── Clock / single-line layout ────────────────────────────────────────────
 	if slide.singleLine {
 		cmd := gudriver.DisplayCommand{
 			ID:         monitorMessageID,
 			Priority:   monitorPriority,
-			Duration:   durationSecs,
-			Transition: gudriver.TransitionFade,
+			Duration:   gudriver.DurationForever(),
+			Transition: transition,
 			Lines: []gudriver.DisplayLine{
 				{
 					Text:   slide.value,
@@ -455,8 +517,8 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 		cmd := gudriver.DisplayCommand{
 			ID:         monitorMessageID,
 			Priority:   monitorPriority,
-			Duration:   durationSecs,
-			Transition: gudriver.TransitionFade,
+			Duration:   gudriver.DurationForever(),
+			Transition: transition,
 			Lines: []gudriver.DisplayLine{
 				{
 					Segments:    slide.topSegments,
@@ -504,8 +566,8 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 	cmd := gudriver.DisplayCommand{
 		ID:         monitorMessageID,
 		Priority:   monitorPriority,
-		Duration:   durationSecs,
-		Transition: gudriver.TransitionFade,
+		Duration:   gudriver.DurationForever(),
+		Transition: transition,
 		Lines: []gudriver.DisplayLine{
 			{
 				// Top line: static label + user count
@@ -651,9 +713,16 @@ func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
 		log.Printf("[MonitorDisplay] Failed to send slide %q: %v", slide.topLine, err)
 	}
 
+	// Wait for this slide's display duration before advancing to the next.
+	// Using slide.displayDuration when set (e.g. band-condition pages = 6s),
+	// otherwise the global monitorSlideDuration.
+	wait := slide.displayDuration
+	if wait <= 0 {
+		wait = monitorSlideDuration
+	}
 	select {
 	case <-ctx.Done():
-	case <-time.After(monitorSlideDuration):
+	case <-time.After(wait):
 	}
 }
 

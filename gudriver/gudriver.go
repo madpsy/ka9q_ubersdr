@@ -64,8 +64,9 @@ const (
 
 // Transition values for DisplayCommand.Transition.
 const (
-	TransitionCut       = "cut"
-	TransitionFade      = "fade"
+	TransitionCut       = "cut"       // Instantaneous — no animation (firmware default)
+	TransitionFade      = "fade"      // Fast brightness fade-in (~0.25 s)
+	TransitionSoftFade  = "soft_fade" // Slow brightness fade-in (~1 s) — good for slide-to-slide
 	TransitionWipeLeft  = "wipe_left"
 	TransitionWipeRight = "wipe_right"
 )

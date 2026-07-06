@@ -77,7 +77,7 @@ Every JSON body sent to `/display` must contain a `type` field:
 | `id` | string | auto-generated UUID | Unique identifier. Sending a message with the same `id` as an active or queued message **replaces** it in-place. Use stable IDs for persistent displays (e.g. `"frequency"`) and unique IDs for one-shot events. |
 | `priority` | integer 0–10 | `5` | Display priority. See [Priority & Queue](#8-priority--queue). |
 | `duration` | number \| `"forever"` | `"forever"` | How long (seconds) to show this message before reverting to the next queued item. `"forever"` means the message stays until explicitly replaced or cancelled. |
-| `transition` | string | `"cut"` | Animation when switching to this message. One of: `"cut"`, `"fade"`, `"wipe_left"`, `"wipe_right"`. |
+| `transition` | string | `"cut"` | Animation when switching to this message. One of: `"cut"`, `"fade"`, `"soft_fade"`, `"wipe_left"`, `"wipe_right"`. |
 | `brightness` | number 0.0–1.0 | `null` | Override global brightness for this message only. `null` means use the current global brightness. Restored after message expires. |
 | `bg_color` | [Colour](#5-colour-specification) | `[0, 0, 0]` | Background colour for all pixels not drawn by text. |
 
@@ -858,7 +858,7 @@ A low-priority, permanent display showing the current frequency. Sent once on st
 | `id` | string | No | auto UUID | Any string ≤ 64 chars |
 | `priority` | integer | No | `5` | `0` – `10` |
 | `duration` | number \| string | No | `"forever"` | `> 0.0` or `"forever"` |
-| `transition` | string | No | `"cut"` | `"cut"`, `"fade"`, `"wipe_left"`, `"wipe_right"` |
+| `transition` | string | No | `"cut"` | `"cut"`, `"fade"`, `"soft_fade"`, `"wipe_left"`, `"wipe_right"` |
 | `brightness` | number \| null | No | `null` | `0.0` – `1.0` or `null` |
 | `bg_color` | Colour | No | `[0,0,0]` | Any valid Colour |
 

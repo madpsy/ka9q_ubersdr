@@ -230,7 +230,7 @@ class DisplayMessage:
                 raise ValueError("duration must be > 0 or 'forever'")
 
         self.transition = raw.get("transition", "cut")
-        if self.transition not in ("cut", "fade", "wipe_left", "wipe_right"):
+        if self.transition not in ("cut", "fade", "soft_fade", "wipe_left", "wipe_right"):
             self.transition = "cut"
 
         br = raw.get("brightness")
@@ -608,11 +608,13 @@ class DisplayEngine:
 
         # Set up transition
         self._transition_type = msg.transition
-        if msg.transition != "cut":
+        if msg.transition == "cut":
+            self._transition_active = False
+        else:
             self._transition_active = True
             self._transition_progress = 0.0
-        else:
-            self._transition_active = False
+            # soft_fade completes in ~1 s (speed=1.0); fade in ~0.25 s (speed=4.0)
+            self._transition_speed = 1.0 if msg.transition == "soft_fade" else 4.0
 
         self._active = msg
 
@@ -813,10 +815,10 @@ class DisplayEngine:
 
         p = self._transition_progress  # 0.0 → 1.0
 
-        if self._transition_type == "fade":
-            # Fade in: draw a black overlay with decreasing opacity
-            # Approximate by drawing black pixels over a fraction of the display
-            # (True alpha blending not available; use brightness ramp instead)
+        if self._transition_type in ("fade", "soft_fade"):
+            # Fade in: ramp brightness from 0 → target over the transition period.
+            # soft_fade uses the same ramp but a slower _transition_speed (1.0 vs 4.0),
+            # giving a ~1 s fade instead of ~0.25 s.
             fade_brightness = p
             if self._active and self._active.brightness is not None:
                 self._gu.set_brightness(self._active.brightness * fade_brightness)

@@ -1,4 +1,23 @@
-# Latest Stable - 0.1.56 - 28th Jun 2026
+# Latest Stable - 0.1.57 - 06th Jul 2026
+
+## Version 0.1.57
+
+### New Features
+- Added **12 KHz AM** instead of 6 KHz for wider broadcast AM stations
+- Added **Notification System** for sending notificatiosn to various destinations (Telegram, Email, Web hook and Galactic Unicorn)
+- Added **VibeSDR Link** on the on-load overlay. This is a mobile application which is currently in approval stages with Google/Apple (made by @stuey3d)
+- Added **SSB AGC Defaults** in Admin -> Config -> Server -> SSB AGC. Check using the web UI first to find prefered values (right click USB/LSB mode butons)
+- Added **DX Cluster Combiner** add-on which combines Digi/CW/Voice/DX spots and delivers over Telnet on port 7300 with built in filtering options
+- Added **Band Buttons** for bands listed in Admin -> Bands. Each has an optional 'Band Button' value (up to 10 chars) which when set will create a button in the web UI
+
+### Bug Fixes
+- CW Spot map was missing 3D globe view. When QRZ.com lookups are enabled will also use lat/lon when available instead of country center
+- AGC settings in web UI were missing 'Threshold' slider
+- DX Cluster was missing additonal log in commands to send (not the addon, the exisitng external cluster support)
+
+### Other Announcements
+- Brand new firmware for MS-S5 antenna switches. Not just for UberSDR integration but also improves standalone use too. See [UberANT Github Repo](https://github.com/madpsy/ubersdr_switch) which includes a web based firmware flash tool (Chrome/Edge only)
+- Telegram Bot support was added as part of the notification system. This allows you to send commands to a Telegram Bot and recieve a response from your instance in real time. Examples are see current users, band conditions, system health and PSKr ranking, just to name a few. It can also optionally allow write commands such as change rotator position, antenna switch port and force a version upgrade of the system. It also has a Chat Relay meaning you can join the chat of your instance from Telegram and send/receive chat messages.
 
 ## Version 0.1.56
 

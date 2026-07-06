@@ -2328,7 +2328,7 @@ func main() {
 
 	// Start monitor display — cycles key metrics on the Galactic Unicorn LED matrix
 	// when config.monitor_display.enabled is true.
-	monitorDisplay := NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, config.Decoder.ReceiverCallsign, rotctlHandler, antSwitchHandler)
+	monitorDisplay := NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, wsprRankFetcher, config.Decoder.ReceiverCallsign, rotctlHandler, antSwitchHandler)
 	monitorDisplay.Start(mainCtx)
 	defer monitorDisplay.Stop()
 

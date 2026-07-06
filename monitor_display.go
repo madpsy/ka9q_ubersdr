@@ -368,7 +368,93 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("PSK", "purple", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("PSKR", "purple", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
+// buildWSPRSlide returns a slide showing WSPR Live receiver rank for the given callsign.
+// Returns nil when no data is available or the callsign is not ranked.
+// Shows rolling-24h rank and today's rank as coloured segments:
+//
+//	"#5 spots"     white  — rolling 24h rank + label
+//	" (1.2k/24h)"  blue   — unique count
+//	"  "           blue   — separator
+//	"#12 today"    white  — today's rank + label
+//	" (450)"       blue   — today's unique count
+//	" (2h ago)"    blue   — data age
+func buildWSPRSlide(wspr *WSPRRankFetcher, callsign string, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if wspr == nil || callsign == "" {
+		return nil
+	}
+	data := wspr.Cached()
+	if data == nil {
+		return nil
+	}
+
+	// Extract rolling-24h rank
+	r24 := filterWSPRRankWindowByCallsign(data.Rolling24h, callsign)
+	today := filterWSPRRankWindowByCallsign(data.Today, callsign)
+
+	has24 := len(r24.Data) > 0
+	hasToday := len(today.Data) > 0
+	if !has24 && !hasToday {
+		return nil
+	}
+
+	// Compact count formatter: ≥1000 → "1.2k", otherwise plain integer.
+	fmtUnique := func(n uint64) string {
+		if n >= 1000 {
+			return fmt.Sprintf("%.1fk", float64(n)/1000)
+		}
+		return fmt.Sprintf("%d", n)
+	}
+
+	var segs []gudriver.Segment
+	if has24 {
+		row := r24.Data[0]
+		rank := row.OriginalRank
+		if rank == 0 {
+			rank = 1
+		}
+		segs = append(segs,
+			gudriver.Segment{Text: fmt.Sprintf("#%d spots", rank), Color: "white"},
+			gudriver.Segment{Text: fmt.Sprintf(" (%s/24h)", fmtUnique(row.Unique)), Color: "blue"},
+		)
+	}
+	if hasToday {
+		if has24 {
+			segs = append(segs, gudriver.Segment{Text: "  ", Color: "blue"})
+		}
+		row := today.Data[0]
+		rank := row.OriginalRank
+		if rank == 0 {
+			rank = 1
+		}
+		segs = append(segs,
+			gudriver.Segment{Text: fmt.Sprintf("#%d today", rank), Color: "white"},
+			gudriver.Segment{Text: fmt.Sprintf(" (%s)", fmtUnique(row.Unique)), Color: "blue"},
+		)
+	}
+	// Data age — use the rolling-24h fetch time if available, else today's.
+	var fetchedAt time.Time
+	if has24 && !data.Rolling24h.FetchedAt.IsZero() {
+		fetchedAt = data.Rolling24h.FetchedAt
+	} else if hasToday && !data.Today.FetchedAt.IsZero() {
+		fetchedAt = data.Today.FetchedAt
+	}
+	if !fetchedAt.IsZero() {
+		mins := int(time.Since(fetchedAt).Minutes())
+		if mins >= 60 {
+			segs = append(segs, gudriver.Segment{Text: fmt.Sprintf(" (%dh ago)", mins/60), Color: "blue"})
+		} else if mins > 0 {
+			segs = append(segs, gudriver.Segment{Text: fmt.Sprintf(" (%dm ago)", mins), Color: "blue"})
+		}
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("WSPR", "magenta", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -377,7 +463,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 // ─── Slide sequencer ──────────────────────────────────────────────────────────
 
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, maxSessions int, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, callsign string, maxSessions int, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
 	var slides []monitorSlide
 
 	// 1. UTC clock (single centred line, no label)
@@ -399,17 +485,22 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 6. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
+	// 6. WSPR Live rank (optional — omitted if fetcher not wired or callsign not ranked)
+	if s := buildWSPRSlide(wspr, callsign, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 7. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
 	if s := buildRotatorSlide(rotctl, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 7. Antenna switch active port (optional — omitted when ant switch not enabled)
+	// 8. Antenna switch active port (optional — omitted when ant switch not enabled)
 	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 8. Band conditions — one or two pages, 3 bands per line, each coloured.
+	// 9. Band conditions — one or two pages, 3 bands per line, each coloured.
 	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
@@ -708,7 +799,8 @@ type MonitorDisplay struct {
 	sessions    *SessionManager
 	nfm         *NoiseFloorMonitor
 	pskRank     *PSKRankFetcher
-	callsign    string // receiver callsign for PSK rank lookup
+	wsprRank    *WSPRRankFetcher // nil if WSPR rank not enabled
+	callsign    string           // receiver callsign for PSK/WSPR rank lookup
 	maxSessions int
 	rotctl      *RotctlAPIHandler // nil if rotator not enabled
 	antSwitch   *AntSwitchHandler // nil if antenna switch not enabled
@@ -718,10 +810,10 @@ type MonitorDisplay struct {
 // NewMonitorDisplay creates a MonitorDisplay from the given config.
 // Returns nil (with no error) when config.MonitorDisplay.Enabled is false.
 //
-// psk may be nil — PSK rank slides are simply omitted when no fetcher is wired.
-// callsign is the receiver callsign used for PSK rank lookups (e.g. config.Decoder.ReceiverCallsign).
+// psk and wspr may be nil — their rank slides are simply omitted when no fetcher is wired.
+// callsign is the receiver callsign used for PSK/WSPR rank lookups (e.g. config.Decoder.ReceiverCallsign).
 // rotctl and antSwitch may be nil — their slides are omitted when not wired.
-func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
+func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
 	if !cfg.MonitorDisplay.Enabled {
 		return nil
 	}
@@ -751,6 +843,7 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 		sessions:    sessions,
 		nfm:         nfm,
 		pskRank:     psk,
+		wsprRank:    wspr,
 		callsign:    callsign,
 		maxSessions: maxSessions,
 		rotctl:      rotctl,
@@ -804,7 +897,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.callsign, md.maxSessions, md.rotctl, md.antSwitch)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.callsign, md.maxSessions, md.rotctl, md.antSwitch)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():

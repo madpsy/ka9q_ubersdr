@@ -834,9 +834,23 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     // Detect all runs above the APPEAR threshold
     const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB);
 
+    // Filter: signal run width must be > 50% of the current receive bandwidth.
+    // This prevents narrow spurs/birdies from showing brackets — only signals
+    // that are meaningfully wide relative to what the user is listening to qualify.
+    const rxBandwidthHz = Math.abs(
+        (spectrumDisplay.currentBandwidthHigh || 2700) -
+        (spectrumDisplay.currentBandwidthLow  || 50)
+    );
+    const minSignalWidthHz = rxBandwidthHz * 0.5;
+    const hzPerBin = totalBandwidth / binCount;
+    const filteredRuns = newRuns.filter(run => {
+        const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
+        return runWidthHz >= minSignalWidthHz;
+    });
+
     // Sort by peak power, take top N
-    newRuns.sort((a, b) => b.peakDb - a.peakDb);
-    const topRuns = newRuns.slice(0, BRACKET_TOP_SIGNALS);
+    filteredRuns.sort((a, b) => b.peakDb - a.peakDb);
+    const topRuns = filteredRuns.slice(0, BRACKET_TOP_SIGNALS);
 
     // Convert bin indices to frequencies
     const newBrackets = topRuns.map(run => ({

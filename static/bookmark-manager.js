@@ -767,15 +767,16 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
 // Uses the EMA-smoothed spectrum (specEma) for stability.
 // Hysteresis: appear at +15 dB above noise, disappear below +8 dB.
 // ─────────────────────────────────────────────────────────────────────────────
-const BRACKET_UPDATE_INTERVAL_MS = 2000;
-const BRACKET_APPEAR_THRESHOLD_DB = 10;  // dB above noise to appear
-const BRACKET_DISAPPEAR_THRESHOLD_DB = 5; // dB above noise to disappear
+const BRACKET_UPDATE_INTERVAL_MS = 500;   // detection runs at most this often
+const BRACKET_APPEAR_THRESHOLD_DB = 10;   // dB above noise to appear
+const BRACKET_DISAPPEAR_THRESHOLD_DB = 5; // dB above noise to refresh linger timer
+const BRACKET_LINGER_MS = 5000;           // keep bracket this long after signal drops below disappear threshold
 const BRACKET_TOP_SIGNALS = 5;
 const BRACKET_MIN_HZ = 200; // minimum run width in Hz (replaces fixed bin count)
 
 // Persistent state (survives across markerCache rebuilds)
 let _bracketLastUpdateTime = 0;
-let _bracketActive = []; // [{freqLow, freqHigh, peakFreq, peakDb, noiseDb}]
+let _bracketActive = []; // [{freqLow, freqHigh, peakFreq, peakDb, noiseDb, lastSeenMs}]
 
 // Reset the rate-limit timer so the next drawStrongSignalBrackets call runs
 // detection immediately.  Call this whenever the receive bandwidth changes so
@@ -954,27 +955,35 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     filteredRuns.sort((a, b) => b.peakDb - a.peakDb);
     const topRuns = filteredRuns.slice(0, BRACKET_TOP_SIGNALS);
 
-    // Convert bin indices to frequencies
+    // Convert bin indices to frequencies; stamp lastSeenMs so linger timer starts now
     const newBrackets = topRuns.map(run => ({
-        freqLow:  _binToFreq(run.startBin, binCount, centerFreq, totalBandwidth),
-        freqHigh: _binToFreq(run.endBin,   binCount, centerFreq, totalBandwidth),
-        peakFreq: _binToFreq(run.peakBin,  binCount, centerFreq, totalBandwidth),
-        peakDb:   run.peakDb,
-        noiseDb:  noiseFloor
+        freqLow:    _binToFreq(run.startBin, binCount, centerFreq, totalBandwidth),
+        freqHigh:   _binToFreq(run.endBin,   binCount, centerFreq, totalBandwidth),
+        peakFreq:   _binToFreq(run.peakBin,  binCount, centerFreq, totalBandwidth),
+        peakDb:     run.peakDb,
+        noiseDb:    noiseFloor,
+        lastSeenMs: now
     }));
 
-    // Apply hysteresis: keep existing brackets that are still above disappear threshold
+    // Linger hysteresis: keep existing brackets for BRACKET_LINGER_MS after the signal
+    // drops below the disappear threshold.  Refresh lastSeenMs whenever the signal is
+    // still clearly present (above disappear threshold) so an active signal never expires.
     const disappearThreshold = noiseFloor + BRACKET_DISAPPEAR_THRESHOLD_DB;
-    const retained = _bracketActive.filter(existing => {
-        // Find the peak bin for this existing bracket's frequency range
-        const startBin = Math.round(((existing.freqLow  - (centerFreq - totalBandwidth / 2)) / totalBandwidth) * binCount);
-        const endBin   = Math.round(((existing.freqHigh - (centerFreq - totalBandwidth / 2)) / totalBandwidth) * binCount);
-        const s = Math.max(0, startBin);
-        const e = Math.min(binCount - 1, endBin);
-        let maxDb = -Infinity;
-        for (let i = s; i <= e; i++) maxDb = Math.max(maxDb, data[i]);
-        return maxDb >= disappearThreshold;
-    });
+    const retained = _bracketActive
+        .map(existing => {
+            const startBin = Math.round(((existing.freqLow  - (centerFreq - totalBandwidth / 2)) / totalBandwidth) * binCount);
+            const endBin   = Math.round(((existing.freqHigh - (centerFreq - totalBandwidth / 2)) / totalBandwidth) * binCount);
+            const s = Math.max(0, startBin);
+            const e = Math.min(binCount - 1, endBin);
+            let maxDb = -Infinity;
+            for (let i = s; i <= e; i++) maxDb = Math.max(maxDb, data[i]);
+            // Refresh the linger timer while the signal is still above the disappear threshold
+            if (maxDb >= disappearThreshold) {
+                return { ...existing, lastSeenMs: now };
+            }
+            return existing; // keep stale lastSeenMs so linger countdown continues
+        })
+        .filter(existing => (now - (existing.lastSeenMs || 0)) < BRACKET_LINGER_MS);
 
     // Merge: start from new detections, add retained ones not already covered
     const merged = [...newBrackets];

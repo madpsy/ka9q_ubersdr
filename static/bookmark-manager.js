@@ -870,15 +870,19 @@ function _binToFreq(bin, binCount, centerFreq, totalBandwidth) {
 // noiseFloor + expandThresholdDb (default 4 dB).  This captures the full extent
 // of spectrally uneven signals (e.g. SSB voice heavy on bass) that may dip below
 // the detection threshold in some bins but are still clearly above the noise floor.
-function _expandRunFromPeak(data, run, noiseFloor, expandThresholdDb) {
+// maxExpansionBins caps how far the walk can go in each direction so a narrow
+// signal cannot be artificially widened beyond the receive bandwidth.
+function _expandRunFromPeak(data, run, noiseFloor, expandThresholdDb, maxExpansionBins) {
     const expandThreshold = noiseFloor + expandThresholdDb;
+    const loLimit = maxExpansionBins != null ? Math.max(0, run.peakBin - maxExpansionBins) : 0;
+    const hiLimit = maxExpansionBins != null ? Math.min(data.length - 1, run.peakBin + maxExpansionBins) : data.length - 1;
     let lo = run.peakBin;
     let hi = run.peakBin;
 
-    // Walk left from peak
-    while (lo > 0 && data[lo - 1] >= expandThreshold) lo--;
-    // Walk right from peak
-    while (hi < data.length - 1 && data[hi + 1] >= expandThreshold) hi++;
+    // Walk left from peak (capped)
+    while (lo > loLimit && data[lo - 1] >= expandThreshold) lo--;
+    // Walk right from peak (capped)
+    while (hi < hiLimit && data[hi + 1] >= expandThreshold) hi++;
 
     return { ...run, startBin: lo, endBin: hi };
 }
@@ -915,9 +919,10 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB, minBins);
 
     // Expand each run outward from its peak at a lower threshold (4 dB above noise).
-    // This captures the full extent of spectrally uneven signals like SSB voice,
-    // which may be strong in the bass but weaker at higher frequencies.
-    const expandedRuns = newRuns.map(run => _expandRunFromPeak(data, run, noiseFloor, 4));
+    // Capped at 75% of the receive bandwidth in each direction so a narrow signal
+    // cannot be artificially widened beyond the BW filter's maximum.
+    const maxExpansionBins = Math.ceil((rxBandwidthHz * 0.75) / hzPerBin);
+    const expandedRuns = newRuns.map(run => _expandRunFromPeak(data, run, noiseFloor, 4, maxExpansionBins));
 
     // Merge runs that are within 30% of the receive bandwidth of each other.
     // This coalesces AM carrier+sidebands and fragmented voice signals into one bracket.

@@ -189,6 +189,16 @@ async function loadBands() {
 
             // Render custom quick-tune band buttons (bands with button_name set)
             renderCustomBandButtons();
+
+            // Apply active highlight immediately after buttons are created,
+            // since updateBandButtons() ran before these buttons existed.
+            if (typeof window.updateBandButtons === 'function') {
+                const freqInput = document.getElementById('frequency');
+                const currentFreq = freqInput
+                    ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) || 0
+                    : 0;
+                window.updateBandButtons(currentFreq);
+            }
         } else {
             console.error('[bookmark-manager.js] No bands available, status:', response.status);
         }

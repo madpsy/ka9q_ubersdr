@@ -756,8 +756,8 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
 // Hysteresis: appear at +15 dB above noise, disappear below +8 dB.
 // ─────────────────────────────────────────────────────────────────────────────
 const BRACKET_UPDATE_INTERVAL_MS = 2000;
-const BRACKET_APPEAR_THRESHOLD_DB = 15;  // dB above noise to appear
-const BRACKET_DISAPPEAR_THRESHOLD_DB = 8; // dB above noise to disappear
+const BRACKET_APPEAR_THRESHOLD_DB = 10;  // dB above noise to appear
+const BRACKET_DISAPPEAR_THRESHOLD_DB = 5; // dB above noise to disappear
 const BRACKET_TOP_SIGNALS = 5;
 const BRACKET_MIN_BINS = 3; // ignore single-bin spikes
 
@@ -862,22 +862,14 @@ function updateStrongSignalBrackets(spectrumDisplay) {
         (spectrumDisplay.currentBandwidthHigh || 2700) -
         (spectrumDisplay.currentBandwidthLow  || 50)
     );
-    const minSignalWidthHz = rxBandwidthHz * 0.5;
+    const minSignalWidthHz = rxBandwidthHz * 0.3;
     const maxSignalWidthHz = rxBandwidthHz * 1.5;
     const hzPerBin = totalBandwidth / binCount;
 
-    // DEBUG — remove after tuning
-    console.log(`[brackets] noise=${noiseFloor.toFixed(1)}dB  appear@${(noiseFloor+BRACKET_APPEAR_THRESHOLD_DB).toFixed(1)}dB  rxBW=${rxBandwidthHz.toFixed(0)}Hz  min=${minSignalWidthHz.toFixed(0)}Hz  max=${maxSignalWidthHz.toFixed(0)}Hz  hzPerBin=${hzPerBin.toFixed(2)}`);
-    console.log(`[brackets] raw runs: ${newRuns.length}`, newRuns.map(r => `peak=${r.peakDb.toFixed(1)}dB bins=${r.startBin}-${r.endBin}`));
-    console.log(`[brackets] expanded:`, expandedRuns.map(r => { const w=(r.endBin-r.startBin+1)*hzPerBin; return `${w.toFixed(0)}Hz peak=${r.peakDb.toFixed(1)}dB`; }));
-
     const filteredRuns = expandedRuns.filter(run => {
         const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
-        const pass = runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
-        if (!pass) console.log(`[brackets] REJECTED ${runWidthHz.toFixed(0)}Hz (need ${minSignalWidthHz.toFixed(0)}–${maxSignalWidthHz.toFixed(0)}Hz)`);
-        return pass;
+        return runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
     });
-    console.log(`[brackets] after filter: ${filteredRuns.length} runs`);
 
     // Sort by peak power, take top N
     filteredRuns.sort((a, b) => b.peakDb - a.peakDb);
@@ -949,7 +941,7 @@ function drawStrongSignalBrackets(spectrumDisplay) {
     const endFreq   = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
     const w = spectrumDisplay.width;
 
-    const BAR_Y    = 0;   // top of overlay
+    const BAR_Y    = 45;  // top of frequency scale strip
     const BAR_H    = 2;   // horizontal bar thickness (px)
     const LEG_H    = 8;   // downward leg length (px)
     const COLOR    = '#ff2222';

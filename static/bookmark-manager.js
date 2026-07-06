@@ -842,10 +842,11 @@ function updateStrongSignalBrackets(spectrumDisplay) {
         (spectrumDisplay.currentBandwidthLow  || 50)
     );
     const minSignalWidthHz = rxBandwidthHz * 0.5;
+    const maxSignalWidthHz = rxBandwidthHz * 1.5;
     const hzPerBin = totalBandwidth / binCount;
     const filteredRuns = newRuns.filter(run => {
         const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
-        return runWidthHz >= minSignalWidthHz;
+        return runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
     });
 
     // Sort by peak power, take top N

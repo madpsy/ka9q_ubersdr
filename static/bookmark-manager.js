@@ -926,12 +926,15 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     const maxSignalWidthHz = rxBandwidthHz * 1.5;
 
     // PRE-FILTER on core run width (before any expansion).
-    // A signal whose core (at APPEAR_THRESHOLD) is narrower than 50% of the receive
-    // bandwidth cannot qualify — expansion must not be able to rescue it.
-    // Also reject cores already wider than 150% BW (they won't merge into range).
+    // Rejects genuinely narrow signals (CW tones, data carriers) whose core at the
+    // appear threshold is less than 20% of the receive bandwidth.  This is loose enough
+    // to let SSB voice cores (which may only be 600–1200 Hz wide at 10 dB above noise)
+    // through to the expansion step, while still blocking 100–300 Hz tones.
+    // The strict 50% minimum is enforced again after expansion + merge (post-filter below).
+    const coreMinWidthHz = rxBandwidthHz * 0.20;
     const coreQualified = newRuns.filter(run => {
         const coreWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
-        return coreWidthHz >= minSignalWidthHz && coreWidthHz <= maxSignalWidthHz;
+        return coreWidthHz >= coreMinWidthHz && coreWidthHz <= maxSignalWidthHz;
     });
 
     // Expand each qualifying run outward from its run edges at a lower threshold (4 dB

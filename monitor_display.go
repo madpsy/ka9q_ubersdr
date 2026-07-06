@@ -170,22 +170,31 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		valueColor = "lime"
 	}
 
-	var value string
+	// Build colour-coded segments for the bottom line:
+	//   "2/20"      — white  (key numbers)
+	//   " users "   — blue   (label)
+	//   "(18 free)" — status colour (lime/amber/red — matches top line)
+	//   ", 1 bypass"— cyan   (bypass sessions, distinct but neutral)
+	segs := []gudriver.Segment{
+		{Text: fmt.Sprintf("%d/%d", regular, maxSessions), Color: "white"},
+		{Text: " users ", Color: "blue"},
+		{Text: fmt.Sprintf("(%d free)", free), Color: valueColor},
+	}
 	if bypassed > 0 {
-		value = fmt.Sprintf("%d/%d users (%d free, %d admin)", regular, maxSessions, free, bypassed)
-	} else {
-		value = fmt.Sprintf("%d/%d users (%d free)", regular, maxSessions, free)
+		segs = append(segs, gudriver.Segment{
+			Text:  fmt.Sprintf(", %d bypass", bypassed),
+			Color: "cyan",
+		})
 	}
 
 	// Users slide: top line shows "USER" label; user count is already in the value.
 	topLine := formatTopLine("USER", fmt.Sprintf("%d/%d", regular, maxSessions))
 
 	return monitorSlide{
-		topLine:    topLine,
-		topColor:   valueColor,
-		value:      value,
-		valueColor: valueColor,
-		transition: gudriver.TransitionFade,
+		topLine:       topLine,
+		topColor:      "cyan",
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
 	}
 }
 
@@ -219,19 +228,19 @@ func loadColor(load float64, cores int) string {
 }
 
 // buildLoadSlide returns a slide showing load averages, colour-coded per value.
-// Bottom line uses segments: 5m value in status colour, 1m value in its own
-// colour, core count in white — all compact with no redundant labels.
+// Bottom line uses segments: 15m, 5m, 1m values in their own status colours,
+// then core count in white — all compact with no redundant labels.
 func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	data := getSystemLoad()
 
+	load15, _ := strconv.ParseFloat(fmt.Sprintf("%v", data["load_15min"]), 64)
 	load5, _ := strconv.ParseFloat(fmt.Sprintf("%v", data["load_5min"]), 64)
 	load1, _ := strconv.ParseFloat(fmt.Sprintf("%v", data["load_1min"]), 64)
 	cores, _ := data["cpu_cores"].(int)
-	status, _ := data["status"].(string)
-	topColor := statusColor(status)
 
-	// Build colour-coded segments: "0.42 " (5m colour) + "0.38" (1m colour) + " /4c" (white)
+	// Build colour-coded segments: 15m, 5m, 1m values each in their own status colour, then core count in white.
 	segs := []gudriver.Segment{
+		{Text: fmt.Sprintf("%.2f ", load15), Color: loadColor(load15, cores)},
 		{Text: fmt.Sprintf("%.2f ", load5), Color: loadColor(load5, cores)},
 		{Text: fmt.Sprintf("%.2f", load1), Color: loadColor(load1, cores)},
 	}
@@ -241,7 +250,7 @@ func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 
 	return monitorSlide{
 		topLine:       formatTopLine("LOAD", userCountStr(sessions, maxSessions)),
-		topColor:      topColor,
+		topColor:      "amber",
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -273,7 +282,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 
 	return &monitorSlide{
 		topLine:       formatTopLine("TEMP", userCountStr(sessions, maxSessions)),
-		topColor:      color,
+		topColor:      "orange",
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -298,17 +307,6 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 
 	if !hasReport && !hasCountry {
 		return nil
-	}
-
-	// Colour by report rank: top 10 = lime, top 50 = amber, otherwise white.
-	topColor := "white"
-	if hasReport {
-		switch {
-		case allReport.Rank <= 10:
-			topColor = "lime"
-		case allReport.Rank <= 50:
-			topColor = "amber"
-		}
 	}
 
 	// Build segments: rank label in white, daily count in blue.
@@ -338,7 +336,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 
 	return &monitorSlide{
 		topLine:       formatTopLine("PSK", userCountStr(sessions, maxSessions)),
-		topColor:      topColor,
+		topColor:      "purple",
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -347,7 +345,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 // ─── Slide sequencer ──────────────────────────────────────────────────────────
 
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, maxSessions int) []monitorSlide {
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, maxSessions int, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
 	var slides []monitorSlide
 
 	// 1. UTC clock (single centred line, no label)
@@ -369,10 +367,83 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 6. Band conditions — one or two pages, 3 bands per line, each coloured.
+	// 6. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
+	if s := buildRotatorSlide(rotctl, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 7. Antenna switch active port (optional — omitted when ant switch not enabled)
+	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 8. Band conditions — one or two pages, 3 bands per line, each coloured.
 	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
+}
+
+// buildRotatorSlide returns a slide showing the current rotator azimuth.
+// Returns nil when rotctl is nil or not connected.
+// The azimuth value is white when stopped, amber when moving.
+// Duration is 6s (short — the value rarely needs long display time).
+func buildRotatorSlide(rotctl *RotctlAPIHandler, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if rotctl == nil {
+		return nil
+	}
+	if !rotctl.controller.client.IsConnected() {
+		return nil
+	}
+	state := rotctl.controller.GetState()
+	if state.Position == nil {
+		return nil
+	}
+
+	az := int(state.Position.Azimuth + 0.5) // round to nearest degree
+	azColor := "white"
+	if state.Moving {
+		azColor = "amber"
+	}
+
+	return &monitorSlide{
+		topLine:         formatTopLine("ROT", userCountStr(sessions, maxSessions)),
+		topColor:        "gold",
+		valueSegments:   []gudriver.Segment{{Text: fmt.Sprintf("%d°", az), Color: azColor}},
+		transition:      gudriver.TransitionFade,
+		displayDuration: 6 * time.Second,
+	}
+}
+
+// buildAntSwitchSlide returns a slide showing the active antenna switch port label.
+// Returns nil when antSwitch is nil.
+// Duration is 6s.
+func buildAntSwitchSlide(antSwitch *AntSwitchHandler, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if antSwitch == nil {
+		return nil
+	}
+	state := antSwitch.getState()
+
+	var segs []gudriver.Segment
+	if state.Grounded {
+		segs = []gudriver.Segment{{Text: "GROUND", Color: "amber"}}
+	} else if len(state.Selected) == 0 {
+		return nil // no active port — skip slide
+	} else {
+		// Build label(s) for all active ports
+		labels := make([]string, 0, len(state.Selected))
+		for _, n := range state.Selected {
+			labels = append(labels, antSwitch.antennaLabel(n))
+		}
+		segs = []gudriver.Segment{{Text: strings.Join(labels, ", "), Color: "white"}}
+	}
+
+	return &monitorSlide{
+		topLine:         formatTopLine("ANT", userCountStr(sessions, maxSessions)),
+		topColor:        "pink",
+		valueSegments:   segs,
+		transition:      gudriver.TransitionFade,
+		displayDuration: 6 * time.Second,
+	}
 }
 
 // buildBandConditionsSlides returns one or two slides showing all non-POOR bands
@@ -605,6 +676,8 @@ type MonitorDisplay struct {
 	pskRank     *PSKRankFetcher
 	callsign    string // receiver callsign for PSK rank lookup
 	maxSessions int
+	rotctl      *RotctlAPIHandler // nil if rotator not enabled
+	antSwitch   *AntSwitchHandler // nil if antenna switch not enabled
 	cancel      context.CancelFunc
 }
 
@@ -613,7 +686,8 @@ type MonitorDisplay struct {
 //
 // psk may be nil — PSK rank slides are simply omitted when no fetcher is wired.
 // callsign is the receiver callsign used for PSK rank lookups (e.g. config.Decoder.ReceiverCallsign).
-func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string) *MonitorDisplay {
+// rotctl and antSwitch may be nil — their slides are omitted when not wired.
+func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
 	if !cfg.MonitorDisplay.Enabled {
 		return nil
 	}
@@ -645,6 +719,8 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 		pskRank:     psk,
 		callsign:    callsign,
 		maxSessions: maxSessions,
+		rotctl:      rotctl,
+		antSwitch:   antSwitch,
 	}
 }
 
@@ -694,7 +770,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.callsign, md.maxSessions)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.callsign, md.maxSessions, md.rotctl, md.antSwitch)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():

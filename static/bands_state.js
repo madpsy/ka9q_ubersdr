@@ -521,6 +521,13 @@ function updateBandBadgeActiveStates() {
 
     // Update each band badge
     document.querySelectorAll('.band-status-badge').forEach(badge => {
+        // Custom quick-tune band buttons don't use data-band; they use data-min/data-max
+        // and their active state is managed by updateBandButtons() in app.js. Skip them
+        // here so we don't clobber the active class that updateBandButtons() just set.
+        if (badge.classList.contains('custom-band-button')) {
+            return;
+        }
+
         const band = badge.getAttribute('data-band');
         const range = bandRanges[band];
         

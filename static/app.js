@@ -1375,6 +1375,17 @@ function updateBandButtons(frequency) {
         }
     });
 
+    // Update custom band buttons (have data-min / data-max instead of data-band)
+    document.querySelectorAll('.custom-band-button').forEach(btn => {
+        const min = parseInt(btn.getAttribute('data-min'));
+        const max = parseInt(btn.getAttribute('data-max'));
+        if (!isNaN(min) && !isNaN(max) && frequency >= min && frequency <= max) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
     // Also update band status badges if the function exists
     if (window.updateBandBadgeActiveStates) {
         window.updateBandBadgeActiveStates();

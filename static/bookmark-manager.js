@@ -230,6 +230,8 @@ function renderCustomBandButtons() {
         const btn = document.createElement('div');
         btn.className = 'band-status-badge custom-band-button';
         btn.setAttribute('data-status', 'EXCELLENT'); // always green
+        btn.setAttribute('data-min', band.start);
+        btn.setAttribute('data-max', band.end);
         btn.setAttribute('title', tooltip);
         btn.textContent = band.button_name;
         btn.style.cursor = 'pointer';

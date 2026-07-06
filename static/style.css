@@ -835,9 +835,11 @@ body {
 }
 
 .custom-band-button.active {
-    border-color: white !important;
+    border: 3px solid white !important;
     box-shadow: 0 0 15px rgba(255, 255, 255, 0.8),
                 0 0 8px rgba(255, 255, 255, 0.6) inset !important;
+    transform: scale(1.1) translateY(-2px);
+    z-index: 10;
 }
 
 .custom-band-button:hover {

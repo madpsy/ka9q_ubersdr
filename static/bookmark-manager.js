@@ -771,11 +771,20 @@ const BRACKET_UPDATE_INTERVAL_MS = 2000;
 const BRACKET_APPEAR_THRESHOLD_DB = 10;  // dB above noise to appear
 const BRACKET_DISAPPEAR_THRESHOLD_DB = 5; // dB above noise to disappear
 const BRACKET_TOP_SIGNALS = 5;
-const BRACKET_MIN_BINS = 3; // ignore single-bin spikes
+const BRACKET_MIN_HZ = 200; // minimum run width in Hz (replaces fixed bin count)
 
 // Persistent state (survives across markerCache rebuilds)
 let _bracketLastUpdateTime = 0;
 let _bracketActive = []; // [{freqLow, freqHigh, peakFreq, peakDb, noiseDb}]
+
+// Reset the rate-limit timer so the next drawStrongSignalBrackets call runs
+// detection immediately.  Call this whenever the receive bandwidth changes so
+// brackets are re-evaluated with the new BW filter rather than waiting 2 s.
+function resetSignalBracketTimer() {
+    _bracketLastUpdateTime = 0;
+    _bracketActive = []; // also clear stale brackets drawn with old bandwidth
+    window._signalBracketsChanged = true; // force markerCache rebuild
+}
 
 function _estimateNoiseFloor(data) {
     // 15th-percentile of the current frame — robust against strong signals
@@ -783,7 +792,7 @@ function _estimateNoiseFloor(data) {
     return sorted[Math.floor(sorted.length * 0.15)];
 }
 
-function _detectSignalRuns(data, noiseFloor, appearThreshold) {
+function _detectSignalRuns(data, noiseFloor, appearThreshold, minBins) {
     const threshold = noiseFloor + appearThreshold;
     const runs = [];
     let inRun = false;
@@ -806,7 +815,7 @@ function _detectSignalRuns(data, noiseFloor, appearThreshold) {
             if (inRun) {
                 inRun = false;
                 const runLen = i - runStart;
-                if (runLen >= BRACKET_MIN_BINS) {
+                if (runLen >= minBins) {
                     runs.push({ startBin: runStart, endBin: i - 1, peakBin: peakIdx, peakDb });
                 }
                 peakDb = -Infinity;
@@ -816,11 +825,41 @@ function _detectSignalRuns(data, noiseFloor, appearThreshold) {
     // Close any open run at end of data
     if (inRun) {
         const runLen = data.length - runStart;
-        if (runLen >= BRACKET_MIN_BINS) {
+        if (runLen >= minBins) {
             runs.push({ startBin: runStart, endBin: data.length - 1, peakBin: peakIdx, peakDb });
         }
     }
     return runs;
+}
+
+// Merge runs that are close together (gap ≤ maxGapBins).
+// This coalesces fragmented signals — e.g. AM carrier + sidebands, or SSB voice
+// with spectral dips — into a single run before width-filtering.
+// The merged run takes the union of bounds and the stronger peak.
+function _mergeNearbyRuns(runs, maxGapBins) {
+    if (runs.length === 0) return runs;
+
+    // Sort by start bin
+    const sorted = [...runs].sort((a, b) => a.startBin - b.startBin);
+    const merged = [{ ...sorted[0] }];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const prev = merged[merged.length - 1];
+        const curr = sorted[i];
+        const gap = curr.startBin - prev.endBin - 1;
+
+        if (gap <= maxGapBins) {
+            // Merge: extend bounds, keep stronger peak
+            prev.endBin = Math.max(prev.endBin, curr.endBin);
+            if (curr.peakDb > prev.peakDb) {
+                prev.peakDb = curr.peakDb;
+                prev.peakBin = curr.peakBin;
+            }
+        } else {
+            merged.push({ ...curr });
+        }
+    }
+    return merged;
 }
 
 function _binToFreq(bin, binCount, centerFreq, totalBandwidth) {
@@ -860,25 +899,36 @@ function updateStrongSignalBrackets(spectrumDisplay) {
 
     const noiseFloor = _estimateNoiseFloor(data);
 
-    // Detect all runs above the APPEAR threshold
-    const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB);
+    // Hz per bin — used to convert Hz thresholds to bin counts
+    const hzPerBin = totalBandwidth / binCount;
+
+    // Minimum run length in bins, derived from BRACKET_MIN_HZ so it scales with zoom
+    const minBins = Math.max(3, Math.ceil(BRACKET_MIN_HZ / hzPerBin));
+
+    // Receive bandwidth — used for width filter and merge gap
+    const rxBandwidthHz = Math.abs(
+        (spectrumDisplay.currentBandwidthHigh || 2700) -
+        (spectrumDisplay.currentBandwidthLow  || 50)
+    );
+
+    // Detect all runs above the APPEAR threshold (Hz-based minimum length)
+    const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB, minBins);
 
     // Expand each run outward from its peak at a lower threshold (4 dB above noise).
     // This captures the full extent of spectrally uneven signals like SSB voice,
     // which may be strong in the bass but weaker at higher frequencies.
     const expandedRuns = newRuns.map(run => _expandRunFromPeak(data, run, noiseFloor, 4));
 
-    // Filter: signal run width must be > 50% and < 150% of the current receive bandwidth.
-    // Uses expanded bounds so uneven voice signals measure their true width.
-    const rxBandwidthHz = Math.abs(
-        (spectrumDisplay.currentBandwidthHigh || 2700) -
-        (spectrumDisplay.currentBandwidthLow  || 50)
-    );
+    // Merge runs that are within 30% of the receive bandwidth of each other.
+    // This coalesces AM carrier+sidebands and fragmented voice signals into one bracket.
+    const maxGapBins = Math.ceil((rxBandwidthHz * 0.3) / hzPerBin);
+    const mergedRuns = _mergeNearbyRuns(expandedRuns, maxGapBins);
+
+    // Filter: signal run width must be > 30% and < 150% of the current receive bandwidth.
     const minSignalWidthHz = rxBandwidthHz * 0.3;
     const maxSignalWidthHz = rxBandwidthHz * 1.5;
-    const hzPerBin = totalBandwidth / binCount;
 
-    const filteredRuns = expandedRuns.filter(run => {
+    const filteredRuns = mergedRuns.filter(run => {
         const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
         return runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
     });
@@ -999,6 +1049,7 @@ export {
     drawAmateurBandBackgrounds,
     drawBookmarksOnSpectrum,
     drawStrongSignalBrackets,
+    resetSignalBracketTimer,
     handleBookmarkClick
 };
 
@@ -1008,4 +1059,5 @@ window.loadBands = loadBands;
 window.drawAmateurBandBackgrounds = drawAmateurBandBackgrounds;
 window.drawBookmarksOnSpectrum = drawBookmarksOnSpectrum;
 window.drawStrongSignalBrackets = drawStrongSignalBrackets;
+window.resetSignalBracketTimer = resetSignalBracketTimer;
 window.handleBookmarkClick = handleBookmarkClick;

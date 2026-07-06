@@ -3395,11 +3395,20 @@ class SpectrumDisplay {
         // offscreen canvas so that on steady-state frames we do a single drawImage
         // instead of re-running all the canvas draw calls.
         if (this.currentTunedFreq && this.totalBandwidth) {
+            const bandwidthChanged =
+                this.lastCursorBandwidthLow  !== this.currentBandwidthLow ||
+                this.lastCursorBandwidthHigh !== this.currentBandwidthHigh;
+
+            // When bandwidth changes, immediately re-evaluate signal brackets with
+            // the new BW filter rather than waiting for the 2-second timer.
+            if (bandwidthChanged && typeof window.resetSignalBracketTimer === 'function') {
+                window.resetSignalBracketTimer();
+            }
+
             const cursorChanged =
                 !this.cursorCache ||
                 this.lastCursorTunedFreq      !== this.currentTunedFreq      ||
-                this.lastCursorBandwidthLow   !== this.currentBandwidthLow   ||
-                this.lastCursorBandwidthHigh  !== this.currentBandwidthHigh  ||
+                bandwidthChanged                                              ||
                 this.lastCursorCenterFreq     !== effectiveCenterFreq        ||
                 this.lastCursorTotalBandwidth !== this.totalBandwidth;
 

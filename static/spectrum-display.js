@@ -3296,6 +3296,13 @@ class SpectrumDisplay {
                            this.lastMarkerTotalBandwidth !== this.totalBandwidth ||
                            this.lastMarkerDisplayMode !== this.displayMode;
 
+        // Also rebuild if signal brackets changed (time-gated, ~2s interval)
+        const bracketsChanged = window._signalBracketsChanged === true;
+        if (bracketsChanged) {
+            window._signalBracketsChanged = false;
+            this.markerCache = null; // force rebuild
+        }
+
         // Create or update offscreen canvas for marker caching if view changed
         if (viewChanged || !this.markerCache) {
             // Create offscreen canvas for caching markers (bookmarks + DX spots)
@@ -3334,6 +3341,12 @@ class SpectrumDisplay {
 
             // Draw chat user markers AFTER band labels but BEFORE bookmark markers
             this.drawChatUserMarkers();
+
+            // Draw strong signal brackets (top-5 signals above noise floor)
+            // Drawn before bookmarks so bookmark labels render on top
+            if (typeof window.drawStrongSignalBrackets === 'function') {
+                window.drawStrongSignalBrackets(this);
+            }
 
             // Draw bookmark markers (but skip band backgrounds since we already drew them)
             if (typeof window.drawBookmarksOnSpectrum === 'function') {

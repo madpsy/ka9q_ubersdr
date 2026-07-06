@@ -747,6 +747,200 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
 }
 
 // Export functions
+// ── Strong Signal Brackets ────────────────────────────────────────────────────
+// Detects the top-5 signals clearly above the noise floor and draws a red
+// bracket (flat top bar + short downward legs) at y=0 of the overlay canvas.
+//
+// Detection runs at most once every BRACKET_UPDATE_INTERVAL_MS (2 s).
+// Uses the EMA-smoothed spectrum (specEma) for stability.
+// Hysteresis: appear at +15 dB above noise, disappear below +8 dB.
+// ─────────────────────────────────────────────────────────────────────────────
+const BRACKET_UPDATE_INTERVAL_MS = 2000;
+const BRACKET_APPEAR_THRESHOLD_DB = 15;  // dB above noise to appear
+const BRACKET_DISAPPEAR_THRESHOLD_DB = 8; // dB above noise to disappear
+const BRACKET_TOP_SIGNALS = 5;
+const BRACKET_MIN_BINS = 3; // ignore single-bin spikes
+
+// Persistent state (survives across markerCache rebuilds)
+let _bracketLastUpdateTime = 0;
+let _bracketActive = []; // [{freqLow, freqHigh, peakFreq, peakDb, noiseDb}]
+
+function _estimateNoiseFloor(data) {
+    // 15th-percentile of the current frame — robust against strong signals
+    const sorted = new Float32Array(data).sort();
+    return sorted[Math.floor(sorted.length * 0.15)];
+}
+
+function _detectSignalRuns(data, noiseFloor, appearThreshold) {
+    const threshold = noiseFloor + appearThreshold;
+    const runs = [];
+    let inRun = false;
+    let runStart = 0;
+    let peakIdx = 0;
+    let peakDb = -Infinity;
+
+    for (let i = 0; i < data.length; i++) {
+        if (data[i] >= threshold) {
+            if (!inRun) {
+                inRun = true;
+                runStart = i;
+                peakIdx = i;
+                peakDb = data[i];
+            } else if (data[i] > peakDb) {
+                peakDb = data[i];
+                peakIdx = i;
+            }
+        } else {
+            if (inRun) {
+                inRun = false;
+                const runLen = i - runStart;
+                if (runLen >= BRACKET_MIN_BINS) {
+                    runs.push({ startBin: runStart, endBin: i - 1, peakBin: peakIdx, peakDb });
+                }
+                peakDb = -Infinity;
+            }
+        }
+    }
+    // Close any open run at end of data
+    if (inRun) {
+        const runLen = data.length - runStart;
+        if (runLen >= BRACKET_MIN_BINS) {
+            runs.push({ startBin: runStart, endBin: data.length - 1, peakBin: peakIdx, peakDb });
+        }
+    }
+    return runs;
+}
+
+function _binToFreq(bin, binCount, centerFreq, totalBandwidth) {
+    return centerFreq - totalBandwidth / 2 + (bin / binCount) * totalBandwidth;
+}
+
+function updateStrongSignalBrackets(spectrumDisplay) {
+    const now = Date.now();
+    if (now - _bracketLastUpdateTime < BRACKET_UPDATE_INTERVAL_MS) return; // rate-limit
+    _bracketLastUpdateTime = now;
+
+    // Prefer EMA-smoothed data; fall back to raw
+    const data = spectrumDisplay.specEma || spectrumDisplay.spectrumData;
+    if (!data || data.length === 0) { _bracketActive = []; return; }
+
+    const binCount = data.length;
+    const centerFreq = spectrumDisplay.centerFreq;
+    const totalBandwidth = spectrumDisplay.totalBandwidth;
+    if (!centerFreq || !totalBandwidth) { _bracketActive = []; return; }
+
+    const noiseFloor = _estimateNoiseFloor(data);
+
+    // Detect all runs above the APPEAR threshold
+    const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB);
+
+    // Sort by peak power, take top N
+    newRuns.sort((a, b) => b.peakDb - a.peakDb);
+    const topRuns = newRuns.slice(0, BRACKET_TOP_SIGNALS);
+
+    // Convert bin indices to frequencies
+    const newBrackets = topRuns.map(run => ({
+        freqLow:  _binToFreq(run.startBin, binCount, centerFreq, totalBandwidth),
+        freqHigh: _binToFreq(run.endBin,   binCount, centerFreq, totalBandwidth),
+        peakFreq: _binToFreq(run.peakBin,  binCount, centerFreq, totalBandwidth),
+        peakDb:   run.peakDb,
+        noiseDb:  noiseFloor
+    }));
+
+    // Apply hysteresis: keep existing brackets that are still above disappear threshold
+    const disappearThreshold = noiseFloor + BRACKET_DISAPPEAR_THRESHOLD_DB;
+    const retained = _bracketActive.filter(existing => {
+        // Find the peak bin for this existing bracket's frequency range
+        const startBin = Math.round(((existing.freqLow  - (centerFreq - totalBandwidth / 2)) / totalBandwidth) * binCount);
+        const endBin   = Math.round(((existing.freqHigh - (centerFreq - totalBandwidth / 2)) / totalBandwidth) * binCount);
+        const s = Math.max(0, startBin);
+        const e = Math.min(binCount - 1, endBin);
+        let maxDb = -Infinity;
+        for (let i = s; i <= e; i++) maxDb = Math.max(maxDb, data[i]);
+        return maxDb >= disappearThreshold;
+    });
+
+    // Merge: start from new detections, add retained ones not already covered
+    const merged = [...newBrackets];
+    for (const r of retained) {
+        const alreadyCovered = merged.some(b =>
+            b.freqLow <= r.peakFreq && b.freqHigh >= r.peakFreq
+        );
+        if (!alreadyCovered) merged.push(r);
+    }
+
+    // Final cap at top N by peak power
+    merged.sort((a, b) => b.peakDb - a.peakDb);
+    const next = merged.slice(0, BRACKET_TOP_SIGNALS);
+
+    // Detect change: different count or any bracket moved significantly (>1 bin width)
+    const binWidth = totalBandwidth / binCount;
+    const changed = next.length !== _bracketActive.length || next.some((b, i) => {
+        const old = _bracketActive[i];
+        return !old ||
+            Math.abs(b.freqLow  - old.freqLow)  > binWidth * 2 ||
+            Math.abs(b.freqHigh - old.freqHigh) > binWidth * 2;
+    });
+
+    _bracketActive = next;
+
+    // Signal to spectrum-display.js that the markerCache needs rebuilding
+    if (changed) {
+        window._signalBracketsChanged = true;
+    }
+}
+
+function drawStrongSignalBrackets(spectrumDisplay) {
+    if (!spectrumDisplay || !spectrumDisplay.overlayCtx) return;
+    if (!spectrumDisplay.totalBandwidth || !spectrumDisplay.centerFreq) return;
+
+    // Run detection (rate-limited internally)
+    updateStrongSignalBrackets(spectrumDisplay);
+
+    if (_bracketActive.length === 0) return;
+
+    const ctx = spectrumDisplay.overlayCtx;
+    const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
+    const endFreq   = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
+    const w = spectrumDisplay.width;
+
+    const BAR_Y    = 0;   // top of overlay
+    const BAR_H    = 2;   // horizontal bar thickness (px)
+    const LEG_H    = 8;   // downward leg length (px)
+    const COLOR    = '#ff2222';
+    const GLOW     = 'rgba(255, 34, 34, 0.35)';
+
+    ctx.save();
+
+    for (const bracket of _bracketActive) {
+        // Skip brackets entirely outside the visible window
+        if (bracket.freqHigh < startFreq || bracket.freqLow > endFreq) continue;
+
+        const xLeft  = Math.max(0, ((bracket.freqLow  - startFreq) / spectrumDisplay.totalBandwidth) * w);
+        const xRight = Math.min(w, ((bracket.freqHigh - startFreq) / spectrumDisplay.totalBandwidth) * w);
+
+        if (xRight - xLeft < 1) continue; // too narrow to draw
+
+        // Glow shadow for visibility against any background
+        ctx.shadowColor = GLOW;
+        ctx.shadowBlur  = 4;
+
+        ctx.fillStyle = COLOR;
+
+        // Horizontal top bar
+        ctx.fillRect(xLeft, BAR_Y, xRight - xLeft, BAR_H);
+
+        // Left leg
+        ctx.fillRect(xLeft, BAR_Y, 2, BAR_H + LEG_H);
+
+        // Right leg
+        ctx.fillRect(xRight - 2, BAR_Y, 2, BAR_H + LEG_H);
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+}
+
 export {
     bookmarks,
     bookmarkPositions,
@@ -755,6 +949,7 @@ export {
     loadBookmarks,
     drawAmateurBandBackgrounds,
     drawBookmarksOnSpectrum,
+    drawStrongSignalBrackets,
     handleBookmarkClick
 };
 
@@ -763,4 +958,5 @@ window.amateurBands = amateurBands;
 window.loadBands = loadBands;
 window.drawAmateurBandBackgrounds = drawAmateurBandBackgrounds;
 window.drawBookmarksOnSpectrum = drawBookmarksOnSpectrum;
+window.drawStrongSignalBrackets = drawStrongSignalBrackets;
 window.handleBookmarkClick = handleBookmarkClick;

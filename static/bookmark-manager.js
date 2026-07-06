@@ -815,6 +815,23 @@ function _binToFreq(bin, binCount, centerFreq, totalBandwidth) {
     return centerFreq - totalBandwidth / 2 + (bin / binCount) * totalBandwidth;
 }
 
+// Expand a run's bounds outward from its peak bin until the signal drops below
+// noiseFloor + expandThresholdDb (default 4 dB).  This captures the full extent
+// of spectrally uneven signals (e.g. SSB voice heavy on bass) that may dip below
+// the detection threshold in some bins but are still clearly above the noise floor.
+function _expandRunFromPeak(data, run, noiseFloor, expandThresholdDb) {
+    const expandThreshold = noiseFloor + expandThresholdDb;
+    let lo = run.peakBin;
+    let hi = run.peakBin;
+
+    // Walk left from peak
+    while (lo > 0 && data[lo - 1] >= expandThreshold) lo--;
+    // Walk right from peak
+    while (hi < data.length - 1 && data[hi + 1] >= expandThreshold) hi++;
+
+    return { ...run, startBin: lo, endBin: hi };
+}
+
 function updateStrongSignalBrackets(spectrumDisplay) {
     const now = Date.now();
     if (now - _bracketLastUpdateTime < BRACKET_UPDATE_INTERVAL_MS) return; // rate-limit
@@ -834,9 +851,13 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     // Detect all runs above the APPEAR threshold
     const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB);
 
-    // Filter: signal run width must be > 50% of the current receive bandwidth.
-    // This prevents narrow spurs/birdies from showing brackets — only signals
-    // that are meaningfully wide relative to what the user is listening to qualify.
+    // Expand each run outward from its peak at a lower threshold (4 dB above noise).
+    // This captures the full extent of spectrally uneven signals like SSB voice,
+    // which may be strong in the bass but weaker at higher frequencies.
+    const expandedRuns = newRuns.map(run => _expandRunFromPeak(data, run, noiseFloor, 4));
+
+    // Filter: signal run width must be > 50% and < 150% of the current receive bandwidth.
+    // Uses expanded bounds so uneven voice signals measure their true width.
     const rxBandwidthHz = Math.abs(
         (spectrumDisplay.currentBandwidthHigh || 2700) -
         (spectrumDisplay.currentBandwidthLow  || 50)
@@ -844,7 +865,7 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     const minSignalWidthHz = rxBandwidthHz * 0.5;
     const maxSignalWidthHz = rxBandwidthHz * 1.5;
     const hzPerBin = totalBandwidth / binCount;
-    const filteredRuns = newRuns.filter(run => {
+    const filteredRuns = expandedRuns.filter(run => {
         const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
         return runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;
     });

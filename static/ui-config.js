@@ -12,6 +12,7 @@
  *   smeter_charts_visible     → ubersdr_smeter_charts_hidden (inverted: false→'0', true→absent/'0')
  *   palette                   → spectrumColorScheme           (waterfall colour palette)
  *   contrast                  → spectrumAutoContrast          (auto-range symmetric dB offset, 0-20)
+ *   min_span                  → spectrumAutoMinSpan           (minimum dynamic range in dB, 0-60; 0=auto, default 30)
  *   vu_meter_style            → vuMeterStyle                  (VU meter style: bar/led)
  *   gpu_scroll                → spectrumGpuScrollEnabled      (GPU sub-pixel waterfall scroll)
  *   smoothing                 → spectrumSmoothEnabled         (spatial smoothing)

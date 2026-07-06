@@ -2325,6 +2325,12 @@ func main() {
 	// Start voice activity notifier — polls for new voice signals every 10s
 	StartVoiceActivityNotifier(mainCtx, notifManager, noiseFloorMonitor, 10*time.Second)
 
+	// Start monitor display — cycles key metrics on the Galactic Unicorn LED matrix
+	// when config.monitor_display.enabled is true.
+	monitorDisplay := NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, config.Decoder.ReceiverCallsign)
+	monitorDisplay.Start(mainCtx)
+	defer monitorDisplay.Stop()
+
 	// Start digital rank notifier — polls PSK/WSPR/RBN rank caches every 5 minutes
 	// and fires DigitalRankEvent when our station's rank changes. Always started
 	// unconditionally so adding a digital_rank rule via the admin UI takes effect

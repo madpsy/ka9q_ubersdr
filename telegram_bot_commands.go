@@ -102,7 +102,7 @@ var botCommands = map[string]botCommand{
 		handler:   (*TelegramBotListener).handleRotator,
 	},
 	"sessions": {
-		desc:     "Show active listener sessions",
+		desc:     "Show active listener sessions (regular|bypass|all; default: regular)",
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleSessions,
 	},
@@ -944,11 +944,33 @@ func (l *TelegramBotListener) handleBands(chatID int64, args string) (string, st
 // Mirrors the admin panel Sessions tab: one row per unique user (grouped by
 // user_session_id), showing audio frequency/mode plus emoji indicators for
 // which connection types are active (🔊 audio, 📊 spectrum, 🌐 DX cluster).
-// args is ignored — sessions is always read-only.
+//
+// args controls which sessions are shown:
+//
+//	""         → regular (non-bypassed) only  [default]
+//	"regular"  → regular (non-bypassed) only
+//	"bypass"   → bypassed only
+//	"all"      → all sessions
+//
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string, string, bool) {
 	if l.sessions == nil {
 		msg := "📡 Session data unavailable."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Parse filter argument.
+	filter := strings.ToLower(strings.TrimSpace(args))
+	switch filter {
+	case "", "regular":
+		filter = "regular"
+	case "bypass", "bypassed":
+		filter = "bypass"
+	case "all":
+		filter = "all"
+	default:
+		msg := "❓ Usage: <code>/sessions</code>, <code>/sessions regular</code>, <code>/sessions bypass</code>, or <code>/sessions all</code>"
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
@@ -996,11 +1018,26 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 			continue // no usable key — skip
 		}
 
+		bypassed, _ := s["is_bypassed"].(bool)
+
+		// Apply filter before grouping so we don't create groups that will be
+		// entirely filtered out.
+		switch filter {
+		case "regular":
+			if bypassed {
+				continue
+			}
+		case "bypass":
+			if !bypassed {
+				continue
+			}
+			// "all": no filtering
+		}
+
 		g, exists := groupMap[key]
 		if !exists {
 			country, _ := s["country"].(string)
 			cc, _ := s["country_code"].(string)
-			bypassed, _ := s["is_bypassed"].(bool)
 			var createdAt time.Time
 			if ts, ok := s["created_at"].(string); ok {
 				createdAt, _ = time.Parse(time.RFC3339, ts)
@@ -1040,23 +1077,76 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 	}
 
 	if len(groupOrder) == 0 {
-		msg := "📡 No active sessions right now."
+		var msg string
+		switch filter {
+		case "bypass":
+			msg = "📡 No bypassed sessions right now."
+		case "all":
+			msg = "📡 No active sessions right now."
+		default:
+			msg = "📡 No regular sessions right now."
+		}
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
 
-	// Count regular (non-bypassed) and bypassed unique users.
+	// Count regular (non-bypassed) and bypassed unique users across ALL sessions
+	// (not just the filtered subset) for the footer summary.
 	regularCount := l.sessions.GetNonBypassedUserCount()
 	bypassedCount := 0
-	for _, key := range groupOrder {
-		if groupMap[key].isBypassed {
-			bypassedCount++
+	for _, s := range l.sessions.GetAllSessionsInfo() {
+		isInternal, _ := s["is_internal"].(bool)
+		if isInternal {
+			continue
+		}
+		bypassed, _ := s["is_bypassed"].(bool)
+		if bypassed {
+			// Count unique bypassed users by user_session_id / client_ip.
+			key, _ := s["user_session_id"].(string)
+			if key == "" {
+				key, _ = s["client_ip"].(string)
+			}
+			if key != "" {
+				bypassedCount++
+			}
 		}
 	}
+	// De-duplicate bypassed count (above loop counts per-session, not per-user).
+	// Re-count properly using a set.
+	bypassedUsers := make(map[string]bool)
+	for _, s := range l.sessions.GetAllSessionsInfo() {
+		isInternal, _ := s["is_internal"].(bool)
+		if isInternal {
+			continue
+		}
+		bypassed, _ := s["is_bypassed"].(bool)
+		if !bypassed {
+			continue
+		}
+		key, _ := s["user_session_id"].(string)
+		if key == "" {
+			key, _ = s["client_ip"].(string)
+		}
+		if key != "" {
+			bypassedUsers[key] = true
+		}
+	}
+	bypassedCount = len(bypassedUsers)
 	maxSessions := l.sessions.config.Server.MaxSessions
 
+	// Build header label.
+	var headerLabel string
+	switch filter {
+	case "bypass":
+		headerLabel = "Bypassed Sessions"
+	case "all":
+		headerLabel = "All Sessions"
+	default:
+		headerLabel = "Regular Sessions"
+	}
+
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "📡 <b>Active Sessions: %d</b>\n\n", len(groupOrder))
+	fmt.Fprintf(&sb, "📡 <b>%s: %d</b>\n\n", headerLabel, len(groupOrder))
 	for i, key := range groupOrder {
 		g := groupMap[key]
 

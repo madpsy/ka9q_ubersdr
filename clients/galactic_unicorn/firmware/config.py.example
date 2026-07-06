@@ -40,20 +40,22 @@ IDLE_ALIGN = "center"
 # ---------------------------------------------------------------------------
 # Hardware button behaviour
 #
-# Front-panel buttons (A/B/C/D):
+# Buttons (A/B/C/D):
 #   A — Show IP address
 #   B — Show Wi-Fi SSID + connection status
 #   C — Clear display queue (restores idle display if configured)
-#   D — Toggle between dim and full brightness
+#   D — Step brightness up by BRIGHTNESS_STEP; wraps from max back to min.
+#       Hold D down to keep stepping (auto-repeat after BTN_D_HOLD_DELAY_MS,
+#       then every BTN_D_REPEAT_MS).
 #
-# Brightness rocker (▲/▼):
-#   Adjusts global brightness by BRIGHTNESS_STEP each press.
+# LUX +/- rocker (SWITCH_BRIGHTNESS_UP / SWITCH_BRIGHTNESS_DOWN):
+#   Adjusts global brightness by BRIGHTNESS_STEP each press (no wrap, no hold-repeat).
 # ---------------------------------------------------------------------------
 
-# Brightness rocker
-BRIGHTNESS_STEP = 0.1       # How much each rocker press changes brightness
-BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off via rocker)
-BRIGHTNESS_MAX = 1.0        # Maximum brightness via rocker
+# Brightness step size and limits (shared by LUX rocker and button D)
+BRIGHTNESS_STEP = 0.1       # How much each press changes brightness (10%)
+BRIGHTNESS_MIN = 0.05       # Minimum brightness (never fully off)
+BRIGHTNESS_MAX = 1.0        # Maximum brightness
 
 # Button A — show IP address
 BTN_IP_PRIORITY = 8         # Priority of the IP display message (interrupts most content)
@@ -66,10 +68,11 @@ BTN_WIFI_DURATION = 5.0     # Seconds to show the status before reverting
 
 # Button C — clear display (no extra config needed; always clears and reinstalls idle)
 
-# Button D — toggle dim / full brightness
-BTN_DIM_BRIGHTNESS = 0.1    # Brightness level used for the "dim" state
-BTN_BRIGHTNESS_PRIORITY = 8 # Priority of the brief brightness-confirmation message
-BTN_BRIGHTNESS_DURATION = 1.5  # Seconds to show the brightness label
+# Button D — step brightness
+BTN_BRIGHTNESS_PRIORITY = 8    # Priority of the brief brightness-confirmation message
+BTN_BRIGHTNESS_DURATION = 1.0  # Seconds to show the brightness percentage label
+BTN_D_HOLD_DELAY_MS = 500      # ms held before auto-repeat begins
+BTN_D_REPEAT_MS = 300          # ms between each auto-repeat step while held
 
 # ---------------------------------------------------------------------------
 # Network timeouts

@@ -56,6 +56,7 @@ func isValidOrigin(s string) bool {
 //	  "smeter_mode":                "smeter-classic",          // ubersdr_smeter_colour_mode
 //	  "palette":                    "jet",                     // spectrumColorScheme
 //	  "contrast":                   10,                        // spectrumAutoContrast (0-20)
+//	  "min_span":                   30,                        // spectrumAutoMinSpan (0-60 dB, 0=auto)
 //	  "vu_meter_style":             "bar",                     // vuMeterStyle
 //	  "gpu_scroll":                 true,                      // spectrumGpuScrollEnabled
 //	  "smoothing":                  false,                     // spectrumSmoothEnabled
@@ -151,6 +152,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"smeter_charts_visible":       config.UI.SMeterChartsVisible.Default,
 		"palette":                     config.UI.Palette.Default,
 		"contrast":                    config.UI.Contrast.Default,
+		"min_span":                    config.UI.MinSpan.Default,
 		"vu_meter_style":              config.UI.VUMeterStyle.Default,
 		"gpu_scroll":                  config.UI.GPUScroll.Default,
 		"smoothing":                   config.UI.Smoothing.Default,
@@ -303,6 +305,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 	// Validate contrast range (0-20 to match the UI slider)
 	if parsed.UI.Contrast.Default < parsed.UI.Contrast.Min || parsed.UI.Contrast.Default > parsed.UI.Contrast.Max {
 		http.Error(w, "contrast.default must be between contrast.min and contrast.max", http.StatusBadRequest)
+		return
+	}
+
+	// Validate min_span range (0-60 dB to match the UI slider; 0 = auto / no minimum)
+	if parsed.UI.MinSpan.Max > 0 && (parsed.UI.MinSpan.Default < parsed.UI.MinSpan.Min || parsed.UI.MinSpan.Default > parsed.UI.MinSpan.Max) {
+		http.Error(w, "min_span.default must be between min_span.min and min_span.max", http.StatusBadRequest)
 		return
 	}
 

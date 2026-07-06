@@ -46,10 +46,46 @@ type Config struct {
 	UI                 UIConfig                  `yaml:"ui"`
 	DSP                DSPConfig                 `yaml:"dsp"`
 	LookupServices     LookupServicesConfig      `yaml:"lookup_services"`
+	MonitorDisplay     MonitorDisplayConfig      `yaml:"monitor_display"`
 	Bookmarks          []Bookmark                `yaml:"bookmarks"`
 	Bands              []Band                    `yaml:"bands"`
 	Extensions         []string                  `yaml:"extensions"`
 	DefaultExtension   string                    `yaml:"default_extension,omitempty"`
+}
+
+// MonitorDisplayConfig contains settings for the optional Pimoroni Unicorn LED
+// matrix display driven by the gudriver package.
+type MonitorDisplayConfig struct {
+	// Enabled controls whether the display feature is active.
+	// When false, no connection is made and all display calls are silently skipped.
+	// Default: false
+	Enabled bool `yaml:"enabled"`
+
+	// Driver selects the display backend.
+	// Currently only "galactic_unicorn" is supported (HTTP POST /display protocol).
+	// Default: "galactic_unicorn"
+	Driver string `yaml:"driver"`
+
+	// Model is the Pimoroni Unicorn display variant.
+	// Informational only — the Pico W firmware auto-detects its own display size.
+	//   "galactic" — Galactic Unicorn 53×11 (default)
+	//   "stellar"  — Stellar Unicorn 16×16
+	//   "cosmic"   — Cosmic Unicorn 32×32
+	Model string `yaml:"model"`
+
+	// URL is the base URL of the Pico W HTTP server, e.g. "http://192.168.0.200".
+	// Must start with http:// or https://. Trailing slashes are stripped automatically.
+	// Default: "http://192.168.0.200"
+	URL string `yaml:"url"`
+
+	// TimeoutSeconds is the HTTP request timeout in seconds (1–30).
+	// Default: 5
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+
+	// InsecureSkipVerify disables TLS certificate verification.
+	// Only for self-signed certificates on private LANs.
+	// Default: false
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
 }
 
 // LookupServicesConfig contains settings for callsign lookup providers.
@@ -640,6 +676,7 @@ type UIBoolSetting struct {
 //	SMeterMode:               ubersdr_smeter_colour_mode — needle S-meter display mode
 //	Palette:                  spectrumColorScheme         — waterfall colour palette
 //	Contrast:                 spectrumAutoContrast        — auto-range symmetric dB offset (0-20)
+//	MinSpan:                  spectrumAutoMinSpan         — minimum dynamic range in dB (0-60, default 30; 0 = auto)
 //	VUMeterStyle:             vuMeterStyle                — VU meter display style (bar/led)
 //	GPUScroll:                spectrumGpuScrollEnabled    — GPU sub-pixel waterfall scroll
 //	Smoothing:                spectrumSmoothEnabled       — spatial smoothing
@@ -665,6 +702,7 @@ type UIConfig struct {
 	SMeterChartsVisible       UIBoolSetting     `yaml:"smeter_charts_visible"      json:"smeter_charts_visible"`
 	Palette                   UISelectSetting   `yaml:"palette"                    json:"palette"`
 	Contrast                  UIRangeSetting    `yaml:"contrast"                   json:"contrast"`
+	MinSpan                   UIRangeSetting    `yaml:"min_span"                   json:"min_span"`
 	VUMeterStyle              UISelectSetting   `yaml:"vu_meter_style"             json:"vu_meter_style"`
 	GPUScroll                 UIBoolSetting     `yaml:"gpu_scroll"                 json:"gpu_scroll"`
 	Smoothing                 UIBoolSetting     `yaml:"smoothing"                  json:"smoothing"`

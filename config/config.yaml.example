@@ -2040,3 +2040,60 @@ ntp:
   # Default: 200 ms
   sync_tolerance_ms: 200
 
+# ==============================================================================
+# Monitor Display
+# ==============================================================================
+# Drives a Pimoroni Unicorn LED matrix display (Galactic 53×11, Stellar 16×16,
+# or Cosmic 32×32) connected to a Raspberry Pi Pico W on the local network.
+# When enabled, other parts of the system (notification channels, frequency
+# display updaters, CW spot displayers, etc.) can send content to the display
+# via the gudriver package without duplicating the protocol.
+#
+# The display is addressed over HTTP using the Galactic Unicorn Display Protocol
+# (see clients/galactic_unicorn/DISPLAY_PROTOCOL.md).
+#
+# Supported drivers:
+#   galactic_unicorn  — Pimoroni Unicorn family via HTTP POST /display (default)
+#
+# Supported models (informational — firmware auto-detects display dimensions):
+#   galactic  — Galactic Unicorn 53×11 LED matrix (default)
+#   stellar   — Stellar Unicorn 16×16 LED matrix
+#   cosmic    — Cosmic Unicorn 32×32 LED matrix
+#
+monitor_display:
+  # Enable the monitor display (default: false)
+  # When false, no connection is made and all display features are silently skipped.
+  enabled: false
+
+  # Driver to use for the display (default: galactic_unicorn)
+  # Currently only "galactic_unicorn" is supported.
+  # Future drivers (e.g. MQTT-based, serial) will be added here.
+  driver: "galactic_unicorn"
+
+  # Display model variant (default: galactic)
+  # Informational only — the Pico W firmware auto-detects its own display size.
+  # Set this to match your hardware so UberSDR can log the correct model name
+  # and make sensible layout decisions (e.g. line count, font size defaults).
+  #   galactic  — Galactic Unicorn 53×11 (default)
+  #   stellar   — Stellar Unicorn 16×16
+  #   cosmic    — Cosmic Unicorn 32×32
+  model: "galactic"
+
+  # Base URL of the Pico W HTTP server (default: http://192.168.0.200)
+  # Must be http:// or https://. Do not include a trailing slash.
+  # The driver appends /display for display commands and /status for status queries.
+  # Example: "http://192.168.0.200"
+  url: "http://192.168.0.200"
+
+  # HTTP request timeout in seconds (default: 5)
+  # How long to wait for the display device to respond to each HTTP request.
+  # For a device on the local Wi-Fi network, 3–5 seconds is usually sufficient.
+  # Increase if your Pico W is on a slow or unreliable connection.
+  # Range: 1–30
+  timeout_seconds: 5
+
+  # Skip TLS certificate verification (default: false)
+  # Only enable this for self-signed certificates on private LANs.
+  # Has no effect when url uses http:// (plain HTTP).
+  insecure_skip_verify: false
+

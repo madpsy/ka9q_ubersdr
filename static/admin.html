@@ -2153,17 +2153,23 @@
                             </div>
                         </div>
 
-                        <!-- Auto-Contrast Slider -->
+                        <!-- Auto Spectrum Sliders -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Default Auto-Contrast</h3>
-                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                The symmetric dB offset applied to the auto-range window for new visitors.
-                                The noise floor is raised by +N dB and the ceiling is lowered by -N dB, making signals pop out against the noise.
-                                Range: 0–20. Default: 10. (Matches the Contrast slider in the spectrum controls.)
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Default Auto Spectrum</h3>
+                            <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">
+                                Controls the auto-range spectrum display defaults for new visitors.
+                                These match the two sliders shown in the spectrum controls when Manual mode is off.
                             </p>
-                            <div class="form-group" style="margin-bottom: 0;">
+
+                            <!-- Contrast sub-slider -->
+                            <div class="form-group" style="margin-bottom: 16px;">
+                                <p style="margin: 0 0 6px 0; font-weight: 600; color: #444; font-size: 13px;">Contrast</p>
+                                <p style="margin: 0 0 8px 0; color: #666; font-size: 12px;">
+                                    Symmetric dB offset applied to the auto-range window. The noise floor is raised by +N dB and the ceiling is lowered by -N dB, making signals pop out against the noise.
+                                    Range: 0–20. Default: 10.
+                                </p>
                                 <label for="ui-contrast" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
-                                    Auto-Contrast: <span id="ui-contrast-display" style="font-weight: bold; color: #667eea;">10</span>
+                                    Contrast: <span id="ui-contrast-display" style="font-weight: bold; color: #667eea;">10</span>
                                 </label>
                                 <input type="range" id="ui-contrast" min="0" max="20" value="10"
                                     style="width: 100%; max-width: 400px;"
@@ -2171,6 +2177,25 @@
                                 <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
                                     <span>0 — Wider dB window</span>
                                     <span>20 — Tighter dB window</span>
+                                </div>
+                            </div>
+
+                            <!-- Minimum Dynamic Range sub-slider -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <p style="margin: 0 0 6px 0; font-weight: 600; color: #444; font-size: 13px;">Minimum Dynamic Range</p>
+                                <p style="margin: 0 0 8px 0; color: #666; font-size: 12px;">
+                                    Guarantees at least this many dB are always shown in the auto-range window. Prevents the display from collapsing on very quiet bands.
+                                    0 = Auto (no minimum). Range: 0–60 dB. Default: 30 dB.
+                                </p>
+                                <label for="ui-min-span" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Min Dynamic Range: <span id="ui-min-span-display" style="font-weight: bold; color: #667eea;">30</span> dB
+                                </label>
+                                <input type="range" id="ui-min-span" min="0" max="60" value="30" step="5"
+                                    style="width: 100%; max-width: 400px;"
+                                    oninput="document.getElementById('ui-min-span-display').textContent = this.value">
+                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0 — Auto (no minimum)</span>
+                                    <span>60 dB — Wide minimum window</span>
                                 </div>
                             </div>
                         </div>
@@ -9079,6 +9104,20 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     contrastDisplay.textContent = contrast.default !== undefined ? contrast.default : 10;
                 }
 
+                // Set minimum dynamic range slider (range 0-60 dB, step 5, default 30)
+                const minSpan = ui.min_span || {};
+                const minSpanSlider = document.getElementById('ui-min-span');
+                const minSpanDisplay = document.getElementById('ui-min-span-display');
+                if (minSpanSlider) {
+                    if (minSpan.min !== undefined) minSpanSlider.min = minSpan.min;
+                    if (minSpan.max !== undefined) minSpanSlider.max = minSpan.max;
+                    if (minSpan.step !== undefined) minSpanSlider.step = minSpan.step;
+                    minSpanSlider.value = minSpan.default !== undefined ? minSpan.default : 30;
+                }
+                if (minSpanDisplay) {
+                    minSpanDisplay.textContent = minSpan.default !== undefined ? minSpan.default : 30;
+                }
+
                 // Build bandwidth indicator colour select
                 buildUISelect('ui-bandwidth-indicator-color', ui.bandwidth_indicator_color);
                 // Update swatch to match loaded default
@@ -9517,6 +9556,15 @@ function resetStationIdColor() {
                         min: parseInt(contrast.min, 10),
                         max: parseInt(contrast.max, 10)
                     },
+                    min_span: (() => {
+                        const el = document.getElementById('ui-min-span');
+                        return el ? {
+                            default: parseInt(el.value, 10),
+                            min: parseInt(el.min, 10),
+                            max: parseInt(el.max, 10),
+                            step: parseInt(el.step, 10)
+                        } : { default: 30, min: 0, max: 60, step: 5 };
+                    })(),
                     vu_meter_style: vuMeterStyle ? {
                         default: vuMeterStyle.value,
                         available: Array.from(vuMeterStyle.options).map(o => ({ value: o.value, label: o.textContent }))

@@ -9,12 +9,12 @@
 # MicroPython version: 1.22+ with Pimoroni firmware
 # Hardware: Pimoroni Galactic Unicorn
 #
-# Button assignments (front panel):
-#   A — Show IP address (cyan scroll)
-#   B — Show Wi-Fi status (SSID + connected/disconnected)
-#   C — Clear display queue
-#   D — Toggle brightness between dim and full
-#   Brightness ▲/▼ — Adjust brightness by BRIGHTNESS_STEP
+# Button assignments:
+#   A     — Show IP address (cyan scroll)
+#   B     — Show Wi-Fi status (SSID + connected/disconnected)
+#   C     — Clear display queue
+#   D     — Step brightness up by BRIGHTNESS_STEP (10%); wraps after max; hold to repeat
+#   LUX + / LUX - (SWITCH_BRIGHTNESS_UP/DOWN) — Adjust brightness by BRIGHTNESS_STEP
 
 import gc
 import json
@@ -42,7 +42,10 @@ engine = DisplayEngine(gu, graphics, brightness=config.DEFAULT_BRIGHTNESS)
 
 _wlan = None          # network.WLAN object — set in connect_wifi()
 _device_ip = None     # IP string or "0.0.0.0" — set in main()
-_brightness_toggled = False  # tracks dim/full toggle state for button D
+
+# Auto-brightness: tracks when the user last manually adjusted brightness so
+# auto-brightness can pause and then resume after a configurable delay.
+_manual_brightness_at = None   # ticks_ms() of last manual change, or None
 
 # ---------------------------------------------------------------------------
 # Boot animation helpers (synchronous — asyncio not running yet)
@@ -552,23 +555,43 @@ def _btn_clear():
     print("[BTN C] Display cleared")
 
 
-def _btn_toggle_brightness():
-    """Button D — toggle between dim (BTN_DIM_BRIGHTNESS) and full brightness."""
-    global _brightness_toggled
-    _brightness_toggled = not _brightness_toggled
-    if _brightness_toggled:
-        new_br = _cfg("BTN_DIM_BRIGHTNESS", 0.1)
-        label = f"Dim {int(new_br * 100)}%"
-    else:
-        new_br = _cfg("BRIGHTNESS_MAX", 1.0)
-        label = f"Bright {int(new_br * 100)}%"
+def _mark_manual_brightness():
+    """Record that the user just manually adjusted brightness.
+
+    Auto-brightness will pause for AUTO_BRIGHTNESS_RESUME_S seconds before
+    resuming.  Call this from any code path that changes brightness in response
+    to a button press.
+    """
+    global _manual_brightness_at
+    _manual_brightness_at = time.ticks_ms()
+
+
+def _btn_step_brightness():
+    """Button D — step brightness up by BRIGHTNESS_STEP, wrapping after max.
+
+    Each press (or hold-repeat) increments the global brightness by BRIGHTNESS_STEP
+    (default 10%).  After reaching BRIGHTNESS_MAX the next step wraps back to
+    BRIGHTNESS_MIN so the user can cycle through the full range without needing
+    the rocker buttons.
+    """
+    step    = _cfg("BRIGHTNESS_STEP", 0.1)
+    br_min  = _cfg("BRIGHTNESS_MIN",  0.05)
+    br_max  = _cfg("BRIGHTNESS_MAX",  1.0)
+
+    current = engine.get_brightness()
+    new_br  = round(current + step, 2)
+    if new_br > br_max + 0.001:   # overshoot → wrap to minimum
+        new_br = br_min
+
     engine.set_brightness(new_br)
-    # Brief on-screen confirmation
+    _mark_manual_brightness()
+
+    label = f"{int(round(new_br * 100))}%"
     raw = {
         "type": "display",
         "id": "btn-brightness",
         "priority": _cfg("BTN_BRIGHTNESS_PRIORITY", 8),
-        "duration": _cfg("BTN_BRIGHTNESS_DURATION", 1.5),
+        "duration": _cfg("BTN_BRIGHTNESS_DURATION", 1.0),
         "transition": "cut",
         "lines": [{
             "text": label,
@@ -582,7 +605,7 @@ def _btn_toggle_brightness():
     try:
         msg = DisplayMessage(raw)
         engine.set_message(msg)
-        print(f"[BTN D] Brightness → {new_br:.2f}")
+        print(f"[BTN D] Brightness → {new_br:.2f} ({label})")
     except Exception as e:
         print(f"[BTN D] Error: {e}")
 
@@ -591,14 +614,21 @@ def _btn_toggle_brightness():
 # Hardware button handler
 # ---------------------------------------------------------------------------
 
+# Hold-repeat timing for button D (brightness step).
+# First repeat fires after BTN_D_HOLD_DELAY_MS ms; subsequent repeats every
+# BTN_D_REPEAT_MS ms.  Both are configurable via config.py.
+_BTN_D_HOLD_DELAY_MS = 500   # ms before first auto-repeat
+_BTN_D_REPEAT_MS     = 300   # ms between subsequent auto-repeats
+
+
 async def button_handler():
     """Poll hardware buttons and respond to presses.
 
-    Brightness ▲/▼  — adjust global brightness by BRIGHTNESS_STEP
+    LUX + / LUX -   — adjust global brightness by BRIGHTNESS_STEP (SWITCH_BRIGHTNESS_UP/DOWN)
     A               — show IP address
     B               — show Wi-Fi SSID + status
     C               — clear display queue
-    D               — toggle dim / full brightness
+    D               — step brightness up by BRIGHTNESS_STEP; hold to repeat
     """
     # Verify that the A/B/C/D switch constants exist on this firmware build.
     # Older Pimoroni builds may not expose them; log a warning but keep running.
@@ -610,35 +640,43 @@ async def button_handler():
         print("Button handler: A/B/C/D switches available")
     else:
         print("Button handler: WARNING — SWITCH_A/B/C/D not found on this firmware; "
-              "only brightness rocker will work")
+              "only LUX buttons will work")
+
+    hold_delay_ms  = _cfg("BTN_D_HOLD_DELAY_MS", _BTN_D_HOLD_DELAY_MS)
+    repeat_ms      = _cfg("BTN_D_REPEAT_MS",      _BTN_D_REPEAT_MS)
 
     # Per-button debounce state: tracks whether the button was held last tick
     _held = {
-        "br_up":   False,
-        "br_down": False,
+        "lux_up":  False,
+        "lux_dn":  False,
         "a":       False,
         "b":       False,
         "c":       False,
-        "d":       False,
     }
+
+    # Button D hold-repeat state
+    _d_held_since_ms = None   # ticks_ms() when D was first pressed, or None
+    _d_last_fire_ms  = None   # ticks_ms() of last step action
 
     while True:
         try:
-            # --- Brightness up ---
+            # --- LUX + — brightness up, no wrap ---
             pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP)
-            if pressed and not _held["br_up"]:
+            if pressed and not _held["lux_up"]:
                 new_br = min(_cfg("BRIGHTNESS_MAX", 1.0),
                              engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1))
                 engine.set_brightness(new_br)
-            _held["br_up"] = pressed
+                _mark_manual_brightness()
+            _held["lux_up"] = pressed
 
-            # --- Brightness down ---
+            # --- LUX - — brightness down, no wrap ---
             pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN)
-            if pressed and not _held["br_down"]:
+            if pressed and not _held["lux_dn"]:
                 new_br = max(_cfg("BRIGHTNESS_MIN", 0.05),
                              engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1))
                 engine.set_brightness(new_br)
-            _held["br_down"] = pressed
+                _mark_manual_brightness()
+            _held["lux_dn"] = pressed
 
             if _has_abcd:
                 # --- Button A: show IP ---
@@ -659,11 +697,24 @@ async def button_handler():
                     _btn_clear()
                 _held["c"] = pressed
 
-                # --- Button D: toggle brightness ---
+                # --- Button D: step brightness (with hold-repeat) ---
                 pressed = gu.is_pressed(GalacticUnicorn.SWITCH_D)
-                if pressed and not _held["d"]:
-                    _btn_toggle_brightness()
-                _held["d"] = pressed
+                now_ms = time.ticks_ms()
+                if pressed:
+                    if _d_held_since_ms is None:
+                        # Fresh press — fire immediately
+                        _d_held_since_ms = now_ms
+                        _d_last_fire_ms  = now_ms
+                        _btn_step_brightness()
+                    else:
+                        held_ms = time.ticks_diff(now_ms, _d_held_since_ms)
+                        since_last = time.ticks_diff(now_ms, _d_last_fire_ms)
+                        if held_ms >= hold_delay_ms and since_last >= repeat_ms:
+                            _d_last_fire_ms = now_ms
+                            _btn_step_brightness()
+                else:
+                    _d_held_since_ms = None
+                    _d_last_fire_ms  = None
 
         except Exception as e:
             print(f"Button handler error: {e}")
@@ -797,7 +848,7 @@ async def main():
     )
 
     print(f"Ready. POST JSON to http://{_device_ip}:{config.HTTP_PORT}/display")
-    print("Buttons: A=IP  B=WiFi  C=Clear  D=Dim/Bright  ▲▼=Brightness")
+    print("Buttons: A=IP  B=WiFi  C=Clear  D=Step brightness (hold to repeat)  LUX+/-=Brightness")
 
     # Run all tasks concurrently
     await asyncio.gather(

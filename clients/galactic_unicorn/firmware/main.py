@@ -10,11 +10,13 @@
 # Hardware: Pimoroni Galactic Unicorn
 #
 # Button assignments:
-#   A     — Show IP address (cyan scroll)
-#   B     — Show Wi-Fi status (SSID + connected/disconnected)
-#   C     — Clear display queue
-#   D     — Step brightness up by BRIGHTNESS_STEP (10%); wraps after max; hold to repeat
-#   LUX + / LUX - (SWITCH_BRIGHTNESS_UP/DOWN) — Adjust brightness by BRIGHTNESS_STEP
+#   A       — Show IP address (cyan scroll)
+#   B       — Show Wi-Fi status (SSID + connected/disconnected)
+#   C       — Clear display queue
+#   D       — Step brightness up by BRIGHTNESS_STEP (10%); wraps after max; hold to repeat
+#   LUX +/- (SWITCH_BRIGHTNESS_UP/DOWN)  — Adjust brightness by BRIGHTNESS_STEP (no wrap)
+#   VOL +/- (SWITCH_VOLUME_UP/DOWN)      — Reserved for future use
+#   Sleep   (SWITCH_SLEEP)               — Reserved for future use
 
 import gc
 import json
@@ -625,22 +627,28 @@ async def button_handler():
     """Poll hardware buttons and respond to presses.
 
     LUX + / LUX -   — adjust global brightness by BRIGHTNESS_STEP (SWITCH_BRIGHTNESS_UP/DOWN)
+    VOL + / VOL -   — reserved for future use (SWITCH_VOLUME_UP/DOWN)
+    Sleep           — reserved for future use (SWITCH_SLEEP)
     A               — show IP address
     B               — show Wi-Fi SSID + status
     C               — clear display queue
     D               — step brightness up by BRIGHTNESS_STEP; hold to repeat
     """
-    # Verify that the A/B/C/D switch constants exist on this firmware build.
-    # Older Pimoroni builds may not expose them; log a warning but keep running.
-    _has_abcd = all(
-        hasattr(GalacticUnicorn, sw)
-        for sw in ("SWITCH_A", "SWITCH_B", "SWITCH_C", "SWITCH_D")
-    )
-    if _has_abcd:
-        print("Button handler: A/B/C/D switches available")
-    else:
-        print("Button handler: WARNING — SWITCH_A/B/C/D not found on this firmware; "
-              "only LUX buttons will work")
+    # Probe which switch constants are available on this firmware build.
+    # Pimoroni firmware exposes different sets depending on board/version.
+    def _has(*names):
+        return all(hasattr(GalacticUnicorn, n) for n in names)
+
+    _has_abcd  = _has("SWITCH_A", "SWITCH_B", "SWITCH_C", "SWITCH_D")
+    _has_lux   = _has("SWITCH_BRIGHTNESS_UP", "SWITCH_BRIGHTNESS_DOWN")
+    _has_vol   = _has("SWITCH_VOLUME_UP", "SWITCH_VOLUME_DOWN")
+    _has_sleep = _has("SWITCH_SLEEP")
+
+    print(f"Button handler: A/B/C/D={_has_abcd}  LUX={_has_lux}  VOL={_has_vol}  SLEEP={_has_sleep}")
+    if not _has_lux:
+        print("Button handler: WARNING — SWITCH_BRIGHTNESS_UP/DOWN not found; LUX buttons disabled")
+    if not _has_abcd:
+        print("Button handler: WARNING — SWITCH_A/B/C/D not found; front buttons disabled")
 
     hold_delay_ms  = _cfg("BTN_D_HOLD_DELAY_MS", _BTN_D_HOLD_DELAY_MS)
     repeat_ms      = _cfg("BTN_D_REPEAT_MS",      _BTN_D_REPEAT_MS)
@@ -649,6 +657,9 @@ async def button_handler():
     _held = {
         "lux_up":  False,
         "lux_dn":  False,
+        "vol_up":  False,
+        "vol_dn":  False,
+        "sleep":   False,
         "a":       False,
         "b":       False,
         "c":       False,
@@ -658,25 +669,46 @@ async def button_handler():
     _d_held_since_ms = None   # ticks_ms() when D was first pressed, or None
     _d_last_fire_ms  = None   # ticks_ms() of last step action
 
+    # Rate-limit error logging so a persistent fault doesn't spam the console
+    _last_err_ms = None
+
     while True:
         try:
-            # --- LUX + — brightness up, no wrap ---
-            pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP)
-            if pressed and not _held["lux_up"]:
-                new_br = min(_cfg("BRIGHTNESS_MAX", 1.0),
-                             engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1))
-                engine.set_brightness(new_br)
-                _mark_manual_brightness()
-            _held["lux_up"] = pressed
+            if _has_lux:
+                # --- LUX + — brightness up, no wrap ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP)
+                if pressed and not _held["lux_up"]:
+                    new_br = min(_cfg("BRIGHTNESS_MAX", 1.0),
+                                 engine.get_brightness() + _cfg("BRIGHTNESS_STEP", 0.1))
+                    engine.set_brightness(new_br)
+                    _mark_manual_brightness()
+                _held["lux_up"] = pressed
 
-            # --- LUX - — brightness down, no wrap ---
-            pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN)
-            if pressed and not _held["lux_dn"]:
-                new_br = max(_cfg("BRIGHTNESS_MIN", 0.05),
-                             engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1))
-                engine.set_brightness(new_br)
-                _mark_manual_brightness()
-            _held["lux_dn"] = pressed
+                # --- LUX - — brightness down, no wrap ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN)
+                if pressed and not _held["lux_dn"]:
+                    new_br = max(_cfg("BRIGHTNESS_MIN", 0.05),
+                                 engine.get_brightness() - _cfg("BRIGHTNESS_STEP", 0.1))
+                    engine.set_brightness(new_br)
+                    _mark_manual_brightness()
+                _held["lux_dn"] = pressed
+
+            if _has_vol:
+                # --- VOL + — reserved for future use ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_VOLUME_UP)
+                # TODO: wire to volume control when audio output is supported
+                _held["vol_up"] = pressed
+
+                # --- VOL - — reserved for future use ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_VOLUME_DOWN)
+                # TODO: wire to volume control when audio output is supported
+                _held["vol_dn"] = pressed
+
+            if _has_sleep:
+                # --- Sleep button — reserved for future use ---
+                pressed = gu.is_pressed(GalacticUnicorn.SWITCH_SLEEP)
+                # TODO: wire to display sleep/wake when desired
+                _held["sleep"] = pressed
 
             if _has_abcd:
                 # --- Button A: show IP ---
@@ -717,7 +749,11 @@ async def button_handler():
                     _d_last_fire_ms  = None
 
         except Exception as e:
-            print(f"Button handler error: {e}")
+            # Rate-limit to one error log per 5 seconds to avoid console spam
+            now_ms = time.ticks_ms()
+            if _last_err_ms is None or time.ticks_diff(now_ms, _last_err_ms) >= 5000:
+                print(f"Button handler error: {e}")
+                _last_err_ms = now_ms
 
         await asyncio.sleep(0.05)  # 20 Hz poll — fast enough for responsive feel
 

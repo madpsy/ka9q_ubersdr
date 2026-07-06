@@ -48,8 +48,14 @@ IDLE_ALIGN = "center"
 #       Hold D down to keep stepping (auto-repeat after BTN_D_HOLD_DELAY_MS,
 #       then every BTN_D_REPEAT_MS).
 #
-# LUX +/- rocker (SWITCH_BRIGHTNESS_UP / SWITCH_BRIGHTNESS_DOWN):
+# LUX +/- buttons (SWITCH_BRIGHTNESS_UP / SWITCH_BRIGHTNESS_DOWN):
 #   Adjusts global brightness by BRIGHTNESS_STEP each press (no wrap, no hold-repeat).
+#
+# VOL +/- buttons (SWITCH_VOLUME_UP / SWITCH_VOLUME_DOWN):
+#   Reserved for future use (audio volume control).
+#
+# Sleep button (SWITCH_SLEEP):
+#   Reserved for future use (display sleep/wake).
 # ---------------------------------------------------------------------------
 
 # Brightness step size and limits (shared by LUX rocker and button D)

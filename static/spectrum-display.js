@@ -5008,6 +5008,11 @@ class SpectrumDisplay {
             this.config.autoContrast = val;
             if (autoContrastSlider) autoContrastSlider.value = val;
             if (autoContrastValue)  autoContrastValue.textContent = val.toFixed(0);
+        } else {
+            // No localStorage value — read the slider's current value which was already
+            // set to the server default by ui-config.js (loadServerUIConfig).
+            const sliderVal = autoContrastSlider ? parseFloat(autoContrastSlider.value) : 10;
+            this.config.autoContrast = isNaN(sliderVal) ? 10 : sliderVal;
         }
 
         // Restore minimum dynamic range setting.
@@ -5018,9 +5023,13 @@ class SpectrumDisplay {
             if (autoMinSpanSlider) autoMinSpanSlider.value = val;
             if (autoMinSpanValue)  autoMinSpanValue.textContent = val === 0 ? 'Auto' : `${val}`;
         } else {
-            // Apply default (30 dB) to the slider element
-            if (autoMinSpanSlider) autoMinSpanSlider.value = 30;
-            if (autoMinSpanValue)  autoMinSpanValue.textContent = '30';
+            // No localStorage value — read the slider's current value which was already
+            // set to the server default by ui-config.js (loadServerUIConfig).
+            const sliderVal = autoMinSpanSlider ? parseFloat(autoMinSpanSlider.value) : 30;
+            const def = isNaN(sliderVal) ? 30 : sliderVal;
+            this.config.autoMinSpan = def === 0 ? null : def;
+            if (autoMinSpanSlider) autoMinSpanSlider.value = def;
+            if (autoMinSpanValue)  autoMinSpanValue.textContent = def === 0 ? 'Auto' : `${def}`;
         }
 
         if (manualRangeCheckbox) {
@@ -5100,23 +5109,25 @@ class SpectrumDisplay {
             });
         }
 
-        // Right-click on Min Span slider → reset to default (30 dB)
+        // Right-click on Min Span slider → reset to server default (falls back to 30 dB)
         if (autoMinSpanSlider && autoMinSpanValue) {
             autoMinSpanSlider.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                const def = 30;
-                this.config.autoMinSpan = def;
+                const def = (window.serverUIConfig && window.serverUIConfig.min_span != null)
+                    ? window.serverUIConfig.min_span : 30;
+                this.config.autoMinSpan = def === 0 ? null : def;
                 autoMinSpanSlider.value = def;
-                autoMinSpanValue.textContent = `${def}`;
+                autoMinSpanValue.textContent = def === 0 ? 'Auto' : `${def}`;
                 localStorage.setItem('spectrumAutoMinSpan', def.toString());
             });
         }
 
-        // Right-click on Contrast slider → reset to default (10)
+        // Right-click on Contrast slider → reset to server default (falls back to 10)
         if (autoContrastSlider && autoContrastValue) {
             autoContrastSlider.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                const def = 10;
+                const def = (window.serverUIConfig && window.serverUIConfig.contrast != null)
+                    ? window.serverUIConfig.contrast : 10;
                 this.config.autoContrast = def;
                 autoContrastSlider.value = def;
                 autoContrastValue.textContent = def;

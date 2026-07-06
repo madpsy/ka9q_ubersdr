@@ -874,14 +874,16 @@ function _binToFreq(bin, binCount, centerFreq, totalBandwidth) {
 // signal cannot be artificially widened beyond the receive bandwidth.
 function _expandRunFromPeak(data, run, noiseFloor, expandThresholdDb, maxExpansionBins) {
     const expandThreshold = noiseFloor + expandThresholdDb;
+    // Cap is relative to the peak bin so a narrow signal cannot walk far in either direction
     const loLimit = maxExpansionBins != null ? Math.max(0, run.peakBin - maxExpansionBins) : 0;
     const hiLimit = maxExpansionBins != null ? Math.min(data.length - 1, run.peakBin + maxExpansionBins) : data.length - 1;
-    let lo = run.peakBin;
-    let hi = run.peakBin;
+    // Start from the existing run edges (not the peak) so expansion only ever widens, never narrows
+    let lo = run.startBin;
+    let hi = run.endBin;
 
-    // Walk left from peak (capped)
+    // Walk left from run start (capped at peak-relative limit)
     while (lo > loLimit && data[lo - 1] >= expandThreshold) lo--;
-    // Walk right from peak (capped)
+    // Walk right from run end (capped at peak-relative limit)
     while (hi < hiLimit && data[hi + 1] >= expandThreshold) hi++;
 
     return { ...run, startBin: lo, endBin: hi };
@@ -909,30 +911,40 @@ function updateStrongSignalBrackets(spectrumDisplay) {
     // Minimum run length in bins, derived from BRACKET_MIN_HZ so it scales with zoom
     const minBins = Math.max(3, Math.ceil(BRACKET_MIN_HZ / hzPerBin));
 
-    // Receive bandwidth — used for width filter and merge gap
-    const rxBandwidthHz = Math.abs(
-        (spectrumDisplay.currentBandwidthHigh || 2700) -
-        (spectrumDisplay.currentBandwidthLow  || 50)
-    );
+    // Receive bandwidth — used for width filter and merge gap.
+    // Use != null checks (not ||) so that legitimate 0 or negative values are preserved.
+    const bwHigh = spectrumDisplay.currentBandwidthHigh != null ? spectrumDisplay.currentBandwidthHigh : 2700;
+    const bwLow  = spectrumDisplay.currentBandwidthLow  != null ? spectrumDisplay.currentBandwidthLow  : 50;
+    const rxBandwidthHz = Math.abs(bwHigh - bwLow);
 
     // Detect all runs above the APPEAR threshold (Hz-based minimum length)
     const newRuns = _detectSignalRuns(data, noiseFloor, BRACKET_APPEAR_THRESHOLD_DB, minBins);
 
-    // Expand each run outward from its peak at a lower threshold (4 dB above noise).
-    // Capped at 75% of the receive bandwidth in each direction so a narrow signal
-    // cannot be artificially widened beyond the BW filter's maximum.
+    // Width filter bounds (Hz)
+    const minSignalWidthHz = rxBandwidthHz * 0.5;
+    const maxSignalWidthHz = rxBandwidthHz * 1.5;
+
+    // PRE-FILTER on core run width (before any expansion).
+    // A signal whose core (at APPEAR_THRESHOLD) is narrower than 50% of the receive
+    // bandwidth cannot qualify — expansion must not be able to rescue it.
+    // Also reject cores already wider than 150% BW (they won't merge into range).
+    const coreQualified = newRuns.filter(run => {
+        const coreWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
+        return coreWidthHz >= minSignalWidthHz && coreWidthHz <= maxSignalWidthHz;
+    });
+
+    // Expand each qualifying run outward from its run edges at a lower threshold (4 dB
+    // above noise) to capture the full extent of spectrally uneven voice signals.
+    // Capped at 75% of the receive bandwidth from the peak so expansion stays bounded.
     const maxExpansionBins = Math.ceil((rxBandwidthHz * 0.75) / hzPerBin);
-    const expandedRuns = newRuns.map(run => _expandRunFromPeak(data, run, noiseFloor, 4, maxExpansionBins));
+    const expandedRuns = coreQualified.map(run => _expandRunFromPeak(data, run, noiseFloor, 4, maxExpansionBins));
 
     // Merge runs that are within 30% of the receive bandwidth of each other.
     // This coalesces AM carrier+sidebands and fragmented voice signals into one bracket.
     const maxGapBins = Math.ceil((rxBandwidthHz * 0.3) / hzPerBin);
     const mergedRuns = _mergeNearbyRuns(expandedRuns, maxGapBins);
 
-    // Filter: signal run width must be > 50% and < 150% of the current receive bandwidth.
-    const minSignalWidthHz = rxBandwidthHz * 0.5;
-    const maxSignalWidthHz = rxBandwidthHz * 1.5;
-
+    // POST-FILTER: after merge the combined run must still be within 50%–150% BW.
     const filteredRuns = mergedRuns.filter(run => {
         const runWidthHz = (run.endBin - run.startBin + 1) * hzPerBin;
         return runWidthHz >= minSignalWidthHz && runWidthHz <= maxSignalWidthHz;

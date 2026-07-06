@@ -125,14 +125,53 @@ func userCountStr(sessions *SessionManager, maxSessions int) string {
 	return fmt.Sprintf("%d/%d", regular, maxSessions)
 }
 
+// userCountColor returns a colour for the user count based on capacity:
+// lime when space is available, amber when ≥75% full, red when at or over limit.
+func userCountColor(sessions *SessionManager, maxSessions int) string {
+	regular := sessions.GetNonBypassedUserCount()
+	switch {
+	case regular >= maxSessions:
+		return "red"
+	case regular >= maxSessions*3/4:
+		return "amber"
+	default:
+		return "lime"
+	}
+}
+
+// formatTopLineSegs builds the top status line as coloured segments:
+// the label is rendered in labelColor, the padding in labelColor (invisible),
+// and the "N/MAX" user count in a capacity-based colour (lime/amber/red).
+func formatTopLineSegs(label, labelColor string, sessions *SessionManager, maxSessions int) []gudriver.Segment {
+	right := userCountStr(sessions, maxSessions)
+	total := monitorTopLineWidth
+	maxLabel := total - len(right) - 1
+	if maxLabel < 0 {
+		maxLabel = 0
+	}
+	if len(label) > maxLabel {
+		label = label[:maxLabel]
+	}
+	pad := total - len(label) - len(right)
+	if pad < 0 {
+		pad = 0
+	}
+	countColor := userCountColor(sessions, maxSessions)
+	return []gudriver.Segment{
+		{Text: label + strings.Repeat(" ", pad), Color: labelColor},
+		{Text: right, Color: countColor},
+	}
+}
+
 // ─── Slide builders ───────────────────────────────────────────────────────────
 
 // monitorSlide is a single display frame.
 type monitorSlide struct {
 	// Two-line layout fields (used when singleLine is false):
 	topLine       string             // top line text (label + user count), static
-	topColor      string             // colour for the top line
-	topSegments   []gudriver.Segment // when non-nil, top line uses multi-colour segments
+	topColor      string             // colour for the top line (used when topLineSegs is nil)
+	topLineSegs   []gudriver.Segment // when non-nil, top line uses multi-colour segments (label + count)
+	topSegments   []gudriver.Segment // when non-nil, top line uses multi-colour segments (band conditions)
 	value         string             // bottom line — metric value, may scroll
 	valueColor    string             // colour for the value
 	valueSegments []gudriver.Segment // when non-nil, used instead of value+valueColor
@@ -187,12 +226,8 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		})
 	}
 
-	// Users slide: top line shows "USER" label; user count is already in the value.
-	topLine := formatTopLine("USER", fmt.Sprintf("%d/%d", regular, maxSessions))
-
 	return monitorSlide{
-		topLine:       topLine,
-		topColor:      "cyan",
+		topLineSegs:   formatTopLineSegs("USER", "cyan", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -249,8 +284,7 @@ func buildLoadSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	}
 
 	return monitorSlide{
-		topLine:       formatTopLine("LOAD", userCountStr(sessions, maxSessions)),
-		topColor:      "amber",
+		topLineSegs:   formatTopLineSegs("LOAD", "amber", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -281,8 +315,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 	}
 
 	return &monitorSlide{
-		topLine:       formatTopLine("TEMP", userCountStr(sessions, maxSessions)),
-		topColor:      "orange",
+		topLineSegs:   formatTopLineSegs("TEMP", "orange", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -335,8 +368,7 @@ func buildPSKSlide(psk *PSKRankFetcher, callsign string, sessions *SessionManage
 	}
 
 	return &monitorSlide{
-		topLine:       formatTopLine("PSK", userCountStr(sessions, maxSessions)),
-		topColor:      "purple",
+		topLineSegs:   formatTopLineSegs("PSK", "purple", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -406,8 +438,7 @@ func buildRotatorSlide(rotctl *RotctlAPIHandler, sessions *SessionManager, maxSe
 	}
 
 	return &monitorSlide{
-		topLine:         formatTopLine("ROT", userCountStr(sessions, maxSessions)),
-		topColor:        "gold",
+		topLineSegs:     formatTopLineSegs("ROT", "gold", sessions, maxSessions),
 		valueSegments:   []gudriver.Segment{{Text: fmt.Sprintf("%d°", az), Color: azColor}},
 		transition:      gudriver.TransitionFade,
 		displayDuration: 6 * time.Second,
@@ -438,8 +469,7 @@ func buildAntSwitchSlide(antSwitch *AntSwitchHandler, sessions *SessionManager, 
 	}
 
 	return &monitorSlide{
-		topLine:         formatTopLine("ANT", userCountStr(sessions, maxSessions)),
-		topColor:        "pink",
+		topLineSegs:     formatTopLineSegs("ANT", "pink", sessions, maxSessions),
 		valueSegments:   segs,
 		transition:      gudriver.TransitionFade,
 		displayDuration: 6 * time.Second,
@@ -642,23 +672,27 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 		bottomLine.Color = slide.valueColor
 	}
 
+	// Top line: use segments when available (coloured label + capacity-coloured count),
+	// otherwise fall back to plain text with a single topColor.
+	topLine := gudriver.DisplayLine{
+		Size:   1,
+		Effect: gudriver.EffectStatic,
+		Align:  gudriver.AlignLeft,
+		Y:      "top",
+	}
+	if len(slide.topLineSegs) > 0 {
+		topLine.Segments = slide.topLineSegs
+	} else {
+		topLine.Text = slide.topLine
+		topLine.Color = slide.topColor
+	}
+
 	cmd := gudriver.DisplayCommand{
 		ID:         monitorMessageID,
 		Priority:   monitorPriority,
 		Duration:   gudriver.DurationForever(),
 		Transition: transition,
-		Lines: []gudriver.DisplayLine{
-			{
-				// Top line: static label + user count
-				Text:   slide.topLine,
-				Color:  slide.topColor,
-				Size:   1,
-				Effect: gudriver.EffectStatic,
-				Align:  gudriver.AlignLeft,
-				Y:      "top",
-			},
-			bottomLine,
-		},
+		Lines:      []gudriver.DisplayLine{topLine, bottomLine},
 	}
 
 	_, err := client.Display(cmd)

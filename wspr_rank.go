@@ -20,6 +20,9 @@ import (
 //   - Initial fetch 5 minutes after startup (avoids hammering upstream on
 //     rapid restart loops).
 //   - Subsequent fetches every hour thereafter.
+//   - Each of the three windows is fetched concurrently; on failure each
+//     retries independently up to wsprRankMaxRetries times with exponential
+//     backoff (1 s, 2 s) before giving up for that cycle.
 //
 // Manual refresh:
 //   - GET /admin/wspr-rank?refresh=1 triggers an immediate synchronous fetch.
@@ -31,11 +34,17 @@ import (
 //   - today       : midnight UTC today to now
 
 const (
-	wsprRankFetchTimeout    = 30 * time.Second
+	wsprRankFetchTimeout    = 15 * time.Second // per-attempt HTTP timeout
 	wsprRankMaxBodyBytes    = 10 * 1024 * 1024 // 10 MiB
 	wsprRankStartupDelay    = 5 * time.Minute
 	wsprRankRefreshInterval = 1 * time.Hour
 	wsprRankManualRateLimit = 1 * time.Minute
+
+	// Retry policy: up to 3 attempts per window with exponential backoff.
+	// Inter-attempt waits: 1+2 = 3 s total. All three windows retry in
+	// parallel so total wall time is bounded by the slowest window.
+	wsprRankMaxRetries    = 3
+	wsprRankRetryBaseWait = 1 * time.Second
 
 	// db1.wspr.live query URLs (JSONCompact format)
 	wsprRankURLRolling24h = "https://db1.wspr.live/?query=%20SELECT%20rx_sign%2C%20rx_loc%2C%20arraySum(gross)%20as%20raw%2C%20arraySum(dupes)%20as%20dupe%2C%20arraySum(uniques)%20as%20unique%2C%20groupArray(band)%20as%20bands%2C%20groupArray(uniques)%20as%20uniques%2C%20groupArray(gross)%20as%20gross%2C%20groupArray(dupes)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20rx_loc%2C%20band%2C%20count()%20as%20gross%2C%20count(distinct%20tx_sign)%20as%20uniques%20FROM%20wspr.rx%20WHERE%20time%20between%20subtractHours(now()%2C%2024)%20and%20now()%20and%20match(tx_sign%2C%27%5E%5BQ01%5D%27)%3D0%20GROUP%20BY%20rx_loc%2C%20rx_sign%2C%20band%20)%20AS%20a%20LEFT%20JOIN%20(%20SELECT%20rx_sign%2C%20band%2C%20sum(cnt)%20as%20dupes%20FROM%20(%20SELECT%20rx_sign%2C%20band%2C%20count()%20as%20cnt%20FROM%20wspr.rx%20WHERE%20time%20between%20subtractHours(now()%2C%2024)%20and%20now()%20GROUP%20BY%20time%2C%20band%2C%20rx_sign%2C%20tx_sign%20HAVING%20cnt%20%3E%201%20)%20GROUP%20BY%20rx_sign%2C%20band%20)%20AS%20b%20USING%20(rx_sign%2C%20band)%20group%20by%20rx_loc%2C%20rx_sign%20ORDER%20BY%20unique%20DESC%20LIMIT%20200%20format%20JSONCompact"
@@ -338,12 +347,44 @@ func (f *WSPRRankFetcher) fetchLoop() {
 
 // runFetch fetches all three windows, stores the result under the write lock,
 // and persists it to disk via the StatsLogger (if configured).
+// On failure the last good cached value is preserved; only the error fields
+// on the individual windows are updated so callers can surface the failure.
 func (f *WSPRRankFetcher) runFetch() {
 	resp := f.fetchAll()
+
+	// Determine whether all windows succeeded.
+	allOK := resp.Rolling24h.Error == "" && resp.Yesterday.Error == "" && resp.Today.Error == ""
+
 	f.mu.Lock()
-	f.cached = resp
+	if allOK {
+		f.cached = resp
+	} else if f.cached == nil {
+		// No prior cache — store the (possibly partial) result so callers
+		// can at least see which windows failed.
+		f.cached = resp
+	} else {
+		// Preserve last good data for windows that succeeded this cycle;
+		// update error fields for windows that failed.
+		if resp.Rolling24h.Error != "" {
+			f.cached.Rolling24h.Error = resp.Rolling24h.Error
+		} else {
+			f.cached.Rolling24h = resp.Rolling24h
+		}
+		if resp.Yesterday.Error != "" {
+			f.cached.Yesterday.Error = resp.Yesterday.Error
+		} else {
+			f.cached.Yesterday = resp.Yesterday
+		}
+		if resp.Today.Error != "" {
+			f.cached.Today.Error = resp.Today.Error
+		} else {
+			f.cached.Today = resp.Today
+		}
+		f.cached.GeneratedAt = resp.GeneratedAt
+	}
 	f.mu.Unlock()
-	if resp != nil && resp.Rolling24h.Error == "" {
+
+	if allOK {
 		if f.statsLogger != nil {
 			f.statsLogger.WriteWSPR(resp)
 		}
@@ -408,8 +449,32 @@ func (f *WSPRRankFetcher) fetchAll() *WSPRRankResponse {
 	return resp
 }
 
-// fetchWindow fetches and parses a single WSPR Live JSONCompact endpoint.
+// fetchWindow fetches and parses a single WSPR Live JSONCompact endpoint,
+// retrying up to wsprRankMaxRetries times with exponential backoff on failure.
 func (f *WSPRRankFetcher) fetchWindow(url string) WSPRRankWindow {
+	var w WSPRRankWindow
+	wait := wsprRankRetryBaseWait
+
+	for attempt := 1; attempt <= wsprRankMaxRetries; attempt++ {
+		w = f.fetchWindowOnce(url)
+		if w.Error == "" {
+			return w // success
+		}
+		if attempt < wsprRankMaxRetries {
+			log.Printf("[WSPRRank] attempt %d/%d failed (%s); retrying in %s",
+				attempt, wsprRankMaxRetries, w.Error, wait)
+			time.Sleep(wait)
+			wait *= 2
+		} else {
+			log.Printf("[WSPRRank] all %d attempts failed for %s; last error: %s",
+				wsprRankMaxRetries, url, w.Error)
+		}
+	}
+	return w
+}
+
+// fetchWindowOnce performs a single HTTP fetch and parse for one WSPR Live endpoint.
+func (f *WSPRRankFetcher) fetchWindowOnce(url string) WSPRRankWindow {
 	start := time.Now()
 	w := WSPRRankWindow{FetchedAt: start.UTC()}
 

@@ -46,6 +46,10 @@ func parsePSKMonitorsByBand(raw pskMonitorsByBandRaw) PSKMonitorsByBand {
 // Background schedule:
 //   - Initial fetch 5 minutes after startup.
 //   - Subsequent fetches every hour.
+//   - On failure, retried up to pskRankMaxRetries times with exponential
+//     backoff (1 s, 2 s, 4 s, 8 s) before giving up for that cycle.
+//     All retries complete within ~15 s. The last successful cached value
+//     is preserved across failed cycles.
 //
 // Manual refresh:
 //   - GET /admin/psk-rank?refresh=1 triggers an immediate synchronous fetch.
@@ -65,11 +69,17 @@ func parsePSKMonitorsByBand(raw pskMonitorsByBandRaw) PSKMonitorsByBand {
 //	?refresh=1       — trigger an immediate synchronous fetch.
 
 const (
-	pskRankFetchTimeout    = 30 * time.Second
+	pskRankFetchTimeout    = 5 * time.Second // per-attempt HTTP timeout
 	pskRankMaxBodyBytes    = 4 * 1024 * 1024 // 4 MiB — page is ~560 KB
 	pskRankStartupDelay    = 5 * time.Minute
 	pskRankRefreshInterval = 1 * time.Hour
 	pskRankManualRateLimit = 1 * time.Minute
+
+	// Retry policy: up to 5 attempts with exponential backoff starting at 1 s.
+	// Inter-attempt waits: 1+2+4+8 = 15 s total, so all retries complete within
+	// ~15 s of wall time (excluding the 5 s per-attempt timeout itself).
+	pskRankMaxRetries    = 5
+	pskRankRetryBaseWait = 1 * time.Second
 
 	pskStatsURL = "https://www.pskreporter.info/cgi-bin/pskstats.pl"
 )
@@ -363,14 +373,49 @@ func (f *PSKRankFetcher) fetchLoop() {
 	}
 }
 
-// runFetch performs a single fetch, stores the result under the write lock,
-// and persists it to disk via the StatsLogger (if configured).
+// runFetch attempts to fetch PSKReporter stats, retrying up to pskRankMaxRetries
+// times with exponential backoff on failure.  On success the cache is updated
+// and data is persisted/published.  On permanent failure (all retries exhausted)
+// the error result is stored in the cache but the previous good data is NOT
+// overwritten — callers still see the last successful fetch alongside the error.
 func (f *PSKRankFetcher) runFetch() {
-	data := f.fetch()
+	var data *PSKRankData
+	wait := pskRankRetryBaseWait
+
+	for attempt := 1; attempt <= pskRankMaxRetries; attempt++ {
+		data = f.fetch()
+		if data.Error == "" {
+			break // success
+		}
+		if attempt < pskRankMaxRetries {
+			log.Printf("[PSKRank] attempt %d/%d failed (%s); retrying in %s",
+				attempt, pskRankMaxRetries, data.Error, wait)
+			time.Sleep(wait)
+			wait *= 2
+		} else {
+			log.Printf("[PSKRank] all %d attempts failed; last error: %s", pskRankMaxRetries, data.Error)
+		}
+	}
+
 	f.mu.Lock()
-	f.cached = data
+	if data.Error == "" {
+		// Success — replace cache with fresh data.
+		f.cached = data
+	} else {
+		// All retries failed — preserve the last good cache so callers can
+		// still serve stale-but-valid data; only update if there is nothing
+		// cached yet (first fetch ever).
+		if f.cached == nil {
+			f.cached = data
+		} else {
+			// Update the error field on the existing cached entry so the
+			// admin UI / Telegram bot can surface the fetch failure.
+			f.cached.Error = data.Error
+		}
+	}
 	f.mu.Unlock()
-	if data != nil && data.Error == "" {
+
+	if data.Error == "" {
 		if f.statsLogger != nil {
 			f.statsLogger.WritePSK(data)
 		}

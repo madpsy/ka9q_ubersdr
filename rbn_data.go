@@ -27,8 +27,11 @@ var rbnCommentDateRe = regexp.MustCompile(`(\d{4})-(\d{2})-(\d{2})`)
 const (
 	rbnSkewURL       = "https://sm7iun.se/rbnskew.csv"
 	rbnStatisticsURL = "https://sm7iun.se/statistics.csv"
-	rbnFetchTimeout  = 5 * time.Second
-	rbnMaxRetries    = 2
+	rbnFetchTimeout  = 3 * time.Second // per-attempt HTTP timeout
+	// Retry policy: up to 5 attempts with exponential backoff starting at 1 s.
+	// Inter-attempt waits: 1+2+4+8 = 15 s total.
+	rbnMaxRetries    = 5
+	rbnRetryBaseWait = 1 * time.Second
 	// 100 KiB hard cap on response bodies — the real files are ~5 KiB
 	rbnMaxBodyBytes = 100 * 1024
 )
@@ -293,12 +296,19 @@ func (f *RBNDataFetcher) fetchSkew() {
 		body []byte
 		err  error
 	)
+	wait := rbnRetryBaseWait
 	for attempt := 1; attempt <= rbnMaxRetries; attempt++ {
 		body, err = f.fetchURL(rbnSkewURL)
 		if err == nil {
 			break
 		}
-		log.Printf("[RBN] Skew fetch attempt %d/%d failed: %v", attempt, rbnMaxRetries, err)
+		if attempt < rbnMaxRetries {
+			log.Printf("[RBN] Skew fetch attempt %d/%d failed: %v; retrying in %s", attempt, rbnMaxRetries, err, wait)
+			time.Sleep(wait)
+			wait *= 2
+		} else {
+			log.Printf("[RBN] Skew fetch attempt %d/%d failed: %v", attempt, rbnMaxRetries, err)
+		}
 	}
 	if err != nil {
 		log.Printf("[RBN] All skew fetch attempts failed, keeping previous data")
@@ -340,12 +350,19 @@ func (f *RBNDataFetcher) fetchStatistics() {
 		body []byte
 		err  error
 	)
+	wait := rbnRetryBaseWait
 	for attempt := 1; attempt <= rbnMaxRetries; attempt++ {
 		body, err = f.fetchURL(rbnStatisticsURL)
 		if err == nil {
 			break
 		}
-		log.Printf("[RBN] Statistics fetch attempt %d/%d failed: %v", attempt, rbnMaxRetries, err)
+		if attempt < rbnMaxRetries {
+			log.Printf("[RBN] Statistics fetch attempt %d/%d failed: %v; retrying in %s", attempt, rbnMaxRetries, err, wait)
+			time.Sleep(wait)
+			wait *= 2
+		} else {
+			log.Printf("[RBN] Statistics fetch attempt %d/%d failed: %v", attempt, rbnMaxRetries, err)
+		}
 	}
 	if err != nil {
 		log.Printf("[RBN] All statistics fetch attempts failed, keeping previous data")

@@ -753,7 +753,7 @@
                     <p id="configEditorSubtitle">Edit UberSDR configuration. Changes require server restart to take effect.</p>
                     <p id="configCallsignName" style="margin-top: 8px; font-size: 14px; font-weight: bold;"></p>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+                <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
                             🔓 Enable Public Access
@@ -771,7 +771,7 @@
                         </div>
                         <button class="btn btn-secondary" onclick="logout()">Logout</button>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: center;">
+                    <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; width: 100%;">
                         <div id="admin-weather-widget" style="display: none; flex-direction: column; color: #333; line-height: 1.3;">
                             <div id="admin-weather-desc" style="font-size: 0.9em; font-weight: 600;"></div>
                             <div id="admin-weather-stats" style="font-size: 0.8em; color: #555; white-space: nowrap;"></div>

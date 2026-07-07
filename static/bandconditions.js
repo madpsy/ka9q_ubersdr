@@ -334,8 +334,12 @@ class BandConditionsMonitor {
                 .map(w => w.charAt(0).toUpperCase() + w.slice(1))
                 .join(' ');
             const tempC = wd.main && wd.main.temp !== undefined ? Math.round(wd.main.temp) : null;
+            const tempMin = wd.main && wd.main.temp_min !== undefined ? Math.round(wd.main.temp_min) : null;
+            const tempMax = wd.main && wd.main.temp_max !== undefined ? Math.round(wd.main.temp_max) : null;
+            const feelsLike = wd.main && wd.main.feels_like !== undefined ? Math.round(wd.main.feels_like) : null;
             const humidity = wd.main && wd.main.humidity !== undefined ? wd.main.humidity : null;
             const pressure = wd.main && wd.main.pressure !== undefined ? wd.main.pressure : null;
+            const seaLevel = wd.main && wd.main.sea_level !== undefined ? wd.main.sea_level : null;
             const windMs = wd.wind && wd.wind.speed !== undefined ? wd.wind.speed : null;
             const windKmh = windMs !== null ? Math.round(windMs * 3.6) : null;
             const windDeg = wd.wind && wd.wind.deg !== undefined ? wd.wind.deg : null;
@@ -344,13 +348,30 @@ class BandConditionsMonitor {
             const gustKmh = gustMs !== null ? Math.round(gustMs * 3.6) : null;
 
             let weatherParts = [];
-            if (tempC !== null) weatherParts.push(`🌡️ ${tempC}°C`);
-            if (humidity !== null) weatherParts.push(`💧 ${humidity}%`);
-            if (pressure !== null) weatherParts.push(`🔵 ${pressure} hPa`);
+            if (tempC !== null) {
+                let tempTooltip = `Current temperature`;
+                const extras = [];
+                if (feelsLike !== null) extras.push(`Feels like ${feelsLike}°C`);
+                if (tempMin !== null && tempMax !== null) extras.push(`Min ${tempMin}°C / Max ${tempMax}°C`);
+                if (extras.length) tempTooltip += ` — ${extras.join(' • ')}`;
+                weatherParts.push(`<span title="${tempTooltip}">🌡️ ${tempC}°C</span>`);
+            }
+            if (humidity !== null) {
+                weatherParts.push(`<span title="Relative humidity">💧 ${humidity}%</span>`);
+            }
+            if (pressure !== null) {
+                const pressureTooltip = seaLevel !== null ? `Atmospheric pressure (sea level: ${seaLevel} hPa)` : 'Atmospheric pressure';
+                weatherParts.push(`<span title="${pressureTooltip}">🔵 ${pressure} hPa</span>`);
+            }
             if (windKmh !== null) {
                 const dirStr = windDir ? ` ${windDir}` : '';
                 const gustStr = gustKmh !== null ? ` (gusts ${gustKmh})` : '';
-                weatherParts.push(`💨 ${windKmh} km/h${dirStr}${gustStr}`);
+                const windDirFull = windDir && windDeg !== null ? `${windDir} (${windDeg}°)` : windDir || (windDeg !== null ? `${windDeg}°` : '');
+                const windTooltip = [
+                    `Wind from ${windDirFull || 'unknown direction'}`,
+                    gustKmh !== null ? `Gusts up to ${gustKmh} km/h` : '',
+                ].filter(Boolean).join(' • ');
+                weatherParts.push(`<span title="${windTooltip}">💨 ${windKmh} km/h${dirStr}${gustStr}</span>`);
             }
 
             html += `<div style="display: flex; justify-content: center; align-items: center; gap: 14px; padding: 10px 14px; background: rgba(255,255,255,0.05); border-radius: 6px; text-align: center;">

@@ -3801,6 +3801,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
+                    // Show version footer now that we have a valid session
+                    checkVersions();
                     // Probe GPSDO health once at login so the tab is visible immediately
                     // (updateGPSDOTabVisibility is also called by loadMonitorHealth, but that
                     // only runs when the user visits the Monitor tab)
@@ -3928,6 +3930,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
+                    // Show version footer now that we have a valid session
+                    checkVersions();
                     // Probe GPSDO health once at login so the tab is visible immediately
                     authenticatedFetch('/admin/gpsdo-health').then(r => {
                         if (r && (r.ok || r.status === 503)) {

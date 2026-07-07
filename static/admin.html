@@ -4186,6 +4186,26 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 const description = wd.weather[0].description
                     .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+                // Build "X ago" string from last_fetched
+                let agoStr = '';
+                if (wd.last_fetched) {
+                    const fetchedMs = new Date(wd.last_fetched).getTime();
+                    const nowMs = Date.now();
+                    let diffSec = Math.max(0, Math.floor((nowMs - fetchedMs) / 1000));
+                    const h = Math.floor(diffSec / 3600);
+                    diffSec -= h * 3600;
+                    const m = Math.floor(diffSec / 60);
+                    const s = diffSec - m * 60;
+                    const parts = [];
+                    if (h > 0) parts.push(`${h}h`);
+                    if (m > 0 || h > 0) parts.push(`${m}m`);
+                    parts.push(`${s}s`);
+                    agoStr = parts.join(' ') + ' ago';
+                }
+
+                const locationName = wd.name || '';
+
                 const tempC = wd.main && wd.main.temp !== undefined ? Math.round(wd.main.temp) : null;
                 const humidity = wd.main && wd.main.humidity !== undefined ? wd.main.humidity : null;
                 const windMs = wd.wind && wd.wind.speed !== undefined ? wd.wind.speed : null;
@@ -4211,7 +4231,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const stats = document.getElementById('admin-weather-stats');
                 if (!widget || !desc || !stats) return;
 
-                desc.textContent = description;
+                const suffix = [locationName, agoStr].filter(Boolean).join(' - ');
+                desc.textContent = suffix ? `${description} (${suffix})` : description;
                 stats.textContent = parts.join(' • ');
                 widget.style.display = 'flex';
             } catch (e) {

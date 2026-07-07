@@ -771,7 +771,13 @@
                         </div>
                         <button class="btn btn-secondary" onclick="logout()">Logout</button>
                     </div>
-                    <a href="notifications-admin.html" class="btn" style="text-decoration: none;">🔔 Notifications</a>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <div id="admin-weather-widget" style="display: none; align-items: center; gap: 8px; font-size: 0.85em; white-space: nowrap; opacity: 0.9;">
+                            <img id="admin-weather-icon" src="" alt="" width="28" height="28" style="vertical-align: middle;" onerror="this.style.display='none'">
+                            <span id="admin-weather-text"></span>
+                        </div>
+                        <a href="notifications-admin.html" class="btn" style="text-decoration: none;">🔔 Notifications</a>
+                    </div>
                 </div>
             </div>
 
@@ -3766,6 +3772,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Show Force Update button for authenticated users
                     document.getElementById('forceUpdateBtn').style.display = 'block';
                     await loadConfig();
+                    loadAdminWeather();
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
@@ -3892,6 +3899,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // Show Force Update button for authenticated users
                     document.getElementById('forceUpdateBtn').style.display = 'block';
                     await loadConfig();
+                    loadAdminWeather();
                     // Load sessions since it's the default tab
                     await loadSessions();
                     startSessionsAutoRefresh();
@@ -4141,6 +4149,50 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
                 startSystemAutoRefresh();
+            }
+        }
+
+        async function loadAdminWeather() {
+            try {
+                const response = await fetch('/api/weather');
+                if (!response.ok) return; // 404 or error — widget stays hidden
+                const wd = await response.json();
+                if (!wd.weather || !wd.weather.length) return;
+
+                const iconCode = wd.weather[0].icon;
+                const description = wd.weather[0].description
+                    .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                const tempC = wd.main && wd.main.temp !== undefined ? Math.round(wd.main.temp) : null;
+                const humidity = wd.main && wd.main.humidity !== undefined ? wd.main.humidity : null;
+                const windMs = wd.wind && wd.wind.speed !== undefined ? wd.wind.speed : null;
+                const windKmh = windMs !== null ? Math.round(windMs * 3.6) : null;
+                const windDeg = wd.wind && wd.wind.deg !== undefined ? wd.wind.deg : null;
+                const windDir = windDeg !== null ? (['N','NE','E','SE','S','SW','W','NW','N'])[Math.round(windDeg / 45) % 8] : null;
+                const gustMs = wd.wind && wd.wind.gust !== undefined ? wd.wind.gust : null;
+                const gustKmh = gustMs !== null ? Math.round(gustMs * 3.6) : null;
+                const pressure = wd.main && wd.main.pressure !== undefined ? wd.main.pressure : null;
+
+                const parts = [];
+                if (tempC !== null) parts.push(`🌡️ ${tempC}°C`);
+                if (humidity !== null) parts.push(`💧 ${humidity}%`);
+                if (pressure !== null) parts.push(`🔵 ${pressure} hPa`);
+                if (windKmh !== null) {
+                    const dirStr = windDir ? ` ${windDir}` : '';
+                    const gustStr = gustKmh !== null ? ` (gusts ${gustKmh})` : '';
+                    parts.push(`💨 ${windKmh} km/h${dirStr}${gustStr}`);
+                }
+
+                const widget = document.getElementById('admin-weather-widget');
+                const icon = document.getElementById('admin-weather-icon');
+                const text = document.getElementById('admin-weather-text');
+                if (!widget || !icon || !text) return;
+
+                icon.src = `/weather/${iconCode}_t.png`;
+                icon.alt = description;
+                text.textContent = `${description} • ${parts.join(' • ')}`;
+                widget.style.display = 'flex';
+            } catch (e) {
+                // Silently ignore — weather widget is optional
             }
         }
 

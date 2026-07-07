@@ -1837,6 +1837,9 @@ func main() {
 	spaceWeatherRateLimiter := NewSpaceWeatherRateLimiter()
 	log.Printf("Space weather rate limiting: 1 req/sec (current), 1 req/2.5sec (history/dates/csv)")
 
+	// Initialize weather endpoint rate limiter (1 req/sec per IP)
+	weatherRateLimiter := NewWeatherRateLimiter()
+
 	// Initialize session stats endpoint rate limiter (1 request per 3 seconds per IP)
 	sessionStatsRateLimiter := NewSessionStatsRateLimiter()
 	log.Printf("Session stats endpoint rate limiting: 1 request per 3 seconds per IP")
@@ -2039,6 +2042,12 @@ func main() {
 	if config.InstanceReporting.Enabled {
 		instanceReporter = NewInstanceReporter(config, cwskimmerConfig, sessions, configPath)
 	}
+
+	// Initialize weather service — fetches weather from the instance reporter using
+	// the private UUID. First fetch is 1 minute after startup, then every hour.
+	weatherService := NewWeatherService(config)
+	weatherService.Start()
+	defer weatherService.Stop()
 
 	// Set the DX cluster websocket handler in instance reporter for chat user count
 	// This must be done after both are initialized
@@ -2328,7 +2337,14 @@ func main() {
 
 	// Start monitor display — cycles key metrics on the Galactic Unicorn LED matrix
 	// when config.monitor_display.enabled is true.
-	monitorDisplay := NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, wsprRankFetcher, config.Decoder.ReceiverCallsign, rotctlHandler, antSwitchHandler)
+	var monitorDisplay *MonitorDisplay
+	{
+		cwCallsign := ""
+		if cwskimmerConfig != nil {
+			cwCallsign = cwskimmerConfig.Callsign
+		}
+		monitorDisplay = NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, wsprRankFetcher, rbnStore, spaceWeatherMonitor, cwCallsign, config.Decoder.ReceiverCallsign, rotctlHandler, antSwitchHandler)
+	}
 	monitorDisplay.Start(mainCtx)
 	defer monitorDisplay.Stop()
 
@@ -2454,6 +2470,9 @@ func main() {
 	}))
 	http.HandleFunc("/api/spaceweather/csv", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherCSV(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
+	}))
+	http.HandleFunc("/api/weather", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleWeather(w, r, weatherService, ipBanManager, weatherRateLimiter)
 	}))
 
 	// MCP endpoint (Model Context Protocol for AI assistants)

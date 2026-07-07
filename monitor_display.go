@@ -233,16 +233,16 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	}
 }
 
-// buildTimeSlide returns a clock slide: single centred line showing HH:MM:SS.
-// No label — the format is self-evident.  Marked isClock=true so the
-// sequencer refreshes it every second.
-func buildTimeSlide() monitorSlide {
+// buildTimeSlide returns a clock slide: top line "UTC" label + user count,
+// bottom line HH:MM:SS in cyan.  Marked isClock=true so the sequencer
+// refreshes it every second.
+func buildTimeSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	now := time.Now().UTC()
 	return monitorSlide{
-		value:      now.Format("15:04:05"),
-		valueColor: "cyan",
-		singleLine: true,
-		isClock:    true,
+		topLineSegs: formatTopLineSegs("UTC", "cyan", sessions, maxSessions),
+		value:       now.Format("15:04:05"),
+		valueColor:  "cyan",
+		isClock:     true,
 	}
 }
 
@@ -315,7 +315,7 @@ func buildCPUTempSlide(sessions *SessionManager, maxSessions int) *monitorSlide 
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("TEMP", "orange", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("CPU", "orange", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}
@@ -462,12 +462,176 @@ func buildWSPRSlide(wspr *WSPRRankFetcher, callsign string, sessions *SessionMan
 
 // ─── Slide sequencer ──────────────────────────────────────────────────────────
 
+// buildRBNSlide returns a slide showing RBN skimmer rank and frequency skew (ppm).
+// Returns nil when rbnStore is nil, or the callsign is not found in either dataset.
+// Uses cwCallsign falling back to callsign (receiver callsign), same as the Telegram bot.
+//
+// Bottom line segments:
+//
+//	"#5"          white  — rank among all skimmers
+//	" of 120"     blue   — total skimmer count
+//	"  "          blue   — separator
+//	"+0.3ppm"     lime/amber/red — skew colour-coded by magnitude
+//	" (80 sp)"    blue   — spot count used for skew measurement
+//
+// Skew colour: lime if |ppm| < 1.0, amber if < 3.0, red if ≥ 3.0.
+// PPM is derived from CorrectionFactor: ppm = (CorrectionFactor - 1) × 1e6.
+func buildRBNSlide(rbnStore *RBNDataStore, cwCallsign, callsign string, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if rbnStore == nil {
+		return nil
+	}
+
+	// Resolve callsign: prefer CW skimmer callsign, fall back to receiver callsign.
+	cs := strings.ToUpper(strings.TrimSpace(cwCallsign))
+	if cs == "" {
+		cs = strings.ToUpper(strings.TrimSpace(callsign))
+	}
+	if cs == "" {
+		return nil
+	}
+
+	rbnStore.mu.RLock()
+	skewEntry, hasSkew := rbnStore.skewData[cs]
+	statsEntry, hasStats := rbnStore.statsData[cs]
+	totalSkimmers := len(rbnStore.statsData)
+	// Compute rank: sort all stats entries by spot count descending, find position.
+	var rank int
+	if hasStats && totalSkimmers > 0 {
+		type rankEntry struct {
+			callsign  string
+			spotCount int
+		}
+		all := make([]rankEntry, 0, totalSkimmers)
+		for k, v := range rbnStore.statsData {
+			all = append(all, rankEntry{k, v.SpotCount})
+		}
+		sort.Slice(all, func(i, j int) bool {
+			if all[i].spotCount != all[j].spotCount {
+				return all[i].spotCount > all[j].spotCount
+			}
+			return all[i].callsign < all[j].callsign
+		})
+		for idx, re := range all {
+			if re.callsign == cs {
+				rank = idx + 1
+				break
+			}
+		}
+	}
+	rbnStore.mu.RUnlock()
+
+	if !hasSkew && !hasStats {
+		return nil
+	}
+
+	var segs []gudriver.Segment
+
+	// Rank segment (only when stats available)
+	if hasStats && rank > 0 {
+		segs = append(segs,
+			gudriver.Segment{Text: fmt.Sprintf("#%d", rank), Color: "white"},
+			gudriver.Segment{Text: fmt.Sprintf(" of %d", totalSkimmers), Color: "blue"},
+		)
+		_ = statsEntry // spot count shown via skew entry below
+	}
+
+	// Skew segment (only when skew available)
+	if hasSkew {
+		ppm := (skewEntry.CorrectionFactor - 1) * 1e6
+		var skewColor string
+		absPPM := ppm
+		if absPPM < 0 {
+			absPPM = -absPPM
+		}
+		switch {
+		case absPPM < 1.0:
+			skewColor = "lime"
+		case absPPM < 3.0:
+			skewColor = "amber"
+		default:
+			skewColor = "red"
+		}
+		sign := "+"
+		if ppm < 0 {
+			sign = ""
+		}
+		if len(segs) > 0 {
+			segs = append(segs, gudriver.Segment{Text: "  ", Color: "blue"})
+		}
+		segs = append(segs,
+			gudriver.Segment{Text: fmt.Sprintf("%s%.2fppm", sign, ppm), Color: skewColor},
+			gudriver.Segment{Text: fmt.Sprintf(" (%d sp)", skewEntry.Spots), Color: "blue"},
+		)
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("RBN", "yellow", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
+// propQualityColor maps a PropagationQuality string to a display colour.
+func propQualityColor(quality string) string {
+	switch strings.ToLower(quality) {
+	case "excellent", "good":
+		return "lime"
+	case "fair":
+		return "amber"
+	case "poor":
+		return "red"
+	default:
+		return "white"
+	}
+}
+
+// buildSpaceWeatherSlide returns a slide showing space weather conditions.
+// Returns nil when swm is nil or no data is available.
+//
+// Top line: "SPCE" in blue, user count in capacity colour.
+// Bottom line segments (scrolling):
+//
+//	"Excellent"   lime/amber/red — PropagationQuality
+//	"  "          blue           — separator
+//	"K:5"         white          — K-index
+//	" A:3"        white          — A-index
+//	" Flux:142"   white          — Solar flux (rounded to integer)
+func buildSpaceWeatherSlide(swm *SpaceWeatherMonitor, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if swm == nil {
+		return nil
+	}
+	data := swm.GetData()
+	if data == nil {
+		return nil
+	}
+
+	qualColor := propQualityColor(data.PropagationQuality)
+	quality := data.PropagationQuality
+	if quality == "" {
+		quality = "Unknown"
+	}
+
+	segs := []gudriver.Segment{
+		{Text: quality, Color: qualColor},
+		{Text: "  ", Color: "blue"},
+		{Text: fmt.Sprintf("K:%d", data.KIndex), Color: "white"},
+		{Text: fmt.Sprintf(" A:%d", data.AIndex), Color: "white"},
+		{Text: fmt.Sprintf(" Flux:%d", int(data.SolarFlux+0.5)), Color: "white"},
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("SPCE", "blue", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, callsign string, maxSessions int, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
 	var slides []monitorSlide
 
-	// 1. UTC clock (single centred line, no label)
-	slides = append(slides, buildTimeSlide())
+	// 1. UTC clock — top line "UTC" label + user count, bottom line HH:MM:SS
+	slides = append(slides, buildTimeSlide(sessions, maxSessions))
 
 	// 2. Users
 	slides = append(slides, buildUsersSlide(sessions, maxSessions))
@@ -490,17 +654,27 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 7. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
+	// 7. RBN skimmer rank and frequency skew (optional — omitted if store not wired or callsign not found)
+	if s := buildRBNSlide(rbnStore, cwCallsign, callsign, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 8. Space weather (optional — omitted when monitor not wired or no data available)
+	if s := buildSpaceWeatherSlide(swm, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 9. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
 	if s := buildRotatorSlide(rotctl, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 8. Antenna switch active port (optional — omitted when ant switch not enabled)
+	// 10. Antenna switch active port (optional — omitted when ant switch not enabled)
 	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 9. Band conditions — one or two pages, 3 bands per line, each coloured.
+	// 11. Band conditions — one or two pages, 3 bands per line, each coloured.
 	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
@@ -799,8 +973,11 @@ type MonitorDisplay struct {
 	sessions    *SessionManager
 	nfm         *NoiseFloorMonitor
 	pskRank     *PSKRankFetcher
-	wsprRank    *WSPRRankFetcher // nil if WSPR rank not enabled
-	callsign    string           // receiver callsign for PSK/WSPR rank lookup
+	wsprRank    *WSPRRankFetcher     // nil if WSPR rank not enabled
+	rbnStore    *RBNDataStore        // nil if RBN not enabled
+	swm         *SpaceWeatherMonitor // nil if space weather not enabled
+	cwCallsign  string               // CW skimmer callsign for RBN lookup (may be empty)
+	callsign    string               // receiver callsign for PSK/WSPR rank lookup
 	maxSessions int
 	rotctl      *RotctlAPIHandler // nil if rotator not enabled
 	antSwitch   *AntSwitchHandler // nil if antenna switch not enabled
@@ -811,9 +988,12 @@ type MonitorDisplay struct {
 // Returns nil (with no error) when config.MonitorDisplay.Enabled is false.
 //
 // psk and wspr may be nil — their rank slides are simply omitted when no fetcher is wired.
+// rbnStore may be nil — RBN slide is omitted when not wired.
+// swm may be nil — space weather slide is omitted when not wired.
+// cwCallsign is the CW skimmer callsign for RBN lookups; falls back to callsign when empty.
 // callsign is the receiver callsign used for PSK/WSPR rank lookups (e.g. config.Decoder.ReceiverCallsign).
 // rotctl and antSwitch may be nil — their slides are omitted when not wired.
-func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
+func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
 	if !cfg.MonitorDisplay.Enabled {
 		return nil
 	}
@@ -844,6 +1024,9 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 		nfm:         nfm,
 		pskRank:     psk,
 		wsprRank:    wspr,
+		rbnStore:    rbnStore,
+		swm:         swm,
+		cwCallsign:  cwCallsign,
 		callsign:    callsign,
 		maxSessions: maxSessions,
 		rotctl:      rotctl,
@@ -897,7 +1080,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.callsign, md.maxSessions, md.rotctl, md.antSwitch)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.rotctl, md.antSwitch)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():
@@ -945,7 +1128,7 @@ func (md *MonitorDisplay) runClockSlide(ctx context.Context) {
 	defer ticker.Stop()
 
 	sendClock := func() {
-		slide := buildTimeSlide()
+		slide := buildTimeSlide(md.sessions, md.maxSessions)
 		if err := sendSlide(md.client, slide); err != nil && ctx.Err() == nil {
 			log.Printf("[MonitorDisplay] Clock slide send error: %v", err)
 		}

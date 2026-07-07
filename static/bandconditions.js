@@ -335,21 +335,25 @@ class BandConditionsMonitor {
                 .join(' ');
             const tempC = wd.main && wd.main.temp !== undefined ? Math.round(wd.main.temp) : null;
             const humidity = wd.main && wd.main.humidity !== undefined ? wd.main.humidity : null;
+            const pressure = wd.main && wd.main.pressure !== undefined ? wd.main.pressure : null;
             const windMs = wd.wind && wd.wind.speed !== undefined ? wd.wind.speed : null;
             const windKmh = windMs !== null ? Math.round(windMs * 3.6) : null;
-            const locationName = [wd.name, wd.sys && wd.sys.country].filter(Boolean).join(', ');
+            const windDeg = wd.wind && wd.wind.deg !== undefined ? wd.wind.deg : null;
+            const windDir = windDeg !== null ? (['N','NE','E','SE','S','SW','W','NW','N'])[Math.round(windDeg / 45) % 8] : null;
 
             let weatherParts = [];
             if (tempC !== null) weatherParts.push(`🌡️ ${tempC}°C`);
             if (humidity !== null) weatherParts.push(`💧 ${humidity}%`);
-            if (windKmh !== null) weatherParts.push(`💨 ${windKmh} km/h`);
+            if (pressure !== null) weatherParts.push(`🔵 ${pressure} hPa`);
+            if (windKmh !== null) {
+                const dirStr = windDir ? ` ${windDir}` : '';
+                weatherParts.push(`💨 ${windKmh} km/h${dirStr}`);
+            }
 
-            html += `<div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: rgba(255,255,255,0.05); border-radius: 6px; flex-wrap: wrap;">
-                        <img src="${iconUrl}" alt="${description}" width="50" height="50" style="flex-shrink: 0;" onerror="this.style.display='none'">
-                        <div style="flex: 1; min-width: 0;">
-                            <div style="font-weight: bold; font-size: 1em;">${description}${locationName ? ` — ${locationName}` : ''}</div>
-                            <div style="font-size: 0.9em; opacity: 0.85; margin-top: 3px;">${weatherParts.join(' &nbsp;•&nbsp; ')}</div>
-                        </div>
+            html += `<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 14px; background: rgba(255,255,255,0.05); border-radius: 6px; text-align: center;">
+                        <img src="${iconUrl}" alt="${description}" width="50" height="50" onerror="this.style.display='none'">
+                        <div style="font-weight: bold; font-size: 1em;">${description}</div>
+                        <div style="font-size: 0.9em; opacity: 0.85;">${weatherParts.join(' &nbsp;•&nbsp; ')}</div>
                      </div>`;
         }
 

@@ -136,7 +136,7 @@
       "enabled": true,
       "require_admin": false,
       "strip_prefix": true,
-      "rewrite_origin": false,
+      "rewrite_origin": true,
       "rate_limit": 100,
       "allowed_ips": ["0.0.0.0/0"]
     },

@@ -340,6 +340,8 @@ class BandConditionsMonitor {
             const windKmh = windMs !== null ? Math.round(windMs * 3.6) : null;
             const windDeg = wd.wind && wd.wind.deg !== undefined ? wd.wind.deg : null;
             const windDir = windDeg !== null ? (['N','NE','E','SE','S','SW','W','NW','N'])[Math.round(windDeg / 45) % 8] : null;
+            const gustMs = wd.wind && wd.wind.gust !== undefined ? wd.wind.gust : null;
+            const gustKmh = gustMs !== null ? Math.round(gustMs * 3.6) : null;
 
             let weatherParts = [];
             if (tempC !== null) weatherParts.push(`🌡️ ${tempC}°C`);
@@ -347,13 +349,16 @@ class BandConditionsMonitor {
             if (pressure !== null) weatherParts.push(`🔵 ${pressure} hPa`);
             if (windKmh !== null) {
                 const dirStr = windDir ? ` ${windDir}` : '';
-                weatherParts.push(`💨 ${windKmh} km/h${dirStr}`);
+                const gustStr = gustKmh !== null ? ` (gusts ${gustKmh})` : '';
+                weatherParts.push(`💨 ${windKmh} km/h${dirStr}${gustStr}`);
             }
 
-            html += `<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 14px; background: rgba(255,255,255,0.05); border-radius: 6px; text-align: center;">
-                        <img src="${iconUrl}" alt="${description}" width="50" height="50" onerror="this.style.display='none'">
-                        <div style="font-weight: bold; font-size: 1em;">${description}</div>
-                        <div style="font-size: 0.9em; opacity: 0.85;">${weatherParts.join(' &nbsp;•&nbsp; ')}</div>
+            html += `<div style="display: flex; justify-content: center; align-items: center; gap: 14px; padding: 10px 14px; background: rgba(255,255,255,0.05); border-radius: 6px; text-align: center;">
+                        <img src="${iconUrl}" alt="${description}" width="50" height="50" style="flex-shrink: 0;" onerror="this.style.display='none'">
+                        <div>
+                            <div style="font-weight: bold; font-size: 1em;">${description}</div>
+                            <div style="font-size: 0.9em; opacity: 0.85; margin-top: 3px;">${weatherParts.join(' &nbsp;•&nbsp; ')}</div>
+                        </div>
                      </div>`;
         }
 

@@ -549,7 +549,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Check if this UUID has been kicked
 	if wsh.sessions.IsUUIDKicked(userSessionID) {
-		log.Printf("Rejected WebSocket connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		if wsh.sessions.ShouldLogKickedUUID(userSessionID) {
+			log.Printf("Rejected WebSocket connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		}
 		if err := wsh.sendError(conn, "Your session has been terminated. Please refresh the page."); err != nil {
 			log.Printf("Failed to send error message: %v", err)
 		}

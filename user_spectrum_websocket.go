@@ -186,7 +186,9 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	// Check if this UUID has been kicked
 	if swsh.sessions.IsUUIDKicked(userSessionID) {
-		log.Printf("Rejected Spectrum WebSocket connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		if swsh.sessions.ShouldLogKickedUUID(userSessionID) {
+			log.Printf("Rejected Spectrum WebSocket connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		}
 		http.Error(w, "Your session has been terminated. Please refresh the page.", http.StatusForbidden)
 		return
 	}

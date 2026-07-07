@@ -2343,7 +2343,7 @@ func main() {
 		if cwskimmerConfig != nil {
 			cwCallsign = cwskimmerConfig.Callsign
 		}
-		monitorDisplay = NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, wsprRankFetcher, rbnStore, spaceWeatherMonitor, cwCallsign, config.Decoder.ReceiverCallsign, rotctlHandler, antSwitchHandler)
+		monitorDisplay = NewMonitorDisplay(config, sessions, noiseFloorMonitor, pskRankFetcher, wsprRankFetcher, rbnStore, spaceWeatherMonitor, weatherService, cwCallsign, config.Decoder.ReceiverCallsign, rotctlHandler, antSwitchHandler)
 	}
 	monitorDisplay.Start(mainCtx)
 	defer monitorDisplay.Stop()

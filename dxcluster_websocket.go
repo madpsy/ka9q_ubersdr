@@ -183,7 +183,9 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 
 	// Check if this UUID has been kicked
 	if h.sessions.IsUUIDKicked(userSessionID) {
-		log.Printf("DX Cluster WebSocket: Rejected connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		if h.sessions.ShouldLogKickedUUID(userSessionID) {
+			log.Printf("DX Cluster WebSocket: Rejected connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		}
 		http.Error(w, "Your session has been terminated. Please refresh the page.", http.StatusForbidden)
 		return
 	}

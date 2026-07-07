@@ -193,6 +193,7 @@ type SessionManager struct {
 	sessions             map[string]*Session
 	ssrcToSession        map[uint32]*Session        // Map SSRC to session for audio routing
 	kickedUUIDs          map[string]time.Time       // Map of kicked user_session_ids with expiry time
+	kickedUUIDLastLogged map[string]time.Time       // Rate-limit: last time a log was emitted for this kicked UUID
 	userSessionFirst     map[string]time.Time       // Map of user_session_id to first seen time
 	userSessionUUIDs     map[string]int             // Map of user_session_id to count of sessions (for limiting unique users)
 	ipToUUIDs            map[string]map[string]bool // Map of IP address to set of UUIDs (for limiting unique UUIDs per IP)
@@ -264,6 +265,7 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 		sessions:             make(map[string]*Session),
 		ssrcToSession:        make(map[uint32]*Session),
 		kickedUUIDs:          make(map[string]time.Time),
+		kickedUUIDLastLogged: make(map[string]time.Time),
 		userSessionFirst:     make(map[string]time.Time),
 		userSessionUUIDs:     make(map[string]int),
 		ipToUUIDs:            make(map[string]map[string]bool),
@@ -2013,6 +2015,7 @@ func (sm *SessionManager) cleanupExpiredKickedUUIDs() {
 		sm.mu.Lock()
 		for _, uuid := range toRemove {
 			delete(sm.kickedUUIDs, uuid)
+			delete(sm.kickedUUIDLastLogged, uuid)
 		}
 		sm.mu.Unlock()
 		log.Printf("Cleaned up %d expired kicked UUID(s)", len(toRemove))
@@ -3052,11 +3055,22 @@ func (sm *SessionManager) IsUUIDKicked(userSessionID string) bool {
 	// Check if the kick has expired
 	if time.Now().After(expiry) {
 		// Expired, will be cleaned up by cleanup loop
-		log.Printf("DEBUG: UUID %s kick has expired", userSessionID)
 		return false
 	}
 
-	log.Printf("DEBUG: UUID %s is kicked (expires: %v)", userSessionID, expiry)
+	return true
+}
+
+// ShouldLogKickedUUID returns true if a log message should be emitted for the
+// given kicked UUID (at most once per minute), and records the current time so
+// subsequent calls within the window return false. Safe for concurrent use.
+func (sm *SessionManager) ShouldLogKickedUUID(userSessionID string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if time.Since(sm.kickedUUIDLastLogged[userSessionID]) < time.Minute {
+		return false
+	}
+	sm.kickedUUIDLastLogged[userSessionID] = time.Now()
 	return true
 }
 

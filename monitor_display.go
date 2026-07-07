@@ -31,6 +31,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -626,8 +627,95 @@ func buildSpaceWeatherSlide(swm *SpaceWeatherMonitor, sessions *SessionManager, 
 	}
 }
 
+// owmWeatherData is a minimal subset of the OpenWeatherMap current-weather JSON
+// returned by the instance reporter and cached by WeatherService.
+type owmWeatherData struct {
+	Weather []struct {
+		Main        string `json:"main"`        // e.g. "Rain", "Clear", "Clouds"
+		Description string `json:"description"` // e.g. "light rain"
+	} `json:"weather"`
+	Main struct {
+		Temp      float64 `json:"temp"`       // °C
+		FeelsLike float64 `json:"feels_like"` // °C
+		Humidity  int     `json:"humidity"`   // %
+	} `json:"main"`
+	Wind struct {
+		Speed float64 `json:"speed"` // m/s
+	} `json:"wind"`
+}
+
+// weatherConditionColor returns a colour for the OWM weather main condition string.
+func weatherConditionColor(main string) string {
+	switch strings.ToLower(main) {
+	case "thunderstorm":
+		return "red"
+	case "drizzle", "rain":
+		return "blue"
+	case "snow":
+		return "cyan"
+	case "clear":
+		return "amber"
+	default: // clouds, mist, fog, haze, smoke, dust, sand, ash, squall, tornado
+		return "white"
+	}
+}
+
+// weatherTempColor returns a colour for a temperature in °C.
+func weatherTempColor(tempC float64) string {
+	switch {
+	case tempC >= 30:
+		return "red"
+	case tempC >= 20:
+		return "amber"
+	case tempC >= 10:
+		return "lime"
+	default:
+		return "cyan"
+	}
+}
+
+// buildWeatherSlide returns a slide showing local weather from the WeatherService cache.
+// Returns nil when ws is nil or no data has been cached yet.
+//
+// Top line:  "WTHR" (teal) + user count (capacity colour)
+// Bottom:    Condition  Temp°C  H:humidity%  W:wind m/s
+func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if ws == nil {
+		return nil
+	}
+	raw, _ := ws.GetCached()
+	if raw == nil {
+		return nil
+	}
+
+	var d owmWeatherData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil
+	}
+	if len(d.Weather) == 0 {
+		return nil
+	}
+
+	condition := d.Weather[0].Main
+	condColor := weatherConditionColor(condition)
+	tempColor := weatherTempColor(d.Main.Temp)
+
+	segs := []gudriver.Segment{
+		{Text: condition + " ", Color: condColor},
+		{Text: fmt.Sprintf("%.0f°C ", d.Main.Temp), Color: tempColor},
+		{Text: fmt.Sprintf("H:%d%% ", d.Main.Humidity), Color: "white"},
+		{Text: fmt.Sprintf("W:%.1fm/s", d.Wind.Speed), Color: "white"},
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("WTHR", "teal", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
 	var slides []monitorSlide
 
 	// 1. UTC clock — top line "UTC" label + user count, bottom line HH:MM:SS
@@ -664,17 +752,22 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 9. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
+	// 9. Local weather (optional — omitted when WeatherService not wired or no data cached)
+	if s := buildWeatherSlide(weather, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 10. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
 	if s := buildRotatorSlide(rotctl, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 10. Antenna switch active port (optional — omitted when ant switch not enabled)
+	// 11. Antenna switch active port (optional — omitted when ant switch not enabled)
 	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 11. Band conditions — one or two pages, 3 bands per line, each coloured.
+	// 12. Band conditions — one or two pages, 3 bands per line, each coloured.
 	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
@@ -976,6 +1069,7 @@ type MonitorDisplay struct {
 	wsprRank    *WSPRRankFetcher     // nil if WSPR rank not enabled
 	rbnStore    *RBNDataStore        // nil if RBN not enabled
 	swm         *SpaceWeatherMonitor // nil if space weather not enabled
+	weather     *WeatherService      // nil if weather service not wired
 	cwCallsign  string               // CW skimmer callsign for RBN lookup (may be empty)
 	callsign    string               // receiver callsign for PSK/WSPR rank lookup
 	maxSessions int
@@ -990,10 +1084,11 @@ type MonitorDisplay struct {
 // psk and wspr may be nil — their rank slides are simply omitted when no fetcher is wired.
 // rbnStore may be nil — RBN slide is omitted when not wired.
 // swm may be nil — space weather slide is omitted when not wired.
+// weather may be nil — local weather slide is omitted when not wired or no data cached.
 // cwCallsign is the CW skimmer callsign for RBN lookups; falls back to callsign when empty.
 // callsign is the receiver callsign used for PSK/WSPR rank lookups (e.g. config.Decoder.ReceiverCallsign).
 // rotctl and antSwitch may be nil — their slides are omitted when not wired.
-func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
+func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, weather *WeatherService, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
 	if !cfg.MonitorDisplay.Enabled {
 		return nil
 	}
@@ -1026,6 +1121,7 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 		wsprRank:    wspr,
 		rbnStore:    rbnStore,
 		swm:         swm,
+		weather:     weather,
 		cwCallsign:  cwCallsign,
 		callsign:    callsign,
 		maxSessions: maxSessions,
@@ -1080,7 +1176,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.rotctl, md.antSwitch)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():

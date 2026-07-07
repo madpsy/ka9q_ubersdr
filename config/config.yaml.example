@@ -2054,6 +2054,28 @@ lookup_services:
   # Set to 0 to disable the limit (not recommended for public instances).
   cache_max_size: 1000
 
+  # Server-side addon containers permitted to call /api/lookup WITHOUT a
+  # session UUID. Intended for addons like the dxcluster addon that enrich DX
+  # spots with QRZ data. Each entry is the container's hostname on the internal
+  # Docker network; the container must connect directly (so its own container IP
+  # is the peer), not via Caddy.
+  #
+  # These names are resolved automatically and do NOT need to be added to
+  # server.trusted_containers. IMPORTANT: this list ONLY grants UUID-free
+  # lookups — it does NOT confer trusted-proxy privileges, so these containers
+  # cannot spoof X-Real-IP / X-Forwarded-For headers.
+  #
+  # Default: ["dxcluster"]. Set to [] to disable.
+  trusted_containers:
+    - "dxcluster"
+
+  # Maximum lookups per minute for EACH trusted container above (keyed per
+  # container name). This is separate from rate_limit_per_minute (which applies
+  # to public per-UUID callers). Cached/in-flight callsigns still receive the
+  # usual 10x allowance. Set to 0 to disable rate limiting for trusted
+  # containers (not recommended). Default: 60.
+  trusted_container_rate_limit: 60
+
   # QRZ.com XML Data API settings
   # Requires a paid QRZ.com XML Data subscription
   qrz:

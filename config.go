@@ -113,6 +113,27 @@ type LookupServicesConfig struct {
 	// Default: 1000
 	CacheMaxSize int `yaml:"cache_max_size"`
 
+	// TrustedContainers lists Docker container names permitted to call
+	// /api/lookup WITHOUT a session UUID.  Intended for server-side addons
+	// (e.g. the dxcluster addon) that enrich spots with QRZ data.  Each named
+	// container must connect directly on the internal Docker network so its
+	// own container IP is the TCP peer.
+	//
+	// SECURITY: this list ONLY grants UUID-free lookups.  Unlike
+	// server.trusted_containers it does NOT confer trusted-proxy privileges —
+	// these containers cannot spoof X-Real-IP / X-Forwarded-For headers.  Their
+	// IPs are resolved into the name→IP map (for IsContainerIP matching) but are
+	// deliberately excluded from the trusted-proxy IP set.
+	//
+	// Default: ["dxcluster"].  Set to [] to disable.
+	TrustedContainers []string `yaml:"trusted_containers"`
+
+	// TrustedContainerRateLimit is the maximum number of lookups per minute
+	// allowed for EACH trusted container (keyed per container name).
+	// Cached/in-flight callsigns still receive the usual 10× allowance.
+	// Default: 60.
+	TrustedContainerRateLimit int `yaml:"trusted_container_rate_limit"`
+
 	// QRZ contains credentials for the QRZ.com XML subscription API.
 	QRZ QRZConfig `yaml:"qrz"`
 }
@@ -350,6 +371,7 @@ type ServerConfig struct {
 	containerNameByIP               map[string]string    // Reverse map: IP -> container name (internal use)
 	containerProxyMu                sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
 	containerResolveErrLastLog      map[string]time.Time // Rate-limit resolve error logging per container name
+	lookupResolveNames              []string             // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
 }
 
 // AudioConfig contains audio processing settings
@@ -738,6 +760,12 @@ func LoadConfig(filename string) (*Config, error) {
 
 	// Apply lookup services defaults (provider defaults to "qrz")
 	config.LookupServices.applyDefaults()
+
+	// Feed the lookup-only trusted container names into the DNS resolver so
+	// their IPs are tracked in containerNameByIP (for IsContainerIP matching).
+	// These are resolved but deliberately NOT added to the trusted-proxy IP set,
+	// so they gain UUID-free lookup access WITHOUT X-Real-IP spoofing privileges.
+	config.Server.lookupResolveNames = config.LookupServices.TrustedContainers
 
 	// Normalise default_mode to lowercase so config values like "USB" work correctly
 	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)
@@ -1559,6 +1587,24 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		}
 	}
 
+	// Merge in lookup-only container names (from lookup_services.trusted_containers).
+	// These are resolved so their IPs appear in the name→IP map (used by
+	// IsContainerIP), but they are NOT added to the trusted-proxy IP set, so
+	// they never gain X-Real-IP spoofing privileges.  A name that already
+	// appears above (proxy-trusted) is left as-is (full trust); it is only
+	// treated as lookup-only when it appears exclusively in this list.
+	lookupOnlySet := make(map[string]bool, len(sc.lookupResolveNames))
+	for _, n := range sc.lookupResolveNames {
+		if n == "" {
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+			lookupOnlySet[n] = true
+		}
+	}
+
 	// Snapshot the current name→IP mapping so we can fall back on failure.
 	sc.containerProxyMu.RLock()
 	prevNameByIP := sc.containerNameByIP
@@ -1572,14 +1618,16 @@ func (sc *ServerConfig) resolveContainerIPs() {
 
 	// Resolve each name; collect per-name results for logging.
 	type result struct {
-		name     string
-		ips      []string
-		err      error
-		fallback bool // true if using cached IPs from a previous successful resolve
+		name       string
+		ips        []string
+		err        error
+		fallback   bool // true if using cached IPs from a previous successful resolve
+		lookupOnly bool // true if resolved for lookups only (NOT added to the trusted-proxy IP set)
 	}
 	results := make([]result, 0, len(names))
 	var resolved []string
 	for _, name := range names {
+		lookupOnly := lookupOnlySet[name]
 		ips, err := net.LookupHost(name)
 		if err != nil {
 			// Only warn for user-configured containers; built-ins (e.g. tunnel-support-client)
@@ -1597,10 +1645,13 @@ func (sc *ServerConfig) resolveContainerIPs() {
 			}
 			// Fall back to previously resolved IPs for this name, if any.
 			if prev, ok := prevIPsByName[name]; ok && len(prev) > 0 {
-				results = append(results, result{name, prev, nil, true})
-				resolved = append(resolved, prev...)
+				results = append(results, result{name, prev, nil, true, lookupOnly})
+				// Lookup-only names are NOT trusted as proxies — skip the resolved set.
+				if !lookupOnly {
+					resolved = append(resolved, prev...)
+				}
 			} else {
-				results = append(results, result{name, nil, err, false})
+				results = append(results, result{name, nil, err, false, lookupOnly})
 			}
 			continue
 		}
@@ -1608,8 +1659,12 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		if sc.containerResolveErrLastLog != nil {
 			delete(sc.containerResolveErrLastLog, name)
 		}
-		results = append(results, result{name, ips, nil, false})
-		resolved = append(resolved, ips...)
+		results = append(results, result{name, ips, nil, false, lookupOnly})
+		// Lookup-only names are resolved into the name→IP map (below) but are
+		// deliberately excluded from the trusted-proxy IP set (resolved).
+		if !lookupOnly {
+			resolved = append(resolved, ips...)
+		}
 	}
 
 	// Build reverse map: IP -> container name
@@ -1622,9 +1677,12 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		}
 	}
 
-	// Detect whether the IP set has changed (initial call goes from nil → resolved, always logs).
+	// Detect whether the resolution has changed (initial call goes from nil →
+	// resolved, always logs).  We consider a change in EITHER the trusted-proxy
+	// IP set OR the name→IP map (which also covers lookup-only containers).
 	sc.containerProxyMu.Lock()
-	changed := !stringSlicesEqual(sc.containerProxyIPs, resolved)
+	changed := !stringSlicesEqual(sc.containerProxyIPs, resolved) ||
+		!stringMapsEqual(sc.containerNameByIP, nameByIP)
 	sc.containerProxyIPs = resolved
 	sc.containerNameByIP = nameByIP
 	sc.containerProxyMu.Unlock()
@@ -1632,10 +1690,27 @@ func (sc *ServerConfig) resolveContainerIPs() {
 	if changed {
 		for _, r := range results {
 			if r.err == nil && !r.fallback {
-				log.Printf("trusted_containers: '%s' resolved to %v", r.name, r.ips)
+				if r.lookupOnly {
+					log.Printf("lookup_services.trusted_containers: '%s' resolved to %v (lookup-only; not trusted as a proxy)", r.name, r.ips)
+				} else {
+					log.Printf("trusted_containers: '%s' resolved to %v", r.name, r.ips)
+				}
 			}
 		}
 	}
+}
+
+// stringMapsEqual returns true if a and b contain exactly the same key→value pairs.
+func stringMapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
 }
 
 // GetContainerName returns the trusted container name for the given IP address,
@@ -2088,6 +2163,15 @@ func (lsc *LookupServicesConfig) applyDefaults() {
 	}
 	if lsc.CacheMaxSize == 0 {
 		lsc.CacheMaxSize = 1000 // Default 1000 cached callsigns
+	}
+	// Default trusted container is the dxcluster addon. A nil slice means the
+	// key was absent from YAML → apply the default; an explicit empty list
+	// (trusted_containers: []) disables the feature and is left untouched.
+	if lsc.TrustedContainers == nil {
+		lsc.TrustedContainers = []string{"dxcluster"}
+	}
+	if lsc.TrustedContainerRateLimit == 0 {
+		lsc.TrustedContainerRateLimit = 60 // Default 60 lookups per minute per container
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -42,21 +43,33 @@ type lookupErrorResponse struct {
 // Query parameters:
 //
 //	callsign  – the callsign to look up (required; normalised to uppercase, suffixes stripped)
-//	uuid      – the caller's session UUID (required; must match an active session)
+//	uuid      – the caller's session UUID (required for normal callers; must match an active session)
 //
 // Behaviour:
 //  1. Reject if lookup services are disabled.
-//  2. Validate uuid — must correspond to an active audio session (not spectrum-only).
+//  2. Auth:
+//     a. If the request comes directly from a trusted addon container
+//     (lookup_services.trusted_containers, matched on the RAW source IP via
+//     IsContainerIP), no session UUID is required.
+//     b. Otherwise validate uuid — must correspond to an active audio session
+//     (not spectrum-only).
 //  3. Validate and normalise the callsign.
-//  4. Apply per-UUID rate limiting (bypassed users are exempt).
+//  4. Apply rate limiting: per-UUID for normal callers (bypassed users exempt),
+//     or per-container for trusted containers (never exempt).
 //     Cache hits are granted 10× the normal rate (no outbound API call needed).
 //  5. Delegate to the active lookup provider and return JSON.
+//
+// SECURITY: trusted-container detection deliberately uses the RAW source IP
+// (r.RemoteAddr), NOT getClientIP(), because the container is the direct TCP
+// peer. It also uses IsContainerIP (name→IP map) rather than IsTrustedProxy, so
+// it grants ONLY lookup access and never confers X-Real-IP spoofing privileges.
 func handleLookup(
 	w http.ResponseWriter,
 	r *http.Request,
 	cfg *Config,
 	sessions *SessionManager,
 	rateLimiter *LookupRateLimiter,
+	containerRateLimiter *LookupRateLimiter,
 ) {
 	// Only GET is supported.
 	if r.Method != http.MethodGet {
@@ -70,24 +83,45 @@ func handleLookup(
 		return
 	}
 
-	// ── 2. UUID validation — must have an active audio session ────────────────
+	// ── 2. Authentication ─────────────────────────────────────────────────────
+	// Detect a trusted addon container calling directly on the internal network.
+	// Use the RAW source IP (the container is the direct TCP peer) and match a
+	// specific container name via IsContainerIP — this grants lookup access only,
+	// never trusted-proxy / header-spoofing privileges.
+	rawSourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
+		rawSourceIP = host
+	}
+	trustedContainerName := ""
+	for _, name := range cfg.LookupServices.TrustedContainers {
+		if name != "" && cfg.Server.IsContainerIP(rawSourceIP, name) {
+			trustedContainerName = name
+			break
+		}
+	}
+	isTrustedContainer := trustedContainerName != ""
+
+	// rawUUID is only required for non-container callers.
 	rawUUID := strings.TrimSpace(r.URL.Query().Get("uuid"))
-	if rawUUID == "" {
-		writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "uuid parameter is required"})
-		return
-	}
+	if !isTrustedContainer {
+		// ── 2b. UUID validation — must have an active audio session ───────────
+		if rawUUID == "" {
+			writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "uuid parameter is required"})
+			return
+		}
 
-	// Validate UUID format before touching the session map.
-	if _, err := uuid.Parse(rawUUID); err != nil {
-		writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "uuid parameter is not a valid UUID"})
-		return
-	}
+		// Validate UUID format before touching the session map.
+		if _, err := uuid.Parse(rawUUID); err != nil {
+			writeJSON(w, http.StatusBadRequest, lookupErrorResponse{Error: "uuid parameter is not a valid UUID"})
+			return
+		}
 
-	// Require an active audio (non-spectrum) session for this UUID.
-	// Spectrum-only viewers are not permitted to use the lookup endpoint.
-	if !sessions.HasActiveAudioSession(rawUUID) {
-		writeJSON(w, http.StatusUnauthorized, lookupErrorResponse{Error: "an active audio session is required to use this endpoint"})
-		return
+		// Require an active audio (non-spectrum) session for this UUID.
+		// Spectrum-only viewers are not permitted to use the lookup endpoint.
+		if !sessions.HasActiveAudioSession(rawUUID) {
+			writeJSON(w, http.StatusUnauthorized, lookupErrorResponse{Error: "an active audio session is required to use this endpoint"})
+			return
+		}
 	}
 
 	// ── 3. Callsign validation (before rate limiting so we can check the cache) ──
@@ -106,23 +140,44 @@ func handleLookup(
 		return
 	}
 
-	// ── 4. Rate limiting (bypassed users are exempt) ──────────────────────────
+	// ── 4. Rate limiting ──────────────────────────────────────────────────────
 	// If the callsign is already in the local cache, or a fetch for it is
 	// already in flight (singleflight will share the result — no extra API
 	// call), we allow 10× the normal rate.
-	bypassed := sessions.IsUUIDBypassedByAnySession(rawUUID)
-	if !bypassed && rateLimiter != nil {
-		cheapRequest := globalQRZService != nil &&
-			(globalQRZService.CacheHas(normalised) || globalQRZService.IsInFlight(normalised))
-		var allowed bool
-		if cheapRequest {
-			allowed = rateLimiter.AllowCachedRequest(rawUUID)
-		} else {
-			allowed = rateLimiter.AllowRequest(rawUUID)
+	cheapRequest := globalQRZService != nil &&
+		(globalQRZService.CacheHas(normalised) || globalQRZService.IsInFlight(normalised))
+
+	if isTrustedContainer {
+		// Trusted containers use their own limiter, keyed per container name.
+		// They are never exempt (always rate-limited), matching the public
+		// endpoint's behaviour with a dedicated per-container rate.
+		if containerRateLimiter != nil {
+			key := "container:" + trustedContainerName
+			var allowed bool
+			if cheapRequest {
+				allowed = containerRateLimiter.AllowCachedRequest(key)
+			} else {
+				allowed = containerRateLimiter.AllowRequest(key)
+			}
+			if !allowed {
+				writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
+				return
+			}
 		}
-		if !allowed {
-			writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
-			return
+	} else {
+		// Normal callers: per-UUID limiter (bypassed users are exempt).
+		bypassed := sessions.IsUUIDBypassedByAnySession(rawUUID)
+		if !bypassed && rateLimiter != nil {
+			var allowed bool
+			if cheapRequest {
+				allowed = rateLimiter.AllowCachedRequest(rawUUID)
+			} else {
+				allowed = rateLimiter.AllowRequest(rawUUID)
+			}
+			if !allowed {
+				writeJSON(w, http.StatusTooManyRequests, lookupErrorResponse{Error: "rate limit exceeded; please slow down"})
+				return
+			}
 		}
 	}
 

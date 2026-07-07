@@ -1855,6 +1855,18 @@ func main() {
 		log.Printf("Lookup endpoint rate limiting: %d requests/min per session UUID", config.LookupServices.RateLimitPerMinute)
 	}
 
+	// Initialize the trusted-container lookup rate limiter (keyed per container
+	// name). Trusted addon containers (e.g. dxcluster) may call /api/lookup
+	// without a session UUID; this bucket applies the configured per-container
+	// rate independently of the per-UUID limiter above.
+	var lookupContainerRateLimiter *LookupRateLimiter
+	if config.LookupServices.Enabled && config.LookupServices.TrustedContainerRateLimit > 0 {
+		lookupContainerRateLimiter = NewLookupRateLimiter(config.LookupServices.TrustedContainerRateLimit)
+		if len(config.LookupServices.TrustedContainers) > 0 {
+			log.Printf("Lookup endpoint trusted containers %v: %d requests/min per container", config.LookupServices.TrustedContainers, config.LookupServices.TrustedContainerRateLimit)
+		}
+	}
+
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
 	var sshProxy *SSHProxy
 	if config.SSHProxy.Enabled != nil && *config.SSHProxy.Enabled {
@@ -2450,7 +2462,7 @@ func main() {
 		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter, geoIPService)
 	})
 	http.HandleFunc("/api/lookup", func(w http.ResponseWriter, r *http.Request) {
-		handleLookup(w, r, config, sessions, lookupRateLimiter)
+		handleLookup(w, r, config, sessions, lookupRateLimiter, lookupContainerRateLimiter)
 	})
 	http.HandleFunc("/api/lookup/image/", func(w http.ResponseWriter, r *http.Request) {
 		if globalImageProxy == nil {

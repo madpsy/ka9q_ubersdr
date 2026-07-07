@@ -3722,6 +3722,56 @@ async function fetchSiteDescription() {
                         console.error('Error fetching user location:', err);
                     }
 
+                    // Add local weather row above location line (if available)
+                    try {
+                        const wxResp = await fetch('/api/weather');
+                        if (wxResp.ok) {
+                            const wd = await wxResp.json();
+                            if (wd.weather && wd.weather.length > 0) {
+                                const iconCode = wd.weather[0].icon;
+                                const wxDesc = wd.weather[0].description
+                                    .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                const wxParts = [];
+                                if (wd.main && wd.main.temp !== undefined) wxParts.push(`🌡️ ${Math.round(wd.main.temp)}°C`);
+                                if (wd.main && wd.main.humidity !== undefined) wxParts.push(`💧 ${wd.main.humidity}%`);
+                                if (wd.main && wd.main.pressure !== undefined) wxParts.push(`🔵 ${wd.main.pressure} hPa`);
+                                if (wd.wind && wd.wind.speed !== undefined) {
+                                    const kmh = Math.round(wd.wind.speed * 3.6);
+                                    const deg = wd.wind.deg !== undefined ? wd.wind.deg : null;
+                                    const dir = deg !== null ? (['N','NE','E','SE','S','SW','W','NW','N'])[Math.round(deg / 45) % 8] : '';
+                                    wxParts.push(`💨 ${kmh} km/h${dir ? ' ' + dir : ''}`);
+                                }
+
+                                const weatherRow = document.createElement('div');
+                                weatherRow.style.marginTop = '5px';
+                                weatherRow.style.fontSize = '12px';
+                                weatherRow.style.textAlign = 'center';
+                                weatherRow.style.color = '#ecf0f1';
+                                weatherRow.style.lineHeight = '1';
+                                weatherRow.style.display = 'flex';
+                                weatherRow.style.alignItems = 'center';
+                                weatherRow.style.justifyContent = 'center';
+                                weatherRow.style.gap = '5px';
+
+                                const wxImg = document.createElement('img');
+                                wxImg.src = `/weather/${iconCode}_t.png`;
+                                wxImg.alt = wxDesc;
+                                wxImg.width = 16;
+                                wxImg.height = 16;
+                                wxImg.style.display = 'inline-block';
+                                wxImg.style.verticalAlign = 'middle';
+                                wxImg.style.flexShrink = '0';
+
+                                const wxText = document.createElement('span');
+                                wxText.textContent = `${wxDesc}  ${wxParts.join('  ')}`;
+
+                                weatherRow.appendChild(wxImg);
+                                weatherRow.appendChild(wxText);
+                                descriptionEl.appendChild(weatherRow);
+                            }
+                        }
+                    } catch (_) { /* weather is optional */ }
+
                     // Add user location info or nothing if not available
                     if (userLocationText) {
                         const locationInfo = document.createElement('div');

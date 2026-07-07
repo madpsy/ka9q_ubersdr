@@ -220,10 +220,10 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 		{Text: fmt.Sprintf("(%d free)", free), Color: valueColor},
 	}
 	if bypassed > 0 {
-		segs = append(segs, gudriver.Segment{
-			Text:  fmt.Sprintf(", %d bypass", bypassed),
-			Color: "cyan",
-		})
+		segs = append(segs,
+			gudriver.Segment{Text: ", ", Color: "blue"},
+			gudriver.Segment{Text: fmt.Sprintf("%d bypass", bypassed), Color: "cyan"},
+		)
 	}
 
 	return monitorSlide{

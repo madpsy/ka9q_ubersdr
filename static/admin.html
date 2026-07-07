@@ -3461,6 +3461,31 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             </div>
         </div>
 
+        <!-- Widget Make-Public Confirmation Modal -->
+        <div id="widgetMakePublicModal" class="modal">
+            <div class="modal-content" style="max-width:520px;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;font-size:16px;">🌐 Publish to Community Catalog?</h3>
+                    <button onclick="closeWidgetMakePublicModal(false)" style="background:none;border:none;font-size:20px;cursor:pointer;color:#fff;line-height:1;">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <p style="margin:0 0 14px 0;font-size:14px;color:#444;line-height:1.6;">
+                        Making this widget <strong>public</strong> will publish it to the <strong>community catalog</strong>, where other UberSDR instances can discover and enable it.
+                    </p>
+                    <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#1b5e20;line-height:1.6;">
+                        <strong>ℹ️ You don't need to do this</strong> for users of <em>this</em> instance to see the widget — that's done by clicking the <strong>Enable</strong> button on the widget card.
+                    </div>
+                    <p style="margin:0;font-size:13px;color:#555;line-height:1.6;">
+                        Only publish if you want to share this widget with the wider UberSDR community. Once public, any changes you save will be visible to all instances that have enabled it.
+                    </p>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;">
+                    <button class="btn btn-secondary" onclick="closeWidgetMakePublicModal(false)" style="margin-left:0;">Cancel</button>
+                    <button class="btn" onclick="closeWidgetMakePublicModal(true)" style="background:#2e7d32;color:#fff;">🌐 Add to Public Catalog</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Auto-Calibration Modal -->
         <div id="autoCalibrationModal" class="modal">
             <div class="modal-content" style="max-width: 600px;">
@@ -10600,7 +10625,13 @@ function resetStationIdColor() {
         function onWidgetPublicCheckboxChange() {
             const cb       = document.getElementById('widgetEditorPublic');
             const widgetID = document.getElementById('widgetEditorID').value.trim();
-            // Only intercept when unchecking a saved public widget that OTHER instances use
+            if (cb.checked) {
+                // Intercept checking — show the "make public" confirmation modal
+                cb.checked = false; // revert visually until confirmed
+                document.getElementById('widgetMakePublicModal').style.display = 'flex';
+                return;
+            }
+            // Unchecking a saved public widget that OTHER instances use
             if (!cb.checked && widgetID) {
                 const count = widgetEnabledByOtherCount[widgetID] || 0;
                 if (count > 0) {
@@ -10613,6 +10644,14 @@ function resetStationIdColor() {
                 }
             }
             updateWidgetPublicOverlay();
+        }
+
+        function closeWidgetMakePublicModal(confirmed) {
+            document.getElementById('widgetMakePublicModal').style.display = 'none';
+            if (confirmed) {
+                document.getElementById('widgetEditorPublic').checked = true;
+                updateWidgetPublicOverlay();
+            }
         }
 
         function closeWidgetMakePrivateModal(confirmed) {

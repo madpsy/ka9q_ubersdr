@@ -783,7 +783,7 @@ func buildGPSDOSlide(gpsdoMonitor *GPSDOMonitor, sessions *SessionManager, maxSe
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("GPSDO", "cyan", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("GPSD", "cyan", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}

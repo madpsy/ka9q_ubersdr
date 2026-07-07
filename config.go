@@ -1297,6 +1297,18 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.UI.Contrast.Default == 0 && config.UI.Contrast.Min == 0 && config.UI.Contrast.Max == 20 {
 		config.UI.Contrast.Default = 10
 	}
+	// MinSpan: minimum dynamic range in dB, range 0-60 (matches UI slider in index.html).
+	// Default is 30 dB (matches the HTML default value="30"). 0 = Auto / disabled.
+	// Use Max == 0 as the sentinel for "this field was never written to ui.yaml at all"
+	// (a saved ui.yaml always has max: 60). When Max is zero the whole section is absent,
+	// so we apply the full built-in default including Default = 30.
+	// When Max is already 60 the admin has saved at least once; we leave Default alone
+	// even if it is 0 (meaning the admin deliberately chose "Auto").
+	minSpanFresh := config.UI.MinSpan.Max == 0
+	if minSpanFresh {
+		config.UI.MinSpan.Max = 60
+		config.UI.MinSpan.Default = 30
+	}
 	// VU meter style: bar or led (matches vuMeterStyle localStorage key)
 	if len(config.UI.VUMeterStyle.Available) == 0 {
 		config.UI.VUMeterStyle.Available = []UIOptionItem{

@@ -222,7 +222,7 @@ func buildUsersSlide(sessions *SessionManager, maxSessions int) monitorSlide {
 	}
 	if bypassed > 0 {
 		segs = append(segs,
-			gudriver.Segment{Text: ", ", Color: "blue"},
+			gudriver.Segment{Text: ", ", Color: valueColor},
 			gudriver.Segment{Text: fmt.Sprintf("%d bypass", bypassed), Color: "cyan"},
 		)
 	}
@@ -677,8 +677,8 @@ func weatherTempColor(tempC float64) string {
 // buildWeatherSlide returns a slide showing local weather from the WeatherService cache.
 // Returns nil when ws is nil or no data has been cached yet.
 //
-// Top line:  "WTHR" (teal) + user count (capacity colour)
-// Bottom:    Condition  Temp°C  H:humidity%  W:wind m/s
+// Top line:  "WTHR" (green) + user count (capacity colour)
+// Bottom:    Condition  Temp°C  H:humidity%  W:wind km/h
 func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions int) *monitorSlide {
 	if ws == nil {
 		return nil
@@ -704,11 +704,11 @@ func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions
 		{Text: condition + " ", Color: condColor},
 		{Text: fmt.Sprintf("%.0f°C ", d.Main.Temp), Color: tempColor},
 		{Text: fmt.Sprintf("H:%d%% ", d.Main.Humidity), Color: "white"},
-		{Text: fmt.Sprintf("W:%.1fm/s", d.Wind.Speed), Color: "white"},
+		{Text: fmt.Sprintf("W:%dkm/h", int(d.Wind.Speed*3.6)), Color: "white"},
 	}
 
 	return &monitorSlide{
-		topLineSegs:   formatTopLineSegs("WTHR", "teal", sessions, maxSessions),
+		topLineSegs:   formatTopLineSegs("WTHR", "green", sessions, maxSessions),
 		valueSegments: segs,
 		transition:    gudriver.TransitionFade,
 	}

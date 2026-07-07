@@ -3751,7 +3751,7 @@ async function fetchSiteDescription() {
                                 weatherRow.style.display = 'flex';
                                 weatherRow.style.alignItems = 'center';
                                 weatherRow.style.justifyContent = 'center';
-                                weatherRow.style.gap = '5px';
+                                weatherRow.style.gap = '0';
 
                                 const wxImg = document.createElement('img');
                                 wxImg.src = `/weather/${iconCode}_t.png`;

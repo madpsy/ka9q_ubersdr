@@ -508,7 +508,7 @@ type SpaceWeatherConfig struct {
 // InstanceReportingConfig contains settings for reporting to central instance registry
 type InstanceReportingConfig struct {
 	Enabled                    bool                   `yaml:"enabled"`                      // Enable/disable instance reporting
-	UseHTTPS                   *bool                  `yaml:"use_https"`                    // Use HTTPS (true) or HTTP (false) for connections
+	UseHTTPS                   *bool                  `yaml:"-"`                            // Hardcoded to true (HTTPS always) — not configurable
 	UseMyIP                    bool                   `yaml:"use_myip"`                     // Automatically use public IP for public access
 	CreateDomain               bool                   `yaml:"create_domain"`                // Request automatic DNS subdomain creation
 	GenerateTLS                bool                   `yaml:"generate_tls"`                 // Generate TLS certificate with Caddy (default: false)
@@ -519,7 +519,7 @@ type InstanceReportingConfig struct {
 	InstanceUUID               string                 `yaml:"instance_uuid"`                // Unique instance identifier (auto-generated)
 	Instance                   InstanceConnectionInfo `yaml:"instance"`                     // Instance connection information
 	TunnelServerHost           string                 `yaml:"tunnel_server_host"`           // Tunnel server hostname for X-Real-IP trust
-	TunnelServerPort           int                    `yaml:"tunnel_server_port"`           // Tunnel server port (for future use)
+	TunnelServerPort           int                    `yaml:"-"`                            // Hardcoded to 443 — not configurable
 	TunnelServerEnabled        bool                   `yaml:"tunnel_server_enabled"`        // Enable/disable tunnel server integration (default: false)
 	TunnelServerURI            string                 `yaml:"tunnel_server_uri"`            // Tunnel server WebSocket URI (default: wss://tunnel.ubersdr.org/tunnel/connect)
 	BetaFrontend               bool                   `yaml:"beta_frontend"`                // Enable beta frontend features (default: false)
@@ -1179,12 +1179,13 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.InstanceReporting.TunnelServerURI == "" {
 		config.InstanceReporting.TunnelServerURI = "wss://tunnel.ubersdr.org/tunnel/connect"
 	}
-	// UseHTTPS defaults to true. Uses *bool so "not set" (nil) is distinguished from
-	// "explicitly set to false" (e.g. for local HTTP-only testing).
-	if config.InstanceReporting.UseHTTPS == nil {
+	// UseHTTPS is hardcoded to true (HTTPS always) — not configurable via config.yaml.
+	{
 		t := true
 		config.InstanceReporting.UseHTTPS = &t
 	}
+	// TunnelServerPort is hardcoded to 443 — not configurable via config.yaml.
+	config.InstanceReporting.TunnelServerPort = 443
 	// NotifyInstanceDisconnected defaults to true. Same *bool pattern.
 	if config.InstanceReporting.NotifyInstanceDisconnected == nil {
 		t := true

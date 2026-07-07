@@ -20,6 +20,7 @@ class BandConditionsMonitor {
         this.location = null; // Store location name if available
         this.utcClockInterval = null; // Interval for UTC clock updates
         this.wsprEnabled = false; // Whether WSPR phone predictions are available
+        this.weatherData = null; // Cached local weather data from /api/weather
 
         // Tableau 10 color palette
         this.bandColors = {
@@ -262,6 +263,26 @@ class BandConditionsMonitor {
         }
     }
 
+    async loadWeather() {
+        try {
+            const response = await fetch('/api/weather');
+            if (response.status === 404) {
+                // No weather data available yet — silently ignore
+                this.weatherData = null;
+                return;
+            }
+            if (!response.ok) {
+                console.error('Failed to load weather data:', response.status);
+                this.weatherData = null;
+                return;
+            }
+            this.weatherData = await response.json();
+        } catch (error) {
+            console.error('Error loading weather:', error);
+            this.weatherData = null;
+        }
+    }
+
     displaySpaceWeather(data) {
         const summaryDiv = document.getElementById('spaceweather-summary');
         const contentDiv = document.getElementById('spaceweather-content');
@@ -300,6 +321,35 @@ class BandConditionsMonitor {
                         <div style="font-size: 1.1em; font-weight: bold; margin-bottom: 5px;">${dayNightIcon} Currently: ${dayNightText}${locationText}</div>
                         <div style="font-size: 0.9em; opacity: 0.8;">🌅 Sunrise: ${sunriseStr} UTC • 🌇 Sunset: ${sunsetStr} UTC</div>
                         <div id="utc-clock" style="font-size: 0.95em; margin-top: 5px; font-weight: bold; opacity: 0.9;">🕐 UTC: --:--:--</div>
+                     </div>`;
+        }
+
+        // Local weather row (only shown if data is available from /api/weather)
+        if (this.weatherData && this.weatherData.weather && this.weatherData.weather.length > 0) {
+            const wd = this.weatherData;
+            const iconCode = wd.weather[0].icon; // e.g. "04d" — already has d/n suffix
+            const iconUrl = `/weather/${iconCode}_t.png`;
+            const description = wd.weather[0].description
+                .split(' ')
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ');
+            const tempC = wd.main && wd.main.temp !== undefined ? Math.round(wd.main.temp) : null;
+            const humidity = wd.main && wd.main.humidity !== undefined ? wd.main.humidity : null;
+            const windMs = wd.wind && wd.wind.speed !== undefined ? wd.wind.speed : null;
+            const windKmh = windMs !== null ? Math.round(windMs * 3.6) : null;
+            const locationName = [wd.name, wd.sys && wd.sys.country].filter(Boolean).join(', ');
+
+            let weatherParts = [];
+            if (tempC !== null) weatherParts.push(`🌡️ ${tempC}°C`);
+            if (humidity !== null) weatherParts.push(`💧 ${humidity}%`);
+            if (windKmh !== null) weatherParts.push(`💨 ${windKmh} km/h`);
+
+            html += `<div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: rgba(255,255,255,0.05); border-radius: 6px; flex-wrap: wrap;">
+                        <img src="${iconUrl}" alt="${description}" width="50" height="50" style="flex-shrink: 0;" onerror="this.style.display='none'">
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: bold; font-size: 1em;">${description}${locationName ? ` — ${locationName}` : ''}</div>
+                            <div style="font-size: 0.9em; opacity: 0.85; margin-top: 3px;">${weatherParts.join(' &nbsp;•&nbsp; ')}</div>
+                        </div>
                      </div>`;
         }
 
@@ -414,7 +464,8 @@ class BandConditionsMonitor {
                 await this.loadVersion();
             }
 
-            // Load space weather data
+            // Load local weather first (needed by displaySpaceWeather), then space weather
+            await this.loadWeather();
             await this.loadSpaceWeather();
 
             // Load phone/SSB predictions if WSPR is available

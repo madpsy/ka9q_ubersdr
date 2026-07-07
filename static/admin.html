@@ -772,12 +772,9 @@
                         <button class="btn btn-secondary" onclick="logout()">Logout</button>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <div id="admin-weather-widget" style="display: none; align-items: center; gap: 10px; color: #333;">
-                            <img id="admin-weather-icon" src="" alt="" width="40" height="40" style="flex-shrink: 0;">
-                            <div style="line-height: 1.3;">
-                                <div id="admin-weather-desc" style="font-size: 0.9em; font-weight: 600;"></div>
-                                <div id="admin-weather-stats" style="font-size: 0.8em; color: #555; white-space: nowrap;"></div>
-                            </div>
+                        <div id="admin-weather-widget" style="display: none; flex-direction: column; color: #333; line-height: 1.3;">
+                            <div id="admin-weather-desc" style="font-size: 0.9em; font-weight: 600;"></div>
+                            <div id="admin-weather-stats" style="font-size: 0.8em; color: #555; white-space: nowrap;"></div>
                         </div>
                         <a href="notifications-admin.html" class="btn" style="text-decoration: none;">🔔 Notifications</a>
                     </div>
@@ -4162,7 +4159,6 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const wd = await response.json();
                 if (!wd.weather || !wd.weather.length) return;
 
-                const iconCode = wd.weather[0].icon;
                 const description = wd.weather[0].description
                     .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                 const tempC = wd.main && wd.main.temp !== undefined ? Math.round(wd.main.temp) : null;
@@ -4186,13 +4182,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 }
 
                 const widget = document.getElementById('admin-weather-widget');
-                const icon = document.getElementById('admin-weather-icon');
                 const desc = document.getElementById('admin-weather-desc');
                 const stats = document.getElementById('admin-weather-stats');
-                if (!widget || !icon || !desc || !stats) return;
+                if (!widget || !desc || !stats) return;
 
-                icon.src = `/weather/${iconCode}_t.png`;
-                icon.alt = description;
                 desc.textContent = description;
                 stats.textContent = parts.join(' • ');
                 widget.style.display = 'flex';

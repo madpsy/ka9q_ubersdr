@@ -9,6 +9,7 @@ package main
 // No other file needs to be touched.
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"net"
@@ -132,6 +133,11 @@ var botCommands = map[string]botCommand{
 		desc:     "Show current space weather report",
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleSpace,
+	},
+	"weather": {
+		desc:     "Show local terrestrial weather (temperature, conditions, wind, humidity)",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleWeather,
 	},
 	"wspr": {
 		desc:     "Show WSPR Live rank for this receiver",
@@ -2060,6 +2066,74 @@ func sortedBotCommandNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// handleWeather reports local terrestrial weather from the WeatherService cache.
+// The data is an OpenWeatherMap-compatible JSON payload fetched from the instance
+// reporter every 15 minutes.
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleWeather(chatID int64, args string) (string, string, bool) {
+	if l.weatherService == nil {
+		msg := "🌤 Weather data is not available on this receiver (instance reporting not configured)."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	raw, fetchedAt := l.weatherService.GetCached()
+	if raw == nil {
+		msg := "🌤 Weather data has not been fetched yet — please try again in a minute."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// Parse the OWM-compatible JSON (same struct as monitor_display.go uses).
+	var d struct {
+		Weather []struct {
+			Main        string `json:"main"`
+			Description string `json:"description"`
+		} `json:"weather"`
+		Main struct {
+			Temp      float64 `json:"temp"`
+			FeelsLike float64 `json:"feels_like"`
+			Humidity  int     `json:"humidity"`
+		} `json:"main"`
+		Wind struct {
+			Speed float64 `json:"speed"` // m/s
+		} `json:"wind"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil || len(d.Weather) == 0 {
+		msg := "🌤 Weather data could not be parsed."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	condition := d.Weather[0].Main
+	description := d.Weather[0].Description
+	windKmh := d.Wind.Speed * 3.6
+
+	// Data age
+	age := time.Since(fetchedAt)
+	var ageStr string
+	switch {
+	case age < time.Minute:
+		ageStr = "just now"
+	case age < time.Hour:
+		ageStr = fmt.Sprintf("%d minutes ago", int(age.Minutes()))
+	default:
+		ageStr = fmt.Sprintf("%d hours ago", int(age.Hours()))
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🌤 <b>Weather</b>\n\n")
+	fmt.Fprintf(&sb, "Condition: %s (%s)\n", condition, description)
+	fmt.Fprintf(&sb, "Temperature: %.0f°C (feels like %.0f°C)\n", d.Main.Temp, d.Main.FeelsLike)
+	fmt.Fprintf(&sb, "Humidity: %d%%\n", d.Main.Humidity)
+	fmt.Fprintf(&sb, "Wind: %.0f km/h\n", windKmh)
+	fmt.Fprintf(&sb, "Data age: %s", ageStr)
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
 }
 
 // handleNetwork reports a network throughput summary matching the admin sessions

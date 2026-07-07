@@ -389,6 +389,17 @@ func (m *NotificationManager) SetGPSDOMonitor(h *GPSDOMonitor) {
 	}
 }
 
+// SetWeatherService wires the weather service into the listener registry
+// so that the /weather bot command can report local terrestrial weather.
+func (m *NotificationManager) SetWeatherService(ws *WeatherService) {
+	m.mu.RLock()
+	reg := m.listeners
+	m.mu.RUnlock()
+	if reg != nil {
+		reg.SetWeatherService(ws)
+	}
+}
+
 // SetReceiverCallsign sets the receiver callsign used for PSK/WSPR lookups.
 func (m *NotificationManager) SetReceiverCallsign(cs string) {
 	m.mu.RLock()

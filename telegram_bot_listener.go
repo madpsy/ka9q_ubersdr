@@ -74,6 +74,7 @@ type TelegramBotListener struct {
 	rbnStore         *RBNDataStore              // nil if CW skimmer / RBN not enabled
 	dxClusterWS      *DXClusterWebSocketHandler // nil if DX cluster not enabled; used by /cw
 	spaceWeather     *SpaceWeatherMonitor       // nil if space weather monitoring not enabled
+	weatherService   *WeatherService            // nil if weather service not enabled
 	chatManager      *ChatManager               // nil if chat not enabled
 	gpsdoMonitor     *GPSDOMonitor              // nil if GPSDO not enabled
 	adminHandler     *AdminHandler              // nil until wired; used by /monitor
@@ -825,6 +826,7 @@ type TelegramListenerRegistry struct {
 	rbnStore          *RBNDataStore              // nil if CW skimmer / RBN not enabled
 	dxClusterWS       *DXClusterWebSocketHandler // nil if DX cluster not enabled; used by /cw
 	spaceWeather      *SpaceWeatherMonitor       // nil if space weather monitoring not enabled
+	weatherService    *WeatherService            // nil if weather service not enabled
 	chatManager       *ChatManager               // nil if chat not enabled
 	gpsdoMonitor      *GPSDOMonitor              // nil if GPSDO not enabled
 	adminHandler      *AdminHandler              // nil until wired; used by /monitor
@@ -977,6 +979,16 @@ func (r *TelegramListenerRegistry) SetIPBanManager(h *IPBanManager) {
 	}
 }
 
+// SetWeatherService wires the weather service into all current and future listeners.
+func (r *TelegramListenerRegistry) SetWeatherService(ws *WeatherService) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.weatherService = ws
+	for _, l := range r.listeners {
+		l.weatherService = ws
+	}
+}
+
 // SetGPSDOMonitor wires the GPSDO monitor into all current and future listeners.
 func (r *TelegramListenerRegistry) SetGPSDOMonitor(h *GPSDOMonitor) {
 	r.mu.Lock()
@@ -1066,6 +1078,7 @@ func (r *TelegramListenerRegistry) Sync(cfg *NotificationsConfig) {
 		l.rbnStore = r.rbnStore
 		l.dxClusterWS = r.dxClusterWS
 		l.spaceWeather = r.spaceWeather
+		l.weatherService = r.weatherService
 		l.chatManager = r.chatManager
 		l.gpsdoMonitor = r.gpsdoMonitor
 		l.adminHandler = r.adminHandler

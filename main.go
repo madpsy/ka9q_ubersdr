@@ -2179,6 +2179,9 @@ func main() {
 	if gpsdoMonitor != nil {
 		notifManager.SetGPSDOMonitor(gpsdoMonitor)
 	}
+	// Wire weather service so the /weather Telegram bot command can report
+	// local terrestrial weather conditions from the OpenWeatherMap cache.
+	notifManager.SetWeatherService(weatherService)
 
 	// Set the frequency reference monitor in instance reporter for tracking information
 	// This must be done after both are initialized

@@ -52,6 +52,14 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 
+		// Resolve the real client IP BEFORE stripping any forwarding headers.
+		// Caddy (and other trusted proxies) deliver the client IP via
+		// X-Forwarded-For (X-Real-IP is stripped by the generated Caddyfile).
+		// If we delete X-Forwarded-For first, getClientIP() loses that
+		// information and falls back to r.RemoteAddr — which is the proxy's
+		// Docker-internal IP, not the real client.
+		clientIP := getClientIP(req)
+
 		// Strip client-supplied proxy headers before we set our own authoritative
 		// values. Without this a client can inject X-Forwarded-For, X-Real-IP,
 		// X-Forwarded-Host, or X-Forwarded-Proto and have them forwarded verbatim
@@ -81,12 +89,6 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 
 		// Set Host header to the backend target
 		req.Host = targetURL.Host
-
-		// Use the same trusted getClientIP() logic used everywhere else in
-		// UberSDR: honours X-Real-IP / X-Forwarded-For only when the request
-		// arrives from a configured tunnel server or trusted proxy, and falls
-		// back to RemoteAddr otherwise.
-		clientIP := getClientIP(req)
 
 		// Set authoritative forwarding headers for the backend.
 		req.Header.Set("X-Real-IP", clientIP)

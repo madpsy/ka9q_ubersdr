@@ -16,7 +16,7 @@ import (
 //	GET {reporter}/api/weather/{private_uuid}
 //
 // The cached JSON is served verbatim at the local /api/weather endpoint.
-// Fetching begins 1 minute after Start() is called and repeats every hour.
+// Fetching begins 1 minute after Start() is called and repeats every 15 minutes.
 // HTTP 429 responses trigger exponential backoff (10 s → 120 s, max 5 retries).
 type WeatherService struct {
 	config *Config
@@ -64,7 +64,7 @@ func (ws *WeatherService) Start() {
 		return
 	}
 
-	log.Printf("[Weather] Starting weather service (first fetch in 1 minute, then every hour)")
+	log.Printf("[Weather] Starting weather service (first fetch in 1 minute, then every 15 minutes)")
 	go ws.fetchLoop()
 }
 
@@ -100,7 +100,7 @@ func (ws *WeatherService) reporterURL() string {
 		protocol, cfg.Hostname, cfg.Port, cfg.InstanceUUID)
 }
 
-// fetchLoop waits 1 minute, performs the first fetch, then repeats every hour.
+// fetchLoop waits 1 minute, performs the first fetch, then repeats every 15 minutes.
 func (ws *WeatherService) fetchLoop() {
 	// Initial delay: 1 minute after startup.
 	select {
@@ -111,7 +111,7 @@ func (ws *WeatherService) fetchLoop() {
 
 	ws.fetchWithBackoff()
 
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 
 	for {

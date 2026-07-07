@@ -3732,14 +3732,12 @@ async function fetchSiteDescription() {
                                 const wxDesc = wd.weather[0].description
                                     .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                                 const wxParts = [];
-                                if (wd.main && wd.main.temp !== undefined) wxParts.push(`🌡️ ${Math.round(wd.main.temp)}°C`);
-                                if (wd.main && wd.main.humidity !== undefined) wxParts.push(`💧 ${wd.main.humidity}%`);
-                                if (wd.main && wd.main.pressure !== undefined) wxParts.push(`🔵 ${wd.main.pressure} hPa`);
+                                if (wd.main && wd.main.temp !== undefined) wxParts.push(`🌡️${Math.round(wd.main.temp)}°C`);
                                 if (wd.wind && wd.wind.speed !== undefined) {
                                     const kmh = Math.round(wd.wind.speed * 3.6);
                                     const deg = wd.wind.deg !== undefined ? wd.wind.deg : null;
                                     const dir = deg !== null ? (['N','NE','E','SE','S','SW','W','NW','N'])[Math.round(deg / 45) % 8] : '';
-                                    wxParts.push(`💨 ${kmh} km/h${dir ? ' ' + dir : ''}`);
+                                    wxParts.push(`💨${kmh} km/h${dir ? ' ' + dir : ''}`);
                                 }
 
                                 const weatherRow = document.createElement('div');

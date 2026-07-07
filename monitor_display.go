@@ -714,8 +714,234 @@ func buildWeatherSlide(ws *WeatherService, sessions *SessionManager, maxSessions
 	}
 }
 
+// buildGPSDOSlide returns a slide showing Leo Bodnar GPSDO status.
+// Returns nil when gpsdoMonitor is nil, the container is unreachable (snapshot nil),
+// or the USB HID device is not physically present (Device == "").
+//
+// Top line:  "GPSDO" in cyan + user count (capacity colour)
+// Bottom line segments (scrolling):
+//
+//	"GPS:"      white  — label
+//	"OK"/"FAIL" lime/red — GPSLock
+//	"  PLL:"    white
+//	"OK"/"FAIL" lime/red — PLLLock
+//	"  Ant:"    white
+//	"OK"/"FAIL" lime/red — AntennaOK
+//	"  Out:"    white
+//	"OK"/"FAIL" lime/red — Output1Enabled
+//	"  "        white
+//	"27MHz"     lime if FrequencyHz == 27 000 000, red otherwise
+//	"  Sats:"   white  — only when GPS telemetry available
+//	"N"         white  — SatsUsed
+func buildGPSDOSlide(gpsdoMonitor *GPSDOMonitor, sessions *SessionManager, maxSessions int) *monitorSlide {
+	if gpsdoMonitor == nil {
+		return nil
+	}
+	snapshot := gpsdoMonitor.GetSnapshot()
+	if snapshot == nil || snapshot.Device == "" || snapshot.DeviceStatus == nil {
+		return nil
+	}
+	ds := snapshot.DeviceStatus
+
+	okFail := func(ok bool) (string, string) {
+		if ok {
+			return "OK", "lime"
+		}
+		return "FAIL", "red"
+	}
+
+	gpsText, gpsColor := okFail(ds.GPSLock)
+	pllText, pllColor := okFail(ds.PLLLock)
+	antText, antColor := okFail(ds.AntennaOK)
+	outText, outColor := okFail(ds.Output1Enabled)
+
+	freqMHz := int((ds.FrequencyHz + 500_000) / 1_000_000)
+	freqText := fmt.Sprintf("%dMHz", freqMHz)
+	freqColor := "red"
+	if ds.FrequencyHz == gpsdoExpectedFrequencyHz {
+		freqColor = "lime"
+	}
+
+	segs := []gudriver.Segment{
+		{Text: "GPS:", Color: "white"},
+		{Text: gpsText, Color: gpsColor},
+		{Text: "  PLL:", Color: "white"},
+		{Text: pllText, Color: pllColor},
+		{Text: "  Ant:", Color: "white"},
+		{Text: antText, Color: antColor},
+		{Text: "  Out:", Color: "white"},
+		{Text: outText, Color: outColor},
+		{Text: "  ", Color: "white"},
+		{Text: freqText, Color: freqColor},
+	}
+
+	if gps := snapshot.GPS; gps != nil {
+		segs = append(segs,
+			gudriver.Segment{Text: "  Sats:", Color: "white"},
+			gudriver.Segment{Text: fmt.Sprintf("%d", gps.SatsUsed), Color: "white"},
+		)
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("GPSDO", "cyan", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
+// netKbpsFormat formats a kbps integer as "X.XX Mbps" when ≥ 1000, else "X kbps".
+// Used by buildNetworkSlide and any other display code that needs throughput formatting.
+func netKbpsFormat(kbps int) string {
+	if kbps >= 1000 {
+		return fmt.Sprintf("%.2f Mbps", float64(kbps)/1000.0)
+	}
+	return fmt.Sprintf("%d kbps", kbps)
+}
+
+// buildNetworkSlide returns a slide showing total and public network throughput.
+// Returns nil when sessions is nil.
+//
+// Top line:  "NET" in blue + user count (capacity colour)
+// Bottom line segments:
+//
+//	"Total:"   cyan  — label
+//	"X.XX Mbps" white — total throughput (audio + waterfall + DX across all users)
+//	"  Public:" cyan  — label
+//	"X.XX Mbps" white — public-IP users only (non-local, non-LAN)
+//
+// Sessions are grouped by user_session_id (fallback: client_ip), matching the
+// admin sessions tab Network Summary panel logic exactly.
+func buildNetworkSlide(sessions *SessionManager, maxSessions int) *monitorSlide {
+	if sessions == nil {
+		return nil
+	}
+
+	// isLocalIP: Docker-internal 172.20.0.0/24
+	isLocalIP := func(ip string) bool {
+		return strings.HasPrefix(ip, "172.20.0.")
+	}
+
+	// isLANIP: RFC 1918 / loopback, excluding 172.20.0.0/24
+	isLANIP := func(ip string) bool {
+		if isLocalIP(ip) {
+			return false
+		}
+		if strings.HasPrefix(ip, "127.") || ip == "::1" {
+			return true
+		}
+		if strings.HasPrefix(ip, "10.") {
+			return true
+		}
+		if strings.HasPrefix(ip, "192.168.") {
+			return true
+		}
+		if strings.HasPrefix(ip, "172.") {
+			parts := strings.SplitN(ip, ".", 3)
+			if len(parts) >= 2 {
+				var second int
+				fmt.Sscanf(parts[1], "%d", &second)
+				if second >= 16 && second <= 31 {
+					return true
+				}
+			}
+		}
+		if len(ip) >= 2 {
+			prefix := strings.ToLower(ip[:2])
+			if prefix == "fc" || prefix == "fd" {
+				return true
+			}
+		}
+		return false
+	}
+
+	type userGroup struct {
+		clientIP      string
+		audioKbps     int
+		waterfallKbps int
+		dxclusterKbps int
+		hasAudio      bool
+		hasSpectrum   bool
+		hasDXKbps     bool
+		hasAudioMeta  bool
+	}
+	groupMap := make(map[string]*userGroup)
+
+	for _, s := range sessions.GetAllSessionsInfo() {
+		isInternal, _ := s["is_internal"].(bool)
+		if isInternal {
+			continue
+		}
+		userSessionID, _ := s["user_session_id"].(string)
+		clientIP, _ := s["client_ip"].(string)
+		key := userSessionID
+		if key == "" {
+			key = clientIP
+		}
+		if key == "" {
+			continue
+		}
+
+		g, exists := groupMap[key]
+		if !exists {
+			g = &userGroup{}
+			groupMap[key] = g
+		}
+
+		isSpectrum, _ := s["is_spectrum"].(bool)
+		if isSpectrum {
+			if !g.hasSpectrum {
+				wf, _ := s["waterfall_kbps"].(int)
+				g.waterfallKbps = wf
+				g.hasSpectrum = true
+			}
+			if !g.hasAudioMeta && g.clientIP == "" {
+				g.clientIP = clientIP
+			}
+		} else {
+			if !g.hasAudio {
+				audio, _ := s["audio_kbps"].(int)
+				g.audioKbps = audio
+				g.hasAudio = true
+			}
+			if !g.hasAudioMeta {
+				g.clientIP = clientIP
+				g.hasAudioMeta = true
+			}
+		}
+		if !g.hasDXKbps {
+			if dxVal, ok := s["dxcluster_kbps"]; ok {
+				dx, _ := dxVal.(int)
+				g.dxclusterKbps = dx
+				g.hasDXKbps = true
+			}
+		}
+	}
+
+	var totalKbps, publicKbps int
+	for _, g := range groupMap {
+		sum := g.audioKbps + g.waterfallKbps + g.dxclusterKbps
+		totalKbps += sum
+		if !isLocalIP(g.clientIP) && !isLANIP(g.clientIP) {
+			publicKbps += sum
+		}
+	}
+
+	segs := []gudriver.Segment{
+		{Text: "Total:", Color: "cyan"},
+		{Text: netKbpsFormat(totalKbps), Color: "white"},
+		{Text: "  Public:", Color: "cyan"},
+		{Text: netKbpsFormat(publicKbps), Color: "white"},
+	}
+
+	return &monitorSlide{
+		topLineSegs:   formatTopLineSegs("NET", "blue", sessions, maxSessions),
+		valueSegments: segs,
+		transition:    gudriver.TransitionFade,
+	}
+}
+
 // collectSlides assembles the full ordered list of slides for one rotation.
-func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) []monitorSlide {
+func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, cwCallsign, callsign string, maxSessions int, swm *SpaceWeatherMonitor, weather *WeatherService, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor) []monitorSlide {
 	var slides []monitorSlide
 
 	// 1. UTC clock — top line "UTC" label + user count, bottom line HH:MM:SS
@@ -732,42 +958,52 @@ func collectSlides(sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRan
 		slides = append(slides, *s)
 	}
 
-	// 5. PSK Reporter rank (optional — omitted if fetcher not wired or callsign not ranked)
+	// 5. Network throughput (Total + Public)
+	if s := buildNetworkSlide(sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 6. GPSDO status (optional — omitted when monitor not wired, container unreachable, or device absent)
+	if s := buildGPSDOSlide(gpsdoMonitor, sessions, maxSessions); s != nil {
+		slides = append(slides, *s)
+	}
+
+	// 7. PSK Reporter rank (optional — omitted if fetcher not wired or callsign not ranked)
 	if s := buildPSKSlide(psk, callsign, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 6. WSPR Live rank (optional — omitted if fetcher not wired or callsign not ranked)
+	// 7. WSPR Live rank (optional — omitted if fetcher not wired or callsign not ranked)
 	if s := buildWSPRSlide(wspr, callsign, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 7. RBN skimmer rank and frequency skew (optional — omitted if store not wired or callsign not found)
+	// 8. RBN skimmer rank and frequency skew (optional — omitted if store not wired or callsign not found)
 	if s := buildRBNSlide(rbnStore, cwCallsign, callsign, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 8. Space weather (optional — omitted when monitor not wired or no data available)
+	// 9. Space weather (optional — omitted when monitor not wired or no data available)
 	if s := buildSpaceWeatherSlide(swm, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 9. Local weather (optional — omitted when WeatherService not wired or no data cached)
+	// 10. Local weather (optional — omitted when WeatherService not wired or no data cached)
 	if s := buildWeatherSlide(weather, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 10. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
+	// 11. Rotator azimuth (optional — omitted when rotctl not enabled or not connected)
 	if s := buildRotatorSlide(rotctl, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 11. Antenna switch active port (optional — omitted when ant switch not enabled)
+	// 12. Antenna switch active port (optional — omitted when ant switch not enabled)
 	if s := buildAntSwitchSlide(antSwitch, sessions, maxSessions); s != nil {
 		slides = append(slides, *s)
 	}
 
-	// 12. Band conditions — one or two pages, 3 bands per line, each coloured.
+	// 13. Band conditions — one or two pages, 3 bands per line, each coloured.
 	slides = append(slides, buildBandConditionsSlides(nfm)...)
 
 	return slides
@@ -1061,21 +1297,22 @@ func sendSlide(client *gudriver.Client, slide monitorSlide) error {
 
 // MonitorDisplay drives the LED matrix display with cycling metric slides.
 type MonitorDisplay struct {
-	client      *gudriver.Client
-	displayURL  string // stored for log messages
-	sessions    *SessionManager
-	nfm         *NoiseFloorMonitor
-	pskRank     *PSKRankFetcher
-	wsprRank    *WSPRRankFetcher     // nil if WSPR rank not enabled
-	rbnStore    *RBNDataStore        // nil if RBN not enabled
-	swm         *SpaceWeatherMonitor // nil if space weather not enabled
-	weather     *WeatherService      // nil if weather service not wired
-	cwCallsign  string               // CW skimmer callsign for RBN lookup (may be empty)
-	callsign    string               // receiver callsign for PSK/WSPR rank lookup
-	maxSessions int
-	rotctl      *RotctlAPIHandler // nil if rotator not enabled
-	antSwitch   *AntSwitchHandler // nil if antenna switch not enabled
-	cancel      context.CancelFunc
+	client       *gudriver.Client
+	displayURL   string // stored for log messages
+	sessions     *SessionManager
+	nfm          *NoiseFloorMonitor
+	pskRank      *PSKRankFetcher
+	wsprRank     *WSPRRankFetcher     // nil if WSPR rank not enabled
+	rbnStore     *RBNDataStore        // nil if RBN not enabled
+	swm          *SpaceWeatherMonitor // nil if space weather not enabled
+	weather      *WeatherService      // nil if weather service not wired
+	cwCallsign   string               // CW skimmer callsign for RBN lookup (may be empty)
+	callsign     string               // receiver callsign for PSK/WSPR rank lookup
+	maxSessions  int
+	rotctl       *RotctlAPIHandler // nil if rotator not enabled
+	antSwitch    *AntSwitchHandler // nil if antenna switch not enabled
+	gpsdoMonitor *GPSDOMonitor     // nil if GPSDO not enabled
+	cancel       context.CancelFunc
 }
 
 // NewMonitorDisplay creates a MonitorDisplay from the given config.
@@ -1088,7 +1325,8 @@ type MonitorDisplay struct {
 // cwCallsign is the CW skimmer callsign for RBN lookups; falls back to callsign when empty.
 // callsign is the receiver callsign used for PSK/WSPR rank lookups (e.g. config.Decoder.ReceiverCallsign).
 // rotctl and antSwitch may be nil — their slides are omitted when not wired.
-func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, weather *WeatherService, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler) *MonitorDisplay {
+// gpsdoMonitor may be nil — GPSDO slide is omitted when not wired or device absent.
+func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMonitor, psk *PSKRankFetcher, wspr *WSPRRankFetcher, rbnStore *RBNDataStore, swm *SpaceWeatherMonitor, weather *WeatherService, cwCallsign, callsign string, rotctl *RotctlAPIHandler, antSwitch *AntSwitchHandler, gpsdoMonitor *GPSDOMonitor) *MonitorDisplay {
 	if !cfg.MonitorDisplay.Enabled {
 		return nil
 	}
@@ -1113,20 +1351,21 @@ func NewMonitorDisplay(cfg *Config, sessions *SessionManager, nfm *NoiseFloorMon
 	}
 
 	return &MonitorDisplay{
-		client:      gudriver.NewClient(cfg.MonitorDisplay.URL, opts...),
-		displayURL:  cfg.MonitorDisplay.URL,
-		sessions:    sessions,
-		nfm:         nfm,
-		pskRank:     psk,
-		wsprRank:    wspr,
-		rbnStore:    rbnStore,
-		swm:         swm,
-		weather:     weather,
-		cwCallsign:  cwCallsign,
-		callsign:    callsign,
-		maxSessions: maxSessions,
-		rotctl:      rotctl,
-		antSwitch:   antSwitch,
+		client:       gudriver.NewClient(cfg.MonitorDisplay.URL, opts...),
+		displayURL:   cfg.MonitorDisplay.URL,
+		sessions:     sessions,
+		nfm:          nfm,
+		pskRank:      psk,
+		wsprRank:     wspr,
+		rbnStore:     rbnStore,
+		swm:          swm,
+		weather:      weather,
+		cwCallsign:   cwCallsign,
+		callsign:     callsign,
+		maxSessions:  maxSessions,
+		rotctl:       rotctl,
+		antSwitch:    antSwitch,
+		gpsdoMonitor: gpsdoMonitor,
 	}
 }
 
@@ -1176,7 +1415,7 @@ func (md *MonitorDisplay) run(ctx context.Context) {
 // Clock slides are special: they re-send every second with the updated time
 // for the full slide duration, so the display always shows the current second.
 func (md *MonitorDisplay) sendNext(ctx context.Context, idx *int) {
-	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch)
+	slides := collectSlides(md.sessions, md.nfm, md.pskRank, md.wsprRank, md.rbnStore, md.cwCallsign, md.callsign, md.maxSessions, md.swm, md.weather, md.rotctl, md.antSwitch, md.gpsdoMonitor)
 	if len(slides) == 0 {
 		select {
 		case <-ctx.Done():

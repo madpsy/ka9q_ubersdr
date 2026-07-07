@@ -123,6 +123,11 @@ var botCommands = map[string]botCommand{
 		readOnly: true,
 		handler:  (*TelegramBotListener).handleGPSDO,
 	},
+	"network": {
+		desc:     "Show network throughput summary by user type and location",
+		readOnly: true,
+		handler:  (*TelegramBotListener).handleNetwork,
+	},
 	"space": {
 		desc:     "Show current space weather report",
 		readOnly: true,
@@ -1959,7 +1964,6 @@ func (l *TelegramBotListener) handleGPSDO(chatID int64, args string) (string, st
 		}
 		sb.WriteString("\n<b>Output 1</b>\n")
 		fmt.Fprintf(&sb, "  Enabled: %s\n", boolIcon(ds.Output1Enabled))
-		fmt.Fprintf(&sb, "  1PPS: %s\n", boolIcon(ds.Output1PPS))
 		if ds.Output1Drive != "" {
 			fmt.Fprintf(&sb, "  Drive: %s\n", html.EscapeString(ds.Output1Drive))
 		}
@@ -2056,6 +2060,217 @@ func sortedBotCommandNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// handleNetwork reports a network throughput summary matching the admin sessions
+// tab Network Summary panel.  Sessions are grouped by user (user_session_id or
+// client_ip), then summed by auth method (regular / ip_bypass / password) and by
+// IP location (local 172.20.0.0/24 / LAN RFC-1918 / public).
+// Returns (botText, telegramAPIResponse, apiOK).
+func (l *TelegramBotListener) handleNetwork(chatID int64, args string) (string, string, bool) {
+	if l.sessions == nil {
+		msg := "⚠️ Session manager not available."
+		apiResp, apiOK := l.sendMessage(chatID, msg)
+		return msg, apiResp, apiOK
+	}
+
+	// isLocalIP returns true for the Docker-internal 172.20.0.0/24 subnet.
+	isLocalIP := func(ip string) bool {
+		return strings.HasPrefix(ip, "172.20.0.")
+	}
+
+	// isLANIP returns true for RFC 1918 / loopback addresses, excluding the
+	// local 172.20.0.0/24 subnet which is classified separately.
+	isLANIP := func(ip string) bool {
+		if isLocalIP(ip) {
+			return false
+		}
+		if strings.HasPrefix(ip, "127.") || ip == "::1" {
+			return true
+		}
+		if strings.HasPrefix(ip, "10.") {
+			return true
+		}
+		if strings.HasPrefix(ip, "192.168.") {
+			return true
+		}
+		// 172.16.0.0/12 — octets 172.16.x through 172.31.x
+		if strings.HasPrefix(ip, "172.") {
+			parts := strings.SplitN(ip, ".", 3)
+			if len(parts) >= 2 {
+				var second int
+				fmt.Sscanf(parts[1], "%d", &second)
+				if second >= 16 && second <= 31 {
+					return true
+				}
+			}
+		}
+		// IPv6 ULA fc00::/7
+		if len(ip) >= 2 {
+			prefix := strings.ToLower(ip[:2])
+			if prefix == "fc" || prefix == "fd" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// formatKbps formats a kbps value as "X.XX Mbps" when ≥ 1000, else "X kbps".
+	formatKbps := func(kbps int) string {
+		if kbps >= 1000 {
+			return fmt.Sprintf("%.2f Mbps", float64(kbps)/1000.0)
+		}
+		return fmt.Sprintf("%d kbps", kbps)
+	}
+
+	allSessions := l.sessions.GetAllSessionsInfo()
+
+	// Group non-internal sessions by user_session_id (falling back to client_ip).
+	// For each group track: auth_method, client_ip, audio_kbps, waterfall_kbps, dxcluster_kbps.
+	// Mirrors the admin.html JS logic: auth_method and client_ip come from the first
+	// audio session, falling back to the first spectrum session (same priority order).
+	type userGroup struct {
+		authMethod    string
+		clientIP      string
+		audioKbps     int
+		waterfallKbps int
+		dxclusterKbps int
+		hasAudio      bool
+		hasSpectrum   bool
+		hasDXKbps     bool
+		hasAudioMeta  bool // true once auth_method/clientIP set from an audio session
+	}
+	groupMap := make(map[string]*userGroup)
+
+	for _, s := range allSessions {
+		isInternal, _ := s["is_internal"].(bool)
+		if isInternal {
+			continue
+		}
+
+		userSessionID, _ := s["user_session_id"].(string)
+		clientIP, _ := s["client_ip"].(string)
+		key := userSessionID
+		if key == "" {
+			key = clientIP
+		}
+		if key == "" {
+			continue
+		}
+
+		g, exists := groupMap[key]
+		if !exists {
+			g = &userGroup{}
+			groupMap[key] = g
+		}
+
+		isSpectrum, _ := s["is_spectrum"].(bool)
+		authMethod, _ := s["auth_method"].(string)
+
+		if isSpectrum {
+			if !g.hasSpectrum {
+				wf, _ := s["waterfall_kbps"].(int)
+				g.waterfallKbps = wf
+				g.hasSpectrum = true
+			}
+			// Set auth_method/clientIP from spectrum only if no audio session has set them yet.
+			if !g.hasAudioMeta && g.clientIP == "" {
+				g.authMethod = authMethod
+				g.clientIP = clientIP
+			}
+		} else {
+			if !g.hasAudio {
+				audio, _ := s["audio_kbps"].(int)
+				g.audioKbps = audio
+				g.hasAudio = true
+			}
+			// Audio session takes priority for auth_method and clientIP.
+			if !g.hasAudioMeta {
+				g.authMethod = authMethod
+				g.clientIP = clientIP
+				g.hasAudioMeta = true
+			}
+		}
+		// DX cluster kbps — take from whichever session has it first.
+		if !g.hasDXKbps {
+			if dxVal, ok := s["dxcluster_kbps"]; ok {
+				dx, _ := dxVal.(int)
+				g.dxclusterKbps = dx
+				g.hasDXKbps = true
+			}
+		}
+	}
+
+	// Accumulate totals.
+	var (
+		regularAudio, regularWF, regularDX    int
+		ipBypassAudio, ipBypassWF, ipBypassDX int
+		passwordAudio, passwordWF, passwordDX int
+		localAudio, localWF, localDX          int
+		lanAudio, lanWF, lanDX                int
+		publicAudio, publicWF, publicDX       int
+	)
+
+	for _, g := range groupMap {
+		a, w, d := g.audioKbps, g.waterfallKbps, g.dxclusterKbps
+
+		switch g.authMethod {
+		case "password":
+			passwordAudio += a
+			passwordWF += w
+			passwordDX += d
+		case "ip_bypass":
+			ipBypassAudio += a
+			ipBypassWF += w
+			ipBypassDX += d
+		default:
+			regularAudio += a
+			regularWF += w
+			regularDX += d
+		}
+
+		if isLocalIP(g.clientIP) {
+			localAudio += a
+			localWF += w
+			localDX += d
+		} else if isLANIP(g.clientIP) {
+			lanAudio += a
+			lanWF += w
+			lanDX += d
+		} else {
+			publicAudio += a
+			publicWF += w
+			publicDX += d
+		}
+	}
+
+	totalAudio := regularAudio + ipBypassAudio + passwordAudio
+	totalWF := regularWF + ipBypassWF + passwordWF
+	totalDX := regularDX + ipBypassDX + passwordDX
+	totalAll := totalAudio + totalWF + totalDX
+
+	var sb strings.Builder
+	sb.WriteString("📊 <b>Network Summary</b>\n\n")
+	fmt.Fprintf(&sb, "• Regular users: %s audio, %s w/f, %s DX\n",
+		formatKbps(regularAudio), formatKbps(regularWF), formatKbps(regularDX))
+	fmt.Fprintf(&sb, "• Bypassed users: %s audio, %s w/f, %s DX\n",
+		formatKbps(ipBypassAudio), formatKbps(ipBypassWF), formatKbps(ipBypassDX))
+	fmt.Fprintf(&sb, "• Password users: %s audio, %s w/f, %s DX\n",
+		formatKbps(passwordAudio), formatKbps(passwordWF), formatKbps(passwordDX))
+	fmt.Fprintf(&sb, "• Local users: %s audio, %s w/f, %s DX\n",
+		formatKbps(localAudio), formatKbps(localWF), formatKbps(localDX))
+	fmt.Fprintf(&sb, "• LAN users: %s audio, %s w/f, %s DX\n",
+		formatKbps(lanAudio), formatKbps(lanWF), formatKbps(lanDX))
+	fmt.Fprintf(&sb, "• Public users: %s audio, %s w/f, %s DX\n",
+		formatKbps(publicAudio), formatKbps(publicWF), formatKbps(publicDX))
+	fmt.Fprintf(&sb, "• Total audio: %s\n", formatKbps(totalAudio))
+	fmt.Fprintf(&sb, "• Total waterfall: %s\n", formatKbps(totalWF))
+	fmt.Fprintf(&sb, "• Total DX cluster: %s\n", formatKbps(totalDX))
+	fmt.Fprintf(&sb, "• Total throughput: %s", formatKbps(totalAll))
+
+	msg := sb.String()
+	apiResp, apiOK := l.sendMessage(chatID, msg)
+	return msg, apiResp, apiOK
 }
 
 // ─── Helpers used by command handlers ─────────────────────────────────────────

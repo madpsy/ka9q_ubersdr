@@ -563,6 +563,10 @@ class RadioGUI:
                 # Load previously-open windows set
                 self._open_windows = set(data.get('open_windows', []))
 
+                # Load DX cluster settings
+                self._dxcluster_callsign = data.get('dxcluster_callsign', '')
+                self._dxcluster_autoconnect = data.get('dxcluster_autoconnect', False)
+
                 # Only log if status_text exists (after UI is created)
                 if hasattr(self, 'status_text'):
                     self.log_status(f"Loaded {len(self.servers)} saved server(s)")
@@ -615,7 +619,9 @@ class RadioGUI:
                 'audio_settings': audio_settings,
                 'radio_control_settings': radio_control_settings,
                 'window_geometry': getattr(self, '_window_geometry', {}),
-                'open_windows': sorted(getattr(self, '_open_windows', set()))
+                'open_windows': sorted(getattr(self, '_open_windows', set())),
+                'dxcluster_callsign': getattr(self, '_dxcluster_callsign', ''),
+                'dxcluster_autoconnect': getattr(self, '_dxcluster_autoconnect', False),
             }
 
             with open(self.config_file, 'w') as f:
@@ -7303,7 +7309,7 @@ class RadioGUI:
 
         ws_url = ws_url.rstrip('/') + '/addon/dxcluster/api/terminal'
 
-        self._dxcluster_terminal = DXClusterTerminalWindow(self.root, ws_url)
+        self._dxcluster_terminal = DXClusterTerminalWindow(self.root, ws_url, radio_gui=self)
         self.log_status(f"DX Cluster terminal opened ({ws_url})")
 
     def open_snr_history_window(self):

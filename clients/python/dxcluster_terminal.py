@@ -1,6 +1,11 @@
 """
 DX Cluster Terminal Window for ka9q_ubersdr Python Client
 
+Double-click any DX spot line to tune the radio to that frequency.
+Mode is determined by:
+  - If the comment contains "WPM" → CWL (< 10 MHz) or CWU (≥ 10 MHz)
+  - Otherwise                     → LSB (< 10 MHz) or USB (≥ 10 MHz)
+
 Provides a Tkinter terminal window that connects to the DX Cluster addon's
 WebSocket terminal endpoint at /addon/dxcluster/api/terminal.
 
@@ -18,6 +23,7 @@ Optional local telnet listener (default port 7300):
   - Stopped automatically when the window closes or WebSocket disconnects
 """
 
+import re
 import socket
 import socketserver
 import threading
@@ -48,15 +54,18 @@ class DXClusterTerminalWindow:
     telnet clients to the same WebSocket session.
     """
 
-    def __init__(self, parent: tk.Tk, ws_url: str):
+    def __init__(self, parent: tk.Tk, ws_url: str, radio_gui=None):
         """
         Args:
-            parent:  Parent Tk window.
-            ws_url:  Full WebSocket URL, e.g.
-                     ws://host:port/addon/dxcluster/api/terminal
+            parent:    Parent Tk window.
+            ws_url:    Full WebSocket URL, e.g.
+                       ws://host:port/addon/dxcluster/api/terminal
+            radio_gui: Optional reference to RadioGUI for double-click tuning
+                       and settings persistence.
         """
         self.parent = parent
         self.ws_url = ws_url
+        self.radio_gui = radio_gui
 
         self._ws = None               # websocket.WebSocketApp instance
         self._ws_thread = None        # background thread running ws.run_forever()
@@ -70,11 +79,40 @@ class DXClusterTerminalWindow:
         self._telnet_clients = set()      # set of active _TelnetClientHandler instances
         self._telnet_clients_lock = threading.Lock()
 
-        self._build_window()
+        # Load persisted settings before building the window
+        saved_callsign, saved_autoconnect = self._load_settings()
+
+        self._build_window(saved_callsign, saved_autoconnect)
+
+        # Auto-connect if both callsign and auto-connect flag are set
+        if saved_autoconnect and saved_callsign:
+            self.window.after(200, self._connect)
+
+    # ── Settings persistence ───────────────────────────────────────────────
+
+    def _load_settings(self):
+        """Return (callsign, autoconnect) from radio_gui's saved settings."""
+        if not self.radio_gui:
+            return '', False
+        callsign = getattr(self.radio_gui, '_dxcluster_callsign', '') or ''
+        autoconnect = getattr(self.radio_gui, '_dxcluster_autoconnect', False)
+        return callsign, bool(autoconnect)
+
+    def _save_settings(self):
+        """Persist current callsign and auto-connect flag to radio_gui's settings file."""
+        if not self.radio_gui:
+            return
+        self.radio_gui._dxcluster_callsign = self._callsign_var.get().strip().upper()
+        self.radio_gui._dxcluster_autoconnect = self._autoconnect_var.get()
+        # Piggyback on the existing save mechanism
+        try:
+            self.radio_gui.save_servers()
+        except Exception:
+            pass
 
     # ── Window construction ────────────────────────────────────────────────
 
-    def _build_window(self):
+    def _build_window(self, saved_callsign: str = '', saved_autoconnect: bool = False):
         self.window = tk.Toplevel(self.parent)
         self.window.title("📡 DX Cluster Terminal")
         self.window.geometry("800x580")
@@ -96,6 +134,14 @@ class DXClusterTerminalWindow:
         self._disconnect_btn.pack_forget()  # hidden until connected
 
         ttk.Button(hdr, text="✕", width=3, command=self._on_close).pack(side=tk.RIGHT)
+
+        # Auto-connect checkbox — saved to settings
+        self._autoconnect_var = tk.BooleanVar(value=saved_autoconnect)
+        ttk.Checkbutton(
+            hdr, text="Auto-connect",
+            variable=self._autoconnect_var,
+            command=self._save_settings,
+        ).pack(side=tk.RIGHT, padx=(0, 8))
 
         ttk.Separator(self.window, orient=tk.HORIZONTAL).pack(side=tk.TOP, fill=tk.X)
 
@@ -132,7 +178,7 @@ class DXClusterTerminalWindow:
 
         ttk.Label(self._login_frame, text="Callsign:").pack(side=tk.LEFT)
 
-        self._callsign_var = tk.StringVar()
+        self._callsign_var = tk.StringVar(value=saved_callsign)
         self._callsign_entry = ttk.Entry(
             self._login_frame, textvariable=self._callsign_var,
             width=12, font=('TkFixedFont', 10)
@@ -188,6 +234,19 @@ class DXClusterTerminalWindow:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self._output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Tag for clickable DX spot lines
+        self._output.tag_configure('dx_spot', foreground='#7ec8e3')
+        # Change cursor to hand2 when hovering over a spot line
+        self._output.tag_bind('dx_spot', '<Enter>',
+                              lambda _e: self._output.config(cursor='hand2'))
+        self._output.tag_bind('dx_spot', '<Leave>',
+                              lambda _e: self._output.config(cursor=''))
+        # Bind double-click directly on the widget — tag_bind for Double-Button-1
+        # is unreliable in Tkinter because the first Button-1 of the double-click
+        # fires first and can move the insertion cursor away from the tag before
+        # the double fires.
+        self._output.bind('<Double-Button-1>', self._on_output_double_click)
+
         # Focus callsign entry on open
         self._callsign_entry.focus_set()
 
@@ -216,9 +275,23 @@ class DXClusterTerminalWindow:
         self._status_lbl.configure(foreground=colour)
 
     def _append_output(self, text: str):
-        """Append text to the terminal output, enforcing the 2000-line scrollback."""
+        """Append text to the terminal output, enforcing the 2000-line scrollback.
+
+        Lines that look like DX spots are tagged 'dx_spot' so they can be
+        double-clicked to tune the radio.
+        """
         self._output.config(state='normal')
-        self._output.insert(tk.END, text)
+
+        # Normalise line endings: \r\n → \n, lone \r → \n
+        normalised = text.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Check each line for DX spot pattern and tag accordingly
+        for line in normalised.splitlines(keepends=True):
+            start_idx = self._output.index(tk.END)
+            self._output.insert(tk.END, line)
+            if self._parse_spot_line(line.rstrip('\n')) is not None:
+                end_idx = self._output.index(tk.END)
+                self._output.tag_add('dx_spot', start_idx, end_idx)
 
         # Trim to SCROLLBACK_LIMIT lines
         line_count = int(self._output.index('end-1c').split('.')[0])
@@ -228,6 +301,77 @@ class DXClusterTerminalWindow:
 
         self._output.see(tk.END)
         self._output.config(state='disabled')
+
+    # ── Spot parsing & tuning ──────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_spot_line(line: str):
+        """Parse a DX cluster spot line and return (freq_hz, mode) or None.
+
+        Expected format:
+            DX de <spotter>:  <freq_khz>  <dx_call>  <comment>  <time>Z
+
+        Mode rules:
+          - 'WPM' in comment → CWL (< 10 MHz) or CWU (≥ 10 MHz)
+          - otherwise        → LSB (< 10 MHz) or USB (≥ 10 MHz)
+        """
+        m = re.match(r'^DX de \S+\s+([\d.]+)\s+(\S+)\s*(.*)', line)
+        if not m:
+            return None
+        try:
+            freq_khz = float(m.group(1))
+        except ValueError:
+            return None
+        freq_hz = int(freq_khz * 1000)
+        comment = m.group(3)
+        is_cw = 'WPM' in comment
+        if is_cw:
+            mode = 'CWL' if freq_hz < 10_000_000 else 'CWU'
+        else:
+            mode = 'LSB' if freq_hz < 10_000_000 else 'USB'
+        return freq_hz, mode
+
+    def _on_output_double_click(self, event):
+        """Double-click handler: parse the spot line under the cursor and tune.
+
+        Always returns 'break' to suppress Tkinter's default word-selection
+        behaviour on double-click.
+        """
+        # Suppress default word-selection on every double-click in the terminal
+        self._output.tag_remove('sel', '1.0', tk.END)
+
+        if not self.radio_gui:
+            return 'break'
+
+        # Identify the line index under the pointer
+        idx = self._output.index(f'@{event.x},{event.y}')
+        line_num = idx.split('.')[0]
+        line_text = self._output.get(f'{line_num}.0', f'{line_num}.end').strip()
+
+        result = self._parse_spot_line(line_text)
+        if result is None:
+            return 'break'
+
+        freq_hz, mode = result
+
+        # Don't tune if current mode is IQ
+        current_mode = self.radio_gui.mode_var.get().upper()
+        if current_mode.startswith('IQ'):
+            return 'break'
+
+        # Apply frequency
+        self.radio_gui.set_frequency_hz(freq_hz)
+
+        # Apply mode if not locked
+        if not self.radio_gui.mode_lock_var.get():
+            self.radio_gui.mode_var.set(mode)
+            self.radio_gui.on_mode_changed()
+
+        # Send tune message if connected
+        if self.radio_gui.connected:
+            self.radio_gui.apply_frequency()
+
+        return 'break'
 
     # ── WebSocket connection ───────────────────────────────────────────────
 
@@ -241,6 +385,9 @@ class DXClusterTerminalWindow:
             self._set_status("Enter your callsign first", 'red')
             self._callsign_entry.focus_set()
             return
+
+        # Persist callsign (and auto-connect flag) to settings
+        self._save_settings()
 
         self._pending_callsign = callsign
         self._callsign_sent = False

@@ -111,6 +111,10 @@ func (s *APIServer) putTune(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		currentBW = *body.BandwidthHz
+	} else if body.Mode != nil && !isWideIQMode(currentMode) {
+		// Mode changed but no explicit bandwidth given — reset to the mode
+		// default, mirroring modeSelect.OnChanged in the Fyne GUI.
+		currentBW = bwDefaultSlider(currentMode)
 	}
 
 	// ── Validate and apply frequency ──────────────────────────────────────────
@@ -173,7 +177,12 @@ func (s *APIServer) putTune(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if body.BandwidthHz != nil {
+	if body.BandwidthHz != nil || body.Mode != nil {
+		// Update BW slider/label whenever bandwidth or mode changed.
+		// When mode changes without an explicit bandwidth_hz, currentBW has
+		// already been reset to the mode default above, so the slider must
+		// reflect that new value — otherwise AppState and the Fyne widget
+		// diverge and the web UI sees the old bandwidth on the next poll.
 		if s.state.BWSlider != nil {
 			s.state.BWSlider.SetValue(currentBW)
 		}

@@ -3316,9 +3316,14 @@ func main() {
 
 	// Status + connect row (pinned to bottom).
 	// The dot is pinned to the left; the label expands; users+throughput+button pinned right.
+	rightItems := []fyne.CanvasObject{}
+	if !*flagNoAPI && apiActualPort != 0 {
+		rightItems = append(rightItems, widget.NewLabel(fmt.Sprintf("HTTP %d", apiActualPort)))
+	}
+	rightItems = append(rightItems, usersLabel, throughputLabel, connectBtn)
 	bottomBar := container.NewBorder(nil, nil,
 		statusDot,
-		container.NewHBox(usersLabel, throughputLabel, connectBtn),
+		container.NewHBox(rightItems...),
 		statusLabel,
 	)
 

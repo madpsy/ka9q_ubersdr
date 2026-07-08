@@ -40,10 +40,10 @@ type CTYPrefix struct {
 
 // CTYDatabase holds the parsed CTY.DAT data
 type CTYDatabase struct {
-	entities    map[string]*CTYEntity // Key is primary prefix
-	prefixes    map[string]*CTYEntry  // Key is prefix (including exact matches)
-	iso2ByName  map[string]string     // CTY country name -> ISO 3166-1 alpha-2 code
-	mu          sync.RWMutex
+	entities   map[string]*CTYEntity // Key is primary prefix
+	prefixes   map[string]*CTYEntry  // Key is prefix (including exact matches)
+	iso2ByName map[string]string     // CTY country name -> ISO 3166-1 alpha-2 code
+	mu         sync.RWMutex
 }
 
 // CTYEntry links a prefix to its entity with overrides
@@ -358,6 +358,8 @@ func (db *CTYDatabase) LookupCallsign(callsign string) string {
 type CTYLookupResult struct {
 	Country     string
 	CountryCode string // ISO 3166-1 alpha-2 (empty for non-sovereign entities)
+	PrimaryPfx  string // Primary prefix of the DXCC entity
+	IsWAEDC     bool   // True if this is a WAEDC-only entity (marked with * in CTY.DAT)
 	CQZone      int
 	ITUZone     int
 	Continent   string
@@ -399,6 +401,8 @@ func buildLookupResult(entry *CTYEntry) *CTYLookupResult {
 	result := &CTYLookupResult{
 		Country:     entry.Entity.Name,
 		CountryCode: entry.Entity.CountryCode,
+		PrimaryPfx:  entry.Entity.PrimaryPfx,
+		IsWAEDC:     entry.Entity.IsWAEDC,
 		CQZone:      entry.Entity.CQZone,
 		ITUZone:     entry.Entity.ITUZone,
 		Continent:   entry.Entity.Continent,

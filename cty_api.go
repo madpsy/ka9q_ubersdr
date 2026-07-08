@@ -46,15 +46,17 @@ type CTYPrefixInfo struct {
 
 // CTYCallsignLookupResponse represents the response for callsign lookup
 type CTYCallsignLookupResponse struct {
-	Callsign    string  `json:"callsign"`
-	Country     string  `json:"country"`
-	CountryCode string  `json:"country_code,omitempty"`
-	CQZone      int     `json:"cq_zone"`
-	ITUZone     int     `json:"itu_zone"`
-	Continent   string  `json:"continent"`
-	Latitude    float64 `json:"latitude"`
-	Longitude   float64 `json:"longitude"`
-	TimeOffset  float64 `json:"time_offset"`
+	Callsign      string  `json:"callsign"`
+	Country       string  `json:"country"`
+	CountryCode   string  `json:"country_code,omitempty"`
+	PrimaryPrefix string  `json:"primary_prefix"`
+	CQZone        int     `json:"cq_zone"`
+	ITUZone       int     `json:"itu_zone"`
+	Continent     string  `json:"continent"`
+	Latitude      float64 `json:"latitude"`
+	Longitude     float64 `json:"longitude"`
+	TimeOffset    float64 `json:"time_offset"`
+	IsWAEDC       bool    `json:"is_waedc,omitempty"`
 }
 
 // handleCTYCountries returns a list of all countries in the database
@@ -229,21 +231,150 @@ func handleCTYLookup(w http.ResponseWriter, r *http.Request, ipBanManager *IPBan
 	}
 
 	response := CTYCallsignLookupResponse{
-		Callsign:    callsign,
-		Country:     result.Country,
-		CountryCode: result.CountryCode,
-		CQZone:      result.CQZone,
-		ITUZone:     result.ITUZone,
-		Continent:   result.Continent,
-		Latitude:    result.Latitude,
-		Longitude:   result.Longitude,
-		TimeOffset:  result.TimeOffset,
+		Callsign:      callsign,
+		Country:       result.Country,
+		CountryCode:   result.CountryCode,
+		PrimaryPrefix: result.PrimaryPfx,
+		CQZone:        result.CQZone,
+		ITUZone:       result.ITUZone,
+		Continent:     result.Continent,
+		Latitude:      result.Latitude,
+		Longitude:     result.Longitude,
+		TimeOffset:    result.TimeOffset,
+		IsWAEDC:       result.IsWAEDC,
 	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(CTYAPIResponse{
 		Success: true,
 		Data:    response,
+	})
+}
+
+// handleCTYEntity looks up a DXCC entity directly by its primary prefix.
+// Unlike /api/cty/lookup (which does callsign prefix matching), this returns
+// the entity whose PrimaryPfx exactly matches the supplied prefix.
+func handleCTYEntity(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManager) {
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if globalCTY == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(CTYAPIResponse{
+			Success: false,
+			Error:   "CTY database is not loaded",
+		})
+		return
+	}
+
+	prefix := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("prefix")))
+	if prefix == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CTYAPIResponse{
+			Success: false,
+			Error:   "prefix parameter is required",
+		})
+		return
+	}
+
+	globalCTY.mu.RLock()
+	entity, ok := globalCTY.entities[prefix]
+	globalCTY.mu.RUnlock()
+
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(CTYAPIResponse{
+			Success: false,
+			Error:   "Entity not found for prefix " + prefix,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(CTYAPIResponse{
+		Success: true,
+		Data: CTYCountryInfo{
+			Name:        entity.Name,
+			CountryCode: entity.CountryCode,
+			PrimaryPfx:  entity.PrimaryPfx,
+			CQZone:      entity.CQZone,
+			ITUZone:     entity.ITUZone,
+			Continent:   entity.Continent,
+			Latitude:    entity.Latitude,
+			Longitude:   entity.Longitude,
+			TimeOffset:  entity.TimeOffset,
+			IsWAEDC:     entity.IsWAEDC,
+		},
+	})
+}
+
+// handleCTYSearch searches DXCC entities by country name substring.
+// Query param: ?name=<substring>  (case-insensitive)
+// Returns all entities whose name contains the substring.
+func handleCTYSearch(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManager) {
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if globalCTY == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(CTYAPIResponse{
+			Success: false,
+			Error:   "CTY database is not loaded",
+		})
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("name"))
+	if query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CTYAPIResponse{
+			Success: false,
+			Error:   "name parameter is required",
+		})
+		return
+	}
+
+	queryLower := strings.ToLower(query)
+
+	globalCTY.mu.RLock()
+	defer globalCTY.mu.RUnlock()
+
+	results := make([]CTYCountryInfo, 0)
+	for _, entity := range globalCTY.entities {
+		if strings.Contains(strings.ToLower(entity.Name), queryLower) {
+			results = append(results, CTYCountryInfo{
+				Name:        entity.Name,
+				CountryCode: entity.CountryCode,
+				PrimaryPfx:  entity.PrimaryPfx,
+				CQZone:      entity.CQZone,
+				ITUZone:     entity.ITUZone,
+				Continent:   entity.Continent,
+				Latitude:    entity.Latitude,
+				Longitude:   entity.Longitude,
+				TimeOffset:  entity.TimeOffset,
+				IsWAEDC:     entity.IsWAEDC,
+			})
+		}
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Name < results[j].Name
+	})
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(CTYAPIResponse{
+		Success: true,
+		Data: map[string]interface{}{
+			"results": results,
+			"count":   len(results),
+			"query":   query,
+		},
 	})
 }
 
@@ -561,6 +692,12 @@ func RegisterCTYAPIHandlers(ipBanManager *IPBanManager) {
 	http.HandleFunc("/api/cty/lookup", func(w http.ResponseWriter, r *http.Request) {
 		handleCTYLookup(w, r, ipBanManager)
 	})
+	http.HandleFunc("/api/cty/entity", func(w http.ResponseWriter, r *http.Request) {
+		handleCTYEntity(w, r, ipBanManager)
+	})
+	http.HandleFunc("/api/cty/search", func(w http.ResponseWriter, r *http.Request) {
+		handleCTYSearch(w, r, ipBanManager)
+	})
 	http.HandleFunc("/api/cty/prefixes", func(w http.ResponseWriter, r *http.Request) {
 		handleCTYPrefixes(w, r, ipBanManager)
 	})
@@ -574,7 +711,9 @@ func RegisterCTYAPIHandlers(ipBanManager *IPBanManager) {
 	log.Println("CTY API endpoints registered:")
 	log.Println("  GET /api/cty/countries - List all countries (optional: ?continent=EU)")
 	log.Println("  GET /api/cty/continents - List all continents with counts")
-	log.Println("  GET /api/cty/lookup?callsign=W1AW - Lookup callsign")
+	log.Println("  GET /api/cty/lookup?callsign=W1AW - Lookup callsign (returns primary_prefix)")
+	log.Println("  GET /api/cty/entity?prefix=G - Direct entity lookup by primary prefix")
+	log.Println("  GET /api/cty/search?name=england - Search entities by country name")
 	log.Println("  GET /api/cty/prefixes - List all prefixes (optional: ?country=K)")
 	log.Println("  GET /api/cty/zones - List all zones (optional: ?type=cq&zone=14)")
 	log.Println("  GET /api/cty/stats - Database statistics")

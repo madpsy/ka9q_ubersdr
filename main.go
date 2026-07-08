@@ -4120,12 +4120,6 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5) // Round to nearest integer
 	}
 
-	// Get antenna switch information if enabled
-	var antSwitchInfo map[string]interface{}
-	if antSwitchHandler != nil && config.AntSwitch.Enabled {
-		antSwitchInfo = antSwitchHandler.GetInfo()
-	}
-
 	// Get frequency reference information if available
 	// Always return frequency_reference object, even when disabled
 	freqRefStatus := freqRefMonitor.GetStatus()
@@ -4232,7 +4226,6 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"cors_enabled":         config.Server.EnableCORS,
 		"rotator":              rotatorInfo,
 		"frequency_reference":  freqRefInfo,
-		"ant_switch":           antSwitchInfo,
 		"speech_to_text":       config.Whisper.Enabled,
 		"lookup_service":       config.LookupServices.Enabled,
 		"dsp":                  buildDSPInfo(&config.DSP),
@@ -4241,6 +4234,11 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"server_time":          time.Now().UTC().Format(time.RFC3339Nano),
 		"server_time_sync":     GetNTPSynced(),
 		"frontend":             buildStartupFrontendInfo(frontendHistory),
+	}
+
+	// Include antenna switch info only when enabled — key is omitted entirely when disabled.
+	if antSwitchHandler != nil && config.AntSwitch.Enabled {
+		response["ant_switch"] = antSwitchHandler.GetInfo()
 	}
 
 	// Include GPSDO status when the Leo Bodnar LBE-1420 is fully operational.
